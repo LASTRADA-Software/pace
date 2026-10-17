@@ -19,12 +19,14 @@
 #include <vector>
 
 #include <tests/RetiredGenerations.hpp>
+#include <tests/Unwrap.hpp>
 
 using namespace Pace::Cc;
 using Pace::Cc::Test::DigestQuarters;
 using Pace::Cc::Test::SplitMix64;
 using Pace::Testing::Generation;
 using Pace::Testing::RequireNoRetiredDigest;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -815,6 +817,50 @@ TEST_CASE("A prefix-map flag's root is relativized, so two checkouts still share
     // COFF, where no mapping exists, and it is written down in
     // `.agent/rules/compile-cache.md` rather than left to be rediscovered here.
     CHECK(keyFor(RootA, {}) == keyFor(RootB, {}));
+}
+
+TEST_CASE("A -march=native is keyed by the CPU the driver resolves it to, and by nothing else")
+{
+    // #1688: the argument names no CPU, so two machines passing it shared an object built for
+    // one of them. The driver's `-###` listing names the CPU; only its target-shaping tokens
+    // are keyed, so the paths in it (which differ per machine) do not split the key.
+    auto const gcc = [](std::string_view cpu, std::string_view feature, std::string_view prefix) {
+        return std::format(
+            " \"{0}/libexec/gcc/x86_64-pc-linux-gnu/16/cc1plus\" \"-quiet\" \"{0}/src/a.cpp\" "
+            "\"-march={1}\" \"-m{2}\" \"--param\" \"l1-cache-size=32\" \"-mtune={1}\" \"-o\" \"/tmp/cc1.s\"\n",
+            prefix,
+            cpu,
+            feature);
+    };
+    auto const znver4 = HostCpuKeyItem(gcc("znver4", "avx512f", "/usr"));
+    auto const skylake = HostCpuKeyItem(gcc("skylake", "no-avx512f", "/usr"));
+    REQUIRE(znver4.has_value());
+    REQUIRE(skylake.has_value());
+    auto const& znver4Key = Unwrap(znver4);
+    CHECK(znver4Key != Unwrap(skylake));
+    // The same CPU under another install prefix and another temporary name is one key.
+    CHECK(znver4 == HostCpuKeyItem(gcc("znver4", "avx512f", "/opt/gcc-16")));
+    CHECK(znver4Key.contains("-march=znver4\n"));
+    CHECK(znver4Key.contains("--param l1-cache-size=32\n"));
+    CHECK_FALSE(znver4Key.contains("/usr"));
+
+    // clang names its CPU and features as values of `-cc1` switches.
+    auto const clang = [](std::string_view cpu, std::string_view feature) {
+        return std::format(" \"/usr/bin/clang-22\" \"-cc1\" \"-triple\" \"x86_64-pc-linux-gnu\" \"-target-cpu\" \"{}\" "
+                           "\"-target-feature\" \"{}\" \"-tune-cpu\" \"generic\"\n",
+                           cpu,
+                           feature);
+    };
+    auto const clangZen = HostCpuKeyItem(clang("znver4", "+avx512f"));
+    REQUIRE(clangZen.has_value());
+    auto const& clangZenKey = Unwrap(clangZen);
+    CHECK(clangZenKey.contains("-target-cpu znver4\n"));
+    CHECK(clangZenKey.contains("-target-feature +avx512f\n"));
+    CHECK(clangZen != HostCpuKeyItem(clang("znver4", "-avx512f")));
+
+    // A listing naming no target is no answer, and the compile is then not cached.
+    CHECK_FALSE(HostCpuKeyItem("clang: error: no such file or directory: 'a.cpp'\n").has_value());
+    CHECK_FALSE(HostCpuKeyItem("").has_value());
 }
 
 TEST_CASE("The keyed text keeps every marker's line and drops its path")

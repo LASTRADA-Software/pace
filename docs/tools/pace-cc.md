@@ -76,6 +76,11 @@ and comment lines, so a comment inserted above a function kept the key while
 `std::source_location`, `__builtin_LINE` and the `-g` line tables moved, and the
 edited file was served the object built before the edit.
 
+`-march=native` (and `-mcpu=`/`-mtune=native`) is keyed by the CPU the compiler
+resolves it to on the machine that compiles, read from its `-###` listing, so a
+shared cache never hands one CPU's object to another. Such a compile is never
+dispatched, since a worker would resolve `native` to its own CPU.
+
 Version-suffixed (`g++-14`, `clang-18`) and `.exe` forms are recognised. Any
 other `argv[0]` is treated as unknown and passed straight through uncached.
 
