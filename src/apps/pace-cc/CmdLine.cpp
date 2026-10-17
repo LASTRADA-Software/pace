@@ -664,7 +664,7 @@ namespace
     /// and matches nothing here. It is left out rather than half-matched, because a
     /// row that fires on `-Xclang` alone would un-cache every build that passes any
     /// `-Xclang` flag at all.
-    constexpr std::array<SideArtefactFlag, 25> SideArtefacts { {
+    constexpr std::array<SideArtefactFlag, 29> SideArtefacts { {
         { .spelling = "/interface", .families = DriverFamily::Msvc },
         { .spelling = "-interface", .families = DriverFamily::Msvc },
         { .spelling = "/internalPartition", .families = DriverFamily::Msvc },
@@ -681,14 +681,19 @@ namespace
         // The GNU flags that write a file beside the object (#1691), each measured by the
         // audit to write its side file: split DWARF (`a.dwo`, whose id the skeleton names),
         // coverage notes (`a.gcno`), clang's time trace (`a.json`), stack usage (`a.su`), and
-        // every intermediate. A hit restores the object alone, so the side file is missing or
-        // from another compile.
+        // every intermediate (`-save-temps`, the `-fdump-*` family, clang's
+        // `-fsave-optimization-record`, `-fcallgraph-info`, `-aux-info`). A hit restores the
+        // object alone, so the side file is missing or from another compile.
         { .spelling = "-gsplit-dwarf", .families = DriverFamily::Gnu },
         { .spelling = "--coverage", .families = DriverFamily::Gnu },
         { .spelling = "-ftest-coverage", .families = DriverFamily::Gnu },
         { .spelling = "-ftime-trace", .families = DriverFamily::Gnu },
         { .spelling = "-fstack-usage", .families = DriverFamily::Gnu },
         { .spelling = "-save-temps", .families = DriverFamily::Gnu },
+        { .spelling = "-fdump-", .families = DriverFamily::Gnu },
+        { .spelling = "-fsave-optimization-record", .families = DriverFamily::Gnu },
+        { .spelling = "-fcallgraph-info", .families = DriverFamily::Gnu },
+        { .spelling = "-aux-info", .families = DriverFamily::Gnu },
         // `cl`'s shared-PDB debug formats. The object only REFERS to the PDB, which holds
         // every translation unit's types, so a hit restores an object whose types were
         // never written anywhere. clang-cl reads these spellings as `/Z7` -- its own option

@@ -76,6 +76,12 @@ and comment lines, so a comment inserted above a function kept the key while
 `std::source_location`, `__builtin_LINE` and the `-g` line tables moved, and the
 edited file was served the object built before the edit.
 
+A compile that writes a file beside its object -- `-gsplit-dwarf` (`.dwo`),
+`--coverage` / `-ftest-coverage` (`.gcno`), `-ftime-trace`, `-fstack-usage`,
+`-save-temps`, `-fdump-*`, `-fsave-optimization-record`, `-fcallgraph-info`,
+`-aux-info` -- is not cached: a hit restores only the object and the depfile, so
+the side file would be missing or left over from another build.
+
 `-march=native` (and `-mcpu=`/`-mtune=native`) is keyed by the CPU the compiler
 resolves it to on the machine that compiles, read from its `-###` listing, so a
 shared cache never hands one CPU's object to another. Such a compile is never
