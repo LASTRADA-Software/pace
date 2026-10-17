@@ -4019,6 +4019,9 @@ half from passing. The in-process fleet asserts it from addresses nobody listed
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
+- **[#1701](https://github.com/LASTRADA-Software/fastcached/issues/1701)** — the memcached and Redis surfaces can modify 0xFC compile keys (no namespace), and a
+  `CompileValue` carries no checksum.
+- **[#1706](https://github.com/LASTRADA-Software/fastcached/issues/1706)** — the node's private tier: a FETCH's upstream write-back can overwrite a newer local STORE.
 - **[#661](https://github.com/LASTRADA-Software/fastcached/issues/661)** — `IProcessRunner`
   has no cancellable seam, so a compile whose client has GONE runs to completion and this
   machine pays for an object nobody will read. The departure is already detected and
