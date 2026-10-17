@@ -82,6 +82,13 @@ A compile that writes a file beside its object -- `-gsplit-dwarf` (`.dwo`),
 `-aux-info` -- is not cached: a hit restores only the object and the depfile, so
 the side file would be missing or left over from another build.
 
+Nor is a compile that reads a file the key cannot see: a profile
+(`-fprofile-use`, `-fprofile-sample-use`, `-fauto-profile`, clang's
+`-fprofile-instr-use`), a plugin (`-fplugin`, `-fpass-plugin`), a specs file
+(`-specs=`), or a `-B` tool directory. None of them reaches the preprocessed text
+or the depfile, so a changed profile would otherwise be answered with the object
+built from the old one.
+
 `-march=native` (and `-mcpu=`/`-mtune=native`) is keyed by the CPU the compiler
 resolves it to on the machine that compiles, read from its `-###` listing, so a
 shared cache never hands one CPU's object to another. Such a compile is never
