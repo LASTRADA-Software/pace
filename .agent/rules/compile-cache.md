@@ -2997,6 +2997,13 @@ nobody can account for.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
+- **[#1699](https://github.com/LASTRADA-Software/pace/issues/1699)** — `PathCanon`'s comparison case-folds on POSIX layouts, and a prefix-map head's trailing separator
+  is lost in the key.
+- **[#1707](https://github.com/LASTRADA-Software/pace/issues/1707)** — the verifier compares only the object, not the depfile or the replayed streams, and the servers
+  count hits on values the launcher then rejects (the store, stale and failed-verify outcomes landed).
+- **[#1708](https://github.com/LASTRADA-Software/pace/issues/1708)** — lower-severity robustness: atomic temp names that can collide across PID namespaces, an object
+  stored without checking this run wrote it, `flush_all <delay>` ignored, an in-memory decompression
+  failure answered as an empty value.
 - **[#1653](https://github.com/LASTRADA-Software/pace/issues/1653)** — a header
   replaced during the key's preprocess by a copy that keeps an older change time is not seen by
   the input witness. On NTFS `CopyFileW` copies the SOURCE's change time onto the destination
