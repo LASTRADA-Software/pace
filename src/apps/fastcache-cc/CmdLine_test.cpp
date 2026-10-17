@@ -297,6 +297,39 @@ TEST_CASE("A line naming the host CPU is never dispatched, and nothing else is m
     CHECK(remote.has_value());
 }
 
+TEST_CASE("A depfile asked for without -MF is the one the driver writes, so a hit restores it")
+{
+    // #1689: `-MD`/`-MMD` alone make gcc and clang write `<object minus extension>.d`; the
+    // launcher knew a depfile only through `-MF`, so a HIT left it absent and a Makefile build
+    // lost every header dependency of the object. Names measured on both drivers.
+    struct Row
+    {
+        std::vector<std::string> args;
+        std::string_view depPath;
+    };
+    for (auto const& [args, depPath]: {
+             Row { .args = { "-MMD", "-c", "a.cpp", "-o", "out/a.o" }, .depPath = "out/a.d" },
+             Row { .args = { "-MD", "-c", "a.cpp", "-o", "out/a.cpp.o" }, .depPath = "out/a.cpp.d" },
+             Row { .args = { "-MMD", "-c", "a.cpp", "-o", "out/noext" }, .depPath = "out/noext.d" },
+             Row { .args = { "-MMD", "-c", "a.cpp", "-o", "dir.v2/obj" }, .depPath = "dir.v2/obj.d" },
+             Row { .args = { "-c", "a.cpp", "-o", "w.o", "-Wp,-MMD,deps/k.d" }, .depPath = "deps/k.d" },
+             Row { .args = { "-MMD", "-MF", "named.d", "-c", "a.cpp", "-o", "a.o" },
+                   .depPath = "named.d" },                                  // -MF names it outright
+             Row { .args = { "-c", "a.cpp", "-o", "a.o" }, .depPath = "" }, // none asked for
+         })
+    {
+        std::vector<std::string> argv { "g++" };
+        argv.insert(argv.end(), args.begin(), args.end());
+        INFO(argv.back());
+        auto const cmd = Parse(argv);
+        REQUIRE(cmd.parsedOk);
+        CHECK(cmd.depPath == depPath);
+    }
+    // An MSVC driver writes no GNU depfile, whatever its line says.
+    std::vector<std::string> const msvc { "cl.exe", "/c", "a.cpp", "/Foa.obj" };
+    CHECK(Parse(msvc).depPath.empty());
+}
+
 TEST_CASE("The end-of-options marker stays with the source, which never travels")
 {
     // CMake's clang-cl rule ends `-c -- $in`. The launcher dropped the source and forwarded
