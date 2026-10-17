@@ -2362,6 +2362,16 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
                 "STORE key={} bytes={} {}", plan.objectKey, encoded.size(), Cc::RecordedReason(outcome, presented.missing)));
     else
         Note(record.verbose, std::format("STORE exchange failed key={}", plan.objectKey));
+
+    // A compile whose store did not land is not a MISS, which the log defines as compiled AND
+    // stored: the next build misses again, and only its own outcome says why (#1707).
+    if (!outcome.IsHit() && (record.outcome == Cc::Outcome::Miss || record.outcome == Cc::Outcome::Stale))
+    {
+        record.outcome = Cc::Outcome::Unstored;
+        record.outcomeDetail = outcome.kind == Cc::CacheOutcomeKind::Rejected
+                                   ? std::string { "the cache refused the store" }
+                                   : std::format("the store {}", Cc::DescribeTransportFailure(outcome.transportFailure));
+    }
 }
 
 /// DIRECT MODE. Preprocessing a translation unit to derive its key costs ~1.4 s
@@ -2886,6 +2896,14 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     return true;
 }
 
+/// @param disposition What became of a fetched hit.
+/// @return The outcome a compile that follows it is traced as when it is not stored: a hit
+///         refused as stale is its own outcome and not a cold miss (#1707).
+[[nodiscard]] Cc::Outcome MissOutcomeAfter(HitDisposition disposition) noexcept
+{
+    return disposition == HitDisposition::Stale ? Cc::Outcome::Stale : Cc::Outcome::Miss;
+}
+
 /// Try to serve `cmd` from the cache; returns the process exit code if handled
 /// (hit, or miss-then-compiled — locally or on a worker), or std::nullopt to
 /// signal "fall back to a plain real compile".
@@ -3255,6 +3273,9 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     };
 
     auto const cacheStarted = std::chrono::steady_clock::now();
+    // A hit that came back and was refused as STALE, recorded as such rather than as a cold
+    // miss (#1707): a key that is stale every time is a defect `--show-stats` must show.
+    auto missOutcome = Cc::Outcome::Miss;
 
     // How the fetch ended, for the two questions below: whether a MISS may be
     // traced, and whether the STORE is worth the transfer. Carried out of the block
@@ -3423,6 +3444,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
                     // of a generation this build cannot read.
                     return Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable));
                 }
+                missOutcome = MissOutcomeAfter(materialized.disposition);
                 // Stale: the object is fine but the dependency record it carries is not
                 // true here -- or the depfile this build names could not be written, which
                 // says nothing against the entry -- so fall through and compile for real. The STORE that follows
@@ -3447,8 +3469,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     {
         // Which parts, from the marker -- and no claim about WHICH of them differs, which
         // this end cannot know: the trace and the tallied reason say the same thing.
-        TraceOutcome(
-            record, Cc::Outcome::Miss, key, boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
+        TraceOutcome(record, missOutcome, key, boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
         // A miss carrying a reason, as a crossed reply is: the cache answered honestly, and
         // what it holds under this key names paths this compile does not share -- or this
         // compile's own copy was evicted. Worth ranking, because a translation unit that is a
