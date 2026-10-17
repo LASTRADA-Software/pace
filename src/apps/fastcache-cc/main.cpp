@@ -2864,6 +2864,28 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     return run;
 }
 
+/// What `-march=native` and its siblings name on THIS machine, asked of the driver itself (#1688).
+///
+/// The unit's own line with `-###` appended, because that runs nothing, writes nothing, and
+/// resolves `native` against everything else the line says (`--target`, `-m32`).
+/// @param argv The compile line, compiler first.
+/// @param keyArgs The key's arguments, which gain the item naming the CPU.
+/// @return False when the line names the host CPU and the driver did not resolve it, so the
+///         compile cannot be keyed; true when it names none, or the item was appended.
+[[nodiscard]] bool AppendHostCpuKeyItem(std::span<std::string const> argv, std::vector<std::string>& keyArgs)
+{
+    if (!std::ranges::any_of(argv.subspan(1), Cc::NamesHostCpu))
+        return true;
+    std::vector<std::string> listing { argv.begin(), argv.end() };
+    listing.emplace_back("-###");
+    auto const run = ProcessRunner().RunCaptureSplit(listing);
+    auto hostCpu = run.exitCode == 0 ? Cc::HostCpuKeyItem(run.err) : std::nullopt;
+    if (!hostCpu.has_value())
+        return false;
+    keyArgs.push_back(std::move(*hostCpu));
+    return true;
+}
+
 /// Try to serve `cmd` from the cache; returns the process exit code if handled
 /// (hit, or miss-then-compiled — locally or on a worker), or std::nullopt to
 /// signal "fall back to a plain real compile".
@@ -2943,6 +2965,13 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
         return Decline(record, "a response file's arguments cannot be keyed; not caching");
     }
     relativizedArgs.insert(relativizedArgs.end(), responseFiles->begin(), responseFiles->end());
+
+    // What `-march=native` names on THIS machine, asked of the driver itself (#1688): the
+    // argument names no CPU, so without this two machines share an object built for one of
+    // them. The unit's own line with `-###` appended, because that runs nothing, writes
+    // nothing, and resolves `native` against everything else the line says (`--target`, `-m32`).
+    if (!AppendHostCpuKeyItem(argv, relativizedArgs))
+        return Decline(record, "the CPU -march=native names could not be resolved; not caching");
     // ONE probe for two questions where the driver allows it (#1237). The banner
     // and the target triple both come out of a clang driver's `-###`, and this is
     // a process per translation unit, so a second spawn here is a second spawn per
