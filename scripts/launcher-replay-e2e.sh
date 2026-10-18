@@ -207,8 +207,8 @@ mkdir -p "${workdir}/wrap"
 launcher_wrapper="${workdir}/wrap/pace-cc"
 cat > "$launcher_wrapper" <<WRAP
 #!/bin/sh
-for _fc_arg in "\$@"; do _fc_last="\$_fc_arg"; done
-printf 'pace-cc-fixture: unit=%s\n' "\$_fc_last" >&2
+for _pace_arg in "\$@"; do _pace_last="\$_pace_arg"; done
+printf 'pace-cc-fixture: unit=%s\n' "\$_pace_last" >&2
 exec "${launcher}" "\$@"
 WRAP
 chmod +x "$launcher_wrapper"

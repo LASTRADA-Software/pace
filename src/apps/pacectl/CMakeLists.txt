@@ -17,7 +17,7 @@
 # main.cpp is deliberately NOT in this list: it is in no test target, which is a
 # property this tree has paid for twice (#370, #909), and it is why every decision
 # this tool makes lives in one of the files below instead.
-set(_fc_cli_sources
+set(_pace_cli_sources
     CliAnswer.cpp
     CliCommand.cpp
     CliFormat.cpp
@@ -53,33 +53,33 @@ set(_fc_cli_sources
 # `MakeTerminalEvents` still links, and refuses by saying why, so a caller asking for a
 # terminal gets a reason rather than a link error.
 if(TARGET core::tui)
-    list(APPEND _fc_cli_sources TerminalEventStream.cpp TerminalEvents.cpp)
-    set(_fc_cli_tui_tests TerminalEventStream_test.cpp TerminalEvents_test.cpp)
+    list(APPEND _pace_cli_sources TerminalEventStream.cpp TerminalEvents.cpp)
+    set(_pace_cli_tui_tests TerminalEventStream_test.cpp TerminalEvents_test.cpp)
 else()
-    list(APPEND _fc_cli_sources TerminalEventsUnavailable.cpp)
-    set(_fc_cli_tui_tests "")
+    list(APPEND _pace_cli_sources TerminalEventsUnavailable.cpp)
+    set(_pace_cli_tui_tests "")
 endif()
 
 # The Sixel rung's encoder follows the same split: `TuiSixelEncoder.cpp` is the one file that
 # includes `<core/tui/Sixel.hpp>`, and a build without it refuses by saying why.
 if(TARGET core::tui)
-    list(APPEND _fc_cli_sources TuiSixelEncoder.cpp)
-    list(APPEND _fc_cli_tui_tests SixelEncoder_test.cpp)
+    list(APPEND _pace_cli_sources TuiSixelEncoder.cpp)
+    list(APPEND _pace_cli_tui_tests SixelEncoder_test.cpp)
 else()
-    list(APPEND _fc_cli_sources SixelEncoderUnavailable.cpp)
+    list(APPEND _pace_cli_sources SixelEncoderUnavailable.cpp)
 endif()
 
 # How many cells text takes on a terminal is core-cpp's `core::tui::stringWidth`, reached through
 # `TerminalCellWidth.cpp` alone. A build without the library has no terminal session to lay a frame
 # out for, so its twin measures nothing: it names the build and ends the process.
 if(TARGET core::tui)
-    list(APPEND _fc_cli_sources TerminalCellWidth.cpp)
-    list(APPEND _fc_cli_tui_tests TerminalCellWidth_test.cpp)
+    list(APPEND _pace_cli_sources TerminalCellWidth.cpp)
+    list(APPEND _pace_cli_tui_tests TerminalCellWidth_test.cpp)
 else()
-    list(APPEND _fc_cli_sources TerminalCellWidthUnavailable.cpp)
+    list(APPEND _pace_cli_sources TerminalCellWidthUnavailable.cpp)
 endif()
 
-add_executable(pacectl main.cpp ${_fc_cli_sources})
+add_executable(pacectl main.cpp ${_pace_cli_sources})
 target_include_directories(pacectl PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(pacectl PRIVATE Pace)
 if(TARGET core::tui)
@@ -102,7 +102,7 @@ install(TARGETS pacectl
 # only reaches src/Pace.
 if(PACE_BUILD_TESTS)
     add_executable(pacectl-tests
-        ${_fc_cli_sources}
+        ${_pace_cli_sources}
         CliAnswer_test.cpp
         CliCommand_test.cpp
         CliFormat_test.cpp
@@ -129,7 +129,7 @@ if(PACE_BUILD_TESTS)
         DashboardGlyphs_test.cpp
         DashboardPanel_test.cpp
         FleetReading_test.cpp
-        ${_fc_cli_tui_tests}
+        ${_pace_cli_tui_tests}
     )
     target_include_directories(pacectl-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(pacectl-tests PRIVATE Pace Catch2::Catch2WithMain)

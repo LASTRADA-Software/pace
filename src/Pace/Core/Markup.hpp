@@ -182,7 +182,7 @@ namespace Detail
 /// ground that the launcher does not link this library. That ground was real and it
 /// does not reach a header like this one: the launcher's rule is header-only AND
 /// std-only, `Markup.hpp` pulls in only `Core/Ranges.hpp` and `Core/Utf8.hpp`, and
-/// there is no `.cpp` between the three -- so the launcher spends no `_fc_cc_core`
+/// there is no `.cpp` between the three -- so the launcher spends no `_pace_cc_core`
 /// row and no link to call this. It compiles one of those two headers already.
 /// @param text Untrusted text.
 /// @return The same text, safe to interpolate into markup, and valid UTF-8

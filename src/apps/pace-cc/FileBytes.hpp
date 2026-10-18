@@ -17,7 +17,7 @@ namespace Pace::Cc
 /// directory had grown three copies of the same signature -- `CompileJob.cpp`,
 /// `main.cpp` and the hit verifier -- and only the first was written the way this
 /// project has twice decided it has to be. A header rather than a row of
-/// `_fc_cc_sources` because `main.cpp` is in no test target (#370) and can include
+/// `_pace_cc_sources` because `main.cpp` is in no test target (#370) and can include
 /// a header regardless, which a shared translation unit would not fix.
 ///
 /// Sized from the stream and read in one call, deliberately NOT through

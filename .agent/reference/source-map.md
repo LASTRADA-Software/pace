@@ -257,7 +257,7 @@ src/apps/
                             in `Cli/UsageDoc.cpp`, the four `Net/` rows that are
                             its TCP client, plus `Platform/Environment.cpp`,
                             `Platform/NarrowText.cpp` and `Platform/Terminal.cpp`
-                            (see `_fc_cc_core`), so
+                            (see `_pace_cc_core`), so
                             its help renders and colorizes exactly like the
                             daemon's without linking the library. `Cli/Options`
                             is header-only, so including it costs no build row.

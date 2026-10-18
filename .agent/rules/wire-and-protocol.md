@@ -185,7 +185,7 @@ Every rule below has already been a bug.
   the `Pace` library, so an include of anything from `Net/`, `Cache/`,
   `Async/` or `Config/` there breaks the launcher's **link**, not merely its
   build. Being header-only is also what keeps it free — it costs no row in
-  `_fc_cc_core`. The dependency runs *out* of `ProtocolAutodetect.hpp` (which
+  `_pace_cc_core`. The dependency runs *out* of `ProtocolAutodetect.hpp` (which
   pulls in `Task`, `CacheEngine` and `ISocket`, and so can never be included by a
   client) into the wire header, never the other way. The launcher's own framing
   lives in `apps/pace-cc/CacheProtocol.cpp` rather than `main.cpp` for a
@@ -806,7 +806,7 @@ Every rule below has already been a bug.
     and would silently differ between a call through the base and one through the
     derived type.
   - **The launcher still does not LINK `Pace`, and that rule survived
-    intact.** The four `Net` rows added to `_fc_cc_core` reach only
+    intact.** The four `Net` rows added to `_pace_cc_core` reach only
     `Net/NetError.hpp`, `Async/Task.hpp` and `Core/Profiling.hpp`, all
     header-only and all std-only, so the launcher stays free of yaml-cpp, OpenSSL
     and the reactor and can still link the CRT statically.

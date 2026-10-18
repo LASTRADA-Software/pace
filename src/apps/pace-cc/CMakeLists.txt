@@ -35,7 +35,7 @@
 # it is header-only, so the component that replaced a compiled row costs none.
 # The remaining CRC32C users are all daemon-side page and record checksums.
 
-set(_fc_cc_core
+set(_pace_cc_core
     "${CMAKE_SOURCE_DIR}/src/Pace/Cli/Duration.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Cli/UsageDoc.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/CompileCache/PathCanon.cpp"
@@ -127,18 +127,18 @@ set(_fc_cc_core
 # compressing. That is asserted, not assumed.
 if(PACE_ENABLE_COMPRESSION)
     if(TARGET libzstd_static)
-        set(_fc_cc_zstd libzstd_static)
+        set(_pace_cc_zstd libzstd_static)
     elseif(TARGET zstd::libzstd_static)
-        set(_fc_cc_zstd zstd::libzstd_static)
+        set(_pace_cc_zstd zstd::libzstd_static)
     elseif(TARGET zstd::libzstd_shared)
-        set(_fc_cc_zstd zstd::libzstd_shared)
+        set(_pace_cc_zstd zstd::libzstd_shared)
     endif()
     if(TARGET lz4_static)
-        set(_fc_cc_lz4 lz4_static)
+        set(_pace_cc_lz4 lz4_static)
     elseif(TARGET LZ4::lz4_static)
-        set(_fc_cc_lz4 LZ4::lz4_static)
+        set(_pace_cc_lz4 LZ4::lz4_static)
     elseif(TARGET lz4::lz4)
-        set(_fc_cc_lz4 lz4::lz4)
+        set(_pace_cc_lz4 lz4::lz4)
     endif()
 endif()
 
@@ -152,7 +152,7 @@ endif()
 # a daemon and a compiler. As its own translation unit it can be driven against
 # a scripted ISocket, which is what lets "a rejected version is reported
 # distinctly from a miss" be a test rather than a hope.
-set(_fc_cc_sources
+set(_pace_cc_sources
     CmdLine.cpp
     AtomicFile.cpp
     CodecEnvelope.cpp
@@ -196,18 +196,18 @@ option(PACE_STATIC_LAUNCHER "Statically link the CRT into pace-cc" ON)
 
 add_executable(pace-cc
     main.cpp
-    ${_fc_cc_sources}
-    ${_fc_cc_core}
+    ${_pace_cc_sources}
+    ${_pace_cc_core}
 )
 target_include_directories(pace-cc PRIVATE "${CMAKE_SOURCE_DIR}/src")
 target_compile_definitions(pace-cc PRIVATE
     PACE_CC_VERSION="${PACE_VERSION_STRING}")
-if(PACE_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
-    target_link_libraries(pace-cc PRIVATE ${_fc_cc_zstd} ${_fc_cc_lz4})
+if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
+    target_link_libraries(pace-cc PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})
     target_compile_definitions(pace-cc PRIVATE FC_COMPRESSION_ENABLED=1)
 endif()
 
-# Core/Ed25519.cpp's primitive; see the comment on `_fc_cc_core`.
+# Core/Ed25519.cpp's primitive; see the comment on `_pace_cc_core`.
 target_link_libraries(pace-cc PRIVATE pace-monocypher)
 
 if(WIN32)
@@ -290,7 +290,7 @@ install(TARGETS pace-cc
 if(PACE_BUILD_TESTS)
     add_executable(pace-cc-tests
         test_main.cpp
-        ${_fc_cc_sources}
+        ${_pace_cc_sources}
         AtomicFile_test.cpp
         CacheDecision_test.cpp
         CmdLine_test.cpp
@@ -325,8 +325,8 @@ if(PACE_BUILD_TESTS)
         TicketCredentials_test.cpp
         # Discovery is the compile NODE's, not the launcher's -- `pace-cc`
         # never surveys a machine, it is handed a compiler. The source is listed
-        # here for its tests and in `_fc_node_shared` for its one real consumer,
-        # rather than in `_fc_cc_sources`, so the shipped launcher does not carry a
+        # here for its tests and in `_pace_node_shared` for its one real consumer,
+        # rather than in `_pace_cc_sources`, so the shipped launcher does not carry a
         # layout table and a vswhere parser it cannot reach.
         ToolchainDiscovery.cpp
         ToolchainDiscovery_test.cpp
@@ -334,17 +334,17 @@ if(PACE_BUILD_TESTS)
         ToolchainHost_test.cpp
         ToolchainProbe_test.cpp
         WorkerProtocol_test.cpp
-        ${_fc_cc_core}
+        ${_pace_cc_core}
     )
     target_include_directories(pace-cc-tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
     if(WIN32)
         # Same reason as the launcher's: this target compiles the same
-        # ${_fc_cc_core} rows and links Pace no more than the launcher does.
+        # ${_pace_cc_core} rows and links Pace no more than the launcher does.
         target_compile_definitions(pace-cc-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     endif()
     target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads pace-monocypher core::async core::net)
-    if(PACE_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
-        target_link_libraries(pace-cc-tests PRIVATE ${_fc_cc_zstd} ${_fc_cc_lz4})
+    if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
+        target_link_libraries(pace-cc-tests PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})
         target_compile_definitions(pace-cc-tests PRIVATE FC_COMPRESSION_ENABLED=1)
     endif()
     if(WIN32)

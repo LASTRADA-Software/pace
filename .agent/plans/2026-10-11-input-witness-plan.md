@@ -41,10 +41,10 @@
 - Create: `src/apps/pace-cc/InputFiles.hpp`
 - Create: `src/apps/pace-cc/InputFiles.cpp`
 - Create: `src/apps/pace-cc/InputFiles_test.cpp`
-- Modify: `src/apps/pace-cc/CMakeLists.txt`: add `InputFiles.cpp` to `_fc_cc_sources` (after `HitVerification.cpp`) and `InputFiles_test.cpp` to `pace-cc-tests` (after `HitVerification_test.cpp`).
+- Modify: `src/apps/pace-cc/CMakeLists.txt`: add `InputFiles.cpp` to `_pace_cc_sources` (after `HitVerification.cpp`) and `InputFiles_test.cpp` to `pace-cc-tests` (after `HitVerification_test.cpp`).
 
 **Interfaces:**
-- Consumes: `Pace::Cc::HashFileContents(std::string_view)` (`DirectManifest.hpp`) and `Pace::PathFromNarrowText(std::string_view)` (`Pace/Platform/NarrowText.hpp`, already in `_fc_cc_core`).
+- Consumes: `Pace::Cc::HashFileContents(std::string_view)` (`DirectManifest.hpp`) and `Pace::PathFromNarrowText(std::string_view)` (`Pace/Platform/NarrowText.hpp`, already in `_pace_cc_core`).
 - Produces:
   - `using Pace::Cc::FileInstant = std::int64_t;` (nanoseconds since the Unix epoch);
   - `struct FileIdentity { FileInstant changeTime; std::uint64_t size; std::uint64_t volumeId; std::uint64_t fileIdHigh; std::uint64_t fileIdLow; }` with a defaulted `operator==`;
@@ -441,7 +441,7 @@ std::unique_ptr<IInputFiles> MakeDiskInputFiles()
 - [ ] **Step 5: Register the files in CMake**
 
 In `src/apps/pace-cc/CMakeLists.txt`:
-- add `InputFiles.cpp` on its own line after `HitVerification.cpp` in `set(_fc_cc_sources ...)`;
+- add `InputFiles.cpp` on its own line after `HitVerification.cpp` in `set(_pace_cc_sources ...)`;
 - add `InputFiles_test.cpp` on its own line after `HitVerification_test.cpp` in `add_executable(pace-cc-tests ...)`.
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -775,7 +775,7 @@ git commit -s -m "cc: a manifest's hashes come from a content source, and manife
 - Create: `src/apps/pace-cc/InputWitness.hpp`
 - Create: `src/apps/pace-cc/InputWitness.cpp`
 - Create: `src/apps/pace-cc/InputWitness_test.cpp`
-- Modify: `src/apps/pace-cc/CMakeLists.txt`: add `InputWitness.cpp` to `_fc_cc_sources` after `InputFiles.cpp`, and `InputWitness_test.cpp` to the tests after `InputFiles_test.cpp`.
+- Modify: `src/apps/pace-cc/CMakeLists.txt`: add `InputWitness.cpp` to `_pace_cc_sources` after `InputFiles.cpp`, and `InputWitness_test.cpp` to the tests after `InputFiles_test.cpp`.
 
 **Interfaces:**
 - Consumes: Task 1's `IInputFiles`, `FileIdentity` and `FileInstant`. Task 2's `IManifestContent`, `ManifestFault::ChangedDuringInvocation`, `ManifestInputs::content`, `ProjectDependencyPaths`, `BuildManifest` and `EncodeManifest`. Also `ComputeManifestKey` and `CanonicalSourceToken`.
@@ -1460,7 +1460,7 @@ if(TARGET pace-cc)
 endif()
 ```
 
-In both `compile-cache-e2e` branches, add `--edit-stub "$<TARGET_FILE:mid-compile-edit-stub>"` (POSIX) or `-EditStub "$<TARGET_FILE:mid-compile-edit-stub>"` (Windows). Guard each with `if(TARGET mid-compile-edit-stub)` into a list variable, the way `_fc_e2e_testclient` is built.
+In both `compile-cache-e2e` branches, add `--edit-stub "$<TARGET_FILE:mid-compile-edit-stub>"` (POSIX) or `-EditStub "$<TARGET_FILE:mid-compile-edit-stub>"` (Windows). Guard each with `if(TARGET mid-compile-edit-stub)` into a list variable, the way `_pace_e2e_testclient` is built.
 
 - [ ] **Step 3: Write the POSIX legs**
 

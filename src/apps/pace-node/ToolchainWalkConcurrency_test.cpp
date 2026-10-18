@@ -13,7 +13,7 @@
 // gate builds at all, so the same cases beside `ToolchainProbe_test.cpp` would be
 // unsanitized while looking exactly as covered.
 //
-// `ToolchainProbe.cpp` is compiled into this target through `_fc_node_shared`
+// `ToolchainProbe.cpp` is compiled into this target through `_pace_node_shared`
 // (`CMakeLists.txt`), and the node is also the process that actually pays the
 // cold walk in production -- so the coverage lands on the binary that runs it.
 //

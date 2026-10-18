@@ -45,7 +45,7 @@
 # ## Dependency-free, and it must stay so
 #
 # It depends on nothing -- not Pace, not the standard library beyond `<stddef.h>` and
-# `<stdint.h>`. That is what lets `pace-cc`'s `_fc_cc_core`, which deliberately does not
+# `<stdint.h>`. That is what lets `pace-cc`'s `_pace_cc_core`, which deliberately does not
 # link Pace, link this later to verify a signed lease. The ONLY first-party code allowed
 # to include a Monocypher header is `src/Pace/Core/{Ed25519,X25519,Hkdf}.cpp`
 # (`ctest -R crypto-seam`); everything else reaches the primitives through those.

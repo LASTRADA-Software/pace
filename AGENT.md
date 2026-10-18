@@ -68,7 +68,7 @@ src/apps/
   pace-kv/            the daemon (PACE_BUILD_DAEMON, default ON)
   pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
-                            args; does NOT link the Pace library (`_fc_cc_core`)
+                            args; does NOT link the Pace library (`_pace_cc_core`)
   pace-node/   the compile worker AND the peer service
                             (PACE_BUILD_NODE, ON); may also be the scheduler, hold
                             a cache tier and run consensus — four surfaces, each off
