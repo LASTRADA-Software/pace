@@ -16,10 +16,10 @@
 # ## Why this takes its files as PARAMETERS
 #
 # `check-node-config-reference.cmake` asks exactly this question about
-# `fastcache-compile-node`, and its own header says why it must be asked -- every
+# `pace-node`, and its own header says why it must be asked -- every
 # word of which is true of the daemon, which had no such check and is the binary
 # most operators actually run
-# ([#759](https://github.com/LASTRADA-Software/fastcached/issues/759)). Two checks
+# ([#759](https://github.com/LASTRADA-Software/pace/issues/759)). Two checks
 # differing only in two paths is the copy-paste this project treats as a defect, so
 # this one is parameterised from the start.
 #
@@ -59,10 +59,10 @@
 # nothing; that near-miss is why the pattern is written down here.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir>
-#         -DFASTCACHED_TABLE=<path relative to source dir>
-#         -DFASTCACHED_REFERENCE=<path relative to source dir>
-#         -DFASTCACHED_LABEL=<name used in messages>
+#   cmake -DPACE_SOURCE_DIR=<dir>
+#         -DPACE_TABLE=<path relative to source dir>
+#         -DPACE_REFERENCE=<path relative to source dir>
+#         -DPACE_LABEL=<name used in messages>
 #         -P scripts/check-config-reference.cmake
 #
 # Exit codes: 0 = the two agree. 1 = at least one key is in one and not the other,
@@ -78,18 +78,18 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-foreach(_required FASTCACHED_SOURCE_DIR FASTCACHED_TABLE FASTCACHED_REFERENCE FASTCACHED_LABEL)
+foreach(_required PACE_SOURCE_DIR PACE_TABLE PACE_REFERENCE PACE_LABEL)
     if(NOT DEFINED ${_required})
         message(FATAL_ERROR "check-config-reference: ${_required} must be set")
     endif()
 endforeach()
 
-set(_table "${FASTCACHED_SOURCE_DIR}/${FASTCACHED_TABLE}")
-set(_reference "${FASTCACHED_SOURCE_DIR}/${FASTCACHED_REFERENCE}")
+set(_table "${PACE_SOURCE_DIR}/${PACE_TABLE}")
+set(_reference "${PACE_SOURCE_DIR}/${PACE_REFERENCE}")
 
 foreach(_file "${_table}" "${_reference}")
     if(NOT EXISTS "${_file}")
-        message(FATAL_ERROR "check-config-reference[${FASTCACHED_LABEL}]: ${_file} does not exist")
+        message(FATAL_ERROR "check-config-reference[${PACE_LABEL}]: ${_file} does not exist")
     endif()
 endforeach()
 
@@ -126,10 +126,10 @@ list(SORT _tableKeys)
 # blanking them makes that check refuse on a good tree. Measured, not assumed.
 #
 # Another copy of this idiom; consolidating them is
-# [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) and is
+# [#495](https://github.com/LASTRADA-Software/pace/issues/495) and is
 # deliberately not done here.
 file(READ "${_reference}" _referenceText)
-fastcached_split_lines_tokenised("${_referenceText}" _lines)
+pace_split_lines_tokenised("${_referenceText}" _lines)
 set(_referenceKeys "")
 foreach(_line IN LISTS _lines)
     if(_line MATCHES "^#([a-z_]+):")
@@ -147,7 +147,7 @@ set(_deduped ${_referenceKeys})
 list(REMOVE_DUPLICATES _deduped)
 if(NOT "${_deduped}" STREQUAL "${_referenceKeys}")
     message(FATAL_ERROR
-        "check-config-reference[${FASTCACHED_LABEL}]: ${_reference} documents a key more than once. "
+        "check-config-reference[${PACE_LABEL}]: ${_reference} documents a key more than once. "
         "Uncommenting both blocks would be a duplicate mapping key, which YAML resolves by "
         "silently keeping one -- so an operator following the file gets half of what they wrote "
         "and no error. Show the second case as more entries under the one key, not as a second "
@@ -177,7 +177,7 @@ list(LENGTH _tableKeys _tableCount)
 list(LENGTH _referenceKeys _referenceCount)
 if(_tableCount EQUAL 0 OR _referenceCount EQUAL 0)
     message(FATAL_ERROR
-        "check-config-reference[${FASTCACHED_LABEL}]: read ${_tableCount} keys from the table and "
+        "check-config-reference[${PACE_LABEL}]: read ${_tableCount} keys from the table and "
         "${_referenceCount} from the reference; one of the two scans matched nothing, so this "
         "check proved nothing rather than passing.")
 endif()
@@ -195,9 +195,9 @@ if(_missing OR _stale)
             "\n  documented but not accepted (uncommenting these refuses to start): ${_staleText}")
     endif()
     message(FATAL_ERROR
-        "check-config-reference[${FASTCACHED_LABEL}]: ${FASTCACHED_TABLE} and ${FASTCACHED_REFERENCE} "
+        "check-config-reference[${PACE_LABEL}]: ${PACE_TABLE} and ${PACE_REFERENCE} "
         "describe different products.${_report}")
 endif()
 
 message(STATUS
-    "check-config-reference[${FASTCACHED_LABEL}]: ${_tableCount} settings, documented and accepted alike")
+    "check-config-reference[${PACE_LABEL}]: ${_tableCount} settings, documented and accepted alike")

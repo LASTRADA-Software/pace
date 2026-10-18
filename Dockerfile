@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Multi-stage build for fastcached. The build stage compiles a Release binary
+# Multi-stage build for pace-kv. The build stage compiles a Release binary
 # with TLS enabled (system OpenSSL); the runtime stage is a slim image carrying
 # just the binary and the shared libraries it needs.
 #
-#   docker build -t fastcached .
-#   docker run --rm -p 6674:6674 -p 9259:9259 fastcached \
+#   docker build -t pace-kv .
+#   docker run --rm -p 6674:6674 -p 9259:9259 pace-kv \
 #       --metrics --requirepass=secret
 #
 # The image binds 0.0.0.0 so it is reachable from outside the container — pair
@@ -29,10 +29,10 @@ COPY . .
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_COMPILER=g++ \
-        -DFASTCACHED_BUILD_TESTS=OFF \
-        -DFASTCACHED_ENABLE_TLS=ON \
+        -DPACE_BUILD_TESTS=OFF \
+        -DPACE_ENABLE_TLS=ON \
         -DUSE_COMPILER_CACHE=OFF \
-    && cmake --build build --target fastcached
+    && cmake --build build --target pace-kv
 
 # ---- runtime stage --------------------------------------------------------
 FROM ubuntu:26.04 AS runtime
@@ -44,17 +44,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /src/build/target/fastcached /usr/local/bin/fastcached
+COPY --from=build /src/build/target/pace-kv /usr/local/bin/pace-kv
 
-# Cache on 6674 (fastcached's own port), admin/metrics on 9259.
+# Cache on 6674 (pace-kv's own port), admin/metrics on 9259.
 EXPOSE 6674 9259
 
 # Self-probe /healthz using the binary itself (no curl in the image). Requires
 # the daemon to be started with --metrics (see CMD).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["fastcached", "--healthcheck"]
+    CMD ["pace-kv", "--healthcheck"]
 
-ENTRYPOINT ["fastcached"]
+ENTRYPOINT ["pace-kv"]
 # Default: listen on all interfaces with the metrics endpoint enabled. Override
 # at `docker run` to add --requirepass / --tls etc. No --port: restating the
 # compiled default here is how EXPOSE and the daemon drift apart.

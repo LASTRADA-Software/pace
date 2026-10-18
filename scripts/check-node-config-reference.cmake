@@ -4,7 +4,7 @@
 # configuration file can carry, and no setting it cannot.
 #
 # `NodeOptions()` is the single source of truth for what the file accepts -- the
-# `yamlKey` column drives the parse -- and `packaging/config/fastcache-compile-node.yaml`
+# `yamlKey` column drives the parse -- and `packaging/config/pace-node.yaml`
 # is what an operator actually reads. Nothing links the two. A flag added with a
 # key and no line in the reference is a setting that works and that nobody can
 # find; a line in the reference for a key the table dropped is worse, because an
@@ -34,7 +34,7 @@
 # recorded here for the next person adding a setting rather than encoded.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-node-config-reference.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-node-config-reference.cmake
 #
 # Exit codes: 0 = the two agree. 1 = at least one key is in one and not the other.
 
@@ -49,12 +49,12 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(_table "${FASTCACHED_SOURCE_DIR}/src/apps/fastcache-compile-node/NodeConfig.cpp")
-set(_reference "${FASTCACHED_SOURCE_DIR}/packaging/config/fastcache-compile-node.yaml")
+set(_table "${PACE_SOURCE_DIR}/src/apps/pace-node/NodeConfig.cpp")
+set(_reference "${PACE_SOURCE_DIR}/packaging/config/pace-node.yaml")
 
 foreach(_file "${_table}" "${_reference}")
     if(NOT EXISTS "${_file}")
@@ -89,7 +89,7 @@ list(SORT _tableKeys)
 # good tree. Measured, in this branch.
 #
 # Fifth-and-counting copy of this idiom; consolidating them is
-# [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) and is
+# [#495](https://github.com/LASTRADA-Software/pace/issues/495) and is
 # deliberately not done here.
 #
 # MEASURED: injecting one `]` into a comment in the reference YAML took this
@@ -98,7 +98,7 @@ list(SORT _tableKeys)
 # check proved nothing rather than passing". That is the vacuous-pass guard
 # working, and it stays: the fix makes the refusal rare, not absent.
 file(READ "${_reference}" _referenceText)
-fastcached_split_lines_tokenised("${_referenceText}" _lines)
+pace_split_lines_tokenised("${_referenceText}" _lines)
 set(_referenceKeys "")
 foreach(_line IN LISTS _lines)
     if(_line MATCHES "^#([a-z_]+):")

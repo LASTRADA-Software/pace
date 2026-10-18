@@ -1,11 +1,11 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build a REAL target through `fastcache-cc` and run that target's own tests.
+# Build a REAL target through `pace-cc` and run that target's own tests.
 #
 # ## Why this exists when two launcher fixtures already do
 #
-# `compile-cache-e2e.sh` and the `fastcache-cc smoke` job prove the launcher RUNS
+# `compile-cache-e2e.sh` and the `pace-cc smoke` job prove the launcher RUNS
 # and produces AN object. Neither proves it is the RIGHT object, because both
 # compile synthetic single files and neither ever executes what came out. That is
 # the only shape that catches a launcher handing back an object which does not
@@ -52,17 +52,17 @@
 
 set -uo pipefail
 
-fastcached=""
+pace_kv=""
 launcher=""
 compiler=""
 port=""
-target="fastcache-cc-tests"
+target="pace-cc-tests"
 canary=0
 source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --fastcached) fastcached="$2"; shift 2 ;;
+        --pace-kv) pace_kv="$2"; shift 2 ;;
         --launcher)   launcher="$2";   shift 2 ;;
         --compiler)   compiler="$2";   shift 2 ;;
         --port)       port="$2";       shift 2 ;;
@@ -119,13 +119,13 @@ SKIP=77
 # green, and it is not there.
 skip() { echo "launcher-replay-e2e: $* -- skipping"; exit "$SKIP"; }
 
-[ -n "$fastcached" ] && [ -x "$fastcached" ] || skip "fastcached was not given an executable"
+[ -n "$pace_kv" ] && [ -x "$pace_kv" ] || skip "pace-kv was not given an executable"
 [ -n "$compiler" ] && command -v "$compiler" >/dev/null 2>&1 || skip "no usable compiler ($compiler)"
 command -v cmake  >/dev/null 2>&1 || skip "cmake is not on PATH"
 command -v ninja  >/dev/null 2>&1 || skip "ninja is not on PATH"
 command -v python3 >/dev/null 2>&1 || skip "python3 is not on PATH"
 
-fastcached="$(cd "$(dirname "$fastcached")" && pwd)/$(basename "$fastcached")"
+pace_kv="$(cd "$(dirname "$pace_kv")" && pwd)/$(basename "$pace_kv")"
 
 workdir="$(mktemp -d)"
 daemon_pid=""
@@ -177,7 +177,7 @@ echo "== the daemon this build will cache through"
 # suffix is a single character, so `2048mb` is an unknown unit where `2048m`
 # is the spelling, and `--log-level=info` makes daemon.log worth catting when
 # the readiness loop does give up.
-"$fastcached" --bind=127.0.0.1 --port="$port" --max-memory=2048m --log-level=info \
+"$pace_kv" --bind=127.0.0.1 --port="$port" --max-memory=2048m --log-level=info \
     > "${workdir}/daemon.log" 2>&1 &
 daemon_pid=$!
 
@@ -202,13 +202,13 @@ e2e_note "daemon up on 127.0.0.1:${port}"
 # stderr, from the same process, inside the same edge, immediately before
 # handing over -- the two lines cannot be separated by anything. It `exec`s, so
 # the launcher under test is the launcher that runs, and it is named
-# `fastcache-cc` so nothing downstream sees a different program.
+# `pace-cc` so nothing downstream sees a different program.
 mkdir -p "${workdir}/wrap"
-launcher_wrapper="${workdir}/wrap/fastcache-cc"
+launcher_wrapper="${workdir}/wrap/pace-cc"
 cat > "$launcher_wrapper" <<WRAP
 #!/bin/sh
 for _fc_arg in "\$@"; do _fc_last="\$_fc_arg"; done
-printf 'fastcache-cc-fixture: unit=%s\n' "\$_fc_last" >&2
+printf 'pace-cc-fixture: unit=%s\n' "\$_fc_last" >&2
 exec "${launcher}" "\$@"
 WRAP
 chmod +x "$launcher_wrapper"
@@ -224,7 +224,7 @@ chmod +x "$launcher_wrapper"
 #     grep -E "All tests passed|assertions in" ... | tail -1
 #
 # and **Catch2 prints `All tests passed (N assertions in M test cases)` only when
-# nothing was skipped.** `fastcache-cc-tests` skips one case on any host with no
+# nothing was skipped.** `pace-cc-tests` skips one case on any host with no
 # MSVC-family driver -- which is every Linux runner, including the one CI runs
 # this fixture on -- and Catch2 then prints a two-line table instead:
 #
@@ -264,11 +264,11 @@ configure_and_build() {
     local args=(-S "$source_dir" -B "$dir" -G Ninja
                 -DCMAKE_BUILD_TYPE=Release
                 -DCMAKE_CXX_COMPILER="$compiler"
-                -DFASTCACHED_BUILD_DAEMON=OFF
-                -DFASTCACHED_BUILD_NODE=OFF
+                -DPACE_BUILD_DAEMON=OFF
+                -DPACE_BUILD_NODE=OFF
                 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
                 "-DUSE_COMPILER_CACHE=${cache}")
-    [ "$cache" = "ON" ] && args+=("-DFASTCACHE_CC=${launcher_wrapper}")
+    [ "$cache" = "ON" ] && args+=("-DPACE_CC=${launcher_wrapper}")
     cmake "${args[@]}" > "${log}.configure" 2>&1 \
         || { tail -40 "${log}.configure" >&2; fail "configure failed for ${dir}"; }
     cmake --build "$dir" --target "$target" > "${log}" 2>&1 \
@@ -279,11 +279,11 @@ configure_and_build() {
 # the environment is set for the BUILD as well as the configure, because
 # `CompileCache.cmake` proves the cache works at configure time by compiling one
 # file through it.
-export FASTCACHE_ADDR="127.0.0.1:${port}"
-export FASTCACHE_VERBOSE=1
+export PACE_ADDR="127.0.0.1:${port}"
+export PACE_VERBOSE=1
 
 echo "== control: the same target with no launcher at all"
-(unset FASTCACHE_ADDR FASTCACHE_VERBOSE
+(unset PACE_ADDR PACE_VERBOSE
  configure_and_build "${workdir}/control" OFF "${workdir}/control.build")
 grep -q "LAUNCHER = " "${workdir}/control/build.ninja" \
     && fail "the control build has a compiler launcher configured; it is not a control"
@@ -320,12 +320,12 @@ import collections, sys
 current = None
 counts = collections.Counter()
 for line in open(sys.argv[1], errors="replace").read().splitlines():
-    marker = line.find("fastcache-cc-fixture: unit=")
+    marker = line.find("pace-cc-fixture: unit=")
     if marker >= 0:
-        current = line[marker + len("fastcache-cc-fixture: unit="):].strip()
+        current = line[marker + len("pace-cc-fixture: unit="):].strip()
         continue
-    if "fastcache-cc: HIT" in line or "fastcache-cc: MISS" in line:
-        outcome = "hit" if "fastcache-cc: HIT" in line else "miss"
+    if "pace-cc: HIT" in line or "pace-cc: MISS" in line:
+        outcome = "hit" if "pace-cc: HIT" in line else "miss"
         if current is None:
             counts["unattributed"] += 1
         else:
@@ -375,15 +375,15 @@ import sys
 
 current = None
 for line in open(sys.argv[1], errors="replace").read().splitlines():
-    marker = line.find("fastcache-cc-fixture: unit=")
+    marker = line.find("pace-cc-fixture: unit=")
     if marker >= 0:
-        current = line[marker + len("fastcache-cc-fixture: unit="):].strip()
+        current = line[marker + len("pace-cc-fixture: unit="):].strip()
         continue
-    if "fastcache-cc: MISS" in line:
+    if "pace-cc: MISS" in line:
         if current is not None and "/_deps/" not in current:
             print("   MISSED: %s\n     %s" % (current, line.strip()))
         current = None
-    elif "fastcache-cc: HIT" in line:
+    elif "pace-cc: HIT" in line:
         current = None
 PY
     fail "${warm_project_misses} of this project's own unit(s) missed on the warm build; the same source in a different build directory must replay, and that is what path canonicalization is for"
@@ -435,7 +435,7 @@ if [ "$canary" = "1" ]; then
     # The link command comes first, because it is what decides which translation
     # unit is worth poisoning. Picking the first `_test.cpp` in the compile
     # database picked `src/CowTree/BasicCowTree_test.cpp` -- a unit of the
-    # `CowTreeTests` target, which `fastcache-cc-tests` does not link. The
+    # `CowTreeTests` target, which `pace-cc-tests` does not link. The
     # canary was then compiled, written and linked over nothing at all, the
     # suite passed exactly as before with the same 537 cases, and the fixture
     # reported "the suite PASSED with a wrong object linked in": a true

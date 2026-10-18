@@ -93,7 +93,7 @@ What is worth carrying past this check:
   with `1000×10,900,1100`: the walk measured `0s`, the run `+100s`, a checkpoint
   `-100s`, and the check reported `93 ms/file. That is the 'bridged and
   contended' band` at exit 0 — a band across a clock it had already watched move.
-  So `fastcached_scan_interval` takes a LABEL and files every backward step
+  So `pace_scan_interval` takes a LABEL and files every backward step
   itself, and the reporting arm reads that record rather than enumerating its
   sources. An arm that enumerates them is an arm that goes silent about the next
   interval somebody adds.
@@ -249,11 +249,11 @@ the one remedy that cannot work.
 
 `run-launcher-e2e.ps1` bound the constant `21714` and nothing reaped the daemon when
 a run did not reach its cleanup — a ctest interrupted, a test killed by a timeout, a
-build cancelled mid-suite. `fastcached.exe` then listened for as long as the machine
+build cancelled mid-suite. `pace-kv.exe` then listened for as long as the machine
 was up and **every later run** failed at
 
 ```
-fastcached exited immediately (exit 1)
+pace-kv exited immediately (exit 1)
 ```
 
 which names neither the port nor the process and reads exactly like a daemon that
@@ -261,12 +261,12 @@ cannot start. It was diagnosed by hand from `Get-NetTCPConnection -LocalPort 217
 after surviving a rebase and presenting as a regression the rebase had caused (#220).
 
 **The reason offered for the constant was true and did not support it.** The launcher
-under test reads `FASTCACHE_ADDR` from the environment and several child processes
+under test reads `PACE_ADDR` from the environment and several child processes
 inherit it, so the port has to be decided BEFORE the daemon starts — which is an
 argument for deciding it early, and drawing does that. The fixture draws from
 20000..32000 like every sibling now, and the four were CHECKED rather than assumed:
 `compile-cache-e2e.sh` and `dist-compile-e2e.sh` call `free_port`; `sccache-smoke.sh`
-does too, and `FASTCACHED_SMOKE_PORT` defaults to EMPTY so the registration passes no
+does too, and `PACE_SMOKE_PORT` defaults to EMPTY so the registration passes no
 `--port` at all, on either platform since `sccache-smoke.ps1` drew too (#183). The
 CMake half is worth naming separately from the script half, because for a while the
 script drew and the registration passed `--port 11611` unconditionally: the draw was
@@ -433,7 +433,7 @@ matter.** `launchctl kickstart` timing out at 60 s having burned almost no CPU i
 `LaunchctlFindingOf`'s `Waiting`, reported honestly as *"this does not say whether that
 was a busy host or a stall"* -- correct, and the end of what the CALLER's own readings
 can establish, because from outside the two causes look identical
-([#965](https://github.com/LASTRADA-Software/fastcached/issues/965)).
+([#965](https://github.com/LASTRADA-Software/pace/issues/965)).
 
 What separates them is whether launchd ever moved the job out of pending, and only
 launchd knows. So the fixture asks it, on the FAILURE PATH: `launchctl print` shows
@@ -551,7 +551,7 @@ limitation you can describe is one the instrument can apply.
 
 **An instrument that prints a remedy has to know when the remedy is under dispute,
 and it cannot.** "Raise the budget" is sound general advice, was printed by the
-branch that fires most often, and is exactly what [#354](https://github.com/LASTRADA-Software/fastcached/issues/354)
+branch that fires most often, and is exactly what [#354](https://github.com/LASTRADA-Software/pace/issues/354)
 refuses -- that budget has been raised twice already. State the finding and stop.
 
 And it is tested, by `ctest -R node-scratch-isolation-e2e-selftest`. **A classifier
@@ -576,14 +576,14 @@ reached a compile. The serialisation rested on waiting for `compile node ready`
 before starting the next node, which at the time meant **surveyed** -- a node
 fingerprinted before it bound.
 
-[#365](https://github.com/LASTRADA-Software/fastcached/issues/365) made a node bind
+[#365](https://github.com/LASTRADA-Software/pace/issues/365) made a node bind
 and serve first and survey afterwards, for good reasons of its own. The log line was
 not renamed, not moved and not reworded; it simply stopped carrying the fact the
 fixture was reading out of it. Every node now reached it in about a second, all three
 walked at once, and the measured rate on the `clangcl` runner fell to **2-5 file/s**
-against the ~30 file/s [#354](https://github.com/LASTRADA-Software/fastcached/issues/354)
+against the ~30 file/s [#354](https://github.com/LASTRADA-Software/pace/issues/354)
 measured with a single walker. 5136 files did not fit in the 600 s that
-[#428](https://github.com/LASTRADA-Software/fastcached/issues/428) had just moved
+[#428](https://github.com/LASTRADA-Software/pace/issues/428) had just moved
 onto the registration wait, and an unrelated pull request was ejected from the merge
 queue for it.
 
@@ -603,7 +603,7 @@ other, and a fixture that folds them cannot say which one happened.
 **And `compile node ready` is not the bind.** This file said "for the bind" and
 `AGENT.md` said #365 made the line mean *bound*; both were a shorthand and both were
 wrong in the same direction
-([#652](https://github.com/LASTRADA-Software/fastcached/issues/652)). Measured: the
+([#652](https://github.com/LASTRADA-Software/pace/issues/652)). Measured: the
 accept loop starts at `main.cpp:1128` and the line is logged at `:1454`, with the
 credential, the registrars, the startup toolchain count and the heartbeat thread in
 between --
@@ -619,7 +619,7 @@ accepted and then stalled in heartbeat setup sent its reader to check a port tha
 open and answering -- the one part that was working. The marker and the fact it names
 are now a row of `Core/ReadinessMarker.hpp`, whose `ReadinessFact` has **no `Bound`
 enumerator**, so the mistake cannot be spelled there
-([#654](https://github.com/LASTRADA-Software/fastcached/issues/654)).
+([#654](https://github.com/LASTRADA-Software/pace/issues/654)).
 
 **A comment stating the intent did not protect it.** The serialisation paragraph was
 correct, prominent and three lines above the wait that stopped implementing it. What
@@ -731,7 +731,7 @@ non-zero**, so the miss does not present as an empty result — it presents as a
 **deterministic red**, identical on every iteration, which is exactly what a real
 reproducible failure looks like.
 
-Re-measured against a built `FastCacheTest` rather than taken from the tickets,
+Re-measured against a built `PaceTest` rather than taken from the tickets,
 both directions, because a subject with no control cannot tell *this name matches
 nothing* from *my quoting is broken* — the first attempt's control picked the
 `--list-tests` header instead of a case and reported `No tests ran` for the
@@ -926,7 +926,7 @@ carried its own abbreviation of that reasoning, so why the idiom exists was
 reconstructible from some and not from others, and an author who found a terse
 copy had nothing telling them a plain dereference was not simply better. It is
 header-only and includes only `<optional>`, so the launcher's and worker's test
-binaries can use it without linking `FastCache`. `std::expected` is **not**
+binaries can use it without linking `Pace`. `std::expected` is **not**
 covered by that check, so a `*result` after `REQUIRE(result.has_value())` stays as
 it is — routing it through `Unwrap` does not even compile.
 
@@ -945,7 +945,7 @@ and what got it there is worth keeping:
   claimed exactly the guarantee it had, "two cases running in one binary cannot
   collide", and that scope is the bug.
 - **The sixth got it wrong in a NEW way, and that is the one worth reading**
-  ([#1507](https://github.com/LASTRADA-Software/fastcached/issues/1507)). Five copies
+  ([#1507](https://github.com/LASTRADA-Software/pace/issues/1507)). Five copies
   used a counter and were beaten by the pid; `StorageTestUtils.hpp`'s `TempFile` reached
   for `std::mt19937_64 { std::random_device {}() }()` instead -- which *looks* stronger
   than a counter and is not a counter at all, so none of the reasoning above applied to
@@ -967,8 +967,8 @@ and what got it there is worth keeping:
     test reach for `UniqueScratchPath`, and a seventh author will reach for whatever
     looks random. `ctest -R unique-temp-paths`.
 - **The fifth one happened because the shared fix was somewhere it could not be
-  included from.** `UniqueScratchPath` lived in `src/apps/fastcache-cc/`, which
-  `FastCacheTest` does not have on its include path, so the one suite that could
+  included from.** `UniqueScratchPath` lived in `src/apps/pace-cc/`, which
+  `PaceTest` does not have on its include path, so the one suite that could
   not reach it re-derived it. A helper is shared only if it sits where everything
   that needs it can include from; `src` is on all three test targets' paths, which
   is why this and `tests/Unwrap.hpp` live together.
@@ -1001,7 +1001,7 @@ separate authors could write this bug and no run anywhere would show it. CI sets
 `CTEST_PARALLEL_LEVEL` once in the workflow's `env:` rather than adding
 `--parallel` to each of the four `run:` lines, so an invocation added later is
 covered by construction; the gate passes `--parallel` explicitly (`getconf
-_NPROCESSORS_ONLN`, since it runs on macOS too; `FASTCACHE_GATE_JOBS` overrides).
+_NPROCESSORS_ONLN`, since it runs on macOS too; `PACE_GATE_JOBS` overrides).
 Tests that genuinely cannot share -- a daemon, a fixed port -- carry `RUN_SERIAL`,
 which `tls-smoke` was missing while every one of its neighbours had it. Measured
 on the full suite: 649s serial, 131s at `--parallel 8`, same 1965 tests; Windows
@@ -1302,7 +1302,7 @@ reverted inside one change: they fired 16 and 5 times, every hit in a PRODUCTION
 shutdown checks, `FrameEndpoint`'s drain, the bench's workers -- and the wait they ask for is
 `src/tests/BoundedWait.hpp`, which a production source cannot include. **A guard's remedy text is
 part of the guard**, so a rule whose remedy does not exist for the files it refuses is not a
-stricter rule, it is a broken one. The `rules` column of `FastCachedTestLoopScope` says which,
+stricter rule, it is a broken one. The `rules` column of `PaceTestLoopScope` says which,
 and a rule no scope row names is refused rather than left enumerated by nothing.
 
 **The 148 sites the widening found were a RATCHET, and a backlog row is a different CLAIM from an
@@ -1605,14 +1605,14 @@ argues against.
 **Which CMakeLists registers a script-driven test is load-bearing, not filing.**
 `src/apps` walks its app table *in order*, so a test registered beside one binary
 cannot name a binary that comes later in that table: at the point
-`src/apps/fastcache-cc` is configured, `fastcache-compile-node` is not a target
+`src/apps/pace-cc` is configured, `pace-node` is not a target
 yet, and a `$<TARGET_FILE:>` guard on it does not fail — it silently skips the
 test, forever, with one `message(STATUS)` in a configure log nobody reads.
 `src/tests` is added *after* `src/apps`, so every target exists by the time it
 runs. That is why `dist-compile-e2e` lives there, and the general rule is that a
 script-driven test naming more than one executable belongs in `src/tests`
 regardless of which binary it feels closest to. (`compile-cache-e2e` predates the
-rule and names only `fastcached`, which the table happens to reach first.)
+rule and names only `pace-kv`, which the table happens to reach first.)
 
 `dist-compile-e2e` additionally allocates its ports per run rather than fixing
 them. It needs four, and four more fixed ports is four more ways to collide with
@@ -1640,7 +1640,7 @@ draws 20000–31999, below that floor and below macOS's 49152, and every fixture
 reaches it through the shared helper inherits that. `migrate-storage-e2e.sh` does
 not: it spells the helper `port`, draws 40000–59999, and is therefore entirely
 inside Linux's default ephemeral range
-([#628](https://github.com/LASTRADA-Software/fastcached/issues/628)). A helper
+([#628](https://github.com/LASTRADA-Software/pace/issues/628)). A helper
 reimplemented under a different name is invisible to `check-e2e-helpers.sh`'s
 name-collision scan, which is what that scan's allowlist reasons are for.
 
@@ -1667,7 +1667,7 @@ below.
     fail "no node ever answered a cluster question; the cluster never elected a leader"
 
 Correct where it was written -- the first formation -- and false everywhere else it
-is called from. In [#388](https://github.com/LASTRADA-Software/fastcached/issues/388)
+is called from. In [#388](https://github.com/LASTRADA-Software/pace/issues/388)
 it fired in phase 6, *after* eight assertions had passed, one of which had printed
 the endpoint the cluster was being led from. The cluster had elected; what it could
 not do was elect **again**, which is a different defect with a different cause. The
@@ -1840,13 +1840,13 @@ Use `scripts/flake-rate.sh`, which keeps a tally. Two things it deliberately kee
 <!-- agent-tripwire: Assert what DISTINGUISHES, not what both sides produce -->
 
 In one evening four lanes found **five** tests that could not fail for the reason
-they existed ([#355](https://github.com/LASTRADA-Software/fastcached/issues/355)).
+they existed ([#355](https://github.com/LASTRADA-Software/pace/issues/355)).
 Not the same mistake in the same place — the same mistake in five shapes, and every
 one of them green.
 
 Two, which are enough to see the shape:
 
-- **[#286](https://github.com/LASTRADA-Software/fastcached/issues/286)'s acceptance
+- **[#286](https://github.com/LASTRADA-Software/pace/issues/286)'s acceptance
   did `REQUIRE(held)` on a bind** (implemented by pull request #348).
   `BlockingListener::Bind` returns a **non-null pointer in an errored state**, so a
   failed bind passes it. Both sections — a named port that must refuse, a defaulted
@@ -1919,7 +1919,7 @@ by an instance filed where nobody looking for it will read it.
 
 ### THREE more in one batch, and how each was actually found
 
-[#405](https://github.com/LASTRADA-Software/fastcached/issues/405) produced three, all
+[#405](https://github.com/LASTRADA-Software/pace/issues/405) produced three, all
 in fixtures its own author had just written and believed, all green. The number is the
 point: **one instance reads as bad luck, three read as the default outcome** — so the
 question to ask of a new fixture is not *is this careful* but *what would make it fail*.
@@ -1942,7 +1942,7 @@ it, or asking how the production code acquires what the fixture acquires.
 ### A fixture that RE-ACQUIRES what production binds ONCE is testing a different object
 
 The sixth shape, found in
-[#405](https://github.com/LASTRADA-Software/fastcached/issues/405) and not by review:
+[#405](https://github.com/LASTRADA-Software/pace/issues/405) and not by review:
 its first `--fleet-open` case called `membership.Oracle()` fresh after each reload and
 passed. Every production surface — `SchedulerTier::Start`, `CompileResponder` — takes an
 `IMembershipOracle const&` at construction and holds it for its lifetime. Against an
@@ -1982,14 +1982,14 @@ mutation, and read back through that binding afterwards.
 <!-- agent-tripwire: Where the answer cannot be determined, report that as its own outcome rather than the nearest neighbour -->
 
 A required-context checker was written for the shape
-[#542](https://github.com/LASTRADA-Software/fastcached/issues/542) names: read the
+[#542](https://github.com/LASTRADA-Software/pace/issues/542) names: read the
 required names, report each one's state, and keep ABSENT distinct from pending so a
 context that was never created cannot hide. Its first version captured
 `gh pr checks ... 2>/dev/null`. `gh` was not on `PATH` in that environment, so
 `command not found` went to the null device, the capture was empty, and the checker
 printed **ABSENT for all eleven required contexts** — while the data sat there,
 retrievable, one working invocation away
-([#557](https://github.com/LASTRADA-Software/fastcached/issues/557)).
+([#557](https://github.com/LASTRADA-Software/pace/issues/557)).
 
 *Eleven is what the instrument printed and what the required set held that day; it has
 grown since (#408, #629). The live figure is `RequiredContexts` in
@@ -2146,15 +2146,15 @@ skipped. It is a hard error at GENERATE time**, so the whole configure fails:
 
 ```
 CMake Error at src/tests/CMakeLists.txt:943 (add_test):
-  Error evaluating generator expression: $<TARGET_FILE:fastcached>
-  No target "fastcached"
+  Error evaluating generator expression: $<TARGET_FILE:pace-kv>
+  No target "pace-kv"
 ```
 
 That is #390. A block registering a test that starts a binary is guarded on
 **`TARGET x`** as well as on whatever feature makes the test interesting; the two
 conditions are independent, because a feature can be enabled while the binary it
-needs is not built. `tls-smoke` asked only `FASTCACHED_ENABLE_TLS` and the sccache
-smokes only `SCCACHE`, so `-DFASTCACHED_BUILD_DAEMON=OFF` could not be configured
+needs is not built. `tls-smoke` asked only `PACE_ENABLE_TLS` and the sccache
+smokes only `SCCACHE`, so `-DPACE_BUILD_DAEMON=OFF` could not be configured
 at all.
 
 **It was conditional on the developer's machine rather than on the tree**, which is
@@ -2163,7 +2163,7 @@ checkout without sccache installed never reaches the broken reference and the fl
 appears to work. The error then names CMake rather than the option, on some
 machines and not others — so the natural conclusion is "my checkout is broken".
 
-And the rule was already written down. `src/apps/fastcache-cc/CMakeLists.txt`
+And the rule was already written down. `src/apps/pace-cc/CMakeLists.txt`
 spells it out in four lines directly above the block that obeys it, while two
 blocks one directory away did not. A rule one file explains and another ignores is
 a rule that needs a check, not a better comment: `ctest -R target-file-guards`
@@ -2172,9 +2172,9 @@ targets are optional from `src/apps/CMakeLists.txt`'s app table rather than
 restating them, so a new app comes under the guard by existing.
 
 **The app table was not always the only place a target became optional**
-([#1369](https://github.com/LASTRADA-Software/fastcached/issues/1369)). While the root added
-`vendor/` only under `FASTCACHED_BUILD_TUI`, every target `vendor/CMakeLists.txt` declared was
-as optional as an app, and an unguarded `$<TARGET_FILE:fastcache-tui-linkprobe>` planted in
+([#1369](https://github.com/LASTRADA-Software/pace/issues/1369)). While the root added
+`vendor/` only under `PACE_BUILD_TUI`, every target `vendor/CMakeLists.txt` declared was
+as optional as an app, and an unguarded `$<TARGET_FILE:pace-tui-linkprobe>` planted in
 `src/tests/CMakeLists.txt` passed: the check's source set had stopped describing the tree, and
 a list is exact about the files it knows and silent about the ones it does not. #1369 added a
 SECOND reader for directories the root gates that way, as a parallel derivation with its own
@@ -2214,7 +2214,7 @@ return any_of(_hosts, SameHost) ? Member : Outsider;      // nothing at all
 
 Today it is a proven key and a verified ticket, and the shape of the trap is unchanged.
 
-That is how [#235](https://github.com/LASTRADA-Software/fastcached/issues/235)
+That is how [#235](https://github.com/LASTRADA-Software/pace/issues/235)
 survived. A worker that admitted **only** its own machine — and therefore refused
 every dispatched compile the documented setup sent it — passed the whole distributed
 suite, because the suite only ever asked it to admit its own machine. The fixture
@@ -2313,7 +2313,7 @@ them ran the code that runs in production.
   is what makes the fallback sound there and unsound in a working checkout, where a
   dependency cache lives inside the source tree.
 - **A fixture that MAKES its tree a repository writes it through `scratch_git`, never bare
-  `git`** (`scripts/lib/git-scrub.sh`; `fastcached_scratch_git` in `CheckCommon.cmake`). Every
+  `git`** (`scripts/lib/git-scrub.sh`; `pace_scratch_git` in `CheckCommon.cmake`). Every
   `git init`, `git add` and commit obeys `GIT_DIR`, `GIT_WORK_TREE` and the rest of
   `scripts/lib/git-scrub-variables.txt` when they are in the environment, and then writes the
   repository they NAME instead of the scratch tree: an exported `GIT_DIR` around a `ctest -L
@@ -2663,8 +2663,8 @@ What makes this one worth writing down is where the rule already was.
 file -- 117 lines above the `--cluster-admit` that lacked it and 212 above the
 `--cluster-forget`. The argument was written down in a comment above it before
 either of the sessions that read the file noticed the sites it did not cover.
-Learned at [#117](https://github.com/LASTRADA-Software/fastcached/issues/117),
-learned again at [#172](https://github.com/LASTRADA-Software/fastcached/issues/172).
+Learned at [#117](https://github.com/LASTRADA-Software/pace/issues/117),
+learned again at [#172](https://github.com/LASTRADA-Software/pace/issues/172).
 A helper that implements a rule does not spread it; only a call site using the
 helper does.
 
@@ -2695,7 +2695,7 @@ found by walking every call site of the pattern, and it was found *because* the 
 was mechanical. Nothing about section 5 looked suspicious, and it never had been.
 When a failure is fixed, the question is not "is this site now correct" but "what
 else has this shape, and would I have seen it fail?"
-([#172](https://github.com/LASTRADA-Software/fastcached/issues/172))
+([#172](https://github.com/LASTRADA-Software/pace/issues/172))
 
 ## An identifier is READ, never reconstructed, and zero rows is not a verdict
 
@@ -2704,7 +2704,7 @@ else has this shape, and would I have seen it fail?"
 Two instrument failures in one session shared one shape, and neither returned an
 error. A query was answered about a set that did not contain the subject, and the
 caller promoted the empty result into a verdict
-([#683](https://github.com/LASTRADA-Software/fastcached/issues/683)).
+([#683](https://github.com/LASTRADA-Software/pace/issues/683)).
 
 **A fabricated SHA.** A lane read a head as the abbreviated `b4331297`, needed forty
 characters for an API call, and **padded it** instead of reading the full value. `gh`
@@ -2945,7 +2945,7 @@ green Linux run is not evidence about it.
 
 <!-- agent-tripwire: A fixture handed a launcher records ONLY into its run's own state directory -->
 
-The launcher records every invocation in `<state>/fastcache-cc/invocations.log`, and
+The launcher records every invocation in `<state>/pace-cc/invocations.log`, and
 `-z` / `--zero-stats` DELETES that file. `<state>` is the DEVELOPER's — `%LOCALAPPDATA%` on
 Windows, `$XDG_STATE_HOME` or `$HOME/.local/state` elsewhere — unless the fixture says
 otherwise. The Windows launcher e2e (`run-launcher-e2e.ps1`) did not: every run deleted
@@ -2954,8 +2954,8 @@ them. Three more fixtures appended without deleting. Nothing looked wrong from i
 of them — the result was right, and only somebody else's file had changed. The POSIX twin
 had exported `XDG_STATE_HOME` all along, which is why nobody noticed the Windows one.
 
-So a fixture handed a launcher — `$<TARGET_FILE:fastcache-cc>` (or any
-`$<TARGET_FILE…:fastcache-cc>`) on its registration, directly or through a variable
+So a fixture handed a launcher — `$<TARGET_FILE:pace-cc>` (or any
+`$<TARGET_FILE…:pace-cc>`) on its registration, directly or through a variable
 carrying it, or a launcher parameter it declares — goes through ONE seam, **entered before
 the launcher first runs**: `Enter-E2ELauncherState` in `scripts/lib/E2EEnvironment.psm1`,
 or `e2e_launcher_state_enter` in `scripts/lib/e2e-common.sh`. Never a variable exported by
@@ -2994,10 +2994,10 @@ Four checks, each with the direction it fails in:
    the launcher recorded HERE, because a launcher recording nowhere spares it too. The bash
    shim also records, for every run, the value each state variable HAD when it ran, and
    the control refuses any that does not name the run's root. A fixture whose every run
-   sets `FASTCACHE_NO_STATS=1` has no record to count — its runs write neither the log nor
+   sets `PACE_NO_STATS=1` has no record to count — its runs write neither the log nor
    the toolchain fingerprint cache, which only a dispatch or `--print-toolchain-fingerprint`
    writes — so for it that shim record IS the control: at least one run beyond the guard,
-   each with every variable at the run's root. `FASTCACHE_NO_STATS` does not gate
+   each with every variable at the run's root. `PACE_NO_STATS` does not gate
    everything, though: a PERSISTENT refusal from the daemon writes a throttle stamp
    (`refusal-*.stamp`, `RefusalNotice.cpp`, reached from `main.cpp`'s fetch path) into the
    same state directory. It is not used as the control, because `compile-cache-daemon-start`'s
@@ -3062,7 +3062,7 @@ or a carrier variable outside an `add_test`/`set` it can read, a block it cannot
 registration naming no script, a script declaring no launcher parameter, a bash fixture
 calling no `e2e_begin`. Carriers are followed to a fixpoint, across files, and a census
 that found no fixture is a failure. It fails OPEN where a registration reaches the launcher
-without naming `$<TARGET_FILE…:fastcache-cc>` or a carrier — a path spelled from the build
+without naming `$<TARGET_FILE…:pace-cc>` or a carrier — a path spelled from the build
 tree's layout, a `find_program` of its own — and nothing catches that. It also holds the
 two readers to one answer per platform. `launcher-state-isolation-selftest` (`--self-test`)
 is the check's proof that it can fail: a planted tree that must earn every verdict, and
@@ -3085,7 +3085,7 @@ passed.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1567](https://github.com/LASTRADA-Software/fastcached/issues/1567)** — three sections here have no `AGENT.md`
+- **[#1567](https://github.com/LASTRADA-Software/pace/issues/1567)** — three sections here have no `AGENT.md`
   tripwire: `## A shared failure message describes one caller, and lies to the others`,
   `## A reproduction models the wiring as it is`, and `## A path-scoped revert is scoped
   to the FILE, not to the mistake`. Each fires in no session that does not open this

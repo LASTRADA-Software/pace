@@ -26,22 +26,22 @@
 # deliberately left pinned rather than recomputed.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<root> -P scripts/check-vendor-figures.cmake
+#   cmake -DPACE_SOURCE_DIR=<root> -P scripts/check-vendor-figures.cmake
 
 cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "vendor-figures: FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "vendor-figures: PACE_SOURCE_DIR must be set")
 endif()
 
-set(document "${FASTCACHED_SOURCE_DIR}/vendor/VENDOR.md")
+set(document "${PACE_SOURCE_DIR}/vendor/VENDOR.md")
 if(NOT EXISTS "${document}")
     message(FATAL_ERROR "vendor-figures: ${document} is missing, so there is nothing to compare")
 endif()
 
-function(fastcached_count_lines path out)
+function(pace_count_lines path out)
     file(READ "${path}" text)
     string(REGEX REPLACE "[^\n]" "" newlines "${text}")
     string(LENGTH "${newlines}" count)
@@ -56,7 +56,7 @@ set(compared 0)
 
 # Compare each figure of the FIRST match of @p pattern against the variable its `name:variable` pair
 # names, in capture order. A phrase that is not found is itself a problem.
-function(fastcached_figures phrase pattern)
+function(pace_figures phrase pattern)
     if(NOT prose MATCHES "${pattern}")
         set(problems "${problems}\n  could not find the ${phrase} phrase (/${pattern}/); a figure this check cannot read is one it cannot compare" PARENT_SCOPE)
         return()
@@ -79,14 +79,14 @@ function(fastcached_figures phrase pattern)
     set(compared ${count} PARENT_SCOPE)
 endfunction()
 
-fastcached_third_party_roots("${FASTCACHED_SOURCE_DIR}" thirdPartyRoots)
+pace_third_party_roots("${PACE_SOURCE_DIR}" thirdPartyRoots)
 set(rootsCompared 0)
 foreach(root IN LISTS thirdPartyRoots)
-    file(GLOB_RECURSE rootFiles LIST_DIRECTORIES false "${FASTCACHED_SOURCE_DIR}/${root}/*")
+    file(GLOB_RECURSE rootFiles LIST_DIRECTORIES false "${PACE_SOURCE_DIR}/${root}/*")
     set(rootFileCount 0)
     set(rootLineCount 0)
     foreach(file IN LISTS rootFiles)
-        fastcached_count_lines("${file}" lines)
+        pace_count_lines("${file}" lines)
         math(EXPR rootFileCount "${rootFileCount} + 1")
         math(EXPR rootLineCount "${rootLineCount} + ${lines}")
     endforeach()
@@ -98,7 +98,7 @@ foreach(root IN LISTS thirdPartyRoots)
     string(REGEX REPLACE "([][.*+?^$(){}|\\\\])" "\\\\\\1" rootPattern "${root}")
     set(copyRootFiles ${rootFileCount})
     set(copyRootLines ${rootLineCount})
-    fastcached_figures("`${root}` row of The copies"
+    pace_figures("`${root}` row of The copies"
         "\\| `${rootPattern}` \\| [^|]* \\| ([0-9,]+) \\| ([0-9,]+) \\|"
         "${root} files:copyRootFiles" "${root} lines:copyRootLines")
     math(EXPR rootsCompared "${rootsCompared} + 1")

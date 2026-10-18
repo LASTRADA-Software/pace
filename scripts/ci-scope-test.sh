@@ -36,9 +36,9 @@ scratch_git init -q -b master .
 scratch_git config user.email ci-scope@example.invalid
 scratch_git config user.name "ci-scope test"
 
-mkdir -p docs/guide .agent/rules src/FastCache/Core scripts cmake packaging .github/workflows
+mkdir -p docs/guide .agent/rules src/Pace/Core scripts cmake packaging .github/workflows
 for f in docs/guide/page.md .agent/rules/thing.md README.md mkdocs.yml CMakeLists.txt \
-         src/FastCache/Core/Thing.cpp scripts/tidy-sweep.sh cmake/Version.cmake \
+         src/Pace/Core/Thing.cpp scripts/tidy-sweep.sh cmake/Version.cmake \
          packaging/CMakeLists.txt .github/workflows/build.yml; do
     echo original > "$f"
 done
@@ -70,14 +70,14 @@ Expect "code=false" "a root .md"           README.md
 Expect "code=false" "several doc paths"    docs/guide/page.md README.md .agent/rules/thing.md
 
 echo "anything that reaches a build -- the matrix must run:"
-Expect "code=true"  "a source file"        src/FastCache/Core/Thing.cpp
+Expect "code=true"  "a source file"        src/Pace/Core/Thing.cpp
 Expect "code=true"  "scripts/"             scripts/tidy-sweep.sh
 Expect "code=true"  "the workflow itself"  .github/workflows/build.yml
 Expect "code=true"  "cmake/"               cmake/Version.cmake
 Expect "code=true"  "CMakeLists.txt"       CMakeLists.txt
 Expect "code=true"  "packaging/"           packaging/CMakeLists.txt
 Expect "code=true"  "mkdocs.yml"           mkdocs.yml
-Expect "code=true"  "docs AND code"        docs/guide/page.md src/FastCache/Core/Thing.cpp
+Expect "code=true"  "docs AND code"        docs/guide/page.md src/Pace/Core/Thing.cpp
 
 echo "a path no row describes is code, never documentation:"
 echo new > unheard-of.frobnicate

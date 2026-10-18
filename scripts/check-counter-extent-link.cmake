@@ -33,9 +33,9 @@
 # refuse -- and the copies are asserted byte-identical to the tree's.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir>
-#         -DFASTCACHED_CXX_COMPILER=<c++> [-DFASTCACHED_GENERATOR=<gen>]
-#         [-DFASTCACHED_MAKE_PROGRAM=<make>] [-DFASTCACHED_CONFIGS=Debug;Release]
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir>
+#         -DPACE_CXX_COMPILER=<c++> [-DPACE_GENERATOR=<gen>]
+#         [-DPACE_MAKE_PROGRAM=<make>] [-DPACE_CONFIGS=Debug;Release]
 #         -P scripts/check-counter-extent-link.cmake
 #
 # Verdict from the OUTPUT (`FAIL_REGULAR_EXPRESSION`), as every `cmake -P` check here
@@ -45,28 +45,28 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
-if(NOT DEFINED FASTCACHED_CONFIGS)
-    set(FASTCACHED_CONFIGS Debug Release)
+if(NOT DEFINED PACE_CONFIGS)
+    set(PACE_CONFIGS Debug Release)
 endif()
 
-set(header "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.hpp")
-set(definition "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.cpp")
+set(header "${PACE_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.hpp")
+set(definition "${PACE_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.cpp")
 foreach(input IN ITEMS "${header}" "${definition}")
     if(NOT EXISTS "${input}")
         message(FATAL_ERROR "the fixture's input is missing: ${input}")
     endif()
 endforeach()
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    message("SKIP: no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    message("SKIP: no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     return()
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 # Short directory names on purpose: a compiler's try-compile nests five levels under the build
 # directory, and the selftest nests this whole scratch tree again. Past MAX_PATH MSVC's configure
@@ -92,11 +92,11 @@ string(REPLACE "${lastAnchor}" "\n        FixtureSkewInsertedCounter,\n        L
 # The healthy copy is COPIED, never written back from `file(READ)`: on Windows `file(WRITE)` wrote
 # CRLF (measured, 88626 bytes in, 90107 out), which would make the identity check below refuse
 # a faithful copy. The skewed copy's line endings do not matter to a compiler.
-file(MAKE_DIRECTORY "${project}/healthy/FastCache/Metrics")
-file(COPY_FILE "${header}" "${project}/healthy/FastCache/Metrics/IMetricsSink.hpp")
-file(WRITE "${project}/skewed/FastCache/Metrics/IMetricsSink.hpp" "${skewedText}")
+file(MAKE_DIRECTORY "${project}/healthy/Pace/Metrics")
+file(COPY_FILE "${header}" "${project}/healthy/Pace/Metrics/IMetricsSink.hpp")
+file(WRITE "${project}/skewed/Pace/Metrics/IMetricsSink.hpp" "${skewedText}")
 file(COPY_FILE "${definition}" "${project}/IMetricsSink.cpp")
-foreach(pair IN ITEMS "${header}|${project}/healthy/FastCache/Metrics/IMetricsSink.hpp"
+foreach(pair IN ITEMS "${header}|${project}/healthy/Pace/Metrics/IMetricsSink.hpp"
                       "${definition}|${project}/IMetricsSink.cpp")
     string(REPLACE "|" ";" pair "${pair}")
     list(GET pair 0 original)
@@ -112,10 +112,10 @@ endforeach()
 # include path that fell back to the healthy copy would link cleanly and read as a guard
 # that does not work.
 file(WRITE "${project}/healthy.cpp"
-    "#include <FastCache/Metrics/IMetricsSink.hpp>\nint HealthyUnit() { return 1; }\n")
+    "#include <Pace/Metrics/IMetricsSink.hpp>\nint HealthyUnit() { return 1; }\n")
 file(WRITE "${project}/skewed.cpp"
-    "#include <FastCache/Metrics/IMetricsSink.hpp>\n"
-    "static_assert(FastCache::IMetricsSink::Counter::FixtureSkewInsertedCounter < FastCache::IMetricsSink::Counter::Last);\n"
+    "#include <Pace/Metrics/IMetricsSink.hpp>\n"
+    "static_assert(Pace::IMetricsSink::Counter::FixtureSkewInsertedCounter < Pace::IMetricsSink::Counter::Last);\n"
     "int SkewedUnit() { return 1; }\n")
 file(WRITE "${project}/control_main.cpp"
     "int HealthyUnit();\nint main() { return HealthyUnit() == 1 ? 0 : 1; }\n")
@@ -136,12 +136,12 @@ add_executable(control control_main.cpp $<TARGET_OBJECTS:healthy_units>)
 add_executable(skewed skewed_main.cpp $<TARGET_OBJECTS:healthy_units> $<TARGET_OBJECTS:skewed_unit>)
 ]=])
 
-set(configureArguments "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}")
-if(FASTCACHED_MAKE_PROGRAM)
-    list(APPEND configureArguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+set(configureArguments "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}")
+if(PACE_MAKE_PROGRAM)
+    list(APPEND configureArguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
 endif()
-if(FASTCACHED_GENERATOR)
-    list(APPEND configureArguments -G "${FASTCACHED_GENERATOR}")
+if(PACE_GENERATOR)
+    list(APPEND configureArguments -G "${PACE_GENERATOR}")
 endif()
 
 # @param binary The build directory.
@@ -149,7 +149,7 @@ endif()
 # @param target What to build.
 # @param outResult Set to the build's exit status.
 # @param outText Set to its output, whitespace runs collapsed (a toolchain wraps long symbols).
-function(fastcached_build binary config target outResult outText)
+function(pace_build binary config target outResult outText)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" --build "${binary}" --config "${config}" --target "${target}"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 300)
@@ -160,7 +160,7 @@ endfunction()
 
 set(violations "")
 set(configsJudged 0)
-foreach(config IN LISTS FASTCACHED_CONFIGS)
+foreach(config IN LISTS PACE_CONFIGS)
     set(binary "${root}/${config}")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -S "${project}" -B "${binary}" ${configureArguments} "-DCMAKE_BUILD_TYPE=${config}"
@@ -179,7 +179,7 @@ foreach(config IN LISTS FASTCACHED_CONFIGS)
                             "${configureOutput}${configureError}")
     endif()
 
-    fastcached_build("${binary}" "${config}" control controlResult controlText)
+    pace_build("${binary}" "${config}" control controlResult controlText)
     if(NOT controlResult EQUAL 0)
         list(APPEND violations
              "${config}: the CONTROL did not link -- a healthy unit and the definition, one header between them. "
@@ -187,7 +187,7 @@ foreach(config IN LISTS FASTCACHED_CONFIGS)
         continue()
     endif()
 
-    fastcached_build("${binary}" "${config}" skewed_unit compileResult compileText)
+    pace_build("${binary}" "${config}" skewed_unit compileResult compileText)
     if(NOT compileResult EQUAL 0)
         list(APPEND violations
              "${config}: the skewed unit did not COMPILE, so a failure to link it would prove nothing about the "
@@ -195,11 +195,11 @@ foreach(config IN LISTS FASTCACHED_CONFIGS)
         continue()
     endif()
 
-    fastcached_build("${binary}" "${config}" skewed skewedResult skewedText)
+    pace_build("${binary}" "${config}" skewed skewedResult skewedText)
     if(skewedResult EQUAL 0)
         list(APPEND violations
              "${config}: a unit compiled against a Counter enum with one more enumerator LINKED against the real "
-             "definition. The guard in src/FastCache/Metrics/IMetricsSink.hpp is not reaching the linker in this "
+             "definition. The guard in src/Pace/Metrics/IMetricsSink.hpp is not reaching the linker in this "
              "configuration -- check that `CounterExtentLinked` is still a `static` whose initializer calls "
              "CounterSkew::RequireExtent, and read that comment for why an inline or unused reference is not one.")
     else()
@@ -220,9 +220,9 @@ if(NOT violations STREQUAL "")
     list(JOIN violations "\n\n" report)
     message(FATAL_ERROR "counter-extent-link:\n${report}")
 endif()
-list(LENGTH FASTCACHED_CONFIGS configCount)
+list(LENGTH PACE_CONFIGS configCount)
 if(NOT configsJudged EQUAL configCount)
     message(FATAL_ERROR "counter-extent-link judged ${configsJudged} of ${configCount} configuration(s)")
 endif()
-message("counter extent link: ${configsJudged} configuration(s) (${FASTCACHED_CONFIGS}), a skewed unit refused at "
+message("counter extent link: ${configsJudged} configuration(s) (${PACE_CONFIGS}), a skewed unit refused at "
         "link time in each, its control linked")

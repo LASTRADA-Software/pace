@@ -3,7 +3,7 @@
 [Tracy](https://github.com/wolfpld/tracy) instrumentation is **opt-in and
 zero-cost when off**: it is gated behind the `TRACY_ENABLE` CMake option
 (default `OFF`). When off, no Tracy header is included, nothing is linked, and
-every profiling macro in `FastCache/Core/Profiling.hpp` collapses to
+every profiling macro in `Pace/Core/Profiling.hpp` collapses to
 `(void) 0` — the default `clang-debug`/`clang-release` binaries are unchanged
 and link zero Tracy symbols.
 
@@ -12,7 +12,7 @@ and link zero Tracy symbols.
 ```sh
 cmake --preset clang-tracy        # RelWithDebInfo, TRACY_ENABLE=ON, TRACY_ON_DEMAND=ON
 cmake --build --preset clang-tracy
-# -> out/build/clang-tracy/target/fastcached
+# -> out/build/clang-tracy/target/pace-kv
 ```
 
 `TRACY_ON_DEMAND=ON` means the daemon buffers nothing until a profiler
@@ -24,7 +24,7 @@ capturing.
 Instrument code through the wrapper macros, never Tracy directly:
 
 ```cpp
-#include <FastCache/Core/Profiling.hpp>
+#include <Pace/Core/Profiling.hpp>
 
 FC_ZONE_SCOPED;                         // zone named by source location
 FC_ZONE_SCOPED_N("CacheEngine::Get");   // zone with a compile-time literal name
@@ -62,7 +62,7 @@ cmake --build /tmp/tracy-cap -j        # -> /tmp/tracy-cap/tracy-capture
 
 Workflow — the client listens on TCP **8086**:
 
-1. Start the daemon: `./out/build/clang-tracy/target/fastcached --bind 127.0.0.1`.
+1. Start the daemon: `./out/build/clang-tracy/target/pace-kv --bind 127.0.0.1`.
 2. Connect the profiler (GUI **Connect**, or `tracy-capture -o out.tracy -a 127.0.0.1`).
    On-demand mode records only from the moment of connection, so connect **before**
    driving load.
@@ -71,7 +71,7 @@ Workflow — the client listens on TCP **8086**:
    `redis-benchmark -p 6674 -t set,get -n 100000`, or a quick
    `printf 'set foo 0 0 3\r\nbar\r\nget foo\r\nquit\r\n' | nc 127.0.0.1 6674`.
 
-What the instrumentation surfaces: thread rows named `fastcached-main` /
+What the instrumentation surfaces: thread rows named `pace-main` /
 `fc-worker-N` / `fc-reactor`; one frame per request; the nested zone breakdown
 `socket.read → LineReader.TryExtractLine → memcached.Handle*.dispatch →
 CacheEngine::* → ShardedStorage::* → LruStorage::* / EvictToFit → socket.write`;

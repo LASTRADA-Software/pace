@@ -28,7 +28,7 @@ namespace CowTree
 /// **A refusal names what was OBSERVED, and an errno is the only observation behind a lock
 /// refusal.** `InUse` on its own says *somebody holds this file* -- which was the one claim
 /// that turned out to be false in
-/// [#1507](https://github.com/LASTRADA-Software/fastcached/issues/1507), where 31 of 32 test
+/// [#1507](https://github.com/LASTRADA-Software/pace/issues/1507), where 31 of 32 test
 /// processes had drawn the same filename and `flock` was refusing correctly. Diagnosing that
 /// meant patching the test to print the errno, because nothing on the wire out of `Open`
 /// carried it; with the code present, `InUse` is falsifiable from a log.

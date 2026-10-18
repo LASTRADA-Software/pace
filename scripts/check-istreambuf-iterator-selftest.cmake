@@ -30,7 +30,7 @@
 # exact `file:line`, because an assertion on the FILENAME alone passes under the bug.
 #
 # That case earned its keep immediately. The check first used the house
-# `fastcached_read_lines` splitting idiom, and this case failed: a line ending in a
+# `pace_read_lines` splitting idiom, and this case failed: a line ending in a
 # backslash merges with the next one there -- measured, 4 list elements where 5 are
 # right -- which is the one thing that reader's own comment claims it prevents. Because
 # the merged element began with `//`, the comment stripper then ate the real code, so
@@ -55,25 +55,25 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-istreambuf-iterator-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-istreambuf-iterator.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-istreambuf-iterator.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -90,20 +90,20 @@ set(baseCleanSource
 "// SPDX-License-Identifier: Apache-2.0
 #include <string>
 
-namespace FastCache
+namespace Pace
 {
 int Clean()
 {
     return 0;
 }
-} // namespace FastCache
+} // namespace Pace
 ")
 
 set(baseDocumentedSource
 "// SPDX-License-Identifier: Apache-2.0
 #include <sstream>
 
-namespace FastCache
+namespace Pace
 {
 std::string ReadAll(std::istream& in)
 {
@@ -113,7 +113,7 @@ std::string ReadAll(std::istream& in)
     out << in.rdbuf();
     return out.str();
 }
-} // namespace FastCache
+} // namespace Pace
 ")
 
 set(baseHelperHeader
@@ -127,15 +127,15 @@ set(baseHelperHeader
  std::istreambuf_iterator. GCC 14 at -O2 inlines that iterator's sgetc and then
  reports -Werror=null-dereference inside <streambuf> itself.
 */
-namespace FastCache::Cc
+namespace Pace::Cc
 {
-} // namespace FastCache::Cc
+} // namespace Pace::Cc
 ")
 
 # ---------------------------------------------------------------------------
 # Stage a tree, apply one mutation, run the check, return its collapsed output.
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     # `~n~`, `~lb~`, `~rb~` and `~sc~` are a newline, `[`, `]` and `;`. Those three
@@ -214,9 +214,9 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     if(writeSources)
-        file(WRITE "${tree}/src/FastCache/Core/Clean.cpp" "${cleanText}")
-        file(WRITE "${tree}/src/FastCache/Core/Documented.cpp" "${documentedText}")
-        file(WRITE "${tree}/src/apps/fastcache-cc/FileBytes.hpp" "${helperText}")
+        file(WRITE "${tree}/src/Pace/Core/Clean.cpp" "${cleanText}")
+        file(WRITE "${tree}/src/Pace/Core/Documented.cpp" "${documentedText}")
+        file(WRITE "${tree}/src/apps/pace-cc/FileBytes.hpp" "${helperText}")
     else()
         # A tree with a src/ directory and no sources in it, which is what a moved
         # source root looks like from here.
@@ -235,7 +235,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
                 "Skipping it silently would leave the mode CI actually takes untested, "
                 "which is the defect this fixture exists to avoid")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -248,7 +248,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -271,7 +271,7 @@ endfunction()
 # Needle fields are ' && '-separated; `-` means none. The field count is asserted per
 # row below, because a row that does not parse runs as a different case than it reads
 # as.
-set(FastCachedIstreambufCases
+set(PaceIstreambufCases
     # The baseline, in BOTH enumeration modes. Every refusal below is evidence only
     # if these pass -- and asserting the mode is what stops every case silently
     # testing the walk while CI takes the git path.
@@ -279,38 +279,38 @@ set(FastCachedIstreambufCases
     "baseline via git|none-git|-|-|all prose, none constructing && git ls-files|CMake Error"
 
     # THE RED ARM: a use planted in a file that carries none, named by file and line.
-    "planted use|newfile|src/FastCache/Core/Fresh.cpp|#include <vector>~n~#include <fstream>~n~std::vector<char> Read(std::ifstream& in)~n~{~n~    return { std::istreambuf_iterator<char> { in }, {} }~sc~~n~}~n~|src/FastCache/Core/Fresh.cpp:5: constructs from|-"
+    "planted use|newfile|src/Pace/Core/Fresh.cpp|#include <vector>~n~#include <fstream>~n~std::vector<char> Read(std::ifstream& in)~n~{~n~    return { std::istreambuf_iterator<char> { in }, {} }~sc~~n~}~n~|src/Pace/Core/Fresh.cpp:5: constructs from|-"
 
     # ...and in git mode too, since that is the enumeration CI uses.
-    "planted use via git|newfile-git|src/FastCache/Core/Fresh.cpp|#include <vector>~n~std::vector<char> Read(std::ifstream& in)~n~{~n~    return { std::istreambuf_iterator<char> { in }, {} }~sc~~n~}~n~|src/FastCache/Core/Fresh.cpp:4: constructs from && git ls-files|-"
+    "planted use via git|newfile-git|src/Pace/Core/Fresh.cpp|#include <vector>~n~std::vector<char> Read(std::ifstream& in)~n~{~n~    return { std::istreambuf_iterator<char> { in }, {} }~sc~~n~}~n~|src/Pace/Core/Fresh.cpp:4: constructs from && git ls-files|-"
 
     # THE QUIET ARM, three comment shapes. This is the direction that gets a check
     # deleted rather than obeyed, and the real tree's seven prose sites are all of
     # these shapes.
-    "line comment is not a use|newfile|src/FastCache/Core/Note.cpp|// Never std::istreambuf_iterator here.~n~int Note() { return 0~sc~ }~n~|all prose, none constructing|CMake Error"
-    "doc comment is not a use|newfile|src/FastCache/Core/Note.cpp|/// Deliberately NOT through `std::istreambuf_iterator`.~n~int Note() { return 0~sc~ }~n~|all prose, none constructing|CMake Error"
-    "block comment is not a use|newfile|src/FastCache/Core/Note.cpp|/*~n~ A paragraph mentioning std::istreambuf_iterator with no leading stars.~n~*/~n~int Note() { return 0~sc~ }~n~|all prose, none constructing|CMake Error"
+    "line comment is not a use|newfile|src/Pace/Core/Note.cpp|// Never std::istreambuf_iterator here.~n~int Note() { return 0~sc~ }~n~|all prose, none constructing|CMake Error"
+    "doc comment is not a use|newfile|src/Pace/Core/Note.cpp|/// Deliberately NOT through `std::istreambuf_iterator`.~n~int Note() { return 0~sc~ }~n~|all prose, none constructing|CMake Error"
+    "block comment is not a use|newfile|src/Pace/Core/Note.cpp|/*~n~ A paragraph mentioning std::istreambuf_iterator with no leading stars.~n~*/~n~int Note() { return 0~sc~ }~n~|all prose, none constructing|CMake Error"
 
     # COMMENT ORDERING, and the first of these is the false green it was: the `/*`
     # test ran BEFORE `//` was stripped, so a line comment NAMING a block opener
     # opened one that no `*/` ever closed -- every remaining line of that file
     # skipped, while the run still printed a clean count over lines it never read.
     # The use one line below it was invisible.
-    "a line comment naming a block opener does not open one|newfile|src/FastCache/Core/Order.cpp|// Never std::istreambuf_iterator, and not inside a /* block either.~n~std::vector<char> Read(std::ifstream& in) { return { std::istreambuf_iterator<char> { in }, {} }~sc~ }~n~|src/FastCache/Core/Order.cpp:2: constructs from|-"
+    "a line comment naming a block opener does not open one|newfile|src/Pace/Core/Order.cpp|// Never std::istreambuf_iterator, and not inside a /* block either.~n~std::vector<char> Read(std::ifstream& in) { return { std::istreambuf_iterator<char> { in }, {} }~sc~ }~n~|src/Pace/Core/Order.cpp:2: constructs from|-"
 
     # ...and the CONTROL, which is what stops the repair from being *ignore block
     # comments*: a `//` inside an open block stays inside it, so line 2 is never
     # named, and the file RESUMES after `*/`, so line 4 is. Both halves are needed --
     # a reader that dropped block tracking passes the case above.
-    "a block comment survives a line marker inside it|newfile|src/FastCache/Core/Order.cpp|/*~n~ Prose with a // in it, naming std::istreambuf_iterator to argue against.~n~*/~n~std::vector<char> Read(std::ifstream& in) { return { std::istreambuf_iterator<char> { in }, {} }~sc~ }~n~|src/FastCache/Core/Order.cpp:4: constructs from|Order.cpp:2"
+    "a block comment survives a line marker inside it|newfile|src/Pace/Core/Order.cpp|/*~n~ Prose with a // in it, naming std::istreambuf_iterator to argue against.~n~*/~n~std::vector<char> Read(std::ifstream& in) { return { std::istreambuf_iterator<char> { in }, {} }~sc~ }~n~|src/Pace/Core/Order.cpp:4: constructs from|Order.cpp:2"
 
     # THE PARTIAL-FIX SHAPE: a file that explains the rule AND breaks it. Refused --
     # a prose mention must not excuse the file it sits in.
-    "prose and a use in one file|newfile|src/FastCache/Core/Both.cpp|// Never std::istreambuf_iterator: GCC reports null-dereference.~n~#include <vector>~n~std::vector<char> Read(std::ifstream& in)~n~{~n~    return { std::istreambuf_iterator<char> { in }, {} }~sc~~n~}~n~|src/FastCache/Core/Both.cpp:5: constructs from|-"
+    "prose and a use in one file|newfile|src/Pace/Core/Both.cpp|// Never std::istreambuf_iterator: GCC reports null-dereference.~n~#include <vector>~n~std::vector<char> Read(std::ifstream& in)~n~{~n~    return { std::istreambuf_iterator<char> { in }, {} }~sc~~n~}~n~|src/Pace/Core/Both.cpp:5: constructs from|-"
 
     # LINE NUMBERS, with the list structure that makes them drift planted above the
     # violation. A filename-only assertion passes under that bug.
-    "line number survives brackets and semicolons|newfile|src/FastCache/Core/Drift.cpp|#include <array>~n~int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~std::vector<char> Read(std::ifstream& in) { return { std::istreambuf_iterator<char> { in }, {} }~sc~ }~n~|src/FastCache/Core/Drift.cpp:5: constructs from|-"
+    "line number survives brackets and semicolons|newfile|src/Pace/Core/Drift.cpp|#include <array>~n~int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~std::vector<char> Read(std::ifstream& in) { return { std::istreambuf_iterator<char> { in }, {} }~sc~ }~n~|src/Pace/Core/Drift.cpp:5: constructs from|-"
 
     # --- fails CLOSED ---
 
@@ -326,7 +326,7 @@ set(FastCachedIstreambufCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedIstreambufCases)
+foreach(row IN LISTS PaceIstreambufCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -343,7 +343,7 @@ foreach(row IN LISTS FastCachedIstreambufCases)
 
     math(EXPR caseCount "${caseCount} + 1")
 
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}"
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}"
                              output applied)
 
     if(NOT applied)

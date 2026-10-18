@@ -1,0 +1,1524 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// pace-kv — Fast Cache Daemon entry point.
+//
+// Wiring: CLI -> YAML file (named by --config, else discovered at the
+// platform's default location) -> ConfigReloader -> CacheEngine over
+// the storage backend -> RunReactorServer, hosted by the requested
+// IDaemonHost (foreground / POSIX daemon / Windows service).
+// SIGINT/SIGTERM and SCM stop trigger graceful shutdown;
+// SIGHUP and SCM PARAMCHANGE trigger config reload.
+
+#include <Pace/Auth/AuthPolicy.hpp>
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Cache/CowTreeStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/LayeredStorage.hpp>
+#include <Pace/Cache/NotifyingStorage.hpp>
+#include <Pace/Cache/ReclaimLog.hpp>
+#include <Pace/Cache/ShardedStorage.hpp>
+#include <Pace/Cache/TracingStorage.hpp>
+#include <Pace/Cache/WriteErrorReportingStorage.hpp>
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Config/CliParser.hpp>
+#include <Pace/Config/Config.hpp>
+#include <Pace/Config/ConfigMerge.hpp>
+#include <Pace/Config/ConfigReloader.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Config/SecretExposureWatcher.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/PathKind.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/DaemonControls.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/Firewall.hpp>
+#include <Pace/Platform/IDaemonHost.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
+#include <Pace/Platform/Terminal.hpp>
+#include <Pace/Platform/WindowsEventLogger.hpp>
+#include <Pace/Protocol/KeyspaceNotifier.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Protocol/PubSubRegistry.hpp>
+#include <Pace/Protocol/RedisMutationObserver.hpp>
+#include <Pace/Protocol/RedisTransaction.hpp>
+#include <Pace/Protocol/StreamWaiterRegistry.hpp>
+#include <Pace/Server/AdminHttpServer.hpp>
+#include <Pace/Server/DaemonStartupGate.hpp>
+#include <Pace/Server/ReactorServerLoop.hpp>
+#include <Pace/Transport/NativeListen.hpp>
+
+#include <core/Profiling.hpp>
+#include <core/async/SyncRun.hpp>
+#include <core/net/BlockingSocket.hpp>
+#include <core/net/HealthProbe.hpp>
+#include <core/platform/Clock.hpp>
+#if defined(FC_TLS_ENABLED)
+    #include <core/net/Tls.hpp>
+#endif
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <print>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+namespace
+{
+
+constexpr std::string_view ProgramVersion = Pace::VersionString;
+
+/// Read the metrics port from the PACE_METRICS_PORT environment variable.
+/// This lets a container's daemon CMD and its separate `--healthcheck` probe
+/// agree on a custom port via a single `-e PACE_METRICS_PORT=...`, without
+/// the static image HEALTHCHECK having to learn the daemon's runtime args.
+///
+/// Reuses the CLI's `Pace::ParsePort`, so the environment fallback accepts
+/// exactly the same syntax and range as the `--metrics-port` flag.
+/// @return The parsed port, or nullopt when unset/empty/invalid.
+[[nodiscard]] std::optional<std::uint16_t> MetricsPortFromEnv()
+{
+    auto const raw = Pace::ReadEnvironmentVariable("PACE_METRICS_PORT");
+    if (!raw.has_value())
+        return std::nullopt;
+
+    // ParsePort already rejects the empty string, so an unset and a blank
+    // variable land in the same place without a second emptiness rule here.
+    auto const parsed = Pace::ParsePort(*raw);
+    if (!parsed.has_value())
+        return std::nullopt;
+    return *parsed;
+}
+
+/// Refuse a start: say why on stderr, and -- under the Windows service @p config names -- in the
+/// event log and to the SCM as a stop with @p stage's exit code as the service-specific code.
+///
+/// **Unless the command line asked for something no supervisor reads** -- `ExitReaderOf`, a column
+/// of `CliOutcomeTable`. A one-shot command answers the ending a command stopped at @p stage has --
+/// 1 for an I/O arm, 2 for a verdict -- and a `--healthcheck` answers 1, the only failure its reader
+/// knows; either reports to the terminal only, never to a service host.
+///
+/// Takes the whole command-line parse, never an outcome beside it, so no site can hand it one the
+/// command line did not name: the outcome and the service host are read off one result. After a
+/// parse that FAILED, that result is `RecognisedCli`'s, so a verb typed after the bad token counts.
+/// `--daemon` and `--service-name` cannot come from a file, so the command line alone says whether
+/// this is a service.
+///
+/// Every refusal below returned from `main` before the host was entered, so under the SCM it
+/// exited before connecting: error 1053, *did not respond in a timely fashion*, with the reason on
+/// a stderr no service holds and in no log at all. `IDaemonHost::Refuse` is what connects to say
+/// so; off Windows, or without `--daemon`, there is no service host and the exit code is the report.
+/// @param commandLine What the command line named: its outcome, and its `--daemon` and `--service-name`.
+/// @param stage The step that refused, whose row says which code a supervisor reads.
+/// @param reason Why this process will not start.
+/// @return What the outcome's reader is answered: a start's @p stage code, or another reader's ending.
+[[nodiscard]] int RefuseUnderService(Pace::CliResult const& commandLine, Pace::StartStage stage, std::string_view reason)
+{
+    std::println(std::cerr, "pace-kv: {}", reason);
+    if (auto const reader = Pace::ExitReaderOf(commandLine.outcome); reader != Pace::ExitReader::Supervisor)
+        return Pace::RefusalExitCode(reader, stage);
+    auto const& config = commandLine.config;
+    auto const code = Pace::ExitCodeFor(stage);
+    auto const host =
+        config.daemon ? Pace::MakeWindowsServiceHost(
+                            config.serviceName, Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt) })
+                      : nullptr;
+    if (host == nullptr)
+        return code;
+    auto const eventLogger = Pace::MakeWindowsEventLogger(config.serviceName, config.logLevel);
+    if (eventLogger == nullptr)
+        return host->Refuse(code);
+    return Pace::RefuseStart(*host, *eventLogger, reason, code);
+}
+
+/// Install `templatePath` at the machine-wide config location, unless a config
+/// is already there. The `--seed-config` action: how a packaging format with no
+/// conffile mechanism ships a default config that survives its own upgrades.
+/// @param templatePath The shipped template to copy.
+/// @return Process exit code: the ending the seeding came to (`EndingOf`), declined for a
+///         template it could not use and failed for a file it began writing.
+[[nodiscard]] int SeedDefaultConfig(std::string const& templatePath)
+{
+    Pace::SystemConfigPathProbe const probe;
+    auto const destination = Pace::SystemConfigPath(probe, Pace::DaemonApplicationName);
+    auto const seeded = destination.and_then([&](auto const& dest) {
+        return Pace::SeedConfigFile(templatePath, dest, Pace::DirectoryPolicy::AdministratorsOnly);
+    });
+    if (!seeded.has_value())
+    {
+        std::println(std::cerr, "pace-kv: {}", seeded.error().ToString());
+        return Pace::CommandExitCode(Pace::EndingOf(seeded.error().code));
+    }
+
+    // The sentence lives beside `SeedConfigFile`, not here: the WORKER seeds too
+    // (#397), and two copies of a three-row table is two chances to describe the
+    // repaired-permissions outcome as though nothing happened.
+    std::println("pace-kv: {}", Pace::SeedOutcomeSentence(*seeded, *destination));
+    return Pace::CommandExitCode(Pace::CommandEnding::Completed);
+}
+
+extern "C" void HandleStopSignal(int /*signum*/)
+{
+    Pace::DaemonControls::Instance().RequestStop();
+}
+
+#if !defined(_WIN32)
+extern "C" void HandleReloadSignal(int /*signum*/)
+{
+    Pace::DaemonControls::Instance().RequestReload();
+}
+#endif
+
+void InstallStopHandlers()
+{
+    std::signal(SIGINT, &HandleStopSignal);
+    std::signal(SIGTERM, &HandleStopSignal);
+#if !defined(_WIN32)
+    std::signal(SIGHUP, &HandleReloadSignal);
+#endif
+}
+
+/// Pick a default shard count when the user left it at 0 (auto):
+/// min(16, hardware_concurrency), floor of 1.
+[[nodiscard]] std::size_t AutoShardCount() noexcept
+{
+    auto const hw = std::thread::hardware_concurrency();
+    auto const cap = std::min<unsigned>(hw == 0 ? 1U : hw, 16U);
+    return static_cast<std::size_t>(cap);
+}
+
+/// Resolve the effective shard count. Sharding fans writes across independent
+/// CoW files so the multi-core reactors write in parallel.
+///
+/// - User-specified non-zero: honored verbatim.
+/// - Auto (0) for in-memory: fan out (`AutoShardCount`).
+/// - Auto (0) for persistent: fan out **by default** so disk writes
+///   parallelise, EXCEPT for paths that name a single file
+///   (`Pace::PathNamesAFile`), which stay single-file for backward
+///   compatibility — the path is used as one file, never `mkdir`-ed over. The
+///   install-time handover asks the same predicate before it creates anything, so
+///   what the first start opens and what `--install-service` may create at that
+///   path cannot drift apart.
+[[nodiscard]] std::size_t ResolvePhysicalShards(std::size_t requested,
+                                                bool usingPersistent,
+                                                std::filesystem::path const& storagePath) noexcept
+{
+    if (requested != 0)
+        return requested;
+    if (!usingPersistent)
+        return AutoShardCount();
+    return Pace::PathNamesAFile(storagePath) ? 1 : AutoShardCount();
+}
+
+/// Translate the user-facing StorageDurability into the page-store enum.
+CowTree::FilePageStore::Durability ToPageStoreDurability(Pace::StorageDurability d) noexcept
+{
+    switch (d)
+    {
+        case Pace::StorageDurability::Fsync:
+            return CowTree::FilePageStore::Durability::Fsync;
+        case Pace::StorageDurability::Batched:
+            return CowTree::FilePageStore::Durability::Batched;
+        case Pace::StorageDurability::None:
+            return CowTree::FilePageStore::Durability::None;
+    }
+    return CowTree::FilePageStore::Durability::Batched;
+}
+
+/// Translate the config-layer LRU recency policy into the cache backend's enum.
+/// @param r Config recency policy.
+/// @return The corresponding InMemoryLruStorage mode.
+[[nodiscard]] Pace::LruMode ToLruMode(Pace::LruRecency r) noexcept
+{
+    return r == Pace::LruRecency::Strict ? Pace::LruMode::Strict : Pace::LruMode::Approximate;
+}
+
+/// Build an L1 tier with the configured byte budget and in-memory codec.
+///
+/// Every L1 instance goes through here so the memory-compression settings cannot be
+/// applied to some shards and silently missed on others.
+/// @param effective  Merged configuration.
+/// @param maxBytes   Byte budget for this instance (per-shard where sharded).
+/// @return The configured storage.
+[[nodiscard]] std::unique_ptr<Pace::InMemoryLruStorage> MakeL1(Pace::Config const& effective, std::size_t maxBytes)
+{
+    auto l1 = std::make_unique<Pace::InMemoryLruStorage>(
+        maxBytes, effective.storageMaxValueBytes, ToLruMode(effective.lruRecency));
+    // The EFFECTIVE codec, never the configured one. `ParseCompressionCodec` refuses
+    // a codec an operator NAMES, so the one route past it is a DEFAULT -- which
+    // nobody typed and nothing validates. On a build without
+    // `PACE_ENABLE_COMPRESSION` this tier stores plaintext regardless, and
+    // resolving here is what lets the banner report that rather than repeat the
+    // configuration back.
+    l1->SetCompression({ .codec = Pace::Compression::EffectiveCodec(effective.memoryCompression),
+                         .level = effective.memoryCompressionLevel,
+                         .minBytes = effective.memoryCompressionMinBytes });
+    return l1;
+}
+
+/// Holds the assembled storage chain. The reload subscriber resizes it
+/// through the virtual `IStorage::Resize`, so no typed observer pointers
+/// are needed.
+struct StorageBackendBundle
+{
+    std::unique_ptr<Pace::IStorage> backend;
+};
+
+/// Advice to append to a storage failure when this process cannot write there.
+///
+/// The daemon no longer runs as the platform's most privileged account, so a
+/// storage directory it cannot write is now something an ordinary, correct
+/// install can hit: the operator set `storage_path` after the service was
+/// registered, so nothing ever handed that directory over. Under a supervisor the
+/// only symptom is a job that exits at every start, and the errno text alone says
+/// nothing about which account was refused or how to grant it.
+///
+/// Gated on an actual write attempt rather than on the error text, because the
+/// three call sites that need this most report a *string* from the storage layer
+/// rather than an `error_code`, and because parsing a localized "permission
+/// denied" is not something to build advice on. What the probe establishes is
+/// exactly what the message then claims -- that this process cannot create a file
+/// there -- so a full disk gets a true statement rather than a wrong diagnosis.
+///
+/// Windows only: this is where the identity changed. The POSIX services already
+/// ran unprivileged and their packaging hands their directories over, and naming
+/// an account here would have to guess between the macOS `_pace-kv` and the
+/// Linux `pace-kv` -- and would be wrong for a foreground run under either.
+///
+/// And on Windows only when this process IS that service. The probe proves that
+/// *this* process cannot write, which says nothing about who the service runs as:
+/// an administrator running the daemon in a console would otherwise be handed a
+/// diagnosis naming an identity that is not running their process, and an `icacls`
+/// line granting an account that may not be registered at all. `--daemon` is
+/// precisely the "started by the SCM" signal, because it is what the registration
+/// bakes into the service's command line.
+///
+/// @param effective The merged configuration -- its storage location, whether this
+///        process was started as the service, and the service's own name, which is
+///        what the SCM derives its virtual account from (`Config{}.serviceName`
+///        would name the wrong account for an install made with `--service-name`).
+/// @return A sentence naming the remedy, or an empty string.
+[[nodiscard]] std::string StorageAccessHint([[maybe_unused]] Pace::Config const& effective)
+{
+#if defined(_WIN32)
+    if (!effective.daemon)
+        return {};
+
+    std::filesystem::path const storagePath { effective.storagePath };
+
+    // The directory itself when it exists, else the parent that would have to
+    // hold it -- a path that could not be created is a permission problem one
+    // level up.
+    std::error_code ec;
+    auto const directory = std::filesystem::is_directory(storagePath, ec) ? storagePath : storagePath.parent_path();
+    if (directory.empty())
+        return {};
+
+    // A directory that is not there produces the same failed `ofstream` as one
+    // this account cannot write, and the two need opposite answers. Saying
+    // "grant NT SERVICE\... access" for a path nobody created sends the operator
+    // to an `icacls` command that fails on its own terms.
+    if (std::error_code dirEc; !std::filesystem::is_directory(directory, dirEc))
+    {
+        // "is not a directory" rather than "does not exist": the guard tests the
+        // former, and the two need different answers. A `--storage` whose parent is
+        // a regular FILE would otherwise be answered with "create it", against a
+        // path that is already there.
+        std::error_code existsEc;
+        return std::filesystem::exists(directory, existsEc)
+                   ? std::format("\nThe storage path {} cannot be used: {} exists but is not a directory.",
+                                 storagePath.string(),
+                                 directory.string())
+                   : std::format("\nThe storage path {} has no directory to live in: {} does not exist. "
+                                 "Create it, then grant the service account access to it.",
+                                 storagePath.string(),
+                                 directory.string());
+    }
+
+    auto const probe = directory / ".pace-access-probe";
+    {
+        std::ofstream out { probe };
+        if (out)
+        {
+            out.close();
+            std::filesystem::remove(probe, ec);
+            return {};
+        }
+    }
+    std::filesystem::remove(probe, ec);
+
+    return std::format("\nThis process cannot create files in {}. The service runs as the virtual account "
+                       "NT SERVICE\\{}, which has no rights of its own to a directory an administrator made. "
+                       "Grant it from an elevated prompt:\n"
+                       "    icacls \"{}\" /grant \"NT SERVICE\\{}\":(OI)(CI)F",
+                       directory.string(),
+                       effective.serviceName,
+                       directory.string(),
+                       effective.serviceName);
+#else
+    return {};
+#endif
+}
+
+/// What an operator is told when a store will not open, whichever shape of
+/// storage produced it.
+///
+/// One function because the three call sites below differ only in the noun --
+/// the whole store, or one shard of it -- and a message assembled separately at
+/// each is a message that drifts at two of them.
+///
+/// It also picks the remedy. `StorageAccessHint` has to *probe* for its answer,
+/// because a permission problem arrives as an unhelpfully generic failure,
+/// whereas `InUse` needs no probe at all: the code IS the diagnosis, and it is
+/// the one open failure whose cause is another process rather than anything
+/// about the file or the directory. So an operator whose real problem is the
+/// other daemon is never handed an `icacls` command instead.
+/// @param what      What the path names to an operator: "storage" or "shard".
+/// @param path      The path that would not open.
+/// @param effective The merged configuration.
+/// @param error     What `CowTreeStorage::Open` reported.
+/// @return The sentence to fail with.
+[[nodiscard]] std::string StorageOpenFailure(std::string_view what,
+                                             std::string_view path,
+                                             Pace::Config const& effective,
+                                             Pace::StorageError const& error)
+{
+    auto const remedy = error.code == Pace::StorageErrorCode::InUse
+                            ? std::string { "\nAnother process already has this store open. A storage path belongs "
+                                            "to one daemon: stop the other one, or give this daemon a path of its own." }
+                            : StorageAccessHint(effective);
+    return std::format("failed to open {} '{}': {}{}", what, path, error.ToString(), remedy);
+}
+
+/// Open a CowTreeStorage at `path` and wrap it in a LayeredStorage(L1
+/// InMemoryLruStorage, L2 CowTreeStorage). The L1 cache owns the
+/// per-shard memory budget; the disk tier is unbounded for now.
+///
+/// Fails with the `StorageError` rather than a rendered string, so the CODE
+/// survives to the caller that composes the operator's message. Flattened here,
+/// "another process has this store open" would be one more opaque open failure
+/// by the time anybody could act on it.
+/// @param path              Where this shard's B+tree lives.
+/// @param effective         The merged configuration.
+/// @param perShardBytes     RAM budget for this shard's L1.
+/// @param perShardDiskBytes On-disk budget for this shard's L2; 0 is unbounded.
+/// @param logger            Where an unenforceable exclusive claim is reported.
+/// @return The layered shard, or why its store would not open.
+[[nodiscard]] std::expected<std::unique_ptr<Pace::LayeredStorage>, Pace::StorageError> BuildLayeredShard(
+    std::filesystem::path const& path,
+    Pace::Config const& effective,
+    std::size_t perShardBytes,
+    std::size_t perShardDiskBytes,
+    Pace::ILogger& logger)
+{
+    Pace::CowTreeStorage::Options opts;
+    opts.path = path;
+    // L2 disk budget: 0 = unbounded (grows as needed); non-zero caps the
+    // on-disk tier and makes the CoW tree evict its LRU tail to fit. L1 holds
+    // the RAM byte budget (perShardBytes) independently.
+    opts.maxBytes = perShardDiskBytes;
+    opts.durability = ToPageStoreDurability(effective.storageDurability);
+    opts.maxValueBytes = effective.storageMaxValueBytes;
+    // Resolved for the reason `MakeL1` gives about its own half: `CowTreeStorage`
+    // falls back to storing verbatim for a codec this build lacks, so an
+    // unresolved `opts.compression` goes on claiming a codec to everything that
+    // reads it back.
+    opts.compression = Pace::Compression::EffectiveCodec(effective.compression);
+    opts.compressionLevel = effective.compressionLevel;
+    opts.compressionMinBytes = effective.compressionMinBytes;
+    auto opened = Pace::CowTreeStorage::Open(opts);
+    if (!opened.has_value())
+        return std::unexpected(opened.error());
+
+    // Read before the store disappears into the LayeredStorage, and said out
+    // loud rather than assumed: a guard that silently does nothing reads
+    // exactly like one that works.
+    if ((*opened)->StoreLockState() == CowTree::FilePageStore::LockState::Unavailable)
+        logger.Logf(Pace::LogLevel::Warn,
+                    "{} is on a filesystem that cannot lock; nothing stops a second daemon opening it",
+                    path.string());
+    auto l1 = MakeL1(effective, perShardBytes);
+    return std::make_unique<Pace::LayeredStorage>(std::move(l1), std::move(*opened));
+}
+
+/// The store files a persistent configuration names, in shard order.
+///
+/// The one place that knows the layout, so nothing derives `shard-NN.cow` for
+/// itself.
+/// @param storagePath    The configured `--storage` path.
+/// @param physicalShards How many shards the configuration resolves to.
+/// @return One path per shard: the path itself when unsharded, else
+///         `shard-NN.cow` beneath it.
+[[nodiscard]] std::vector<std::filesystem::path> StorageShardPaths(std::string const& storagePath,
+                                                                   std::size_t physicalShards)
+{
+    if (physicalShards <= 1)
+        return { std::filesystem::path { storagePath } };
+
+    // Built by hand rather than with `std::ranges::to`, which clang 22 over
+    // libstdc++ 14 rejects here ("deduced return type cannot be used before it
+    // is defined") -- and which nothing else in this tree uses, so the one
+    // caller is not worth the portability.
+    std::filesystem::path const dir { storagePath };
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(physicalShards);
+    for (auto const i: std::views::iota(std::size_t { 0 }, physicalShards))
+        paths.push_back(dir / std::format("shard-{:02d}.cow", i));
+    return paths;
+}
+
+/// Construct the multi-shard inner storages for a ShardedStorage
+/// wrapper. Handles three shapes: in-memory fan-out, single-file
+/// persistent, and multi-file persistent (directory of shard-NN.cow).
+[[nodiscard]] std::expected<std::vector<std::unique_ptr<Pace::IStorage>>, std::string> BuildShardedInners(
+    Pace::Config const& effective,
+    bool usingPersistent,
+    std::size_t physicalShards,
+    std::size_t perShardBytes,
+    std::size_t perShardDiskBytes,
+    Pace::ILogger& logger)
+{
+    std::vector<std::unique_ptr<Pace::IStorage>> inners;
+    inners.reserve(physicalShards);
+
+    if (!usingPersistent)
+    {
+        for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, physicalShards))
+            inners.emplace_back(MakeL1(effective, perShardBytes));
+        return inners;
+    }
+
+    if (physicalShards == 1)
+    {
+        auto layered = BuildLayeredShard(effective.storagePath, effective, perShardBytes, perShardDiskBytes, logger);
+        if (!layered.has_value())
+            return std::unexpected(StorageOpenFailure("storage", effective.storagePath, effective, layered.error()));
+        inners.push_back(std::move(*layered));
+        return inners;
+    }
+
+    std::filesystem::path const dir { effective.storagePath };
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec)
+        return std::unexpected(std::format("failed to create storage directory '{}': {}{}",
+                                           effective.storagePath,
+                                           ec.message(),
+                                           StorageAccessHint(effective)));
+
+    for (auto const& path: StorageShardPaths(effective.storagePath, physicalShards))
+    {
+        auto layered = BuildLayeredShard(path, effective, perShardBytes, perShardDiskBytes, logger);
+        if (!layered.has_value())
+            return std::unexpected(StorageOpenFailure("shard", path.string(), effective, layered.error()));
+        inners.push_back(std::move(*layered));
+    }
+    return inners;
+}
+
+/// Build the full storage chain and the typed observer pointers used by
+/// the reload subscriber.
+///
+/// Physical shapes:
+///   - In-memory: N InMemoryLruStorage instances (one per shard).
+///   - Persistent: N CowTreeStorage instances on disk, each one fronted
+///     by an in-memory LRU cache via LayeredStorage. Reads hit RAM
+///     first; writes pass through to disk (canonical CAS) and mirror
+///     into the RAM cache.
+///
+/// Concurrency wrapping (orthogonal to physical fan-out):
+///   - Threaded execution: always wrap in ShardedStorage (even at
+///     shards==1) so workers serialise via the per-shard mutex.
+///   - Reactor execution: single-shard backends run unwrapped.
+[[nodiscard]] std::expected<StorageBackendBundle, std::string> BuildStorageBackend(Pace::Config const& effective,
+                                                                                   bool usingPersistent,
+                                                                                   bool useShardingWrapper,
+                                                                                   std::size_t physicalShards,
+                                                                                   Pace::ILogger& logger)
+{
+    auto const perShardBytes = physicalShards > 0 ? effective.maxMemoryBytes / physicalShards : effective.maxMemoryBytes;
+    // Split the on-disk budget the same way as the RAM budget. 0 stays 0
+    // (unbounded) after the division, so the default remains "grow as needed".
+    auto const perShardDiskBytes =
+        physicalShards > 0 ? effective.storageMaxDiskBytes / physicalShards : effective.storageMaxDiskBytes;
+    StorageBackendBundle bundle;
+
+    if (useShardingWrapper)
+    {
+        auto inners =
+            BuildShardedInners(effective, usingPersistent, physicalShards, perShardBytes, perShardDiskBytes, logger);
+        if (!inners.has_value())
+            return std::unexpected(std::move(inners.error()));
+        bundle.backend = std::make_unique<Pace::ShardedStorage>(std::move(*inners));
+        return bundle;
+    }
+
+    // Unwrapped single-shard reactor path.
+    if (!usingPersistent)
+    {
+        bundle.backend = MakeL1(effective, effective.maxMemoryBytes);
+        return bundle;
+    }
+
+    auto layered = BuildLayeredShard(effective.storagePath, effective, perShardBytes, perShardDiskBytes, logger);
+    if (!layered.has_value())
+        return std::unexpected(StorageOpenFailure("storage", effective.storagePath, effective, layered.error()));
+    bundle.backend = std::move(*layered);
+    return bundle;
+}
+
+/// The store files that actually exist under a configured `--storage` path.
+///
+/// Deliberately an enumeration rather than `StorageShardPaths`: that one answers
+/// "which files will this configuration open", which depends on a shard count
+/// the daemon derives from the CPU count when the operator did not name one. A
+/// conversion has to cover every file the daemon could open on ANY future start,
+/// and the set on disk is exactly that.
+/// @param storagePath The configured `--storage` path.
+/// @return The store files, or why there are none to convert: transient for a path that is not
+///         there or a directory that could not be listed, a decision for one that holds no store.
+[[nodiscard]] std::expected<std::vector<std::filesystem::path>, Pace::UnfinishedCommand> ExistingStorePaths(
+    std::string const& storagePath)
+{
+    std::filesystem::path const configured { storagePath };
+    std::error_code ec;
+
+    if (std::filesystem::is_regular_file(configured, ec))
+        return std::vector<std::filesystem::path> { configured };
+    if (!std::filesystem::is_directory(configured, ec))
+        return std::unexpected(Pace::UnfinishedCommand {
+            .ending = Pace::CommandEnding::Failed,
+            .reason = std::format("no store at '{}': it is neither a store file nor a directory of shards",
+                                  configured.string()) });
+
+    // Incremented explicitly with an error_code. A range-for over
+    // `directory_iterator` advances through the THROWING `operator++`, so an
+    // entry vanishing mid-scan or a subdirectory that cannot be read would
+    // terminate the process instead of reporting "cannot list".
+    std::vector<std::filesystem::path> shards;
+    auto entry = std::filesystem::directory_iterator { configured, ec };
+    auto const end = std::filesystem::directory_iterator {};
+    for (; !ec && entry != end; entry.increment(ec))
+    {
+        auto const name = entry->path().filename().string();
+        if (name.starts_with("shard-") && name.ends_with(".cow"))
+            shards.push_back(entry->path());
+    }
+    if (ec)
+        return std::unexpected(
+            Pace::UnfinishedCommand { .ending = Pace::CommandEnding::Failed,
+                                      .reason = std::format("cannot list '{}': {}", configured.string(), ec.message()) });
+    if (shards.empty())
+        return std::unexpected(
+            Pace::UnfinishedCommand { .ending = Pace::CommandEnding::Declined,
+                                      .reason = std::format("no shard-NN.cow files under '{}'", configured.string()) });
+
+    // Sorted so the report reads in shard order rather than in whatever order
+    // the filesystem hands them back.
+    std::ranges::sort(shards);
+    return shards;
+}
+
+/// Convert every store the configuration names to this build's record layout.
+///
+/// Acts on the EFFECTIVE configuration rather than on a path of its own, so it
+/// converts exactly the files `BuildShardedInners` would open -- including the
+/// directory-of-shards shape, which a `--migrate-storage=<path>` taking one
+/// path could not express without the operator knowing the naming scheme.
+///
+/// Reports per shard rather than in total. An operator whose fleet has one bad
+/// shard needs to know which one, and a summary line saying "4 stores, 0
+/// converted" hides the case where three were converted and the fourth was
+/// refused.
+/// The exit is the WORST ending any shard came to: a shard that stopped part-way, or whose file
+/// could not be opened, makes the run `Failed`, since a re-run may finish it; a shard refused on
+/// a decision -- a layout it cannot read, a store another process holds -- makes it `Declined`,
+/// and so does a configuration with nothing to convert.
+/// @param effective The merged configuration.
+/// @return Process exit code.
+[[nodiscard]] int MigrateConfiguredStorage(Pace::Config const& effective)
+{
+    if (effective.storagePath.empty())
+    {
+        std::println(std::cerr,
+                     "pace-kv: --migrate-storage needs --storage: there is no on-disk store to convert "
+                     "in a memory-only configuration");
+        return Pace::CommandExitCode(Pace::CommandEnding::Declined);
+    }
+
+    // What is ON DISK, not what the shard formula predicts. With no explicit
+    // --storage-shards the daemon derives the count from the CPU count, so a
+    // conversion run inside a CPU-limited container -- or after the machine was
+    // resized -- would walk a different set than the daemon opens, exit zero,
+    // and leave the daemon still refusing to start on the shard it missed. That
+    // is precisely the failure this command exists to end, so it enumerates
+    // rather than predicts: every `shard-NN.cow` present is converted, whatever
+    // count the daemon resolves to next time.
+    auto const paths = ExistingStorePaths(effective.storagePath);
+    if (!paths.has_value())
+    {
+        std::println(std::cerr, "pace-kv: {}", paths.error().reason);
+        return Pace::CommandExitCode(paths.error().ending);
+    }
+
+    // Ordered by severity, so the run's ending is the largest a shard came to.
+    auto ending = Pace::CommandEnding::Completed;
+    for (auto const& path: *paths)
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.path = path;
+        opts.maxValueBytes = effective.storageMaxValueBytes;
+
+        auto const report = Pace::CowTreeStorage::Migrate(opts);
+        auto const line = Pace::DescribeMigration(path, report);
+        if (!report.has_value())
+        {
+            std::println(std::cerr, "pace-kv: {}", line);
+            ending = std::max(ending, Pace::UnfinishedEnding(report.error().Transient()));
+            continue;
+        }
+        std::println("pace-kv: {}", line);
+    }
+    return Pace::CommandExitCode(ending);
+}
+
+/// Daemon body: holds the actual server lifecycle. Runs under whatever
+/// IDaemonHost was selected (Foreground / Posix double-fork / Windows
+/// service).
+/// @param effective The configuration this process starts with.
+/// @param rejected Config candidates the lookup declined, re-reported through the
+///        logger because a service has no console for the stderr line to land on.
+/// @param sources The command line and environment fallback that, with the file,
+///        produced @p effective. Handed to `ConfigReloader` so a SIGHUP rebuilds
+///        the candidate the same way (#622).
+/// @param commandLine The command line ALONE, parsed: what the operator typed, as
+///        opposed to what the assembly says was named anywhere.
+int DaemonBody(Pace::Config const& effective,
+               std::span<Pace::RejectedCandidate const> rejected,
+               Pace::ConfigSources const& sources,
+               Pace::CliResult const& commandLine)
+{
+    // A service gets the event log, everything else gets stderr. The factory answers
+    // nullptr wherever there is no event log, which is how this stays one expression
+    // rather than a platform branch — and `effective.daemon` rather than "am I on
+    // Windows", so a foreground run keeps its terminal output on a machine that has
+    // one (#179).
+    Pace::ConsoleLogger consoleLogger { std::cerr,
+                                        effective.logLevel,
+                                        effective.logTimestamps ? Pace::LogTimestamps::Yes : Pace::LogTimestamps::No };
+    auto const eventLogger =
+        effective.daemon ? Pace::MakeWindowsEventLogger(effective.serviceName, effective.logLevel) : nullptr;
+    Pace::ILogger& logger =
+        eventLogger ? static_cast<Pace::ILogger&>(*eventLogger) : static_cast<Pace::ILogger&>(consoleLogger);
+
+    // Through the logger, not just the stderr line main() already printed: a
+    // service started by the SCM has no console for that to land on, and this
+    // is exactly the deployment where a rejected machine-wide config would
+    // otherwise be invisible — the daemon serving on built-in defaults while an
+    // operator edits a file it has declined to read.
+    for (auto const& [path, reason]: rejected)
+        logger.Logf(Pace::LogLevel::Error, "{}: {}", path.string(), reason);
+
+    // A secret that came out of a configuration file is only as private as that
+    // file. The whole reason to put `requirepass:` there is that a command line
+    // is visible in `ps`, so an operator who took that step and landed on a
+    // mode-0644 file has undone the point of the exercise -- and had no signal at
+    // all until #384.
+    //
+    // **Here rather than at the install, and that is not a preference.** The
+    // installer cannot know whether the file it is handed carries a secret:
+    // `InlineCredentialRejection` says so in its own comment, and a refusal that
+    // had to condemn every broadly-readable `--config` regardless of contents is
+    // not one anybody could ship. Provenance is known only after the parse.
+    //
+    // **A warning and not a refusal.** A refusal breaks a deployment that is
+    // running today, on upgrade, over a file the operator may not be able to
+    // re-permission that minute. The usual objection -- a warning scrolls past --
+    // is answered by WHERE this one goes: through the logger, which on every
+    // supported deployment is journald, the Windows event log, or launchd's log
+    // file. A durable record, not a console line. (Contrast the dashboard
+    // credential, which IS a startup refusal: refusing a MISSING credential fails
+    // closed and breaks nothing that worked, while refusing an EXPOSED one breaks
+    // something that did.)
+    //
+    // **And it is no longer only that file.** `WatchSecretExposure` asks
+    // `DaemonSecretFiles`, which since
+    // [#864](https://github.com/LASTRADA-Software/pace/issues/864) also walks
+    // `DaemonSecretFileTable()` -- `--tls-key` today. Those are NOT provenance-gated:
+    // the path is not the secret and the file is, so a world-readable private key is
+    // exposed however its path was named. A further path-valued flag is a row there
+    // and reaches this call site for free, which is the point of asking through one
+    // function rather than deriving a subject list here.
+    //
+    // **And again at every reload, through the same watcher.** `requirepass` is
+    // `Reloadable::Yes`, so a file can GAIN a secret after startup -- an operator adds
+    // `requirepass:` to a mode-0644 file and sends SIGHUP -- and a startup-only check
+    // is silent on exactly the path #384 exists to close
+    // ([#753](https://github.com/LASTRADA-Software/pace/issues/753)). One call
+    // rather than a second check written here: two copies of one rule is the shape
+    // #396 and #726 already paid for, and the startup answer is what seeds the memory
+    // the reload compares against.
+    Pace::ConfigReloader reloader { effective, effective.configPath, sources };
+
+    // After the reloader and before anything that can return, because the startup
+    // observation happens inside this call. `logger` outlives `reloader` -- it names
+    // `consoleLogger` or `eventLogger`, both declared above it, so both are destroyed
+    // after it -- which is what the subscriber's capture requires.
+    Pace::WatchSecretExposure(reloader, commandLine.requirePassExplicit, [&logger](std::string_view warning) {
+        logger.Logf(Pace::LogLevel::Warn, "{}", warning);
+    });
+
+    core::platform::SteadyClock steadyClock;
+    // The engine reads the clock once per command, and on Windows that is a
+    // QueryPerformanceCounter — ~16 ns, which measured as roughly a third of the
+    // cost of serving a cached GET. Serving a value sampled once per reactor
+    // iteration removes it from the per-command path entirely. The same object
+    // goes to the server loop below (`serverOpts.clock`), because only whoever
+    // owns the event loop can refresh it.
+    core::platform::CachedClock clock { steadyClock };
+
+    auto const usingPersistent = !effective.storagePath.empty();
+
+    // The server scales across cores by running N independent single-threaded
+    // reactors (--threads, default: hardware concurrency). Each connection is
+    // pinned to one reactor for its lifetime.
+    auto const hardwareThreads = std::max(1U, std::thread::hardware_concurrency());
+    auto const reactorCount =
+        effective.workerThreads != 0 ? static_cast<unsigned>(effective.workerThreads) : hardwareThreads;
+
+    auto physicalShards = ResolvePhysicalShards(effective.storageShards, usingPersistent, effective.storagePath);
+    // Several reactor threads share one storage, so keep at least as many
+    // in-memory shards as reactors to hold per-shard lock contention down.
+    if (!usingPersistent && reactorCount > 1)
+        physicalShards = std::max<std::size_t>(physicalShards, reactorCount);
+
+    // Wrap the backend in a ShardedStorage (its per-shard mutex serialises
+    // access) whenever more than one thread can reach it: an explicit
+    // multi-shard layout, the persistent backend, the reactor running on more
+    // than one thread, or the metrics endpoint (its fc-admin thread calls
+    // engine.Snapshot() concurrently with the reactor, and InMemoryLruStorage::
+    // Snapshot is only safe under the shard's exclusive lock). A lone reactor
+    // over in-memory storage with no metrics stays unwrapped — one thread owns
+    // it, so the wrapper would be pure overhead.
+    auto const useShardingWrapper = physicalShards > 1 || usingPersistent || reactorCount > 1 || effective.metricsEnabled;
+
+    // Daemon-lifetime sinks: WATCH registry, pubsub, and keyspace notifier.
+    //
+    // Two ordering constraints meet here. They are created BEFORE
+    // `reloaderThread` (declared further below) so LIFO stack unwind destroys
+    // the thread before any object its subscribers capture by reference. And
+    // they are created before the STORAGE CHAIN, because the reclaim log below
+    // is wired into the tiers inside it — a log declared after the backend
+    // would be destroyed while those tiers still held a pointer to it.
+    Pace::PubSubRegistry pubsub;
+    Pace::StreamWaiterRegistry streamWaiters;
+    Pace::WatchRegistry watches;
+    auto const eventsMask = Pace::ParseKeyspaceEvents(effective.notifyKeyspaceEvents);
+    if (!eventsMask.has_value())
+    {
+        logger.Logf(Pace::LogLevel::Fatal,
+                    "pace-kv: invalid --notify-keyspace-events '{}': {}",
+                    effective.notifyKeyspaceEvents,
+                    eventsMask.error().context);
+        return Pace::ExitCodeFor(Pace::StartStage::KeyspaceEvents);
+    }
+    Pace::KeyspaceNotifier keyspaceNotifier { &pubsub, *eventsMask };
+
+    // Connection-level metrics sink, shared by the server loop and the admin
+    // HTTP endpoint. Wiring it into RunReactorServer is what actually collects
+    // the connection counters; command/capacity stats come from the engine.
+    // Declared here rather than beside the engine because the reclaim log below
+    // reports its dropped notifications into it, and the log has to outlive the
+    // storage chain.
+    Pace::AtomicMetricsSink metrics;
+
+    // The observer every storage mutation reaches, and the log the tiers report
+    // their own reclaims into. Both sit above the storage chain in declaration
+    // order and therefore outlive it.
+    Pace::RedisMutationObserver mutationObserver { &watches, &keyspaceNotifier };
+    Pace::ReclaimLog reclaimLog { &mutationObserver, &metrics };
+
+    auto bundle = BuildStorageBackend(effective, usingPersistent, useShardingWrapper, physicalShards, logger);
+    if (!bundle.has_value())
+    {
+        logger.Logf(Pace::LogLevel::Fatal, "{}", bundle.error());
+        return Pace::ExitCodeFor(Pace::StartStage::Storage);
+    }
+    auto backend = std::move(bundle->backend);
+
+    // Always surface value-write failures. A write that cannot be persisted
+    // (full disk / I/O error / corruption / read-only) is otherwise invisible
+    // at the default log level: it never reaches the trace-only TracingStorage,
+    // so a store silently does not happen. This decorator logs each such failure
+    // at Warn and counts it into Snapshot().writeErrors (Prometheus
+    // `pace_write_errors_total`). It wraps the raw backend so it observes
+    // the true storage result (e.g. the disk error LayeredStorage propagates).
+    Pace::WriteErrorReportingStorage writeErrorReporter { *backend, logger };
+    Pace::IStorage* storagePtr = &writeErrorReporter;
+
+    // Optionally wrap in TracingStorage when trace logging is requested.
+    std::unique_ptr<Pace::TracingStorage> tracer;
+    if (effective.logLevel <= Pace::LogLevel::Trace)
+    {
+        tracer = std::make_unique<Pace::TracingStorage>(*storagePtr, logger, clock);
+        storagePtr = tracer.get();
+    }
+
+    // Storage-layer fan-out: NotifyingStorage wraps the inner chain with the
+    // RedisMutationObserver declared above, which fires WatchRegistry::Touched
+    // on every successful mutation. This closes two cross-protocol bugs:
+    //   * memcached writes never called Touched, so a Redis WATCH on a
+    //     key mutated by a memcached client silently passed EXEC;
+    //   * FLUSHDB had no per-key fan-out, leaving every WATCH'd key
+    //     undirty after a database wipe.
+    // Double-firing WATCH dirties is harmless because MarkDirty is idempotent,
+    // so the per-verb Touched calls in the Redis handlers can coexist with it.
+    //
+    // Per-verb keyspace events also stay where they are — the observer
+    // publishes only `expired` and `evicted`, which no handler is in a
+    // position to fire because no verb is executing when they happen.
+    Pace::NotifyingStorage notifyingStorage { *storagePtr, &mutationObserver };
+    // One call wires both halves of the reclaim path: the tiers below record
+    // into the log, this decorator drains it once their call has returned and
+    // every storage lock is released.
+    notifyingStorage.SetReclaimLog(&reclaimLog);
+    storagePtr = &notifyingStorage;
+
+    // The sink is handed to the engine, not only to the server loop: a value that
+    // will not decode is known at THIS layer and nowhere else -- the storage below
+    // has already verified what it returned, and the protocol above has no single
+    // seam where a storage error becomes a reply. Without it
+    // `pace_cache_malformed_values_total` would stay at zero on the one process
+    // that can observe the event (#296).
+    Pace::CacheEngine engine { *storagePtr, clock, core::platform::defaultSystemWallClock(), &metrics };
+
+    auto const durabilityName = [&] {
+        switch (effective.storageDurability)
+        {
+            case Pace::StorageDurability::Fsync:
+                return std::string_view { "fsync" };
+            case Pace::StorageDurability::Batched:
+                return std::string_view { "batched" };
+            case Pace::StorageDurability::None:
+                return std::string_view { "none" };
+        }
+        return std::string_view { "?" };
+    }();
+    // Authentication policy: built once, shared read-only across connections.
+    // Never log the secret itself — only whether auth is on. Wrapped in a
+    // SharedAuthSource so a SIGHUP-driven reload can swap in a freshly-built
+    // policy without restarting connections; in-flight verifies finish on the
+    // policy they captured.
+    auto const makePolicy = [](Pace::Config const& c) -> std::shared_ptr<Pace::AuthPolicy const> {
+        if (c.requirePass.empty())
+            return {};
+        return std::make_shared<Pace::AuthPolicy const>(c.authUsername, c.requirePass);
+    };
+    Pace::SharedAuthSource authSource { makePolicy(effective) };
+
+    reloader.Subscribe([&logger, &notifyingStorage, &authSource, &makePolicy](auto const& /*prev*/, auto const& next) {
+        logger.SetMinLevel(next->logLevel);
+        // Through the top of the chain, not straight at the backend. Shrinking
+        // the budget evicts until it fits, which on a large cache is a great
+        // many keys at once; entering below NotifyingStorage would leave every
+        // one of them recorded in the reclaim log with nothing to drain it,
+        // dropping all but the first bound-many and holding the rest until
+        // some later client call — never, on an idle daemon.
+        notifyingStorage.Resize(next->maxMemoryBytes);
+        // Rotate the shared secret: building a fresh AuthPolicy and atomically
+        // swapping it in lets a SIGHUP'd operator update requirepass without
+        // restarting the daemon. In-flight verifies finish against the policy
+        // they captured (kept alive by the returned shared_ptr).
+        authSource.Store(makePolicy(*next));
+    });
+
+    // TLS context: built once and shared read-only across connections. Fails
+    // fast on a missing build feature or unreadable cert/key.
+#if defined(FC_TLS_ENABLED)
+    std::shared_ptr<core::net::ITlsContext> tlsContext;
+#endif
+    auto const anyTlsBind = std::ranges::any_of(effective.binds, [](auto const& b) { return b.tls; });
+    if (effective.tlsEnabled || anyTlsBind)
+    {
+#if defined(FC_TLS_ENABLED)
+        if (effective.tlsCertPath.empty() || effective.tlsKeyPath.empty())
+        {
+            logger.Logf(Pace::LogLevel::Fatal, "pace-kv: {}", Pace::DaemonTlsMaterialRefusal);
+            return Pace::ExitCodeFor(Pace::StartStage::TlsMaterial);
+        }
+        auto created = core::net::makeTlsServerContextFromFiles(effective.tlsCertPath, effective.tlsKeyPath);
+        if (!created.has_value())
+        {
+            logger.Logf(Pace::LogLevel::Fatal, "pace-kv: TLS init failed: {}", created.error());
+            return Pace::ExitCodeFor(Pace::StartStage::TlsLoad);
+        }
+        tlsContext = std::move(*created);
+#else
+        logger.Logf(Pace::LogLevel::Fatal, "pace-kv: {}", Pace::DaemonTlsUnavailableRefusal);
+        return Pace::ExitCodeFor(Pace::StartStage::TlsUnavailable);
+#endif
+    }
+
+    auto const shardingMode = useShardingWrapper ? std::string_view { "" } : std::string_view { " (unwrapped)" };
+    // The bind summary reflects what is actually being listened on. The
+    // original banner formatted the legacy single-bind fields verbatim and
+    // ignored `binds`, so a daemon brought up via `--listen` always logged
+    // the defaults of the unused legacy fields rather than its real endpoints.
+    // We build the binds-shaped list from `effective` here so the banner
+    // is computable before the equivalent `serverOpts.binds` is populated
+    // a few dozen lines below; the synthesis rule is the same (prefer the
+    // explicit list, otherwise fold the legacy single-bind triplet into a
+    // synthetic BindConfig).
+    //
+    // The fallback is a NAMED object and the choice is made between two spans,
+    // not between two vectors. Spelling it as a conditional over the vectors
+    // themselves gave the operator a prvalue common type, so the configured list
+    // was COPIED wholesale — every bind, on every start — just to render one line,
+    // and the discarded temporary is what GCC 16 reports as a dangling pointer
+    // through the span this is about to be read as. An array rather than a vector
+    // because the synthetic case is exactly one bind and needs no allocation.
+    std::array<Pace::BindConfig, 1> const legacyBind { Pace::BindConfig {
+        .address = effective.bindAddress, .port = effective.port, .tls = effective.tlsEnabled } };
+    auto const bannerBinds = !effective.binds.empty() ? std::span<Pace::BindConfig const> { effective.binds }
+                                                      : std::span<Pace::BindConfig const> { legacyBind };
+    auto const bindSummary = Pace::FormatBindSummary(bannerBinds);
+
+    // Both codec fields name what the STORE will do, not what was asked for.
+    // `compression=` read `effective.compression` until the worker was found doing
+    // the same thing: the disk default is `zstd`, a default is the one value
+    // `ParseCompressionCodec` never sees, and a build without the codec then stored
+    // plaintext under a banner saying `compression=zstd`.
+    //
+    // **Both halves, adjacent.** The daemon has had two codecs since
+    // `--memory-compression` landed and reported one of them, so the tier an
+    // operator is most likely to have turned on by hand was the one they could not
+    // see. Adjacent rather than scattered because the question is almost always
+    // which of the two is which.
+    //
+    // The disk field says `<no disk tier>` without `--storage`, in the banner's own
+    // vocabulary for an absent thing (`<none>`, `<in-memory>`) and deliberately not
+    // `none`, which is the name of a CODEC. A codec beside a tier this daemon does
+    // not run describes nothing -- the worker's line spells the same rule as `disk
+    // off` with no codec after it -- and this is the half that can be absent, since
+    // an L1 is built on every path.
+    auto const diskCodec = Pace::Compression::EffectiveCodec(effective.compression);
+    auto const memoryCodec = Pace::Compression::EffectiveCodec(effective.memoryCompression);
+
+    // And said out loud rather than left to be inferred from a field that now reads
+    // `none`. The operator cannot reach this from their own configuration -- the
+    // BUILD made the choice -- so the remedy names the build. Only for a half that
+    // exists: an in-memory daemon has no on-disk tier for a disk codec to describe.
+    auto const reportCodecFallback = [&logger](std::string_view half, Pace::CompressionCodec configured) {
+        if (Pace::Compression::EffectiveCodec(configured) == configured)
+            return;
+        logger.Logf(Pace::LogLevel::Warn,
+                    "{} compression is configured {} and this build has no such codec, so that tier stores "
+                    "plaintext; rebuild with PACE_ENABLE_COMPRESSION or set the codec to none",
+                    half,
+                    Pace::Compression::NameOf(configured));
+    };
+    reportCodecFallback("memory", effective.memoryCompression);
+    if (!effective.storagePath.empty())
+        reportCodecFallback("disk", effective.compression);
+    // `anyTlsBind` was computed up-top against `effective.binds`; under the
+    // current ordering `serverOpts.binds` is either `effective.binds` (when
+    // non-empty) or the synthesised legacy single-bind. Either way, a TLS
+    // banner field that reports "off" while a TLS listener is up is the
+    // operator-misleading bug — fold `anyTlsBind` into the TLS field below.
+    logger.Logf(Pace::LogLevel::Info,
+                "pace-kv {} starting; bind={} max-memory={} config={} storage={} "
+                "durability={} compression={} memory-compression={} max-value={} reactors={} shards={}{} auth={} "
+                "tls={}",
+                ProgramVersion,
+                bindSummary,
+                Pace::FormatByteSize(effective.maxMemoryBytes),
+                effective.configPath.empty() ? std::string_view { "<none>" } : std::string_view { effective.configPath },
+                effective.storagePath.empty() ? std::string_view { "<in-memory>" }
+                                              : std::string_view { effective.storagePath },
+                durabilityName,
+                effective.storagePath.empty() ? std::string_view { "<no disk tier>" } : Pace::Compression::NameOf(diskCodec),
+                Pace::Compression::NameOf(memoryCodec),
+                Pace::FormatByteSize(effective.storageMaxValueBytes),
+                reactorCount,
+                physicalShards,
+                shardingMode,
+                authSource.Current() ? std::string_view { "on" } : std::string_view { "off" },
+                (effective.tlsEnabled || anyTlsBind) ? std::string_view { "on" } : std::string_view { "off" });
+
+    InstallStopHandlers();
+    // The "ready, accepting connections" line is emitted by the server loop
+    // itself, only once every accept loop is armed — see `ReadinessAnnouncer`.
+    // Logging it here (before bind) would race a client that connects on the
+    // strength of the message.
+    //
+    // "Bound and listening" is what it used to mean, and that was WEAKER than it
+    // reads (#646): a marker naming the bind a waiter already had, on a line that
+    // looks like a readiness contract. It now names every acceptor being parked in
+    // `accept()`, so it is safe for a fixture to wait on.
+
+    // Shared daemon-lifetime objects MUST be declared BEFORE reloaderThread
+    // below: the jthread joins in its destructor during stack unwind, which
+    // happens in LIFO order. If pubsub / watches / keyspaceNotifier were
+    // declared after the thread, a SIGHUP racing shutdown could invoke a
+    // reload subscriber against a freshly-destroyed notifier (UAF). Putting
+    // them ahead of the thread guarantees the thread joins BEFORE these
+    // objects are torn down.
+    // The accept loops' one registry: a bind whose loop ends says so here, and `/healthz` answers
+    // `503` from it rather than `200` over a port that listens and refuses.
+    core::net::AcceptLoopHealth acceptLoops;
+    Pace::ReactorServerOptions serverOpts;
+    // Hand the reactors the very clock the engine reads, so their per-iteration
+    // refresh is what keeps it current.
+    serverOpts.clock = &clock;
+    // The readiness line's fact, handed to the service host: it reports RUNNING on it.
+    serverOpts.onServing = [] {
+        Pace::DaemonControls::Instance().MarkServing();
+    };
+    // Listener endpoints: prefer the explicit list when given, otherwise
+    // synthesise one from the legacy single-bind fields. This keeps the
+    // common single-port case working without an explicit --listen, and
+    // lets advanced operators bring up multiple binds (e.g. plaintext on a
+    // private interface + TLS on the public one) with repeated --listen /
+    // --listen-tls flags. `EffectiveBinds` is that rule, and `DaemonStartupRejection` judged these
+    // very endpoints in `main()` -- duplicates included, which SO_REUSEPORT would otherwise let both
+    // bind and split traffic between -- before the daemon host was invoked.
+    serverOpts.binds = Pace::EffectiveBinds(effective);
+    serverOpts.listenBacklog = effective.listenBacklog;
+    // The active expiry cycle. The two defaults are asserted equal rather than trusted:
+    // `Config` cannot include `Cache/`, so the number is written in both places,
+    // and a `--help` line advertising a default the daemon does not use is
+    // exactly the kind of drift nothing else would catch.
+    static_assert(Pace::DefaultActiveExpiryInterval
+                  == std::chrono::duration_cast<std::chrono::milliseconds>(Pace::ExpiryReaperOptions {}.interval));
+    static_assert(Pace::DefaultActiveExpiryScanBudget == Pace::ExpiryReaperOptions::DefaultScanBudget);
+    serverOpts.expiry.interval = effective.activeExpiryInterval;
+    serverOpts.expiry.scanBudget = effective.activeExpiryScanBudget;
+    // One reactor per core (each single-threaded, connections pinned). One
+    // reactor = a single event loop; N reactors scale across cores without any
+    // cross-thread coroutine migration.
+    serverOpts.reactorThreads = reactorCount;
+    // Pin reactors to cores when asked (PerCore) and there's more than one;
+    // a lone reactor gains nothing from pinning.
+    serverOpts.pinReactorsToCpu = effective.cpuAffinity == Pace::CpuAffinity::PerCore && reactorCount > 1;
+    // When --log-source is set, every connection prefixes its log lines with
+    // the client IP.
+    serverOpts.logSource = effective.logSource;
+    // --log-everything widens the Trace command log to non-data commands too.
+    // Carried on the session bundle that every connection's handlers receive.
+    serverOpts.session.logEverything = effective.logEverything;
+    serverOpts.session.authSource = &authSource;
+    // pubsub / watches / keyspaceNotifier are declared further up, above the
+    // storage chain, so the NotifyingStorage decorator can wire them into it
+    // and so the reclaim log outlives the tiers that hold a pointer to it.
+    // Just publish the pointers into the session here.
+    serverOpts.session.pubsub = &pubsub;
+    serverOpts.session.streamWaiters = &streamWaiters;
+    serverOpts.session.watches = &watches;
+    serverOpts.session.keyspaceNotifier = &keyspaceNotifier;
+
+    // The RESP wire cap must admit the largest value the cache will store, so a
+    // client can push a value up to --storage-max-value without the connection
+    // being dropped mid-command. Keep the protocol default floor when the
+    // configured value is smaller; --storage-max-value drives both limits.
+    serverOpts.session.maxPayloadBytes = std::max(serverOpts.session.maxPayloadBytes, effective.storageMaxValueBytes);
+    // Make the notifier reloadable: a SIGHUP that changes
+    // notify-keyspace-events now updates the live bitmask on the
+    // already-running notifier. Existing connections' cached
+    // state->keyspaceEnabled stays as it was at connect time (that's
+    // documented per-connection behaviour); NEW connections opened after
+    // the reload read the updated bitmask immediately. A parse error in
+    // the reloaded config is logged but the previous mask is kept — the
+    // daemon never silently falls back to an empty mask.
+    //
+    // Subscribe BEFORE the reloaderThread is constructed: the thread's
+    // destructor joins on unwind, and we must guarantee the subscriber
+    // table is fully populated before the thread can dispatch a reload.
+    reloader.Subscribe([&logger, &keyspaceNotifier](auto const& /*prev*/, auto const& next) {
+        auto const newMask = Pace::ParseKeyspaceEvents(next->notifyKeyspaceEvents);
+        if (!newMask.has_value())
+        {
+            logger.Logf(Pace::LogLevel::Error,
+                        "config reload: invalid notify-keyspace-events '{}': {} (keeping previous mask)",
+                        next->notifyKeyspaceEvents,
+                        newMask.error().context);
+            return;
+        }
+        keyspaceNotifier.SetClasses(*newMask);
+    });
+
+    // Reloader thread MUST be declared AFTER every object its subscribers
+    // capture by reference (logger, keyspaceNotifier, ...). jthread joins
+    // in its destructor; stack unwind destroys locals in reverse
+    // declaration order, so the thread's destructor runs BEFORE the
+    // captured objects' destructors. This prevents a SIGHUP racing
+    // shutdown from invoking a subscriber against freed memory.
+    std::atomic<bool> reloaderQuit { false };
+    std::jthread reloaderThread { [&reloader, &logger, &reloaderQuit] {
+        auto& controls = Pace::DaemonControls::Instance();
+        while (!reloaderQuit.load(std::memory_order_acquire))
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds { 250 });
+            if (!controls.TakeReloadRequest())
+                continue;
+            auto const result = reloader.Reload();
+            if (!result.has_value())
+                logger.Logf(Pace::LogLevel::Error, "config reload failed: {}", result.error().ToString());
+            else
+                logger.Log(Pace::LogLevel::Info, "config reloaded");
+        }
+    } };
+#if defined(FC_TLS_ENABLED)
+    serverOpts.tlsContext = tlsContext.get(); // null unless --tls is active
+#endif
+
+    // What `/metrics` reports beside the counters, as ONE provider: the admin endpoint renders it
+    // and a live-stats subscription streams it (#1399), so the two cannot disagree about this
+    // cache. Uptime reads `steadyClock`, not the cached one the engine uses: the cached clock only
+    // advances when a reactor completes a loop iteration, so a daemon sitting idle would report a
+    // frozen uptime until the next request arrived.
+    auto const startedAt = steadyClock.now();
+    Pace::AdminHttpServer::SnapshotProvider const snapshotProvider = [&engine, &steadyClock, startedAt] {
+        return Pace::MetricsSnapshot {
+            .storage = engine.Snapshot(),
+            // What the merged view above had to leave out. With `--storage` the backend is an
+            // in-memory tier over a CoW tree, and `LayeredStorage::Snapshot()` reports the tree's
+            // item count, bytes and budget alone -- so the RAM tier an operator sized with
+            // `--memory` has never appeared on this scrape at all.
+            .storageTiers = engine.SnapshotTiers(),
+            // Absent, and said out loud rather than left to the default: this is a cache, not a
+            // compile node, and cores it does not schedule against are noise on its scrape. Naming
+            // the field is also what keeps a field added to the middle of the struct from silently
+            // defaulting here.
+            .host = std::nullopt,
+            .uptime = Pace::Uptime { std::chrono::duration_cast<std::chrono::seconds>(steadyClock.now() - startedAt) },
+        };
+    };
+
+    // Live stats over `0xFC`: the cache subject, streamed. Declared before the reactors run and
+    // after everything its provider reads, so it outlives every connection and is outlived by
+    // what it captures. The endpoint named is the first bind, which is where `0xFC` answers.
+    Pace::CacheLiveStatsSources const liveSources {
+        metrics,
+        snapshotProvider,
+        serverOpts.binds.empty() ? std::string {}
+                                 : std::format("{}:{}", serverOpts.binds.front().address, serverOpts.binds.front().port)
+    };
+    Pace::LiveStream liveStream { liveSources, metrics };
+    serverOpts.session.liveStats = &liveStream;
+
+    // Optional admin HTTP endpoint (/metrics, /healthz) on its own port and
+    // thread. A blocking listener is plenty for scrape-rate traffic; SetTimeouts
+    // below makes the accept loop poll so Shutdown() is observed even on POSIX
+    // (where Close() does not unblock a parked accept()) and bounds a stalled
+    // client's request read so it cannot wedge the single-threaded endpoint.
+    std::unique_ptr<Pace::BlockingListener> adminListener;
+    std::unique_ptr<Pace::AdminHttpServer> adminServer;
+    std::jthread adminThread;
+    if (effective.metricsEnabled)
+    {
+        adminListener = Pace::BlockingListener::Bind(effective.metricsBindAddress, effective.metricsPort);
+        if (!adminListener || !adminListener->IsBound())
+        {
+            // The `else` below is the whole of the success path, so this branch is
+            // the daemon deciding to serve on WITHOUT an admin endpoint -- forever,
+            // by design. The verdict and the severity that matches it are the
+            // endpoint's own (#603), not this call site's: an `Error` here pages an
+            // operator for a working daemon, and a level nothing in this tree can
+            // reach is a level nothing can hold to its policy.
+            auto const report = Pace::DescribeToleratedAdminBindFailure(
+                effective.metricsBindAddress,
+                effective.metricsPort,
+                adminListener ? adminListener->BindError() : std::string_view { "null listener" });
+            logger.Log(report.level, report.message);
+        }
+        else
+        {
+            // Both values belong to the endpoint rather than to this call site --
+            // the worker serves the same server and had grown its own copy of the
+            // pair, which is two places for one decision to drift.
+            adminListener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
+
+            adminServer = std::make_unique<Pace::AdminHttpServer>(
+                *adminListener, metrics, snapshotProvider, logger, steadyClock, acceptLoops, Pace::DefaultDrainWait());
+            adminThread = std::jthread { [&adminServer] {
+                CORE_THREAD_NAME("fc-admin");
+                core::async::syncRun(adminServer->Run());
+            } };
+            logger.Logf(Pace::LogLevel::Info,
+                        "metrics endpoint on http://{}:{}/metrics (and /healthz)",
+                        effective.metricsBindAddress,
+                        effective.metricsPort);
+        }
+    }
+
+    int const exitCode = Pace::RunReactorServer(serverOpts, engine, logger, acceptLoops, /*admission*/ nullptr, &metrics);
+
+    if (adminServer)
+    {
+        // Ask, join, then close -- the same ordering `AdminEndpoint::~AdminEndpoint`
+        // documents (#260). Shutdown() alone closes the listener while this thread's
+        // accept loop may be reading it, which is a data race whatever the suite says.
+        // The loop leaves within one `AcceptPoll` of the flag, so the join is bounded.
+        adminServer->RequestStop();
+        if (adminThread.joinable())
+            adminThread.join();
+        adminServer->Shutdown();
+    }
+    reloaderQuit.store(true, std::memory_order_release);
+    return exitCode;
+}
+
+} // namespace
+
+int main(int argc, char const* const* argv)
+{
+    CORE_THREAD_NAME("pace-main");
+    std::span<char const* const> const args { argv + 1, argc > 0 ? static_cast<std::size_t>(argc - 1) : 0 };
+
+    // A command line refused still says what it named, from the WHOLE of it (`RecognisedCli`):
+    // whether it is a service's -- under the SCM the registered line carries `--daemon`, and a
+    // refusal that never told the host exits before the SCM hears anything, error 1053 -- and
+    // which verb it asked for, wherever the operator typed it relative to the bad token.
+    Pace::CliResult cli;
+    if (auto const flow = Pace::ParseCliInto(args, cli); !flow.has_value())
+    {
+        auto const refused =
+            RefuseUnderService(Pace::RecognisedCli(args), Pace::StartStage::CommandLine, flow.error().ToString());
+        std::println(std::cerr, "{}", Pace::CliUsage());
+        return refused;
+    }
+    auto const* const parsed = &cli;
+
+    switch (parsed->outcome)
+    {
+        case Pace::CliOutcome::ShowVersion:
+            std::println("pace-kv {}", ProgramVersion);
+            return Pace::CommandExitCode(Pace::CommandEnding::Completed);
+        case Pace::CliOutcome::ShowHelp:
+            std::print("{}",
+                       Pace::CliUsage(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored : Pace::UsageColor::Plain));
+            return Pace::CommandExitCode(Pace::CommandEnding::Completed);
+        case Pace::CliOutcome::SeedConfig:
+            return SeedDefaultConfig(parsed->seedConfigTemplate);
+        case Pace::CliOutcome::Run:
+        case Pace::CliOutcome::InstallService:
+        case Pace::CliOutcome::UninstallService:
+        case Pace::CliOutcome::HealthCheck:
+        case Pace::CliOutcome::MigrateStorage:
+            // These all need the effective config assembled below; they branch
+            // apart afterwards.
+            break;
+        case Pace::CliOutcome::Last:
+            // The table's count, which no option row selects.
+            return RefuseUnderService(*parsed, Pace::StartStage::NoOutcome, "the command line selected no outcome");
+    }
+
+    // The config file to read: the one the operator named, or else whichever
+    // platform default is actually there (EffectiveConfigPath owns that rule and
+    // the tests for it). Resolved into a LOCAL and never back into
+    // parsed->config, which is what --install-service registers: a discovered
+    // path baked into a service's launch arguments would outrank the file itself
+    // forever, and InlineCredentialRejection would start naming a path nobody
+    // typed.
+    auto const lookup =
+        Pace::EffectiveConfigPath(parsed->config.configPath, Pace::SystemConfigPathProbe {}, Pace::DaemonApplicationName);
+    auto const configPath = lookup.path.string();
+
+    // A config that exists and is readable but was passed over anyway has to say
+    // so: silence would mean an operator editing a file the daemon has quietly
+    // decided not to obey, over a permission problem only they can fix. Printed
+    // here for the commands that never reach the daemon body, and repeated
+    // through the logger once there is one — a Windows service has no console,
+    // so stderr alone would put the message nowhere in the one deployment where
+    // a machine-wide config is the norm.
+    for (auto const& [path, reason]: lookup.rejected)
+        std::println(std::cerr, "pace-kv: {}: {}", path.string(), reason);
+
+    // The two sources besides the file, resolved once and KEPT: `ConfigReloader`
+    // below is handed the same object, so a SIGHUP rebuilds the candidate exactly
+    // the way this start built the live configuration. Re-reading the file alone
+    // republished every setting it did not mention at its built-in default —
+    // `--max-memory=8g` came back as a fraction of host RAM and the storage evicted
+    // down to it, silently (#622).
+    //
+    // The precedence the assembly implements is CLI > config-file > env > default,
+    // so a stray `PACE_METRICS_PORT` can never override a `metrics_port:` the
+    // operator wrote — even when they wrote the compiled-in default, which the
+    // explicit bit the file's applier sets is what makes distinguishable from an
+    // absent key. A container
+    // that wants the env form simply omits the config/CLI value, letting both the
+    // daemon and its `--healthcheck` probe agree via a single `-e ...`.
+    Pace::ConfigSources const sources { .args = std::vector<std::string>(args.begin(), args.end()),
+                                        .metricsPortEnv = MetricsPortFromEnv() };
+
+    auto assembled = Pace::AssembleEffectiveConfig(configPath, sources);
+    if (!assembled.has_value())
+    {
+        // A file that does not parse is fatal for the command that *serves*,
+        // and for any file the operator named — but not for a discovered one
+        // on the way to some other action. Refusing to uninstall a service
+        // because the file at the default location has a typo blocks the very
+        // recovery the operator reached for, and fails a container health
+        // check whose daemon was started with explicit flags and is serving
+        // perfectly well.
+        // ...and for the conversion, which acts on the merged `storage_path`:
+        // proceeding on a config this run could not read would convert a
+        // different set of files than the daemon opens, or none at all, and
+        // report success either way.
+        if (!parsed->config.configPath.empty() || parsed->outcome == Pace::CliOutcome::Run
+            || parsed->outcome == Pace::CliOutcome::MigrateStorage)
+            // The command line's `--daemon`, since no merged configuration exists to ask.
+            return RefuseUnderService(
+                *parsed, Pace::ConfigurationFileStage(assembled.error().code), assembled.error().ToString());
+
+        // Ignored, and the PATH ignored with it: re-assembling against no file at
+        // all is what leaves `configPath` empty, so nothing later re-reads a file
+        // this run declined — the reloader included, since it is handed
+        // `effective.configPath`. Assembling with no path cannot fail.
+        std::println(std::cerr, "pace-kv: ignoring {}: {}", configPath, assembled.error().ToString());
+        assembled = Pace::AssembleEffectiveConfig({}, sources);
+    }
+
+    Pace::Config const& effective = assembled->Configuration();
+
+    // Converting the store acts on the files and exits; it never runs the daemon
+    // body. BEFORE the serving-shape checks below, and after the merge because it
+    // is the MERGED --storage it acts on: a store of the wrong vintage is what
+    // stops the daemon starting, so demanding the operator first fix an unrelated
+    // `--listen`/`--notify-keyspace-events` typo would be refusing to let them
+    // repair the thing that is actually broken. The node's `--migrate-cache`
+    // sits early for the same reason.
+    if (parsed->outcome == Pace::CliOutcome::MigrateStorage)
+        return MigrateConfiguredStorage(effective);
+
+    // The rules a SERVING daemon is held to -- the bind-flag shape, the keyspace-event grammar and
+    // every rule decided by the configuration and the build alone -- asked of a start and an install
+    // only, BEFORE handing off to the daemon host (which may fork) so the refusal reaches the
+    // operator, and before an install bakes the command line in. `ServingRulesRejection` says
+    // which outcomes and in what order; it is in the library, where a test holds it to that.
+    if (auto const rejection = Pace::ServingRulesRejection(parsed->outcome, *assembled))
+        return RefuseUnderService(*parsed, Pace::StartStage::StartupRules, *rejection);
+
+    // Health check: probe the running daemon's /healthz on loopback and exit
+    // 0/1. Loopback regardless of the configured metrics bind address, since the
+    // probe runs inside the same host/container as the daemon.
+    if (parsed->outcome == Pace::CliOutcome::HealthCheck)
+        return Pace::CommandExitCode(core::net::httpHealthProbe("127.0.0.1", effective.metricsPort, "/healthz")
+                                         ? Pace::CommandEnding::Completed
+                                         : Pace::CommandEnding::Failed);
+
+    // Service-control requests act on the service manager and exit; they never
+    // run the daemon body.
+    //
+    // The *command-line* config is what gets registered, not the merged one:
+    // the launch arguments should hold what the operator typed, plus --config,
+    // and let the file govern everything else. Registering the merged config
+    // instead froze every YAML value into the supervisor's argument list at
+    // install time — and because a CLI value outranks the file, later
+    // edits to that same file then had no effect, silently, for exactly the
+    // keys the operator had bothered to set. It also copied `requirepass:` out
+    // of a mode-0600 config file into a world-readable service registration.
+    // The YAML is still parsed above, so a broken config is still rejected here
+    // rather than at first start.
+    if (parsed->outcome == Pace::CliOutcome::InstallService || parsed->outcome == Pace::CliOutcome::UninstallService)
+    {
+        // The command-line config, never the merged one -- see the comment above.
+        // Turned into a ServiceSpec here because that is the seam the platform
+        // registration speaks: `pace-node` builds its own from its
+        // own configuration type rather than reaching for the daemon's.
+        // The whole parse, not `parsed->config`: which flags get baked in is decided
+        // by what the operator NAMED, and only the parse records that (#349). It is
+        // still the command-line-only parse -- `effective` is the merged one and is
+        // deliberately never passed here.
+        auto spec = Pace::MakeDaemonServiceSpec(Pace::CurrentExecutablePath(), *parsed);
+
+        // ...and here, deliberately, the MERGED one -- for a purpose the rule
+        // above does not cover. Nothing from `effective` is registered: this adds
+        // a path to hand over, never a flag to bake in, so the hazard that rule
+        // exists for (a path in ProgramArguments outranking the very file it came
+        // from, forever) cannot arise.
+        //
+        // It is needed because the daemon no longer runs as the machine's most
+        // privileged account. `storage_path` is read from YAML at every start, so
+        // the registration cannot see it -- and an upgrade that changed the
+        // service's identity without handing over the cache directory LocalSystem
+        // had created would leave the daemon unable to open its own storage, at
+        // every start, on precisely the installs that bothered to configure
+        // persistence.
+        //
+        // Only what is actually configured. A daemon with no `storage_path` is
+        // memory-only and needs no directory at all, so granting a speculative
+        // default would create one nothing ever uses.
+        //
+        // Whether the path may be CREATED is not decided here. `storage_path` is
+        // allowed to name one CoW file, and the handover is what would `mkdir` over
+        // it -- so the handover is where that is refused, once, for every producer
+        // of an owned path rather than for this one.
+        if (!effective.storagePath.empty()
+            && !std::ranges::contains(
+                spec.ownedPaths, std::filesystem::path { effective.storagePath }, &Pace::OwnedPath::path))
+            spec.ownedPaths.push_back(Pace::OwnedPath {
+                .path = effective.storagePath, .privacy = Pace::PathPrivacy::Shared, .credentialFiles = {} });
+        // The firewall follows the registration: opened for what the MERGED configuration binds
+        // beyond loopback -- `effective`, for the storage handover's reason above: it adds rules,
+        // never a flag -- and closed on removal once the delete succeeded or found no
+        // registration, never after a refused one (`WithRemovalFirewall`). The registration is
+        // the argument, so it has happened before the firewall is asked.
+        auto const firewall = Pace::MakeSystemFirewall();
+        auto const result =
+            parsed->outcome == Pace::CliOutcome::InstallService
+                ? Pace::WithRegistrationFirewall(Pace::InstallService(spec, parsed->serviceScope),
+                                                 firewall.get(),
+                                                 spec.serviceName,
+                                                 Pace::DaemonFirewallRules(effective, spec.exePath, parsed->firewallAllow))
+                : Pace::WithRemovalFirewall(
+                      Pace::UninstallService(spec, parsed->serviceScope), firewall.get(), spec.serviceName);
+        if (result.Ending() == Pace::CommandEnding::Completed)
+            std::println("pace-kv: {}", result.message);
+        else
+            std::println(std::cerr, "pace-kv: {}", result.message);
+        return result.ExitCode();
+    }
+
+    std::unique_ptr<Pace::IDaemonHost> host;
+    if (effective.daemon)
+    {
+#if defined(_WIN32)
+        // RUNNING once every acceptor is armed (`serverOpts.onServing` below), so `net start` answers
+        // for a daemon that serves rather than for a process that is up.
+        host = Pace::MakeWindowsServiceHost(effective.serviceName,
+                                            Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt),
+                                                                       .readiness = Pace::ServiceReadiness::BodySignals });
+#else
+        // `/`, stated rather than defaulted. This daemon executes nothing, so no
+        // path-mapping rule is ever derived from its working directory and the
+        // classical answer is right for it -- unlike the compile node, which spawns
+        // a compiler and states a directory of its own (#784).
+        host = Pace::MakePosixDaemonHost(effective.pidfile, "/");
+#endif
+    }
+    if (!host)
+        host = std::make_unique<Pace::ForegroundHost>();
+
+    return host->Run(
+        [&effective, &lookup, &sources, &parsed] { return DaemonBody(effective, lookup.rejected, sources, *parsed); });
+}

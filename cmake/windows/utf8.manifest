@@ -9,7 +9,7 @@
   values an operator types (issue #155).
 
   Honoured from Windows 10 1903 / Server 2022 onwards. An older host ignores the
-  setting silently, which is why FastCache::NarrowTextIsUtf8() exists to say so.
+  setting silently, which is why Pace::NarrowTextIsUtf8() exists to say so.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <application xmlns="urn:schemas-microsoft-com:asm.v3">

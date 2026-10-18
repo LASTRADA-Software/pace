@@ -76,17 +76,17 @@ unexercised until after a merge.
 
 ```sh
 cmake -S . -B build \
-  -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON \
-  -DFASTCACHED_MACOS_SIGN_IDENTITY_APP="Developer ID Application: … (TEAMID)" \
-  -DFASTCACHED_MACOS_SIGN_IDENTITY_PKG="Developer ID Installer: … (TEAMID)" \
-  -DFASTCACHED_MACOS_NOTARIZE=ON
+  -DPACE_PACKAGE_ROOT_PREFIX=ON \
+  -DPACE_MACOS_SIGN_IDENTITY_APP="Developer ID Application: … (TEAMID)" \
+  -DPACE_MACOS_SIGN_IDENTITY_PKG="Developer ID Installer: … (TEAMID)" \
+  -DPACE_MACOS_NOTARIZE=ON
 cd build && cpack -G productbuild
 ```
 
 Notarization needs a stored credential profile, once per machine:
 
 ```sh
-xcrun notarytool store-credentials fastcached-notary \
+xcrun notarytool store-credentials pace-notary \
       --key AuthKey_XXXXXXXXXX.p8 --key-id <KEY-ID> --issuer <ISSUER-UUID>
 ```
 
@@ -110,7 +110,7 @@ The `.pkg` itself is signed by CPack via `CPACK_PKGBUILD_IDENTITY_NAME` and
 
 Binaries are signed with `--options=runtime --timestamp`: notarization
 rejects a submission missing either. No entitlements file is used — unlike a
-GUI app, fastcached needs neither JIT nor relaxed library validation, and
+GUI app, pace-kv needs neither JIT nor relaxed library validation, and
 entitlements it does not need only widen its attack surface.
 
 The `.dmg` is signed **without** `--options=runtime`: a disk image holds no
@@ -120,10 +120,10 @@ running process.
 ## Verifying
 
 ```sh
-pkgutil --check-signature fastcached-*.pkg
-spctl --assess --verbose=4 --type install fastcached-*.pkg   # what Gatekeeper decides
-xcrun stapler validate fastcached-*.pkg
-xcrun stapler validate fastcached-*.dmg
+pkgutil --check-signature pace-*.pkg
+spctl --assess --verbose=4 --type install pace-*.pkg   # what Gatekeeper decides
+xcrun stapler validate pace-*.pkg
+xcrun stapler validate pace-*.dmg
 ```
 
 ## Troubleshooting
@@ -132,13 +132,13 @@ xcrun stapler validate fastcached-*.dmg
 |---|---|
 | `codesign` hangs in CI | The key's ACL does not permit the tool. Needs both `security import -T /usr/bin/codesign` and `security set-key-partition-list`. |
 | `resource fork, Finder information, or similar detritus not allowed` | Stray extended attributes; `xattr -c` the file first. |
-| Notarization rejected, no reason given | Fetch it: `xcrun notarytool log <submission-id> --keychain-profile fastcached-notary`. |
+| Notarization rejected, no reason given | Fetch it: `xcrun notarytool log <submission-id> --keychain-profile pace-notary`. |
 | `The signature does not include a secure timestamp` | `--timestamp` was omitted. |
 | `Killed: 9` after install | The binary was stripped after signing. |
 | No Installer identity found | `security find-identity -v -p codesigning` does not list Installer certificates; drop `-p codesigning`. |
 
 ## Related
 
-Configure-time guard: `FASTCACHED_MACOS_NOTARIZE` requires both identities.
+Configure-time guard: `PACE_MACOS_NOTARIZE` requires both identities.
 Apple rejects an unsigned or ad-hoc submission, but only after a multi-minute
 round trip, so the mistake is caught at configure time instead.

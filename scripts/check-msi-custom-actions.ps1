@@ -6,7 +6,7 @@
 # starts with CreateProcess, IN its Directory. Nothing in the WiX build looks at either half: a
 # quote PowerShell parses differently, a `[` the formatter swallows, or a working directory that
 # does not exist when the action runs all build a package that fails only on a Windows runner,
-# minutes into its slowest job. The last one did: FastCacheAwaitServiceExit was started in
+# minutes into its slowest job. The last one did: PaceAwaitServiceExit was started in
 # INSTALL_ROOT before InstallFiles, after an upgrade from 0.3.0 had removed that directory, so the
 # process was never created and the upgrade failed in under 100 ms (round 5).
 #
@@ -25,7 +25,7 @@
 #      (as MajorUpgrade's afterInstallInitialize does): NO action that writes to the execution
 #      script -- deferred, rollback or commit -- may come before it, or the package is refused at
 #      once with Error 2613 (round 7, when round 6 had put the registration copies there);
-#   7. the key rollback state lives in -- read off FastCacheClearRollbackState, and the one key
+#   7. the key rollback state lives in -- read off PaceClearRollbackState, and the one key
 #      every action naming rollback state uses -- is covered by NO registry element of the package:
 #      one the package owns is deleted by an uninstall, and the state must outlive a failed
 #      transaction's rollback until its last step (#8). It reads the
@@ -55,7 +55,7 @@
 #      MSIRESTARTMANAGERCONTROL to "Disable", and nothing else sets it. Restart Manager restarts a
 #      service the table left stopped, and its shutdown, ahead of StopServices, cost the
 #      ServiceControl rows their rollback start;
-#  14. FastCachedDisableForNode disables only a registration that EXISTS: its command is started for
+#  14. PaceDisableForNode disables only a registration that EXISTS: its command is started for
 #      real with every service name it spells swapped for one nothing registers, and must exit 0;
 #      and, the control that keeps that 0 honest, with the QUERY naming a service every host has and
 #      the disable still naming the absent one, it must exit 1060 -- a disable that fails on a
@@ -86,8 +86,8 @@ $AnchorPhases = @{
 # The actions that only READ, and are therefore started for real. Each names the processes its
 # control runs from the install root, and the bound its control shortens.
 $RunnableActions = @{
-    FastCacheAwaitServiceExit  = @{ ControlImages = @('fastcached.exe', 'fastcache-compile-node.exe') }
-    FastCachedAwaitExitForNode = @{ ControlImages = @('fastcached.exe') }
+    PaceAwaitServiceExit  = @{ ControlImages = @('pace-kv.exe', 'pace-node.exe') }
+    PaceAwaitExitForNode = @{ ControlImages = @('pace-kv.exe') }
 }
 
 # The standard actions an anchor of the fragment ends on, with their InstallExecuteSequence
@@ -113,7 +113,7 @@ function Pass([string] $what) { Write-Host "ok   $what" }
 
 $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("msi-custom-actions-" + [guid]::NewGuid().ToString('N'))
 # A root with a SPACE in it, as Program Files has, and absent until a phase says it exists.
-$root = Join-Path $scratch 'Program Files Probe\fastcached\'
+$root = Join-Path $scratch 'Program Files Probe\pace\'
 $system64 = Join-Path $env:SystemRoot 'System32\'
 $knownDirectories = @{ INSTALL_ROOT = $root; System64Folder = $system64 }
 # Properties a case sets, beside the directories; empty but for the old-registration control below.
@@ -229,12 +229,12 @@ try {
         # R4-1's control: the OLD registrations named another directory -- a 0.3.0 installed
         # elsewhere, upgraded into the default root -- and a process running from THERE keeps the
         # wait waiting too, with nothing running from the new root. Each registration in a spelling
-        # AppSearch was measured or documented to return (service-actions.xml): fastcached's bare,
+        # AppSearch was measured or documented to return (service-actions.xml): pace-kv's bare,
         # the node's raw with `#%`, and both with a space in the path, as a custom one may have.
-        $oldBin = Join-Path $scratch 'Old Custom Root\fastcached\bin'
+        $oldBin = Join-Path $scratch 'Old Custom Root\pace\bin'
         New-Item -ItemType Directory -Force -Path $oldBin | Out-Null
-        $knownProperties['FASTCACHED_IMAGEPATH'] = '"' + (Join-Path $oldBin 'fastcached.exe') + '" --daemon --service-name=FastCached'
-        $knownProperties['FASTCACHE_NODE_IMAGEPATH'] = '#%"' + (Join-Path $oldBin 'fastcache-compile-node.exe') + '" --daemon'
+        $knownProperties['PACE_IMAGEPATH'] = '"' + (Join-Path $oldBin 'pace-kv.exe') + '" --daemon --service-name=pace-kv'
+        $knownProperties['PACE_NODE_IMAGEPATH'] = '#%"' + (Join-Path $oldBin 'pace-node.exe') + '" --daemon'
         try {
             $oldTarget = Format-Target $action.ExeCommand
             $quiet = Start-Target $oldTarget $workingDirectory
@@ -326,13 +326,13 @@ function Test-ScheduledBefore([string] $Earlier, [string] $Later) {
 #
 # Every action that names rollback state, by id, so a lost one AND a new one are both findings.
 $RollbackStateActions = @(
-    'FastCachedStashRegistration', 'FastCacheNodeStashRegistration',
-    'FastCachedStashFromCopy', 'FastCacheNodeStashFromCopy',
-    'FastCachedRestoreRegistrationExactly', 'FastCacheNodeRestoreRegistrationExactly',
-    'FastCachedStopForNode', 'FastCacheNodeStopForRestart',
-    'FastCachedRestartAfterStop', 'FastCacheNodeRestartAfterStop',
-    'FastCacheClearRollbackState', 'FastCacheDiscardRollbackState',
-    'FastCacheUndoRollbackState', 'FastCacheRemoveRollbackState')
+    'PaceStashRegistration', 'PaceNodeStashRegistration',
+    'PaceStashFromCopy', 'PaceNodeStashFromCopy',
+    'PaceRestoreRegistrationExactly', 'PaceNodeRestoreRegistrationExactly',
+    'PaceStopForNode', 'PaceNodeStopForRestart',
+    'PaceRestartAfterStop', 'PaceNodeRestartAfterStop',
+    'PaceClearRollbackState', 'PaceDiscardRollbackState',
+    'PaceUndoRollbackState', 'PaceRemoveRollbackState')
 
 # Does a registry element on $Owned cover $Key -- the key itself, a parent that removes it with
 # its subtree, or a child inside it? Registry names are case-INSENSITIVE, so the comparison is too.
@@ -343,9 +343,9 @@ function Test-RegistryKeyCovers([string] $Owned, [string] $Key) {
 }
 
 $failuresBeforeRollbackKey = $failures.Count
-$clear = $actions | Where-Object { $_.Id -eq 'FastCacheClearRollbackState' }
+$clear = $actions | Where-Object { $_.Id -eq 'PaceClearRollbackState' }
 if ($null -eq $clear -or $clear.ExeCommand -notmatch 'reg\.exe"?\s+delete\s+HKLM\\(\S+)\s') {
-    Fail 'FastCacheClearRollbackState does not delete an HKLM key, so the rollback key could not be read off it'
+    Fail 'PaceClearRollbackState does not delete an HKLM key, so the rollback key could not be read off it'
 } else {
     $rollbackKey = $Matches[1]
 
@@ -354,9 +354,9 @@ if ($null -eq $clear -or $clear.ExeCommand -notmatch 'reg\.exe"?\s+delete\s+HKLM
     $coverageRows = @(
         @{ Owned = ($rollbackKey.Substring(0, $rollbackKey.LastIndexOf('\'))).ToLowerInvariant(); Covers = $true },
         @{ Owned = $rollbackKey.ToUpperInvariant(); Covers = $true },
-        @{ Owned = "$rollbackKey\FastCached"; Covers = $true },
+        @{ Owned = "$rollbackKey\pace-kv"; Covers = $true },
         @{ Owned = "${rollbackKey}Elsewhere"; Covers = $false },
-        @{ Owned = 'SOFTWARE\fastcached\Installer'; Covers = $false }
+        @{ Owned = 'SOFTWARE\Pace\Installer'; Covers = $false }
     )
     foreach ($row in $coverageRows) {
         if ((Test-RegistryKeyCovers $row.Owned $rollbackKey) -ne $row.Covers) {
@@ -383,26 +383,26 @@ if ($null -eq $clear -or $clear.ExeCommand -notmatch 'reg\.exe"?\s+delete\s+HKLM
     # transaction's rollback runs in reverse, so the rollback delete is scheduled ahead of every
     # action that reads the key (the exact restores, the restarts), and each of them runs before
     # it in a rollback.
-    $undo = $actions | Where-Object { $_.Id -eq 'FastCacheUndoRollbackState' }
-    if ($null -eq $undo -or $undo.Execute -ne 'rollback' -or -not $schedule.ContainsKey('FastCacheUndoRollbackState')) {
-        Fail "FastCacheUndoRollbackState must be a scheduled rollback action, so it runs LAST in a rollback; it is '$($undo.Execute)' at '$($schedule['FastCacheUndoRollbackState'])'"
+    $undo = $actions | Where-Object { $_.Id -eq 'PaceUndoRollbackState' }
+    if ($null -eq $undo -or $undo.Execute -ne 'rollback' -or -not $schedule.ContainsKey('PaceUndoRollbackState')) {
+        Fail "PaceUndoRollbackState must be a scheduled rollback action, so it runs LAST in a rollback; it is '$($undo.Execute)' at '$($schedule['PaceUndoRollbackState'])'"
     } else {
         # Every OTHER rollback action that names rollback state reads it, so each is derived from
         # the table rather than listed again: a new one is ordered by this check the day it is added.
         $readers = @($actions | Where-Object {
-                $RollbackStateActions -contains $_.Id -and $_.Execute -eq 'rollback' -and $_.Id -ne 'FastCacheUndoRollbackState'
+                $RollbackStateActions -contains $_.Id -and $_.Execute -eq 'rollback' -and $_.Id -ne 'PaceUndoRollbackState'
             } | ForEach-Object { $_.Id })
         if ($readers.Count -eq 0) { Fail 'no rollback action reads the rollback key, so the ordering below judged nothing' }
-        $early = @($readers | Where-Object { -not (Test-ScheduledBefore 'FastCacheUndoRollbackState' $_) })
-        if ($early.Count -gt 0) { Fail "these read the rollback key but are not scheduled after FastCacheUndoRollbackState, so a rollback could run them after its delete: $($early -join ', ')" }
-        else { Pass 'FastCacheUndoRollbackState runs last in a rollback, after every action that reads the key' }
+        $early = @($readers | Where-Object { -not (Test-ScheduledBefore 'PaceUndoRollbackState' $_) })
+        if ($early.Count -gt 0) { Fail "these read the rollback key but are not scheduled after PaceUndoRollbackState, so a rollback could run them after its delete: $($early -join ', ')" }
+        else { Pass 'PaceUndoRollbackState runs last in a rollback, after every action that reads the key' }
     }
-    $remove = $fragment.SelectSingleNode('//InstallExecuteSequence/Custom[@Action="FastCacheRemoveRollbackState"]')
-    $removeAction = $actions | Where-Object { $_.Id -eq 'FastCacheRemoveRollbackState' }
+    $remove = $fragment.SelectSingleNode('//InstallExecuteSequence/Custom[@Action="PaceRemoveRollbackState"]')
+    $removeAction = $actions | Where-Object { $_.Id -eq 'PaceRemoveRollbackState' }
     if ($null -eq $remove -or $removeAction.Execute -ne 'deferred' -or $remove.Condition -ne 'REMOVE = "ALL" AND NOT UPGRADINGPRODUCTCODE') {
-        Fail "FastCacheRemoveRollbackState must be a deferred action conditioned 'REMOVE = `"ALL`" AND NOT UPGRADINGPRODUCTCODE': an upgrade's removal of the old product must not delete the copy taken before it"
+        Fail "PaceRemoveRollbackState must be a deferred action conditioned 'REMOVE = `"ALL`" AND NOT UPGRADINGPRODUCTCODE': an upgrade's removal of the old product must not delete the copy taken before it"
     } else {
-        Pass 'FastCacheRemoveRollbackState deletes the key on an uninstall, never in an upgrade''s removal of the old product'
+        Pass 'PaceRemoveRollbackState deletes the key on an uninstall, never in an upgrade''s removal of the old product'
     }
 }
 
@@ -417,9 +417,9 @@ if ($null -eq $clear -or $clear.ExeCommand -notmatch 'reg\.exe"?\s+delete\s+HKLM
 # back with NO service registered. Only the checked actions of OURS in that window are rows here. Each such action is a row here with its reason, and a row whose action is
 # no longer before the restores, or is gone, is refused as stale.
 $ChecksBeforeTheRestores = @{
-    FastCacheAwaitServiceExit = 'waits for the OLD product''s processes, so it must precede InstallFiles, which precedes WriteRegistryValues'
+    PaceAwaitServiceExit = 'waits for the OLD product''s processes, so it must precede InstallFiles, which precedes WriteRegistryValues'
 }
-$restores = @('FastCachedRestoreRegistrationExactly', 'FastCacheNodeRestoreRegistrationExactly')
+$restores = @('PaceRestoreRegistrationExactly', 'PaceNodeRestoreRegistrationExactly')
 $checked = @($actions | Where-Object {
         $_.Execute -in @('deferred', 'commit') -and $schedule.ContainsKey($_.Id) -and
         (-not $_.HasAttribute('Return') -or $_.Return -eq 'check')
@@ -469,17 +469,17 @@ if ($failures.Count -eq $failuresBeforeStarters) {
 # lines, so a new one is a finding rather than invisible; each deferred one is a row with its reason.
 #
 # THE BLIND SPOT, and the direction it fails in: the derivation recognises ONE spelling, `reg.exe
-# delete HKLM\SOFTWARE\fastcached\InstallerRollback` naming the whole key, the way every deleter in the
+# delete HKLM\SOFTWARE\Pace\InstallerRollback` naming the whole key, the way every deleter in the
 # fragment writes it today. A deleter spelled any other way -- PowerShell's Remove-Item, the
 # `HKEY_LOCAL_MACHINE\` form, a quoted key path, a delete of a SUBKEY, or a <RemoveRegistryKey>
 # element -- is not in the set at all, so this step fails OPEN for it: a deferred discard written
 # that way passes unseen. The positive control below does not close that; it only makes the step
 # refuse to pass when it found no commit-phase discard to judge.
 $DeferredStateDeleters = @{
-    FastCacheClearRollbackState  = 'empties the state BEFORE this transaction writes any, so an earlier transaction''s copy is never restored'
-    FastCacheRemoveRollbackState = 'an uninstall that is not an upgrade''s removal: no restore is armed in that transaction'
+    PaceClearRollbackState  = 'empties the state BEFORE this transaction writes any, so an earlier transaction''s copy is never restored'
+    PaceRemoveRollbackState = 'an uninstall that is not an upgrade''s removal: no restore is armed in that transaction'
 }
-$deleters = @($actions | Where-Object { $_.ExeCommand -match 'reg\.exe"?\s+delete\s+HKLM\\SOFTWARE\\fastcached\\InstallerRollback(\s|$)' })
+$deleters = @($actions | Where-Object { $_.ExeCommand -match 'reg\.exe"?\s+delete\s+HKLM\\SOFTWARE\\Pace\\InstallerRollback(\s|$)' })
 if ($deleters.Count -eq 0) { Fail 'no action deletes the rollback state, so step 11 judged nothing' }
 $failuresBeforeDiscard = $failures.Count
 foreach ($action in $deleters) {
@@ -490,7 +490,7 @@ foreach ($action in $deleters) {
         'rollback' { continue } # the undo, run only by a failed transaction
         default {
             if (-not $DeferredStateDeleters.ContainsKey($action.Id)) {
-                Fail "$($action.Id) deletes the rollback state as a '$($action.Execute)' action: a failure after it rolls back with nothing to restore. Make it Execute=`"commit`" -- or, if it must delete BEFORE the transaction can succeed (as FastCacheClearRollbackState empties the previous transaction's copy), add a `$DeferredStateDeleters row stating why; making that one a commit action would break it."
+                Fail "$($action.Id) deletes the rollback state as a '$($action.Execute)' action: a failure after it rolls back with nothing to restore. Make it Execute=`"commit`" -- or, if it must delete BEFORE the transaction can succeed (as PaceClearRollbackState empties the previous transaction's copy), add a `$DeferredStateDeleters row stating why; making that one a commit action would break it."
             }
         }
     }
@@ -503,7 +503,7 @@ foreach ($id in $DeferredStateDeleters.Keys) {
 # successful transaction leaves it behind. So the step also requires a SCHEDULED commit deleter.
 $discards = @($deleters | Where-Object { $_.Execute -eq 'commit' -and $schedule.ContainsKey($_.Id) })
 if ($discards.Count -eq 0) {
-    Fail 'no SCHEDULED commit action deletes the rollback state, so step 11 found no discard to judge and its pass would describe nothing: a successful transaction leaves the state behind. FastCacheDiscardRollbackState is the one expected, Execute="commit" with a Custom row.'
+    Fail 'no SCHEDULED commit action deletes the rollback state, so step 11 found no discard to judge and its pass would describe nothing: a successful transaction leaves the state behind. PaceDiscardRollbackState is the one expected, Execute="commit" with a Custom row.'
 }
 if ($failures.Count -eq $failuresBeforeDiscard) {
     Pass "the rollback state is discarded only in the commit phase: $($deleters.Count) deleter(s) judged, $($discards.Count) scheduled commit discard(s) ($(@($discards | ForEach-Object Id) -join ', ')), $($DeferredStateDeleters.Count) deferred deleter(s) are stated rows"
@@ -512,7 +512,7 @@ if ($failures.Count -eq $failuresBeforeDiscard) {
 # 12. A maintenance transaction resolves INSTALL_ROOT from the product's OWN install location.
 # CPack's properties.wxi sets it only from Uninstall\[WIX_UPGRADE_DETECTED], empty outside an
 # upgrade, so a repair, a feature change or an uninstall of a custom root fell back to the default
-# root: the uninstall ran a fastcached.exe that was not there and left the service registered
+# root: the uninstall ran a pace-kv.exe that was not there and left the service registered
 # (CI run 37456507637).
 #
 # The set is DERIVED: every scheduled action whose Directory is INSTALL_ROOT or whose command spells
@@ -581,12 +581,12 @@ if ($failures.Count -eq $failuresBeforeMaintenanceRoot) {
 # 13. Windows Installer's Restart Manager takes no part in a transaction. A silent install otherwise
 # ALWAYS uses it: at InstallValidate it shuts down a service holding a file the transaction replaces,
 # and at the end of the install it starts that service again, whatever the service table decided. CI
-# MEASURED on PR 1634 that the upgrade from 0.3.0 started FastCached after the table had made it manual
+# MEASURED on PR 1634 that the upgrade from 0.3.0 started pace-kv after the table had made it manual
 # and stopped it for the node, that it crash-looped on the port the node holds, and that a recovery
 # restart took that port during a later transaction, which failed with 1603. Its printed log then
 # MEASURED whose session that was: the OLD package's removal, nested in the upgrade, while this
 # package's own logged "Disabled" -- so this step is necessary and NOT sufficient, and step 14's
-# FastCachedDisableForNode is the other half (the comment on MSIRESTARTMANAGERCONTROL). Restart
+# PaceDisableForNode is the other half (the comment on MSIRESTARTMANAGERCONTROL). Restart
 # Manager's shutdown also comes before StopServices, so the ServiceControl rows find the service
 # stopped and record no rollback start.
 #
@@ -595,7 +595,7 @@ if ($failures.Count -eq $failuresBeforeMaintenanceRoot) {
 # than counted. Fails OPEN for a value a transform or a command line supplies, which no package check
 # can see; the MSI job's per-transaction judgement (Invoke-Msiexec) is what would see its effect.
 $failuresBeforeRestartManager = $failures.Count
-$restartManagerDefect = "Windows Installer's Restart Manager restarts a service the table left stopped: a silent install shuts each service holding a replaced file down at InstallValidate and starts it again at the end, whatever the service table decided, and because that shutdown comes before StopServices, the ServiceControl rows record no rollback start. (The stray start PR 1634 measured came from an OLD package's nested removal, which this property cannot reach; FastCachedDisableForNode answers that one, and this property is still required for the package's own session)"
+$restartManagerDefect = "Windows Installer's Restart Manager restarts a service the table left stopped: a silent install shuts each service holding a replaced file down at InstallValidate and starts it again at the end, whatever the service table decided, and because that shutdown comes before StopServices, the ServiceControl rows record no rollback start. (The stray start PR 1634 measured came from an OLD package's nested removal, which this property cannot reach; PaceDisableForNode answers that one, and this property is still required for the package's own session)"
 $restartManagerRows = @($fragment.SelectNodes("//Property[@Id='MSIRESTARTMANAGERCONTROL']"))
 if ($restartManagerRows.Count -ne 1) {
     Fail "$($restartManagerRows.Count) Property rows set MSIRESTARTMANAGERCONTROL, and exactly one must, Value=`"Disable`". $restartManagerDefect."
@@ -610,39 +610,39 @@ if ($failures.Count -eq $failuresBeforeRestartManager) {
     Pass 'Restart Manager takes no part in a transaction: one Property row sets MSIRESTARTMANAGERCONTROL to Disable, and no custom action sets it'
 }
 
-# 14. FastCachedDisableForNode disables only a registration that EXISTS (rm-nested review, I-1):
-# fastcached's registration is Return="ignore", so it may be absent, and a checked disable of an
+# 14. PaceDisableForNode disables only a registration that EXISTS (rm-nested review, I-1):
+# pace-kv's registration is Return="ignore", so it may be absent, and a checked disable of an
 # absent service failed the node's whole install. The command is started for real, with each service
 # name it spells swapped for one nothing registers, so neither run can change a service.
 $failuresBeforeDisable = $failures.Count
-$disable = $actions | Where-Object { $_.Id -eq 'FastCachedDisableForNode' }
+$disable = $actions | Where-Object { $_.Id -eq 'PaceDisableForNode' }
 if ($null -eq $disable) {
-    Fail 'FastCachedDisableForNode is not in the fragment, so nothing leaves fastcached disabled beside the node'
+    Fail 'PaceDisableForNode is not in the fragment, so nothing leaves pace-kv disabled beside the node'
 } else {
     $disableTarget = Format-Target $disable.ExeCommand
-    $absent = 'FastCacheAbsent' + [guid]::NewGuid().ToString('N').Substring(0, 12)
-    $queries = [regex]::Matches($disableTarget, '\bquery FastCached\b').Count
-    $configs = [regex]::Matches($disableTarget, '\bconfig FastCached\b').Count
+    $absent = 'PaceAbsent' + [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $queries = [regex]::Matches($disableTarget, '\bquery pace-kv\b').Count
+    $configs = [regex]::Matches($disableTarget, '\bconfig pace-kv\b').Count
     if ($queries -ne 1 -or $configs -ne 1) {
-        Fail "FastCachedDisableForNode spells 'query FastCached' $queries time(s) and 'config FastCached' $configs time(s); this step swaps exactly one of each, so it cannot run the command: $disableTarget"
+        Fail "PaceDisableForNode spells 'query pace-kv' $queries time(s) and 'config pace-kv' $configs time(s); this step swaps exactly one of each, so it cannot run the command: $disableTarget"
     } else {
         $swap = { param([string] $queried, [string] $configured)
-            $disableTarget -replace '\bquery FastCached\b', "query $queried" -replace '\bconfig FastCached\b', "config $configured" }
+            $disableTarget -replace '\bquery pace-kv\b', "query $queried" -replace '\bconfig pace-kv\b', "config $configured" }
         $whenAbsent = Start-Target (& $swap $absent $absent) $system64
         if ($whenAbsent -ne 0) {
-            Fail "FastCachedDisableForNode exited $whenAbsent for a service that is not registered; it must exit 0, or a refused fastcached registration (Return=`"ignore`") fails the node's whole install and rolls it back, naming this action rather than the refusal"
+            Fail "PaceDisableForNode exited $whenAbsent for a service that is not registered; it must exit 0, or a refused pace-kv registration (Return=`"ignore`") fails the node's whole install and rolls it back, naming this action rather than the refusal"
         }
         # The control: the query finds a service every host has, and the disable still names the
         # absent one, so the disable runs and fails (1060). A guard that ended the command whatever
         # the query answered would pass the run above and fail here.
         $whenPresent = Start-Target (& $swap 'EventLog' $absent) $system64
         if ($whenPresent -ne 1060) {
-            Fail "FastCachedDisableForNode exited $whenPresent when the queried service exists and the disable fails (1060 expected): a disable that fails on a registered fastcached must fail the action"
+            Fail "PaceDisableForNode exited $whenPresent when the queried service exists and the disable fails (1060 expected): a disable that fails on a registered pace-kv must fail the action"
         }
     }
 }
 if ($failures.Count -eq $failuresBeforeDisable) {
-    Pass 'FastCachedDisableForNode exits 0 for an unregistered service and fails with the disable on a registered one'
+    Pass 'PaceDisableForNode exits 0 for an unregistered service and fails with the disable on a registered one'
 }
 
 # Positive controls: a walk that found nothing reports nothing wrong about it.

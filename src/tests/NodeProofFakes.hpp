@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/NodeProof.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodeProof.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -21,7 +21,7 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/SecureRandomFakes.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file NodeProofFakes.hpp
@@ -123,4 +123,4 @@ struct CallerHandshake
         CompileCacheWire::EncodeProveNode(Distributed::MintNodeProof(TestKeyPair(machine), claimedId, request, reply)));
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

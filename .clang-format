@@ -70,7 +70,7 @@ UseTab: Never
 IncludeCategories:
   - Regex:     '^".*"'
     Priority:  0
-  - Regex:     '^<FastCache/'
+  - Regex:     '^<Pace/'
     Priority:  10
   - Regex:     '^<yaml-cpp/'
     Priority:  40

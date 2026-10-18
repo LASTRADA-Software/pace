@@ -8,7 +8,7 @@
 #
 # ## The distinction the seam cannot draw
 #
-# `fastcached_work_tree_state` answers in three words, and `no-git` is three situations:
+# `pace_work_tree_state` answers in three words, and `no-git` is three situations:
 #
 #   * git is not installed, or cannot run at all;
 #   * this directory is in no repository -- an exported source tarball;
@@ -37,25 +37,25 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-repository-hygiene.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-repository-hygiene.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
 # The staged trees must not be INSIDE a repository, and by default they are.
 #
-# `FASTCACHED_SCRATCH_DIR` is under the build directory, which for this project's own
+# `PACE_SCRATCH_DIR` is under the build directory, which for this project's own
 # presets is `out/build/...` -- inside the checkout. So `git rev-parse` started in a
 # staged "tarball" tree walks UP, finds the real repository, and answers `work-tree`:
 # the state this fixture meant to arrange never existed, and state 2 failed against a
@@ -66,7 +66,7 @@ endif()
 # `GIT_CEILING_DIRECTORIES` stops the upward walk. It is exported to this process, so
 # every `git` below -- the ones this file runs and the ones the check runs -- inherits
 # it.
-set(ENV{GIT_CEILING_DIRECTORIES} "${FASTCACHED_SCRATCH_DIR}")
+set(ENV{GIT_CEILING_DIRECTORIES} "${PACE_SCRATCH_DIR}")
 
 find_program(GIT_EXECUTABLE NAMES git)
 if(NOT GIT_EXECUTABLE)
@@ -92,7 +92,7 @@ function(RunCheck name tree gitExecutable outFlat)
         set(gitArg "-DGIT_EXECUTABLE=${gitExecutable}")
     endif()
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "${gitArg}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "${gitArg}"
                 -P "${check}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err)
     set(combined "${out}${err}")
@@ -148,11 +148,11 @@ endfunction()
 # State 1 -- a real checkout. The accepting direction, and it is not decoration: every
 # case below is a way of NOT running the rule, so without this one a check that refused
 # or skipped unconditionally would pass the lot.
-set(tree "${FASTCACHED_SCRATCH_DIR}/work-tree")
+set(tree "${PACE_SCRATCH_DIR}/work-tree")
 file(REMOVE_RECURSE "${tree}")
 file(MAKE_DIRECTORY "${tree}/scripts")
 file(WRITE "${tree}/scripts/ordinary.sh" "#!/usr/bin/env bash\necho hello\n")
-fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
 execute_process(COMMAND ${scratchGit} init -q "${tree}" OUTPUT_QUIET ERROR_QUIET)
 execute_process(COMMAND ${scratchGit} -C "${tree}" add -A OUTPUT_QUIET ERROR_QUIET)
 RunCheck("work-tree" "${tree}" "-" flat)
@@ -163,7 +163,7 @@ ExpectVerdict("state 1: a checkout is inspected and accepted" "${flat}" "pass" "
 # must stay a skip. The registration in `src/tests/CMakeLists.txt` is written around
 # this case, so turning `no-git` into a refusal outright -- which is the obvious reading
 # of "git could not answer is an environment fault" -- would have failed every tarball.
-set(tarball "${FASTCACHED_SCRATCH_DIR}/tarball")
+set(tarball "${PACE_SCRATCH_DIR}/tarball")
 file(REMOVE_RECURSE "${tarball}")
 file(MAKE_DIRECTORY "${tarball}/scripts")
 file(WRITE "${tarball}/scripts/ordinary.sh" "#!/usr/bin/env bash\necho hello\n")
@@ -180,7 +180,7 @@ if(tarballStatus EQUAL 0 AND tarballInsideTree STREQUAL "true")
         "the staged tarball tree at ${tarball} is INSIDE a git work tree, so the state "
         "this case exists to drive cannot be arranged here and the case would report a "
         "defect in the check rather than in this fixture. GIT_CEILING_DIRECTORIES was "
-        "set to ${FASTCACHED_SCRATCH_DIR} and did not stop git's upward walk -- check "
+        "set to ${PACE_SCRATCH_DIR} and did not stop git's upward walk -- check "
         "that the scratch path is absolute and unsymlinked.")
 endif()
 RunCheck("tarball" "${tarball}" "-" flat)
@@ -194,11 +194,11 @@ ExpectVerdict("state 2: a tree with no `.git` at all is skipped" "${flat}" "skip
 # Byte-identical to state 2 as far as git is concerned -- both answer `no-git`, both from
 # a `rev-parse` exiting 128 with "not a git repository" -- which is why this needs the
 # `.git` entry to be told apart and why it skipped for years.
-set(broken "${FASTCACHED_SCRATCH_DIR}/broken-pointer")
+set(broken "${PACE_SCRATCH_DIR}/broken-pointer")
 file(REMOVE_RECURSE "${broken}")
 file(MAKE_DIRECTORY "${broken}/scripts")
 file(WRITE "${broken}/scripts/ordinary.sh" "#!/usr/bin/env bash\necho hello\n")
-file(WRITE "${broken}/.git" "gitdir: ${FASTCACHED_SCRATCH_DIR}/no-such-gitdir-anywhere\n")
+file(WRITE "${broken}/.git" "gitdir: ${PACE_SCRATCH_DIR}/no-such-gitdir-anywhere\n")
 RunCheck("broken-pointer" "${broken}" "-" flat)
 ExpectVerdict("state 3: a checkout git cannot read is REFUSED, not skipped"
     "${flat}" "refuse" "repair-worktree-pointers.sh")

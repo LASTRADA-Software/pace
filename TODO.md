@@ -9,14 +9,14 @@ What are the pros and cons of each algorithm in terms of compression ratio, spee
 
 ---
 
-- [ ] CoW storage needs to expose the on-disk format version, such that we can identify old stores on newer fastcached versions with a newer on-disk format (to gracefully bail, or migrate)
+- [ ] CoW storage needs to expose the on-disk format version, such that we can identify old stores on newer pace-kv versions with a newer on-disk format (to gracefully bail, or migrate)
 - [ ] Add valgrind memcheck CI job to ensure no memory issues on clang release build
-- [ ] Github CI should create a static `fastcached` binary and provide it as artifact.
-- [ ] Add `fastcached stats` command to show in-process stats of the currently running instance (assuming we auto-detect it via config file)
-- [ ] Add `fastcached live-stats` command to show in-process stats live on the terminal (using Sixels, if supported by the connected terminal, otherwise Unicode or ASCII art)
+- [ ] Github CI should create a static `pace-kv` binary and provide it as artifact.
+- [ ] Add `pace-kv stats` command to show in-process stats of the currently running instance (assuming we auto-detect it via config file)
+- [ ] Add `pace-kv live-stats` command to show in-process stats live on the terminal (using Sixels, if supported by the connected terminal, otherwise Unicode or ASCII art)
 - [x] Reactor `UpdateInterest` swallows real `kevent`/`epoll_ctl` failures — surface them instead of stalling. See risk note below. **Done** — and the hazard was not hypothetical: `KqueueReactor::UpdateInterest` submitted both filter changes in one `kevent()` changelist with no eventlist, so the benign `ENOENT` on the `EVFILT_READ` delete aborted the batch before the `EVFILT_WRITE` add was applied. Every reply too large for the socket send buffer parked forever. Fixed with `EV_RECEIPT` (per-change results, no early abort); park sites now fail the awaitable instead of suspending when arming fails. Regression tests in `Net/KqueueSocket_test.cpp`.
 - [ ] **Data-driven `ConfigMerge` (review follow-up — Group D #12).**
-      The current `Merge()` in `src/FastCache/Config/ConfigMerge.cpp` is 25
+      The current `Merge()` in `src/Pace/Config/ConfigMerge.cpp` is 25
       hand-rolled if-branches; adding a Config field requires touching
       Config + CliResult bit + CliParser + YamlReader + Merge, and the
       `lruRecency` / `cpuAffinity` silent-drop bug from the
@@ -28,7 +28,7 @@ What are the pros and cons of each algorithm in terms of compression ratio, spee
       referenced by exactly one descriptor — that guard fails fast the next
       time someone adds a field without wiring it into Merge.
 - [ ] **Startup-failure log on partial bind (review follow-up — Group D #14).**
-      `RunMultiReactorPosix` in `src/FastCache/Server/ReactorServerLoop.cpp`
+      `RunMultiReactorPosix` in `src/Pace/Server/ReactorServerLoop.cpp`
       binds `reactorCount × binds` listeners. When one bind fails mid-loop,
       the function logs a generic "cannot bind A:P on reactor R" and
       returns; the storage chain and reloader thread are already running.
@@ -45,7 +45,7 @@ What are the pros and cons of each algorithm in terms of compression ratio, spee
       `PATCH /v1/keys/:k` (CAS), `POST /v1/batch`, `GET /stats`, `GET /healthz`.
       Unlocks curl, browser `fetch`, serverless platforms that ban raw TCP,
       k8s sidecars, Prometheus-style scrapers. Architecture: new
-      `HttpRest` `IProtocolHandler` under `src/FastCache/Protocol/` —
+      `HttpRest` `IProtocolHandler` under `src/Pace/Protocol/` —
       verb routing must be data-driven (descriptor table of
       `{method, path-shape, engine-call}`, **not** a hand-rolled
       `if`/`switch` ladder). Listener selection: introduce

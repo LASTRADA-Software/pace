@@ -23,11 +23,11 @@
 #
 # ## What it matches
 #
-# Over each `*_test.cpp` with its comments removed (`fastcached_strip_comments`), so prose
+# Over each `*_test.cpp` with its comments removed (`pace_strip_comments`), so prose
 # about the interface is not read as implementing it:
 #
 #   a `class` or `struct` whose base clause names `IMembershipOracle`, in any spelling
-#   (`IMembershipOracle`, `Distributed::IMembershipOracle`, `FastCache::Distributed::...`),
+#   (`IMembershipOracle`, `Distributed::IMembershipOracle`, `Pace::Distributed::...`),
 #   with or without `final`, and with or without an access specifier.
 #
 # The base clause is bounded by `[^;{]*`, which cannot cross a `;` or a `{` -- so the match is
@@ -63,8 +63,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "membership-fakes: FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "membership-fakes: PACE_SOURCE_DIR must be set")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
@@ -72,8 +72,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # ---------------------------------------------------------------------------
 # Where the shared fakes live. Overridable ONLY so the self-test can stage a tree; a real run
 # never sets it, and the default is the claim.
-if(NOT DEFINED FASTCACHED_MEMBERSHIP_FAKES)
-    set(FASTCACHED_MEMBERSHIP_FAKES "src/tests/MembershipFakes.hpp")
+if(NOT DEFINED PACE_MEMBERSHIP_FAKES)
+    set(PACE_MEMBERSHIP_FAKES "src/tests/MembershipFakes.hpp")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ endif()
 # alternative to an escape hatch is somebody deleting the check, and because a row nobody can
 # write is a rule nobody can be held to. A row is `<path>|<reason>`; the reason is a forcing
 # function, so a row without one does not parse.
-set(FastCachedMembershipFakeExemptions)
+set(PaceMembershipFakeExemptions)
 
 # The one derivation pattern. `[^;{]*` bounds the base clause, so the match is the declaration
 # and a wrapped one is still one match.
@@ -98,10 +98,10 @@ set(derivationPattern
 # nothing to refuse, and this check's whole subject is a shape nobody noticed. So it must first
 # find the shared fakes themselves: the same pattern, over the header it is pointing everybody
 # at. If that comes back short, the pattern or the header moved and no verdict is available.
-set(fakesPath "${FASTCACHED_SOURCE_DIR}/${FASTCACHED_MEMBERSHIP_FAKES}")
+set(fakesPath "${PACE_SOURCE_DIR}/${PACE_MEMBERSHIP_FAKES}")
 if(NOT EXISTS "${fakesPath}")
     message("")
-    message("  The shared fakes header is missing: ${FASTCACHED_MEMBERSHIP_FAKES}")
+    message("  The shared fakes header is missing: ${PACE_MEMBERSHIP_FAKES}")
     message("")
     message("This check tells every test file to use that header, so it cannot conclude anything")
     message("while the header is not there -- a clean run would be advice to include a file that")
@@ -110,12 +110,12 @@ if(NOT EXISTS "${fakesPath}")
 endif()
 
 file(READ "${fakesPath}" fakesWhole)
-fastcached_strip_comments("${fakesWhole}" fakesCode)
+pace_strip_comments("${fakesWhole}" fakesCode)
 string(REGEX MATCHALL "${derivationPattern}" fakesFound "${fakesCode}")
 list(LENGTH fakesFound fakesCount)
 if(fakesCount LESS 2)
     message("")
-    message("  ${FASTCACHED_MEMBERSHIP_FAKES} defines ${fakesCount} `IMembershipOracle` implementation(s),")
+    message("  ${PACE_MEMBERSHIP_FAKES} defines ${fakesCount} `IMembershipOracle` implementation(s),")
     message("  and this check's own pattern is what found that number. Two are expected:")
     message("  `ListedMembership` (admits from a host list) and `FixedMembership` (one verdict).")
     message("")
@@ -130,7 +130,7 @@ endif()
 # The file set. The question is this check's own -- every first-party Catch2 test source -- and
 # it is asked through the shared machinery so the walk fallback, the exclusions and the
 # work-tree probe are not a seventh copy.
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src"
     GLOBS "src/*_test.cpp" "src/**/*_test.cpp"
     FILTER "_test\\.cpp$"
@@ -156,7 +156,7 @@ endif()
 # ---------------------------------------------------------------------------
 # The exemption rows, parsed before the scan so a malformed row fails loudly rather than
 # silently exempting nothing.
-fastcached_split_rows(FastCachedMembershipFakeExemptions exemptPaths exemptReasons)
+pace_split_rows(PaceMembershipFakeExemptions exemptPaths exemptReasons)
 list(LENGTH exemptPaths exemptionCount)
 set(exemptionsUsed "")
 
@@ -166,10 +166,10 @@ set(violations "")
 set(violationCount 0)
 
 foreach(testFile IN LISTS testFiles)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${testFile}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${testFile}")
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${testFile}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${testFile}" wholeFile)
     # Whole-file filter first: a file that never names the interface has nothing to say, and
     # stripping comments over every test source is the expensive part.
     string(FIND "${wholeFile}" "IMembershipOracle" mentionAt)
@@ -177,7 +177,7 @@ foreach(testFile IN LISTS testFiles)
         continue()
     endif()
 
-    fastcached_strip_comments("${wholeFile}" code)
+    pace_strip_comments("${wholeFile}" code)
     string(REGEX MATCHALL "${derivationPattern}" found "${code}")
     if(NOT found)
         continue()
@@ -213,7 +213,7 @@ if(NOT violations STREQUAL "")
     message("")
     message("A test file defines its own `IMembershipOracle`:${violations}")
     message("")
-    message("Use the shared fakes in ${FASTCACHED_MEMBERSHIP_FAKES}:")
+    message("Use the shared fakes in ${PACE_MEMBERSHIP_FAKES}:")
     message("")
     message("  * `Testing::ListedMembership { { hosts... }, <participant> }` -- admits the hosts it")
     message("    lists, and `Remove(host)` stops admitting one mid-case;")
@@ -228,7 +228,7 @@ if(NOT violations STREQUAL "")
     message("that reason is about your arrangement, not about the fake, so it stays with you.")
     message("")
     message("A fake that genuinely belongs to one file takes a row in")
-    message("FastCachedMembershipFakeExemptions with the reason it does, in")
+    message("PaceMembershipFakeExemptions with the reason it does, in")
     message("${CMAKE_CURRENT_LIST_FILE}. The table is empty today, so a first row is a decision")
     message("somebody should read rather than a formality.")
     message("")
@@ -238,7 +238,7 @@ endif()
 
 if(NOT staleRows STREQUAL "")
     message("")
-    message("FastCachedMembershipFakeExemptions has STALE row(s) matching no fake:${staleRows}")
+    message("PaceMembershipFakeExemptions has STALE row(s) matching no fake:${staleRows}")
     message("")
     message("The fake was shared, moved or deleted. Remove the row -- a standing exemption for a")
     message("site that is gone would wave the next one of that path through silently.")
@@ -253,5 +253,5 @@ if(refused)
 endif()
 
 message(STATUS
-    "membership-fakes: ${fakesCount} shared fake(s) in ${FASTCACHED_MEMBERSHIP_FAKES}, no test file "
+    "membership-fakes: ${fakesCount} shared fake(s) in ${PACE_MEMBERSHIP_FAKES}, no test file "
     "defines its own across ${fileCount} file(s) via ${scanMode}, ${exemptionCount} exemption row(s)")

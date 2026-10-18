@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Server/Connection.hpp>
+#include <Pace/Server/Server.hpp>
+#include <Pace/Transport/AcceptLoopReporter.hpp>
+
+#include <memory>
+#include <optional>
+#include <utility>
+
+#include <core/net/EventLoop.hpp>
+#include <core/net/ITlsContext.hpp>
+
+namespace Pace
+{
+
+namespace
+{
+
+    /// Per-connection coroutine. Self-owning via DetachedTask; the unique_ptr
+    /// ensures the Connection object is freed when the coroutine ends.
+    /// Admission and metrics observers are passed by raw pointer (may be
+    /// null) so Connection cleanup decrements the admission gate.
+    ///
+    /// The body is wrapped in a catch-all firewall: this coroutine is a
+    /// DetachedTask, whose `unhandled_exception` calls std::terminate, so an
+    /// exception escaping a handler (e.g. std::bad_alloc while serving a large
+    /// value) would take down the entire daemon and every other connection.
+    /// We instead log it and drop only this connection.
+    /// @param lease The connection's admission slot, given back when this frame ends -- on every
+    ///        path, a destroyed frame's included -- or nothing when no policy is configured.
+    core::async::DetachedTask RunConnectionDetached(std::unique_ptr<Connection> connection,
+                                                    ILogger* logger,
+                                                    std::optional<core::net::AdmissionLease> lease)
+    {
+        try
+        {
+            co_await connection->Run();
+        }
+        catch (...)
+        {
+            LogConnectionFirewallException(*logger);
+        }
+        static_cast<void>(lease);
+        co_return;
+    }
+
+    /// Holds an `accepting` flag true for as long as an accept loop is running.
+    ///
+    /// RAII rather than a store beside each `co_return`, because the loop can also
+    /// end by its coroutine frame being destroyed while suspended -- at which point
+    /// a flag set by hand would go on claiming the acceptor is armed, and the
+    /// readiness line it feeds would be a claim about a loop that no longer exists.
+    class AcceptingScope
+    {
+      public:
+        /// @param flag Set true now and false when this object dies.
+        explicit AcceptingScope(std::atomic<bool>& flag) noexcept:
+            _flag { flag }
+        {
+            _flag.store(true, std::memory_order_release);
+        }
+        AcceptingScope(AcceptingScope const&) = delete;
+        AcceptingScope(AcceptingScope&&) = delete;
+        AcceptingScope& operator=(AcceptingScope const&) = delete;
+        AcceptingScope& operator=(AcceptingScope&&) = delete;
+        ~AcceptingScope()
+        {
+            _flag.store(false, std::memory_order_release);
+        }
+
+      private:
+        std::atomic<bool>& _flag;
+    };
+
+} // namespace
+
+Server::Server(core::net::IListener& listener,
+               CacheEngine& engine,
+               ILogger& logger,
+               core::net::AcceptLoopHealth& acceptLoops,
+               std::string surface,
+               core::net::IAdmissionControl* admission,
+               IMetricsSink* metrics,
+               SessionContext session,
+               core::net::ITlsContext* tls,
+               LogSource logSource) noexcept:
+    _listener { listener },
+    _engine { engine },
+    _logger { logger },
+    _acceptLoops { acceptLoops },
+    _surface { std::move(surface) },
+    _admission { admission },
+    _metrics { metrics },
+    _session { session },
+    _tls { tls },
+    _logSource { logSource }
+{
+}
+
+core::async::Task<void> Server::Run()
+{
+    // Declared before the loop so it is already true at the first suspend: the
+    // caller that started this coroutine resumes the moment `Accept()` parks, and
+    // what it needs to know then is that the accept is registered rather than that
+    // `Run()` was called. See `IsAccepting()`.
+    AcceptingScope const accepting { _accepting };
+    // `core::net::AcceptErrorPolicy` decides, as it does for every accept loop in the tree, and
+    // `AcceptLoopReporter` says so: only a closed or dead listener ends this loop. It used to end on
+    // ANY failed accept, at `Debug` -- a client that reset its queued connection stopped the bind
+    // for as long as the daemon ran.
+    AcceptLoopReporter acceptErrors { _surface, _surface, _logger, _acceptLoops };
+    // The reactor's clock where there is one, and the blocking wait's own where there is not, so
+    // the rate limit and the backoff read the same seam that paces them.
+    auto const now = [this] {
+        return _session.reactor != nullptr ? _session.reactor->clock().now() : DefaultDrainWait().Now();
+    };
+    while (!_shuttingDown.load(std::memory_order_acquire))
+    {
+        auto accepted = co_await _listener.accept();
+        if (!accepted.has_value())
+        {
+            auto const step = acceptErrors.OnError(accepted.error(), now(), _shuttingDown.load(std::memory_order_acquire));
+            if (step.next == AcceptLoopNext::EndAndClose)
+                _listener.close();
+            if (step.next != AcceptLoopNext::AcceptAgain)
+                co_return;
+            co_await WaitOutBackoff(_session.reactor, &DefaultDrainWait(), step.delay);
+            continue;
+        }
+        acceptErrors.OnAccepted(now());
+
+        // Admission control: refuse if the cap is full. We still accepted
+        // the socket (the OS already did the SYN-ACK), so close it and
+        // count the rejection. We also bump a TLS-specific counter when
+        // this Server is wrapping accepted sockets in TLS, so operators
+        // can attribute traffic to plaintext vs TLS without a per-bind
+        // metrics label dimension.
+        // Admitted and counted in one step (`core::net::IAdmissionControl::tryAdmit`), so two
+        // loops sharing a policy cannot both take its last slot.
+        auto lease = _admission != nullptr ? _admission->tryAdmit() : std::nullopt;
+        if (_admission != nullptr && !lease.has_value())
+        {
+            if (_metrics)
+            {
+                _metrics->Increment(IMetricsSink::Counter::ConnectionsAdmissionRejected);
+                if (_tls != nullptr)
+                    _metrics->Increment(IMetricsSink::Counter::ConnectionsAdmissionRejectedTls);
+            }
+            (*accepted)->close();
+            continue;
+        }
+
+        _accepted.fetch_add(1, std::memory_order_relaxed);
+        if (_metrics)
+        {
+            _metrics->Increment(IMetricsSink::Counter::ConnectionsTotal);
+            if (_tls != nullptr)
+                _metrics->Increment(IMetricsSink::Counter::ConnectionsTotalTls);
+        }
+
+        auto socket = std::move(*accepted);
+        if (_tls != nullptr)
+        {
+            // The TLS socket resumes its own waiters on the loop the connection is pinned to.
+            if (_session.reactor == nullptr)
+            {
+                _logger.Logf(LogLevel::Error, "Server: a TLS connection needs the loop it is pinned to; dropping it");
+                socket->close();
+                continue;
+            }
+            socket = _tls->wrap(std::move(socket), *_session.reactor);
+        }
+        auto connection = std::make_unique<Connection>(
+            std::move(socket),
+            ConnectionHoldings { .engine = _engine, .logger = _logger, .session = _session, .logSource = _logSource });
+        RunConnectionDetached(std::move(connection), &_logger, std::move(lease));
+    }
+    // Shut down between accepts: a loop that was degraded says it stopped.
+    acceptErrors.OnLoopEnded();
+    co_return;
+}
+
+void Server::Shutdown() noexcept
+{
+    _shuttingDown.store(true, std::memory_order_release);
+    _listener.close();
+}
+
+} // namespace Pace

@@ -3,7 +3,7 @@
 # No first-party C++ calls a range algorithm that core-cpp's `<core/Ranges.hpp>` wraps
 # directly: `std::ranges::iota` is spelled `core::ranges::Iota`, `std::ranges::fold_left`
 # is spelled `core::ranges::FoldLeft`, and so on for every facility that header wraps. It was
-# `src/FastCache/Core/Ranges.hpp` until #1596 moved it into core-cpp; see `seamHeader` below.
+# `src/Pace/Core/Ranges.hpp` until #1596 moved it into core-cpp; see `seamHeader` below.
 #
 # ## Why the seam exists
 #
@@ -46,7 +46,7 @@
 # this check derives no row from is REFUSED, never read as "nothing to enforce".
 #
 # A USE is `ranges::<name>` followed by something that cannot continue an identifier, in code
-# with comments stripped (`fastcached_scan_code_lines`, `scripts/lib/CheckCommon.cmake`). So
+# with comments stripped (`pace_scan_code_lines`, `scripts/lib/CheckCommon.cmake`). So
 # `std::ranges::iota` and a bare `ranges::iota` under a `using namespace std;` are refused, and
 # `std::views::iota` and `std::ranges::iota_view` -- C++20, shipped everywhere -- are not.
 # The seam spelling differs by CASE (`Ranges::Iota`), which is what lets one case-sensitive
@@ -79,7 +79,7 @@
 # failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> [-DGIT_EXECUTABLE=<git>] -P scripts/check-ranges-seam.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> [-DGIT_EXECUTABLE=<git>] -P scripts/check-ranges-seam.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -87,45 +87,45 @@ cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # The one path this check is anchored on. Its test is DERIVED from it.
 #
 # **Or the header is somebody else's, and then nothing in this tree is exempt.** Since #1596 the
 # seam is core-cpp's `<core/Ranges.hpp>` (`core::ranges::Iota`, `core::ranges::FoldLeft`), and
-# the ctest registration passes its absolute path as FASTCACHED_RANGES_SEAM_HEADER. The header and
+# the ctest registration passes its absolute path as PACE_RANGES_SEAM_HEADER. The header and
 # its test are core-cpp's to keep, so the in-tree exemption has no subject and every first-party
 # file is scanned. Unset, the check reads an in-tree seam, which is what its self-test stages.
-if(DEFINED FASTCACHED_RANGES_SEAM_HEADER)
-    if(NOT EXISTS "${FASTCACHED_RANGES_SEAM_HEADER}")
+if(DEFINED PACE_RANGES_SEAM_HEADER)
+    if(NOT EXISTS "${PACE_RANGES_SEAM_HEADER}")
         message("")
-        message("  ${FASTCACHED_RANGES_SEAM_HEADER} does not exist.")
+        message("  ${PACE_RANGES_SEAM_HEADER} does not exist.")
         message("")
         message("This check reads the wrapped facilities from core-cpp's seam header. With it gone")
         message("it cannot say what to refuse -- a moved or renamed seam, not a clean tree.")
-        message(FATAL_ERROR "ranges-seam: the seam header ${FASTCACHED_RANGES_SEAM_HEADER} is missing and the scan cannot conclude")
+        message(FATAL_ERROR "ranges-seam: the seam header ${PACE_RANGES_SEAM_HEADER} is missing and the scan cannot conclude")
     endif()
-    set(seamHeader "${FASTCACHED_RANGES_SEAM_HEADER}")
-    set(seamHeaderPath "${FASTCACHED_RANGES_SEAM_HEADER}")
+    set(seamHeader "${PACE_RANGES_SEAM_HEADER}")
+    set(seamHeaderPath "${PACE_RANGES_SEAM_HEADER}")
     set(seamTest "")
     set(seamSpelling "core::ranges")
     set(seamInclude "core/Ranges.hpp")
     set(anchors "")
     set(exemptExpected 0)
 else()
-    set(seamHeader "src/FastCache/Core/Ranges.hpp")
-    set(seamHeaderPath "${FASTCACHED_SOURCE_DIR}/${seamHeader}")
+    set(seamHeader "src/Pace/Core/Ranges.hpp")
+    set(seamHeaderPath "${PACE_SOURCE_DIR}/${seamHeader}")
     string(REGEX REPLACE "\\.hpp$" "_test.cpp" seamTest "${seamHeader}")
-    set(seamSpelling "FastCache::Ranges")
-    set(seamInclude "FastCache/Core/Ranges.hpp")
+    set(seamSpelling "Pace::Ranges")
+    set(seamInclude "Pace/Core/Ranges.hpp")
     set(anchors "${seamHeader};${seamTest}")
     set(exemptExpected 2)
 endif()
 
 foreach(anchor IN LISTS anchors)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${anchor}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${anchor}")
         message("")
         message("  ${anchor} does not exist.")
         message("")
@@ -180,7 +180,7 @@ string(REPLACE ";" ", " rowSummaryText "${rowSummaries}")
 
 # ---------------------------------------------------------------------------
 # Which C++ this repository holds, asked of git, then narrowed to what it OWNS by the
-# third-party roots -- through `fastcached_first_party_cxx`, which is the ONE answer to that
+# third-party roots -- through `pace_first_party_cxx`, which is the ONE answer to that
 # question (#1485). The extension set that used to live here included `.ipp` and `.inl`, so
 # it moved INTO the helper rather than the helper's narrower set being adopted here: this
 # tree tracks none of either today, so a verbatim migration would have selected the identical
@@ -190,7 +190,7 @@ string(REPLACE ";" ", " rowSummaryText "${rowSummaries}")
 # has three values, not two, and the walk's fallback exists for a source export with no index
 # -- which holds no build tree and no dependency cache by construction, and that is what makes
 # the walk sound there and unsound in a working checkout.
-fastcached_first_party_cxx("${FASTCACHED_SOURCE_DIR}" sourceFiles declinedFiles scanSource)
+pace_first_party_cxx("${PACE_SOURCE_DIR}" sourceFiles declinedFiles scanSource)
 list(LENGTH declinedFiles declinedCount)
 
 if(NOT sourceFiles)
@@ -198,7 +198,7 @@ if(NOT sourceFiles)
     message("  No first-party C++ source was found in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved source")
-    message("root, a FASTCACHED_SOURCE_DIR pointing somewhere else, or a third-party root")
+    message("root, a PACE_SOURCE_DIR pointing somewhere else, or a third-party root")
     message("that swallowed the whole tree.")
     message(FATAL_ERROR "ranges-seam: the scan matched no first-party C++ sources and cannot conclude")
 endif()
@@ -217,18 +217,18 @@ foreach(relative IN LISTS sourceFiles)
     endif()
     # The index can name a file deleted from the worktree and not yet staged; reading it
     # would print `CMake Error`, which would score as THIS check failing for another reason.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
 
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
     foreach(standardName IN LISTS rowNames)
         # A whole-file test first; the line walk is quadratic and almost no file needs it.
         string(FIND "${wholeFile}" "ranges::${standardName}" tokenPosition)
         if(tokenPosition EQUAL -1)
             continue()
         endif()
-        fastcached_scan_code_lines("${wholeFile}" "ranges::${standardName}([^A-Za-z0-9_]|$)" hits)
+        pace_scan_code_lines("${wholeFile}" "ranges::${standardName}([^A-Za-z0-9_]|$)" hits)
         foreach(hit IN LISTS hits)
             if(hit MATCHES "^use:([0-9]+)$")
                 list(APPEND violations "${relative}:${CMAKE_MATCH_1}|${standardName}")

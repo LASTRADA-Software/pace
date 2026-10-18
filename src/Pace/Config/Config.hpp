@@ -1,0 +1,450 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Platform/HostMemory.hpp>
+#include <Pace/Transport/ListenQueue.hpp>
+
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace Pace
+{
+
+/// pace-kv's own TCP port: 6674, the leading digits of the gravitational
+/// constant G = 6.674e-11.
+///
+/// Deliberately *not* memcached's 11211 nor redis's 6379. The daemon detects
+/// the wire format per connection, so the port number selects no protocol —
+/// memcached text, memcached binary, RESP and the 0xFC compile-cache protocol
+/// are all served here. Borrowing another project's registered port only
+/// suggested otherwise, and collided with a real memcached on the same host.
+///
+/// Chosen so it stays bindable everywhere: unassigned in the IANA service-name
+/// registry, above the privileged floor (no CAP_NET_BIND_SERVICE), and below
+/// Linux's ephemeral range (`ip_local_port_range` starts at 32768) so it cannot
+/// lose a race against an outbound connection's source port.
+inline constexpr std::uint16_t DefaultPort { 6674 };
+
+/// TCP port for the admin HTTP endpoint (`/metrics`, `/healthz`). Separate from
+/// `DefaultPort` so the admin surface never shares a listener with the cache
+/// protocols.
+inline constexpr std::uint16_t DefaultMetricsPort { 9259 };
+
+/// Default period of the active expiry sweep. Zero would disable it.
+///
+/// Spelled here and `static_assert`ed against `ExpiryReaperOptions` where the
+/// two meet, rather than written twice: `Config` must not depend on `Cache/`,
+/// and two independently-maintained copies of a default is how the CLI's
+/// advertised default stops matching what the daemon actually does.
+inline constexpr std::chrono::milliseconds DefaultActiveExpiryInterval { 1000 };
+
+/// Default number of entries one expiry sweep examines per shard.
+inline constexpr std::size_t DefaultActiveExpiryScanBudget { 512 };
+
+/// One listener flag, and what an endpoint declared with it serves.
+///
+/// The single source of truth for the mapping between a `--listen*` spelling and
+/// a `BindConfig`, in **both** directions: `CliParser` binds a parser to each row,
+/// and `BuildServiceArgv` spells a bind back out by finding its row. Those two
+/// must agree or a daemon registers with a listener set it will not accept back —
+/// which is the class of defect `FormatListenHost` and `MaybeQuote` already exist
+/// to prevent, reached through a different door.
+///
+/// It was a `bind.tls ? "listen-tls" : "listen"` ternary in each place while there
+/// were two kinds. A third made that a three-way conditional in three files, which
+/// is the shape a table replaces.
+struct ListenerFlagSpec
+{
+    std::string_view flag; ///< Flag spelling, without the leading `--`.
+    bool tls;              ///< Whether accepted sockets are TLS-wrapped.
+};
+
+/// Every listener flag. Order is documentation order; lookup is by content.
+inline constexpr std::array<ListenerFlagSpec, 2> ListenerFlags {
+    ListenerFlagSpec { .flag = "listen", .tls = false },
+    ListenerFlagSpec { .flag = "listen-tls", .tls = true },
+};
+
+struct BindConfig
+{
+    /// Bind address: IPv4/IPv6 literal or hostname. `::` selects dual-stack.
+    std::string address {};
+    /// TCP port (1..65535).
+    std::uint16_t port { 0 };
+    /// When true, accepted sockets on this endpoint are wrapped through
+    /// `TlsWrap` before the protocol handler ever sees a byte.
+    bool tls { false };
+
+    /// Structural equality. Used by ConfigReloader::ValidateImmutable
+    /// (the listener set is live-wired at startup; a SIGHUP that mutates
+    /// it must reject), plus by tests asserting parsed binds verbatim.
+    friend bool operator==(BindConfig const&, BindConfig const&) = default;
+};
+
+/// Which listener flag spells `bind`.
+///
+/// Falls back to plain `listen` when no row matches, which is the safe direction:
+/// a bind whose role mask this build does not recognise is re-registered as an
+/// ordinary cache endpoint rather than silently gaining a dispatch surface it was
+/// never given.
+/// @param bind The endpoint to spell.
+/// @return The flag name, without the leading `--`.
+[[nodiscard]] constexpr std::string_view ListenFlagFor(BindConfig const& bind) noexcept
+{
+    for (auto const& row: ListenerFlags)
+        if (row.tls == bind.tls)
+            return row.flag;
+    return ListenerFlags.front().flag;
+}
+
+/// Durability policy for the persistent storage backend. Decoupled from
+/// the storage subsystem so the Config layer does not depend on Cache
+/// internals; main.cpp translates this into the backend's enum.
+enum class StorageDurability : std::uint8_t
+{
+    Fsync = 0,   ///< fsync after every write. Slowest, safest.
+    Batched = 1, ///< Buffer writes, fsync at commit boundaries (default).
+    None = 2,    ///< OS page cache only; no fsync.
+};
+
+/// Which supervisor domain `--install-service` registers the daemon in.
+///
+/// Deliberately *not* a Config field, only a vocabulary type living beside the
+/// others: it configures the installation, not the running daemon. As a Config
+/// field it would also make BuildServiceArgv's "emit every field that differs
+/// from the default" rule bake a meaningless `--service-scope` into the
+/// registered job's own arguments. See CliResult::serviceScope.
+///
+/// Meaningful on macOS (launchd has two domains); ignored on Windows, whose SCM
+/// has only one.
+enum class ServiceScope : std::uint8_t
+{
+    /// A LaunchAgent in the invoking user's `~/Library/LaunchAgents`, running as
+    /// that user from their next login onwards. Needs no privileges.
+    User = 0,
+    /// A LaunchDaemon in `/Library/LaunchDaemons`, running as a dedicated
+    /// service account from boot, before anyone logs in. Requires root.
+    System = 1,
+};
+
+/// How a registered service starts.
+///
+/// A vocabulary type living beside `ServiceScope` for that type's reason: it
+/// configures the installation, not the running daemon, and `CliResult` carries it
+/// -- which `Platform/ServiceControl.hpp` cannot be included to declare, since it
+/// includes the parser. Its rows (`ServiceStartTable`) live there.
+///
+/// **Private**: never transmitted and never persisted by this project -- the SCM start type
+/// and the launchd keys are written from the ROW, never from the enumerator's value, so the
+/// enumerators carry none.
+///
+/// There is no systemd column: this binary registers no systemd unit (`InstallService` answers
+/// "only on Windows and macOS" there), and the packaged units carry their own enable policy.
+enum class ServiceStart : std::uint8_t
+{
+    Auto, ///< Starts with the machine: SCM auto-start, launchd `RunAtLoad`.
+    /// Registered, and started only when somebody asks: SCM demand-start, no `RunAtLoad`.
+    /// On macOS it is restarted on a crash alone, as an auto-start job is (see its row).
+    Manual,
+    Last
+};
+
+/// CPU-affinity policy for the reactor worker threads.
+enum class CpuAffinity : std::uint8_t
+{
+    /// Let the OS scheduler place reactor threads (default for a lone reactor).
+    None = 0,
+    /// Pin each reactor thread to its own core (default with >1 reactor): keeps
+    /// per-worker state cache-resident and avoids cross-core migration churn.
+    PerCore = 1,
+};
+
+/// In-memory LRU recency policy. Decoupled from the Cache layer (like
+/// StorageDurability); main.cpp translates this into the backend's `LruMode`.
+enum class LruRecency : std::uint8_t
+{
+    /// Sampled/deferred promotion: reads run concurrently under a shared lock
+    /// and eviction stays approximately-LRU. Favours read throughput. Default.
+    Approximate = 0,
+    /// Promote on every read for exact LRU order; reads on one shard serialise.
+    Strict = 1,
+};
+
+/// All runtime configuration. POD-like value type; built once from CLI
+/// arguments (and later, from a YAML config file). For SIGHUP reload, the
+/// daemon keeps a shared_ptr<const Config> and atomically swaps.
+struct Config
+{
+    /// In-memory storage byte budget. 0 = unbounded (testing/dev only).
+    /// Scales with the machine rather than being a fixed constant; see
+    /// DefaultMaxMemoryBytes() for the fraction and the bounds.
+    std::size_t maxMemoryBytes { DefaultMaxMemoryBytes() };
+
+    /// Maximum size of a single cache value in bytes, enforced by every
+    /// storage backend (in-memory LRU and on-disk COW tree).
+    /// Set/Add/Replace/CompareAndSwap/Append/Prepend that would exceed
+    /// this return StorageErrorCode::ValueTooLarge.
+    ///
+    /// Sized for the compile-cache workload this daemon exists to serve:
+    /// object files routinely pass 16 MiB, and the entries a cap rejects are
+    /// precisely the expensive-to-recompute ones it was worth caching. The
+    /// cap costs nothing until it is used -- a value does not need a page of
+    /// its own, it spills into an overflow-page chain over the fixed 16 KiB
+    /// store page size.
+    ///
+    /// It also raises the wire payload cap, but only for the protocols that
+    /// take it from the session: the compile-cache protocol and RESP. Both
+    /// memcached framings keep their own hardcoded 16 MiB ceiling.
+    std::size_t storageMaxValueBytes { 256 * 1024 * 1024 };
+
+    /// Maximum bytes the on-disk (L2) tier may hold, across all shards
+    /// (the `--storage-max-disk` flag). Only meaningful with `--storage`.
+    /// 0 (the default) means unbounded — the disk file grows to whatever the
+    /// cached content needs. When non-zero, the budget is split evenly across
+    /// the physical shards and each shard's CoW tree evicts its LRU tail to
+    /// stay within its share, so the total on-disk footprint is capped: pages
+    /// in use, compressed values at their compressed size. Set this to keep a
+    /// build cache within a fixed disk allotment.
+    std::size_t storageMaxDiskBytes { 0 };
+
+    /// Number of independent pinned reactors to run (the `--threads`
+    /// flag). Each reactor is a single-threaded event loop; connections
+    /// are pinned to one for their lifetime, so this is the server's
+    /// across-core parallelism. 0 means "use
+    /// std::thread::hardware_concurrency()".
+    std::size_t workerThreads { 0 };
+
+    /// Number of storage shards. 1 means "do not shard" (preserves
+    /// PR #10 single-file storage behaviour). When >1 and `storagePath`
+    /// is set, the path is treated as a directory containing
+    /// `shard-NN.cow` files. 0 means "auto" — defaults to a sensible
+    /// value at runtime (min(16, hardware_concurrency)).
+    std::size_t storageShards { 0 };
+
+    /// How often the active expiry cycle sweeps. Zero disables it.
+    ///
+    /// Without a sweep, expiry is entirely access-driven: a key whose TTL
+    /// lapses and which nobody touches again keeps its memory and never
+    /// publishes an `expired` keyspace event. redis's `hz` is the analogue.
+    ///
+    /// A `std::chrono` type rather than a count of milliseconds, because the unit is
+    /// part of the value an operator types (`250ms`, `1s`) and of what a registration
+    /// writes back (`FormatDuration`); a bare integer field is what let the flag and
+    /// its file key disagree about which unit a number was in (#1402).
+    std::chrono::milliseconds activeExpiryInterval { DefaultActiveExpiryInterval };
+
+    /// Entries one sweep examines per shard before it stops and resumes next
+    /// time. The bound on how long the cycle holds a shard's exclusive lock.
+    std::size_t activeExpiryScanBudget { DefaultActiveExpiryScanBudget };
+
+    /// Bind address: IPv4/IPv6 literal or hostname. Default 127.0.0.1
+    /// (IPv4 loopback). An IPv6 wildcard (`::`) binds dual-stack and
+    /// serves both IPv4 and IPv6 on every platform.
+    ///
+    /// Legacy single-bind shorthand. When `binds` is non-empty this field
+    /// is ignored: every endpoint is described as a `BindConfig` instead.
+    /// When `binds` is empty (the common case), main.cpp synthesises a
+    /// single `BindConfig { bindAddress, port, tlsEnabled }` so the rest
+    /// of the daemon body sees only the data-driven view.
+    std::string bindAddress { "127.0.0.1" };
+
+    /// Path of the YAML config file (if any) that produced this Config.
+    /// Used by ConfigReloader on SIGHUP. Empty means no file-backed config.
+    std::string configPath {};
+
+    /// Optional pidfile path (POSIX daemon mode only).
+    std::string pidfile {};
+
+    /// Windows service name; defaults to pace-kv.
+    std::string serviceName { "pace-kv" };
+
+    /// Shared authentication secret (redis `requirepass` style). Empty (the
+    /// default) means authentication is disabled and every client is served
+    /// without a credential check. When set, clients must authenticate before
+    /// any data command: redis via `AUTH`, the memcached binary protocol via
+    /// SASL PLAIN. The memcached text protocol has no auth handshake, so it
+    /// then rejects data commands.
+    ///
+    /// **`SecureString`, and this is the largest credential holder in the tree**
+    /// ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)). It is
+    /// `Reloadable::Yes`, and `ConfigReloader` keeps `_current` alongside a `previous`
+    /// snapshot for as long as a reader still holds one -- so as a `std::string` this
+    /// secret was multiplied by every reload, each copy released to the general
+    /// allocator with its characters intact. Every one of those copies is now zeroed as
+    /// it dies, with no call site having to remember anything.
+    SecureString requirePass {};
+
+    /// Expected username for the two-argument auth form (redis
+    /// `AUTH <user> <pass>` and SASL PLAIN authcid). Defaults to "default",
+    /// mirroring redis's default ACL user. Only consulted when `requirePass`
+    /// is non-empty.
+    ///
+    /// Note: the one-argument redis form `AUTH <pass>` authenticates the default
+    /// user against `requirePass` alone and does NOT enforce this username
+    /// (standard redis semantics). The username only constrains the two-argument
+    /// `AUTH <user> <pass>` form and SASL PLAIN, where the supplied authcid must
+    /// match it.
+    std::string authUsername { "default" };
+
+    /// Optional path to a persistent storage file. When set, the
+    /// daemon uses a CoW-tree storage backed by this file; when empty,
+    /// the cache is in-memory only.
+    std::string storagePath {};
+
+    /// TCP port. Defaults to pace-kv's own `DefaultPort`; see the constant
+    /// for why the number is ours rather than memcached's or redis's.
+    std::uint16_t port { DefaultPort };
+
+    /// Bind address for the admin HTTP endpoint (`/metrics`, `/healthz`).
+    /// Defaults to loopback so metrics are not exposed to the world unless the
+    /// operator opts in. Only used when `metricsEnabled` is true.
+    std::string metricsBindAddress { "127.0.0.1" };
+
+    /// TCP port for the admin HTTP endpoint. Served on a dedicated port so it
+    /// never collides with the cache protocols. Only used when `metricsEnabled`.
+    std::uint16_t metricsPort { DefaultMetricsPort };
+
+    /// Whether to start the admin HTTP endpoint (Prometheus `/metrics` plus a
+    /// `/healthz` liveness probe). Off by default.
+    bool metricsEnabled { false };
+
+    /// Whether to terminate TLS on the cache port. Off by default. Requires a
+    /// build with `PACE_ENABLE_TLS=ON` and both `tlsCertPath`/`tlsKeyPath`
+    /// set; the daemon fails fast at startup otherwise.
+    bool tlsEnabled { false };
+
+    /// PEM certificate (chain) file for TLS. Only used when `tlsEnabled`.
+    std::string tlsCertPath {};
+
+    /// PEM private key file for TLS. Only used when `tlsEnabled`.
+    std::string tlsKeyPath {};
+
+    /// Redis-style keyspace-event flag string. Empty (the default) disables
+    /// every keyspace notification. Each letter enables one event class
+    /// (matches redis-server's `notify-keyspace-events`):
+    ///   K  publish on `__keyspace@<db>__:<key>` channels
+    ///   E  publish on `__keyevent@<db>__:<event>` channels
+    ///   g  generic events: del / expire / persist
+    ///   $  string events: set
+    ///   x  expired: a TTL lapsed and the entry was reclaimed
+    ///   e  evicted: the entry was reclaimed under memory pressure
+    ///   A  alias for `g$xe` — everything we emit, as in redis
+    /// `x` and `e` come from the storage layer rather than a verb handler,
+    /// because no verb is executing when a key expires or is evicted. They
+    /// fire when the tier reclaims the entry, which access drives rather
+    /// than a timer — see `docs/operations/known-limitations.md`.
+    /// Each enabled write verb fires `__keyspace@0__:<key> <event>` (with K)
+    /// and `__keyevent@0__:<event> <key>` (with E). At least one of K or E
+    /// must be set for any event to actually be published.
+    /// The database index is fixed at 0 (this daemon does not implement
+    /// `SELECT`).
+    /// Unknown letters cause main.cpp to fail fast at startup.
+    std::string notifyKeyspaceEvents {};
+
+    /// Listener endpoints. When empty (the default), main.cpp collapses the
+    /// legacy single-bind fields (`bindAddress`, `port`, `tlsEnabled`) into
+    /// a single synthesised `BindConfig` and proceeds. When non-empty,
+    /// every entry defines one endpoint and the legacy single-bind fields
+    /// are ignored. The CLI populates this vector from repeatable
+    /// `--listen address:port` / `--listen-tls address:port` flags, and a
+    /// configuration file through the same appliers from `listen:` / `listen_tls:`.
+    std::vector<BindConfig> binds {};
+
+    /// The depth of the kernel's queue of accepted-but-not-yet-handed-off
+    /// connections. Bursts of parallel clients (a `make -jN` driving the
+    /// launcher opens many sockets at once) overflow a small queue and get
+    /// connect timeouts at the OS layer before the daemon ever sees them.
+    ///
+    /// A DEPTH, spelled for the platform where it binds (`ListenBacklogArgument`):
+    /// a plain number asks Windows for at most about 200, whatever it says
+    /// (#1679). Defaults to `ListenQueueDepth`, the figure every listener in
+    /// this project asks for; POSIX clamps it to `somaxconn`, Windows to
+    /// [200, 65535].
+    int listenBacklog { ListenQueueDepth };
+
+    /// Log threshold.
+    LogLevel logLevel { LogLevel::Info };
+
+    /// When true, each ConsoleLogger line is prefixed with an ISO 8601 UTC timestamp.
+    ///
+    /// **On by default under macOS and off elsewhere** -- see `DefaultLogTimestamps`,
+    /// which carries the reason: launchd stamps nothing, journald stamps everything,
+    /// and the Windows service never reaches this logger.
+    bool logTimestamps { DefaultLogTimestamps };
+
+    /// When true, each connection-scoped log line is prefixed with the client
+    /// IP that caused it (e.g. `[INFO] [203.0.113.7] ...`). Global/server log
+    /// lines, which have no client, are unaffected.
+    bool logSource { false };
+
+    /// When true, the Trace-level command (access) log includes every command,
+    /// not just keyspace data operations — i.e. also connection/keepalive/admin
+    /// chatter such as PING, COMMAND, HELLO, CLIENT, AUTH. Off by default so the
+    /// command log stays focused on GET/SET-style traffic.
+    bool logEverything { false };
+
+    /// If true, daemonize (POSIX) or self-register as a Windows service.
+    bool daemon { false };
+
+    /// Durability mode for the persistent backend (ignored when
+    /// storagePath is empty).
+    StorageDurability storageDurability { StorageDurability::Batched };
+
+    /// In-memory LRU recency policy. Approximate (default) favours read
+    /// throughput by letting same-shard reads run concurrently; Strict gives
+    /// exact LRU order at the cost of serialising reads per shard.
+    LruRecency lruRecency { LruRecency::Approximate };
+
+    /// CPU-affinity policy for reactor threads. PerCore (default) pins each
+    /// reactor to its own core when running more than one; with a single
+    /// reactor it is a no-op regardless. None lets the scheduler place threads.
+    CpuAffinity cpuAffinity { CpuAffinity::PerCore };
+
+    /// Codec applied to values before they are written to the persistent
+    /// backend (ignored when storagePath is empty). Zstd by default; set to
+    /// Identity ("none") to store values verbatim. Reads always return
+    /// plaintext, so the codec can be changed between runs with no migration —
+    /// each record is decoded by its own stored codec tag.
+    CompressionCodec compression { CompressionCodec::Zstd };
+
+    /// Effort level for `compression` (higher = smaller/slower). Ignored by
+    /// codecs without a level. Defaults to zstd level 3.
+    int compressionLevel { 3 };
+
+    /// Values smaller than this are never compressed (their CPU cost is not
+    /// worth it and tiny values rarely shrink). Defaults to 256 bytes.
+    std::size_t compressionMinBytes { 256 };
+
+    /// Codec for the IN-MEMORY (L1) tier, independent of the on-disk `compression`
+    /// above. `Identity` (the default) keeps reads allocation-free; anything else
+    /// trades a decompress on every read for a much larger effective cache.
+    ///
+    /// Worth enabling when the working set exceeds RAM: compile-cache objects with
+    /// embedded debug info compress ~4.5x, so a 27 GB working set becomes ~6 GB, at
+    /// ~3.5 ms per 3.3 MB value read. Leave it off for small values or
+    /// latency-critical reads, where the decompress dominates.
+    CompressionCodec memoryCompression { CompressionCodec::Identity };
+
+    /// Effort level for `memoryCompression`. Level 3 is the measured speed/ratio
+    /// knee; higher levels cost much more to write for a few percent of size.
+    int memoryCompressionLevel { 3 };
+
+    /// Values smaller than this stay uncompressed in memory.
+    std::size_t memoryCompressionMinBytes { 4096 };
+
+    /// Member-wise equality. Lets a test assert that two ways of spelling the
+    /// same thing — `--flag=value` and `--flag value`, or a CLI flag and its
+    /// YAML key — produce an identical configuration, rather than spot-checking
+    /// whichever fields the test author happened to think of.
+    friend bool operator==(Config const&, Config const&) = default;
+};
+
+} // namespace Pace

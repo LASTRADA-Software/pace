@@ -7,7 +7,7 @@
 # That is the property issue #48 turns on. A build with no compiler cache is a
 # slow build; a build whose configure aborts because a cache could not be
 # downloaded is no build at all, and the module is vendored into repositories
-# that have never heard of fastcached. Every way the fetch can go wrong
+# that have never heard of pace-kv. Every way the fetch can go wrong
 # therefore has to end in one status line and a fall-through to sccache, ccache,
 # or plain compilation.
 #
@@ -31,9 +31,9 @@
 # covering them on Linux and macOS covers them.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<scratch>
-#         -DFASTCACHED_CXX_COMPILER=<c++> [-DFASTCACHED_MAKE_PROGRAM=<make>]
-#         [-DFASTCACHED_GENERATOR=<gen>]
+#   cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<scratch>
+#         -DPACE_CXX_COMPILER=<c++> [-DPACE_MAKE_PROGRAM=<make>]
+#         [-DPACE_GENERATOR=<gen>]
 #         -P scripts/check-compile-cache-autoinstall.cmake
 #
 # Exit codes: 0 = every row behaved, or skipped. 1 = at least one row did not.
@@ -60,29 +60,29 @@ cmake_minimum_required(VERSION 3.28)
 # publishes for, and the unpublished case is a row of its own that states a
 # platform nothing is published for. no-such-release names the asset it tried,
 # which is how it shows the pin reached the download and not only the lookup.
-set(FastCachedAutoInstallRows
-    "api-unreachable|Not auto-installing fastcache-cc: cannot reach the GitHub API||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_API=http://127.0.0.1:1"
-    "off-by-default||Not auto-installing fastcache-cc|"
-    "opted-out-empty-addr|Not auto-installing fastcache-cc: FASTCACHE_ADDR is empty||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_ADDR="
-    "not-a-version|is not a numeric X.Y.Z version||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_VERSION=not-a-version"
-    "no-such-release|Not auto-installing fastcache-cc: downloading fastcached-9.9.9-Linux-x86_64.tar.gz failed||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_VERSION=9.9.9"
-    "unpublished-platform|Not auto-installing fastcache-cc: no prebuilt binary is published for Linux-no-such-arch||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_HOST_SYSTEM=Linux -DFASTCACHE_AUTO_INSTALL_HOST_PROCESSOR=no-such-arch"
+set(PaceAutoInstallRows
+    "api-unreachable|Not auto-installing pace-cc: cannot reach the GitHub API||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_API=http://127.0.0.1:1"
+    "off-by-default||Not auto-installing pace-cc|"
+    "opted-out-empty-addr|Not auto-installing pace-cc: PACE_ADDR is empty||-DPACE_AUTO_INSTALL=ON -DPACE_ADDR="
+    "not-a-version|is not a numeric X.Y.Z version||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=not-a-version"
+    "no-such-release|Not auto-installing pace-cc: downloading pace-9.9.9-Linux-x86_64.tar.gz failed||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=9.9.9"
+    "unpublished-platform|Not auto-installing pace-cc: no prebuilt binary is published for Linux-no-such-arch||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_HOST_SYSTEM=Linux -DPACE_AUTO_INSTALL_HOST_PROCESSOR=no-such-arch"
 )
 
 # The platform every row asks about unless it states its own. It must be a row of
 # the module's published-asset table, and the one no-such-release's asset name
 # spells; a row's own -D comes later on the command line, and the later one wins.
-set(FastCachedPinnedHostSystem "Linux")
-set(FastCachedPinnedHostProcessor "x86_64")
+set(PacePinnedHostSystem "Linux")
+set(PacePinnedHostProcessor "x86_64")
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
 
-set(fixtureDir "${FASTCACHED_SOURCE_DIR}/src/tests/compile-cache-fixture")
-set(moduleDir "${FASTCACHED_SOURCE_DIR}/cmake/portable")
+set(fixtureDir "${PACE_SOURCE_DIR}/src/tests/compile-cache-fixture")
+set(moduleDir "${PACE_SOURCE_DIR}/cmake/portable")
 if(NOT IS_DIRECTORY "${fixtureDir}")
     message(FATAL_ERROR "no fixture project at ${fixtureDir}")
 endif()
@@ -99,36 +99,36 @@ if(NOT hostUname)
     message("SKIP: no uname found, so a sandboxed configure cannot detect its own host")
     return()
 endif()
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    message("SKIP: no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    message("SKIP: no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     return()
 endif()
 
-set(sandbox "${FASTCACHED_SCRATCH_DIR}/sandbox")
+set(sandbox "${PACE_SCRATCH_DIR}/sandbox")
 file(REMOVE_RECURSE "${sandbox}")
 file(MAKE_DIRECTORY "${sandbox}/usr/bin")
 file(CREATE_LINK "${hostUname}" "${sandbox}/usr/bin/uname" COPY_ON_ERROR SYMBOLIC)
 
 # Shared by every row: a real project, a compiler named outright, and a program
-# search that can find neither fastcache-cc nor sccache nor ccache.
+# search that can find neither pace-cc nor sccache nor ccache.
 set(commonArguments
-    "-DFASTCACHED_MODULE_DIR=${moduleDir}"
-    "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}"
+    "-DPACE_MODULE_DIR=${moduleDir}"
+    "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}"
     "-DCMAKE_FIND_ROOT_PATH=${sandbox}"
     "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
-    "-DFASTCACHE_AUTO_INSTALL_HOST_SYSTEM=${FastCachedPinnedHostSystem}"
-    "-DFASTCACHE_AUTO_INSTALL_HOST_PROCESSOR=${FastCachedPinnedHostProcessor}")
-if(FASTCACHED_MAKE_PROGRAM)
-    list(APPEND commonArguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+    "-DPACE_AUTO_INSTALL_HOST_SYSTEM=${PacePinnedHostSystem}"
+    "-DPACE_AUTO_INSTALL_HOST_PROCESSOR=${PacePinnedHostProcessor}")
+if(PACE_MAKE_PROGRAM)
+    list(APPEND commonArguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
 endif()
-if(FASTCACHED_GENERATOR)
-    list(APPEND commonArguments -G "${FASTCACHED_GENERATOR}")
+if(PACE_GENERATOR)
+    list(APPEND commonArguments -G "${PACE_GENERATOR}")
 endif()
 
 set(violations "")
-list(LENGTH FastCachedAutoInstallRows rowCount)
+list(LENGTH PaceAutoInstallRows rowCount)
 
-foreach(row IN LISTS FastCachedAutoInstallRows)
+foreach(row IN LISTS PaceAutoInstallRows)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 name)
     list(GET fields 1 expected)
@@ -142,15 +142,15 @@ foreach(row IN LISTS FastCachedAutoInstallRows)
 
     # A staging directory of its own per row, never the user's: a test must not
     # write into ~/.cache, and two rows must not inherit each other's download.
-    set(rowBinaryDir "${FASTCACHED_SCRATCH_DIR}/${name}/build")
-    set(rowStageDir "${FASTCACHED_SCRATCH_DIR}/${name}/stage")
-    file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}/${name}")
+    set(rowBinaryDir "${PACE_SCRATCH_DIR}/${name}/build")
+    set(rowStageDir "${PACE_SCRATCH_DIR}/${name}/stage")
+    file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}/${name}")
 
     execute_process(
         COMMAND "${CMAKE_COMMAND}"
                 -S "${fixtureDir}" -B "${rowBinaryDir}"
                 ${commonArguments}
-                "-DFASTCACHE_AUTO_INSTALL_DIR=${rowStageDir}"
+                "-DPACE_AUTO_INSTALL_DIR=${rowStageDir}"
                 ${extraArguments}
         RESULT_VARIABLE configureResult
         OUTPUT_VARIABLE configureOutput

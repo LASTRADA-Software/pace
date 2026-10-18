@@ -97,14 +97,14 @@ UseColor: true
 # It must match a checkout whatever it is CALLED, and it must not depend on where
 # DEPENDENCIES are unpacked either. Both halves have now been got wrong:
 #
-#   `.*/fastcached/src/.*`                        missed `fastcached-wt-139/`
-#   `.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*` missed `fastcached-worktrees/<lane>/`
+#   `.*/pace/src/.*`                        missed `pace-wt-139/`
+#   `.*/(pace[^/]*|worktrees/[^/]+)/src/.*` missed `pace-worktrees/<lane>/`
 #   `.*/src/.*` + exclude `.*/_deps/.*`           missed CI's `.cache/CPM/`
 #
-# The second is #1040: `fastcached[^/]*` matches the SEGMENT `fastcached-worktrees`
+# The second is #1040: `pace[^/]*` matches the SEGMENT `pace-worktrees`
 # and then demands `/src/` immediately, while `worktrees/[^/]+` needs a segment that
 # is literally `worktrees`. Every lane worktree analysed ZERO first-party headers and
-# reported clean, invisibly, because CI clones to `.../fastcached/src/...` -- the one
+# reported clean, invisibly, because CI clones to `.../pace/src/...` -- the one
 # shape that still matched.
 #
 # The THIRD was the fix for the second, and it is the same mistake wearing the other
@@ -142,7 +142,7 @@ UseColor: true
 # report a finding planted in two headers before any sweep is believed, on whichever
 # host the sweep runs. In a YAML single-quoted scalar a backslash is literal, and inside
 # a POSIX bracket expression -- `llvm::Regex` is one -- so is the regex's.
-HeaderFilterRegex: '.*[/\\]src[/\\](CowTree|FastCache|apps|tests)[/\\].*'
+HeaderFilterRegex: '.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
 FormatStyle:     none
 CheckOptions:
   - key:             readability-function-cognitive-complexity.Threshold

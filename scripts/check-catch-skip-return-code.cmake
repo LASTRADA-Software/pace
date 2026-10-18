@@ -23,7 +23,7 @@
 # thing that tells ctest an exit code means *skipped* rather than *failed*, and none
 # of the five Catch2 registrations set it -- so the binary printed `1 skipped` and
 # ctest printed `***Failed` for the very same run
-# ([#499](https://github.com/LASTRADA-Software/fastcached/issues/499)). Measured on
+# ([#499](https://github.com/LASTRADA-Software/pace/issues/499)). Measured on
 # one forced skip:
 #
 #     CowTreeTests "[skiprepro]"   ->  test cases: 1 | 1 skipped   BINARY EXIT: 4
@@ -74,7 +74,7 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-catch-skip-return-code.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-catch-skip-return-code.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -84,8 +84,8 @@
 # declares. Stated as a minimum version so the whole set moves together.
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # What Catch2 exits with on `SKIP(...)`. Not 77: see the header.
@@ -126,7 +126,7 @@ set(catchSkipCode 4)
 #
 # #495 records why this idiom exists in two copies; consolidating them is that ticket
 # and not this one.
-macro(fastcached_take_line contentVar lineVar doneVar)
+macro(pace_take_line contentVar lineVar doneVar)
     string(FIND "${${contentVar}}" "\n" _ftl_newline)
     if(_ftl_newline EQUAL -1)
         set(${lineVar} "${${contentVar}}")
@@ -142,7 +142,7 @@ macro(fastcached_take_line contentVar lineVar doneVar)
 endmacro()
 
 # The file, read once, ready to be walked a line at a time.
-function(fastcached_read_content path outVar)
+function(pace_read_content path outVar)
     file(READ "${path}" content)
     string(REPLACE "[" " " content "${content}")
     string(REPLACE "]" " " content "${content}")
@@ -179,7 +179,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # has THREE values since the consolidation: a walk now says whether there was no index at all
 # or whether the index named no file matching this question.
 
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "*CMakeLists.txt"
     GLOBS "CMakeLists.txt"
     FILES_OUT listFiles
@@ -189,7 +189,7 @@ fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
 # in the index, copied verbatim, and nobody here may add a property to them. So both modes
 # decline the third-party roots (#1370), and name what they declined on every run -- the
 # fourth fix to this scan's scope is the one that states the scope rather than guessing it.
-fastcached_decline_third_party("${FASTCACHED_SOURCE_DIR}" listFiles declinedFiles)
+pace_decline_third_party("${PACE_SOURCE_DIR}" listFiles declinedFiles)
 if(declinedFiles)
     list(LENGTH declinedFiles declinedCount)
     list(GET declinedFiles 0 firstDeclined)
@@ -202,7 +202,7 @@ if(NOT listFiles)
     message("  No CMakeLists.txt was found in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "catch skip return code: the scan matched no CMakeLists and cannot conclude")
 endif()
 
@@ -210,12 +210,12 @@ set(registrations "")
 set(violations "")
 
 foreach(relative IN LISTS listFiles)
-    fastcached_read_content("${FASTCACHED_SOURCE_DIR}/${relative}" rest)
+    pace_read_content("${PACE_SOURCE_DIR}/${relative}" rest)
 
     set(lineNumber 0)
     set(atEnd FALSE)
     while(NOT atEnd)
-        fastcached_take_line(rest line atEnd)
+        pace_take_line(rest line atEnd)
         math(EXPR lineNumber "${lineNumber} + 1")
 
         # Prose, not a call. This file's own header names the function it checks.
@@ -242,7 +242,7 @@ foreach(relative IN LISTS listFiles)
         set(scanContent "${line}\n${rest}")
         set(scanDone FALSE)
         while(NOT scanDone)
-            fastcached_take_line(scanContent inner scanDone)
+            pace_take_line(scanContent inner scanDone)
             if(onFirst)
                 set(callText "${inner}")
                 set(onFirst FALSE)

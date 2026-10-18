@@ -6,23 +6,23 @@
 # a staged git index. It prints how many cases ran, so a run that stopped early does not read as one
 # that judged everything.
 #
-# Every tree is SYNTHESISED under FASTCACHED_SCRATCH_DIR; the tree under test is never touched.
+# Every tree is SYNTHESISED under PACE_SCRATCH_DIR; the tree under test is never touched.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
 #         -P scripts/check-udp-opener-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required IN ITEMS FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required IN ITEMS PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-udp-opener.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-udp-opener.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -33,24 +33,24 @@ endif()
 set(ran 0)
 set(failures "")
 
-set(discoveryTier "src/apps/fastcache-compile-node/DiscoveryTier.cpp")
-set(routeProbe "src/FastCache/Platform/RouteProbe.cpp")
-set(otherFile "src/FastCache/Cluster/Other.cpp")
+set(discoveryTier "src/apps/pace-node/DiscoveryTier.cpp")
+set(routeProbe "src/Pace/Platform/RouteProbe.cpp")
+set(otherFile "src/Pace/Cluster/Other.cpp")
 
 # The baseline tree: the two permitted openers (discovery's, and the route probe's connect-only one), a file that opens nothing, and a vendored root.
-function(fastcached_udp_tree name outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_udp_tree name outVar)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/elsewhere\n")
     file(WRITE "${tree}/${discoveryTier}"
         "#include \"DiscoveryTier.hpp\"\n    auto opened = core::net::openSharedPortUdpSocket(host, beacon, reply);\n")
     file(WRITE "${tree}/${routeProbe}" "    auto fd = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);\n")
-    file(WRITE "${tree}/${otherFile}" "#include <FastCache/Cluster/Other.hpp>\n")
+    file(WRITE "${tree}/${otherFile}" "#include <Pace/Cluster/Other.hpp>\n")
     file(WRITE "${tree}/vendor/elsewhere/socket.hpp" "int s = ::socket(AF_INET, SOCK_DGRAM, 0);\n")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
 
-function(fastcached_stage_git tree)
+function(pace_stage_git tree)
     if(NOT GIT_EXECUTABLE)
         message(FATAL_ERROR "udp-opener-selftest: INCONCLUSIVE -- no git to stage ${tree} with")
     endif()
@@ -63,9 +63,9 @@ function(fastcached_stage_git tree)
     endforeach()
 endfunction()
 
-function(fastcached_udp_judge name tree expect mustSay)
+function(pace_udp_judge name tree expect mustSay)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
         OUTPUT_VARIABLE output ERROR_VARIABLE errors RESULT_VARIABLE result)
     if(NOT result MATCHES "^[0-9]+$")
         message(FATAL_ERROR "udp-opener-selftest: INCONCLUSIVE -- the check could not be RUN (${result})")
@@ -92,12 +92,12 @@ endfunction()
 set(accepted "the UDP openers are ${discoveryTier} and ${routeProbe}, and nothing else opens one")
 set(refused "${otherFile}:2: opens a UDP socket outside the permitted files")
 
-fastcached_udp_tree(clean tree)
-fastcached_udp_judge(clean "${tree}" accept "${accepted}")
+pace_udp_tree(clean tree)
+pace_udp_judge(clean "${tree}" accept "${accepted}")
 
-fastcached_udp_tree(cleanGit tree)
-fastcached_stage_git("${tree}")
-fastcached_udp_judge(cleanGit "${tree}" accept "via git ls-files")
+pace_udp_tree(cleanGit tree)
+pace_stage_git("${tree}")
+pace_udp_judge(cleanGit "${tree}" accept "via git ls-files")
 
 # A second opener, once per primitive the check names. Each is what the firewall rule would expose.
 foreach(spelling IN ITEMS
@@ -110,50 +110,50 @@ foreach(spelling IN ITEMS
     string(SUBSTRING "${spelling}" 0 ${bar} caseName)
     math(EXPR afterBar "${bar} + 1")
     string(SUBSTRING "${spelling}" ${afterBar} -1 statement)
-    fastcached_udp_tree(${caseName} tree)
+    pace_udp_tree(${caseName} tree)
     file(APPEND "${tree}/${otherFile}" "${statement};\n")
-    fastcached_udp_judge(${caseName} "${tree}" refuse "${refused}")
+    pace_udp_judge(${caseName} "${tree}" refuse "${refused}")
 endforeach()
 
 # The refusal says WHY a second opener matters, not only where it is.
-fastcached_udp_tree(refusalSaysWhy tree)
+pace_udp_tree(refusalSaysWhy tree)
 file(APPEND "${tree}/${otherFile}" "    auto socket = core::net::openUdpSocket(host, 7000);\n")
-fastcached_udp_judge(refusalSaysWhy "${tree}" refuse "would be EXPOSED by the compile node's any-port firewall rule")
+pace_udp_judge(refusalSaysWhy "${tree}" refuse "would be EXPOSED by the compile node's any-port firewall rule")
 
-fastcached_udp_tree(violationGit tree)
+pace_udp_tree(violationGit tree)
 file(APPEND "${tree}/${otherFile}" "    auto socket = core::net::openUdpSocket(host, 7000);\n")
-fastcached_stage_git("${tree}")
-fastcached_udp_judge(violationGit "${tree}" refuse "via git ls-files")
+pace_stage_git("${tree}")
+pace_udp_judge(violationGit "${tree}" refuse "via git ls-files")
 
-fastcached_udp_tree(commentedOut tree)
+pace_udp_tree(commentedOut tree)
 file(APPEND "${tree}/${otherFile}" "// core::net::openUdpSocket is what this file must never call\n")
-fastcached_udp_judge(commentedOut "${tree}" accept "${accepted}")
+pace_udp_judge(commentedOut "${tree}" accept "${accepted}")
 
-fastcached_udp_tree(nameContainsPrimitive tree)
+pace_udp_tree(nameContainsPrimitive tree)
 file(APPEND "${tree}/${otherFile}" "    auto const reopenUdpSocketCount = 0;\n")
-fastcached_udp_judge(nameContainsPrimitive "${tree}" accept "${accepted}")
+pace_udp_judge(nameContainsPrimitive "${tree}" accept "${accepted}")
 
-fastcached_udp_tree(testFile tree)
-file(WRITE "${tree}/src/FastCache/Cluster/Other_test.cpp" "auto socket = core::net::openUdpSocket(host, 0);\n")
+pace_udp_tree(testFile tree)
+file(WRITE "${tree}/src/Pace/Cluster/Other_test.cpp" "auto socket = core::net::openUdpSocket(host, 0);\n")
 file(WRITE "${tree}/src/tests/Datagram.hpp" "int s = ::socket(AF_INET, SOCK_DGRAM, 0);\n")
-fastcached_udp_judge(testFile "${tree}" accept "${accepted}")
+pace_udp_judge(testFile "${tree}" accept "${accepted}")
 
-fastcached_udp_tree(vendoredDeclined tree)
-fastcached_udp_judge(vendoredDeclined "${tree}" accept "declined under third-party roots")
+pace_udp_tree(vendoredDeclined tree)
+pace_udp_judge(vendoredDeclined "${tree}" accept "declined under third-party roots")
 
-fastcached_udp_tree(staleNoOpener tree)
+pace_udp_tree(staleNoOpener tree)
 file(WRITE "${tree}/${discoveryTier}" "#include \"DiscoveryTier.hpp\"\n")
-fastcached_udp_judge(staleNoOpener "${tree}" refuse "STALE permitted row -- ${discoveryTier}: was read and opens no UDP socket")
+pace_udp_judge(staleNoOpener "${tree}" refuse "STALE permitted row -- ${discoveryTier}: was read and opens no UDP socket")
 
-fastcached_udp_tree(staleMissing tree)
+pace_udp_tree(staleMissing tree)
 file(REMOVE "${tree}/${discoveryTier}")
-fastcached_udp_judge(staleMissing "${tree}" refuse "STALE permitted row -- ${discoveryTier}: does not exist")
+pace_udp_judge(staleMissing "${tree}" refuse "STALE permitted row -- ${discoveryTier}: does not exist")
 
-set(tree "${FASTCACHED_SCRATCH_DIR}/empty")
+set(tree "${PACE_SCRATCH_DIR}/empty")
 file(REMOVE_RECURSE "${tree}")
 file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/elsewhere\n")
 file(WRITE "${tree}/vendor/elsewhere/socket.hpp" "int s = ::socket(AF_INET, SOCK_DGRAM, 0);\n")
-fastcached_udp_judge(empty "${tree}" refuse "matched no first-party C++ source")
+pace_udp_judge(empty "${tree}" refuse "matched no first-party C++ source")
 
 list(LENGTH failures failureCount)
 if(failureCount GREATER 0)

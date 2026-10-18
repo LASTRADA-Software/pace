@@ -13,7 +13,7 @@
 
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// An `core::net::ISocket` that replays a fixed reply stream and records what was written.
@@ -250,4 +250,4 @@ class FailingSocket final: public core::net::ISocket
     return out;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

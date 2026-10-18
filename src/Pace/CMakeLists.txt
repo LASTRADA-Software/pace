@@ -1,0 +1,241 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pace library — source list. Headers are added so IDEs surface them in
+# the target view; only the .cpp files actually drive compilation.
+
+target_sources(Pace
+    PRIVATE
+        Auth/AuthPolicy.cpp
+        Cache/CacheEngine.cpp
+        Cache/CowTreeStorage.cpp
+        Cache/ExpiryReaper.cpp
+        Cache/InMemoryLruStorage.cpp
+        Cache/LayeredStorage.cpp
+        Cache/NotifyingStorage.cpp
+        Cache/ReclaimLog.cpp
+        Cache/ShardedStorage.cpp
+        Cache/TracingStorage.cpp
+        Cache/WriteErrorReportingStorage.cpp
+        Cli/Duration.cpp
+        Cli/UsageDoc.cpp
+        CompileCache/PrefetchGroupManifest.cpp
+        CompileCache/CompileValue.cpp
+        CompileCache/PathCanon.cpp
+        Config/ByteSize.cpp
+        Config/CliParser.cpp
+        Config/CompressionValues.cpp
+        Config/ConfigMerge.cpp
+        Config/ConfigReloader.cpp
+        Config/DefaultConfigPath.cpp
+        Config/EnvExpand.cpp
+        Config/SecretExposureWatcher.cpp
+        Config/SecretProvenance.cpp
+        Config/YamlReader.cpp
+        Consensus/DurableFile.cpp
+        Consensus/FileRaftStorage.cpp
+        Consensus/InMemoryRaftStorage.cpp
+        Consensus/RaftConfig.cpp
+        Consensus/RaftDriver.cpp
+        Consensus/RaftLog.cpp
+        Consensus/RaftNode.cpp
+        Consensus/RaftPeerIdentity.cpp
+        Consensus/RaftPeerServer.cpp
+        Consensus/RaftPeerSession.cpp
+        Consensus/RaftPeerTransport.cpp
+        Consensus/RaftSessionReader.cpp
+        Core/CpuFeatures.cpp
+        Core/Crc32c.cpp
+        Core/Ed25519.cpp
+        Core/FigureText.cpp
+        Core/Hkdf.cpp
+        Core/PathKind.cpp
+        Core/SecureBytes.cpp
+        Core/SecureRandom.cpp
+        Core/SessionSeal.cpp
+        Core/Sha256.cpp
+        Core/X25519.cpp
+        Cluster/AnnouncedEndpoints.cpp
+        Cluster/BeaconDestinations.cpp
+        Cluster/ClusterState.cpp
+        Cluster/ClusterStateMachine.cpp
+        Cluster/ChallengeCookies.cpp
+        Cluster/SharedCacheTarget.cpp
+        Cluster/DiscoveryService.cpp
+        Cluster/FleetEndpoints.cpp
+        Cluster/FleetPin.cpp
+        Cluster/FormationRecord.cpp
+        Cluster/MembershipPolicy.cpp
+        Cluster/PeerDirectory.cpp
+        Cluster/Roster.cpp
+        Cluster/RosterKeys.cpp
+        Cluster/SeedSources.cpp
+        Core/Logger.cpp
+        Distributed/LeaseTable.cpp
+        Distributed/WorkerRegistry.cpp
+        Distributed/UnservedToolchains.cpp
+        Distributed/FleetVersions.cpp
+        Distributed/NodeProof.cpp
+        Distributed/StateLeaseRoster.cpp
+        Distributed/TicketVerifier.cpp
+        Distributed/SchedulerService.cpp
+        Distributed/SchedulerProtocol.cpp
+        Distributed/FleetHistory.cpp
+        Distributed/FleetChart.cpp
+        Distributed/FleetView.cpp
+        Core/BufferPool.cpp
+        Core/Base64.cpp
+        Server/AdminCredential.cpp
+        Metrics/IMetricsSink.cpp
+        Metrics/PrometheusFormatter.cpp
+        Metrics/StatsReading.cpp
+        Metrics/StatsReadingCodec.cpp
+        Platform/CpuAffinity.cpp
+        Platform/DaemonControls.cpp
+        Platform/Environment.cpp
+        Platform/FileTrust.cpp
+        Platform/Firewall.cpp
+        Platform/HostEvents.cpp
+        Platform/HostInfo.cpp
+        Platform/HostLoad.cpp
+        Platform/HostMemory.cpp
+        Platform/HostNaming.cpp
+        Platform/InheritedListener.cpp
+        Platform/LocalAddresses.cpp
+        Platform/NarrowText.cpp
+        Platform/NetworkChangeMessages.cpp
+        Platform/NetworkChangeWatcher.cpp
+        Platform/PosixDaemonHost.cpp
+        Platform/Registry.cpp
+        Platform/ReplacingRename.cpp
+        Platform/RouteProbe.cpp
+        Platform/ServiceControl.cpp
+        Platform/ServiceHost.cpp
+        Platform/SrvResolver.cpp
+        Platform/StopPending.cpp
+        Platform/StopSignal.cpp
+        Platform/Terminal.cpp
+        Platform/WindowsEventLogger.cpp
+        Platform/WindowsFirewall.cpp
+        Platform/WindowsServiceHost.cpp
+        Protocol/Framing/LineReader.cpp
+        Protocol/CompileCacheHandler.cpp
+        Protocol/LiveStream.cpp
+        Protocol/MemcachedBinary.cpp
+        Protocol/MemcachedMeta.cpp
+        Protocol/MemcachedText.cpp
+        Protocol/ProtocolAutodetect.cpp
+        Protocol/KeyspaceNotifier.cpp
+        Protocol/PubSubRegistry.cpp
+        Protocol/SealedFrameSocket.cpp
+        Protocol/RedisMutationObserver.cpp
+        Protocol/RedisResp.cpp
+        Protocol/RedisTransaction.cpp
+        Protocol/StreamWaiterRegistry.cpp
+        Server/AdminHttpServer.cpp
+        Server/Connection.cpp
+        Server/DaemonStartupGate.cpp
+        Server/ReactorServerLoop.cpp
+        Server/ReadinessAnnouncer.cpp
+        Server/Server.cpp
+        Transport/AcceptLoopReporter.cpp
+        Transport/LingeringClose.cpp
+        Transport/NativeListen.cpp
+)
+
+# The DNS SRV lookup behind Platform/SrvResolver: DnsQueryEx lives in dnsapi on Windows, and
+# res_nquery with the ns_* parser in libresolv on Linux and macOS. PRIVATE because only
+# SrvResolver.cpp calls either; a static library still carries it to every executable's link.
+target_link_libraries(Pace PRIVATE $<$<PLATFORM_ID:Windows>:dnsapi> $<$<PLATFORM_ID:Linux,Darwin>:resolv>)
+
+# The macOS package prefix, handed to the code that has to agree with it.
+# ServiceControl's launchd install picks the system job's storage and log
+# directories under this prefix, and the installer scripts lay the payload out
+# under the same one; when the two were spelled independently, a build with a
+# non-default PACE_MACOS_PREFIX produced a plist whose StandardOutPath
+# pointed into a directory the package never created, so launchd could not
+# spawn the job while the installer still reported success.
+#
+# PUBLIC so ServiceControl_test.cpp asserts against the same value.
+if(APPLE)
+    target_compile_definitions(Pace PUBLIC FC_MACOS_PREFIX="/${PACE_MACOS_PREFIX}")
+endif()
+
+# The machine-wide config directory the daemon probes when no --config is given,
+# taken from the same variable packaging/ installs the file into so the two
+# cannot drift. Defined regardless of PACE_PACKAGE_ROOT_PREFIX: a source
+# build should still find a config an operator placed in the conventional
+# location, and an absent file is a no-op. Windows resolves %ProgramData% at
+# runtime instead, so it gets no compiled-in path.
+#
+# PUBLIC so DefaultConfigPath_test.cpp asserts against the same value.
+if(APPLE)
+    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${PACE_MACOS_PREFIX}/etc")
+elseif(UNIX)
+    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${PACE_SYSCONF_DIR}")
+endif()
+
+# Optional TLS support: compiled and linked only when PACE_ENABLE_TLS is
+# on, so the default build pulls in no OpenSSL header and links no OpenSSL
+# symbol. FC_TLS_ENABLED is PUBLIC so dependents (the test binary) can guard
+# TLS-only tests behind the same macro.
+if(PACE_ENABLE_TLS)
+    # The TLS socket is core-cpp's `core::net_tls` (#1596), configured with CORE_CPP_WITH_TLS by
+    # the top-level CMakeLists.txt; it links OpenSSL privately, and no OpenSSL type crosses its header.
+    target_link_libraries(Pace PUBLIC core::net_tls)
+    target_compile_definitions(Pace PUBLIC FC_TLS_ENABLED=1)
+endif()
+
+# Optional on-disk value compression (zstd + lz4). ON by default. The exact
+# target names differ between a CPM source build and a system find_package, so
+# resolve whichever target each library actually exports before linking.
+# FC_COMPRESSION_ENABLED is PUBLIC so the test binary compiles the same codec
+# table (and the codec-selection tests) as the library.
+if(PACE_ENABLE_COMPRESSION)
+    if(TARGET libzstd_static)
+        set(_fc_zstd_target libzstd_static)
+    elseif(TARGET zstd::libzstd_static)
+        set(_fc_zstd_target zstd::libzstd_static)
+    elseif(TARGET zstd::libzstd_shared)
+        set(_fc_zstd_target zstd::libzstd_shared)
+    else()
+        message(FATAL_ERROR "PACE_ENABLE_COMPRESSION is ON but no zstd target was found")
+    endif()
+
+    if(TARGET lz4_static)
+        set(_fc_lz4_target lz4_static)
+    elseif(TARGET LZ4::lz4_static)
+        set(_fc_lz4_target LZ4::lz4_static)
+    elseif(TARGET lz4::lz4)
+        set(_fc_lz4_target lz4::lz4)
+    else()
+        message(FATAL_ERROR "PACE_ENABLE_COMPRESSION is ON but no lz4 target was found")
+    endif()
+
+    target_sources(Pace PRIVATE Core/Compression.cpp)
+    target_link_libraries(Pace PUBLIC ${_fc_zstd_target} ${_fc_lz4_target})
+    target_compile_definitions(Pace PUBLIC FC_COMPRESSION_ENABLED=1)
+else()
+    # Identity-only build: the codec utility still compiles (no zstd/lz4 header).
+    target_sources(Pace PRIVATE Core/Compression.cpp)
+endif()
+
+# Header-only files surfaced for IDE indexing.
+target_sources(Pace
+    PRIVATE
+        FILE_SET pace_public_headers
+        TYPE HEADERS
+        BASE_DIRS "${CMAKE_SOURCE_DIR}/src"
+        FILES
+            Core/Errors/ProtocolError.hpp
+            Core/Errors/StorageError.hpp
+            Core/Errors/ConfigError.hpp
+            Core/Bytes.hpp
+            Core/SecureBytes.hpp
+            Core/Compression.hpp
+            Core/Endian.hpp
+            Core/FigureText.hpp
+            Core/Markup.hpp
+            Core/StringHash.hpp
+            Core/Utf8.hpp
+            Core/Logger.hpp
+            Core/BufferPool.hpp
+)

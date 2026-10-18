@@ -95,7 +95,7 @@ fi
 # `exitcode=66` so a reported race is distinguishable from the program's own exit,
 # and `halt_on_error=0` so a run that reports several still finishes. NO
 # suppressions file: `.tsan-suppressions` never matches the canary -- it races on
-# its own global in a binary linking no FastCache frame -- and leaving it out of
+# its own global in a binary linking no Pace frame -- and leaving it out of
 # this measurement keeps the two questions apart. The gate runs the canary WITH it
 # on purpose, which is a different assertion (that no pattern is broad enough to
 # swallow an obvious race).

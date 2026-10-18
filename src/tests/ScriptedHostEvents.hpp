@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/HostEvents.hpp>
+#include <Pace/Platform/HostEvents.hpp>
 
 #include <cstddef>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The host, scripted: a case fires the event the OS would have, and reads who is listening.
@@ -47,4 +47,4 @@ class ScriptedHostEvents final: public IHostEvents
     HostEventHub _hub;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

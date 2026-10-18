@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cli/Options.hpp>
+#include <Pace/Cli/Options.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The operand spelling that makes an option row path-valued.
@@ -92,7 +92,7 @@ template <typename Table>
 /// secret-file table and a public-path table over their own option table, and the
 /// rule joining the three is identical -- so it is written here rather than twice in
 /// two Catch2 cases that would then drift on which directions they check
-/// ([#864](https://github.com/LASTRADA-Software/fastcached/issues/864)). It lives in
+/// ([#864](https://github.com/LASTRADA-Software/pace/issues/864)). It lives in
 /// `src/tests/` and not in the library because nothing in production asks it: it is a
 /// property of the tables, checked at build time by whoever owns them.
 ///
@@ -159,4 +159,4 @@ template <typename Result>
     return joined;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

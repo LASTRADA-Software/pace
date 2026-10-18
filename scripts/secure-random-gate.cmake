@@ -40,13 +40,13 @@ cmake_minimum_required(VERSION 3.28)
 # registered under -- `src/tests/CMakeLists.txt` holds the one spelling of the pattern.
 #
 # Usage:
-#   cmake -DFASTCACHED_PROBE=<path to secure-random-probe> -P scripts/secure-random-gate.cmake
+#   cmake -DPACE_PROBE=<path to secure-random-probe> -P scripts/secure-random-gate.cmake
 
-if(NOT DEFINED FASTCACHED_PROBE)
-    message(FATAL_ERROR "secure-random-gate: FASTCACHED_PROBE must be set to the secure-random-probe executable")
+if(NOT DEFINED PACE_PROBE)
+    message(FATAL_ERROR "secure-random-gate: PACE_PROBE must be set to the secure-random-probe executable")
 endif()
-if(NOT EXISTS "${FASTCACHED_PROBE}")
-    message(FATAL_ERROR "secure-random-gate: the probe does not exist: ${FASTCACHED_PROBE}")
+if(NOT EXISTS "${PACE_PROBE}")
+    message(FATAL_ERROR "secure-random-gate: the probe does not exist: ${PACE_PROBE}")
 endif()
 
 set(Processes 8)
@@ -54,11 +54,11 @@ set(PerProcess 16)
 
 # Run the probe @p runs times over @p source and collect every nonce, each tagged with the run
 # that drew it so a repeat can say which two processes agreed.
-function(fastcached_draw_nonces source runs outVar)
+function(pace_draw_nonces source runs outVar)
     set(tagged "")
     foreach(run RANGE 1 ${runs})
         execute_process(
-            COMMAND "${FASTCACHED_PROBE}" "--source=${source}" "--count=${PerProcess}"
+            COMMAND "${PACE_PROBE}" "--source=${source}" "--count=${PerProcess}"
             RESULT_VARIABLE probeResult
             OUTPUT_VARIABLE probeOut
             ERROR_VARIABLE probeErr
@@ -93,7 +93,7 @@ function(fastcached_draw_nonces source runs outVar)
 endfunction()
 
 # Every entry of @p tagged whose nonce an EARLIER entry already carried.
-function(fastcached_repeated_nonces tagged outVar)
+function(pace_repeated_nonces tagged outVar)
     set(seen "")
     set(repeats "")
     foreach(entry IN LISTS tagged)
@@ -108,8 +108,8 @@ function(fastcached_repeated_nonces tagged outVar)
 endfunction()
 
 # The control first: the detector must be seen to fire before its silence means anything.
-fastcached_draw_nonces(seeded-engine 2 control)
-fastcached_repeated_nonces("${control}" controlRepeats)
+pace_draw_nonces(seeded-engine 2 control)
+pace_repeated_nonces("${control}" controlRepeats)
 list(LENGTH controlRepeats controlRepeated)
 if(NOT controlRepeated EQUAL PerProcess)
     message(FATAL_ERROR
@@ -121,7 +121,7 @@ endif()
 message(STATUS "secure-random-gate: the control repeated ${controlRepeated} of ${PerProcess} nonces across two "
                "processes, as a zero-seeded engine must")
 
-fastcached_draw_nonces(os ${Processes} drawn)
+pace_draw_nonces(os ${Processes} drawn)
 list(LENGTH drawn total)
 
 foreach(entry IN LISTS drawn)
@@ -130,13 +130,13 @@ foreach(entry IN LISTS drawn)
     endif()
 endforeach()
 
-fastcached_repeated_nonces("${drawn}" repeats)
+pace_repeated_nonces("${drawn}" repeats)
 list(LENGTH repeats repeated)
 if(NOT repeated EQUAL 0)
     message(FATAL_ERROR
         "secure-random-gate: the operating system's generator repeated ${repeated} of ${total} nonces across "
         "${Processes} processes (run:nonce): ${repeats}. A restarted acceptor re-issuing an earlier run's challenge "
-        "is exactly what #1527 closes; see FastCache/Core/ISecureRandom.hpp")
+        "is exactly what #1527 closes; see Pace/Core/ISecureRandom.hpp")
 endif()
 
 message(STATUS "secure-random-gate: ${total} nonces from ${Processes} processes, none repeated and none zero")

@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "SixelEncoder.hpp"
+
+namespace Pace::Cli
+{
+
+/// @file SixelEncoderUnavailable.cpp
+/// The Sixel seam for a build without core-cpp's terminal UI (`PACE_BUILD_TUI=OFF`).
+///
+/// It refuses rather than handing back an encoder that produces nothing: an empty body is what a
+/// fully transparent image encodes to, so an encoder answering empty would draw a blank chart
+/// where the fact is that this binary cannot draw one.
+
+std::expected<std::unique_ptr<ISixelEncoder>, std::string> MakeSixelEncoder()
+{
+    return std::unexpected(std::string { "this pacectl was built without the terminal UI (PACE_BUILD_TUI=OFF)" });
+}
+
+} // namespace Pace::Cli

@@ -55,7 +55,7 @@ set(failures "")
 #
 # @param tag Catch2 tag selecting the case.
 # @param outStatus Receives the exit status.
-function(fastcached_run tag outStatus)
+function(pace_run tag outStatus)
     execute_process(
         COMMAND "${CANARY}" "${tag}"
         OUTPUT_VARIABLE captured
@@ -91,7 +91,7 @@ function(fastcached_run tag outStatus)
 endfunction()
 
 # 3. The control first: a case that passes exits 0.
-fastcached_run("[canarypass]" passStatus)
+pace_run("[canarypass]" passStatus)
 if(NOT passStatus EQUAL 0)
     list(APPEND failures
          "the PASSING control exited ${passStatus}, not 0 -- the canary itself is broken, so no other status below says anything about Catch2")
@@ -100,7 +100,7 @@ endif()
 # 1. Every skip-only shape exits 4, which is what `SKIP_RETURN_CODE 4` reads as skipped.
 set(skipShapes "[canaryskip]" "[canarypadskip]" "[canarywidepad]" "[canarysectionskip]")
 foreach(tag IN LISTS skipShapes)
-    fastcached_run("${tag}" status)
+    pace_run("${tag}" status)
     if(NOT status EQUAL 4)
         list(APPEND failures
              "the skip-only shape ${tag} exited ${status}, not 4 -- every `SKIP_RETURN_CODE 4` registration now scores that skip as a FAILURE (#499 returning)")
@@ -111,7 +111,7 @@ endforeach()
 set(failShapes "[canaryfailone]" "[canaryfail]" "[canaryfailmany]" "[canarymixed]" "[canarydecoy]" "[canaryadversary]")
 set(failureCode "")
 foreach(tag IN LISTS failShapes)
-    fastcached_run("${tag}" status)
+    pace_run("${tag}" status)
     if(status EQUAL 4)
         list(APPEND failures
              "the failing shape ${tag} exited 4, the skip code -- ctest scores it SKIPPED, a genuinely failing test inside `100% tests passed` (#1128 returning)")

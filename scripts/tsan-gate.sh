@@ -123,13 +123,13 @@
 # rather than about how a directory is spelled -- so the check written to enforce
 # the first correction could not see it (#316). `Async`, `Consensus` and
 # `Distributed` are not the only places this tree spawns one: a census of
-# `std::thread`/`std::jthread`/`std::async` over `FastCacheTest`'s own sources
+# `std::thread`/`std::jthread`/`std::async` over `PaceTest`'s own sources
 # names NINETEEN files, and ELEVEN of them were selected by no tag here and sat
 # in no directory `check-tsan-scope.cmake` scanned -- among them every threaded `Net/`
 # test, which is the module `BlockingListener` lives in and therefore the module
 # the one real race this gate has ever seen (#260) came out of. That race reached
-# the gate only because `fastcache-compile-node-tests` is run whole; a regression
-# of it reached through a `Net/` unit test in `FastCacheTest` was selected by
+# the gate only because `pace-node-tests` is run whole; a regression
+# of it reached through a `Net/` unit test in `PaceTest` was selected by
 # nothing. The scope now names those files, and the tags below are what SELECTS
 # them.
 #
@@ -205,11 +205,11 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 # reactors (#1399) -- and `[livestats]` is deliberately NOT a row: its other cases
 # drive one `TestReactor` on one thread, where ThreadSanitizer has no second thread
 # to observe, so the tag would lengthen the run and read as race coverage it is not.
-# Measured on 78582087, Linux, clang-tsan, `-DFASTCACHED_ENABLE_TLS=ON`, Catch2's own
+# Measured on 78582087, Linux, clang-tsan, `-DPACE_ENABLE_TLS=ON`, Catch2's own
 # `matching test cases` line: this expression 903, with `[livestats]` added 921 --
 # the 18 it would add are exactly its cases outside every tag here, 0 of them threaded.
 #
-# MEASURED 2026-09-11 on 9c5cc374, Linux, with `-DFASTCACHED_ENABLE_TLS=ON` --
+# MEASURED 2026-09-11 on 9c5cc374, Linux, with `-DPACE_ENABLE_TLS=ON` --
 # what the clang-tsan job passes, and the condition that decides the number:
 # without it the same commit builds 830 rather than 848, so counts taken at the
 # two settings were never comparable. Read from Catch2's OWN trailing
@@ -247,10 +247,10 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 # -- two are `CliParser: --tls captures cert and key paths` and a `Server:` TLS
 # metrics case -- so `[tls]` reaches a little outside the directory it is named
 # for. This paragraph said "three `TlsContext` cases" until it was asked.
-# THE THIRD ROW, and why it is run whole (#1209). `fastcache-cc-tests` was in no
-# row: the launcher does not link the FastCache library, so it is a separate
+# THE THIRD ROW, and why it is run whole (#1209). `pace-cc-tests` was in no
+# row: the launcher does not link the Pace library, so it is a separate
 # binary that the two rows above cannot reach however the tags are written. Its
-# concurrency is one file, `src/apps/fastcache-cc/CompileJob_test.cpp` -- jthreads
+# concurrency is one file, `src/apps/pace-cc/CompileJob_test.cpp` -- jthreads
 # over `OverlappingEchoRunner::Overlap` behind a `std::latch`, and a toolchain
 # replacement landing mid-compile against a dangling iterator -- so a tag
 # expression would buy nothing here: the whole binary is 3 s sanitized, measured
@@ -259,7 +259,7 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 #
 # MEASURED BEFORE THE ROW WAS ADDED, which is what #1209 asks for -- a row added
 # blind turns this job red for the next person. On 9a01737b, Linux, clang-22,
-# `-DFASTCACHED_ENABLE_TLS=ON`, `detect_deadlocks=0`:
+# `-DPACE_ENABLE_TLS=ON`, `detect_deadlocks=0`:
 #
 #     objects carrying an undefined `__tsan_init`   82 of 82
 #     whole binary, gate's own TSAN_OPTIONS         exit 0, 716 cases, 0 warnings
@@ -274,7 +274,7 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 #
 # **It declares first-party since #178**, which gave the launcher's shared sources an
 # Ed25519 verifier -- the worker half checks a lease's signature -- and with it ONE
-# first-party archive, `fastcache-monocypher`. It still links no FastCache library; what
+# first-party archive, `pace-monocypher`. It still links no Pace library; what
 # the row now asks is that the archive it does link was instrumented, which a "none" row
 # would have waved through unasked.
 #
@@ -296,10 +296,10 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 # an undefined `__tsan_init`, the canary exits 66 with its race reported, and 20 runs of
 # `[host-events]` (15 cases) came back clean with 0 warnings. A bound, not an absence.
 TARGETS=(
-    "FastCacheTest|[consensus],[distributed],[reactor],[net],[tls],[sharded],[expiry],[clock],[wait],[pubsub],[server],[host-events]|first-party"
-    "fastcache-compile-node-tests||first-party"
-    "fastcache-cc-tests||first-party"
-    "fastcache-cli-tests||first-party"
+    "PaceTest|[consensus],[distributed],[reactor],[net],[tls],[sharded],[expiry],[clock],[wait],[pubsub],[server],[host-events]|first-party"
+    "pace-node-tests||first-party"
+    "pace-cc-tests||first-party"
+    "pacectl-tests||first-party"
 )
 
 # What this gate DID, one entry per row of TARGETS above.
@@ -489,7 +489,7 @@ export TSAN_OPTIONS="halt_on_error=0 exitcode=66 print_suppressions=1 detect_dea
 # place the change is a REGRESSION rather than an improvement. GNU `timeout`'s
 # manual documents `--foreground` as the way to stop children being timed out, so
 # without it they are; `run_bounded` signals the direct child only, and says so
-# (`ONE PROCESS DEEP` in its header). `fastcache-compile-node-tests` spawns
+# (`ONE PROCESS DEEP` in its header). `pace-node-tests` spawns
 # compilers and claims scratch roots, so on expiry a grandchild can outlive the
 # target this gate killed.
 #
@@ -512,7 +512,7 @@ export TSAN_OPTIONS="halt_on_error=0 exitcode=66 print_suppressions=1 detect_dea
 # `run_bounded`'s header rejects both routes on stated grounds: job control
 # changes the calling fixture's own signal handling, and a watchdog firing after
 # `wait` reaps can signal a REUSED pid.
-TargetTimeoutSeconds="${FASTCACHE_TSAN_TIMEOUT:-900}"
+TargetTimeoutSeconds="${PACE_TSAN_TIMEOUT:-900}"
 
 # The canary's own bound, which is much tighter because the canary is a few
 # milliseconds of deliberate race and nothing else -- there is no suite behind it
@@ -590,8 +590,8 @@ BinaryPath() { printf '%s' "${BUILD_DIR}/target/$1"; }
 # Where CMake put a target's object files.
 #
 # Found rather than tabulated, because the three targets do not share a parent:
-# `tsan-canary` and `FastCacheTest` sit under `src/tests/CMakeFiles/`, while
-# `fastcache-compile-node-tests` is under `src/apps/fastcache-compile-node/`. A
+# `tsan-canary` and `PaceTest` sit under `src/tests/CMakeFiles/`, while
+# `pace-node-tests` is under `src/apps/pace-node/`. A
 # table would be a second place to edit when a target moves, and the kind that
 # goes stale silently.
 #
@@ -643,13 +643,13 @@ ${matches}
 # binaries had no such backstop: `RunTarget` checks the timeout, that the tag
 # filter matched, and that assertions were reported, and not one of those can
 # tell an instrumented run from an uninstrumented one. An uninstrumented
-# `FastCacheTest` linked against the runtime runs, reports assertions, exits 0,
+# `PaceTest` linked against the runtime runs, reports assertions, exits 0,
 # and the gate prints `all scoped targets clean`. That is the silent fail-open,
 # and it is why this check covers every artefact rather than only the canary.
 #
 # WHY `__tsan_init` AND NOT `__tsan_func_entry`. The latter is emitted per
 # instrumented FUNCTION, so an object whose translation unit has no functions
-# carries none -- six of `FastCacheTest`'s 135 are exactly that, the
+# carries none -- six of `PaceTest`'s 135 are exactly that, the
 # platform-gated `Iocp*`, `Kqueue*` and `Tls*` test files, which compile to
 # nothing on Linux. A rule built on `__tsan_func_entry` needs an
 # empty-TU exemption and would otherwise refuse a correct build. Those six DO
@@ -741,13 +741,13 @@ ${offenders}    The BINARY may still carry a defined __tsan_init -- the link pul
 # `AssertInstrumented` reads the objects in the row's own `<target>.dir`, and a binary
 # is more than those. The vendored TUI went unsanitized in every sanitizer
 # configuration (#134) -- its targets were declared before the directory-scoped
-# sanitizer options -- while this gate printed "fastcache-cli-tests: instrumented
+# sanitizer options -- while this gate printed "pacectl-tests: instrumented
 # (31 object files)": true of the 31, and silent about the static library holding
 # the half of that binary the row exists for.
 #
 # DERIVED, never listed. The libraries are the static archives on the row's own link
 # edge, read from ninja's record of the build (`ninja -t query`), and each archive's
-# objects are the inputs of ITS edge. A hand list of "FastCache and the TUI" is exact
+# objects are the inputs of ITS edge. A hand list of "Pace and the TUI" is exact
 # about the libraries it knows and silent about the next one, which is precisely how
 # the TUI escaped the object check above.
 #
@@ -763,7 +763,7 @@ ${offenders}    The BINARY may still carry a defined __tsan_init -- the link pul
 # archive nobody recorded as a dependency is treated as ours and checked, which
 # fails CLOSED.
 #
-# A row linking no first-party archive is ordinary -- `fastcache-cc-tests` was one,
+# A row linking no first-party archive is ordinary -- `pace-cc-tests` was one,
 # compiling its few shared sources in, until #178 linked it the Ed25519 archive -- so it
 # is REPORTED by name rather than refused. What is refused is the derivation coming back empty for
 # EVERY row (`AssertSomeRowLinksALibrary`), and a link edge ninja cannot describe.
@@ -897,7 +897,7 @@ ${offenders}    The row's OWN objects passed, so this is a LIBRARY the sanitizer
 # that `.tsan-suppressions` is not broad enough to swallow an obvious race -- a
 # wildcard pattern that silences the canary fails here rather than quietly
 # disarming the whole gate. It is not a proof about narrow entries: the canary
-# races on its own global, in a binary that links no FastCache frame, so a
+# races on its own global, in a binary that links no Pace frame, so a
 # `race_top:` naming a real function here could never have silenced it.
 # ---------------------------------------------------------------------------
 
@@ -996,7 +996,7 @@ FailTarget() {
 #
 # A single grep for `assertions in` therefore reads a perfectly healthy run with
 # one skip as a run that REPORTED NOTHING, and the gate refuses to call it clean.
-# A false RED, and a deterministic one rather than a flake: `fastcache-cc-tests`
+# A false RED, and a deterministic one rather than a flake: `pace-cc-tests`
 # skips one case on every host with no MSVC-family driver, which is every Linux
 # runner, so the third row of TARGETS could not go green on the platform this job
 # runs on. The two rows before it happen to skip nothing, which is why the defect
@@ -1087,7 +1087,7 @@ RunTarget() {
             cat "$log"
             FailTarget "$name" "${name} did not finish within ${TargetTimeoutSeconds}s and was killed.
     Under ThreadSanitizer that is a deadlock until proven otherwise, and the last
-    case in the log above is where to start. FASTCACHE_TSAN_TIMEOUT raises the
+    case in the log above is where to start. PACE_TSAN_TIMEOUT raises the
     bound if the suite has simply grown."
             ;;
         "$E2eBoundUnstartable")
@@ -1117,8 +1117,8 @@ RunTarget() {
     # The PER-ENTRY lines are part of that, and were missing. TSan prints
     #
     #     ThreadSanitizer: Matched 5 suppressions (pid=NNN):
-    #     2 race_top:FastCache::BlockingListener::Close
-    #     3 race_top:FastCache::EpollReactor::Detach
+    #     2 race_top:Pace::BlockingListener::Close
+    #     3 race_top:Pace::EpollReactor::Detach
     #
     # and this grep matched only the header, so a green run reported a bare TOTAL
     # with no attribution -- 4 could be 4 from one entry and 0 from the other, and
@@ -1346,7 +1346,7 @@ STUB
                                               "                 U __tsan_func_entry" \
                                               "                 U __tsan_read4" > "${dir}/${obj}.o" ;;
                 # An instrumented TU with NO functions -- the six platform-gated
-                # files in FastCacheTest. It carries __tsan_init and nothing else,
+                # files in PaceTest. It carries __tsan_init and nothing else,
                 # which is why the rule is built on that symbol and not on
                 # __tsan_func_entry: a rule using the hooks would refuse this.
                 empty)        printf '%s\n' "                 U __tsan_init" > "${dir}/${obj}.o" ;;
@@ -1430,37 +1430,37 @@ STUB
     # THE CASE #472 IS ABOUT. A suite binary with one uninstrumented object.
     # Before this change nothing anywhere refused it: the binary carries a defined
     # __tsan_init from the runtime, and RunTarget cannot tell the difference.
-    Stage FastCacheTest a:instrumented b:plain c:instrumented
+    Stage PaceTest a:instrumented b:plain c:instrumented
     Case "suite-object-uninstrumented" 1 \
         "1 of 3 object files were built WITHOUT" "b.o" "the binary is not evidence here"
 
     Stage tsan-canary only:plain
     Case "canary-object-uninstrumented" 1 "1 of 1 object files were built WITHOUT"
 
-    Stage FastCacheTest a:instrumented b:instrumented c:instrumented
+    Stage PaceTest a:instrumented b:instrumented c:instrumented
     Case "all-instrumented" 0 "instrumented (3 object files)" "!WITHOUT"
 
     # No false positive on a translation unit with nothing to instrument.
-    Stage FastCacheTest a:instrumented b:empty c:empty
+    Stage PaceTest a:instrumented b:empty c:empty
     Case "empty-tu-is-not-a-failure" 0 "instrumented (3 object files)" "!WITHOUT"
 
-    Stage FastCacheTest a:instrumented b:unreadable
+    Stage PaceTest a:instrumented b:unreadable
     Case "object-cannot-be-read" 1 "nm could not read" "!WITHOUT"
 
-    Stage FastCacheTest a:instrumented
-    rm -rf "${BUILD_DIR}/src/tests/CMakeFiles/FastCacheTest.dir"
-    Case "no-object-directory" 1 "no FastCacheTest.dir under"
+    Stage PaceTest a:instrumented
+    rm -rf "${BUILD_DIR}/src/tests/CMakeFiles/PaceTest.dir"
+    Case "no-object-directory" 1 "no PaceTest.dir under"
 
-    Stage FastCacheTest a:instrumented
-    mkdir -p "${BUILD_DIR}/src/apps/CMakeFiles/FastCacheTest.dir"
+    Stage PaceTest a:instrumented
+    mkdir -p "${BUILD_DIR}/src/apps/CMakeFiles/PaceTest.dir"
     Case "two-object-directories" 1 "cannot tell which is current"
 
-    Stage FastCacheTest a:instrumented
-    rm -f "${BUILD_DIR}"/src/tests/CMakeFiles/FastCacheTest.dir/*.o
+    Stage PaceTest a:instrumented
+    rm -f "${BUILD_DIR}"/src/tests/CMakeFiles/PaceTest.dir/*.o
     Case "no-objects-at-all" 1 "no object files under"
 
-    Stage FastCacheTest a:instrumented
-    rm -f "${BUILD_DIR}/target/FastCacheTest"
+    Stage PaceTest a:instrumented
+    rm -f "${BUILD_DIR}/target/PaceTest"
     Case "binary-not-built" 1 "not built"
 
     # -----------------------------------------------------------------------
@@ -1514,10 +1514,10 @@ STUB
 
     # THE CASE #134 IS ABOUT: the row's own objects are fine, and a library it links is
     # not. The object check above passes this tree.
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     printf '%s\n' "CPM_PACKAGE_Catch2_BINARY_DIR:INTERNAL=$(cd "$BUILD_DIR" && pwd -P)/_deps/catch2-build" > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "vendor/libtui.a" a:instrumented b:plain
-    StageQuery "target/fastcache-cli-tests" "own.o" "vendor/libtui.a"
+    StageQuery "target/pacectl-tests" "own.o" "vendor/libtui.a"
     LinkCase "linked-library-uninstrumented" first-party 1 \
         "links the first-party library vendor/libtui.a" "1 of 2 of its object files were built WITHOUT" \
         "vendor/libtui.dir/b.o" "!vendor/libtui.dir/a.o"
@@ -1526,12 +1526,12 @@ STUB
     # step over: a recorded dependency's archive that is NOT instrumented, and a system
     # library by absolute path. Watched passing, so the refusal above is not a check
     # that refuses everything.
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     printf '%s\n' "CPM_PACKAGE_Catch2_BINARY_DIR:INTERNAL=$(cd "$BUILD_DIR" && pwd -P)/_deps/catch2-build" > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "vendor/libtui.a" a:instrumented b:instrumented
     StageArchive "libFirst.a" c:instrumented
     StageArchive "_deps/catch2-build/libCatch2.a" d:plain
-    StageQuery "target/fastcache-cli-tests" "own.o" "libFirst.a vendor/libtui.a _deps/catch2-build/libCatch2.a /usr/lib/libssl.so /usr/lib/libsys.a"
+    StageQuery "target/pacectl-tests" "own.o" "libFirst.a vendor/libtui.a _deps/catch2-build/libCatch2.a /usr/lib/libssl.so /usr/lib/libsys.a"
     LinkCase "linked-libraries-instrumented" first-party 0 \
         "linked first-party libraries instrumented: libFirst.a (1) vendor/libtui.a (2)" \
         "!WITHOUT" "!libCatch2" "!libssl" "!libsys"
@@ -1539,10 +1539,10 @@ STUB
     # The classification is the BUILD'S RECORD, not the path: the same archive under
     # `_deps/` with no CPM record is ours as far as anything can tell, so it is checked
     # -- and refused. A `_deps/` pattern would have waved it through.
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "_deps/catch2-build/libCatch2.a" d:plain
-    StageQuery "target/fastcache-cli-tests" "own.o" "_deps/catch2-build/libCatch2.a"
+    StageQuery "target/pacectl-tests" "own.o" "_deps/catch2-build/libCatch2.a"
     LinkCase "unrecorded-dependency-is-checked" first-party 1 \
         "links the first-party library _deps/catch2-build/libCatch2.a"
 
@@ -1550,48 +1550,48 @@ STUB
     # none is accepted and says why; a row declaring first-party that reads empty is
     # refused -- the misread graph a count across rows could not see -- and so is a
     # stale none that reads a library, even an instrumented one.
-    Stage fastcache-cc-tests own:instrumented
+    Stage pace-cc-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cc-tests" "own.o" "/usr/lib/libssl.so"
+    StageQuery "target/pace-cc-tests" "own.o" "/usr/lib/libssl.so"
     LinkCase "row-declaring-none-links-none" "none: compiles its sources in" 0 \
-        "fastcache-cc-tests: links no first-party static library, as its row declares (compiles its sources in)" "!WITHOUT"
+        "pace-cc-tests: links no first-party static library, as its row declares (compiles its sources in)" "!WITHOUT"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cli-tests" "own.o" "/usr/lib/libssl.so"
+    StageQuery "target/pacectl-tests" "own.o" "/usr/lib/libssl.so"
     LinkCase "row-declaring-first-party-reads-none" first-party 1 \
         "declares it links first-party libraries, and ninja's record of its link names none"
 
-    Stage fastcache-cc-tests own:instrumented
+    Stage pace-cc-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "libFirst.a" c:instrumented
-    StageQuery "target/fastcache-cc-tests" "own.o" "libFirst.a"
+    StageQuery "target/pace-cc-tests" "own.o" "libFirst.a"
     LinkCase "row-declaring-none-links-a-library" "none: compiles its sources in" 1 \
         "declares it links no first-party library (compiles its sources in), and it links: libFirst.a (1)"
 
-    Stage fastcache-cc-tests own:instrumented
+    Stage pace-cc-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cc-tests" "own.o" ""
+    StageQuery "target/pace-cc-tests" "own.o" ""
     LinkCase "row-declaring-something-else" "none:" 1 "declares \"none:\" about what it links"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    LinkCase "link-edge-ninja-cannot-describe" first-party 1 "ninja -t query target/fastcache-cli-tests failed"
+    LinkCase "link-edge-ninja-cannot-describe" first-party 1 "ninja -t query target/pacectl-tests failed"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cli-tests" "" ""
-    LinkCase "link-edge-with-no-inputs" first-party 1 "ninja records no inputs for target/fastcache-cli-tests"
+    StageQuery "target/pacectl-tests" "" ""
+    LinkCase "link-edge-with-no-inputs" first-party 1 "ninja records no inputs for target/pacectl-tests"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
     StageQuery "libEmpty.a" "" ""
-    StageQuery "target/fastcache-cli-tests" "own.o" "libEmpty.a"
+    StageQuery "target/pacectl-tests" "own.o" "libEmpty.a"
     LinkCase "library-with-no-objects" first-party 1 "ninja records no object inputs for it"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     rm -f "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cli-tests" "own.o" ""
+    StageQuery "target/pacectl-tests" "own.o" ""
     LinkCase "no-cache-to-classify-with" first-party 1 "no ${BUILD_DIR}/CMakeCache.txt"
 
     # The row's fields: a tag expression holding a `|` of its own still leaves the
@@ -1698,8 +1698,8 @@ STUB
     # cases ran, 0 failed. A signal that cannot be false in the failing case is
     # not evidence.
     VerdictCase "verdict-stopped-before-the-second-target" \
-        "FastCacheTest=FAILED fastcache-compile-node-tests=not-run" \
-        "FastCacheTest" "FAILED" "fastcache-compile-node-tests" "NOT RUN" \
+        "PaceTest=FAILED pace-node-tests=not-run" \
+        "PaceTest" "FAILED" "pace-node-tests" "NOT RUN" \
         "reported nothing about it" \
         "!clean" "!UNKNOWN"
 
@@ -1707,15 +1707,15 @@ STUB
     # where BOTH were examined must be distinguishable from the one above. It was
     # not, because neither printed anything per target.
     VerdictCase "verdict-both-clean-says-so-per-target" \
-        "FastCacheTest=clean fastcache-compile-node-tests=clean" \
-        "FastCacheTest" "fastcache-compile-node-tests" "clean" \
+        "PaceTest=clean pace-node-tests=clean" \
+        "PaceTest" "pace-node-tests" "clean" \
         "!NOT RUN" "!STARTED" "!FAILED"
 
     # An early failure, before any target: every row reports that it was not
     # reached. Silence used to be the only signal here, and silence is also what a
     # scrolled-past line and a truncated log look like.
     VerdictCase "verdict-nothing-reached-at-all" \
-        "FastCacheTest=not-run fastcache-compile-node-tests=not-run" \
+        "PaceTest=not-run pace-node-tests=not-run" \
         "NOT RUN" "!clean" "!FAILED"
 
     # STARTED is not NOT RUN, and it is not FAILED either. A target killed
@@ -1723,7 +1723,7 @@ STUB
     # it spent; saying it FAILED would be a verdict nothing reached. Three states,
     # three diagnoses, three different people.
     VerdictCase "verdict-started-is-not-unstarted" \
-        "FastCacheTest=running" \
+        "PaceTest=running" \
         "STARTED, NO VERDICT" "!NOT RUN" "!FAILED"
 
     # The acceptance clause a fall-through would silently break: a state this
@@ -1732,7 +1732,7 @@ STUB
     # the two shared one, an unrecognised state rendered as NOT RUN, which reads
     # as a considered verdict about a target nobody looked at.
     VerdictCase "verdict-unrecognised-state-renders-as-unrecognised" \
-        "FastCacheTest=wat" \
+        "PaceTest=wat" \
         "UNKNOWN STATE" "wat" "bug in the gate" \
         "!NOT RUN" "!clean" "!FAILED" "!STARTED"
 
@@ -1748,10 +1748,10 @@ STUB
     # three rows, and the third must come back `not-run` rather than aborting the
     # render under `set -u`.
     Expect "verdict-pairs-are-derived-from-the-table" 0 0 \
-        "$(TARGETS=("FastCacheTest|[async]|first-party" "fastcache-compile-node-tests||first-party" "a-third-target|[new]|none: staged")
+        "$(TARGETS=("PaceTest|[async]|first-party" "pace-node-tests||first-party" "a-third-target|[new]|none: staged")
            TargetVerdicts=("clean" "clean")
            TargetPairs)" \
-        "FastCacheTest=clean" "fastcache-compile-node-tests=clean" "a-third-target=not-run"
+        "PaceTest=clean" "pace-node-tests=clean" "a-third-target=not-run"
 
     # Every refusal that BELONGS to a target goes through `FailTarget`, checked at
     # the SOURCE rather than left to a reader. A bare `fatal` inside `RunTarget`

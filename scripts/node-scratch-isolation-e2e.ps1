@@ -29,7 +29,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Fastcached,
+    [string]$PaceKv,
     [string]$Node,
     [string]$Launcher,
     [string]$Compiler,
@@ -61,7 +61,7 @@ catch { Write-Host "node-scratch-isolation-e2e FAILED: $($_.Exception.Message)";
 # node to exercise a wait's arithmetic would put the one check that has no
 # prerequisites behind every prerequisite there is.
 if (-not $SelfTest) {
-    foreach ($pair in @(@{p=$Fastcached;n="-Fastcached"}, @{p=$Node;n="-Node"})) {
+    foreach ($pair in @(@{p=$PaceKv;n="-PaceKv"}, @{p=$Node;n="-Node"})) {
         if (-not $pair.p -or -not (Test-Path $pair.p)) { Skip "$($pair.n) was not given a built binary" }
     }
     # Asked apart from the loop above: a launcher path copied into a table is an alias
@@ -1177,7 +1177,7 @@ long long marker_$seed(std::string const& s) {
 
 $clientBody = {
     param($Launcher, $cc, $proj, $obj, $src, $sched, $cache, $tag, $StateModule, $StateHandle)
-    # First, before this job sets any FASTCACHE_* of its own: importing the module
+    # First, before this job sets any PACE_* of its own: importing the module
     # clears the ones it inherited, and brings the launcher-state wrapper into the job.
     Import-Module $StateModule -Force
     function ConvertTo-QuotedArgs([string[]]$arguments) {
@@ -1185,11 +1185,11 @@ $clientBody = {
             if ($_ -match '\s' -and $_ -notmatch '^"') { '"' + $_ + '"' } else { $_ }
         }
     }
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$cache"
-    $env:FASTCACHE_SOURCE_DIR = $proj
-    $env:FASTCACHE_BINARY_DIR = (Join-Path $proj "build")
-    $env:FASTCACHE_VERBOSE    = "1"
-    $env:FASTCACHE_SCHEDULER  = $sched
+    $env:PACE_ADDR       = "127.0.0.1:$cache"
+    $env:PACE_SOURCE_DIR = $proj
+    $env:PACE_BINARY_DIR = (Join-Path $proj "build")
+    $env:PACE_VERBOSE    = "1"
+    $env:PACE_SCHEDULER  = $sched
     # BOTH streams to files: `cl` echoes the source name on stdout, and an
     # un-redirected child inside Start-Job puts that into the job's output stream
     # where Receive-Job fails trying to deserialize it.
@@ -1229,10 +1229,10 @@ function Invoke-Phase([string]$label, [bool]$separateTempForB) {
     $commandLines = @{}
     try {
         $cacheArgs = @("--port=$cachePort", "--bind=127.0.0.1")
-        $cacheProc = Start-Process -FilePath $Fastcached -ArgumentList $cacheArgs `
+        $cacheProc = Start-Process -FilePath $PaceKv -ArgumentList $cacheArgs `
                     -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $phaseDir "cache.out.log") `
                     -RedirectStandardError (Join-Path $phaseDir "cache.err.log")
-        $commandLines[$cacheProc.Id] = (@($Fastcached) + $cacheArgs) -join ' '
+        $commandLines[$cacheProc.Id] = (@($PaceKv) + $cacheArgs) -join ' '
         $procs += $cacheProc
 
         function Start-NodeIn([string]$name, [string[]]$argv, [string]$tempOverride) {
@@ -1400,7 +1400,7 @@ function Invoke-Phase([string]$label, [bool]$separateTempForB) {
                 try {
                     $text = (Invoke-WebRequest -Uri "http://127.0.0.1:$($n.admin)/metrics" -TimeoutSec 5).Content
                     foreach ($line in ($text -split "`n")) {
-                        if ($line -match '^fastcached_dispatch_worker_registrations_total\s+([0-9]+)') { $regs = [int]$Matches[1] }
+                        if ($line -match '^pace_dispatch_worker_registrations_total\s+([0-9]+)') { $regs = [int]$Matches[1] }
                     }
                 } catch { }
             }

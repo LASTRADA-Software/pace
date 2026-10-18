@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Dependency-free wire-protocol clients for fastcached benchmarking.
+"""Dependency-free wire-protocol clients for pace-kv benchmarking.
 
-Three clients speak fastcached's three wire protocols directly over a raw
+Three clients speak pace-kv's three wire protocols directly over a raw
 socket — no redis / memcached client libraries are required, which keeps the
 benchmark portable and reproducible across Windows, Linux, and macOS.
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 import socket
 import struct
 
-# fastcached auto-detects the protocol from the first byte a client sends
+# pace-kv auto-detects the protocol from the first byte a client sends
 # (see ProtocolAutodetect.cpp): 0x80 -> memcached binary, one of *+-:$ -> Redis
 # RESP2, anything else -> memcached text.
 PROTOCOLS = ("memcached-text", "memcached-binary", "redis", "redis-resp3")
@@ -137,7 +137,7 @@ class MemcachedTextClient:
 
 
 class RedisRespClient:
-    """Speaks Redis RESP2. Note: fastcached has no INCR over Redis."""
+    """Speaks Redis RESP2. Note: pace-kv has no INCR over Redis."""
 
     def __init__(self, host: str, port: int, timeout: float) -> None:
         self._conn = _Connection(host, port, timeout)
@@ -179,7 +179,7 @@ class RedisRespClient:
         return self._read_reply() == b"1"
 
     def incr(self, key: bytes, delta: int) -> int | None:
-        raise Unsupported("Redis INCR is not implemented by fastcached")
+        raise Unsupported("Redis INCR is not implemented by pace-kv")
 
     def ping(self) -> bool:
         self._conn.send(self._encode(b"PING"))
@@ -262,7 +262,7 @@ class RedisResp3Client:
         return self._read_reply() == b"1"
 
     def incr(self, key: bytes, delta: int) -> int | None:
-        raise Unsupported("Redis INCR is not implemented by fastcached")
+        raise Unsupported("Redis INCR is not implemented by pace-kv")
 
     def ping(self) -> bool:
         self._conn.send(self._encode(b"PING"))

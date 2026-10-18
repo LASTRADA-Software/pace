@@ -354,11 +354,11 @@ if [ "${1:-}" = "--self-test" ]; then
     }
 
     Case "a wrapped registration passes" want-pass \
-'add_test(NAME "foo" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
+'add_test(NAME "foo" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
     # The arm this whole file exists for.
     Case "an UNWRAPPED registration is refused" want-fail \
-'add_test(NAME "foo" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
+'add_test(NAME "foo" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
     # Drive the audit and read its OUTPUT, which `Case` cannot: it folds every non-zero
     # into "want-fail", so a refusal that said nothing useful would pass every case above.
@@ -392,15 +392,15 @@ if [ "${1:-}" = "--self-test" ]; then
     # reads exactly like a registration that never names the wrapper. A reader acted on that
     # twice, telling a lane its registration lacked `run-check.sh` when the line above had it.
     CaseSaying "a wrapped COMMAND is refused, and the refusal SHOWS the wrapper on the line above" \
-        'COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh"' "-" \
+        'COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh"' "-" \
 'add_test(NAME "foo"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh"
         "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
     CaseSaying "and it names the remedy rather than leaving the reader to guess" \
         "put scripts/run-check.sh and the checked script on ONE line" "-" \
 'add_test(NAME "foo"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh"
         "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
     # The DISCRIMINATION, and what makes the first case mean anything. This scan has ONE
@@ -412,27 +412,27 @@ if [ "${1:-}" = "--self-test" ]; then
         "put scripts/run-check.sh and the checked script on ONE line" \
         'scripts/run-check.sh"' \
 'add_test(NAME "foo"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
 
     Case "one unwrapped among several wrapped is refused" want-fail \
-'add_test(NAME "a" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-a.sh")
-add_test(NAME "b" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-b.sh")'
+'add_test(NAME "a" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-a.sh")
+add_test(NAME "b" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-b.sh")'
 
     # A file naming no check at all is a derivation that found nothing, which must
     # refuse rather than report every check wrapped.
     Case "a registration file naming no check is REFUSED, not passed vacuously" want-fail \
-'add_test(NAME "unrelated" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/something-else.sh")'
+'add_test(NAME "unrelated" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/something-else.sh")'
 
     # A comment is not a call site.
     Case "an unwrapped check inside a COMMENT does not refuse a good file" want-pass \
-'# COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-old.sh"
-add_test(NAME "foo" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
+'# COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/check-old.sh"
+add_test(NAME "foo" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
     # And the wrapper is not asked to wrap itself.
     Case "the wrapper's own self-test registration is not a violation" want-pass \
-'add_test(NAME "run-check-selftest" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" --self-test)
-add_test(NAME "foo" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
+'add_test(NAME "run-check-selftest" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" --self-test)
+add_test(NAME "foo" COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-foo.sh")'
 
     # --- the marker-safety half ---------------------------------------------
     #
@@ -472,8 +472,8 @@ add_test(NAME "foo" COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-
     # Without resolution this passes, and so would every real collision behind a
     # variable -- which is how this check would go quietly vacuous.
     MarkerCase "a colliding pattern behind a VARIABLE is still refused" want-fail \
-'set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CHECK CONCLUDED")
-set_tests_properties("x" PROPERTIES FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}")'
+'set(PACE_SCRIPT_CHECK_FAILED "CMake Error|CHECK CONCLUDED")
+set_tests_properties("x" PROPERTIES FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}")'
 
     MarkerCase "a registration file with NO fail-pattern is REFUSED, not passed vacuously" want-fail \
 'add_test(NAME "x" COMMAND true)'
@@ -491,9 +491,9 @@ set_tests_properties("x" PROPERTIES FAIL_REGULAR_EXPRESSION "CMake Error")'
     # simply vanishes and the run reports 'no collision' over a set it could not
     # read.
     MarkerCase "a fail-pattern naming an UNRESOLVABLE variable is REFUSED, not dropped" want-fail \
-'set(FASTCACHED_KNOWN "CMake Error")
-set_tests_properties("a" PROPERTIES FAIL_REGULAR_EXPRESSION "${FASTCACHED_KNOWN}")
-set_tests_properties("b" PROPERTIES FAIL_REGULAR_EXPRESSION "${FASTCACHED_ELSEWHERE}")'
+'set(PACE_KNOWN "CMake Error")
+set_tests_properties("a" PROPERTIES FAIL_REGULAR_EXPRESSION "${PACE_KNOWN}")
+set_tests_properties("b" PROPERTIES FAIL_REGULAR_EXPRESSION "${PACE_ELSEWHERE}")'
 
     # An argument this does not know is REFUSED rather than ignored. Ignored, the
     # fall-through audits `src/tests/CMakeLists.txt` and the run reads as an answer

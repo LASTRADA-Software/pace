@@ -1,6 +1,6 @@
 # Metrics and observability
 
-Rules for `src/FastCache/Metrics/` and the admin/scrape endpoints the daemon and
+Rules for `src/Pace/Metrics/` and the admin/scrape endpoints the daemon and
 the worker each serve.
 
 Read this before adding a counter, adding a refusal code, or changing what
@@ -23,7 +23,7 @@ fault.
   name, help text, type -- `static_assert`ed to hold one row per enumerator in
   enumerator order, and the renderer walks it. (The guide's names were wrong as well
   as absent -- it said `dispatch_leases_granted` where the series is
-  `fastcached_dispatch_leases_granted_total` -- which is what documenting a series
+  `pace_dispatch_leases_granted_total` -- which is what documenting a series
   nobody could scrape lets you get away with.) Consequences that are each
   load-bearing:
   - **The test asserts over the TABLE, not against a list written out beside it.**
@@ -57,11 +57,11 @@ fault.
   row answering two of the three questions is not a row, and `ErrorCode` has no zero
   enumerator for `{}` to name in the first place.
 - **A process with no cache reports no cache, and absent is not zero.**
-  `fastcache-compile-node` serves the daemon's own `AdminHttpServer` over the same
+  `pace-node` serves the daemon's own `AdminHttpServer` over the same
   renderer -- a second implementation for a process without storage is exactly how
   two endpoints come to disagree -- so `MetricsSnapshot::storage` and `::host` are
-  `optional`. A default-constructed `StorageStats` would publish `fastcached_items 0`
-  and `fastcached_bytes_limit 0`, which is not "no cache" but "an empty, unbounded
+  `optional`. A default-constructed `StorageStats` would publish `pace_items 0`
+  and `pace_bytes_limit 0`, which is not "no cache" but "an empty, unbounded
   cache", and a dashboard reads that as a fact. The daemon leaves `host` absent for
   the mirror-image reason, and **names the field to do it** (`.host = std::nullopt`)
   rather than letting it default: a designated initializer that skips a field added
@@ -75,7 +75,7 @@ fault.
   it:
   - **Absent is not zero, one level below `MetricsSnapshot::storage`.** A tier the
     cache does not have renders **no line**, not a zero and not a bare `# HELP` with
-    no sample beneath it. `fastcached_tier_items{tier="disk"} 0` says a disk tier is
+    no sample beneath it. `pace_tier_items{tier="disk"} 0` says a disk tier is
     standing empty, and a memory-only node has no such tier to be empty.
   - **The label values come from `StorageTierTable`, not from a hand-written list.**
     Same rule the counters follow against `MetricsCatalog`, applied to the other
@@ -194,10 +194,10 @@ fault.
   REPRESENT this counter at all* is about the BUILD, not the world, and a zero there
   is a number for an event that could not have been counted. A catalogue row the
   sink has no slot for is omitted and reported as its own series
-  (`fastcached_metrics_catalogue_skew`), never rendered as a plausible zero (#1353).
+  (`pace_metrics_catalogue_skew`), never rendered as a plausible zero (#1353).
   **A SECOND carve-out, on the same side of the same line (#1484): *could a writer for this
-  counter run in this PROCESS at all*.** `fastcache-compile-node` constructs neither `Server`
-  nor `ReactorServerLoop`, the only writers of `fastcached_connections_*`, so that figure cannot
+  counter run in this PROCESS at all*.** `pace-node` constructs neither `Server`
+  nor `ReactorServerLoop`, the only writers of `pace_connections_*`, so that figure cannot
   move there at any traffic level ever -- and it read `0`, which says the one thing an operator
   most wants to know and gets wrong: *nothing has connected to this node*. Found by dogfooding,
   on a node that two builds had just gone through.
@@ -211,7 +211,7 @@ fault.
 
   **The attribution is one row per (counter, surface) PAIR, so its `size()` is not a count of
   counters** -- it exceeds the catalogue by however many rows are written from two components,
-  and `fastcached_metrics_surface_absent` was asserted against `CounterSoleWriterTable.size()`
+  and `pace_metrics_surface_absent` was asserted against `CounterSoleWriterTable.size()`
   while the two happened to be equal. `AttributedCounterCount()` is the derivation that stays
   right.
 
@@ -229,7 +229,7 @@ fault.
 
   **What must NOT be narrowed casually is a BINARY's surface set, not this table.** The table says
   where a counter is written, which is a fact about the source; what hides a figure is the set a
-  PROCESS claims. `fastcached` still passes `EverySurface` and renders every row. The node derives
+  PROCESS claims. `pace-kv` still passes `EverySurface` and renders every row. The node derives
   its set from the flags that decide whether each component is CONSTRUCTED
   (`NodeServedSurfacesFor`), never a second reading of them -- and `ServedSurfaces{}` defaults to
   every surface, because a default-constructed value means *not narrowed* and an empty default
@@ -259,13 +259,13 @@ fault.
     half times larger. The table therefore holds three rows, and widening it wants the refusal
     tables read properly.
   - The absence carries its REASON, and only one reason is a fault.
-    `fastcached_metrics_catalogue_skew` counts a build whose sink has no slot; the new
-    `fastcached_metrics_surface_absent` counts rows this process cannot write, and a nonzero
+    `pace_metrics_catalogue_skew` counts a build whose sink has no slot; the new
+    `pace_metrics_surface_absent` counts rows this process cannot write, and a nonzero
     value there is the HEALTHY state of any binary serving some surfaces. Collapsing the two --
     which is what reusing `IMetricsSink::Carries` would have done -- makes every compile node
     scrape as a broken build, and costs the skew series its meaning.
   - The reason travels on the WIRE, because the renderer is not always in the process that
-    captured the reading: `fastcache-cli`'s poll rung decodes a reading and re-renders Prometheus
+    captured the reading: `pacectl`'s poll rung decodes a reading and re-renders Prometheus
     from it, so a locally-derived reason would answer for the wrong process. That is what moved
     `StatsReadingWire::Grammar` to `-4`.
 
@@ -717,8 +717,8 @@ looks exactly like a port nobody is talking to.
   values and no `Last`, and a sentinel would permanently claim a byte in the one enum
   whose retired-code rule exists because bytes are scarce and irreversible.
 - **`RefusedVerb` cannot grow a counter column.** It lives in `CompileCacheWire.hpp`,
-  which is header-only and dependency-free because `fastcache-cc` compiles it in
-  without linking `FastCache`; `IMetricsSink::Counter` is not reachable from there. The
+  which is header-only and dependency-free because `pace-cc` compiles it in
+  without linking `Pace`; `IMetricsSink::Counter` is not reachable from there. The
   pairing lives in the surface that owns the sink.
 - **The refusals that ALREADY counted go through the same door**, converting their own
   tables' rows rather than restating the pair. Not tidiness: it is what makes the guard
@@ -745,7 +745,7 @@ looks exactly like a port nobody is talking to.
   which wraps it — so adding a row is the only way to weaken the check, which makes
   weakening it an argued edit rather than an omission.
 - **The primitive has a shared home for that reason**, not for tidiness.
-  `SurfaceRefusal` and `Refuse` lived in `fastcache-cc`'s private `WorkerProtocol.hpp`,
+  `SurfaceRefusal` and `Refuse` lived in `pace-cc`'s private `WorkerProtocol.hpp`,
   which the node's generic frame listener included for two symbols; with them in
   `Protocol/SurfaceRefusal.hpp` coverage is a property of the TYPE rather than of
   somebody's memory. Header-only, because `Refuse` reaches only `CompileCacheWire.hpp`
@@ -966,7 +966,7 @@ outright rather than drawing with a gap.
   and forgotten for the other. A ceiling is sized from what the field IS and
   `static_assert`ed where the producer is visible: the key and the fingerprint are
   `KeyDigest` hex (`MaxLeaseKeyBytes`, `MaxToolchainFingerprintBytes`, held in
-  `fastcache-cc/Dispatch.cpp`), the label a compiler's name and version
+  `pace-cc/Dispatch.cpp`), the label a compiler's name and version
   (`MaxToolchainLabelBytes`, beside its constant). Two refusal rows, not text and
   too long (`MalformedFrame` on the wire, a counter each), never
   `MalformedRegistration`, whose counter is the WORKER's. And the launcher sends
@@ -1000,7 +1000,7 @@ outright rather than drawing with a gap.
 <!-- agent-tripwire: A live stream's ending is a row named for what was OBSERVED -->
 
 A subscription is the one `0xFC` exchange whose ending is not an answer, so its endings are
-the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)).
+the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)).
 
 - **Each ending is a row, named for what was OBSERVED.** A goodbye (EOF), a reset, a stall, a
   revocation and a lost leadership are five different reasons a stream ended. Only the reset
@@ -1020,11 +1020,11 @@ the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/fastcached/iss
 <!-- agent-tripwire: A condition an operator must act on is a row of `NodeConditionTable`, never a log line alone -->
 
 A node detects things an operator has to act on, and until
-[#1364](https://github.com/LASTRADA-Software/fastcached/issues/1364) each one reached only the
+[#1364](https://github.com/LASTRADA-Software/pace/issues/1364) each one reached only the
 log -- which scrolls, and which nobody reads across forty machines. A condition is now a row of
-`NodeConditionTable` (`apps/fastcache-compile-node/NodeConditions.hpp`), kept in the one
+`NodeConditionTable` (`apps/pace-node/NodeConditions.hpp`), kept in the one
 `NodeConditions` registry `main` declares and every component borrows, and carried to three
-surfaces: `node-status` (so `fastcache-cli node` and `node-conditions`), NODE-ANNOUNCE (so the
+surfaces: `node-status` (so `pacectl node` and `node-conditions`), NODE-ANNOUNCE (so the
 leader's page, `/fleet.json`, `/fleet.txt` and `fleet conditions`) and the live-stats node panel.
 The log lines stay.
 
@@ -1042,7 +1042,7 @@ The log lines stay.
   row whose component is PRESENT is left undecided on purpose -- filling it in would hide the
   wiring defect it reports. The `[conditions]` Catch2 tag holds a fully configured node to no
   undecided row, through the one registry the components share. **The tag spans THREE test
-  binaries** -- `FastCacheTest` for `Distributed/` and `Protocol/`, plus the node's and the
+  binaries** -- `PaceTest` for `Distributed/` and `Protocol/`, plus the node's and the
   cli's own -- because a condition is produced on one machine, carried over two wires and
   rendered by two readers, and a tag selecting only the producer's binary would assert the row
   exists while saying nothing about whether either reader can draw it. Select by the TAG, never
@@ -1074,7 +1074,7 @@ The log lines stay.
   announce loops logged an unreachable scheduler, an unproved identity and a refused registration
   or presence at Warn on every round -- about 360 lines an hour from one machine running a worker
   and the presence loop -- which is a log nobody reads for the one line that changed.
-  `SchedulerReachability` (`apps/fastcache-compile-node/`) keys on the round's OUTCOME, one row
+  `SchedulerReachability` (`apps/pace-node/`) keys on the round's OUTCOME, one row
   of `SchedulerOutcomeTable` per kind, and says it through `ReachabilityTable`. Its `cadence`
   column is the one interval. Each property below is tested with a `ManualClock` by counting
   lines per level (`[reachability]`):
@@ -1126,7 +1126,7 @@ The log lines stay.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#592](https://github.com/LASTRADA-Software/fastcached/issues/592)** — whether the
+- **[#592](https://github.com/LASTRADA-Software/pace/issues/592)** — whether the
   fleet scheduler should count a non-member caller in a series of its own. #494 left it
   `RefuseWithoutCounter`, deferring to `SchedulerService::UncountedRefusals`, and that
   service's reason argues against *mixing* the series rather than against counting at

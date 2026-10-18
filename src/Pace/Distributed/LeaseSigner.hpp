@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/IdentityKeyLabel.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+
+#include <cstddef>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace Pace::Distributed
+{
+
+/// A grant signer holding a node's identity key pair (#178).
+///
+/// What a scheduler signs with in production and in every test: the key pair a node's start
+/// resolved out of its state directory, and the member id it runs as. Header-only, because it
+/// is a pair of members and two forwarding calls.
+class KeyPairLeaseSigner final: public ILeaseSigner
+{
+  public:
+    /// @param signerId The member id grants name as their signer.
+    /// @param key This node's identity key pair; its secret half never leaves this object.
+    KeyPairLeaseSigner(std::string signerId, Ed25519KeyPair key):
+        _signerId { std::move(signerId) },
+        _key { std::move(key) }
+    {
+    }
+
+    [[nodiscard]] std::string_view SignerId() const override
+    {
+        return _signerId;
+    }
+
+    [[nodiscard]] Ed25519PublicKey PublicKey() const override
+    {
+        return _key.PublicKey();
+    }
+
+    [[nodiscard]] Ed25519Signature Sign(LabelledMessage const& message) const override
+    {
+        return SignLabelled(_key, message);
+    }
+
+  private:
+    std::string _signerId;
+    Ed25519KeyPair _key;
+};
+
+} // namespace Pace::Distributed

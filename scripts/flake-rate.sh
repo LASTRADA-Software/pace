@@ -2,7 +2,7 @@
 # Qualify a flake by keeping a TALLY, because the natural tool does not.
 #
 #   scripts/flake-rate.sh --runs 200 -- ctest --preset clang-debug -R SomeTest
-#   scripts/flake-rate.sh --until-fail --runs 50 -- ./out/build/clang-debug/target/FastCacheTest "[flaky]"
+#   scripts/flake-rate.sh --until-fail --runs 50 -- ./out/build/clang-debug/target/PaceTest "[flaky]"
 #
 # ## Why this exists
 #

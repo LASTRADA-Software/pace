@@ -42,25 +42,25 @@
 # failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         [-DGIT_EXECUTABLE=<git>] -P scripts/check-ranges-seam-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-ranges-seam.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-ranges-seam.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -79,7 +79,7 @@ set(baseSeamHeader
 #pragma once
 #include <version>
 
-namespace FastCache::Ranges
+namespace Pace::Ranges
 {
 // Where the macro is defined this is std::ranges::iota itself.
 #if defined(__cpp_lib_ranges_iota) && !defined(FC_RANGES_FORCE_FALLBACK)
@@ -93,16 +93,16 @@ inline constexpr auto FoldLeft = std::ranges::fold_left;
 #else
 inline constexpr auto FoldLeft = Detail::FoldLeftFallback;
 #endif
-} // namespace FastCache::Ranges
+} // namespace Pace::Ranges
 ")
 
 set(baseSeamTest
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Ranges.hpp>
+#include <Pace/Core/Ranges.hpp>
 
 void Agree(std::vector<int>& a, std::vector<int>& b)
 {
-    FastCache::Ranges::Detail::IotaFallback(a, 0);
+    Pace::Ranges::Detail::IotaFallback(a, 0);
     std::ranges::iota(b, 0);
     (void) std::ranges::fold_left(b, 0, std::plus {});
 }
@@ -110,29 +110,29 @@ void Agree(std::vector<int>& a, std::vector<int>& b)
 
 set(baseCleanSource
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Ranges.hpp>
+#include <Pace/Core/Ranges.hpp>
 
-namespace FastCache
+namespace Pace
 {
 std::size_t Total(std::array<std::size_t, 3> const& swept)
 {
     return Ranges::FoldLeft(swept, std::size_t { 0 }, std::plus {});
 }
-} // namespace FastCache
+} // namespace Pace
 ")
 
 set(baseDocumentedSource
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Ranges.hpp>
+#include <Pace/Core/Ranges.hpp>
 
-namespace FastCache
+namespace Pace
 {
 void Number(std::vector<std::size_t>& order)
 {
     // Ranges::Iota rather than std::ranges::iota: Apple's libc++ has no std::ranges::iota.
     Ranges::Iota(order, std::size_t { 0 });
 }
-} // namespace FastCache
+} // namespace Pace
 ")
 
 set(baseVendoredSource
@@ -147,8 +147,8 @@ set(baseRoots "# planted\nvendor/upstream\n")
 
 # ---------------------------------------------------------------------------
 # Stage a tree, apply one mutation, run the check, return its collapsed output.
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     # `~n~`, `~lb~`, `~rb~` and `~sc~` are a newline, `[`, `]` and `;`, none of which can
@@ -198,11 +198,11 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
         # block and `to` is the planted file's content.
         set(extraPath "${CMAKE_MATCH_1}")
         set(extraText "${to}")
-        string(FIND "${seamHeaderText}" "} // namespace FastCache::Ranges" position)
+        string(FIND "${seamHeaderText}" "} // namespace Pace::Ranges" position)
         if(position EQUAL -1)
             set(applied FALSE)
         else()
-            string(REPLACE "} // namespace FastCache::Ranges" "${from}\n} // namespace FastCache::Ranges"
+            string(REPLACE "} // namespace Pace::Ranges" "${from}\n} // namespace Pace::Ranges"
                    seamHeaderText "${seamHeaderText}")
         endif()
     elseif(target STREQUAL "roots")
@@ -226,13 +226,13 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     if(writeSeamHeader)
-        file(WRITE "${tree}/src/FastCache/Core/Ranges.hpp" "${seamHeaderText}")
+        file(WRITE "${tree}/src/Pace/Core/Ranges.hpp" "${seamHeaderText}")
     endif()
     if(writeSeamTest)
-        file(WRITE "${tree}/src/FastCache/Core/Ranges_test.cpp" "${seamTestText}")
+        file(WRITE "${tree}/src/Pace/Core/Ranges_test.cpp" "${seamTestText}")
     endif()
-    file(WRITE "${tree}/src/FastCache/Core/Clean.cpp" "${baseCleanSource}")
-    file(WRITE "${tree}/src/apps/fastcache-cli/Documented.cpp" "${baseDocumentedSource}")
+    file(WRITE "${tree}/src/Pace/Core/Clean.cpp" "${baseCleanSource}")
+    file(WRITE "${tree}/src/apps/pacectl/Documented.cpp" "${baseDocumentedSource}")
     file(WRITE "${tree}/vendor/upstream/src/Upstream.cpp" "${baseVendoredSource}")
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "${rootsText}")
     if(NOT extraPath STREQUAL "")
@@ -245,14 +245,14 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
                 "case `${name}` asks for the git enumeration path and no git was found. "
                 "Skipping it silently would leave the mode CI actually takes untested")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
                         OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE addStatus)
         set(rmStatus 0)
         if(untrackSeamTest)
-            execute_process(COMMAND ${scratchGit} -C "${tree}" rm -q --cached src/FastCache/Core/Ranges_test.cpp
+            execute_process(COMMAND ${scratchGit} -C "${tree}" rm -q --cached src/Pace/Core/Ranges_test.cpp
                             OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE rmStatus)
         endif()
         if(NOT initStatus EQUAL 0 OR NOT addStatus EQUAL 0 OR NOT rmStatus EQUAL 0)
@@ -263,7 +263,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -283,40 +283,40 @@ endfunction()
 #
 # Needle fields are ' && '-separated; `-` means none. `CMake Error` in the last field means the
 # case expects the check to PASS. The field count is asserted per row below.
-set(FastCachedRangesSeamCases
+set(PaceRangesSeamCases
     # The baselines, in both enumeration modes. The vendored direct call is DECLINED here.
     "baseline via walk|none|-|-|none called directly && directory walk && 1 declined under third-party roots && std::ranges::iota -> Ranges::Iota && std::ranges::fold_left -> Ranges::FoldLeft|CMake Error"
     "baseline via git|none-git|-|-|none called directly && git ls-files && 1 declined under third-party roots|CMake Error"
 
     # --- THE RED ARM ---
-    "planted iota|newfile|src/FastCache/Core/Fresh.cpp|#include <vector>~n~void Fresh(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~}~n~|src/FastCache/Core/Fresh.cpp:4: calls `std::ranges::iota` directly -- write `Ranges::Iota` (gated by __cpp_lib_ranges_iota) && 1 site(s) call a wrapped range algorithm directly|-"
-    "planted fold_left via git|newfile-git|src/apps/fastcache-compile-node/Fresh.cpp|int Fresh(std::array<int, 3> const& a)~n~{~n~    return std::ranges::fold_left(a, 0, std::plus {})~sc~~n~}~n~|src/apps/fastcache-compile-node/Fresh.cpp:3: calls `std::ranges::fold_left` directly -- write `Ranges::FoldLeft` && via git ls-files|-"
-    "bare ranges qualifier under using namespace std|newfile|src/FastCache/Core/Bare.cpp|using namespace std~sc~~n~void Bare(vector<int>& v) { ranges::iota(v, 0)~sc~ }~n~|src/FastCache/Core/Bare.cpp:2: calls `std::ranges::iota` directly|-"
-    "a test is first-party too|newfile|src/FastCache/Cache/Fresh_test.cpp|TEST_CASE(\"x\", \"~lb~cache~rb~\")~n~{~n~    std::vector<int> order(3)~sc~~n~    std::ranges::iota(order, 0)~sc~~n~}~n~|src/FastCache/Cache/Fresh_test.cpp:4: calls|-"
-    "a header extension other than hpp|newfile|src/apps/fastcache-bench/Inline.inl|inline int Sum(std::span<int const> s) { return std::ranges::fold_left(s, 0, std::plus {})~sc~ }~n~|src/apps/fastcache-bench/Inline.inl:1: calls `std::ranges::fold_left`|-"
-    "two calls on two lines are both named|newfile|src/FastCache/Core/Two.cpp|void Two(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~    (void) std::ranges::fold_left(v, 0, std::plus {})~sc~~n~}~n~|Two.cpp:3: calls `std::ranges::iota` && Two.cpp:4: calls `std::ranges::fold_left` && 2 site(s)|-"
-    "line number survives brackets semicolons and a trailing backslash|newfile|src/FastCache/Core/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~void Drift(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/FastCache/Core/Drift.cpp:4: calls|-"
+    "planted iota|newfile|src/Pace/Core/Fresh.cpp|#include <vector>~n~void Fresh(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~}~n~|src/Pace/Core/Fresh.cpp:4: calls `std::ranges::iota` directly -- write `Ranges::Iota` (gated by __cpp_lib_ranges_iota) && 1 site(s) call a wrapped range algorithm directly|-"
+    "planted fold_left via git|newfile-git|src/apps/pace-node/Fresh.cpp|int Fresh(std::array<int, 3> const& a)~n~{~n~    return std::ranges::fold_left(a, 0, std::plus {})~sc~~n~}~n~|src/apps/pace-node/Fresh.cpp:3: calls `std::ranges::fold_left` directly -- write `Ranges::FoldLeft` && via git ls-files|-"
+    "bare ranges qualifier under using namespace std|newfile|src/Pace/Core/Bare.cpp|using namespace std~sc~~n~void Bare(vector<int>& v) { ranges::iota(v, 0)~sc~ }~n~|src/Pace/Core/Bare.cpp:2: calls `std::ranges::iota` directly|-"
+    "a test is first-party too|newfile|src/Pace/Cache/Fresh_test.cpp|TEST_CASE(\"x\", \"~lb~cache~rb~\")~n~{~n~    std::vector<int> order(3)~sc~~n~    std::ranges::iota(order, 0)~sc~~n~}~n~|src/Pace/Cache/Fresh_test.cpp:4: calls|-"
+    "a header extension other than hpp|newfile|src/apps/pace-bench/Inline.inl|inline int Sum(std::span<int const> s) { return std::ranges::fold_left(s, 0, std::plus {})~sc~ }~n~|src/apps/pace-bench/Inline.inl:1: calls `std::ranges::fold_left`|-"
+    "two calls on two lines are both named|newfile|src/Pace/Core/Two.cpp|void Two(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~    (void) std::ranges::fold_left(v, 0, std::plus {})~sc~~n~}~n~|Two.cpp:3: calls `std::ranges::iota` && Two.cpp:4: calls `std::ranges::fold_left` && 2 site(s)|-"
+    "line number survives brackets semicolons and a trailing backslash|newfile|src/Pace/Core/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~void Drift(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/Pace/Core/Drift.cpp:4: calls|-"
 
     # --- THE QUIET ARM ---
-    "C++20 names sharing the prefix are not wrapped facilities|newfile|src/FastCache/Core/Views.cpp|auto Indices(int n) { return std::views::iota(0, n)~sc~ }~n~using Span = std::ranges::iota_view<int, int>~sc~~n~auto Tail = std::ranges::fold_left_first~sc~~n~|none called directly|CMake Error"
-    "the seam spelling and the macro are not direct calls|newfile|src/FastCache/Core/Seam.cpp|#if defined(__cpp_lib_ranges_iota)~n~#endif~n~void Seam(std::vector<int>& v) { FastCache::Ranges::Iota(v, 0)~sc~ (void) Ranges::FoldLeft(v, 0, std::plus {})~sc~ }~n~|none called directly|CMake Error"
-    "comments are not calls|newfile|src/FastCache/Core/Note.cpp|// Never std::ranges::iota(v, 0) here.~n~/// Nor `std::ranges::fold_left(v, 0, op)`.~n~/*~n~ std::ranges::iota(v, 0) is missing from Apple's libc++.~n~*/~n~int Note() { return 0~sc~ }~n~|none called directly|CMake Error"
+    "C++20 names sharing the prefix are not wrapped facilities|newfile|src/Pace/Core/Views.cpp|auto Indices(int n) { return std::views::iota(0, n)~sc~ }~n~using Span = std::ranges::iota_view<int, int>~sc~~n~auto Tail = std::ranges::fold_left_first~sc~~n~|none called directly|CMake Error"
+    "the seam spelling and the macro are not direct calls|newfile|src/Pace/Core/Seam.cpp|#if defined(__cpp_lib_ranges_iota)~n~#endif~n~void Seam(std::vector<int>& v) { Pace::Ranges::Iota(v, 0)~sc~ (void) Ranges::FoldLeft(v, 0, std::plus {})~sc~ }~n~|none called directly|CMake Error"
+    "comments are not calls|newfile|src/Pace/Core/Note.cpp|// Never std::ranges::iota(v, 0) here.~n~/// Nor `std::ranges::fold_left(v, 0, op)`.~n~/*~n~ std::ranges::iota(v, 0) is missing from Apple's libc++.~n~*/~n~int Note() { return 0~sc~ }~n~|none called directly|CMake Error"
 
     # --- DERIVATION: a block added to the header is enforced with no edit to the check ---
-    "a selection block added to the header is enforced|seamrow:src/FastCache/Core/Right.cpp|#if defined(__cpp_lib_ranges_fold) && !defined(FC_RANGES_FORCE_FALLBACK)~n~inline constexpr auto FoldRight = std::ranges::fold_right~sc~~n~#else~n~inline constexpr auto FoldRight = Detail::FoldRightFallback~sc~~n~#endif|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|Right.cpp:1: calls `std::ranges::fold_right` directly -- write `Ranges::FoldRight` && std::ranges::fold_right -> Ranges::FoldRight|-"
+    "a selection block added to the header is enforced|seamrow:src/Pace/Core/Right.cpp|#if defined(__cpp_lib_ranges_fold) && !defined(FC_RANGES_FORCE_FALLBACK)~n~inline constexpr auto FoldRight = std::ranges::fold_right~sc~~n~#else~n~inline constexpr auto FoldRight = Detail::FoldRightFallback~sc~~n~#endif|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|Right.cpp:1: calls `std::ranges::fold_right` directly -- write `Ranges::FoldRight` && std::ranges::fold_right -> Ranges::FoldRight|-"
     # ...and its CONTROL: the same call with no block in the header is not this check's business.
-    "a facility the header does not wrap is not refused|newfile|src/FastCache/Core/Right.cpp|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|none called directly|CMake Error"
+    "a facility the header does not wrap is not refused|newfile|src/Pace/Core/Right.cpp|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|none called directly|CMake Error"
 
     # --- THE EXEMPTION IS EXACT ---
-    "a file sharing the seam test name elsewhere is not exempt|newfile|src/apps/fastcache-cli/Ranges_test.cpp|void Other(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/apps/fastcache-cli/Ranges_test.cpp:1: calls|-"
+    "a file sharing the seam test name elsewhere is not exempt|newfile|src/apps/pacectl/Ranges_test.cpp|void Other(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/apps/pacectl/Ranges_test.cpp:1: calls|-"
 
     # --- THIRD-PARTY ROOTS ---
     "a vendored call is refused once the roots stop naming it|roots|vendor/upstream|vendor/elsewhere|vendor/upstream/src/Upstream.cpp:4: calls `std::ranges::iota` directly|-"
 
     # --- FAILS CLOSED ---
-    "a header shape the check cannot read|seam|inline constexpr auto |inline constexpr auto const& |derived no wrapped facility from src/FastCache/Core/Ranges.hpp|-"
-    "no seam header|noseamheader|-|-|the seam anchor src/FastCache/Core/Ranges.hpp is missing|-"
-    "no seam test|noseamtest|-|-|the seam anchor src/FastCache/Core/Ranges_test.cpp is missing|-"
+    "a header shape the check cannot read|seam|inline constexpr auto |inline constexpr auto const& |derived no wrapped facility from src/Pace/Core/Ranges.hpp|-"
+    "no seam header|noseamheader|-|-|the seam anchor src/Pace/Core/Ranges.hpp is missing|-"
+    "no seam test|noseamtest|-|-|the seam anchor src/Pace/Core/Ranges_test.cpp is missing|-"
     "a seam the enumeration did not list|untrackseamtest-git|-|-|listed 1 of the 2 exempt files && the enumeration missed the seam it is anchored on|-"
     "no first-party C++ at all|roots|vendor/upstream|src~n~vendor/upstream|matched no first-party C++ sources|-"
 )
@@ -325,7 +325,7 @@ set(FastCachedRangesSeamCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedRangesSeamCases)
+foreach(row IN LISTS PaceRangesSeamCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -342,7 +342,7 @@ foreach(row IN LISTS FastCachedRangesSeamCases)
 
     math(EXPR caseCount "${caseCount} + 1")
 
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
 
     if(NOT applied)
         list(APPEND failures

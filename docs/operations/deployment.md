@@ -1,13 +1,13 @@
 # Deployment
 
-fastcached ships the pieces needed to run it beyond a trusted LAN:
+pace-kv ships the pieces needed to run it beyond a trusted LAN:
 authentication, TLS, a Prometheus metrics endpoint, a health probe, and a
 container image. This page shows how they fit together.
 
 ## systemd
 
 The `.deb` and `.rpm` packages install a unit that runs the daemon as a
-dedicated `fastcached` system user and starts it on boot. See
+dedicated `pace-kv` system user and starts it on boot. See
 [Install](../getting-started/install.md) for the package-level workflow;
 this section covers what the unit does and how to adapt it.
 
@@ -19,11 +19,11 @@ both parents exit, which races `Type=forking` with `PIDFile=`. Running in
 the foreground avoids both and gives journald the daemon's stderr directly.
 
 ```sh
-journalctl -u fastcached -f
+journalctl -u pace-kv -f
 ```
 
 Two things about `--daemon` changed in the release that fixed
-[#784](https://github.com/LASTRADA-Software/fastcached/issues/784), and neither
+[#784](https://github.com/LASTRADA-Software/pace/issues/784), and neither
 affects a machine installed from the packages, since no shipped unit passes the
 flag:
 
@@ -31,8 +31,8 @@ flag:
   run in. It used to resolve against `/`, because the host changed directory
   before writing it and only root can write there. An **absolute** `--pidfile` —
   which is what every documented invocation uses — is unaffected.
-- `fastcached --daemon` still changes directory to `/`; it executes nothing, so
-  that costs it nothing but a busy mount point. `fastcache-compile-node --daemon`
+- `pace-kv --daemon` still changes directory to `/`; it executes nothing, so
+  that costs it nothing but a busy mount point. `pace-node --daemon`
   now changes to a directory of its own instead, because it spawns a compiler and
   a worker running in `/` records rewritten paths in every object it produces.
 
@@ -41,7 +41,7 @@ is the default on Linux.
 
 A start the daemon **refuses** — a flag it does not know, a configuration file
 it read that does not load, a combination of settings a rule forbids, and for
-`fastcache-compile-node` also a credential file it read and found empty, or an
+`pace-node` also a credential file it read and found empty, or an
 identity key in its state directory it read and cannot use — exits **78**
 (`EX_CONFIG`; `systemctl status` shows `status=78/CONFIG`) and is **not**
 restarted: the unit says `RestartPreventExitStatus=78`, because the next start
@@ -72,11 +72,11 @@ Measured on systemd 259:
 The last row is the default start limit, which counts your starts as well as
 systemd's: five starts inside ten seconds are honoured, and a sixth — the fifth
 `systemctl restart` right after a start — is refused and leaves the service
-down until `systemctl reset-failed fastcached && systemctl start fastcached`.
+down until `systemctl reset-failed pace-kv && systemctl start pace-kv`.
 
 Only a start answers 1 or 78. A command that answers and exits —
 `--install-service`, `--uninstall-service`, `--migrate-storage` and
-`--seed-config` on either binary, and `fastcache-compile-node`'s
+`--seed-config` on either binary, and `pace-node`'s
 `--print-surfaces`, `--print-identity`, `--migrate-cache`, cluster,
 enrollment and cordon commands — is not supervised, and answers what a
 script calling it should do next:
@@ -87,15 +87,15 @@ script calling it should do next:
 | **2** | **a decision — do not retry** | a command line that did not parse (wherever the command was typed on it), a configuration file that did not parse or names a setting that does not exist, an install the startup rules refuse, a service name the registration will not use, access denied, a service that already exists or is not installed, a store in a format it cannot convert or that another process holds, a refusal the scheduler or seed **replied** with — except the ones listed under 1 |
 | 1 | **transient — a retry may help** | a scheduler, seed or node that **could not be reached** or broke off the exchange, a reply that decided nothing: another cluster change still committing, an endpoint or fleet at its capacity, a fleet with no worker registered for the toolchain yet (one that is still starting), a cluster with no leader right now, leaders that went on redirecting to each other, a machine that gave up waiting to be approved (run it again once an operator approves it), a file that is not there or could not be read or written (a named configuration file included, as at a start), a service-manager call that failed on its own, a conversion that stopped part-way (run it again to finish it) |
 
-`fastcached --healthcheck` is read by a container runtime, and Docker documents
+`pace-kv --healthcheck` is read by a container runtime, and Docker documents
 0 and 1 and reserves 2, so it answers 0 for healthy and **1 for everything
 else** — unhealthy, a refused command line, or a configuration file that did
 not load.
 
 ### Reloading
 
-`systemctl reload fastcached` sends `SIGHUP`, which re-reads the config file in
-use — `/etc/fastcached/fastcached.yaml` for the packaged unit. Only part of the
+`systemctl reload pace-kv` sends `SIGHUP`, which re-reads the config file in
+use — `/etc/pace/pace-kv.yaml` for the packaged unit. Only part of the
 configuration is reloadable:
 
 --8<-- "reload-matrix.md"
@@ -107,21 +107,21 @@ logged. Reload therefore either applies everything or nothing.
 
 ### Hardening
 
-fastcached never drops privileges on its own, so every restriction comes
+pace-kv never drops privileges on its own, so every restriction comes
 from the unit: `User=`/`Group=`, `StateDirectory=`, and the usual
 `Protect*`/`Restrict*` set. Check it with:
 
 ```sh
-systemd-analyze security fastcached.service
+systemd-analyze security pace-kv.service
 ```
 
 Two consequences worth knowing. `ProtectSystem=strict` and
 `ProtectHome=yes` mean TLS certificates must live somewhere the unit can
-still read — `/etc/fastcached/` is the natural place. And binding a port
+still read — `/etc/pace/` is the natural place. And binding a port
 below 1024 needs capabilities the unit drops by default:
 
 ```ini
-# systemctl edit fastcached
+# systemctl edit pace-kv
 [Service]
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -129,11 +129,11 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 ### Persistent storage
 
-`StateDirectory=fastcached` provides `/var/lib/fastcached`, owned by the
+`StateDirectory=pace-kv` provides `/var/lib/pace-kv`, owned by the
 service user. Point `storage_path` at it to enable the on-disk tier:
 
 ```yaml
-storage_path: /var/lib/fastcached/cache
+storage_path: /var/lib/pace-kv/cache
 ```
 
 The path's *shape* selects the layout: a path with no file extension (as
@@ -147,17 +147,17 @@ available from the command line on any installation, and `--service-scope`
 picks the domain:
 
 ```sh
-fastcached --install-service --service-scope=user            # LaunchAgent
-sudo fastcached --install-service --service-scope=system      # LaunchDaemon
+pace-kv --install-service --service-scope=user            # LaunchAgent
+sudo pace-kv --install-service --service-scope=system      # LaunchDaemon
 ```
 
-The system scope needs the `_fastcached` service account, which the `.pkg`
+The system scope needs the `_pace-kv` service account, which the `.pkg`
 creates; installing from a tarball or a source build fails with a message
 saying so rather than registering a job launchd cannot spawn.
 
-The `.pkg` creates a second account, `fastcache-node`, for
-`fastcache-compile-node`. It is deliberately not shared with `_fastcached`: a
-worker runs a compiler on input that arrived over the network while `fastcached`
+The `.pkg` creates a second account, `pace-node`, for
+`pace-node`. It is deliberately not shared with `_pace-kv`: a
+worker runs a compiler on input that arrived over the network while `pace-kv`
 owns the cache storage, so one account would let a compromised compile rewrite
 every cached object. It comes from the package's Runtime component, so it is
 present whichever launchd choice you made here, and the uninstaller removes both.
@@ -168,8 +168,8 @@ from a `--config` file are not: they stay in the file, so editing it and
 restarting the job keeps working.
 
 ```sh
-sudo fastcached --install-service --service-scope=system \
-    --config=/opt/fastcached/etc/fastcached.yaml --threads=4
+sudo pace-kv --install-service --service-scope=system \
+    --config=/opt/pace/etc/pace-kv.yaml --threads=4
 ```
 
 Prefer the config file for anything you might want to change later. A flag
@@ -185,10 +185,10 @@ line whether that file actually carries `requirepass:`, so accepting the
 combination would be the silent drop under another name.
 
 The package sets the system daemon's config to mode `0640`, owned
-`root:_fastcached`, so it is readable by the account the daemon drops to and
+`root:_pace-kv`, so it is readable by the account the daemon drops to and
 by nobody else — which is the whole reason to keep the secret there rather
 than in the plist. If you point the daemon at a config of your own, the
-install checks that `_fastcached` can read it and tells you how to fix it if
+install checks that `_pace-kv` can read it and tells you how to fix it if
 not; without that check an unreadable config shows up only as a job that
 exits at every start, with the `EACCES` visible nowhere.
 
@@ -200,7 +200,7 @@ agent under `/var/root` that your own login never starts and your own
 | | `user` | `system` |
 |---|---|---|
 | Plist | `~/Library/LaunchAgents/` | `/Library/LaunchDaemons/` |
-| Runs as | the invoking user | `_fastcached` |
+| Runs as | the invoking user | `_pace-kv` |
 | Starts at | login | boot |
 | Privileges | none | root to install |
 | `KeepAlive` | on crash only | on crash only |
@@ -232,18 +232,18 @@ the least bad choice, and it costs two things the other supervisors do not:
 Status, restart, logs:
 
 ```sh
-launchctl print gui/$UID/software.lastrada.fastcached
-launchctl kickstart -k gui/$UID/software.lastrada.fastcached
-tail -f ~/Library/Logs/fastcached/software.lastrada.fastcached.err.log
+launchctl print gui/$UID/software.lastrada.pace-kv
+launchctl kickstart -k gui/$UID/software.lastrada.pace-kv
+tail -f ~/Library/Logs/pace-kv/software.lastrada.pace-kv.err.log
 ```
 
-The system daemon logs to `/opt/fastcached/var/log/<label>/` instead — a
+The system daemon logs to `/opt/pace/var/log/<label>/` instead — a
 directory per job, because that directory is owned by the account the job runs
-as and a machine may run both `fastcached` and `fastcache-compile-node`
+as and a machine may run both `pace-kv` and `pace-node`
 system-wide:
 
 ```sh
-tail -f /opt/fastcached/var/log/software.lastrada.fastcached/software.lastrada.fastcached.err.log
+tail -f /opt/pace/var/log/software.lastrada.pace-kv/software.lastrada.pace-kv.err.log
 ```
 
 ### Timestamps
@@ -267,15 +267,15 @@ line outranks the file, as everywhere else.
 There is no reload equivalent to `systemctl reload`: send `SIGHUP` to the
 pid `launchctl print` reports, or kickstart the job.
 
-To remove it: `fastcached --uninstall-service --service-scope=<scope>`, or
-`sudo /opt/fastcached/bin/fastcached-uninstall` to remove the whole install.
+To remove it: `pace-kv --uninstall-service --service-scope=<scope>`, or
+`sudo /opt/pace/bin/pace-uninstall` to remove the whole install.
 
 ## Windows service
 
-The MSI registers `fastcached` as an auto-start service — a disabled one, left
-stopped, when the fastcache-compile-node feature is installed too, since both answer
+The MSI registers `pace-kv` as an auto-start service — a disabled one, left
+stopped, when the pace-node feature is installed too, since both answer
 on 6674 ([the MSI's service table](../getting-started/install.md#windows)) — and seeds
-`C:\ProgramData\fastcached\fastcached.yaml` from the template it ships, unless
+`C:\ProgramData\pace\pace-kv.yaml` from the template it ships, unless
 a config is already there. The registration passes **no** `--config`: the
 service resolves that path itself at every start, so editing the file is all it
 takes to reconfigure it, and a machine without one still starts on the built-in
@@ -284,12 +284,12 @@ defaults rather than failing.
 The same registration is available from the command line on any installation:
 
 ```powershell
-fastcached.exe --install-service
-sc.exe start FastCached
-fastcached.exe --uninstall-service
+pace-kv.exe --install-service
+sc.exe start pace-kv
+pace-kv.exe --uninstall-service
 ```
 
-Pass `--config=C:\path\to\fastcached.yaml` only to point the service at a file
+Pass `--config=C:\path\to\pace-kv.yaml` only to point the service at a file
 *other* than the default location.
 
 ### When a start is refused
@@ -301,7 +301,7 @@ a service-specific code**, and the reason is written to the Application event lo
 under the service's name:
 
 ```
-> sc.exe query FastCached
+> sc.exe query pace-kv
         STATE              : 1  STOPPED
         WIN32_EXIT_CODE    : 1066  (0x42a)
         SERVICE_EXIT_CODE  : 78  (0x4e)
@@ -338,14 +338,14 @@ launchd restarts a crash only (see [launchd](#launchd)).
 
 ### What it runs as
 
-The service logs on as the **virtual account** `NT SERVICE\FastCached`. The SCM
+The service logs on as the **virtual account** `NT SERVICE\pace-kv`. The SCM
 derives that from the service name and manages it itself, so there is no account
 to create and no password to keep. Told nothing, `CreateService` would use
 LocalSystem, which has unrestricted access to every local resource and is a
 member of the local Administrators group — more than a cache daemon listening on
 a socket has any use for.
 
-It can still read `C:\ProgramData\fastcached\fastcached.yaml`, because seeding
+It can still read `C:\ProgramData\pace\pace-kv.yaml`, because seeding
 grants `NT AUTHORITY\SERVICE` read on that file and a service logon is a member
 of it. The file does **not** inherit the directory's `BUILTIN\Users` read, so a
 `requirepass:` written there is not readable by every local account. It
@@ -357,7 +357,7 @@ hands over whatever `storage_path` is configured at the time it runs, so seeding
 the config first and installing second needs nothing extra.
 
 One exception: a `storage_path` that names a **single cache file** — an existing
-file, or a path with a file extension such as `D:\fastcached\cache.cow` — is only
+file, or a path with a file extension such as `D:\pace\cache.cow` — is only
 created by the installer if it is already there. Creating `cache.cow` as a
 *directory* would make the very next start treat it as a directory of shards and
 fan out inside it, so the installer refuses and says so. An upgrade therefore needs
@@ -368,7 +368,7 @@ and needs the `icacls` command below, run against the directory that will hold i
 If you add or move `storage_path` afterwards, grant it from an elevated prompt:
 
 ```powershell
-icacls "D:\fastcached\cache" /grant "NT SERVICE\FastCached":(OI)(CI)F
+icacls "D:\pace\cache" /grant "NT SERVICE\pace-kv":(OI)(CI)F
 ```
 
 Re-running `--install-service` from an elevated prompt repairs it too: registering
@@ -392,7 +392,7 @@ it is open, so a second daemon started against the same `storage_path` refuses
 rather than sharing it:
 
 ```
-failed to open storage 'D:\fastcached\cache': StorageError(code=InUse system=0 context=FilePageStore::Open)
+failed to open storage 'D:\pace\cache': StorageError(code=InUse system=0 context=FilePageStore::Open)
 Another process already has this store open. A storage path belongs to one daemon:
 stop the other one, or give this daemon a path of its own.
 ```
@@ -421,8 +421,8 @@ the service runs with.
 Registering also opens the Windows Firewall for every cache listener that binds
 beyond loopback and, with `--metrics`, for a metrics endpoint that does — nothing
 at all for the default `127.0.0.1:6674`. Each gets one inbound rule, admitting
-`fastcached.exe` running as this service, on every network profile, in the group
-`fastcached: FastCached`; the install line lists them. `--firewall-allow=<address[/prefix]>`
+`pace-kv.exe` running as this service, on every network profile, in the group
+`Pace: pace-kv`; the install line lists them. `--firewall-allow=<address[/prefix]>`
 (IPv4 or IPv6, repeatable) limits which remote addresses they admit, and `/0` is
 refused: leave the flag out to allow any address.
 
@@ -442,8 +442,8 @@ A multi-stage [`Dockerfile`](../../Dockerfile) builds a Release binary with TLS
 enabled and copies it onto a slim Debian runtime:
 
 ```sh
-docker build -t fastcached .
-docker run --rm -p 6674:6674 -p 9259:9259 fastcached \
+docker build -t pace-kv .
+docker run --rm -p 6674:6674 -p 9259:9259 pace-kv \
     --bind=0.0.0.0 --metrics --metrics-bind=0.0.0.0 --requirepass=secret
 ```
 
@@ -455,7 +455,7 @@ that is exactly the deployment this bundle exists to secure, so pair it with
 
 ### Health check
 
-The image's `HEALTHCHECK` runs `fastcached --healthcheck`, which probes
+The image's `HEALTHCHECK` runs `pace-kv --healthcheck`, which probes
 `http://127.0.0.1:<metrics-port>/healthz` and exits 0 (healthy) or 1. It is
 self-contained — no `curl`/`wget` in the image — but requires the daemon to run
 with `--metrics`.
@@ -471,8 +471,8 @@ Only a closed listener ends a loop; a client that reset its queued connection is
 Set a shared secret to require clients to authenticate before any data command:
 
 ```sh
-fastcached --requirepass=secret            # redis AUTH + memcached binary SASL PLAIN
-fastcached --requirepass=secret --auth-username=alice
+pace-kv --requirepass=secret            # redis AUTH + memcached binary SASL PLAIN
+pace-kv --requirepass=secret --auth-username=alice
 ```
 
 - **Redis:** `AUTH secret` or `AUTH alice secret` → `+OK`; data commands before
@@ -485,11 +485,11 @@ The secret is compared in constant time and never logged.
 
 ## TLS
 
-TLS is compiled in with `-DFASTCACHED_ENABLE_TLS=ON` (the image enables it) and
+TLS is compiled in with `-DPACE_ENABLE_TLS=ON` (the image enables it) and
 turned on at runtime:
 
 ```sh
-fastcached --tls --tls-cert=/etc/fastcached/server.crt --tls-key=/etc/fastcached/server.key
+pace-kv --tls --tls-cert=/etc/pace/server.crt --tls-key=/etc/pace/server.key
 # clients:
 redis-cli --tls --insecure -a secret ping
 ```
@@ -500,79 +500,79 @@ certificate (mutual TLS) auth is not yet implemented.
 ## Metrics
 
 ```sh
-fastcached --metrics --metrics-bind=0.0.0.0 --metrics-port=9259
+pace-kv --metrics --metrics-bind=0.0.0.0 --metrics-port=9259
 curl http://host:9259/metrics    # Prometheus text exposition
 curl http://host:9259/healthz    # 200 OK; 503 naming any bind that stopped accepting
 ```
 
 If the endpoint cannot be bound the daemon **carries on serving the cache without
 it**, and says so at `Warn`. That is deliberate: the admin surface is a scrape and
-probe convenience rather than the service. `fastcache-compile-node` answers the same
+probe convenience rather than the service. `pace-node` answers the same
 failure by refusing to start, because an operator who asked a *worker* for an
 endpoint is almost always wiring a probe to it.
 
-### The series `fastcached` exports
+### The series `pace-kv` exports
 
 Every counter in the build is exported by every process that serves this endpoint,
 without exception — a per-counter "does this apply?" predicate is exactly the
-mechanism that once left seven of nine live counters unexported. So a `fastcached`
-scrape also carries the `fastcache_worker_*`, `fastcache_node_*` and
-`fastcache_scheduler_*` series, and on a daemon they are **flat at zero**: nothing
+mechanism that once left seven of nine live counters unexported. So a `pace-kv`
+scrape also carries the `pace_worker_*`, `pace_node_*` and
+`pace_scheduler_*` series, and on a daemon they are **flat at zero**: nothing
 in this binary moves them. They belong to
-[`fastcache-compile-node`](../tools/fastcache-compile-node.md), which documents
+[`pace-node`](../tools/pace-node.md), which documents
 them. Read a zero there as *this process produces no such events*, never as *this
 process has no such subsystem* — a cumulative counter cannot tell you which, which
-is why the things that genuinely can be absent (`fastcached_items` and the whole
+is why the things that genuinely can be absent (`pace_items` and the whole
 storage block on a process with no cache, a `tier` a cache does not have) are
 omitted from the exposition instead of reported as `0`.
 
 The same reading applies inside the daemon's own namespace: the
-`fastcached_dispatch_*` block below is the fleet scheduler's, and the scheduler is
-`fastcache-compile-node`. The `fastcached_` prefix on it is
+`pace_dispatch_*` block below is the fleet scheduler's, and the scheduler is
+`pace-node`. The `pace_` prefix on it is
 historical.
 
 #### Command traffic
 
-Present only when the process has a cache, which for `fastcached` is always.
+Present only when the process has a cache, which for `pace-kv` is always.
 
 | Series | Says |
 |---|---|
-| `fastcached_cmd_get_total` | GET commands processed. |
-| `fastcached_cmd_set_total` | SET-family commands processed. |
-| `fastcached_cmd_touch_total` | TOUCH commands processed. |
-| `fastcached_cmd_flush_total` | FLUSH commands processed. |
-| `fastcached_get_hits_total` | GETs that found a live entry. With the misses below, this is the hit ratio. |
-| `fastcached_get_misses_total` | GETs that found nothing. |
-| `fastcached_delete_hits_total` | DELETEs that removed an entry. |
-| `fastcached_delete_misses_total` | DELETEs with no matching key. |
-| `fastcached_incr_hits_total` | INCRs against a present key. |
-| `fastcached_incr_misses_total` | INCRs with no matching key. |
-| `fastcached_decr_hits_total` | DECRs against a present key. |
-| `fastcached_decr_misses_total` | DECRs with no matching key. |
-| `fastcached_touch_hits_total` | TOUCHes against a present key. |
-| `fastcached_touch_misses_total` | TOUCHes with no matching key. |
-| `fastcached_cas_hits_total` | CAS requests that matched and stored. |
-| `fastcached_cas_misses_total` | CAS requests with no matching key. |
-| `fastcached_cas_badval_total` | CAS requests refused on a token mismatch — a real write conflict, not a missing key. |
+| `pace_cmd_get_total` | GET commands processed. |
+| `pace_cmd_set_total` | SET-family commands processed. |
+| `pace_cmd_touch_total` | TOUCH commands processed. |
+| `pace_cmd_flush_total` | FLUSH commands processed. |
+| `pace_get_hits_total` | GETs that found a live entry. With the misses below, this is the hit ratio. |
+| `pace_get_misses_total` | GETs that found nothing. |
+| `pace_delete_hits_total` | DELETEs that removed an entry. |
+| `pace_delete_misses_total` | DELETEs with no matching key. |
+| `pace_incr_hits_total` | INCRs against a present key. |
+| `pace_incr_misses_total` | INCRs with no matching key. |
+| `pace_decr_hits_total` | DECRs against a present key. |
+| `pace_decr_misses_total` | DECRs with no matching key. |
+| `pace_touch_hits_total` | TOUCHes against a present key. |
+| `pace_touch_misses_total` | TOUCHes with no matching key. |
+| `pace_cas_hits_total` | CAS requests that matched and stored. |
+| `pace_cas_misses_total` | CAS requests with no matching key. |
+| `pace_cas_badval_total` | CAS requests refused on a token mismatch — a real write conflict, not a missing key. |
 
 #### Capacity and what the cache is holding
 
 | Series | Says |
 |---|---|
-| `fastcached_items` | Live entries currently stored. A gauge. |
-| `fastcached_bytes_used` | Bytes currently stored. A gauge. |
-| `fastcached_bytes_limit` | The configured byte budget; `0` means unbounded. A gauge. |
-| `fastcached_evictions_total` | Entries dropped to stay inside that budget. Sustained evictions with a falling hit ratio mean the working set no longer fits. |
-| `fastcached_evicted_unfetched_total` | Entries evicted before ever being read — capacity spent on values nobody wanted. |
-| `fastcached_expired_unfetched_total` | Entries that lapsed before ever being read. |
-| `fastcached_expirations_total` | Entries removed because their TTL lapsed, whichever path removed them: a lookup or a write that met one, or the expiry cycle. The unfetched series above is the part of this nobody read, and `fastcached_expiry_keys_reclaimed_total` is the cycle's share alone. |
-| `fastcached_write_errors_total` | Value writes that failed to persist: a full disk, an I/O error, a read-only mount, a damaged store. **This one is about the disk.** See [When a store reports Corrupt](corrupt-store.md). |
+| `pace_items` | Live entries currently stored. A gauge. |
+| `pace_bytes_used` | Bytes currently stored. A gauge. |
+| `pace_bytes_limit` | The configured byte budget; `0` means unbounded. A gauge. |
+| `pace_evictions_total` | Entries dropped to stay inside that budget. Sustained evictions with a falling hit ratio mean the working set no longer fits. |
+| `pace_evicted_unfetched_total` | Entries evicted before ever being read — capacity spent on values nobody wanted. |
+| `pace_expired_unfetched_total` | Entries that lapsed before ever being read. |
+| `pace_expirations_total` | Entries removed because their TTL lapsed, whichever path removed them: a lookup or a write that met one, or the expiry cycle. The unfetched series above is the part of this nobody read, and `pace_expiry_keys_reclaimed_total` is the cycle's share alone. |
+| `pace_write_errors_total` | Value writes that failed to persist: a full disk, an I/O error, a read-only mount, a damaged store. **This one is about the disk.** See [When a store reports Corrupt](corrupt-store.md). |
 
 #### Per tier
 
 Emitted once per tier the cache actually has, each sample carrying a
 `tier="memory"` or `tier="disk"` label. A tier this cache does not have contributes
-**no line at all** rather than a zero: `fastcached_tier_items{tier="disk"} 0` says a
+**no line at all** rather than a zero: `pace_tier_items{tier="disk"} 0` says a
 disk tier is standing empty, and a memory-only daemon has no such tier to be empty.
 
 Nothing here is a total waiting to be summed. The memory tier mirrors what it reads
@@ -582,92 +582,92 @@ published per tier and stays on the unlabelled series above.
 
 | Series | Says |
 |---|---|
-| `fastcached_tier_items` | Live entries this tier holds. |
-| `fastcached_tier_bytes_used` | What this tier's budget counts: stored (compressed) value bytes for `memory`, the on-disk footprint (pages in use × page size) for `disk`. |
-| `fastcached_tier_bytes_limit` | This tier's own byte budget; `0` means unbounded. |
-| `fastcached_tier_file_bytes` | Length of the file backing a disk tier, free pages included; runs ahead of `bytes_used` by its free pages until a commit cuts them off the end or later writes reuse them. Absent for a tier with no file. |
-| `fastcached_tier_evictions_total` | Entries this tier dropped to stay within its budget. |
-| `fastcached_tier_index_bytes` | Resident memory this tier spends on its key index — always RAM, even for a disk tier. |
+| `pace_tier_items` | Live entries this tier holds. |
+| `pace_tier_bytes_used` | What this tier's budget counts: stored (compressed) value bytes for `memory`, the on-disk footprint (pages in use × page size) for `disk`. |
+| `pace_tier_bytes_limit` | This tier's own byte budget; `0` means unbounded. |
+| `pace_tier_file_bytes` | Length of the file backing a disk tier, free pages included; runs ahead of `bytes_used` by its free pages until a commit cuts them off the end or later writes reuse them. Absent for a tier with no file. |
+| `pace_tier_evictions_total` | Entries this tier dropped to stay within its budget. |
+| `pace_tier_index_bytes` | Resident memory this tier spends on its key index — always RAM, even for a disk tier. |
 
 #### Expiry
 
 | Series | Says |
 |---|---|
-| `fastcached_expiry_cycles_total` | Sweeps the active expiry cycle has run. Flat on a daemon serving traffic means the cycle is disabled (`--expiry-interval=0s`) or wedged, which otherwise looks exactly like nothing having expired. |
-| `fastcached_expiry_keys_reclaimed_total` | Entries that cycle reclaimed — keys that lapsed and that nothing would have touched again, so no other path would ever have freed them. |
-| `fastcached_keyspace_reclaim_events_dropped_total` | Reclaimed keys whose `expired`/`evicted` keyspace event was never published, because one call reclaimed more at once than the notification buffer holds. Any rise means a subscriber's view is incomplete. |
+| `pace_expiry_cycles_total` | Sweeps the active expiry cycle has run. Flat on a daemon serving traffic means the cycle is disabled (`--expiry-interval=0s`) or wedged, which otherwise looks exactly like nothing having expired. |
+| `pace_expiry_keys_reclaimed_total` | Entries that cycle reclaimed — keys that lapsed and that nothing would have touched again, so no other path would ever have freed them. |
+| `pace_keyspace_reclaim_events_dropped_total` | Reclaimed keys whose `expired`/`evicted` keyspace event was never published, because one call reclaimed more at once than the notification buffer holds. Any rise means a subscriber's view is incomplete. |
 
 #### Connections
 
 | Series | Says |
 |---|---|
-| `fastcached_connections_total` | Connections accepted since start. |
-| `fastcached_connections_rejected_total` | Connections refused by admission control (`--max-connections`). |
-| `fastcached_connections_total_tls` | The subset of `fastcached_connections_total` that arrived on a TLS-flagged bind. Plaintext traffic is the difference between the two. |
-| `fastcached_connections_rejected_tls` | The TLS subset of the rejections. |
+| `pace_connections_total` | Connections accepted since start. |
+| `pace_connections_rejected_total` | Connections refused by admission control (`--max-connections`). |
+| `pace_connections_total_tls` | The subset of `pace_connections_total` that arrived on a TLS-flagged bind. Plaintext traffic is the difference between the two. |
+| `pace_connections_rejected_tls` | The TLS subset of the rejections. |
 
 #### The compile-cache (`0xFC`) surface
 
-What `fastcache-cc` and `fastcache-compile-node` talk to this daemon with. These are
+What `pace-cc` and `pace-node` talk to this daemon with. These are
 the daemon's own counters, and they are **not** the node's identically-shaped
-`fastcache_node_cache_*` series: a mixed fleet moves both, and watching only the
+`pace_node_cache_*` series: a mixed fleet moves both, and watching only the
 node's reads a fleet mid-upgrade as one that has converged.
 
 | Series | Says |
 |---|---|
-| `fastcached_cache_stores_refused_foreign_generation_total` | A `STORE` whose value names a canonicalization generation this build does not implement. A rise names a rolling upgrade in progress; it stopping names one that finished. Flat at zero unless the fleet spans a `CompileValueVersion` bump, so any rise is a real event. The node's twin is `fastcache_node_cache_requests_refused_foreign_generation_total` — watch **both**. |
-| `fastcached_cache_stores_refused_not_a_compile_value_total` | A `STORE` whose value is not a compile value at all. Distinct from `fastcached_cache_malformed_values_total`, which is the memcached and Redis path's answer for a set or stream contradicting its own flags. |
-| `fastcached_cache_stores_failed_total` | A `STORE` that reached the engine and could not be written: a full disk, a read-only mount, a backend refusing writes. The only arm of this surface that is about **this machine** rather than its clients. |
-| `fastcached_cache_malformed_values_total` | A stored value that did not decode as the type its flags claim. **Not** a disk signal — the store is intact and every record still verifies. |
-| `fastcached_cache_frames_refused_unsupported_version_total` | A frame naming a protocol version this build does not serve. During a rollout this tracks the rollout; afterwards it names a machine nobody upgraded. |
-| `fastcached_cache_frames_refused_unknown_opcode_total` | A frame naming an opcode this build has no row for. A scanner, or a client speaking something else entirely at this port. |
-| `fastcached_cache_frames_refused_payload_too_large_total` | A frame refused before its payload was read, for declaring more than the session cap or the verb's own ceiling allows. The cheapest probe there is. |
-| `fastcached_cache_frames_refused_malformed_payload_total` | A payload that did not decode as the verb it named — two ends that agree on the framing and disagree about what goes inside it. |
-| `fastcached_cache_frames_refused_unauthenticated_total` | A verb attempted on a connection that never authenticated: a client that has not learned it needs a credential, rather than one presenting a wrong credential. |
-| `fastcached_cache_frames_refused_malformed_credential_total` | An `AUTH` payload that did not decode. Counted apart from ordinary malformed payloads because garbage aimed at the credential verb is what a scanner produces. |
-| `fastcached_cache_credentials_rejected_total` | A credential presented and **refused**. Any sustained rise names somebody guessing. |
+| `pace_cache_stores_refused_foreign_generation_total` | A `STORE` whose value names a canonicalization generation this build does not implement. A rise names a rolling upgrade in progress; it stopping names one that finished. Flat at zero unless the fleet spans a `CompileValueVersion` bump, so any rise is a real event. The node's twin is `pace_node_cache_requests_refused_foreign_generation_total` — watch **both**. |
+| `pace_cache_stores_refused_not_a_compile_value_total` | A `STORE` whose value is not a compile value at all. Distinct from `pace_cache_malformed_values_total`, which is the memcached and Redis path's answer for a set or stream contradicting its own flags. |
+| `pace_cache_stores_failed_total` | A `STORE` that reached the engine and could not be written: a full disk, a read-only mount, a backend refusing writes. The only arm of this surface that is about **this machine** rather than its clients. |
+| `pace_cache_malformed_values_total` | A stored value that did not decode as the type its flags claim. **Not** a disk signal — the store is intact and every record still verifies. |
+| `pace_cache_frames_refused_unsupported_version_total` | A frame naming a protocol version this build does not serve. During a rollout this tracks the rollout; afterwards it names a machine nobody upgraded. |
+| `pace_cache_frames_refused_unknown_opcode_total` | A frame naming an opcode this build has no row for. A scanner, or a client speaking something else entirely at this port. |
+| `pace_cache_frames_refused_payload_too_large_total` | A frame refused before its payload was read, for declaring more than the session cap or the verb's own ceiling allows. The cheapest probe there is. |
+| `pace_cache_frames_refused_malformed_payload_total` | A payload that did not decode as the verb it named — two ends that agree on the framing and disagree about what goes inside it. |
+| `pace_cache_frames_refused_unauthenticated_total` | A verb attempted on a connection that never authenticated: a client that has not learned it needs a credential, rather than one presenting a wrong credential. |
+| `pace_cache_frames_refused_malformed_credential_total` | An `AUTH` payload that did not decode. Counted apart from ordinary malformed payloads because garbage aimed at the credential verb is what a scanner produces. |
+| `pace_cache_credentials_rejected_total` | A credential presented and **refused**. Any sustained rise names somebody guessing. |
 
 #### Fleet dispatch
 
-The fleet scheduler's series. `fastcached` runs no scheduler, so **on a daemon these
-are flat at zero**; they move on a `fastcache-compile-node` that serves the scheduler, and
+The fleet scheduler's series. `pace-kv` runs no scheduler, so **on a daemon these
+are flat at zero**; they move on a `pace-node` that serves the scheduler, and
 [Distributed compilation](../getting-started/distributed-compilation.md#confirming-it-works)
 is where they are explained one by one.
 
 | Series | Says |
 |---|---|
-| `fastcached_dispatch_leases_granted_total` | Work is being distributed. |
-| `fastcached_dispatch_leases_released_total` | Clients are reporting their jobs done. |
-| `fastcached_dispatch_leases_no_worker_total` | The fleet is misconfigured — workers are up but nobody matches. |
-| `fastcached_dispatch_leases_no_capacity_total` | The fleet is too small -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
-| `fastcached_dispatch_leases_withdrawn_total` | The fleet is unavailable — slots free on paper, machines busy elsewhere. |
-| `fastcached_dispatch_leases_all_excluded_total` | The fleet is **unreachable from its clients** — every matching worker was on the asking client's exclusion list. A network problem, not a missing toolchain. |
-| `fastcached_dispatch_leases_duplicate_total` | Duplicate-work suppression is doing its job. |
-| `fastcached_dispatch_leases_reclaimed_total` | A machine went away mid-job and the keys it was building were freed. |
-| `fastcached_dispatch_leases_unauthorized_total` | A lease token this cluster never signed was handed back. |
-| `fastcached_dispatch_leases_released_late_total` | A compile outran the lease timeout and reported back too late. Read as a fraction of `released_total`; a steady fraction means the lease bound is too short for this site's slowest translation unit. |
-| `fastcached_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused. |
-| `fastcached_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused. |
-| `fastcached_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
-| `fastcached_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. |
-| `fastcached_dispatch_worker_registrations_field_too_long_total` | A peer registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused. |
-| `fastcached_dispatch_node_announcements_field_too_long_total` | A machine announced itself with an endpoint or version longer than a scheduler records, and was refused. An overlong condition field is refused earlier, when the frame is decoded, and is not counted here. |
-| `fastcached_dispatch_worker_endpoint_mismatch_total` | A worker was admitted while advertising an endpoint whose host is not the address it connected from. |
-| `fastcached_dispatch_workers_expired_total` | A machine stopped heartbeating and was dropped. |
-| `fastcached_dispatch_workers_withdrawn_total` | A machine re-surveyed, found it no longer serves a toolchain, and retired that registration itself. |
-| `fastcached_dispatch_frames_refused_unsupported_version_total` | A peer built against another release of the wire. |
-| `fastcached_dispatch_frames_refused_unknown_opcode_total` | A frame naming a verb no build has. |
-| `fastcached_dispatch_frames_refused_not_permitted_total` | A verb that exists and is served on a different port. |
-| `fastcached_dispatch_frames_refused_truncated_total` | A frame whose header disagreed with what arrived. Never sum it with a malformed-payload series. |
+| `pace_dispatch_leases_granted_total` | Work is being distributed. |
+| `pace_dispatch_leases_released_total` | Clients are reporting their jobs done. |
+| `pace_dispatch_leases_no_worker_total` | The fleet is misconfigured — workers are up but nobody matches. |
+| `pace_dispatch_leases_no_capacity_total` | The fleet is too small -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
+| `pace_dispatch_leases_withdrawn_total` | The fleet is unavailable — slots free on paper, machines busy elsewhere. |
+| `pace_dispatch_leases_all_excluded_total` | The fleet is **unreachable from its clients** — every matching worker was on the asking client's exclusion list. A network problem, not a missing toolchain. |
+| `pace_dispatch_leases_duplicate_total` | Duplicate-work suppression is doing its job. |
+| `pace_dispatch_leases_reclaimed_total` | A machine went away mid-job and the keys it was building were freed. |
+| `pace_dispatch_leases_unauthorized_total` | A lease token this cluster never signed was handed back. |
+| `pace_dispatch_leases_released_late_total` | A compile outran the lease timeout and reported back too late. Read as a fraction of `released_total`; a steady fraction means the lease bound is too short for this site's slowest translation unit. |
+| `pace_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused. |
+| `pace_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused. |
+| `pace_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
+| `pace_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. |
+| `pace_dispatch_worker_registrations_field_too_long_total` | A peer registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused. |
+| `pace_dispatch_node_announcements_field_too_long_total` | A machine announced itself with an endpoint or version longer than a scheduler records, and was refused. An overlong condition field is refused earlier, when the frame is decoded, and is not counted here. |
+| `pace_dispatch_worker_endpoint_mismatch_total` | A worker was admitted while advertising an endpoint whose host is not the address it connected from. |
+| `pace_dispatch_workers_expired_total` | A machine stopped heartbeating and was dropped. |
+| `pace_dispatch_workers_withdrawn_total` | A machine re-surveyed, found it no longer serves a toolchain, and retired that registration itself. |
+| `pace_dispatch_frames_refused_unsupported_version_total` | A peer built against another release of the wire. |
+| `pace_dispatch_frames_refused_unknown_opcode_total` | A frame naming a verb no build has. |
+| `pace_dispatch_frames_refused_not_permitted_total` | A verb that exists and is served on a different port. |
+| `pace_dispatch_frames_refused_truncated_total` | A frame whose header disagreed with what arrived. Never sum it with a malformed-payload series. |
 
 #### Process
 
 | Series | Says |
 |---|---|
-| `fastcached_uptime_seconds` | Seconds since this process started. A gauge; a reset is a restart. |
-| `fastcached_build_info` | The build this process runs, as `fastcached_build_info{version="0.4.1"} 1`. The value is always 1 and the version is the label, so a query joins on it rather than reading a number. |
-| `fastcached_metrics_surface_absent` | How many counters this build's catalogue names that belong to surfaces **this process does not serve**, so nothing here can ever write them. A gauge, and **a nonzero reading is the healthy state** of any binary that serves only some surfaces. Those series are omitted from the scrape rather than rendered as a zero. **Do not alert on this**; it is the row above that is a fault. **It moves with the configuration**: every catalogue row is attributed to a surface, and `fastcache-compile-node` derives its surfaces from the components it was told to run -- so a node started `--slots=0` reports the worker's refusal counters here rather than as zeroes claiming nothing was ever refused, and one with no `--listen-raft` does the same for the Raft peer wire. A reading that CHANGES after a flag change is therefore expected, and the daemon reports `0` because it claims every surface. |
-| `fastcached_metrics_catalogue_skew` | How many counters this build's metrics catalogue names that its sink has no slot for. A gauge, and **zero on any correctly built process** -- a nonzero reading means the catalogue and the sink were compiled against different versions of the counter enum, so the binary is inconsistent and every counter at the affected ordinals is missing from this scrape rather than reading zero. Alert on `> 0`. |
+| `pace_uptime_seconds` | Seconds since this process started. A gauge; a reset is a restart. |
+| `pace_build_info` | The build this process runs, as `pace_build_info{version="0.4.1"} 1`. The value is always 1 and the version is the label, so a query joins on it rather than reading a number. |
+| `pace_metrics_surface_absent` | How many counters this build's catalogue names that belong to surfaces **this process does not serve**, so nothing here can ever write them. A gauge, and **a nonzero reading is the healthy state** of any binary that serves only some surfaces. Those series are omitted from the scrape rather than rendered as a zero. **Do not alert on this**; it is the row above that is a fault. **It moves with the configuration**: every catalogue row is attributed to a surface, and `pace-node` derives its surfaces from the components it was told to run -- so a node started `--slots=0` reports the worker's refusal counters here rather than as zeroes claiming nothing was ever refused, and one with no `--listen-raft` does the same for the Raft peer wire. A reading that CHANGES after a flag change is therefore expected, and the daemon reports `0` because it claims every surface. |
+| `pace_metrics_catalogue_skew` | How many counters this build's metrics catalogue names that its sink has no slot for. A gauge, and **zero on any correctly built process** -- a nonzero reading means the catalogue and the sink were compiled against different versions of the counter enum, so the binary is inconsistent and every counter at the affected ordinals is missing from this scrape rather than reading zero. Alert on `> 0`. |
 
 This table is checked against the exposition the daemon actually renders — see
 `MetricsDocumentation_test.cpp`, which fails in both directions.
@@ -680,26 +680,26 @@ A minimal Deployment with probes and a Prometheus scrape annotation:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fastcached
+  name: pace-kv
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: fastcached }
+    matchLabels: { app: pace-kv }
   template:
     metadata:
-      labels: { app: fastcached }
+      labels: { app: pace-kv }
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9259"
         prometheus.io/path: "/metrics"
     spec:
       containers:
-        - name: fastcached
-          image: fastcached:latest
+        - name: pace-kv
+          image: pace-kv:latest
           args: ["--bind=0.0.0.0", "--metrics", "--metrics-bind=0.0.0.0", "--requirepass=$(CACHE_SECRET)"]
           env:
             - name: CACHE_SECRET
-              valueFrom: { secretKeyRef: { name: fastcached, key: requirepass } }
+              valueFrom: { secretKeyRef: { name: pace-kv, key: requirepass } }
           ports:
             - { containerPort: 6674, name: cache }
             - { containerPort: 9259, name: metrics }

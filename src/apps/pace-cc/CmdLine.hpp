@@ -1,0 +1,1164 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <cstdint>
+#include <expected>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace Pace::Cc
+{
+
+/// Which compiler driver the launcher is fronting.
+///
+/// The driver decides how the command line is spelled (`/Fo` vs `-o`), how a
+/// preprocess-only run is requested, and how header dependencies are reported —
+/// MSVC-style drivers print `/showIncludes` notes on a stream, GNU-style ones
+/// write a Makefile depfile. See `DriverOf` for the per-flavor descriptor.
+enum class Flavor : std::uint8_t
+{
+    Unknown,
+    /// MSVC cl.exe. Believed to write /showIncludes notes on stderr, UNVERIFIED
+    /// (#825): the analysis on #700 says stdout and nobody here has a Windows host.
+    /// `.agent/rules/compile-cache.md` states it once; do not restate it.
+    Cl,
+    ClangCl, ///< clang-cl.exe (MSVC-compatible driver) — notes on stdout.
+    Gcc,     ///< gcc / g++ — GNU driver, depfile via -MD -MF.
+    Clang,   ///< clang / clang++ — GNU driver, depfile via -MD -MF.
+};
+
+/// The families of command-line spelling the launcher understands, as a SET.
+///
+/// A set rather than a single value because a spelling can belong to both
+/// families: every MSVC driver accepts `-o` alongside `/Fo`, and `-I` is
+/// universal. It is carried per flag row and per driver, and it is NOT derivable
+/// from a flag's introducer character — `-MT` names a dependency target on a GNU
+/// driver and selects the static multithreaded runtime on an MSVC one, so a row
+/// matched by introducer alone would make `cl -MT` consume the next argument,
+/// which is usually the source file.
+enum class DriverFamily : std::uint8_t
+{
+    None = 0, ///< No recognised spelling (an unknown driver).
+    Msvc = 1, ///< cl, clang-cl.
+    Gnu = 2,  ///< gcc, g++, clang, clang++.
+    Any = 3,  ///< Msvc | Gnu — a spelling every driver accepts.
+};
+
+/// How a driver can be asked where it looks for system headers.
+///
+/// A mechanism rather than a flag list, because the two families do not merely
+/// spell the same question differently — they answer it in different places. A
+/// GNU driver PRINTS its search list when asked to be verbose; `cl` does not have
+/// such a switch at all and takes its list from the `INCLUDE` environment
+/// variable the developer command prompt sets. A flags-only column could not
+/// express the second, and a `bool isMsvc` at the use site would be the
+/// "behaviour in code rather than data" this table exists to avoid.
+///
+/// A third mechanism is a new enumerator plus one arm in the one switch that
+/// interprets it, which carries no `default:` so adding one is a compile error at
+/// the site that must handle it rather than a silent fall-through.
+enum class IncludeDiscovery : std::uint8_t
+{
+    /// Unknown driver: no discovery, so no include tree contributes to the
+    /// fingerprint. The compiler banner still does, so an unknown driver degrades
+    /// to the weaker identity rather than to none at all.
+    None = 0,
+    /// Run the driver verbosely over an empty input and read the search list it
+    /// prints between its "search starts here" and "End of search list." markers.
+    GnuVerbose = 1,
+    /// Derive an MSVC toolchain's search list from the machine's INSTALL LAYOUT --
+    /// the compiler's own path for the VC headers, the registry for the Windows
+    /// SDK's -- falling back to `INCLUDE` when the layout cannot be determined.
+    ///
+    /// This exists because `INCLUDE` is set per shell by `vcvarsall`, and a
+    /// **Windows service does not inherit it**. Reading the variable therefore
+    /// yielded nothing under the SCM, `ProbeToolchainFiles` walked nothing, and an
+    /// MSVC worker started as a service fingerprinted as its banner and nothing
+    /// else. That banner was `cl` for every MSVC toolset in existence until issue
+    /// #195, so the digest was too: the false match `ToolchainFingerprint.hpp`
+    /// exists to prevent, and the one that yields a silently wrong object rather
+    /// than a stale path a replay guard can probe. The banner now names the toolset
+    /// and the target, and since #1656 the fingerprint folds NONE of these roots
+    /// (`FingerprintTree::None`) -- they are the toolset `cl` lives in and an SDK it
+    /// borrows, and a worker opens neither for a preprocessed compile. Discovery is
+    /// kept for the fingerprint cache's stamp and so a node notices a toolset or SDK
+    /// update and re-surveys. Both are local checks that never cross a machine, so a
+    /// service and a prompt disagreeing about these roots now costs a recompute, never
+    /// a match; the layout-first rule below was written when it cost the match.
+    ///
+    /// The layout is tried FIRST and the environment only as a fallback, which is
+    /// the whole of why this is not merely "read INCLUDE, then guess". Preferring
+    /// `INCLUDE` where it is set would make a developer prompt and a service
+    /// disagree the moment the two root sets differ by one directory -- and a
+    /// fingerprint disagreement is invisible from both ends, presenting only as a
+    /// scheduler that never matches. Layout-first means both derive the same roots
+    /// wherever the layout is derivable at all.
+    ///
+    /// The layout is modelled here because `cl` cannot be asked WHERE IT LOOKS --
+    /// it prints no search list at any verbosity. What it can be asked is who it
+    /// is, and it is (`DriverSpec::versionFlags`). `Flavor::ClangCl` answers both,
+    /// so both are asked: see `ClangResourceLayout`.
+    MsvcLayout = 2,
+    /// Ask a clang driver for the resource directory that SHIPS WITH IT --
+    /// `<prefix>/lib/clang/<version>/include`, via `-print-resource-dir`.
+    ///
+    /// This exists for `clang-cl`, which read `INCLUDE` like `cl` did and hit the
+    /// same wall from the other side: a developer command prompt has the variable
+    /// and a **Windows service does not**, so a launcher fingerprinted the compiler
+    /// over the whole MSVC include tree while a worker fingerprinted it over the
+    /// banner alone. The two never agreed, the scheduler answered `NoWorker`, and
+    /// nothing at either end said why.
+    ///
+    /// Asked rather than derived, because the resource tree is not recoverable from
+    /// the driver's path: `/usr/bin/clang-cl-20` has `/usr` for a prefix, whose
+    /// `lib/clang` holds `20`, `20.1.2`, `22` and `22.1.8` on an ordinary Debian.
+    /// One spawn, on the same path `GnuVerbose` already spawns on.
+    ///
+    /// Unlike `MsvcLayout` this reads `INCLUDE` **not at all**, not even as a
+    /// fallback, which is what makes a service and a developer prompt agree
+    /// unconditionally rather than merely where a layout is derivable. It can
+    /// afford that because `clang-cl` announces a genuine version: a driver that
+    /// does not answer degrades to a banner-only fingerprint, which still tells one
+    /// clang from another. `cl` announces one too now (issue #195), but only after
+    /// being asked the one way it answers. `MsvcLayout` keeps its fallback for the
+    /// stamp and the evidence it feeds, not for the fingerprint, which folds no
+    /// MSVC tree at all (#1656).
+    ///
+    /// The VC toolset and the Windows SDK stay OUT of the answer. `clang-cl`
+    /// borrows them rather than owning them, and a worker compiles text the client
+    /// already preprocessed, so it opens no header from either -- while the
+    /// newest-kit rule that picks them would split two machines running one
+    /// clang-cl with different SDKs installed. `ClangResourceIncludeRoots` carries
+    /// the argument in full.
+    ClangResourceLayout = 3,
+};
+
+/// How a driver can be asked which target it will actually generate for.
+///
+/// Separate from `IncludeDiscovery` because it answers a different question about a
+/// different half of the machine. The include roots decide what the compiler READS;
+/// the target decides what it EMITS -- and once `ClangResourceLayout` took the VC
+/// toolset and the Windows SDK out of `clang-cl`'s fingerprint, nothing left in that
+/// digest varies with the target at all. Two machines running one clang-cl therefore
+/// match while generating differently, which is the hole this closes.
+///
+/// A mechanism added here is a new enumerator plus one arm in the single switch that
+/// interprets it, which carries no `default:` -- so adding one is a compile error at
+/// the site that must handle it rather than a silent "no target".
+enum class TargetDiscovery : std::uint8_t
+{
+    /// Not askable, or nothing ambient worth stating. `cl` is both: it has no `-###`
+    /// and no `--target`, because its target is decided by WHICH `cl.exe` is
+    /// invoked -- a fact no command line can restate.
+    None = 0,
+    /// Ask a clang driver to print the frontend invocation it WOULD run (`-###`) and
+    /// read the `-triple` out of it.
+    ///
+    /// The `-triple` from the `-cc1` line, and deliberately not the `Target:` line
+    /// three lines above it. That is the trap this mechanism exists to walk around:
+    /// `Target:` reports `x86_64-pc-windows-msvc`, while the frontend is really run
+    /// with `x86_64-pc-windows-msvc19.51.36252`. The version suffix is the entire
+    /// point -- it is where `-fms-compatibility-version` lives, and clang's Microsoft
+    /// C++ ABI gates version-specific CODE GENERATION on it (a `noexcept` function
+    /// type mangles as `P6AXXZ` below 19.12 and `P6AXX_E` from 19.12 on). Pinning the
+    /// unversioned spelling would look exactly like a fix and change nothing.
+    ClangDriverLine = 1,
+    /// Read the `Target:` header a GNU driver prints under `-###`.
+    ///
+    /// For `gcc` this header IS the answer: it prints no `-cc1` line and its
+    /// frontend takes no `-triple`, so there is nothing more precise to read. That
+    /// is the opposite of `ClangDriverLine`, where the very same header is the trap
+    /// -- unversioned, and three lines closer to the top than the real answer. Two
+    /// mechanisms rather than one that tries both, so which line is authoritative is
+    /// a property of the driver in the table rather than a guess at parse time.
+    ///
+    /// It DISCOVERS without pinning. `gcc` is a fixed-target driver and has no
+    /// `--target=`, so this identifies the code generator for the cache key and
+    /// states nothing on a dispatched line -- see `TargetPinPrefixFor`, which is
+    /// where those two questions are kept apart.
+    GnuTargetLine = 2,
+};
+
+/// Which of a driver's include roots its toolchain FINGERPRINT walks
+/// ([#1656](https://github.com/LASTRADA-Software/pace/issues/1656)).
+///
+/// Separate from `IncludeDiscovery` because the two answer different questions. That
+/// one says where a driver SEARCHES, and the answer also feeds the fingerprint cache's
+/// stamp and the node's evidence of a toolchain moving; this one says which of those
+/// trees is the driver's OWN, and only the own tree identifies it. A tree the driver
+/// BORROWS -- the VC toolset and the Windows SDK, under `cl` and under a clang that
+/// targets MSVC -- buys no discrimination, because a dispatched compile is preprocessed
+/// on the client and the worker opens no header from it. It does cost matches: an
+/// installed Visual Studio language pack drops IntelliSense XML into the toolset's
+/// `include` directory, and two machines with one toolset and one SDK split on it.
+///
+/// PRIVATE: never transmitted and never persisted. What a fingerprint folds is the
+/// files a row selects, never the enumerator, so the order is free to change and no
+/// value is pinned.
+enum class FingerprintTree : std::uint8_t
+{
+    /// Every root `IncludeDiscovery` found. `clang-cl`'s discovery already names only
+    /// its own resource directory.
+    DiscoveredRoots,
+    /// No include tree at all: the identity is the banner and the grammar. `cl`'s
+    /// banner names its toolset version and its target (#195), and every tree its
+    /// discovery finds -- the toolset it lives in, the newest SDK -- is one a worker
+    /// never opens for a dispatched compile.
+    None,
+    /// The driver's own resource directory when it targets MSVC, exactly as
+    /// `clang-cl` is identified -- and every discovered root otherwise. A GNU-grammar
+    /// clang on Windows lists the VC toolset and the SDK in its `-v` search list; on
+    /// Linux it lists libstdc++, which it does read, and that stays folded. Decided by
+    /// the target the include probe's own output names, so it costs no spawn on a
+    /// driver that targets anything else.
+    ///
+    /// The `gcc` row carries it too, although no gcc targets MSVC. One binary reaches
+    /// both rows -- the node and `--print-toolchain-fingerprint` classify a driver by
+    /// its STEM, the launcher corrects that by its banner, and both share one cache
+    /// file per grammar -- so a `cc` that is really an MSVC-targeting clang must
+    /// fingerprint alike under either row, or a worker and its clients split.
+    OwnTreeWhenTargetingMsvc,
+};
+
+/// True when two family sets overlap.
+///
+/// A membership test when one side is a single family (a driver's), and a
+/// genuine intersection when it is not — the cache key asks with
+/// DriverFamily::Any, because it relativizes a command line without knowing
+/// which driver produced it.
+///
+/// @param left  One family set (typically a flag row's).
+/// @param right The other (typically a driver's).
+/// @return True when they have a family in common.
+[[nodiscard]] constexpr bool Overlaps(DriverFamily left, DriverFamily right) noexcept
+{
+    return (std::to_underlying(left) & std::to_underlying(right)) != 0;
+}
+
+/// What a path-valued flag's value names.
+///
+/// The role is what each consumer filters on, so a new flag never grows a
+/// branch: the preprocess line drops every role but the three that decide which
+/// headers the text is made of (IncludeDir, ForcedInclude, PrecompiledHeaderInput --
+/// `DroppedFromPreprocess`), the parser captures ObjectOutput and DepFile, and the
+/// cache key relativizes them all.
+enum class PathValueRole : std::uint8_t
+{
+    ObjectOutput, ///< The compiled object file (`/Fo`, `-o`).
+    IncludeDir,   ///< A header search directory (`-I`, `/I`, `/external:I`).
+    DepFile,      ///< The Makefile dependency file the compile writes (`-MF`).
+    DepTarget,    ///< The rule target named inside that depfile (`-MT`, `-MQ`).
+    /// Where MSVC would put a PDB (`/Fd`). CMake emits it on every compile, and it
+    /// names a path on THIS machine, so it neither travels to a worker nor belongs
+    /// in a key. Whether a PDB is written at all is decided by `/Zi` / `/ZI`, which
+    /// dispatch refuses outright -- with `/Z7`, and with no debug flag, this names a
+    /// file nothing produces.
+    DebugOutput,
+
+    /// A path rewrite the compiler applies to what it EMBEDS (`-fdebug-prefix-map`
+    /// and the two spellings beside it). Its value carries a tail; where that is
+    /// cut is `PathValueFlag::valueTailSeparator`, not a fact about this role.
+    ///
+    /// It is here because the flag carries the producing checkout's absolute root
+    /// by construction -- that is what it is for -- so an argument nothing
+    /// relativized would put that root into every key and cost exactly the
+    /// cross-checkout sharing the flag was added to preserve. Measured before the
+    /// row existed: `-fdebug-prefix-map=/home/ci/checkout-aaa=/pace/src` came
+    /// back from `RelativizeArgs` byte-for-byte.
+    ///
+    /// The replacement half is deliberately NOT rewritten. Two machines that map
+    /// to different replacements produce different objects, so they must produce
+    /// different keys; leaving that half literal is what makes the key enforce
+    /// #203's "the mapping must be identical on every machine sharing the cache"
+    /// rather than merely document it.
+    PrefixMap,
+
+    /// A header the driver includes ahead of the source (`-include`, `/FI`). Like an
+    /// include directory it stays on the preprocess lines and never reaches a worker:
+    /// the dispatch preprocess inlines the header into the text the worker compiles,
+    /// so the worker has nothing left to read (#1666).
+    ForcedInclude,
+
+    /// A PRECOMPILED header the compile reads (`-include-pch`). It stays on the
+    /// preprocess lines as it always did, and the line is never dispatched: what it
+    /// names is a compiler's internal state rather than text, so no preprocess can
+    /// inline it, and it is a file on THIS machine. A row of its own, ahead of
+    /// `-include`, because the drivers resolve the longest spelling and so must this
+    /// table -- matched as `-include` with the value `-pch`, it would leave the line.
+    PrecompiledHeaderInput,
+
+    /// A path rewrite that ALSO reaches the preprocessed text (`-ffile-prefix-map`,
+    /// `-fmacro-prefix-map`): it maps `__FILE__` and `__builtin_FILE`, which is what a
+    /// project adds so its objects stop naming its checkout -- Catch2's own CMake passes
+    /// `-ffile-prefix-map=<checkout>/=` on every compile.
+    ///
+    /// Keyed as `PrefixMap` is -- the head relativized, the replacement literal -- and
+    /// differing in the two places where reaching the text matters: it STAYS on the
+    /// preprocess line, so the key hashes the `__FILE__` the real compile produces, and
+    /// a line carrying one is never dispatched, since a worker compiling the client's
+    /// `#line`-marked text would embed `source_location` names the client's mapping never
+    /// touched. Unrecognised, the flag reached the key verbatim with the checkout's
+    /// absolute root in it, and every checkout of such a project missed.
+    SourcePrefixMap,
+};
+
+/// What a dispatched compile's line does with a path-valued flag.
+///
+/// Private: read where the worker's line is built and never stored or sent, so no
+/// enumerator carries a value.
+enum class RemoteLine : std::uint8_t
+{
+    /// Left off: the value names something on THIS machine the worker has no use for --
+    /// headers already inlined, an object and a depfile the client writes itself.
+    Dropped,
+    /// Sent verbatim: a rewrite the worker's compiler must apply to the client's paths in
+    /// the text it is handed, opening none of them (`-fmacro-prefix-map`). Asked AHEAD of the
+    /// role's `UndispatchableBecause`, which is what lets one row of a refused role travel:
+    /// `-ffile-prefix-map`, which also rewrites debug records a worker maps by its own rules,
+    /// stays refused by the role.
+    Forwarded,
+};
+
+/// One spelling of a flag whose value is a filesystem path.
+struct PathValueFlag
+{
+    std::string_view spelling;                        ///< The flag text, without its value.
+    PathValueRole role { PathValueRole::IncludeDir }; ///< What the value names.
+    DriverFamily families { DriverFamily::None };     ///< Which drivers accept this spelling.
+
+    /// For a flag whose value is `<path><sep><rest>`, the separator; `\0` when the
+    /// whole value is the path, which is every row but the prefix-map family.
+    ///
+    /// A COLUMN and not a branch at a consumer, because the shape of a value is a
+    /// fact about the FLAG. This header's own contract two paragraphs up is that
+    /// "the role is what each consumer filters on, so a new flag never grows a
+    /// branch" -- and a consumer asking `role == PrefixMap` to learn where to cut
+    /// is that branch, spelled as a role test. With the column, the next flag
+    /// whose value carries a tail (`-fprofile-prefix-map`, a `<path>:<something>`
+    /// spelling) is a row.
+    ///
+    /// The LAST occurrence is the split point, which follows GCC. There is no
+    /// answer that satisfies both drivers in the family: measured with a directory
+    /// named `a=b`, gcc cuts `-fdebug-prefix-map=<dir>/a=b=ZZZ` at the last
+    /// separator and clang at the first. Reachable only when a mapped root itself
+    /// contains one, and it costs a MISS rather than a mis-serve -- the head the
+    /// launcher isolates lies under no root, so the argument comes back verbatim.
+    char valueTailSeparator { '\0' };
+
+    /// True for a spelling whose value must be FUSED to it: clang-cl's `/clang:` and
+    /// `-clang:` pass-through, which hands one argument to the GNU driver inside it.
+    /// Its separated form (`-clang:-MF -clang:dep.d`) carries a value wrapped in a
+    /// pass-through of its own, which no consumer of this table unwraps -- so the
+    /// parser refuses the bare spelling as uncacheable rather than reading
+    /// `-clang:dep.d` as a path. CMake's Ninja generator emits the fused form (#1531).
+    bool joinedOnly { false };
+
+    /// What a dispatched compile's line does with it. A column rather than a role test,
+    /// because two rows of one role differ here.
+    RemoteLine remote { RemoteLine::Dropped };
+};
+
+/// Every flag whose value is a filesystem path, in one table.
+///
+/// The single source of truth for three questions that used to be answered by
+/// three separate tables, which is how the object output came to be relativized
+/// in its separated form and not in its fused one: whether a bare occurrence
+/// consumes the NEXT argument (CmdLine's own `ValueFlags`), which flag names the
+/// object output (`DriverSpec::objectFlag`), and whose fused value the cache key
+/// must rewrite to a canonical token (CacheKey's `IncludePrefixes`). Adding a
+/// flag is adding a row here.
+///
+/// Rows are ordered longest spelling first, so a scan cannot match a shorter row
+/// that prefixes a longer one before reaching it.
+///
+/// @return The table, in match order.
+[[nodiscard]] std::span<PathValueFlag const> PathValueFlags();
+
+/// How `family` spells "write the object here", as a prefix to fuse a path onto.
+///
+/// Read out of `PathValueFlags()` rather than restated, so the flag a worker
+/// EMITS and the flag the launcher PARSES cannot drift apart -- which is the
+/// defect this exists to close: the compile worker hard-coded the GNU `-o`, and
+/// `cl` does not take it. MSVC quietly wrote `tu.obj` beside the source instead,
+/// exited 0, and the worker then found nothing at the path it had asked for and
+/// refused the job. Distribution therefore never worked on Windows at all.
+///
+/// The value is meant to be FUSED onto the path (`/Fofoo.o`, `-ofoo.o`), which
+/// both families accept and which is the only form MSVC documents for `/Fo`.
+/// Returning a prefix rather than emitting two arguments is what keeps one rule
+/// covering both.
+///
+/// @param family The driver family being invoked.
+/// @return The flag text, or `-o` for a family with no more specific spelling.
+[[nodiscard]] std::string_view ObjectOutputPrefixFor(DriverFamily family);
+
+/// A path-valued flag recognised on a command line.
+struct PathValueMatch
+{
+    PathValueFlag flag;      ///< The table row that matched.
+    std::string_view prefix; ///< The argument up to the fused value (flag plus any `=`/`:` separator).
+    /// The fused value's PATH portion; EMPTY when the value is the next argument
+    /// instead. For a row with a `valueTailSeparator` this is the part before the
+    /// last separator, and @ref valueTail carries the rest.
+    std::string_view value;
+    /// Whatever followed the path inside the same value, separator included;
+    /// empty for every row without a `valueTailSeparator`.
+    ///
+    /// Split HERE rather than by each consumer, for the same reason `prefix` and
+    /// `value` are: "where does a flag end and its value begin" is answered once,
+    /// and a second copy of that question is exactly how the object output came to
+    /// be relativized in its separated spelling and not in its fused one.
+    /// `prefix + value + valueTail` reconstitutes the argument.
+    std::string_view valueTail;
+};
+
+/// Recognise the path-valued flag an argument names, bare or with a fused value.
+///
+/// `introducers` is what makes this usable from both consumers: the parser passes
+/// the driver's own option introducers, while the cache key passes the ones that
+/// apply to the LAYOUT it is relativizing against — a leading `/` introduces an
+/// option under a Windows layout, but on POSIX it starts an absolute path, and
+/// matching `/I` there splits a checkout rooted at `/Infra` into a fragment that
+/// lies under no root and keeps its absolute path in the key.
+///
+/// @param arg         The argument as it appeared on the command line.
+/// @param introducers The characters that introduce an option in this context.
+/// @param families    Which families' spellings may match.
+/// @return The match, or nullopt when `arg` names no path-valued flag.
+[[nodiscard]] std::optional<PathValueMatch> MatchPathValueFlag(std::string_view arg,
+                                                               std::string_view introducers,
+                                                               DriverFamily families);
+
+/// How a driver is TOLD which target to generate for.
+///
+/// A function over the DISCOVERY mechanism rather than a constant, so the two
+/// cannot drift: a mechanism added to `TargetDiscovery` is a compile error here,
+/// which is exactly where somebody has to decide whether `--target=` is still the
+/// right way to say it.
+///
+/// **Discovering and stating are separate questions and this is the seam.** `gcc`
+/// can be asked what it generates for and cannot be told -- it is a fixed-target
+/// driver with no `--target=` -- so its target belongs in the cache key, which
+/// decides which object may be served, and nowhere near a dispatched command line,
+/// which would fail the compile outright. An empty prefix means exactly that:
+/// identified, not pinned.
+///
+/// The value is meant to be FUSED onto the triple, for the reason
+/// `ObjectOutputPrefixFor`'s is: `--target x` is rejected by clang-cl while
+/// `--target=x` is accepted by both clang drivers, so one spelling covers both.
+///
+/// @param discovery The mechanism that produced the triple.
+/// @return The flag prefix, or empty when this mechanism pins nothing.
+[[nodiscard]] std::string_view TargetPinPrefixFor(TargetDiscovery discovery) noexcept;
+
+/// The option-introducer characters a driver family uses.
+/// @param family The family (or family set) to describe.
+/// @return Its introducers; empty for DriverFamily::None.
+[[nodiscard]] std::string_view IntroducersOf(DriverFamily family) noexcept;
+
+/// The stable name of a driver's argument GRAMMAR, for folding into a fingerprint.
+///
+/// A toolchain fingerprint answers "can this worker compile what I preprocessed", and
+/// the grammar is part of that answer: `clang-cl`, `clang++` and `clang` from one LLVM
+/// install print the same banner and own one include tree, so they fingerprinted
+/// IDENTICALLY -- and a worker looks a toolchain up by fingerprint, runs its own
+/// driver, and appends the client's `args` verbatim. A GNU driver handed `/std:c++20`
+/// reads it as a filename, so on a machine with both, one family was always routed to a
+/// driver that cannot read its arguments and distribution was silently off for it
+/// ([#226](https://github.com/LASTRADA-Software/pace/issues/226)).
+///
+/// **A NAME rather than the enumerator's value.** A fingerprint is compared between
+/// machines and across builds, so folding an integer would make reordering the enum a
+/// silent fleet-wide split; folding the name makes it a rename nobody performs by
+/// accident. It is the same argument the wire constants make about spelling a byte.
+///
+/// This does NOT contradict the rule that the key folds the target and the fingerprint
+/// must not. That rule is about the target TRIPLE -- code generation, which the key
+/// separates -- where this is about which spellings the driver accepts, which is what
+/// makes a dispatched compile runnable at all.
+///
+/// @param family The driver family.
+/// @return Its grammar name; empty for DriverFamily::None, which identifies nothing.
+[[nodiscard]] std::string_view DriverGrammarName(DriverFamily family) noexcept;
+
+/// The source language a translation unit is written in.
+///
+/// Needed only where a driver has to be TOLD, because the ordinary signal — the
+/// file's extension — is lost the moment the text is preprocessed into a worker's
+/// scratch file. See `DriverSpec::preprocessedInput`.
+enum class SourceLanguage : std::uint8_t
+{
+    C,
+    Cxx,
+    ObjectiveC,
+    ObjectiveCxx,
+    /// A module interface unit (`.ixx`, `.cppm`, ...). Recognised so it can be
+    /// REFUSED: it writes a BMI beside its object, and neither a cache hit nor a
+    /// dispatched compile reproduces anything but the object.
+    CxxModuleInterface,
+};
+
+/// One driver's spelling of "this input is preprocessed <language>".
+struct PreprocessedInputSpelling
+{
+    /// The initialiser is there to remove INDETERMINACY, not to supply a
+    /// meaningful default (#697). Every row of both driver tables designates this
+    /// member, and there is no language it would be right to fall back to -- `{}`
+    /// lands on `C` because it is enumerator zero, which is a value rather than an
+    /// answer. What it buys is that a future default-initialisation reads `C`
+    /// deterministically instead of whatever the stack held, and the neighbouring
+    /// `PathValueFlag` initialises both of its enum members for the same reason.
+    ///
+    /// Left bare it was also a `cppcoreguidelines-pro-type-member-init` error under
+    /// `WarningsAsErrors: "*"` -- but only for an analyser run whose standard
+    /// library ODR-uses the implicit default constructor somewhere, which is why no
+    /// Linux run has ever reported it. The measurement is on the issue.
+    SourceLanguage language {};
+    std::span<std::string_view const> flags;
+};
+
+/// The language a source path names, by its extension.
+///
+/// Case-insensitive, with `.C` and `.M` deliberately excluded: those two are read
+/// as C++ / Objective-C++ by a GNU driver and as C / Objective-C by an MSVC one, so
+/// the extension alone does not answer the question and a guess would hand a worker
+/// the wrong language. An extension with no answer is not dispatched.
+///
+/// @param path The source path as the build system spelled it.
+/// @return The language, or nullopt when the extension names none unambiguously.
+[[nodiscard]] std::optional<SourceLanguage> LanguageOfSource(std::string_view path);
+
+/// A language's English name, for a refusal a human has to act on.
+/// @param language The language.
+/// @return Its name.
+[[nodiscard]] std::string_view DescribeLanguage(SourceLanguage language) noexcept;
+
+/// Why a translation unit in this language is neither cached nor dispatched.
+///
+/// Both gates read it, and caching is the wider of the two: a line that is not
+/// cacheable never reaches dispatch at all, so a language refused here is refused
+/// once rather than in two places that can come to disagree.
+///
+/// @param language The language.
+/// @return The reason, or empty when this language may be cached and dispatched.
+[[nodiscard]] std::string_view UncacheableBecause(SourceLanguage language) noexcept;
+
+/// How one compiler driver spells the options the launcher needs.
+///
+/// This is the data behind the parser: adding a driver is adding a row to the
+/// table in CmdLine.cpp, not a new branch in the parsing logic.
+struct DriverSpec
+{
+    Flavor flavor { Flavor::Unknown };
+    /// Which family's spellings this driver accepts. Decides both its option
+    /// introducers (via IntroducersOf — MSVC drivers take `/` and `-`, GNU
+    /// drivers only `-`, so a bare `/usr/lib/x.c` stays a source path) and which
+    /// rows of PathValueFlags() apply to it. One field rather than two, because a
+    /// second spelling of "this is an MSVC driver" is a second thing to keep in
+    /// step.
+    DriverFamily family { DriverFamily::None };
+    /// Flags that request preprocess-to-stdout, appended for the key probe.
+    std::span<std::string_view const> preprocessFlags;
+    /// Flags that request preprocess-to-stdout WITH `#line` markers, for text a
+    /// worker is going to compile.
+    ///
+    /// Separate from `preprocessFlags` because the two runs answer different
+    /// questions. The key's text must carry no path, so it suppresses markers; a
+    /// worker's text must carry them, because they are what tells the compiler
+    /// which lines came from a system header — and without that every warning
+    /// inside libc++ or the CRT resurfaces, which under `-Werror` fails the
+    /// compile outright rather than merely being noisy.
+    std::span<std::string_view const> dispatchPreprocessFlags;
+    /// How this driver is told, per language, that its input is ALREADY
+    /// preprocessed — appended to a remote compile's argument list.
+    ///
+    /// Keeping `#line` markers fixes system-header warnings and immediately creates
+    /// a second problem: under `-pedantic` the markers themselves are a GNU
+    /// extension, so clang reports `-Wgnu-line-marker` and `-Werror` turns that into
+    /// a failed compile. Naming the input's language as preprocessed output is what
+    /// makes the driver expect them — the same thing ccache and distcc do.
+    ///
+    /// A TABLE and not one span, because the language is the whole point of the
+    /// flag and it was previously inferred from a FILE NAME on the far side. MSVC's
+    /// entry used to be empty on the reasoning that `/E` emits standard `#line` and
+    /// so there is nothing to tell it — true about the markers, and it left nothing
+    /// stating the LANGUAGE. The worker writes its scratch file as `tu.cpp`, MSVC
+    /// reads the language off that extension, and a dispatched `.c` translation unit
+    /// therefore came back compiled as C++: a failed remote compile where C is not
+    /// valid C++ (so C silently never distributed), and where it is valid C++, an
+    /// object with C++ mangling stored under the C key. `/TC` and `/TP` are exactly
+    /// the `-x` spelling MSVC does have, and `/TP` is a byte-for-byte no-op on a C++
+    /// translation unit, so nothing that worked before moves.
+    ///
+    /// A language with no row is NOT DISPATCHABLE on this driver, which is the
+    /// difference between an empty table and a missing row: MSVC has no way to be
+    /// handed preprocessed Objective-C, and sending it anyway is how the defect
+    /// above happened. See `PreprocessedInputFlagsFor`.
+    std::span<PreprocessedInputSpelling const> preprocessedInput;
+    /// The driver's own flags dropped when building the preprocess command line
+    /// (the compile-only marker and the dependency-reporting switches).
+    ///
+    /// Path-valued flags are deliberately absent here: the preprocess line drops
+    /// every PathValueFlags() row whose role is not IncludeDir, so the object
+    /// output and the depfile options go without being spelled a second time.
+    /// This list is only what has no path value to speak of.
+    std::span<std::string_view const> preprocessDropFlags;
+    /// Flags dropped from the KEY PROBE line only: warnings-as-errors.
+    ///
+    /// Separate from `preprocessDropFlags` because the two have different
+    /// audiences. That one is read through `MatchDroppedFlag`, which
+    /// `DispatchPreprocessCommand` and `RemoteCompileArgs` share -- so a spelling
+    /// added there also stops reaching a dispatched compile. `/WX` must keep
+    /// reaching one, or a remote build stops failing on warnings the local build
+    /// fails on. Only `PreprocessCommand` consults this span.
+    ///
+    /// The probe's job is to emit text to hash; warning severity does not change
+    /// that text, and making warnings fatal there converts any diagnostic into a
+    /// silently dead cache. See the table definition for the two instances.
+    std::span<std::string_view const> probeDropFlags;
+    /// Flags appended to the preprocess line so the same probe ALSO reports the
+    /// translation unit's dependencies, which are folded into the cache key.
+    ///
+    /// The key must be a function of both artefacts a hit reproduces. Without the
+    /// dependency set it determines only the object, and a header that moves
+    /// without changing a byte keys identically while its depfile no longer does
+    /// (issue #53 / issue #56). Capturing them here rather than in a second probe
+    /// is what makes that affordable: measured at +1.5% on a 45 ms preprocess,
+    /// because the compiler has already opened every one of those files.
+    ///
+    /// When `usesDepfile`, the probe's depfile path is appended after these; a
+    /// stream driver reports inline and needs no path.
+    std::span<std::string_view const> dependencyProbeFlags;
+    /// True when dependencies are emitted into a depfile (`-MF <path>`).
+    ///
+    /// There is deliberately no companion field naming *which* stream an inline
+    /// reporter uses. There was, and nothing could safely interpret it: a
+    /// per-driver stream is a property of the COMPILE run, while the launcher's
+    /// two consumers of notes read a different command line each — the key probe
+    /// (`/EP`, where clang-cl moves its notes to stderr so they do not corrupt the
+    /// preprocessed stdout) and the replay path (which tags both captured streams
+    /// with the ShowIncludes grammar rather than choosing). Both therefore read
+    /// both streams, and a descriptor row nothing interprets is how the two drifted
+    /// apart in the first place.
+    bool usesDepfile { false };
+    /// How this driver reveals its system include search paths.
+    IncludeDiscovery includeDiscovery { IncludeDiscovery::None };
+    /// How this driver reveals the target it will generate for.
+    ///
+    /// Beside `includeDiscovery` rather than below the spans, so every byte-wide
+    /// member stays in one run: one dropped between two 8-aligned members costs
+    /// seven bytes of padding and fails clang-tidy's budget.
+    TargetDiscovery targetDiscovery { TargetDiscovery::None };
+    /// Which of the discovered include roots the toolchain fingerprint walks.
+    ///
+    /// In the same byte run as the two above, for the padding reason they give.
+    FingerprintTree fingerprintTree { FingerprintTree::DiscoveredRoots };
+    /// Flags that make the driver print its include search list, for
+    /// `IncludeDiscovery::GnuVerbose`. Empty for every other mechanism.
+    ///
+    /// The input is a separate concern from these flags and is supplied by the
+    /// caller, because "a file that is empty and always exists" has no portable
+    /// spelling: `/dev/null` is not a path on Windows, and reading from stdin
+    /// needs the caller to close it.
+    std::span<std::string_view const> includeProbeFlags;
+    /// Flags that make the driver print what it WOULD run without running it, for
+    /// every `TargetDiscovery` mechanism that asks the driver a question -- both
+    /// `ClangDriverLine` and `GnuTargetLine` read this. Empty only for
+    /// `TargetDiscovery::None`.
+    ///
+    /// The two mechanisms differ in which LINE of that output is authoritative, not
+    /// in how the driver is asked, so emptying this for one of them would not
+    /// disable it -- it would spawn `g++ /dev/null`, a link step with no target on
+    /// it, and drop the target from every GCC key in silence.
+    ///
+    /// Deliberately NOT the compile's own command line, which would make the answer a
+    /// property of one translation unit rather than of the machine. It does not need
+    /// to be: the pin these produce is placed FIRST among the dispatched arguments,
+    /// so anything the build states for itself -- `--target=`, `-m32` -- comes later
+    /// and still wins, which is precisely what happens locally.
+    ///
+    /// The input path is appended by the caller, for the reason `includeProbeFlags`
+    /// gives: "a file that is empty and always exists" has no portable spelling.
+    std::span<std::string_view const> targetProbeFlags;
+    /// Flags that make the driver print its version banner as the FIRST line of
+    /// its output, and exit ZERO having done so.
+    ///
+    /// Both halves are load-bearing, and MSVC is why this is a table row rather
+    /// than one spelling for everybody. `cl` has no `--version`: handed it, it
+    /// prints its banner (it always does), then warns D9002, then errors D8003 and
+    /// exits 2. `CompilerBanner` requires a zero exit — deliberately, so that a
+    /// driver which cannot answer falls back to a normalized name rather than
+    /// fingerprinting on an error message — so `cl` took that fallback, and every
+    /// MSVC compiler ever installed identified as the string `cl`. That string is
+    /// the cache key's compiler identity, so one toolset's object was served to
+    /// another toolset's compile under a zero exit code (issue #195).
+    ///
+    /// MSVC's row is therefore EMPTY, which is not "no probe" but "no flags
+    /// needed": `cl` invoked with nothing at all prints the same banner, reads no
+    /// stdin, writes no file, and exits 0. The gate stays as it was; the probe is
+    /// what was wrong.
+    std::span<std::string_view const> versionFlags;
+};
+
+/// One argument a pass-through hands to a different driver grammar: what it carries, and
+/// which driver parses it.
+struct PassThroughMatch
+{
+    std::string_view inner;          ///< The argument carried, as the driver it is handed to receives it.
+    Flavor into { Flavor::Unknown }; ///< The driver whose grammar parses @ref inner.
+};
+
+/// Whether @p arg is a pass-through for a driver of @p family, and what it carries.
+///
+/// clang-cl's `/clang:<arg>` and `-clang:<arg>` hand `<arg>` to the clang driver underneath,
+/// which parses it with clang's OWN option table. **The one unwrap every argument classifier
+/// asks** -- the worker's allowlist and, through this, the launcher's side-artefact, denial and
+/// macro-switch checks -- so the launcher judges a pass-through exactly as the worker does
+/// (#1680). Each classifier asks it INSIDE itself and recurses on @ref PassThroughMatch::inner
+/// under the inner driver, so no call site can forget it.
+///
+/// The match is the prefix alone: an empty or bare inner argument still matches, and what that
+/// means is each caller's to say (the worker refuses one).
+/// @param arg    The argument as it appeared on the command line, introducer included.
+/// @param family The family of the driver that receives @p arg.
+/// @return What it carries, or nullopt when it is no pass-through for that family.
+[[nodiscard]] std::optional<PassThroughMatch> MatchPassThrough(std::string_view arg, DriverFamily family) noexcept;
+
+/// Whether `arg` makes a compile write something BESIDES its object file.
+///
+/// A cache hit reproduces the object and the dependency record and nothing else, so
+/// a line that also writes a BMI (`/ifcOutput`, `-fmodule-output`), a precompiled
+/// header (`/Yc`) or `cl`'s PDB shared across the target (`/Zi`, `/ZI`) must not be
+/// cached: replaying only the object leaves the second artefact missing, which fails
+/// loudly, or stale, which does not. The module EXTENSIONS are the other half of the
+/// same rule and are handled by `LanguageOfSource` — this table is for an ordinary
+/// source promoted by a flag, which is how a `.cpp` becomes a module interface unit
+/// (`cl /interface`).
+///
+/// One flag is here although it writes nothing: `cl`'s `/Yu`, whose object is tied
+/// to the one pch.obj it was compiled against, by a symbol that differs per checkout
+/// and by a record naming that file's absolute path. The key sees neither, so a
+/// replay fails to link in another checkout, or links without the translation unit's
+/// debug info after the PCH was rebuilt. clang-cl's `/Yu` object carries neither and
+/// stays cacheable.
+///
+/// A pass-through (`/clang:-fmodule-output=x.pcm`) is judged as the argument it carries, by
+/// the driver it is handed to (`MatchPassThrough`): its whole spelling matches no row, so it
+/// used to cache a compile that writes a module file, and a hit restored the object
+/// without it (#1680).
+///
+/// @param arg    The argument as it appeared on the command line.
+/// @param driver The driver whose spellings and flavor apply.
+/// @return True when this argument means a second artefact is produced, or (`cl /Yu`)
+///         an object tied to an artefact the key cannot see.
+[[nodiscard]] bool ProducesSideArtefact(std::string_view arg, DriverSpec const& driver);
+
+/// The pieces of a compile command line the launcher needs to key, cache, and
+/// reproduce a compilation.
+struct ParsedCommand
+{
+    Flavor flavor { Flavor::Unknown };
+    std::string compiler;            ///< argv[0] — the real compiler to exec.
+    std::string source;              ///< The translation-unit source path.
+    std::string objPath;             ///< The requested object output (/Fo or -o).
+    std::string depPath;             ///< The requested depfile (-MF), if any.
+    bool wantShowIncludes { false }; ///< True if /showIncludes was requested.
+    /// True when the line also writes a BMI, a precompiled header or `cl`'s shared
+    /// PDB, or uses a precompiled header under `cl` (`/Yu`), which makes it
+    /// uncacheable. Recorded rather than folded into `parsedOk` alone so the launcher
+    /// can say WHY it stepped aside: a link step and a module interface unit are both
+    /// passed through, and only one of them looks like a defect.
+    bool sideArtefact { false };
+    /// True when a pass-through dependency flag (`-clang:-MF`) arrived with its value
+    /// in a SEPARATE argument, which the launcher cannot read. Uncacheable rather than
+    /// guessed at: a hit writes the depfile the build named, and a misread name is a
+    /// build whose headers stop triggering rebuilds (#1531). See `PathValueFlag::joinedOnly`.
+    bool separatedPassThrough { false };
+    bool parsedOk { false }; ///< False if the line is not a cacheable compile.
+};
+
+/// Look up the descriptor for a compiler flavor.
+/// @param flavor The flavor to describe.
+/// @return Its driver spec; the Unknown spec for an unrecognised flavor.
+/// Classify a compiler's driver flavor from its basename.
+///
+/// Tolerates version suffixes (`g++-14`, `clang-18`) and a `.exe` extension, both
+/// ordinary on real build systems.
+///
+/// Exposed because the flavor is needed outside a parsed command line: asking a
+/// toolchain where it searches for headers requires knowing which family it
+/// belongs to, and that question is asked by `--print-toolchain-fingerprint`,
+/// which has a compiler and no command line at all.
+///
+/// @param compiler argv[0] as invoked.
+/// @return The matching flavor, or `Flavor::Unknown`.
+[[nodiscard]] Flavor ClassifyCompiler(std::string_view compiler);
+
+/// Correct a name-based classification against what the driver calls itself.
+///
+/// `cc` and `c++` name a POLICY -- "the system C compiler" -- rather than a
+/// product. On most Linuxes they are GCC; on macOS `/usr/bin/c++` is Apple clang,
+/// and it is CMake's default C++ compiler there, so the spelling a build system
+/// uses most is precisely the one that says least. Classifying it by name put an
+/// Apple clang in the `gcc` row, and once that row became the one that decides how
+/// a target is discovered, a name-based guess started deciding whether two machines
+/// share a cache entry.
+///
+/// The banner settles it and costs nothing: it is already in hand for the key, so
+/// this is a string test rather than a second spawn.
+///
+/// Only the GNU-driver pair is refined, and only on POSITIVE evidence. A banner
+/// carrying `clang version` is proof; a banner without it is not proof of the
+/// opposite, because a driver that could not be RUN falls back to its own basename
+/// -- so a real `clang++` whose `--version` failed would otherwise be demoted into
+/// the gcc row, losing both the versioned target and the pin on a driver whose name
+/// said exactly what it was. An unrecognised banner therefore leaves @p named alone.
+///
+/// `clang-cl` is deliberately untouchable here, because its banner is
+/// `clang version ...` -- identical to plain clang's -- so the NAME is the only
+/// thing that distinguishes the two drivers, and a banner test would collapse them.
+/// `cl` is left alone for the same reason in reverse: its banner is a fallback, and
+/// there is nothing to read.
+///
+/// @param named What the compiler's name said it was.
+/// @param banner Its version line, as `CompilerBanner` returns it.
+/// @return The corrected flavor; @p named unchanged for every driver but the pair.
+[[nodiscard]] Flavor ClassifyCompilerFromBanner(Flavor named, std::string_view banner) noexcept;
+
+/// A compiler's basename, lowered and stripped of `.exe`.
+///
+/// Here rather than beside its callers because THREE questions are answered from
+/// it and they must not disagree: which driver this is (`ClassifyCompiler`),
+/// whether it compiles everything as C++, and -- when a driver answers no
+/// `--version` -- what to call it in a fingerprint. `CL.EXE`, `cl` and
+/// `C:/.../cl.exe` are one compiler, and a second spelling of "what do we call it"
+/// is a second chance for a launcher and a worker to part company silently.
+///
+/// @param compiler argv[0] as invoked, bare name or path.
+/// @return Its normalized basename.
+[[nodiscard]] std::string NormalizedCompilerName(std::string_view compiler);
+
+[[nodiscard]] DriverSpec const& DriverOf(Flavor flavor);
+
+/// How `driver` is told its input is preprocessed `language`.
+///
+/// @param driver   The driver descriptor.
+/// @param language The translation unit's language.
+/// @return The flags to append, or nullopt when this driver has no spelling for
+///         that language — which means the job must not be dispatched to it.
+[[nodiscard]] std::optional<std::span<std::string_view const>> PreprocessedInputFlagsFor(DriverSpec const& driver,
+                                                                                         SourceLanguage language);
+
+/// Parse a compiler invocation (`argv[0]` = compiler, rest = its arguments).
+///
+/// Recognises MSVC-style (`cl`, `clang-cl`) and GNU-style (`gcc`, `g++`, `cc`,
+/// `c++`, `clang`, `clang++`, including version-suffixed names like `g++-14`)
+/// command lines, extracting the source file, the object output path, the
+/// depfile path, and whether inline include reporting was requested.
+///
+/// `parsedOk` is false when the line has no single source file (a link step, a
+/// multi-TU line), names no explicit object output (`g++ -c a.cpp`, which
+/// defaults to `./a.o` — a path the launcher cannot reconstruct), is
+/// preprocess-only, or writes a second artefact besides the object (a BMI or a
+/// precompiled header) or uses a precompiled header under `cl` (see
+/// `ProducesSideArtefact`) — the launcher then falls back to a plain exec.
+///
+/// @param argv The full invocation, argv[0] being the compiler.
+/// @return The parsed command; `parsedOk` gates cacheability.
+[[nodiscard]] ParsedCommand ParseCommand(std::span<std::string const> argv);
+
+/// Build the argv that preprocesses `cmd`'s translation unit to stdout.
+///
+/// Drops the compile-only, object-output and dependency flags (which would
+/// otherwise write stray files) and appends the driver's preprocess flags.
+///
+/// The caller's own dependency flags are dropped and the driver's
+/// `dependencyProbeFlags` appended in their place, so the probe reports
+/// dependencies in exactly one spelling regardless of what the build asked for —
+/// `-MD` even when the compile said `-MMD`, and a `-MF` naming
+/// `dependencyProbePath` rather than the build's own depfile, which a discarded
+/// hit must not have touched.
+///
+/// @param cmd The parsed command.
+/// @param argv The original full invocation.
+/// @param dependencyProbePath Where a depfile driver writes the probe's
+///                            dependencies, and the request for the probe itself:
+///                            empty asks for no dependency reporting at all. A
+///                            stream driver reports inline and reads nothing out
+///                            of this but the request.
+/// @return The preprocess invocation, argv[0] being the compiler.
+/// Build the argument list a remote worker compiles this translation unit with.
+///
+/// The worker receives **preprocessed** text, so this is not the build's command
+/// line minus a few things — it is the subset that still means something once the
+/// headers are already inlined and the macros already expanded:
+///
+///   - The **source path** is dropped. The worker compiles a file of its own, in a
+///     directory the client has never heard of.
+///   - Every **path-valued** flag is dropped, whatever its role. An include
+///     directory has already done its work (and naming a path that does not exist
+///     on the worker is at best useless); an object output would make the worker
+///     write where the client wanted it rather than where it can; a depfile or its
+///     rule target would have the worker report dependencies for preprocessed text,
+///     which has none. This is `PathValueFlags()` again, read for a fourth question,
+///     rather than a fourth list of spellings to keep in step.
+///   - The driver's own **compile-only and dependency switches** are dropped, for
+///     the same reason and off the same table `PreprocessCommand` uses. The worker
+///     adds its own `-c`, because only it knows its output path.
+///
+/// Everything else is kept, and deliberately: `-std=`, `-O`, `-g`, `-W`, `-f`, `-m`
+/// and their kin all change the code the compiler generates and must reach it, or
+/// the object the client gets back is not the object it asked for. `-D`/`-U` are
+/// kept too — already expanded, so inert, but dropping them would mean a fifth
+/// classification of flags and no benefit.
+///
+/// Anything left that could still name a file makes the whole command line
+/// **undispatchable**, and this returns nothing.
+///
+/// Dropping the known path-valued flags is a deny-list, and a deny-list is the
+/// losing game here: `PathValueFlags()` does not know `-isystem`, `-iquote`,
+/// `--sysroot`, `-B`, `-specs=`, `-fplugin=` or `@response-file`, and it should not
+/// have to — it exists to answer questions about the cache key. Several of those
+/// point a compiler at an *executable* or at a file it will read, which is exactly
+/// the surface a worker must not expose to a client.
+///
+/// So the last word is a positive check on what survives: an argument carrying a
+/// path separator, or opening a response file, means this translation unit is not
+/// dispatched at all. **Refused rather than stripped**, because the two failure
+/// modes are not comparable — stripping an argument this function does not
+/// recognise would change the code the compiler generates and hand back an object
+/// that is quietly not the one that was asked for, while refusing costs one local
+/// compile. A code-generation flag (`-std=c++23`, `-O2`, `-Wall`, `-fPIC`,
+/// `/std:c++20`) has no path in it, so the ordinary case is unaffected.
+///
+/// The worker separately refuses to take its compiler from the client, so this is
+/// the second of two independent barriers rather than the only one.
+///
+/// ## The target is stated, not left to the worker
+///
+/// `targetTriple` is emitted as `--target=<triple>` **first**, ahead of everything
+/// the build said for itself. A worker otherwise re-derives the target from its own
+/// machine, and for a Microsoft target that re-derivation includes
+/// `-fms-compatibility-version`: clang-cl reads it from whatever MSVC it can find,
+/// a Windows service can find none and falls back to clang's built-in default, and
+/// the toolchain fingerprint sees neither. So two ends match and generate
+/// differently, which is a wrong object with a zero exit code.
+///
+/// FIRST and not last, which is the opposite of the language flags below and for the
+/// opposite reason. What this states is the DEFAULT the client's own driver would
+/// have used, so anything the build names explicitly -- `--target=`, `-m32` -- comes
+/// later on the line and still wins, exactly as it does locally. Appending it would
+/// override the build instead, and compiling for a target the build did not ask for
+/// is a wrong object rather than a failed one.
+///
+/// Passing it is not optional, and there is deliberately no default: a second
+/// dispatch path that forgot it would silently go back to letting the worker choose.
+/// Empty is the honest answer for a driver with no target to state (`cl`) or one
+/// that would not say, and it leaves the line exactly as it was.
+///
+/// @param cmd The parsed compile command.
+/// @param argv The original full invocation.
+/// @param targetTriple The target the CLIENT's driver would generate for; empty to
+///        state none.
+/// @return The arguments to send (without the compiler and without the source), or
+///         the reason this command line must not be dispatched. The reason travels
+///         because every refusal here ends in a local compile, and "distribution
+///         stopped helping" is otherwise a whole investigation.
+[[nodiscard]] std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCommand const& cmd,
+                                                                                     std::span<std::string const> argv,
+                                                                                     std::string_view targetTriple);
+
+/// The working directory a COMPILER will report, which is not `getcwd(3)`'s answer.
+///
+/// Both GNU drivers take their `DW_AT_comp_dir` — and therefore the string they run
+/// every `-fdebug-prefix-map` comparison against — from `$PWD` when it is usable, and
+/// from `getcwd(3)` only when it is not. The two differ whenever the build was reached
+/// through a symlink, because the shell keeps the spelling it was given while
+/// `getcwd(3)` resolves every link. `std::filesystem::current_path()` is `getcwd(3)`,
+/// so predicting a driver's behaviour from it is wrong on exactly those machines.
+///
+/// **Measured**, gcc 14 and clang 20, cwd `/tmp/l506f/build` reached as
+/// `/tmp/l506f-link/build`, both drivers identical:
+///
+/// | `PWD`                          | recorded `DW_AT_comp_dir` |
+/// |--------------------------------|---------------------------|
+/// | `/tmp/l506f-link/build`        | `/tmp/l506f-link/build`   |
+/// | unset                          | `/tmp/l506f/build`        |
+/// | a different real directory     | `/tmp/l506f/build`        |
+/// | a path that does not exist     | `/tmp/l506f/build`        |
+/// | a relative path                | `/tmp/l506f/build`        |
+///
+/// So the rule is: absolute, and naming the same directory as `.`. That is a `stat`
+/// comparison rather than a spelling one, which is what `std::filesystem::equivalent`
+/// is, and every other case falls back. This is libiberty's `getpwd()`, which is where
+/// gcc gets it; clang was measured to agree rather than read.
+///
+/// A rule written with the resolved spelling does **not** match — measured, same
+/// arrangement: `-fdebug-prefix-map=/tmp/l506f/build=.` left `DW_AT_comp_dir` at
+/// `/tmp/l506f-link/build`, unmapped. So this cannot be answered by canonicalizing both
+/// sides and comparing filesystem identities: that is more permissive than the driver,
+/// and it would send a worker a mapping the local compile did not apply — manufacturing
+/// [#506](https://github.com/LASTRADA-Software/pace/issues/506)'s disagreement in
+/// the other direction. The driver does a byte compare against one particular spelling,
+/// so this returns that spelling and lets `MappedCompileDirectory` go on doing a byte
+/// compare too.
+///
+/// @param physicalDirectory `std::filesystem::current_path()`'s answer.
+/// @param environmentPwd The `PWD` variable's value; empty when it is unset, the two
+///        being one answer here because both fall back.
+/// @return The directory a compiler spawned here will report and match against.
+[[nodiscard]] std::string CompilerWorkingDirectory(std::string_view physicalDirectory, std::string_view environmentPwd);
+
+/// `CompilerWorkingDirectory` reading `PWD` from this process's environment.
+///
+/// The overload exists so no call site has to remember the pairing — the two consumers
+/// (the client predicting its own compile, the worker predicting the one it is about to
+/// spawn) each read `current_path()` and would each have to remember to read `PWD`
+/// beside it. The two-argument form above is what the tests drive.
+///
+/// @param physicalDirectory `std::filesystem::current_path()`'s answer.
+/// @return The directory a compiler spawned here will report and match against.
+[[nodiscard]] std::string CompilerWorkingDirectory(std::string_view physicalDirectory);
+
+/// A client's own compilation directory and what its mapping spells that as.
+///
+/// The two travel together or not at all: a replacement with no directory is half a
+/// rule, and both halves come out of one computation.
+struct MappedCompileDir
+{
+    std::string directory;   ///< The directory the client's own compile runs in.
+    std::string replacement; ///< What the client's own `-fdebug-prefix-map` rules spell it as.
+};
+
+/// How this client's own compile spells its **compilation directory**, and the
+/// directory it spells.
+///
+/// A compiler with debug info on records the directory it ran in — DWARF's
+/// `DW_AT_comp_dir` — and that appears on no command line, so no cache key can
+/// relativize it. `RemoteCompileArgs` drops every path-valued flag, the prefix-map row
+/// included, so a worker received no mapping and a dispatched object recorded a
+/// directory a locally mapped one does not, under the same key
+/// ([#506](https://github.com/LASTRADA-Software/pace/issues/506)).
+///
+/// The flag itself cannot be forwarded: a worker needs a rule whose left-hand side is a
+/// path on the WORKER, which this machine has never seen. So this pair travels and the
+/// worker builds the rules — **both** of them, because which directory a dispatched
+/// object records is a fact about the driver rather than about the fleet. The
+/// measurements are on `CompileRequest::compileDir`.
+///
+/// ## The rule this models is the driver's, and it was measured
+///
+/// gcc 14 and clang 20 agree on all three points that matter here, and the third is
+/// where an intuition would have gone wrong:
+///
+///   - the **last** matching rule wins, not the first (two rules mapping one directory
+///     to `A` then `B` give `B`);
+///   - a longer directory keeps its tail (`/root=.` with a working directory of
+///     `/root/sub/deeper` gives `./sub/deeper`);
+///   - the match is a **byte prefix and not a path prefix** — `/tmp/work=X` against a
+///     working directory of `/tmp/worker` gives `Xer`, on both drivers. So no
+///     separator boundary is imposed here either: modelling the flag more sensibly
+///     than the compiler implements it would make the client predict a replacement the
+///     compiler never writes, which is exactly the disagreement this exists to end.
+///
+/// @param argv The original full invocation, as the build system wrote it.
+/// @param family The client driver's family, so `/I` is not read as a flag on POSIX.
+/// @param workingDirectory The directory the client's own compile runs in, spelled the
+///        way that compile will spell it — `CompilerWorkingDirectory`, never
+///        `current_path()`, which is a different string on a symlinked build.
+/// @return The directory and its replacement, or nullopt when no rule on the line
+///         governs that directory — which is the honest answer for a build that maps
+///         nothing, and the answer the worker must be given so it maps nothing either.
+[[nodiscard]] std::optional<MappedCompileDir> MappedCompileDirectory(std::span<std::string const> argv,
+                                                                     DriverFamily family,
+                                                                     std::string_view workingDirectory);
+
+/// What this client's own `-fdebug-prefix-map` rules spell @p path as.
+///
+/// The computation `MappedCompileDirectory` is built on, named for what it does rather
+/// than for the one value it was first asked about. It models the driver's flag and
+/// nothing else — last match wins, byte prefix, unmatched tail appended — and the three
+/// paragraphs above are its measurements.
+///
+/// A second value needs it, which is why it is a function of its own
+/// ([#800](https://github.com/LASTRADA-Software/pace/issues/800)). A compiler
+/// with debug info on records the **name of the file it was handed**, DWARF's
+/// `DW_AT_name`, and `RemoteCompileArgs` drops the client's rules by design — so a
+/// client whose source argument is ABSOLUTE and whose line carries a rule matching it
+/// recorded the MAPPED spelling locally and the raw one when the same translation unit
+/// was dispatched. Same key, two recorded names.
+///
+/// **Measured on clang 22.1.8, ELF, `readelf --debug-dump=info`**, one TU at
+/// `<root>/src/tu.cpp` compiled from `<root>/build` under
+/// `-fdebug-prefix-map=<root>=/MAPPED`:
+///
+/// | compile | `DW_AT_name` |
+/// |---|---|
+/// | local | `/MAPPED/src/tu.cpp` |
+/// | dispatched, worker sent the raw spelling | `<root>/src/tu.cpp` |
+/// | dispatched, worker sent this function's answer | `/MAPPED/src/tu.cpp` |
+///
+/// **gcc is neither fixed nor worsened, and that is a different residual with a
+/// different cause.** gcc takes `DW_AT_name` from the `#line` marker in the
+/// preprocessed text, so the worker's scratch rule never matches it — measured on
+/// gcc 16.2.1, the dispatched name is the client's raw absolute path under both
+/// spellings. Reaching it would need a rule whose left-hand side is the client's raw
+/// path as well, which is a second field on a wire whose payload arity is exact.
+/// Neither driver rewrites a `#line` marker for this flag (measured on both), so the
+/// preprocessed text is not a route either.
+///
+/// @param argv The original full invocation, as the build system wrote it.
+/// @param family The client driver's family, so `/I` is not read as a flag on POSIX.
+/// @param path The path to spell — a working directory, or the source argument.
+/// @return The replacement, or nullopt when no rule on the line governs @p path.
+[[nodiscard]] std::optional<std::string> MappedByPrefixMapRules(std::span<std::string const> argv,
+                                                                DriverFamily family,
+                                                                std::string_view path);
+
+[[nodiscard]] std::vector<std::string> PreprocessCommand(ParsedCommand const& cmd,
+                                                         std::span<std::string const> argv,
+                                                         std::string_view dependencyProbePath = {});
+
+/// Build the argv that preprocesses `cmd`'s translation unit for a REMOTE compile.
+///
+/// The same line `PreprocessCommand` builds, except that it keeps `#line` markers
+/// and asks for no dependency reporting. See `DriverSpec::dispatchPreprocessFlags`
+/// for why the markers are not optional.
+///
+/// This is a second preprocess run, and it is paid only on the path that is about
+/// to spend seconds compiling remotely: roughly 45 ms against a compile that would
+/// not have been dispatched at all if it were cheap. Reusing the key's text instead
+/// would save that and break every `-Werror` build, which is not a trade.
+///
+/// **Warnings-as-errors STAYS on this line, unlike the key probe's** (#1665). `cl /E`
+/// ignores `#pragma warning(disable: …)`, so under `/WX` a warning the source silences
+/// fails this preprocess (C2220) and the unit compiles locally. Dropping `/WX` here is
+/// not the fix it looks like: a PREPROCESSOR-phase warning is resolved in this run and
+/// never reaches the worker's text, so an UNSILENCED one would then pass remotely where
+/// the local compile fails. Measured with cl 19.51, `/W4 /WX`, an unsilenced `#define`
+/// redefinition (C4005): the local compile exits 2, while `/E` without `/WX` exits 0 and
+/// its `.i` compiles under `/WX` with exit 0 -- a build that fails locally and passes
+/// on the fleet. The key probe may drop it because a miss still compiles locally.
+///
+/// @param cmd The parsed command.
+/// @param argv The original full invocation.
+/// @return The preprocess invocation, argv[0] being the compiler.
+[[nodiscard]] std::vector<std::string> DispatchPreprocessCommand(ParsedCommand const& cmd,
+                                                                 std::span<std::string const> argv);
+
+/// What a failed preprocess says about itself, for the line that reports it.
+///
+/// The exit status and the first line of @p diagnostics that names an error, else its
+/// first non-empty line, reduced to printable text a log may carry. `cl` echoes the
+/// source's name as its first stderr line, which says nothing, so an error line is
+/// preferred over position.
+/// @param exitCode The preprocess's exit status.
+/// @param diagnostics What it wrote to stderr.
+/// @return For example `exit 2: a.cpp(3): error C2220: the following warning is treated as an error`.
+[[nodiscard]] std::string DescribeFailedPreprocess(int exitCode, std::string_view diagnostics);
+
+} // namespace Pace::Cc

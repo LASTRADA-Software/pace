@@ -3,12 +3,12 @@
 # The launcher's documented environment table must name every variable the launcher
 # reads, and no variable it does not.
 #
-# `EnvName` in `src/apps/fastcache-cc/LauncherCli.hpp` holds the names, and
+# `EnvName` in `src/apps/pace-cc/LauncherCli.hpp` holds the names, and
 # `EnvironmentTable` in `LauncherCli.cpp` is what drives parsing and `--help` from
-# them. `docs/tools/fastcache-cc.md` is what somebody reading the documentation site
+# them. `docs/tools/pace-cc.md` is what somebody reading the documentation site
 # gets instead. Nothing linked the two, and the page said so in prose:
 #
-#   > `fastcache-cc --help` documents the same set, generated from the table in
+#   > `pace-cc --help` documents the same set, generated from the table in
 #   > `LauncherCli.cpp` ... if the two ever disagree, `--help` is right.
 #
 # A sentence that names a hazard and does nothing about it. A variable added to the
@@ -31,24 +31,24 @@
 # here for the same reason it was wrong for `check-tsan-scope`: they are the data.
 #
 # So the whole file is read as one string and only the NAMES are matched out of it.
-# Every captured substring is `FASTCACHE_[A-Z_]+`, which cannot contain a bracket, so
+# Every captured substring is `PACE_[A-Z_]+`, which cannot contain a bracket, so
 # there is no element for a stray `]` to merge with. Immune by construction rather
 # than by the corpus happening to be safe today.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-launcher-env-reference.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-launcher-env-reference.cmake
 #
 # Exit codes: 0 = the two agree. 1 = a name is in one and not the other, or either
 # scan matched nothing.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(_header "${FASTCACHED_SOURCE_DIR}/src/apps/fastcache-cc/LauncherCli.hpp")
-set(_page "${FASTCACHED_SOURCE_DIR}/docs/tools/fastcache-cc.md")
+set(_header "${PACE_SOURCE_DIR}/src/apps/pace-cc/LauncherCli.hpp")
+set(_page "${PACE_SOURCE_DIR}/docs/tools/pace-cc.md")
 
 foreach(_file "${_header}" "${_page}")
     if(NOT EXISTS "${_file}")
@@ -57,7 +57,7 @@ foreach(_file "${_header}" "${_page}")
 endforeach()
 
 # The names the launcher reads, taken from the declarations themselves. Anchored on
-# the `constexpr std::string_view <Name> = "FASTCACHE_..."` shape so a mention in a
+# the `constexpr std::string_view <Name> = "PACE_..."` shape so a mention in a
 # comment -- and this header has several -- is not mistaken for a declaration.
 file(READ "${_header}" _headerText)
 
@@ -68,10 +68,10 @@ file(READ "${_header}" _headerText)
 # `comment-is-not-a-declaration` case found it here before review did.
 string(REGEX REPLACE "//[^\n]*" "" _headerText "${_headerText}")
 
-string(REGEX MATCHALL "constexpr std::string_view [A-Za-z]+ = \"FASTCACHE_[A-Z_]+\"" _decls "${_headerText}")
+string(REGEX MATCHALL "constexpr std::string_view [A-Za-z]+ = \"PACE_[A-Z_]+\"" _decls "${_headerText}")
 set(_declared "")
 foreach(_decl IN LISTS _decls)
-    string(REGEX MATCH "FASTCACHE_[A-Z_]+" _name "${_decl}")
+    string(REGEX MATCH "PACE_[A-Z_]+" _name "${_decl}")
     list(APPEND _declared "${_name}")
 endforeach()
 list(REMOVE_DUPLICATES _declared)
@@ -82,10 +82,10 @@ list(SORT _declared)
 # the set. A row begins a line, so the newline is part of the pattern -- CMake's regex
 # has no multiline mode and `^` would anchor to the whole file.
 file(READ "${_page}" _pageText)
-string(REGEX MATCHALL "\n\\| `FASTCACHE_[A-Z_]+` \\|" _rows "${_pageText}")
+string(REGEX MATCHALL "\n\\| `PACE_[A-Z_]+` \\|" _rows "${_pageText}")
 set(_documented "")
 foreach(_row IN LISTS _rows)
-    string(REGEX MATCH "FASTCACHE_[A-Z_]+" _name "${_row}")
+    string(REGEX MATCH "PACE_[A-Z_]+" _name "${_row}")
     list(APPEND _documented "${_name}")
 endforeach()
 list(REMOVE_DUPLICATES _documented)
@@ -98,12 +98,12 @@ list(LENGTH _declared _declaredCount)
 list(LENGTH _documented _documentedCount)
 if(_declaredCount EQUAL 0)
     message(FATAL_ERROR
-            "check-launcher-env-reference: found no FASTCACHE_* declaration in ${_header}. "
+            "check-launcher-env-reference: found no PACE_* declaration in ${_header}. "
             "The scan matched nothing, which is not the same as the two agreeing.")
 endif()
 if(_documentedCount EQUAL 0)
     message(FATAL_ERROR
-            "check-launcher-env-reference: found no FASTCACHE_* table row in ${_page}. "
+            "check-launcher-env-reference: found no PACE_* table row in ${_page}. "
             "The scan matched nothing, which is not the same as the two agreeing.")
 endif()
 
@@ -111,13 +111,13 @@ set(_violations "")
 foreach(_name IN LISTS _declared)
     if(NOT "${_name}" IN_LIST _documented)
         list(APPEND _violations
-             "${_name} is read by the launcher and has no row in docs/tools/fastcache-cc.md")
+             "${_name} is read by the launcher and has no row in docs/tools/pace-cc.md")
     endif()
 endforeach()
 foreach(_name IN LISTS _documented)
     if(NOT "${_name}" IN_LIST _declared)
         list(APPEND _violations
-             "${_name} has a row in docs/tools/fastcache-cc.md and is not read by the launcher")
+             "${_name} has a row in docs/tools/pace-cc.md and is not read by the launcher")
     endif()
 endforeach()
 
@@ -129,8 +129,8 @@ if(_violations)
     message(FATAL_ERROR
             "check-launcher-env-reference: the launcher and its documented environment table disagree."
             "${_text}\n"
-            "  Add or remove the row in docs/tools/fastcache-cc.md, or the declaration in "
-            "src/apps/fastcache-cc/LauncherCli.hpp. The table in LauncherCli.cpp drives --help, "
+            "  Add or remove the row in docs/tools/pace-cc.md, or the declaration in "
+            "src/apps/pace-cc/LauncherCli.hpp. The table in LauncherCli.cpp drives --help, "
             "so --help is right and the page is what drifts.")
 endif()
 

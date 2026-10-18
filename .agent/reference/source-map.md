@@ -11,7 +11,7 @@ narrow interface so the whole thing is testable end-to-end against an
 in-memory transport.
 
 ```
-src/FastCache/
+src/Pace/
   Core/         Errors taxonomy, Clock, HostPort (one parser for
                 `port` / `host:port` / `[v6]:port`), IRandomSource (the randomness seam,
                 beside Clock and for the same reason), ISecureRandom (the OS CSPRNG,
@@ -59,7 +59,7 @@ src/FastCache/
                 prose, rendered with an ANSI palette) and Options (OptionSpec
                 row type, the matching rules, the one parse loop). Dependency-
                 free by design — std plus the header-only ConfigError — so
-                fastcache-cc can compile it in without linking the library
+                pace-cc can compile it in without linking the library
   Cache/        IStorage atomic primitives (incl. Prefetch — warm a tier with
                 no read side effect), CacheEntry, CacheEngine,
                 InMemoryLruStorage, CowTreeStorage (CoW B+tree, src/CowTree),
@@ -131,7 +131,7 @@ src/FastCache/
                 I/O, which is what lets every capacity and expiry rule be a
                 ManualClock unit test rather than a sleep. Named Distributed
                 and not Dispatch because RedisResp.cpp already has a Dispatch()
-                that collides under unqualified lookup inside namespace FastCache.
+                that collides under unqualified lookup inside namespace Pace.
                 FleetView renders what the leader can see -- members, machines,
                 workers, per-tier caches and the lease split -- as one page and as
                 JSON, off column tables both renderers walk. Pure with respect to
@@ -177,7 +177,7 @@ src/FastCache/
                 on-FETCH, leading-key group prefetch), CompileCacheWire
                 (header-only, dependency-free: the 0xFC magic/version/opcode/
                 status/error tables and their encoders, shared verbatim by the
-                daemon, fastcache-cc and the test client) and SurfaceRefusal
+                daemon, pace-cc and the test client) and SurfaceRefusal
                 (the ONE way any 0xFC surface answers a refusal: Refuse with a
                 row carrying the counter, RefuseWithoutCounter with the reason
                 nothing rises, RefuseUntriaged with the issue that will decide
@@ -241,13 +241,13 @@ each one, so adding an executable is adding a row:
 
 ```
 src/apps/
-  fastcached/               the daemon (FASTCACHED_BUILD_DAEMON, default ON)
-  fastcache-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER,
+  pace-kv/            the daemon (PACE_BUILD_DAEMON, default ON)
+  pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER,
                             default ON) — a drop-in sccache-style launcher that
                             keys on preprocess+relativized-args, FETCHes and
                             hit-replays with include paths localized,
                             misses→compile→STORE, and falls back safely on any
-                            cache error. Config via `FASTCACHE_*` env, wired
+                            cache error. Config via `PACE_*` env, wired
                             through `CMAKE_<LANG>_COMPILER_LAUNCHER`. Platform
                             work sits behind `IProcessRunner` / `Net/ISocket` /
                             `IPathResolver` (the last collapsing every spelling
@@ -261,8 +261,8 @@ src/apps/
                             its help renders and colorizes exactly like the
                             daemon's without linking the library. `Cli/Options`
                             is header-only, so including it costs no build row.
-  fastcache-compile-node/   the compile worker AND the peer service (
-                            FASTCACHED_BUILD_NODE, default ON) — registers with a
+  pace-node/   the compile worker AND the peer service (
+                            PACE_BUILD_NODE, default ON) — registers with a
                             scheduler's `--serve-scheduler` endpoint (another node's;
                             `--listen-dispatch` on the daemon is gone) and answers
                             `Compile` on its own port. It may also BE the scheduler,
@@ -282,24 +282,24 @@ src/apps/
                             and never a program: the compiler comes from this
                             node's own `--toolchain` table, which is what keeps a
                             build accelerator from being a remote shell. Links
-                            `FastCache` (unlike the launcher), because it needs
+                            `Pace` (unlike the launcher), because it needs
                             the reactor and the wire. It runs no `Server`: its
                             framed surfaces are `FrameEndpoint`s over one shared
                             `NodeIoLoop`, and its HTTP surface is
                             `AdminHttpServer`.
-  fastcache-cli/            the operator's client (FASTCACHED_BUILD_CLI, default
+  pacectl/            the operator's client (PACE_BUILD_CLI, default
                             ON, INSTALLED). Reads, writes and measures a running
-                            cache from a terminal; `docs/tools/fastcache-cli.md`
+                            cache from a terminal; `docs/tools/pacectl.md`
                             is its reference. It was absent from this tree and
                             from `AGENT.md`'s app table until #1439 noticed,
                             having shipped and been documented on the Tools page
                             throughout — which is what a missing row of a table
                             called the spec looks like
   compile-cache-testclient/ low-level `0xFC` protocol probe + cross-depth
-                            validation (FASTCACHED_BUILD_TESTCLIENT, default
+                            validation (PACE_BUILD_TESTCLIENT, default
                             OFF — test infrastructure, never installed, but
                             built by the `linux` and `clang-tidy` CI jobs for the
-                            reason `fastcache-bench` is: a target nothing
+                            reason `pace-bench` is: a target nothing
                             compiles is a target that rots, and this one had
                             rotted all the way to not building on POSIX). Drives
                             either driver family off a two-row table, and gets
@@ -308,8 +308,8 @@ src/apps/
                             and launcher use — a tool that exists to prove
                             the canonicalization contract proves nothing if it
                             reimplements either side of it
-  fastcache-bench/          in-process storage micro-benchmarks
-                            (FASTCACHED_BUILD_BENCHMARKS, default OFF — test
+  pace-bench/          in-process storage micro-benchmarks
+                            (PACE_BUILD_BENCHMARKS, default OFF — test
                             infrastructure, never installed). Catch2 benchmarks
                             decomposing a lookup layer by layer, plus a
                             thread-scaling tier; driven by `bench/inproc_bench.py`,
@@ -336,7 +336,7 @@ packaging/
                       component); exports the config-file list reused by the
                       dpkg conffiles and rpm %config filelists
   linux/              system + user systemd units, sysusers.d/tmpfiles.d,
-                      the commented /etc/fastcached/fastcached.yaml, and the
+                      the commented /etc/pace/pace-kv.yaml, and the
                       DEB/RPM maintainer-script templates (*.in)
   macos/              /etc/paths.d entry, the per-component postinstall
                       templates, the uninstaller, and the installer panes

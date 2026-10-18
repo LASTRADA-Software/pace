@@ -12,10 +12,10 @@ That refusal is not a report of damage. The store is intact.
 ## What it looks like
 
 ```
-fastcached: failed to open storage '/var/lib/fastcached/cache':
+pace-kv: failed to open storage '/var/lib/pace-kv/cache':
 StorageError(code=13 system=0 context=on-disk storage format version 3
 (this build reads and writes 4): the store is intact and does not need to be
-deleted -- convert it with `fastcached --migrate-storage` ...)
+deleted -- convert it with `pace-kv --migrate-storage` ...)
 ```
 
 `code=13` is `UnsupportedFormatVersion`, and it exists specifically so that this
@@ -30,21 +30,21 @@ If what you are actually looking at is `Corrupt`, this is the wrong page —
 
     A set or a stream is an ordinary value distinguished only by its flags word,
     and the memcached text verbs let any client choose that word — so until
-    [#296](https://github.com/LASTRADA-Software/fastcached/issues/296) a client
+    [#296](https://github.com/LASTRADA-Software/pace/issues/296) a client
     could plant a few bytes, tag them as a set, read them back, and make the
     daemon report **`Corrupt` against a store whose every record still verified**.
-    It moved `fastcached_write_errors_total` and wrote a `storage write failed`
+    It moved `pace_write_errors_total` and wrote a `storage write failed`
     line, so an unprivileged client could drive the disk-failure signal at will.
 
     That condition is now `MalformedValue`, counted by
 
     ```
-    fastcached_cache_malformed_values_total
+    pace_cache_malformed_values_total
     ```
 
     and it is **not** a persistence failure: it moves no write-error counter and
     writes no warning. Read a rise as *clients are sending malformed values*, and
-    look at the client. `Corrupt` beside a rising `fastcached_write_errors_total`
+    look at the client. `Corrupt` beside a rising `pace_write_errors_total`
     is what still means the disk.
 
     If you were alerting on `Corrupt` before this release, that alert was
@@ -56,7 +56,7 @@ Stop the daemon, then run the conversion with **the same storage options the
 daemon runs with**:
 
 ```bash
-fastcached --migrate-storage --config /etc/fastcached/fastcached.yaml
+pace-kv --migrate-storage --config /etc/pace/pace-kv.yaml
 ```
 
 The flag takes no path of its own. It converts exactly the files the daemon would
@@ -67,7 +67,7 @@ reported separately.
 For a compile worker, the equivalent is:
 
 ```bash
-fastcache-compile-node --migrate-cache --cache-dir /var/cache/fastcache-node
+pace-node --migrate-cache --cache-dir /var/cache/pace-node
 ```
 
 Both print a line per store and exit non-zero if any of them could not be
@@ -94,7 +94,7 @@ converted. So a conversion killed part-way leaves a store that says so:
 
 ```
 an interrupted conversion left this store part-way from on-disk storage format
-version 3 to 4: re-run `fastcached --migrate-storage` to finish it, which
+version 3 to 4: re-run `pace-kv --migrate-storage` to finish it, which
 resumes where it stopped. The store is intact and does not need to be deleted.
 ```
 
@@ -120,5 +120,5 @@ find that out by guessing.
 !!! warning "Run it with the daemon stopped"
 
     Nothing enforces this yet — the store takes no inter-process lock
-    ([issue #135](https://github.com/LASTRADA-Software/fastcached/issues/135)).
+    ([issue #135](https://github.com/LASTRADA-Software/pace/issues/135)).
     Converting a store a running daemon has open will corrupt it.

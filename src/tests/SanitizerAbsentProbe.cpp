@@ -4,7 +4,7 @@
 // configuration and requires its object to carry NO sanitizer init reference: the control that
 // proves the check can say "absent". See scripts/check-sanitized-objects.cmake.
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A function, so the control object holds code the way an instrumented one would. Never called.
@@ -16,4 +16,4 @@ int SanitizerAbsentProbe() noexcept
     return 0;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

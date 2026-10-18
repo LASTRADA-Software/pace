@@ -39,7 +39,7 @@ determinism rests on.
   **filesystem**. The oldest and most confident of them had nothing that could ever
   falsify it. Replacing an assertion with an observation is the fix; the timeout number is
   incidental to it. The bands and their conditions live in
-  `FastCachedSccacheScanCostBands` — point at it, never copy a number out of it — and each
+  `PaceSccacheScanCostBands` — point at it, never copy a number out of it — and each
   row says whether its per-file figure was **measured or derived**, because two of the
   three are somebody else's wall time divided by a corpus count taken separately.
 - **A bound on a check that cannot wedge is a backstop, not a deadline**, and conflating
@@ -50,7 +50,7 @@ determinism rests on.
   filesystem slower than the widest measured band, which is a condition rather than a
   defect. Do not tighten it as though tightening a real deadline. It is defensible **only
   while a run going long says so**: the check narrates its measured per-file cost past
-  `FastCachedSccacheScanNarrateAfterSeconds` — per scan root while walking, per hundred
+  `PaceSccacheScanNarrateAfterSeconds` — per scan root while walking, per hundred
   files while reading — and ctest captures the output of a test it kills, so a kill
   arrives with its reason attached. The one window it cannot narrate inside is a single
   `file(GLOB_RECURSE)`, which is uninterruptible and cannot be subdivided without
@@ -97,7 +97,7 @@ determinism rests on.
 
   That is also why `byte-order-qualifier`'s registration comment said *"finishes in well
   under a second"* and went unchallenged for so long
-  ([#665](https://github.com/LASTRADA-Software/fastcached/issues/665)): on the author's
+  ([#665](https://github.com/LASTRADA-Software/pace/issues/665)): on the author's
   filesystem it was **true**, and it is true on CI. An assertion that is correct
   everywhere its author can run it, and two orders of magnitude wrong where the gate
   actually fails, has nothing that can falsify it from the inside — which is the same
@@ -149,7 +149,7 @@ determinism rests on.
   validates a change that alters HOW MUCH a check reads, and never one that alters WHAT
   it matches — a dropped escape or a normalised tab leaves the line count identical and
   the matched text different. The consolidation in
-  [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) was nearly
+  [#495](https://github.com/LASTRADA-Software/pace/issues/495) was nearly
   validated this way, by the very method this bullet recommends. A tool that cannot
   fail in the way a change fails is not validation, it is decoration.
 - **A bracket-vulnerable reader is judged per (reader, file, surviving lines) — never
@@ -283,7 +283,7 @@ determinism rests on.
   figure, not that people count more carefully.
 
 - **A listing that came back AT its `--limit` is a real answer about a set that is not
-  the whole set** ([#724](https://github.com/LASTRADA-Software/fastcached/issues/724),
+  the whole set** ([#724](https://github.com/LASTRADA-Software/pace/issues/724),
   closed). Nothing about the rows distinguishes it: the cap reads as the total, and the
   reading is wrong in the SMALLER and therefore unsuspicious direction.
 
@@ -309,7 +309,7 @@ determinism rests on.
   four-states table — where each commit fixed the previous count and introduced the next,
   all three by the same author, in the same file, on the same day, with the rule about
   instruments that miscount open in the next tab
-  ([#780](https://github.com/LASTRADA-Software/fastcached/issues/780)). At three
+  ([#780](https://github.com/LASTRADA-Software/pace/issues/780)). At three
   occurrences it is not a discipline problem: prose did not prevent it and re-reading did
   not prevent it. It is the `RowsInEnumeratorOrder` argument arriving in markdown — the
   count comes from the table or it is not a count.
@@ -351,7 +351,7 @@ determinism rests on.
   asserting it against the table would assert a wrong thing.
 - **A scan whose needle can appear in its own source, or in the text it reports, will
   match itself.** The guard added for
-  [#678](https://github.com/LASTRADA-Software/fastcached/issues/678) scans
+  [#678](https://github.com/LASTRADA-Software/pace/issues/678) scans
   `check-e2e-helpers.sh` for direct increments of its failure counter, because the
   property it protects — that `note_failure` is the only thing that touches the counter,
   so a failure cannot be counted without being named — holds only while that is true.
@@ -387,13 +387,13 @@ determinism rests on.
   **13** that read file content. Today there are 34, none added by the branch that
   audited them. **A ticket cannot be closed against a count that no longer describes the
   tree**, so the acceptance became a per-reader audit and the consolidation stayed with
-  [#495](https://github.com/LASTRADA-Software/fastcached/issues/495), which is where
+  [#495](https://github.com/LASTRADA-Software/pace/issues/495), which is where
   `check-glob-traversals.cmake`'s own comment already sent it. Absorbing it would have
   closed one ticket by silently swallowing another.
 - **A count asserted in prose is a claim nothing verifies.** Two comments went stale in
   one session, both because the thing they counted changed underneath them and nothing
   was watching. "This is the fourth copy of this idiom" was counting the SPLITTER when
-  it was written and now reads as a claim about `fastcached_globs_to_regex`, of which
+  it was written and now reads as a claim about `pace_globs_to_regex`, of which
   there are three. A note asserting `src/tests/CMakeLists.txt` holds 25
   `$<TARGET_FILE:>` references survived a rebase that added a registration only because
   that registration happened to use `${CMAKE_COMMAND}` — true by luck, not by
@@ -476,7 +476,7 @@ determinism rests on.
   machine has at RUN time, and a macOS runner can carry 3.2 at `/bin/bash` and 5.x
   from Homebrew, which `if(NOT WIN32)` cannot tell apart.
 
-  It is also a live instance of [#336](https://github.com/LASTRADA-Software/fastcached/issues/336):
+  It is also a live instance of [#336](https://github.com/LASTRADA-Software/pace/issues/336):
   `local-gate.sh` cannot run in an agent-created Windows worktree, so nothing
   exercised this before CI did.
 
@@ -530,7 +530,7 @@ determinism rests on.
     rather than writing the call; it also pins the C locale, which the obvious
     `istringstream` spelling does not, so a host whose `LC_NUMERIC` is not `.` still
     reads the format this project's own `std::format` writes. It was `RedisResp.cpp`'s
-    private `ParseDouble` and was **moved** rather than copied when `fastcache-cli`
+    private `ParseDouble` and was **moved** rather than copied when `pacectl`
     became its second caller -- a second implementation citing the first in a comment
     vouches for its bugs without inheriting its fixes.
 
@@ -592,7 +592,7 @@ determinism rests on.
       sees exactly it. The wrapped set is DERIVED from the header's selection blocks -- a
       restated list catches a facility leaving and is blind to one arriving -- and the file set
       from `git ls-files` minus `scripts/lib/third-party-roots.txt`. Its line walk is
-      `fastcached_scan_code_lines` in `scripts/lib/CheckCommon.cmake`, moved there from
+      `pace_scan_code_lines` in `scripts/lib/CheckCommon.cmake`, moved there from
       `check-istreambuf-iterator.cmake` when this became its second caller.
 
     **The next missing facility is a selection block in `Core/Ranges.hpp`, never an `#if`
@@ -693,7 +693,7 @@ determinism rests on.
   - `Check C++ style` installs that requirement into a venv (the runner's python is
     externally-managed) and asserts it is the declared build BEFORE formatting.
   - Which binary is **one resolver**, `check-clang-format-version.sh --resolve`:
-    `FASTCACHED_CLANG_FORMAT` when set — the only candidate then, refused rather than stepped
+    `PACE_CLANG_FORMAT` when set — the only candidate then, refused rather than stepped
     over when it is not the declared build — else the declared build among EVERY clang-format
     on `PATH`, as the hook resolves. `Check C++ style`, `local-gate.sh` and the windows.h check
     all format through it; none keeps a `clang-format-$V` of its own. With none present the gate
@@ -770,8 +770,8 @@ determinism rests on.
     so an issue held open for that event is a second, unwired copy of the tripwire. The issue a row
     names DOCUMENTS the defect, open or closed (#1410), and an EMPTY table passes every mode, so
     retiring the last row leaves a working guard.
-  - **One question, three askers.** `--resolve` hands a local run the binary `FASTCACHED_CLANG_TIDY`
-    names, or the one installed at `${XDG_DATA_HOME:-~/.local/share}/fastcached/clang-tidy/<version>`,
+  - **One question, three askers.** `--resolve` hands a local run the binary `PACE_CLANG_TIDY`
+    names, or the one installed at `${XDG_DATA_HOME:-~/.local/share}/pace/clang-tidy/<version>`,
     only after identifying it, and names the exact `pip install --target` command when it cannot.
     `local-gate.sh` passes that binary to the configure. `tidy-sweep.sh` resolves or checks its
     `TIDY` the same way. Both CI jobs install with `--requirement` and check with `--installed`
@@ -799,7 +799,7 @@ determinism rests on.
     the gate could not repair it, because re-running the gate is what skipped the configure.**
     Measured on this repository's own WSL image: a `clang-debug` directory the gate itself had
     created sat on `CLANG_TIDY_EXE:FILEPATH=/usr/bin/clang-tidy`, which is 20, while every run
-    reported clean. The same shape as the stale `FASTCACHE_CC-NOTFOUND` that kept build trees
+    reported clean. The same shape as the stale `PACE_CC-NOTFOUND` that kept build trees
     on sccache silently, and `CLANG_TIDY_EXE-NOTFOUND` is that shape exactly -- a value, which
     compares unequal, never an absence to be tolerated.
   - **`cmake/portable/ClangTidy.cmake` needs no change and must not get one.** It stays
@@ -819,7 +819,7 @@ determinism rests on.
   the script's own header already names that hazard. What was wrong is that the refusal
   was the *whole* report: `GATE FAILED: clang-debug tests` and nothing else, so the
   reader supplied "and the rest passed" from optimism. It had not been asked
-  ([#501](https://github.com/LASTRADA-Software/fastcached/issues/501)).
+  ([#501](https://github.com/LASTRADA-Software/pace/issues/501)).
 
   Measured in #493: gate runs 1, 3, 4, 5 and 7 all failed inside `clang-debug` and
   **none of them reached `gcc-release`**, while a GCC-only
@@ -869,7 +869,7 @@ determinism rests on.
   `LOCAL GATE PASSED` and, after #501, no leg block either. The only thing separating
   it from a completed run was the ABSENCE of both lines, and absence is equally what a
   scrolled-past line, a truncated log and a lost terminal look like
-  ([#584](https://github.com/LASTRADA-Software/fastcached/issues/584)). It is not
+  ([#584](https://github.com/LASTRADA-Software/pace/issues/584)). It is not
   hypothetical: every lane on a shared machine runs these script names out of different
   worktrees, so a name-matched `pkill -f local-gate.sh` in one lane hits every other
   lane's run -- the worktree path appears nowhere in the pattern. Twice in one night.
@@ -958,9 +958,9 @@ determinism rests on.
   `local-gate.sh` invoked `cmake --preset` without it, and `USE_COMPILER_CACHE` defaults to ON,
   so both its configurations were fronted by whichever launcher happened to be installed, at
   whatever version, with no check and no mention. Measured: 148 `LAUNCHER = ` lines in
-  `clang-debug` and 618 in `gcc-release`, all pointing at an installed `fastcache-cc` hundreds
-  of commits behind master and subject to [#368](https://github.com/LASTRADA-Software/fastcached/issues/368)
-  ([#471](https://github.com/LASTRADA-Software/fastcached/issues/471)).
+  `clang-debug` and 618 in `gcc-release`, all pointing at an installed `pace-cc` hundreds
+  of commits behind master and subject to [#368](https://github.com/LASTRADA-Software/pace/issues/368)
+  ([#471](https://github.com/LASTRADA-Software/pace/issues/471)).
 
   **The rule was already standing, in a file sitting beside the one that ignored it.**
   `scripts/launcher-replay-e2e.sh` names "the standing `-DUSE_COMPILER_CACHE=OFF` rule" in its
@@ -1029,7 +1029,7 @@ determinism rests on.
     overrides one, so a gate run turns the compiler cache off there *permanently*. That is
     accepted as a STATED cost -- the run prints what it did, that it is permanent, and how to
     undo it -- and gate-owned directories are
-    [#487](https://github.com/LASTRADA-Software/fastcached/issues/487). A silent change to how
+    [#487](https://github.com/LASTRADA-Software/pace/issues/487). A silent change to how
     a tree builds is the defect this whole entry is about, so the fix for it must not commit a
     quieter version of it one directory over.
   - The one-time cost is stated by the run that incurs it. Dropping the launcher rewrites every
@@ -1062,7 +1062,7 @@ determinism rests on.
   cmake -S . -B out/build/gcc-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
-        -DFASTCACHED_ENABLE_TLS=ON -DPEDANTIC_COMPILER_WERROR=OFF
+        -DPACE_ENABLE_TLS=ON -DPEDANTIC_COMPILER_WERROR=OFF
   ```
 
   **ASan only, never `address,undefined`.** UBSan's instrumentation defeats GCC's
@@ -1156,12 +1156,12 @@ determinism rests on.
     three of which were fine. The **test binaries** had no backstop: `RunTarget`
     checks the timeout, the tag filter and the assertion count, and not one of those
     distinguishes an instrumented run from an uninstrumented one, so an
-    uninstrumented `FastCacheTest` ran, reported assertions, exited 0, and the gate
+    uninstrumented `PaceTest` ran, reported assertions, exited 0, and the gate
     printed *all scoped targets clean*. A fix covering only the canary would have
     closed the issue with its stated harm untouched.
     **The obvious per-function symbols are the wrong ones.** `__tsan_func_entry`,
     `__tsan_read` and `__tsan_write` are emitted per instrumented *function*, so an
-    object whose TU has no functions carries none -- six of `FastCacheTest`'s 135,
+    object whose TU has no functions carries none -- six of `PaceTest`'s 135,
     the platform-gated `Iocp*`, `Kqueue*` and `Tls*` files that compile to nothing
     on Linux. They do carry `__tsan_init` and a `tsan.module_ctor`: instrumented,
     with nothing to instrument. A rule built on the hooks needs an empty-TU
@@ -1268,7 +1268,7 @@ determinism rests on.
     therefore not evidence that a pipeline of this shape is sound.
 
     **And it came back, in EIGHTEEN sites across twelve scripts, with the rule already
-    written down here** ([#970](https://github.com/LASTRADA-Software/fastcached/issues/970)).
+    written down here** ([#970](https://github.com/LASTRADA-Software/pace/issues/970)).
     Observed as `clang-asan-ubsan` failing `check-tidy-blind-spots-selftest` with a
     message saying it could not find a phrase that was in the evidence it printed
     directly beneath — which is not a contradiction but the diagnosis: the match never
@@ -1297,7 +1297,7 @@ determinism rests on.
       producer's: `< <(printf '%s\n' "$x")` -- **superseded below for an EXTERNAL
       reader**, and kept only where the SHELL reads. The audit of the sites still under
       the boundary, and the scan that should refuse the next one, are
-      [#1591](https://github.com/LASTRADA-Software/fastcached/issues/1591).
+      [#1591](https://github.com/LASTRADA-Software/pace/issues/1591).
     - **And process substitution was itself the next defect, for an EXTERNAL reader.**
       `grep < <(printf ...)` makes grep the PARENT of the writer, and on a GitHub Windows
       runner such a grep came back **exit 148** in round 10, in `header_filter_taken_lines`:
@@ -1305,7 +1305,7 @@ determinism rests on.
       CHLD), not Linux's SIGTSTP. That the writer's exit is what killed it is INFERRED:
       neither the micro shape nor the real path reproduced locally, under load, on Git for
       Windows 2.51 (MSYS 3.6.5, bash 5.2) or 2.55 (MSYS 3.6.10, bash 5.3, the runner's)
-      ([#1630](https://github.com/LASTRADA-Software/fastcached/issues/1630)). Round 8,
+      ([#1630](https://github.com/LASTRADA-Software/pace/issues/1630)). Round 8,
       in `_third_party_select`, was a **status-2 refusal** whose grep status was never
       printed; it was READ as a kill and was not measured as one, so it is not a second
       instance.
@@ -1332,7 +1332,7 @@ determinism rests on.
       continuation line; a quoted argument holding an escaped quote of its own kind, and
       any quoting it does not model (`$'...'`, nested `$( )`); and the `run:` blocks of
       `.github/workflows`, which it does not walk; and a file its own grep failed on
-      ([#1631](https://github.com/LASTRADA-Software/fastcached/issues/1631)). Its own canary lines sit
+      ([#1631](https://github.com/LASTRADA-Software/pace/issues/1631)). Its own canary lines sit
       in a `procsub-scan` data REGION around the two heredocs alone, so
       `check-e2e-helpers.sh` is scanned like any other file rather than exempted whole.
     - **The status, once read, has to carry WHOSE failure it is.** Round 10's red was
@@ -1521,10 +1521,10 @@ determinism rests on.
 <!-- agent-tripwire: `NDEBUG` is not optimisation, and `CMAKE_BUILD_TYPE` is a LABEL that decides nothing -->
 
 The same "the cache and the log are the two places that lie" rule, arriving where a
-number gets quoted. `fastcache-bench` printed timings that said nothing about the build
+number gets quoted. `pace-bench` printed timings that said nothing about the build
 behind them, and a Debug bench prints a plausible number: reviewing #1420 the manager read
 an MSVC `cl-release` log as *"a Debug-build signature"*, and the only tell anywhere was the
-build directory's **name** ([#1439](https://github.com/LASTRADA-Software/fastcached/issues/1439)).
+build directory's **name** ([#1439](https://github.com/LASTRADA-Software/pace/issues/1439)).
 
 Four things, and the first is the one that had already shipped as a defect.
 
@@ -1560,7 +1560,7 @@ Four things, and the first is the one that had already shipped as a defect.
   **unconfirmed** — the last being a `cl` build with `NDEBUG` and no way to confirm the
   optimiser from inside the binary. Folding it into *a cost* is the wrong answer arriving
   as the plausible one, which is this file's recurring subject; folding it into *not a
-  cost* would mark every MSVC release figure unquotable. `src/apps/fastcache-bench/BuildBanner.hpp`
+  cost* would mark every MSVC release figure unquotable. `src/apps/pace-bench/BuildBanner.hpp`
   carries the fact table, and `ctest -R bench-build-banner` drives every arm over staged
   readings, because this host can only ever produce one of them.
 
@@ -1594,10 +1594,10 @@ bare number there. This one at least DERIVES from the breakdown that follows, so
 can check it; a number nothing can derive from the thing it counts is a second source of
 truth. Later instances are enumerated in `AGENT.md`'s list rather than re-counted here.
 Six while fixing
-[#493](https://github.com/LASTRADA-Software/fastcached/issues/493), two more while
-fixing [#247](https://github.com/LASTRADA-Software/fastcached/issues/247), one while
-fixing [#243](https://github.com/LASTRADA-Software/fastcached/issues/243), and two
-while fixing [#292](https://github.com/LASTRADA-Software/fastcached/issues/292). Not
+[#493](https://github.com/LASTRADA-Software/pace/issues/493), two more while
+fixing [#247](https://github.com/LASTRADA-Software/pace/issues/247), one while
+fixing [#243](https://github.com/LASTRADA-Software/pace/issues/243), and two
+while fixing [#292](https://github.com/LASTRADA-Software/pace/issues/292). Not
 one of them announced itself. Every one presented as an ordinary flake, and **a re-run would
 have cleared all of them without fixing any of them** — which is the whole reason they
 are written down here rather than in those pull requests.
@@ -1705,7 +1705,7 @@ The specific traps are examples. The rule is the mechanism.
     reasoning about whether whitespace could matter.
 
 - **A `ctest` total is only a total for the target set it was configured with.**
-  `-DFASTCACHED_BUILD_TESTCLIENT` and `-DFASTCACHED_BUILD_BENCHMARKS` default OFF, so
+  `-DPACE_BUILD_TESTCLIENT` and `-DPACE_BUILD_BENCHMARKS` default OFF, so
   two runs of *one commit on one platform* report different totals, and **nothing in
   the output says which you asked for**. A gated-off target is invisible to the run
   rather than absent from it: the suite passes, the count looks like a count, and the
@@ -1857,8 +1857,8 @@ so the broken mechanism sat behind a working one where nothing could see it.
 
 So the lock is taken by the thing being serialised, and omission stops being possible:
 
-- **One path, defined once in the script** — `$HOME/.fastcached-local-gate.lock`, overridable
-  by `FASTCACHED_GATE_LOCK`. **Per user, and chosen rather than settled for.** A host-wide path
+- **One path, defined once in the script** — `$HOME/.pace-local-gate.lock`, overridable
+  by `PACE_GATE_LOCK`. **Per user, and chosen rather than settled for.** A host-wide path
   means `/tmp`, which WSL wipes when it idles out, and `flock` on a file unlinked while held
   leaves the holder locking an orphaned inode while the next opener creates a fresh file and
   acquires it: two holders, no error from either. That fails silently in exactly the direction
@@ -1902,7 +1902,7 @@ So the lock is taken by the thing being serialised, and omission stops being pos
   `== GATE LOCK WAITING` first, so contention is observed rather than inferred from a long wall
   time. The self-test proves it by CONTENTION — refused while held, acquired once released —
   because a lock that acquires proves nothing, which is this whole section. **And it drives the
-  REAL path, not stand-ins**: the script itself, stopped by `FASTCACHED_GATE_STOP_AFTER_LOCK`
+  REAL path, not stand-ins**: the script itself, stopped by `PACE_GATE_STOP_AFTER_LOCK`
   once the lock stage has decided. Its first version exercised `gate_lock_run` with `sh -c`
   commands only, and a review showed three one-line mutants of the real path — the marker
   exported under another name, the sentinel never touched, the ancestor walk returning nothing
@@ -1968,7 +1968,7 @@ the call site and inside the macro. Quadrupling the escape is correct, unreadabl
 will not be maintained.
 
 That is one half of a larger fact about macros, and the other half is
-[#1216](https://github.com/LASTRADA-Software/fastcached/issues/1216): because the
+[#1216](https://github.com/LASTRADA-Software/pace/issues/1216): because the
 parameters are TEXT rather than variables, `if(param STREQUAL "x")` inside a macro
 compares the literal string `param` and the branch is **silently dead**. Same cause, two
 symptoms, and neither has a diagnostic — one fails loudly at the wrong layer, the other
@@ -2278,7 +2278,7 @@ rule, rest on that sentence, and it does not reproduce** (#565).
   `script-check-warning-canary` is the half that proves the mechanism. And a check
   that shells out to another CMake without reading `RESULT_VARIABLE` exits 0 with
   its child's error on the output. `FAIL_REGULAR_EXPRESSION
-  "${FASTCACHED_SCRIPT_CHECK_FAILED}"`, one spelling defined once in
+  "${PACE_SCRIPT_CHECK_FAILED}"`, one spelling defined once in
   `src/tests/CMakeLists.txt`: a pattern restated per registration is one that
   drifts, and a drifted pattern stops matching without saying so.
 - **A canary carried by its exit code is vacuous, and correcting the note is what
@@ -2331,7 +2331,7 @@ rule, rest on that sentence, and it does not reproduce** (#565).
   ways in one night (#497): a lane hit CMP0012 on 3.28 and the manager could not
   reproduce it on 4.3.1.
 - **Under `ctest` these are LOUD; the silence is one level down.** Nothing in this tree
-  passes `-Wno-dev` and `FASTCACHED_SCRIPT_CHECK_FAILED` is `"CMake Error|CMake Warning"`,
+  passes `-Wno-dev` and `PACE_SCRIPT_CHECK_FAILED` is `"CMake Error|CMake Warning"`,
   so a registered check that trips a policy goes **red** on the 3.28 leg. What is silent
   is a **selftest's sub-run harness**: all six grep the captured output for `CMake Error`
   and none for `CMake Warning`, so a construct that merely warns and inverts is invisible
@@ -2359,7 +2359,7 @@ rule, rest on that sentence, and it does not reproduce** (#565).
 
 **Being blind to a MENTION is free. Being blind to a USE is the whole job.**
 
-`fastcached_strip_comment_line` in `scripts/lib/CheckCommon.cmake` is the one comment stripper
+`pace_strip_comment_line` in `scripts/lib/CheckCommon.cmake` is the one comment stripper
 for eight checks -- `check-test-loops`, `check-cli-text-cell`, `check-enumerator-walks`,
 `check-istreambuf-iterator`, `check-markup-entities`, `check-ranges-seam`,
 `check-selftest-registered`, `check-target-pragmas` -- so a defect in it is a defect in all of
@@ -2370,7 +2370,7 @@ them at once. Its header declared one, for as long as it existed:
 That sentence is accurate and points the wrong way. It reads as a false POSITIVE -- a comment
 inside a literal being stripped, which costs nothing and is what "as every regex-shaped reader
 here is" is true of. The consequence was a false GREEN.
-`src/apps/fastcache-cli/SocketExchange.cpp:410` holds a one-line `std::format` request
+`src/apps/pacectl/SocketExchange.cpp:410` holds a one-line `std::format` request
 literal whose header lines are separated by escaped CRLFs, one of them `Accept: */*`. The
 three
 characters `*`, `/`, `*` in `Accept: */*` contain a `/*`; no `*/` follows on that line; the
@@ -2537,7 +2537,7 @@ here, and four test binaries link `Catch2::Catch2WithMain`, so they set nothing.
   walk, or outside its roots, is exactly what it catches, and no `CMakeLists.txt` would
   read wrong. **The census is NOT taken through the walk**: its first version was, and
   dropping `vendor` from the walk's roots left the check green over an unsuppressed
-  `fastcache-tui-tests`, the vendored TUI's test binary while there was one -- a list derived by the thing it checks is exact about what that
+  `pace-tui-tests`, the vendored TUI's test binary while there was one -- a list derived by the thing it checks is exact about what that
   thing reached and silent about the rest. It is taken at the end of configure over the
   whole source tree; measured since, the same neuter is refused by name, and so is moving
   the walk ahead of `src/tests`.
@@ -2549,15 +2549,15 @@ here, and four test binaries link `Catch2::Catch2WithMain`, so they set nothing.
   the gate refused at 60 s. **The assertion text was on stderr in BOTH runs** -- the dialog
   held the process after the text was written -- so a gate that read only the text would
   have passed the hang. It checks the process ENDED first.
-- **Product binaries count, because tests spawn them**: `fastcached`, `fastcache-cc`,
-  `fastcache-compile-node` and `fastcache-cli` are all handed to e2e scripts, and the
+- **Product binaries count, because tests spawn them**: `pace-kv`, `pace-cc`,
+  `pace-node` and `pacectl` are all handed to e2e scripts, and the
   check finds them through those arguments. **But a product binary suppresses only when
-  asked**, by `FASTCACHED_SUPPRESS_ERROR_DIALOGS` in its environment: a developer running a
-  Debug `fastcached` by hand keeps the dialog and the debugger it offers, which is what a
+  asked**, by `PACE_SUPPRESS_ERROR_DIALOGS` in its environment: a developer running a
+  Debug `pace-kv` by hand keeps the dialog and the debugger it offers, which is what a
   Debug build is for. The first draft here suppressed in every Debug product binary and
   took exactly that away. **Every registered test sets the variable**, so a binary a
   fixture spawns inherits it: a deferred walk sets it on each `add_test`, and each
-  `catch_discover_tests` names `FASTCACHED_ERROR_DIALOG_ENVIRONMENT` itself, because its
+  `catch_discover_tests` names `PACE_ERROR_DIALOG_ENVIRONMENT` itself, because its
   registrations do not exist at configure time. The check reads both kinds of generated
   registration and refuses a test that does not set it. `error-popup-product-canary` is
   built as a product binary is, and its gate requires both directions -- routed to a file
@@ -2566,7 +2566,7 @@ here, and four test binaries link `Catch2::Catch2WithMain`, so they set nothing.
   unsuppressed direction opens no dialog on a desktop and proves something on a runner that
   has none. This is the mechanism `endo` proved.
 - **An exemption is a reason on the target itself**, never a row in a list:
-  `set_target_properties(<t> PROPERTIES FASTCACHED_ERROR_POPUPS "<why>")`. The walk skips
+  `set_target_properties(<t> PROPERTIES PACE_ERROR_POPUPS "<why>")`. The walk skips
   it and the check prints the reason. Nothing is exempt today.
 - **Not covered, and not this project's to cover**: a program the build does not define.
   The compilers the launcher spawns, `pwsh`, `git` and `cmake` itself are not in the
@@ -2885,8 +2885,8 @@ makes it anyway and says so there.
   workflow. A README typo is deliberately not on it.
 
 - **The unit of work is a compile command, not a file, and that is what makes the
-  swap lossless.** `Stats.cpp` builds into `fastcache-cc`, `fastcache-cc-tests`
-  and `fastcache-compile-node`, which do not agree about `FC_COMPRESSION_ENABLED`.
+  swap lossless.** `Stats.cpp` builds into `pace-cc`, `pace-cc-tests`
+  and `pace-node`, which do not agree about `FC_COMPRESSION_ENABLED`.
   `clang-tidy -p <dir> <file>` does **not** take the first matching entry:
   libTooling's `ClangTool::run` loops over *every* command the database returns for
   that file. So a file with one command needs nothing special, and a file with
@@ -3000,7 +3000,7 @@ makes it anyway and says so there.
   never over legs — a leg that builds with an option OFF has run without covering
   anything that option gates, so counting it as coverage is the same over-report one
   level up. Which units are reached by no leg at all is a number this check prints on
-  every run, and closing it is [#858](https://github.com/LASTRADA-Software/fastcached/issues/858).
+  every run, and closing it is [#858](https://github.com/LASTRADA-Software/pace/issues/858).
 
 - **The sanitizer test run moved to `clang-asan-ubsan`; it did not go.** The
   `clang-debug` preset is the only configuration in the workflow with ASan and
@@ -3034,14 +3034,14 @@ makes it anyway and says so there.
   jobs, which reads as "the launcher was never wired in" and is not what happened:
   sccache keeps its counters **in the server**, and this suite's
   `sccache-smoke-*` tests restart that server with `SCCACHE_MEMCACHED` pointed at
-  a fastcached daemon — zeroing them, minutes before the post step reads them.
+  a pace-kv daemon — zeroing them, minutes before the post step reads them.
 
   That is the shared-cache configuration `docs/snippets/sccache-backend-caveat.md`
   exists for, and naming it here without saying so is what
   `ctest -R sccache-backend-caveat` refuses: under **MSVC** and **clang-cl**
   sccache hashes `/EP` output, which carries no paths, and replays a hit's
   `/showIncludes` with the absolute paths of the checkout that stored it, so two
-  checkouts record each other's headers; `fastcache-cc` is the remedy, because it
+  checkouts record each other's headers; `pace-cc` is the remedy, because it
   rewrites a hit's paths into the consuming checkout and refuses a hit whose
   replayed dependency is not there. Those smoke jobs compile with `g++-14`, where
   the hazard does not arise at all — which is the only reason a test in this suite
@@ -3079,7 +3079,7 @@ makes it anyway and says so there.
 - **Sharing sccache entries across Windows CI runs is safe, and the reason is not
   "it seems fine".** The `/showIncludes` hazard `CompileCache.cmake` warns about
   needs an *incremental* build across checkouts at *different* absolute paths.
-  Every runner builds from scratch at `D:\a\fastcached\fastcached`, so neither half
+  Every runner builds from scratch at `D:\a\pace\pace`, so neither half
   holds. Change either — a persistent Windows runner, or a checkout somewhere else
   — and this stops being true.
 
@@ -3165,7 +3165,7 @@ makes it anyway and says so there.
   over **9p** on WSL2, which is what `df -T` reports; DrvFs is the WSL1 mechanism
   and is what the older notes in this tree call it — and a build is almost entirely
   small-file I/O. Measured on this machine — same commit, clang 20, Debug,
-  `USE_COMPILER_CACHE=OFF`, `-j8`, target `fastcached`, a warm configure so only
+  `USE_COMPILER_CACHE=OFF`, `-j8`, target `pace-kv`, a warm configure so only
   the compile is timed:
 
   <!-- table-total: none -->
@@ -3234,7 +3234,7 @@ makes it anyway and says so there.
   the thing being timed and can fail outright. That is a per-worktree cost nobody
   budgets, it is paid independently by every lane, and no per-job timing anywhere
   shows it;
-  [#545](https://github.com/LASTRADA-Software/fastcached/issues/545) is where it is
+  [#545](https://github.com/LASTRADA-Software/pace/issues/545) is where it is
   being dealt with. Point a measurement at the machine's populated cache instead.
 
   **What the shared per-machine cache buys, measured** (moved here from `AGENT.md`'s
@@ -3290,9 +3290,9 @@ makes it anyway and says so there.
   the entry above, and `NOLINT` is not the alternative here either.
 
 - **A return type is not part of a function's name on Linux, and MSVC's mangling
-  hides that.** `Core/HostPort.hpp` added an `inline FastCache::ParsePort(
+  hides that.** `Core/HostPort.hpp` added an `inline Pace::ParsePort(
   std::string_view)` returning `std::optional<std::uint16_t>` while
-  `Config/CliParser` already had a `FastCache::ParsePort(std::string_view)`
+  `Config/CliParser` already had a `Pace::ParsePort(std::string_view)`
   returning `std::expected<std::uint16_t, ConfigError>`. That is **not an
   overload**, and no compiler can say so: each translation unit sees exactly one
   of the two declarations, so both compile, and the Itanium ABI does not encode a
@@ -3310,7 +3310,7 @@ makes it anyway and says so there.
   - **A standalone reproducer will not reproduce it**, because the bug is in the
     *link*, not the code: the same calls compiled against the header alone are
     correct and pass under ASan. What identified it was `nm -C` on the library
-    object, showing a strong `T FastCache::ParsePort(...)` that the test binary
+    object, showing a strong `T Pace::ParsePort(...)` that the test binary
     had no business resolving to.
   - **The two implementations were not merged**, deliberately. The CLI's version
     distinguishes "not a number" from "out of range" because an operator needs
@@ -3388,8 +3388,8 @@ makes it anyway and says so there.
 
   ```sh
   cmake --preset clang-debug -B out/build/tidy22 -DENABLE_TIDY=OFF \
-        -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON \
-        -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+        -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON \
+        -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
   ```
 
   **Not a hand-rolled `cmake -S . -B …` equivalent**, which is what stood here and
@@ -3421,7 +3421,7 @@ makes it anyway and says so there.
   `out/build/clang-debug` tree a DEVELOPER builds in — configuring the sweep's
   database must not turn `ENABLE_TIDY` and module scanning off in that one. (It
   used to be the tree `local-gate.sh` built in as well; since
-  [#487](https://github.com/LASTRADA-Software/fastcached/issues/487) the gate owns
+  [#487](https://github.com/LASTRADA-Software/pace/issues/487) the gate owns
   `out/build/gate-*` and reaches this one no more than the sweep does. The
   reasoning is unchanged — only the list of things that would otherwise collide in
   there got shorter.)
@@ -3431,7 +3431,7 @@ makes it anyway and says so there.
   the workflow to the two places that document it.
 
   Verbatim duplication is right *under the constraint it was written under* and
-  wrong permanently — [#615](https://github.com/LASTRADA-Software/fastcached/issues/615)
+  wrong permanently — [#615](https://github.com/LASTRADA-Software/pace/issues/615)
   carries the `tidy22` preset that removes it, and must be taken by whoever can
   change `build.yml` in the same change: a preset CI does not adopt is a fourth
   copy, not a consolidation. The check moves to comparing against the preset in
@@ -3476,7 +3476,7 @@ makes it anyway and says so there.
   kept only when `HeaderFilterRegex` takes the header's path *as clang spells it on
   that host*, and clang joins an include directory to a header name with the host's
   separator: a cl or clang-cl database reports `D:\...\src\tests\X.hpp`, or
-  `D:\...\src\FastCache/Core/X.hpp` where `-I...\src` meets a `/` include. The
+  `D:\...\src\Pace/Core/X.hpp` where `-I...\src` meets a `/` include. The
   pattern wrote every separator as `/`, so the `clang-tidy-windows` leg discarded
   every first-party header finding as non-user code and reported clean -- measured
   with the pinned 22.1.8, native, over both Windows databases, by a planted `g_`
@@ -3617,7 +3617,7 @@ makes it anyway and says so there.
     new configure line in an existing one, or the step reordered below the build would ship
     unchecked, and **every required context would stay green, because `Package` jobs are not
     required contexts.** `ctest -R shipping-configure-guard` selects on the
-    `-DFASTCACHED_BUILD_TESTS=OFF` FLAG rather than on three job names, so a fourth job is something
+    `-DPACE_BUILD_TESTS=OFF` FLAG rather than on three job names, so a fourth job is something
     it FINDS; it matches the guard on that configure's own build directory, not merely on the job,
     because a copied step naming another configure's database is the likeliest wrong shape and a
     per-job existence test cannot see it. Four verdicts rather than one flag -- same job, before the
@@ -3700,8 +3700,8 @@ makes it anyway and says so there.
     It is kept as a probe because what it yields is candidates, not proof -- a value spilled to
     the stack any other way is not looked for at all -- it needs an ARM64 build with listings, and
     a heuristic check that fails on arrival gets disabled. Measured with it on run 35362081853,
-    over the 307 production translation units (the library, `fastcached`, `fastcache-cc`,
-    `fastcache-cli`, `fastcache-compile-node` and the vendored tui): all 303 resume functions
+    over the 307 production translation units (the library, `pace-kv`, `pace-cc`,
+    `pacectl`, `pace-node` and the vendored tui): all 303 resume functions
     modelled, and master's `HandleMs` the only one with candidates -- 21 reads of its flags --
     and none with the fix. **Its first version read the listing in text order and passed every
     small-frame resume function without reading it**, so the clean result first reported for 307
@@ -3737,7 +3737,7 @@ makes it anyway and says so there.
 
 - **`activeCodePage` is honoured from Windows 10 1903 / Server 2022 and ignored in
   silence below it**, which is the one thing a build-time setting must not be
-  allowed to be. `FastCache::NarrowTextIsUtf8()` reports the OUTCOME rather than the
+  allowed to be. `Pace::NarrowTextIsUtf8()` reports the OUTCOME rather than the
   intent, a Catch2 case asserts it — red at code page 1252, green at 65001 — and the
   node names the active code page in a parse refusal when it is not UTF-8, which on
   such a host is the whole answer and no other surface would ever give it.
@@ -3796,7 +3796,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
 
 - **The gate REFUSES a launcher-fronted build rather than warning about it, and the
   reason is the direction nobody investigates.** The observed case
-  ([#626](https://github.com/LASTRADA-Software/fastcached/issues/626)) was five
+  ([#626](https://github.com/LASTRADA-Software/pace/issues/626)) was five
   metrics counter tests failing in four files the branch never touched, on a
   launcher-fronted MSVC build, all clearing with `-DUSE_COMPILER_CACHE=OFF` — a
   false alarm, which costs somebody an investigation. **The same substituted object
@@ -3827,7 +3827,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
   `CMAKE_CXX_COMPILER` resolves to `/usr/lib64/ccache/clang++`, because the preset
   spells a bare `clang++` and `/usr/lib64/ccache` precedes `/usr/bin` on that host's
   `PATH`. The blind spot is **total**, not partial, and it is
-  [#804](https://github.com/LASTRADA-Software/fastcached/issues/804).
+  [#804](https://github.com/LASTRADA-Software/pace/issues/804).
 
 - On Linux the #626 symptom **does not reproduce** in either cache state: three full
   builds of one tree — populated shared caches, cold caches, and a reference build —
@@ -3836,7 +3836,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
   **And the populated arm is weaker than it looks** — the cold build recorded exactly
   131 ccache hits, which is exactly the number of duplicate compilations in the tree,
   so every hit was intra-build and the populated one replayed only a handful more.
-  A cache keyed per build directory is [#816](https://github.com/LASTRADA-Software/fastcached/issues/816).
+  A cache keyed per build directory is [#816](https://github.com/LASTRADA-Software/pace/issues/816).
 
 ## `PEDANTIC_COMPILER_WERROR` decides fatality, not which warnings exist
 
@@ -3851,7 +3851,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
   presets that inherit `PEDANTIC_COMPILER=ON` from `base` and leave `WERROR` off
   got the warnings and none of the suppressions**: `clang-coverage`,
   `clang-asan-ubsan`, `clang-tsan`, `clang-tracy`
-  ([#611](https://github.com/LASTRADA-Software/fastcached/issues/611)).
+  ([#611](https://github.com/LASTRADA-Software/pace/issues/611)).
 
   Measured on `0db96dc8`, each preset in its OWN fresh build directory against
   `/usr/bin/clang++` pinned by absolute path with zero `LAUNCHER =` edges: **7049
@@ -3868,7 +3868,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
   and is therefore correct. And the one place it becomes *visible* is a clang-tidy
   database from a build directory configured that way, where it reads as a stale
   cache rather than as a rule. That is exactly how
-  [#454](https://github.com/LASTRADA-Software/fastcached/issues/454) came to be
+  [#454](https://github.com/LASTRADA-Software/pace/issues/454) came to be
   filed and then believed unreproducible: its three `clang-diagnostic-c2y-extensions`
   findings are this, and `-Wc2y-extensions` being pedantic-only in clang 22 made the
   hand-rolled configure line look like the whole story when it was half of it.
@@ -3896,7 +3896,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
     reading the paragraph above as covering the whole family is how it goes stale.
     `-Wno-error=array-bounds` and `-Wno-error=maybe-uninitialized` have no `-Wno-`
     half and are what lets GCC 16.2.1 build this tree at all
-    ([#805](https://github.com/LASTRADA-Software/fastcached/issues/805)): both fire
+    ([#805](https://github.com/LASTRADA-Software/pace/issues/805)): both fire
     inside libstdc++'s headers, from inlining, on code with no defect to fix, and
     g++-13/g++-14 report neither. They are gated to `GNU` — only GCC produces them,
     and ungated they would cost clang `-Werror` on two diagnostics that name real
@@ -4166,7 +4166,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
   projects, so a dependency on anything else here breaks it where nobody in this
   repository would notice. It is also included at `CMakeLists.txt:164`, before CPM
   is bootstrapped at `:183`, so `CPMAddPackage`/`FetchContent` are not available to
-  it even locally — the `FASTCACHE_AUTO_INSTALL` fetch therefore uses bare
+  it even locally — the `PACE_AUTO_INSTALL` fetch therefore uses bare
   `file(DOWNLOAD)`. Not with `EXPECTED_HASH`, which aborts the configure on a
   mismatch *even when `STATUS` is captured* (measured); the SHA-256 the release
   publishes is compared by hand instead, which is the same guarantee without the
@@ -4202,16 +4202,16 @@ carriage return, so such a script does not misbehave — it fails to start at al
 <!-- agent-tripwire: sccache is never selected AUTOMATICALLY (`ALLOW_SCCACHE_FALLBACK`, default OFF) -->
 
 `USE_COMPILER_CACHE` (default ON, `cmake/portable/CompileCache.cmake`) fronts the compiler
-with our own `fastcache-cc` when it is on `PATH` and a daemon answers — at
-`127.0.0.1:6674` by default, or wherever `FASTCACHE_ADDR=host:port` points;
-`FASTCACHE_SOURCE_DIR`/`FASTCACHE_BINARY_DIR` are injected from the source and build
+with our own `pace-cc` when it is on `PATH` and a daemon answers — at
+`127.0.0.1:6674` by default, or wherever `PACE_ADDR=host:port` points;
+`PACE_SOURCE_DIR`/`PACE_BINARY_DIR` are injected from the source and build
 trees. Configure proves the cache works by compiling one tiny file through the
 launcher (~0.1 s) and requiring a `HIT`/`MISS`, because a launcher that cannot
 reach its daemon still compiles fine and would otherwise cost every TU a failed
 connect in silence. When nothing answers it falls through to `ccache`; `sccache`
 sits between the two in preference order but is **opt-in**, see below. When
-*nothing usable* is installed, `-DFASTCACHE_AUTO_INSTALL=ON` (default OFF) fetches a
-prebuilt `fastcache-cc` for the host from the latest stable release instead,
+*nothing usable* is installed, `-DPACE_AUTO_INSTALL=ON` (default OFF) fetches a
+prebuilt `pace-cc` for the host from the latest stable release instead,
 staged per user so a machine downloads it once; `cmake/README.md` is the note
 for projects vendoring the module. A cache hit reproduces only the object file,
 so with either launcher active the module scan and precompiled headers are
@@ -4220,13 +4220,13 @@ turned off and MSVC debug info is forced to `/Z7`
 PDB is a second artefact no hit can reproduce).
 
 - **An environment value SEEDS a build tree and never steers one** (`_fc_hold_setting`).
-  `FASTCACHE_ADDR` and `FASTCACHE_SCHEDULER` are taken from the environment only by the
+  `PACE_ADDR` and `PACE_SCHEDULER` are taken from the environment only by the
   configure that creates their cache entry; a later configure whose environment differs
   REPORTS it, naming the `-D` that would apply it, and applies nothing. Both used to
   retarget on an environment CHANGE unless the entry had been "changed by hand", judged by
   comparing it with the value last applied — which cannot see a `-D` that typed the value
   already held, `OptionSpec::explicitBit`'s blind spot in CMake, where nothing says a `-D`
-  was on this command line. Measured: `-DFASTCACHE_SCHEDULER=`, typed to say OFF from a
+  was on this command line. Measured: `-DPACE_SCHEDULER=`, typed to say OFF from a
   shell holding the variable, turned dispatch ON. And dispatch is baked into the launcher
   in BOTH states and said beside it (`_fc_dispatch_state`), because the launcher used to
   read it from whatever shell ran the build and 341 misses compiled locally in silence.
@@ -4273,7 +4273,7 @@ PDB is a second artefact no hit can reproduce).
   `-DSCCACHE=` falls through to ccache, whose default empty `base_dir` means it
   does not rewrite absolute paths and so does not share entries between checkouts.
 
-  `fastcache-cc` does not have this failure mode by construction — `MaterializeHit`
+  `pace-cc` does not have this failure mode by construction — `MaterializeHit`
   runs every stored region through `PathCanon::LocalizeRegion` before replaying it,
   and `MissingReplayedDependency` refuses a hit whose replayed dependency is not
   there. That is the fix, not a workaround: install it and run a daemon, or
@@ -4288,8 +4288,8 @@ PDB is a second artefact no hit can reproduce).
   rather than reported (#815).** Two rules, one defect, and the second is the half
   that survives the first.
 
-  The reporting host ran a packaged `/usr/bin/fastcached` 0.1.0 while
-  `/usr/local/bin/fastcache-cc` was a current build. Wire 3 against a server
+  The reporting host ran a packaged `/usr/bin/pace-kv` 0.1.0 while
+  `/usr/local/bin/pace-cc` was a current build. Wire 3 against a server
   speaking 1..1 — correct on both sides, a deployment mismatch and not a bug — so
   every exchange was refused, `CompileCache.cmake` fell through, and the project
   built through sccache for weeks while believing it dogfooded its own launcher.
@@ -4335,14 +4335,14 @@ PDB is a second artefact no hit can reproduce).
     *your daemon is older than your launcher* — and it cannot be fixed where it is
     written, because the sentence comes from the **daemon**
     (`CompileCacheHandler.cpp`), so an old daemon goes on sending the old wording
-    forever. It is read at `_fc_cache_fastcache_cc_predicts_detail` instead.
+    forever. It is read at `_fc_cache_pace_cc_predicts_detail` instead.
   - **A launcher installed and not used is announced too.** A row skipped because
     its `requires` is falsy used to print nothing, which would have rebuilt #815's
     shape one row over the moment sccache became opt-in. `_fc_cache_<id>_requires_note`
     is the column; a row whose absence explains itself carries none, which is why
-    `fastcache_cc` has none — an emptied `FASTCACHE_ADDR` is a documented opt-out
+    `pace_cc` has none — an emptied `PACE_ADDR` is a documented opt-out
     (#372).
-  - **Auto-install had to move with it.** `FASTCACHE_AUTO_INSTALL` fires only when
+  - **Auto-install had to move with it.** `PACE_AUTO_INSTALL` fires only when
     nothing else is installed, on the reasoning that "a launcher the user installed
     is a decision already made". An installed-but-not-opted-into sccache is not that
     decision, and counting it as one would leave a machine that explicitly asked for
@@ -4356,7 +4356,7 @@ PDB is a second artefact no hit can reproduce).
     module before being believed.
 
 - **The same hazard has a second audience, and that warning cannot reach it.**
-  Pointing sccache at a fastcached daemon — `SCCACHE_MEMCACHED` / `SCCACHE_REDIS`,
+  Pointing sccache at a pace-kv daemon — `SCCACHE_MEMCACHED` / `SCCACHE_REDIS`,
   which `README.md` pitches, the docs repeat and this project's own `--help` prints
   — is *definitionally* **one cache shared by every checkout and every machine
   pointed at it**, the maximal form of the entry above. Those users have their own
@@ -4377,7 +4377,7 @@ PDB is a second artefact no hit can reproduce).
   anything. `ctest -R sccache-backend-caveat` fails any file naming either variable
   without, within 40 lines of it, the three facts a reader is otherwise right to
   skip past: **which compilers**, **the mechanism** (`/showIncludes`, `/EP`), and
-  **the remedy** (`fastcache-cc`). Wording is free; those three are not. Prose
+  **the remedy** (`pace-cc`). Wording is free; those three are not. Prose
   drifts exactly the way an include graph drifts — nothing fails, nothing warns,
   and the next page pitching it is written by someone who never saw the caveat on
   the other four.
@@ -4386,7 +4386,7 @@ PDB is a second artefact no hit can reproduce).
 
 <!-- agent-tripwire: Running the launcher is not testing it. The synthetic fixtures prove it RUNS -->
 
-`compile-cache-e2e` and the `fastcache-cc smoke` job compile synthetic single files
+`compile-cache-e2e` and the `pace-cc smoke` job compile synthetic single files
 and never execute what came out, so they prove the launcher **runs** and produces
 **an** object — not that it is the **right** object. That gap is why #319 (a
 cache-backed build segfaulting while the same commit at `-DUSE_COMPILER_CACHE=OFF`
@@ -4442,7 +4442,7 @@ under a lock, so no suppression and no serialization is needed.
 profiles totalling 20 MB. `%p` would have written one multi-megabyte file *per process*.
 
 **A compiler cache and coverage cannot be combined.** Coverage mapping data is embedded
-in the object file and names its sources by **absolute path**, while `fastcache-cc`
+in the object file and names its sources by **absolute path**, while `pace-cc`
 exists precisely so an object built under one checkout root can serve a compile under
 another. A hit replays a perfectly valid object carrying the *producer's* paths, and
 llvm-cov then reports files that do not exist here — a report about somebody else's
@@ -4502,7 +4502,7 @@ shell fixtures that locate python (`scripts/tidy-sweep.sh`,
 `scripts/launcher-replay-e2e.sh`) use `command -v`, which does not run it either; shell
 has no validating equivalent and both run only on the POSIX legs. **Nothing enforces any
 of this** — it is four names in a comment, not a closed set — which is
-[#607](https://github.com/LASTRADA-Software/fastcached/issues/607).
+[#607](https://github.com/LASTRADA-Software/pace/issues/607).
 
 **The CI job publishes and gates on nothing.** `coverage` in `build.yml` reports the
 figure to the job summary, uploads the HTML, and pushes lcov to Codecov once
@@ -4898,8 +4898,8 @@ turn those jobs into gates by the back door.
   recorded, and every other mention of it points here.** Every consumer reads
   `RequiredContexts`; the check prints `all <n> required contexts ...` on every run.
   Both were restated anyway, and promoting `clang-asan-ubsan` and `clang-tsan`
-  ([#408](https://github.com/LASTRADA-Software/fastcached/issues/408),
-  [#629](https://github.com/LASTRADA-Software/fastcached/issues/629)) meant editing all
+  ([#408](https://github.com/LASTRADA-Software/pace/issues/408),
+  [#629](https://github.com/LASTRADA-Software/pace/issues/629)) meant editing all
   thirteen sites by hand with nothing to catch a miss: **eleven sentences across nine
   files** restating the count (`.github/workflows/build.yml`,
   `.github/workflows/merge-group-report.yml` twice, `scripts/ci-merge-group-report.sh`,
@@ -4935,15 +4935,15 @@ turn those jobs into gates by the back door.
   `skipped`*, *five required contexts went green*, *ten required contexts went
   unwatched*, and #557's *ABSENT for all eleven*). Marking those as counts would
   misdescribe them, and narrowing the pattern to the cardinality phrasings means
-  guessing at English determiners — which is [#495](https://github.com/LASTRADA-Software/fastcached/issues/495)'s
+  guessing at English determiners — which is [#495](https://github.com/LASTRADA-Software/pace/issues/495)'s
   and the `pgrep -f` lesson's warning that a pattern is broader than its author reads
   it. A guard whose false positives outnumber its true ones teaches people to work
-  around it. [#830](https://github.com/LASTRADA-Software/fastcached/issues/830) carries
+  around it. [#830](https://github.com/LASTRADA-Software/pace/issues/830) carries
   the analysis; the enforcement here is that **the count is not written down**, so there
   is nothing for a scan to check.
 
 **The SECOND door is a push to master, and it needed no new trigger**
-([#774](https://github.com/LASTRADA-Software/fastcached/issues/774)). A job failing
+([#774](https://github.com/LASTRADA-Software/pace/issues/774)). A job failing
 there reaches nobody by the same mechanism: nothing gates a push, no pull request page
 shows it, and the only trace is a run in the Actions tab that nothing points at — two
 packaging jobs stayed red on master `dd4633b2` until a human went looking.
@@ -4967,7 +4967,7 @@ the change is a ROW of `EventPolicy` and nothing else:
   cannot ship a release — it would fail again on the tag. What was missing is being
   TOLD, weeks before the tag rather than at it.
 - **A push report is a TRANSITION; a queue report is an EVENT.**
-  `FASTCACHED_REPORT_ONLY_IF_NEW` answers the ticket's own objection to reporting
+  `PACE_REPORT_ONLY_IF_NEW` answers the ticket's own objection to reporting
   pushes: a context failing on every subsequent push would otherwise comment on one
   issue indefinitely and say nothing new. Per CALLER, never a default on
   `ci-report-issue.sh`, because the two callers genuinely differ and no default is right
@@ -5025,7 +5025,7 @@ workflow and passed, correctly by its own rules. The rule that motivated the `$E
 read is
 
 ```sh
-grep -q 'FASTCACHED_REPORT_ONLY_IF_NEW' <<< "$(NonComment "$Workflow")"
+grep -q 'PACE_REPORT_ONLY_IF_NEW' <<< "$(NonComment "$Workflow")"
 ```
 
 a **whole-file** grep — and the line satisfying it is inside the step that cannot run. A
@@ -5141,7 +5141,7 @@ which reads identically to complete coverage. It walks every workflow file as a 
 What it cannot see is stated in its own header.
 
 **And it is no longer the only reader: there is ONE model of workflow YAML, and it is
-`scripts/lib/workflow-walk.awk`** ([#1456](https://github.com/LASTRADA-Software/fastcached/issues/1456)).
+`scripts/lib/workflow-walk.awk`** ([#1456](https://github.com/LASTRADA-Software/pace/issues/1456)).
 
 Five checks each carried their own awk walk over `.github/workflows`, and four of the five spelled
 `build.yml`'s two-space indentation as literal column counts -- `/^  [A-Za-z0-9_-]+:/`, `/^    if:/`,
@@ -5204,7 +5204,7 @@ was extracted from it, and its output over the real files is byte-for-byte uncha
   loads the walk and not the lexer, because it reads no shell. Merging them would have made every
   YAML reader carry a bash model it has no use for.
 - **A job MATRIX is the walk's too, and three private partial models of one is the same defect as
-  five private walks** ([#1432](https://github.com/LASTRADA-Software/fastcached/issues/1432)). One
+  five private walks** ([#1432](https://github.com/LASTRADA-Software/pace/issues/1432)). One
   check expanded `${{ matrix.preset }}` over a `preset:` flow list and nothing else, one mapped
   `runs-on` to an OS only when it was literal, one refused any expression in `runs-on`. So the first
   matrix to grow a `runner:` axis, adding an arm64 leg as a ROW so the required context names do not
@@ -5228,7 +5228,7 @@ was extracted from it, and its output over the real files is byte-for-byte uncha
   concurrently exactly as jobs do, so that is #318 arriving through a matrix, and rule F refuses it.
   The first patch for #1432 was refused for exactly that on its CPM key.
 - **So a leg is a writer of a step UNLESS the step's `if:` decidedly rules it out**
-  ([#1540](https://github.com/LASTRADA-Software/fastcached/issues/1540)), which is what makes the
+  ([#1540](https://github.com/LASTRADA-Software/pace/issues/1540)), which is what makes the
   shape IDENTICAL content wants expressible: `actions/cache/restore` on every leg and
   `actions/cache/save` guarded by `matrix.suffix == ''`, as the `linux` job's CPM steps are. **The
   rule is one writer per KEY, never one per job**: each preset has its own key, so a guard picking
@@ -5260,7 +5260,7 @@ was extracted from it, and its output over the real files is byte-for-byte uncha
 
 
 **A Windows leg that cannot start processes reports six red smoke tests, not a
-runner fault** ([#966](https://github.com/LASTRADA-Software/fastcached/issues/966)).
+runner fault** ([#966](https://github.com/LASTRADA-Software/pace/issues/966)).
 Observed on `Windows-cl-debug`: six failures, all exit `0xc0000142`
 (`STATUS_DLL_INIT_FAILED`), and they were exactly the six tests that spawn a process
 while every in-process case in the same binary passed.
@@ -5290,7 +5290,7 @@ So `ctest` is BRACKETED by a spawn probe, and the PAIR is what carries the meani
   whatever it sees. And it says out loud that it is a reading taken after the fact.
 
 **A probe of one capability cannot clear a runner that degraded in another**
-([#1515](https://github.com/LASTRADA-Software/fastcached/issues/1515)). The green/green
+([#1515](https://github.com/LASTRADA-Software/pace/issues/1515)). The green/green
 row used to read *"read the failures as being about the tree"*, and the step printed
 exactly that over one red: `mkdocs-validation`, measured at 170 ms, `***Timeout` at
 60.34 s on a branch whose inputs were disjoint from it. The runner could still spawn,
@@ -5326,7 +5326,7 @@ prose-only edit is precisely the change those checks never saw.** Both live
 findings #462 fixed came from doc-side hand edits.
 
 Reproduced end to end on one commit: a four-line addition to `docs/how-it-works.md`
-recommending the sccache-over-fastcached setup — naming one of the two backend
+recommending the sccache-over-pace setup — naming one of the two backend
 environment variables `check-sccache-backend-caveat.cmake` scans for — with no
 caveat after it. `ci-scope.sh` classifies that commit `code=false`, so on master
 today no `ctest` runs at all; `doc-subject-checks.sh` on the same tree exits **1**
@@ -5357,7 +5357,7 @@ wrong move: the caveat rule is right and the prose was wrong.
   by unit test.** `docs/operations/corrupt-store.md` quotes startup diagnostics
   verbatim and exactly one of them was asserted anywhere (#633) — because the
   daemon's `StorageOpenFailure` sits in an ANONYMOUS NAMESPACE in `main.cpp`,
-  behind `add_executable(fastcached main.cpp)` with no test target, and the node's
+  behind `add_executable(pace-kv main.cpp)` with no test target, and the node's
   sentence is composed in a third file in a different binary. Asserting them by
   unit test needs the app restructured; a `docs-subject` check reading the page
   AND the composing sources needs no linkage at all, and covers both binaries.
@@ -5382,7 +5382,7 @@ wrong move: the caveat rule is right and the prose was wrong.
     check vouching for something it never read.
 - **The set is the `docs-subject` ctest LABEL**, read out of
   `src/tests/CMakeLists.txt` along with each check's `-D` arguments, its
-  `SKIP_REGULAR_EXPRESSION` and the one `FASTCACHED_SCRIPT_CHECK_FAILED` spelling.
+  `SKIP_REGULAR_EXPRESSION` and the one `PACE_SCRIPT_CHECK_FAILED` spelling.
   Nothing is restated, so a check that grows an argument cannot silently start
   running with the wrong one.
 - **Every way of not being able to run is a REFUSAL, never a skip**: a label
@@ -5391,7 +5391,7 @@ wrong move: the caveat rule is right and the prose was wrong.
   every check skipped. That last one is *absence of the negative is not the
   positive* — nothing failed because nothing ran.
   It has been watched refuse on the real tree: `sccache-backend-caveat` was
-  labelled while `-DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSccacheCaveatBudgetSeconds}`
+  labelled while `-DPACE_SCAN_BUDGET_SECONDS=${PaceSccacheCaveatBudgetSeconds}`
   could not be resolved, and it was named rather than skipped. Resolving
   file-local `set()` variables is what fixed it, and it keeps that budget one
   value serving both the argument and the ctest `TIMEOUT`.
@@ -5432,9 +5432,9 @@ are recorded together because the shape is one shape.
   refused rather than because the rule fired: **eight cases, entirely green,
   testing nothing.** Caught by the one case that expects a PASS, which is the
   argument for a baseline case rather than only negative ones.
-  [#720](https://github.com/LASTRADA-Software/fastcached/issues/720) is the mode
+  [#720](https://github.com/LASTRADA-Software/pace/issues/720) is the mode
   across fourteen scripts;
-  [#723](https://github.com/LASTRADA-Software/fastcached/issues/723) is the rule
+  [#723](https://github.com/LASTRADA-Software/pace/issues/723) is the rule
   that survives a chmod.
 
   **The mode half is CLOSED and the past tense above is deliberate.** `ctest -R
@@ -5443,7 +5443,7 @@ are recorded together because the shape is one shape.
   comments and one `AGENT.md` bullet went on asserting the present tense long
   after #720 repaired it, and a manager briefed five lanes from one of them
   before a lane checked it against `git ls-files -s`
-  ([#1033](https://github.com/LASTRADA-Software/fastcached/issues/1033)). No
+  ([#1033](https://github.com/LASTRADA-Software/pace/issues/1033)). No
   corrected COUNT replaces them: the property is enforced, so a figure would be a
   second source of truth for a fact a check already owns. Do not restate the
   ratio; run the check. What survives untouched is the rule — a call that fails
@@ -5577,7 +5577,7 @@ provenance branch WAS the whole use of its `cli` parameter — #752 moved the ru
 exists — and deleting the branch left the parameter unused, `-Werror` refused the
 build, and the arm went red for a COMPILATION reason while claiming to demonstrate
 the rule
-([#384](https://github.com/LASTRADA-Software/fastcached/issues/384)). Nothing in the
+([#384](https://github.com/LASTRADA-Software/pace/issues/384)). Nothing in the
 red output says which of the two it was.
 
 **This is the mirror of the `want-fail`-satisfied-by-exit-126 rule above**, and both
@@ -5586,7 +5586,7 @@ refused to start the script), here an arm FAILED for the wrong reason. One missi
 state underneath both — a run that did not happen is neither a pass nor a failure —
 which is why the harness that caught this one is the harness that reports
 **INCONCLUSIVE** rather than scoring a build failure as red
-([#747](https://github.com/LASTRADA-Software/fastcached/issues/747) is that state
+([#747](https://github.com/LASTRADA-Software/pace/issues/747) is that state
 generally; this is it existing in one script and earning its keep).
 
 So a counterfactual is a **plausible WEAKENING** rather than an amputation: for the
@@ -5612,7 +5612,7 @@ Two claims broken at once, and they are different KINDS of claim:
   changes it.
 - **A scope.** "in one branch", and the opening *"Every one of these was written by
   somebody who had just read this file"*. The inserted rule came from
-  [#384](https://github.com/LASTRADA-Software/fastcached/issues/384) -- a different
+  [#384](https://github.com/LASTRADA-Software/pace/issues/384) -- a different
   branch, a different ticket -- so it was never one of "these", however well it fit
   the theme.
 
@@ -5694,7 +5694,7 @@ counterfactual did.
 The repair is the same idiom as everywhere else here -- **read the literal from the
 file that owns it, never restate it.** The check now reads the `predicts` column out
 of `cmake/portable/CompileCache.cmake` and `UnsupportedVersion`'s `.name` out of
-`src/FastCache/Protocol/CompileCacheWire.hpp` and asserts they agree, which also
+`src/Pace/Protocol/CompileCacheWire.hpp` and asserts they agree, which also
 closed a pre-existing coupling nobody had connected: the launcher reports the wire
 name, and a rename there would have disarmed the warning with every test green.
 
@@ -5812,8 +5812,8 @@ and ranking a queue by that number sorts it by nothing.
 Two branches touching one file will conflict, or will merge into something neither
 author read -- worth knowing. But **the absence of overlap is evidence of nothing**,
 and reading it as safety is how this gets missed.
-[#520](https://github.com/LASTRADA-Software/fastcached/pull/520) and
-[#525](https://github.com/LASTRADA-Software/fastcached/pull/525) share no file at
+[#520](https://github.com/LASTRADA-Software/pace/pull/520) and
+[#525](https://github.com/LASTRADA-Software/pace/pull/525) share no file at
 all: #520 changed `IConnector::Connect`'s third parameter from
 `std::chrono::milliseconds connectTimeout` to `DialOptions options`, across
 `IConnector` and every connector implementing it; #525 adds callers of `Connect` in
@@ -5829,7 +5829,7 @@ A compiler finds this in seconds and no amount of reading finds it: the hazard i
 name shared between two changes, not a line shared between two diffs, and a diff
 cannot show a name it does not mention. Which is also why cost is not the argument
 against doing it -- the N lane's worktree for
-[#292](https://github.com/LASTRADA-Software/fastcached/issues/292) was nine commits
+[#292](https://github.com/LASTRADA-Software/pace/issues/292) was nine commits
 behind, and rebasing and rebuilding it took about two minutes and came back clean.
 That is what the check costs when it passes -- and passing is what it usually does,
 which is precisely why skipping it feels free.
@@ -5847,7 +5847,7 @@ diffs `B` against the MERGE BASE, which is the question actually being put: what
 this branch change relative to where it diverged.
 
 Measured while checking that a rebase had landed intact
-([#541](https://github.com/LASTRADA-Software/fastcached/issues/541)): the two-dot form
+([#541](https://github.com/LASTRADA-Software/pace/issues/541)): the two-dot form
 reported `expect=-35` against `delta=10` -- a 45-line discrepancy that reads exactly
 like a dropped hunk, and was reported as one. The three-dot form over the same pair
 agreed with the expectation exactly, and nothing had been dropped.
@@ -6104,12 +6104,12 @@ that was fine or learned to ignore the names, and an ignored red is a disarmed c
 
 | where `ctest` ran | cause | what the entries said | what closes it |
 |---|---|---|---|
-| Git Bash, with `MSYS_NO_PATHCONV=1` and `MSYS2_ARG_CONV_EXCL='*'` exported | every check INHERITED the switch, and a check spelling a POSIX path (`pwd` is `/d/...`, `mktemp` is `/tmp/...`) to a native program relies on the conversion it turns off | `mkdocs-validation`: `/d/...\mkdocs.yml does not exist -- the scan is broken, not the tree`; `script-modes-selftest`: `fatal: cannot change to '/tmp/...'`, exit 128; `workflow-script-invocations`: exit 128 and nothing else; `node-reloadable-docs-selftest`: no tracked file carries its marker; `reactor-teardown-gate-selftest`: the canary does not exist; and the `smoke` entry `fastcache-cli-e2e`, registered without the wrapper: the daemon DIED, on a config file `/tmp/.../empty.yaml` that did not exist | every test `src/tests/CMakeLists.txt` registers starts without the switch on Windows, a DEFERRED `ENVIRONMENT_MODIFICATION` so a registration appended later is covered too; `run-check.sh` unsets it as well, for a check run by hand |
-| PowerShell, or a Visual Studio developer shell | a bare `bash` resolved to `C:\Windows\System32\bash.exe`, a launcher for WSL's LINUX bash, ahead of Git on that PATH | 53 of 136 `hygiene` entries: `No such file or directory` | `FASTCACHED_BASH` on Windows is Git for Windows' `bin/bash.exe`, found beside `GIT_EXECUTABLE` and asked for `MSYSTEM` |
+| Git Bash, with `MSYS_NO_PATHCONV=1` and `MSYS2_ARG_CONV_EXCL='*'` exported | every check INHERITED the switch, and a check spelling a POSIX path (`pwd` is `/d/...`, `mktemp` is `/tmp/...`) to a native program relies on the conversion it turns off | `mkdocs-validation`: `/d/...\mkdocs.yml does not exist -- the scan is broken, not the tree`; `script-modes-selftest`: `fatal: cannot change to '/tmp/...'`, exit 128; `workflow-script-invocations`: exit 128 and nothing else; `node-reloadable-docs-selftest`: no tracked file carries its marker; `reactor-teardown-gate-selftest`: the canary does not exist; and the `smoke` entry `pacectl-e2e`, registered without the wrapper: the daemon DIED, on a config file `/tmp/.../empty.yaml` that did not exist | every test `src/tests/CMakeLists.txt` registers starts without the switch on Windows, a DEFERRED `ENVIRONMENT_MODIFICATION` so a registration appended later is covered too; `run-check.sh` unsets it as well, for a check run by hand |
+| PowerShell, or a Visual Studio developer shell | a bare `bash` resolved to `C:\Windows\System32\bash.exe`, a launcher for WSL's LINUX bash, ahead of Git on that PATH | 53 of 136 `hygiene` entries: `No such file or directory` | `PACE_BASH` on Windows is Git for Windows' `bin/bash.exe`, found beside `GIT_EXECUTABLE` and asked for `MSYSTEM` |
 | WSL over DrvFs, in a worktree the Windows git created | the absolute `gitdir:` pointer, which WSL git cannot follow | `workflow-script-invocations`: exit 128, silent; `unguarded-prerequisites-selftest`: *"a shallow clone must fetch depth 0"*; `node-reloadable-docs`: no tracked file carries its marker; `unguarded-prerequisites`: enumerated by directory WALK; `local-gate-selftest`: `no-headers` | `run-check.sh` refuses a check in a git tree the git on PATH cannot read, before it starts, printing `repair-worktree-pointers.sh`'s diagnosis; `local-gate.sh`'s live header case names the same cause |
 
 Measured, with the switch exported: the five wrapped entries fail -- exactly those five --
-with no unset anywhere, and pass with the switch not exported; `fastcache-cli-e2e` failed
+with no unset anywhere, and pass with the switch not exported; `pacectl-e2e` failed
 twice running with it and passed twice without. With the deferred property alone, and both
 script-level unsets removed, all six pass. From PowerShell the full native suite ran 4061
 tests with none failing.
@@ -6198,7 +6198,7 @@ change.
 
 That is why `cmake/Version.cmake` does not treat a query that did not answer within its bound
 as a negative. It names what that query lost -- the tag, the distance, or the dirty state
-(`-dirty-unknown`) -- and makes the version Provisional, which `FASTCACHED_REQUIRE_EXACT_VERSION`
+(`-dirty-unknown`) -- and makes the version Provisional, which `PACE_REQUIRE_EXACT_VERSION`
 refuses. The 20 s bound stays: raising it hides the cost this section names.
 `ctest -R version-git-unanswered` drives each query past a small injected bound.
 
@@ -6272,7 +6272,7 @@ completed has told you nothing*, one level up.
 `scripts/local-gate.sh` owns `out/build/gate-clang-debug` and `out/build/gate-gcc-release`
 **under the source directory**, and it keeps owning those paths. What changes is where they
 POINT: when the root is on a filesystem in `protocol_filesystems` and the build home is not,
-each becomes a symlink into `${FASTCACHED_GATE_BUILD_HOME:-$XDG_CACHE_HOME/fastcached/gate}`,
+each becomes a symlink into `${PACE_GATE_BUILD_HOME:-$XDG_CACHE_HOME/pace/gate}`,
 and every run says which it decided.
 
 - **A symlink, not a path threaded through the script.** The build directory is spelled once,
@@ -6340,7 +6340,7 @@ from the level above it.
 `Async/` files. That is what the check was written for.
 
 **Then the SCOPE was wrong.** It named three directories. A `std::thread` census over
-`FastCacheTest`'s own sources finds **nineteen** threaded files with **eleven** in no row
+`PaceTest`'s own sources finds **nineteen** threaded files with **eleven** in no row
 and under no tag — every threaded `Net/` test among them, which is `BlockingListener`'s
 module and so the module the tree's one observed race (#260) came out of, reached only
 because the node binary is run whole (#316).
@@ -6354,8 +6354,8 @@ left as a proxy deliberately, and said so here rather than left silent.
 
 ### The BINARY half is not a proxy, and it IS checked
 
-`ctest -R tsan-binaries` ([#1209](https://github.com/LASTRADA-Software/fastcached/issues/1209)).
-`fastcache-cc-tests` was in no row for its whole life and **no tag could have put it
+`ctest -R tsan-binaries` ([#1209](https://github.com/LASTRADA-Software/pace/issues/1209)).
+`pace-cc-tests` was in no row for its whole life and **no tag could have put it
 there**: the launcher does not link the library, so it is a separate binary the other rows
 cannot contain. A tag expression selects cases *within* the binaries the gate builds, and
 says nothing about which binaries those are — which is why the level above could be
@@ -6367,11 +6367,11 @@ empty reason, a row naming a binary nothing registers, and a row that is also a 
 row.
 
 **And an exemption's CLAIM is re-taken on every run, because a reason nobody re-measures
-goes false in silence.** `fastcache-cli-tests` stayed exempt as "single-threaded -- no
+goes false in silence.** `pacectl-tests` stayed exempt as "single-threaded -- no
 source names `std::thread`" after #134 gave it a thread pool and two suites asserting on
 thread identities; the check went on passing, since a reason was only required to be
 non-empty. So a row is `target|directory|reason`, and the check scans the directory for
-the primitives in `FastCachedTsanThreadPrimitives` (`ThreadPoolExecutor` among them, which
+the primitives in `PaceTsanThreadPrimitives` (`ThreadPoolExecutor` among them, which
 is how this tree reaches a thread without spelling one), refusing a hit outside a comment,
 a missing directory, and one holding no source.
 
@@ -6395,7 +6395,7 @@ job goes red for the next person.
 One selected tag ANYWHERE in a file used to cover every case in it. So a 28th case tagged
 `[fleetchart]` in a file of 27 `[distributed]` ones left the sanitized scope with the check
 reporting covered — the defect the file was written for, one level down
-([#317](https://github.com/LASTRADA-Software/fastcached/issues/317)).
+([#317](https://github.com/LASTRADA-Software/pace/issues/317)).
 
 Reading a case's tags correctly is most of the work, and every part of it has a wrong
 answer that looks right:
@@ -6439,7 +6439,7 @@ whose `extras/Catch.cmake` carries **zero** occurrences of it — measured, agai
 `catch_discover_tests`'s 11 in the same file as the positive control.
 
 The reason lived in `tsan-gate.sh`'s header, which whoever bumps the CPM block never opens
-([#312](https://github.com/LASTRADA-Software/fastcached/issues/312)). So
+([#312](https://github.com/LASTRADA-Software/pace/issues/312)). So
 `check-tsan-scope.cmake` now READS the declared version and refuses past a **WATERMARK**.
 
 The watermark is a **pinned CONDITION** and must not be made to track `CMakeLists.txt`:
@@ -6461,7 +6461,7 @@ WRONG TREE. This is the other shape, and it is not in that list: the gate refusi
 tree, at its first leg, with a confidently worded false cause.
 
 **A red gate reads as "my branch is bad", never as "the gate is broken."** So nobody files
-it. [#1031](https://github.com/LASTRADA-Software/fastcached/issues/1031) shipped inside the
+it. [#1031](https://github.com/LASTRADA-Software/pace/issues/1031) shipped inside the
 change that added the guard (#926) and stood for two days. `run_preset` read `$dir`, which
 is `local` to `configure_reason` and unbound there, and the `*)` arm reported
 
@@ -6501,14 +6501,14 @@ was linted, formatted, scanned and counted as first-party, silently and green. T
 that opened the work found more than five.
 
 So the answer is data, in one place: `scripts/lib/third-party-roots.txt`, one root per
-line, `#` comments, read by `third_party_roots` (bash 3.2) and `fastcached_third_party_roots`
+line, `#` comments, read by `third_party_roots` (bash 3.2) and `pace_third_party_roots`
 (`cmake -P`). Both readers REFUSE a file that is missing, names no root, or names one with a
 leading or trailing `/`, a `..` or a backslash -- read as empty, it would hand every vendored
 file to every enumerator. `third-party-roots-selftest` drives both over the same files and
 requires them to agree, because two readers of one format are two parsers.
 
 - **An enumerator asks, and says what it declined.** `first_party_paths` /
-  `third_party_paths` in `scripts/lib/third-party-roots.sh`, `fastcached_decline_third_party`
+  `third_party_paths` in `scripts/lib/third-party-roots.sh`, `pace_decline_third_party`
   in `CheckCommon.cmake`, then a line naming the count and the first declined path. A run
   that declines silently cannot be told from one that declined nothing.
 - **It asks the tree it WALKS, not this repository** -- which is what lets each script's own
@@ -6528,7 +6528,7 @@ requires them to agree, because two readers of one format are two parsers.
   scan that reads the file. The next import is its own row -- and the second was: `vendor/monocypher`
   (#178), beside `vendor/endo` until #1596 moved that code to core-cpp. The verbatim check and the figures check read the file too, so that row is also what
   hashes the copy into `vendor/MANIFEST` and asks `vendor/VENDOR.md` to describe it; a re-sync
-  names ONE root (`FASTCACHED_VENDOR_RESYNC_ROOT`), so it cannot bless another copy's changes.
+  names ONE root (`PACE_VENDOR_RESYNC_ROOT`), so it cannot bless another copy's changes.
 - **clang-format is the enumerator no script can make ask**, so each root is also a row of
   `.clang-format-ignore`, refused when missing -- and `local-gate.sh` compares the
   formatter's declined count with the offered files under the roots, both directions: fewer
@@ -6545,7 +6545,7 @@ is correct: an inclusion list naming this repository's own layout needs no roots
 
 ## And HOW a file set is found is ONE answer too (#1485)
 
-<!-- agent-tripwire: And HOW a file set is found is one answer too: `fastcached_tracked_files` -->
+<!-- agent-tripwire: And HOW a file set is found is one answer too: `pace_tracked_files` -->
 
 #1370 settled *which files are this project's own*. The sibling question — *how is a file
 set obtained at all* — had **eight** answers, one per `check-*.cmake`, each a byte-identical
@@ -6558,16 +6558,16 @@ together.
 That is the finding, and it is the opposite of what the ticket was filed saying. The eight ask
 eight different questions — `*CMakeLists.txt`, `src/*.cpp src/*.hpp`, one subdirectory, the
 test files by pathspec, every tracked C++ source, and one that does not enumerate at all — so
-`fastcached_first_party_cxx` fit **none** of them verbatim and migrating any onto it would have
+`pace_first_party_cxx` fit **none** of them verbatim and migrating any onto it would have
 narrowed or widened what its rule is enforced over. Three of them and the first-party set both
 answer **915** files today, which is a real coincidence rather than evidence they agree: every
 one of this repository's own C++ files is under `src/` spelled `.cpp` or `.hpp`, and every
 third-party file is under `vendor/`. It diverges the moment a `.h` or a `tools/*.cpp` appears,
 and nothing would say so.
 
-- **One function, parameterised by the question.** `fastcached_tracked_files(<dir>
+- **One function, parameterised by the question.** `pace_tracked_files(<dir>
   [PATHSPECS ...] GLOBS ... [FILTER ...] FILES_OUT v MODE_OUT v)`. The pathspec and the glob
-  stay in the file where the rule is; `fastcached_first_party_cxx` is a CALLER of it, not the
+  stay in the file where the rule is; `pace_first_party_cxx` is a CALLER of it, not the
   thing every check calls.
 - **The pathspec and the glob are the same question twice, and the FILTER applies in both
   modes.** A filter living in the pathspec on one side and in the glob on the other passes
@@ -6585,7 +6585,7 @@ and nothing would say so.
   probe. Measured: six of these were green with the scratch directory in `TEMP` and red with it
   in `out/`. In `check-catch-skip-selftest` that assertion is an ABSENCE, so the class-level
   string is also **stricter** — the old spelling passed with the third mode's string present.
-- **The work-tree probe answers in THREE values**, `fastcached_work_tree_state` →
+- **The work-tree probe answers in THREE values**, `pace_work_tree_state` →
   `work-tree` / `no-git` / `not-a-work-tree`, because an enumeration walks the directory on
   either negative while a check with nothing to fall back on SKIPS, and owes an operator a
   different sentence for each. It also settled a disagreement the copies carried in silence:
@@ -6621,10 +6621,10 @@ Windows under a deny-read access list — the same status, the same line. It als
 tracked file DELETED from the work tree without a word, stderr included, and never searches
 a symlink. Each of those is a file left out of an answer, and **a file left out of an
 answer is a file PASSED**: the reviewer's plant, `::htonl(` in a `chmod 000`
-`src/FastCache/Core/Endian.hpp`, made the byte-order check exit 0 through the seam when the
+`src/Pace/Core/Endian.hpp`, made the byte-order check exit 0 through the seam when the
 per-file read it replaced had refused.
 
-So `fastcached_tracked_files` (`scripts/lib/CheckCommon.cmake`) owes an ACCOUNT of every file
+So `pace_tracked_files` (`scripts/lib/CheckCommon.cmake`) owes an ACCOUNT of every file
 a question names — judged, reported missing, or refused by name — and the rules follow:
 
 - **Any stderr makes a search untrusted**, a status of 0 included, and the question is then
@@ -6677,7 +6677,7 @@ an operation rather than folded into it, which is the kind that needs a scan.
 **What it deliberately does not refuse, because that was measured.** A `static_cast` near an
 `EnumeratorCount` looks like the obvious third pattern and matches six sites in this tree —
 `static_cast<std::size_t>(raw) >= EnumeratorCount<E>` in `Consensus/RaftTypes.hpp` and
-`apps/fastcache-cc/Stats.cpp` — every one of which is a BOUNDS CHECK on a value off a wire
+`apps/pace-cc/Stats.cpp` — every one of which is a BOUNDS CHECK on a value off a wire
 and correct. A check on it would refuse working code, which is why the loop shape requires
 `for`/`while` on the line: `>=` is a range test and a `<` inside an `if` may be one too. Nor
 does it cover a walk split across lines, or the C-style three-clause form, which is #1452's
@@ -6694,14 +6694,14 @@ applies* are different answers and only one of them is good news.
 #1452 converted the three-clause form across `src/`, and **the head is not a classifier.** Of
 the 134 backlogged sites the opening estimate called 78 mechanical; 68 were, and nothing about a
 head says which. It closed with `scripts/check-test-loops-backlog.txt` EMPTY: every site either
-converted or moved to `FastCachedTestLoopExemptions` with the reason it stays.
+converted or moved to `PaceTestLoopExemptions` with the reason it stays.
 
 Five shapes are not a RANGE-FOR, in the order they cost the most, each with the target it
 actually took:
 
 - **The body ADVANCES the loop variable**, to consume an escaped character, a continuation or a
   length prefix — `CompileCache/PathCanon.cpp`'s depfile tokenizer, `Protocol/RedisResp.cpp`'s
-  `SET` options, `Cli/UsageTestUtils.hpp` and three walks in `apps/fastcache-cc/DirectManifest.cpp`.
+  `SET` options, `Cli/UsageTestUtils.hpp` and three walks in `apps/pace-cc/DirectManifest.cpp`.
   In a range-for that `++i` advances the ITERATION'S COPY, so the second character is consumed as
   data. Not a crash: in `DirectManifest` it mis-splits a dependency path on `\ `, which is **a
   wrong cache key**. **And `auto i` compiles silently** — only `auto const i` is refused, by
@@ -6711,7 +6711,7 @@ actually took:
   `ParseOptionsInto` took first — so no path can skip the step and the head no longer advertises
   a constant one the loop does not take.
 - **A CALLEE advances it through `std::size_t&`**, which no body scan can see:
-  `Cli/Options.hpp` and `apps/fastcache-cli/CliCommand.cpp` pass their index to `ApplyOneOption`,
+  `Cli/Options.hpp` and `apps/pacectl/CliCommand.cpp` pass their index to `ApplyOneOption`,
   `Config/FileOptions.hpp` to `TakeValue`. Both consume an option's VALUE, so a conversion to a
   range-for makes every `--key value` flag re-read its value as the next token — across argv, the
   launcher's flags and the config-FILE appliers at once, silent for boolean flags. This is the
@@ -6796,7 +6796,7 @@ objects. A plain retry with nothing recompiled linked.
 reproduction with this tree's flags failed 0 times in 860 links: 250 each with no launcher, a
 warm cache and a cold cache, and 110 with `/INCREMENTAL:NO`. Its control never failing means
 it clears nothing and implicates nothing, so it is not evidence for either reading. Every tree
-that failed builds through `fastcache-cc`, so *where* it happened cannot separate launcher from
+that failed builds through `pace-cc`, so *where* it happened cannot separate launcher from
 linker. What a launcher-fronted tree differs in is two things. (i) The bytes a HIT restores:
 measured identical to `cl`'s own apart from the one-byte COFF timestamp, and both failing
 objects that could be placed were `cl`'s own MISS output. (ii) The `/Z7` that
@@ -6810,7 +6810,7 @@ spellings are not stacked: the module REMOVES every form of the switch and state
 which of two spellings wins is the linker's choice, and `/debug` with no switch at all links
 incrementally by default.
 
-**What it costs**, measured on the real `fastcache-compile-node-tests` inputs (118 objects,
+**What it costs**, measured on the real `pace-node-tests` inputs (118 objects,
 410 MB, copied out of an idle tree), with link 14.51.36252 on a host at 100% CPU and 9
 interleaved pairs:
 
@@ -6851,7 +6851,7 @@ findings still came through.
 
 **Two dimensions, each of which has already shipped a defect**, so a verdict is taken
 in both: WHERE a checkout lives (#1040 — a pattern anchored on a directory name matched
-CI's `.../fastcached/` and no lane worktree) and HOW its separators are spelled (the
+CI's `.../pace/` and no lane worktree) and HOW its separators are spelled (the
 above). The guard that existed read **363/363 under both the broken and the fixed
 filter**, because it matched POSIX paths only — a guard that could not fail on the
 defect in front of it.
@@ -6892,7 +6892,13 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1591](https://github.com/LASTRADA-Software/fastcached/issues/1591)** — three sites
+- **[#1713](https://github.com/LASTRADA-Software/pace/issues/1713)** — the rename to Pace
+  left two refusals that name the OLD spelling and read nothing under it: `pace-cc` and
+  `pace-node` print one stderr line while any `FASTCACHE_*` variable is set
+  (`Cli/RetiredEnvironment.hpp`), and the top-level configure fails on a cache holding a
+  `FASTCACHED_*` entry (`cmake/RetiredOptions.cmake`, `ctest -R retired-cmake-options`).
+  Both are removed in 0.8.0, with their exemption rows in `brand-leftovers`.
+- **[#1591](https://github.com/LASTRADA-Software/pace/issues/1591)** — three sites
   now feed a listing through process substitution, and the other herestrings are NOT
   swept. 341 `<<<` sites exist under `scripts/` and nearly all take a line, a row or
   one file's text; what is open is an audit of the ones that can take a LISTING, each
@@ -6902,14 +6908,14 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   itself pinned by a case, so the bash or platform that moves it is a red rather than
   a Windows leg that hangs with no diagnosis.
 
-- **[#1631](https://github.com/LASTRADA-Software/fastcached/issues/1631)** — every
+- **[#1631](https://github.com/LASTRADA-Software/pace/issues/1631)** — every
   per-file scan in `check-e2e-helpers.sh`, `procsub-reader-scan` among them, reads
   through an extractor ending in `|| true`, so a grep that fails on ONE file passes that
   file: #1630's shape, failing OPEN. The canary before each scan catches only a failure
   that empties every file. The house idiom across seven extractors, so it is a design
   change of its own rather than a line of PR #1600.
 
-- **[#1567](https://github.com/LASTRADA-Software/fastcached/issues/1567)** — `## A correction is a search,
+- **[#1567](https://github.com/LASTRADA-Software/pace/issues/1567)** — `## A correction is a search,
   not a recollection` has no `AGENT.md` tripwire. The nearest bullet is `testing.md`'s
   census rule, which this section itself calls borrowed, so the rule that a claim
   corrected in the places you REMEMBER writing it is not corrected fires in no session
@@ -6920,10 +6926,10 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   over a file it cannot read; stderr is the only signal `` are in the same state until the
   integration consolidation adds their proposed bullets.
 
-- **[#829](https://github.com/LASTRADA-Software/fastcached/issues/829)** — six
+- **[#829](https://github.com/LASTRADA-Software/pace/issues/829)** — six
   contexts are still `Undecided` in `check-merge-queue-contexts.sh`'s binding table
   (`Windows-cl-debug`, `Code coverage`, both `compile-cache E2E` legs, the
-  `fastcache-cc` smoke and `Docker image`). They cited #408, which the sanitizer
+  `pace-cc` smoke and `Docker image`). They cited #408, which the sanitizer
   promotion settles, so they were re-pointed at #829 in the same change: **an
   `Undecided` row naming a CLOSED issue is the "forgot" state the three spellings
   exist to keep distinguishable from a decision** — it still reads as *somebody will
@@ -6932,7 +6938,7 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   so nothing offline catches this; it was found by hand. `NotBinding` with a reason
   is a complete answer for most of these — a verdict is what is missing, not a
   promotion.
-- **[#835](https://github.com/LASTRADA-Software/fastcached/issues/835)** — `clang-tsan`
+- **[#835](https://github.com/LASTRADA-Software/pace/issues/835)** — `clang-tsan`
   is the ONLY job in `build.yml` that sets `timeout-minutes`, so the jobs behind **twelve
   of the thirteen** required contexts inherit GitHub's 360-minute default. Raised while
   promoting the two sanitizer legs, and the survey is what stops it being filed as a
@@ -6944,20 +6950,20 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   after the queue gave up. A bound needs measured durations: one set below a leg's real p99
   is a flake generator, and `clang-tsan`'s own 60 is a leg-specific argument about bounding
   its BUILD rather than a house number to copy.
-- **[#830](https://github.com/LASTRADA-Software/fastcached/issues/830)** — nothing
+- **[#830](https://github.com/LASTRADA-Software/pace/issues/830)** — nothing
   stops the required set or its count being restated in prose again. There is no
   drift today; what is missing is the guard, and the obvious one was measured against
   the tree and rejected rather than skipped. The measurement and the alternatives it
   rules out are on the ticket, and the rule it enforces is the
   *neither-the-set-nor-its-count* bullet above.
-- **[#717](https://github.com/LASTRADA-Software/fastcached/issues/717)** — the
+- **[#717](https://github.com/LASTRADA-Software/pace/issues/717)** — the
   open-or-update-an-issue decision exists twice: `scripts/ci-report-issue.sh`,
   which `merge-group-report-selftest` drives against a stub `gh`, and the inline
   copy in `build.yml`'s clang-tidy job. Deliberately not folded together as part
   of #684: that step is inside a REQUIRED context and is reachable only on a
   master push whose sweep has already failed, so editing its YAML to remove a
   duplication risks every lane's pull request for no gain #684 needs.
-- **[#858](https://github.com/LASTRADA-Software/fastcached/issues/858)** — the eleven
+- **[#858](https://github.com/LASTRADA-Software/pace/issues/858)** — the eleven
     translation units no analyser sees are GATED but still unanalysed. #682 is CLOSED:
     #857 measures the set, refuses in both directions and pins the configuration in its
     verdict, so a unit going blind can no longer pass unnoticed. What remains is giving
@@ -6965,7 +6971,7 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
     the caution that made #682 sit still applies: the ticket's fifteen pre-existing
     diagnostics would land a permanently RED context, a worse instrument than the gap,
     and neither leg can be developed from a Linux host.
-- **[#1234](https://github.com/LASTRADA-Software/fastcached/issues/1234)** —
+- **[#1234](https://github.com/LASTRADA-Software/pace/issues/1234)** —
   `PreprocessArgv` still parses the whole compile database once per translation
   unit: 14.1 s of CPU a sweep against 141 ms batched, ~0.3% of wall clock. #605
   closed the CORRECTNESS half and deliberately left this one. The plan now hands
@@ -6987,7 +6993,7 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   compare the two rules as a LOOKUP rather than by compiling every unit, which #605
   did at 566 of 566 identical, with a control proving the comparison could see a
   difference.
-- **[#607](https://github.com/LASTRADA-Software/fastcached/issues/607)** — #568 made the
+- **[#607](https://github.com/LASTRADA-Software/pace/issues/607)** — #568 made the
   two CMake sites agree on the lookup that RUNS the interpreter, and `cmake/Coverage.cmake`
   names the four places python is located and which two do not validate. **Nothing reads
   that comment.** A third `find_program(NAMES python3)` passes every check in the tree and
@@ -6998,7 +7004,7 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   deliberate, because the module is included before `project()` where `find_package` has
   no toolchain — or the check fails a correct file. Roughly 3x the diff it protects, so it
   is recorded rather than urgent.
-- **[#311](https://github.com/LASTRADA-Software/fastcached/issues/311)** — nothing in
+- **[#311](https://github.com/LASTRADA-Software/pace/issues/311)** — nothing in
   CI catches an uninitialised read, and no sanitizer that runs today can: ASan does
   not, UBSan does not, and neither does ThreadSanitizer. That is MemorySanitizer,
   which needs an instrumented standard library, or valgrind memcheck over the
@@ -7024,9 +7030,9 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
   `libcrypto.so.3` as system shared objects, of which TLS can be turned off and
   yaml-cpp can be forced from source. valgrind was absent on the machine that took
   these readings; apt offers 1:3.22.0-0ubuntu3, and that route needs no rebuild.
-- **[#1272](https://github.com/LASTRADA-Software/fastcached/issues/1272)** —
+- **[#1272](https://github.com/LASTRADA-Software/pace/issues/1272)** —
   `scripts/check-gate-target-set.cmake` compares the local gate's
-  `gate_target_flags` against every `-DFASTCACHED_BUILD_*=ON` the workflow passes
+  `gate_target_flags` against every `-DPACE_BUILD_*=ON` the workflow passes
   ANYWHERE, and deliberately does not model which jobs run `ctest`: deriving *this
   job tests* from the YAML is fragile in the direction that fails SILENT, where a
   job whose test step is conditional or renamed reads as "does not test" and the

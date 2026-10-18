@@ -18,8 +18,8 @@
 # and the Release half of the guard itself is what the check proper runs.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> -DFASTCACHED_CXX_COMPILER=<c++>
-#         [-DFASTCACHED_GENERATOR=<gen>] [-DFASTCACHED_MAKE_PROGRAM=<make>]
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> -DPACE_CXX_COMPILER=<c++>
+#         [-DPACE_GENERATOR=<gen>] [-DPACE_MAKE_PROGRAM=<make>]
 #         -P scripts/check-counter-extent-link-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output; `SKIP: `
@@ -27,22 +27,22 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-counter-extent-link.cmake")
-set(header "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.hpp")
-set(definition "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.cpp")
+set(check "${PACE_SOURCE_DIR}/scripts/check-counter-extent-link.cmake")
+set(header "${PACE_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.hpp")
+set(definition "${PACE_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.cpp")
 foreach(input IN ITEMS "${check}" "${header}" "${definition}")
     if(NOT EXISTS "${input}")
         message(FATAL_ERROR "missing: ${input}")
     endif()
 endforeach()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 file(READ "${header}" headerText)
 file(READ "${definition}" definitionText)
@@ -72,18 +72,18 @@ set(skipped FALSE)
 # @param outObjected Set TRUE when the check reported `CMake Error` or `CMake Warning`.
 # @param outOutput Set to its output, whitespace collapsed.
 # @param outSkipped Set TRUE when the check skipped.
-function(fastcached_run_case name headerBody definitionBody outObjected outOutput outSkipped)
+function(pace_run_case name headerBody definitionBody outObjected outOutput outSkipped)
     set(tree "${root}/${name}")
-    file(WRITE "${tree}/src/FastCache/Metrics/IMetricsSink.hpp" "${headerBody}")
-    file(WRITE "${tree}/src/FastCache/Metrics/IMetricsSink.cpp" "${definitionBody}")
+    file(WRITE "${tree}/src/Pace/Metrics/IMetricsSink.hpp" "${headerBody}")
+    file(WRITE "${tree}/src/Pace/Metrics/IMetricsSink.cpp" "${definitionBody}")
     set(arguments
-        "-DFASTCACHED_SOURCE_DIR=${tree}" "-DFASTCACHED_SCRATCH_DIR=${tree}/s"
-        "-DFASTCACHED_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}" "-DFASTCACHED_CONFIGS=Debug")
-    if(FASTCACHED_GENERATOR)
-        list(APPEND arguments "-DFASTCACHED_GENERATOR=${FASTCACHED_GENERATOR}")
+        "-DPACE_SOURCE_DIR=${tree}" "-DPACE_SCRATCH_DIR=${tree}/s"
+        "-DPACE_CXX_COMPILER=${PACE_CXX_COMPILER}" "-DPACE_CONFIGS=Debug")
+    if(PACE_GENERATOR)
+        list(APPEND arguments "-DPACE_GENERATOR=${PACE_GENERATOR}")
     endif()
-    if(FASTCACHED_MAKE_PROGRAM)
-        list(APPEND arguments "-DFASTCACHED_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+    if(PACE_MAKE_PROGRAM)
+        list(APPEND arguments "-DPACE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
     endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" ${arguments} -P "${check}"
                     OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE ignored)
@@ -104,7 +104,7 @@ endfunction()
 # 1. The guard removed.
 math(EXPR cases "${cases} + 1")
 string(REPLACE "${anchorLine}" "" noAnchorHeader "${headerText}")
-fastcached_run_case(noanchor "${noAnchorHeader}" "${definitionText}" objected output sawSkip)
+pace_run_case(noanchor "${noAnchorHeader}" "${definitionText}" objected output sawSkip)
 if(sawSkip)
     # The check's own output is not repeated: a skip must not carry text the registration reads as a failure.
     message("SKIP: counter-extent-link skipped in this environment, so none of its refusals can be watched")
@@ -123,7 +123,7 @@ endif()
 math(EXPR cases "${cases} + 1")
 string(REPLACE "${definitionLine}" "bool RenamedCounterExtent(Extent<CounterCount> /*extent*/) noexcept"
        renamedDefinition "${definitionText}")
-fastcached_run_case(nodefinition "${headerText}" "${renamedDefinition}" objected output sawSkip)
+pace_run_case(nodefinition "${headerText}" "${renamedDefinition}" objected output sawSkip)
 if(NOT objected)
     list(APPEND failures "nodefinition: nothing defines the symbol and the check passed -- a skewed link failing for any reason was read as the guard")
 else()
@@ -136,7 +136,7 @@ endif()
 # 3. Nowhere to place the skew.
 math(EXPR cases "${cases} + 1")
 string(REPLACE "\n        Last,\n" "\n        Last\n" noPlaceHeader "${headerText}")
-fastcached_run_case(noplace "${noPlaceHeader}" "${definitionText}" objected output sawSkip)
+pace_run_case(noplace "${noPlaceHeader}" "${definitionText}" objected output sawSkip)
 if(NOT objected)
     list(APPEND failures "noplace: the skew could not be inserted and the check passed -- it built two copies of one header")
 else()

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# TLS smoke test (POSIX). Start fastcached with TLS terminated using the
+# TLS smoke test (POSIX). Start pace-kv with TLS terminated using the
 # checked-in self-signed cert, connect with `openssl s_client`, send a RESP
 # PING, and assert the daemon answers +PONG over the encrypted channel.
 #
 # Usage:
-#   tls-smoke.sh --fastcached <path> --cert <pem> --key <pem> [--port <n>]
+#   tls-smoke.sh --pace-kv <path> --cert <pem> --key <pem> [--port <n>]
 #
 # Exit codes: 0 = +PONG over TLS; 1 = ran but no PONG; 77 = a runtime
-# prerequisite (openssl / fastcached / cert) was missing — treated as a skip.
+# prerequisite (openssl / pace-kv / cert) was missing — treated as a skip.
 #
 # The port is DRAWN per run unless one is passed. It used to be the constant
 # `11811` — the same constant `tls-smoke.ps1` carried, so the two halves of one
@@ -18,7 +18,7 @@
 # cleanup (#1284). This is the arm Linux CI runs.
 set -euo pipefail
 
-fastcached=""
+pace_kv=""
 # Empty, never a number: an empty default is what makes the draw below reachable
 # from the only caller there is. #183 records the shape of getting this half
 # wrong — a fixture whose script drew a port while its registration passed
@@ -30,7 +30,7 @@ key=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached) fastcached="$2"; shift 2 ;;
+        --pace-kv) pace_kv="$2"; shift 2 ;;
         --port)       port="$2";       shift 2 ;;
         --cert)       cert="$2";       shift 2 ;;
         --key)        key="$2";        shift 2 ;;
@@ -40,7 +40,7 @@ done
 
 readonly SKIP=77
 command -v openssl >/dev/null 2>&1 || { echo "openssl not found; skipping"; exit "$SKIP"; }
-[[ -n "$fastcached" && -x "$fastcached" ]] || { echo "fastcached not found: '$fastcached'; skipping"; exit "$SKIP"; }
+[[ -n "$pace_kv" && -x "$pace_kv" ]] || { echo "pace-kv not found: '$pace_kv'; skipping"; exit "$SKIP"; }
 [[ -f "$cert" && -f "$key" ]] || { echo "cert/key not found; skipping"; exit "$SKIP"; }
 
 workdir="$(mktemp -d)"
@@ -66,8 +66,8 @@ e2e_begin "TLS smoke" "$workdir"
 # `free_port`'s comment carries that argument in full.
 [[ -n "$port" ]] || port="$(free_port)"
 
-"$fastcached" --bind 127.0.0.1 --port "$port" --tls --tls-cert "$cert" --tls-key "$key" \
-    > "${workdir}/fastcached.log" 2>&1 &
+"$pace_kv" --bind 127.0.0.1 --port "$port" --tls --tls-cert "$cert" --tls-key "$key" \
+    > "${workdir}/pace-kv.log" 2>&1 &
 server_pid=$!
 
 # Bounded, and it says what it waited for and which KIND of failure a timeout
@@ -75,7 +75,7 @@ server_pid=$!
 # nothing when five seconds were not enough, so a cold runner surfaced as
 # `openssl` failing to connect — a diagnosis of the wrong thing — and its
 # "5 seconds" was a product of the loop shape that no run ever observed.
-wait_for_port 127.0.0.1 "$port" "$server_pid" "fastcached with TLS" "${workdir}/fastcached.log"
+wait_for_port 127.0.0.1 "$port" "$server_pid" "pace-kv with TLS" "${workdir}/pace-kv.log"
 
 # Send PING then QUIT: the QUIT makes the daemon close the connection, so
 # `openssl s_client` exits cleanly (it otherwise keeps the socket open —
@@ -103,8 +103,8 @@ case "$resp" in
         #
         # `wait_for_port` returned green here by construction: the daemon BOUND.
         # What failed is one layer up, which is exactly the case its log explains.
-        echo "--- ${workdir}/fastcached.log ---" >&2
-        cat "${workdir}/fastcached.log" >&2 || true
+        echo "--- ${workdir}/pace-kv.log ---" >&2
+        cat "${workdir}/pace-kv.log" >&2 || true
         exit 1
         ;;
 esac

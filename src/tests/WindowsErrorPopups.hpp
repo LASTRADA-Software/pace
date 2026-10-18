@@ -10,7 +10,7 @@
     #include <crtdbg.h>
 #endif
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Route every Windows CRT diagnostic to stderr instead of a modal dialog.
@@ -79,4 +79,4 @@ inline void SuppressWindowsErrorPopups() noexcept
 #endif
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

@@ -4,9 +4,9 @@
 #
 # `VSLANG` selects `cl`'s diagnostic language. The launcher sets it so that two
 # things it PARSES come back in a language it can read: the `/showIncludes` notes
-# ([#692](https://github.com/LASTRADA-Software/fastcached/issues/692)) and the
+# ([#692](https://github.com/LASTRADA-Software/pace/issues/692)) and the
 # version banner, which since #195 is the compiler's identity
-# ([#200](https://github.com/LASTRADA-Software/fastcached/issues/200)).
+# ([#200](https://github.com/LASTRADA-Software/pace/issues/200)).
 #
 # Both of those spawns are read by nobody but this process. The REAL compile is
 # different in kind: its diagnostics are the developer's, and forcing English there
@@ -22,7 +22,7 @@
 # WORDS are localized too", and in the Doxygen on both entry points. **Nothing read
 # it.** Every test that existed asserted the variable REACHES the probe -- which a
 # change that also set it on the compile spawn passes unchanged. A rule whose only
-# reader is prose is the shape [#683](https://github.com/LASTRADA-Software/fastcached/issues/683)
+# reader is prose is the shape [#683](https://github.com/LASTRADA-Software/pace/issues/683)
 # was filed about: a plausible claim that nothing can make fail. This is its reader.
 #
 # ## What is counted, and why it is the assignment rather than the word
@@ -49,26 +49,26 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # One row per site allowed to SET the variable: the file, how many assignments it
 # may hold, and what asks for it there. The reason is a column because a row with no
 # stated purpose is a row nobody can judge when it starts failing.
 set(vslangAllowedSites
-    "src/apps/fastcache-cc/main.cpp|1|RunCaptureSplitInEnglish, for the preprocess probe that reads /showIncludes (#692)"
-    "src/apps/fastcache-cc/ToolchainProbe.cpp|1|CompilerBanner, for the version banner that is the compiler identity (#200)"
+    "src/apps/pace-cc/main.cpp|1|RunCaptureSplitInEnglish, for the preprocess probe that reads /showIncludes (#692)"
+    "src/apps/pace-cc/ToolchainProbe.cpp|1|CompilerBanner, for the version banner that is the compiler identity (#200)"
 )
 
 # Where an assignment may NOT appear. Scanned as a whole so a new production file
 # reaching for it is caught rather than silently permitted by an allow-list that
 # does not mention it.
 set(vslangScanRoots
-    "src/apps/fastcache-cc"
-    "src/apps/fastcache-compile-node"
-    "src/apps/fastcached"
-    "src/FastCache"
+    "src/apps/pace-cc"
+    "src/apps/pace-node"
+    "src/apps/pace-kv"
+    "src/Pace"
 )
 
 # The assignment's shape. Anchored on the designated initializer, so a mention in
@@ -89,7 +89,7 @@ set(vslangAssignmentPattern "\\.name[ \t]*=[ \t]*\"VSLANG\"")
 # guard written against one route does not cover a second route to the same place
 # merely because the same variable is at the end of it.
 set(vslangEnglishEntryPoints
-    "src/apps/fastcache-cc/main.cpp|RunCaptureSplitInEnglish|2|its definition, plus the single preprocess-probe call (#692)"
+    "src/apps/pace-cc/main.cpp|RunCaptureSplitInEnglish|2|its definition, plus the single preprocess-probe call (#692)"
 )
 
 set(missingRoots "")
@@ -101,7 +101,7 @@ set(totalAssignments 0)
 set(scanFiles "")
 set(scanHolding "")
 foreach(root IN LISTS vslangScanRoots)
-    set(resolvedRoot "${FASTCACHED_SOURCE_DIR}/${root}")
+    set(resolvedRoot "${PACE_SOURCE_DIR}/${root}")
     if(NOT IS_DIRECTORY "${resolvedRoot}")
         list(APPEND missingRoots "  ${root}: named in the scan table and not present")
         continue()
@@ -110,20 +110,20 @@ foreach(root IN LISTS vslangScanRoots)
     # what `check-glob-traversals` refuses (#502) and what caught this scan on its
     # first run.
     #
-    # Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its files,
+    # Through `pace_tracked_files`, this tree's one answer to HOW a check finds its files,
     # rather than a traversal of its own: on DrvFs -- where every local gate tree takes its
     # sources from -- walking the tree and reading every file it found cost seconds a single
     # `git grep` spends in under half of one, and several lanes gating at once took this check
     # past its budget. CONTAINING names the literal every match must contain, so a file without
     # it is not read at all; the count printed is still over the whole set.
-    fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+    pace_tracked_files("${PACE_SOURCE_DIR}"
         PATHSPECS "${root}/"
         GLOBS "${root}/*"
         FILTER "^${root}/.*[.](cpp|hpp)$"
         CONTAINING "VSLANG" CONTAINING_OUT rootHolding
         FILES_OUT rootFiles MODE_OUT rootMode)
-    list(TRANSFORM rootFiles PREPEND "${FASTCACHED_SOURCE_DIR}/")
-    list(TRANSFORM rootHolding PREPEND "${FASTCACHED_SOURCE_DIR}/")
+    list(TRANSFORM rootFiles PREPEND "${PACE_SOURCE_DIR}/")
+    list(TRANSFORM rootHolding PREPEND "${PACE_SOURCE_DIR}/")
     list(APPEND scanFiles ${rootFiles})
     list(APPEND scanHolding ${rootHolding})
 endforeach()
@@ -131,7 +131,7 @@ endforeach()
 # --- count assignments per file ----------------------------------------------
 set(sitesWithAssignments "")
 foreach(sourceFile IN LISTS scanFiles)
-    file(RELATIVE_PATH relativePath "${FASTCACHED_SOURCE_DIR}" "${sourceFile}")
+    file(RELATIVE_PATH relativePath "${PACE_SOURCE_DIR}" "${sourceFile}")
 
     # Tests may construct the assignment; that is how the rule is exercised.
     if(relativePath MATCHES "_test\\.cpp$" OR relativePath MATCHES "TestUtils\\.hpp$"
@@ -160,7 +160,7 @@ foreach(sourceFile IN LISTS scanFiles)
         continue()
     endif()
     file(READ "${sourceFile}" _vslangText)
-    fastcached_split_lines_tokenised("${_vslangText}" matchedLines)
+    pace_split_lines_tokenised("${_vslangText}" matchedLines)
     list(FILTER matchedLines INCLUDE REGEX "${vslangAssignmentPattern}")
     list(LENGTH matchedLines matchCount)
     if(matchCount EQUAL 0)
@@ -213,7 +213,7 @@ foreach(row IN LISTS vslangAllowedSites)
     # absolute, which it always is -- so this arm could never fire, and a renamed
     # file was reported as "stopped asking for English", sending the reader hunting
     # for a deleted assignment inside a file that is no longer there.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${rowPath}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${rowPath}")
         list(APPEND missingRoots "  ${rowPath}: named in the allow table and not present")
         continue()
     endif()
@@ -231,7 +231,7 @@ foreach(row IN LISTS vslangEnglishEntryPoints)
     list(GET rowFields 2 helperAllowed)
     list(GET rowFields 3 helperReason)
 
-    set(resolvedHelper "${FASTCACHED_SOURCE_DIR}/${helperPath}")
+    set(resolvedHelper "${PACE_SOURCE_DIR}/${helperPath}")
     if(NOT EXISTS "${resolvedHelper}")
         list(APPEND missingRoots "  ${helperPath}: named in the English-helper table and not present")
         continue()
@@ -255,7 +255,7 @@ foreach(row IN LISTS vslangEnglishEntryPoints)
     # to 14 while it still passed. Same shape, different corpus, opposite verdict --
     # which is why exposure is judged per (reader, file, surviving lines).
     file(READ "${resolvedHelper}" _vslangText)
-    fastcached_split_lines_tokenised("${_vslangText}" helperLines)
+    pace_split_lines_tokenised("${_vslangText}" helperLines)
     list(FILTER helperLines INCLUDE REGEX "${helperName}")
     list(LENGTH helperLines helperCount)
     if(NOT helperCount EQUAL helperAllowed)

@@ -5,7 +5,7 @@
 trying `--tls` locally:
 
 ```sh
-fastcached --tls --tls-cert testdata/tls/server.crt --tls-key testdata/tls/server.key
+pace-kv --tls --tls-cert testdata/tls/server.crt --tls-key testdata/tls/server.key
 # then, e.g.:  redis-cli --tls --insecure ping
 ```
 

@@ -10,7 +10,7 @@
 # file be the dpkg conffile, the macOS `.default` template and the MSI `.default`
 # template all at once.
 #
-# Nothing enforced that they all get shipped. `fastcache-compile-node.yaml` arrived
+# Nothing enforced that they all get shipped. `pace-node.yaml` arrived
 # with #291 as a Linux conffile, and the macOS `.pkg` and the Windows MSI shipped
 # NO worker configuration at all until #397 -- so an operator on either platform
 # had no annotated reference to start from, and every setting documented only in
@@ -20,8 +20,8 @@
 #
 # What this checks, per file under `packaging/config/`:
 #
-#   1. Linux   -- a `config/<name>|...` row in FASTCACHED_PLATFORM_ASSETS
-#   2. macOS   -- a `config/<name>|${FASTCACHED_MACOS_PREFIX}/etc|...` row
+#   1. Linux   -- a `config/<name>|...` row in PACE_PLATFORM_ASSETS
+#   2. macOS   -- a `config/<name>|${PACE_MACOS_PREFIX}/etc|...` row
 #   3. Windows -- an `install(FILES .../config/<name>` under the `if(WIN32)` arm
 #
 # It reads `packaging/CMakeLists.txt` as TEXT rather than configuring the project,
@@ -32,18 +32,18 @@
 # the defect it exists to catch, one level up.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-config-reference-reach.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-config-reference-reach.cmake
 #
 # Exit codes: 0 = every reference reaches every payload. 1 = at least one does not.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(_dir "${FASTCACHED_SOURCE_DIR}/packaging/config")
-set(_table "${FASTCACHED_SOURCE_DIR}/packaging/CMakeLists.txt")
+set(_dir "${PACE_SOURCE_DIR}/packaging/config")
+set(_table "${PACE_SOURCE_DIR}/packaging/CMakeLists.txt")
 
 if(NOT IS_DIRECTORY "${_dir}")
     message(FATAL_ERROR
@@ -78,11 +78,11 @@ set(_missing "")
 foreach(_name IN LISTS _references)
     set(_gaps "")
 
-    if(NOT _tableText MATCHES "\"config/${_name}\\|\\$\\{FASTCACHED_SYSCONF_DIR\\}")
-        list(APPEND _gaps "Linux (no FASTCACHED_PLATFORM_ASSETS row installing it to FASTCACHED_SYSCONF_DIR)")
+    if(NOT _tableText MATCHES "\"config/${_name}\\|\\$\\{PACE_SYSCONF_DIR\\}")
+        list(APPEND _gaps "Linux (no PACE_PLATFORM_ASSETS row installing it to PACE_SYSCONF_DIR)")
     endif()
-    if(NOT _tableText MATCHES "\"config/${_name}\\|\\$\\{FASTCACHED_MACOS_PREFIX\\}")
-        list(APPEND _gaps "macOS (no .default row under FASTCACHED_MACOS_PREFIX/etc)")
+    if(NOT _tableText MATCHES "\"config/${_name}\\|\\$\\{PACE_MACOS_PREFIX\\}")
+        list(APPEND _gaps "macOS (no .default row under PACE_MACOS_PREFIX/etc)")
     endif()
     if(NOT _tableText MATCHES "install\\(FILES \"\\$\\{CMAKE_CURRENT_SOURCE_DIR\\}/config/${_name}\"")
         list(APPEND _gaps "Windows (no install(FILES ...) under the if(WIN32) arm)")
@@ -98,8 +98,8 @@ endforeach()
 # reference ships with nothing in force. Every setting is a comment showing its
 # default, so there is no live value -- and therefore no live absolute PATH, which
 # is the only thing in these files that could be platform-specific. Measured at the
-# commit that added this check: 0 live lines of 285 in fastcached.yaml and 0 of 296
-# in fastcache-compile-node.yaml, so the rule holds today and an ordinary edit
+# commit that added this check: 0 live lines of 285 in pace-kv.yaml and 0 of 296
+# in pace-node.yaml, so the rule holds today and an ordinary edit
 # breaks it.
 #
 # Stated as `nothing is in force` rather than as a path-shaped regex, because a path

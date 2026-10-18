@@ -781,10 +781,10 @@ run_case() {
         echo "stop_and_require_clean_exit accepted status ${E2eStopStatus}"
         ;;
 
-    # --- a fixture inherits no FASTCACHE_* ------------------------------------
+    # --- a fixture inherits no PACE_* ------------------------------------
     #
-    # Sourcing the library clears every FASTCACHE_* the shell inherited, so an
-    # operator's FASTCACHE_SCHEDULER cannot send a fixture's "local" compile to
+    # Sourcing the library clears every PACE_* the shell inherited, so an
+    # operator's PACE_SCHEDULER cannot send a fixture's "local" compile to
     # their fleet. Driven the way a fixture meets it: the variable EXPORTED before
     # the `source`, the fixture's own setting exported after, and a stand-in
     # compile that reports the environment it was started with.
@@ -794,28 +794,28 @@ run_case() {
     # nothing. And the harness knob row is the other direction -- a scrub that
     # cleared everything would pass the first two lines and switch `tsan-gate.sh`'s
     # bound off in silence.
-    fastcache-env-scrubbed)
+    pace-env-scrubbed)
         stub="${scratch}/stub-compile"
         printf '#!/bin/sh\nenv\n' > "$stub"
         chmod +x "$stub"
-        control="$(FASTCACHE_SCHEDULER=staged.invalid:6674 "$stub")"
+        control="$(PACE_SCHEDULER=staged.invalid:6674 "$stub")"
         case "$control" in
-            *FASTCACHE_SCHEDULER=staged.invalid:6674*) ;;
+            *PACE_SCHEDULER=staged.invalid:6674*) ;;
             *) echo "BUG: the stand-in compile never saw an exported variable, so nothing below is tested" ;;
         esac
-        seen="$(FASTCACHE_SCHEDULER=staged.invalid:6674 FASTCACHE_TSAN_TIMEOUT=77 \
-            bash -c '. "$1"; export FASTCACHE_VERBOSE=1; "$2"' _ "$library" "$stub")"
+        seen="$(PACE_SCHEDULER=staged.invalid:6674 PACE_TSAN_TIMEOUT=77 \
+            bash -c '. "$1"; export PACE_VERBOSE=1; "$2"' _ "$library" "$stub")"
         case "$seen" in
-            *FASTCACHE_SCHEDULER=*) echo "BUG: an inherited FASTCACHE_SCHEDULER reached the fixture's compile" ;;
-            *) echo "an inherited FASTCACHE_SCHEDULER did not reach the compile" ;;
+            *PACE_SCHEDULER=*) echo "BUG: an inherited PACE_SCHEDULER reached the fixture's compile" ;;
+            *) echo "an inherited PACE_SCHEDULER did not reach the compile" ;;
         esac
         case "$seen" in
-            *FASTCACHE_VERBOSE=1*) echo "the fixture's own FASTCACHE_VERBOSE did" ;;
+            *PACE_VERBOSE=1*) echo "the fixture's own PACE_VERBOSE did" ;;
             *) echo "BUG: the fixture's own export, made after sourcing, did not reach the compile" ;;
         esac
         case "$seen" in
-            *FASTCACHE_TSAN_TIMEOUT=77*) echo "the harness knob FASTCACHE_TSAN_TIMEOUT was kept" ;;
-            *) echo "BUG: the harness knob FASTCACHE_TSAN_TIMEOUT was cleared" ;;
+            *PACE_TSAN_TIMEOUT=77*) echo "the harness knob PACE_TSAN_TIMEOUT was kept" ;;
+            *) echo "BUG: the harness knob PACE_TSAN_TIMEOUT was cleared" ;;
         esac
         ;;
 
@@ -846,7 +846,7 @@ run_case() {
         echo "a short line: status ${status}, [${short}]"
         # A column name this reader cannot read is a refused LAYOUT, never a column skipped in
         # silence -- which would shift every later column by one.
-        sed 's/\.name = "elapsed-ms"/.name = "elapsed_ms"/' "${source_dir}/src/apps/fastcache-cc/Stats.cpp" > "${scratch}/Stats.cpp"
+        sed 's/\.name = "elapsed-ms"/.name = "elapsed_ms"/' "${source_dir}/src/apps/pace-cc/Stats.cpp" > "${scratch}/Stats.cpp"
         grep -q 'elapsed_ms' "${scratch}/Stats.cpp" || echo "BUG: the odd column name was not planted"
         status=0
         e2e_launcher_log_layout "${scratch}/Stats.cpp" >/dev/null 2>&1 || status=$?
@@ -2100,7 +2100,7 @@ run_case() {
         _selftest_listener "$p" 0 "${scratch}/unattr.log" \
             >/dev/null 2>>"${scratch}/unattr.log" &
         listener=$!
-        FASTCACHED_E2E_LISTENER_TOOL=none \
+        PACE_E2E_LISTENER_TOOL=none \
             wait_for_port 127.0.0.1 "$p" "$listener" "the staged listener" \
                 "${scratch}/unattr.log" 15
         kill "$listener" 2>/dev/null || true
@@ -2284,7 +2284,7 @@ run_case() {
     # connection was refused*, so a caller had no channel for the third outcome and
     # reported a truncation as the endpoint having answered. #1184's fixture drew
     # the conclusion *the refusing worker exports no
-    # `fastcache_worker_jobs_refused_not_a_member_total` series* from a scrape whose
+    # `pace_worker_jobs_refused_not_a_member_total` series* from a scrape whose
     # completeness nothing had established.
     #
     # The body is asserted to be a PREFIX as well as the status being truncated.
@@ -2635,7 +2635,7 @@ _selftest_metrics() {
 # flags differ between the BSD, GNU and OpenBSD builds and one of those is on
 # every platform CI runs, but never the same one.
 #
-# THE MARKER IS A PARAMETER, because `fastcached` has one of these lines too and
+# THE MARKER IS A PARAMETER, because `pace-kv` has one of these lines too and
 # it is a different one -- `ready, accepting connections`, from `ReadinessAnnouncer`
 # (#644). Two stand-ins would be two copies of a program whose every subtlety is
 # recorded here and in `_selftest_listener`, and the `exec`/lifetime pair is exactly
@@ -3335,7 +3335,7 @@ cases=(
     "clean-stop-bad-opt-in|1|unknown fifth argument 'term-is-fine'|!accepted status|!BUG:"
     "clean-stop-crashed|1|exited with status 134 when asked to stop|!accepted status|!BUG:"
     "clean-stop-refusal-line|1|refused to destroy its shared-cache host|exit status 0|!accepted status|!BUG:"
-    "fastcache-env-scrubbed|0|an inherited FASTCACHE_SCHEDULER did not reach the compile|the fixture's own FASTCACHE_VERBOSE did|the harness knob FASTCACHE_TSAN_TIMEOUT was kept|!BUG:"
+    "pace-env-scrubbed|0|an inherited PACE_SCHEDULER did not reach the compile|the fixture's own PACE_VERBOSE did|the harness knob PACE_TSAN_TIMEOUT was kept|!BUG:"
     "wait-success|0|the wait returned when the predicate became true|polls) for the staged marker"
     "wait-death-is-prompt|1|the process DIED|exit=3|of a 10s budget|!BUG:|!waited 9s|!waited 10s"
     "wait-timeout-silent|1|logged NOTHING for the whole 2s|!BUG:"
@@ -4531,7 +4531,7 @@ echo "   procsub: scanned ${procsub_scanned} script(s) under scripts/ (walked, n
 # **BSD `wc` pads its count with leading blanks; GNU `wc` does not.** So
 # `$(wc -c < f)` is `11` on Linux and `      11` on macOS, and a fixture that
 # captures it and compares it as a STRING is green on one platform and red on the
-# other. `fastcache-cli-e2e` shipped exactly that and failed on its first macOS run
+# other. `pacectl-e2e` shipped exactly that and failed on its first macOS run
 # with `--raw wrote       11 bytes, expected 11` -- a message whose two numbers are
 # EQUAL, which reads as the check being broken rather than as the shell, and is the
 # reading that gets an assertion deleted.
@@ -5420,7 +5420,7 @@ rm -rf "$canary_dir"
 # The allowlist, in the `_scan_exempt` shape the two scans above use. Each row
 # names WHY, and a row that is a deferred defect names the ISSUE so an exclusion
 # cannot rot into folklore. Neither of these two is a defect.
-bash32_allowed="tidy-sweep.sh:not a bash 3.2 script and does not claim to be. It declares a bash 4.4 floor in its own header (wait -n is 4.3; expanding an empty array under set -u stops erroring at 4.4). Its 'tidy-sweep-selftest' registration runs it through FASTCACHED_BASH44 -- a version-CHECKED interpreter rather than the /bin/bash pin every other registration uses -- and keeps SKIP_RETURN_CODE 77 for a host where no candidate clears the floor. Until #598 that registration used the 3.2 pin and therefore reported SKIPPED on macOS in perpetuity; this sentence used to cite that skip as the enforcement mechanism, which stopped being the arrangement when the interpreter moved. A declared exception with an enforcement mechanism, not an omission."
+bash32_allowed="tidy-sweep.sh:not a bash 3.2 script and does not claim to be. It declares a bash 4.4 floor in its own header (wait -n is 4.3; expanding an empty array under set -u stops erroring at 4.4). Its 'tidy-sweep-selftest' registration runs it through PACE_BASH44 -- a version-CHECKED interpreter rather than the /bin/bash pin every other registration uses -- and keeps SKIP_RETURN_CODE 77 for a host where no candidate clears the floor. Until #598 that registration used the 3.2 pin and therefore reported SKIPPED on macOS in perpetuity; this sentence used to cite that skip as the enforcement mechanism, which stopped being the arrangement when the interpreter moved. A declared exception with an enforcement mechanism, not an omission."
 
 # DERIVED, by walking the tree rather than by listing files or naming
 # directories. `find` because a glob cannot recurse portably and this must work in
@@ -5646,7 +5646,7 @@ echo "== no bound is decided from SECONDS"
 # disagree about what it is looking for is two scans.
 #
 # A WHOLE WORD, and that is the correction rather than a nicety. It was a bare
-# `grep -n 'SECONDS'`, which is a substring: `FASTCACHED_SCAN_BUDGET_SECONDS`,
+# `grep -n 'SECONDS'`, which is a substring: `PACE_SCAN_BUDGET_SECONDS`,
 # `READY_SECONDS` and any other identifier ENDING in the token matched, and so
 # would one beginning with it. `pgrep -f` in a `grep` -- a pattern is broader than
 # its author reads it as -- and it is the same family as this file's own
@@ -5846,7 +5846,7 @@ elapsed=$(( SECONDS - started ))
 stall=$(( SECONDS - grewAt ))
 readonly READY_SECONDS=240
 wait_until worker_ready "the worker" "$pid" "$log" "$READY_SECONDS"
-cmake -DFASTCACHED_SCAN_BUDGET_SECONDS=90 -P check.cmake
+cmake -DPACE_SCAN_BUDGET_SECONDS=90 -P check.cmake
 SECONDS_PER_TICK=5
 CANARY
 _scan_canary "seconds-scan-canary" _seconds_unlisted \

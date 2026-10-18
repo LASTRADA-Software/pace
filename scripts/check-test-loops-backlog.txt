@@ -3,7 +3,7 @@
 #
 # rule|file|count|issue
 #
-# A row here makes a DIFFERENT claim from a row in `FastCachedTestLoopExemptions`. An exemption
+# A row here makes a DIFFERENT claim from a row in `PaceTestLoopExemptions`. An exemption
 # says *this site is right and must stay, here is why*. A row here says *nobody has decided about
 # these yet*. Spelling the second like the first would put every site below behind a word that
 # means "decided", and the only reason an undecided row is safe at all is that the check tallies
@@ -44,7 +44,7 @@
 # they cannot drift from the rows.
 #
 # EMPTY, and deliberately so: #1452 decided every production site this file held -- each one
-# converted, or moved to `FastCachedTestLoopExemptions` with the reason it stays. The check says
+# converted, or moved to `PaceTestLoopExemptions` with the reason it stays. The check says
 # so on every run (`backlog: empty`) rather than printing nothing, because a tally that simply
 # stops appearing reads the same as one that stopped being computed. A NEW site is converted or
 # exempted, never added here: a row comes back only when the scan's SCOPE widens over sites

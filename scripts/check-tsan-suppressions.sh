@@ -192,7 +192,7 @@ EOF
 
     # ThreadSanitizer prints
     #     ThreadSanitizer: Matched 5 suppressions (pid=NNN):
-    #     2 race_top:FastCache::BlockingListener::Close
+    #     2 race_top:Pace::BlockingListener::Close
     # and `tsan-gate.sh` greps both shapes onto its own stdout, so either the gate log
     # or a raw sanitizer log can be handed here.
     # EVERY header, summed -- not the first one.
@@ -358,10 +358,10 @@ RunSelfTest() {
 
     # An entry that names its issue, and one that does not.
     live='# a known race, tracked as #1207
-race_top:FastCache::Alpha::Close
+race_top:Pace::Alpha::Close
 '
     dead='# a known race, tracked as #1208
-race_top:FastCache::Beta::Detach
+race_top:Pace::Beta::Detach
 '
     twoDead="${live}${dead}"
 
@@ -388,16 +388,16 @@ race_top:FastCache::Beta::Detach
     Case "case 4: an entry that matched is RECONCILED" \
         "RECONCILED" 0 "each naming an issue" "$live" \
         "ThreadSanitizer: Matched 2 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 "
 
     # 5 -- THE ticket: an entry that matched nothing. Invisible in every number the
     # gate prints, because a total of 2 and a total of 2 with a dead entry beside it
     # are the same total.
     Case "case 5: an entry matching nothing is refused and NAMED" \
-        "FAIL" 1 "race_top:FastCache::Beta::Detach matched NOTHING" "$twoDead" \
+        "FAIL" 1 "race_top:Pace::Beta::Detach matched NOTHING" "$twoDead" \
         "ThreadSanitizer: Matched 2 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 "
 
     # 6 -- and the refusal says what to do instead of widening the rule, which is the
@@ -405,7 +405,7 @@ race_top:FastCache::Beta::Detach
     Case "case 6: the refusal warns against widening race_top to race" \
         "FAIL" 1 "Do NOT widen" "$twoDead" \
         "ThreadSanitizer: Matched 2 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 "
 
     # 7 -- the other direction: TSan matched something this file does not contain, so
@@ -414,15 +414,15 @@ race_top:FastCache::Beta::Detach
     Case "case 7: a matched suppression absent from the file is refused" \
         "FAIL" 1 "is not in" "$live" \
         "ThreadSanitizer: Matched 3 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
-1 race_top:FastCache::Gamma::Run
+2 race_top:Pace::Alpha::Close
+1 race_top:Pace::Gamma::Run
 "
 
     # 8 -- the file's own rule, which was prose until now: an entry with no issue.
     Case "case 8: an entry naming no issue is refused" \
         "FAIL" 1 "names no issue" \
         "# no issue number here
-race_top:FastCache::Alpha::Close
+race_top:Pace::Alpha::Close
 " "-"
 
     # 9 -- the issue must be in a comment ABOVE the rule and not on it. A trailing
@@ -430,7 +430,7 @@ race_top:FastCache::Alpha::Close
     # nothing -- accepting it would be this check endorsing a dead rule.
     Case "case 9: an issue number on the rule's own line does not count" \
         "FAIL" 1 "names no issue" \
-        "race_top:FastCache::Alpha::Close # 1207
+        "race_top:Pace::Alpha::Close # 1207
 " "-"
 
     # 10 -- the header against the per-entry sum. Both come from one run, so a
@@ -438,7 +438,7 @@ race_top:FastCache::Alpha::Close
     Case "case 10: a header disagreeing with the per-entry sum is refused" \
         "FAIL" 1 "defect in how they are read here" "$live" \
         "ThreadSanitizer: Matched 9 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 "
 
     # 12-14 -- SEVERAL runs concatenated, which is the only input the gate ever
@@ -453,9 +453,9 @@ race_top:FastCache::Alpha::Close
     Case "case 12: an entry matching in two targets is RECONCILED, not a false mismatch" \
         "RECONCILED" 0 "each naming an issue" "$live" \
         "ThreadSanitizer: Matched 2 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 ThreadSanitizer: Matched 3 suppressions (pid=77):
-3 race_top:FastCache::Alpha::Close
+3 race_top:Pace::Alpha::Close
 "
 
     # And the arm still BITES across a concatenation -- a sum fix that stopped
@@ -463,9 +463,9 @@ ThreadSanitizer: Matched 3 suppressions (pid=77):
     Case "case 13: a genuine header/entry mismatch is still caught across two runs" \
         "FAIL" 1 "defect in how they are read here" "$live" \
         "ThreadSanitizer: Matched 2 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 ThreadSanitizer: Matched 9 suppressions (pid=77):
-3 race_top:FastCache::Alpha::Close
+3 race_top:Pace::Alpha::Close
 "
 
     # A defect in a LATER run's header -- targets two through four were never looked
@@ -477,9 +477,9 @@ ThreadSanitizer: Matched 9 suppressions (pid=77):
     Case "case 14: a mismatch in the SECOND run alone is caught" \
         "FAIL" 1 "defect in how they are read here" "$live" \
         "ThreadSanitizer: Matched 2 suppressions (pid=41):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 ThreadSanitizer: Matched 4 suppressions (pid=77):
-2 race_top:FastCache::Alpha::Close
+2 race_top:Pace::Alpha::Close
 "
 
     # And an entry alive in only ONE of the targets is alive: a dead entry is one that
@@ -487,9 +487,9 @@ ThreadSanitizer: Matched 4 suppressions (pid=77):
     Case "case 15: an entry matching in only one target is not dead" \
         "RECONCILED" 0 "each naming an issue" "$twoDead" \
         "ThreadSanitizer: Matched 1 suppressions (pid=41):
-1 race_top:FastCache::Alpha::Close
+1 race_top:Pace::Alpha::Close
 ThreadSanitizer: Matched 1 suppressions (pid=77):
-1 race_top:FastCache::Beta::Detach
+1 race_top:Pace::Beta::Detach
 "
 
     # 11 -- a missing file. The gate hands this path to TSan, so a run without it is a

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Core/Ed25519.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Core/Ed25519.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -13,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-#include <apps/fastcache-compile-node/NodeKey.hpp>
+#include <apps/pace-node/NodeKey.hpp>
 #include <tests/SecureRandomFakes.hpp>
 
 /// @file FoundedStateDirectory.hpp
@@ -24,7 +24,7 @@
 /// configuration they judged, which `main` has not resolved when it judges the record. This writes
 /// the KEY FILE and the RECORD the way a start does, and leaves the key to be found where a start
 /// finds it.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A cluster id spelled as a mint spells one, so `--fleet-id` parses it.
@@ -63,4 +63,4 @@ inline constexpr std::string_view FoundedClusterId = "0123456789abcdef0123456789
     return key->pair.PublicKey();
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

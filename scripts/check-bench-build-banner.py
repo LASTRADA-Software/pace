@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Watches `fastcache-bench` state the build its figures came from (#1439).
+"""Watches `pace-bench` state the build its figures came from (#1439).
 
 A timing is a quantity under conditions, and the condition that decides whether it is a
-cost at all is the build. `fastcache-bench` used to print nothing about that, and a Debug
+cost at all is the build. `pace-bench` used to print nothing about that, and a Debug
 bench prints a plausible number -- so while reviewing #1420 an MSVC `cl-release` log was
 read as "a Debug-build signature", and the only tell was the build directory's name.
 
@@ -47,7 +47,7 @@ something; if either fails, the check refuses naming ITSELF and says nothing abo
 binary.
 
 Usage:
-    python3 scripts/check-bench-build-banner.py --binary <path to fastcache-bench>
+    python3 scripts/check-bench-build-banner.py --binary <path to pace-bench>
 
 Exit:
     0   the binary states its build, marks every figure, and its XML is a document
@@ -65,10 +65,10 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
-#: The banner's first line. `RenderBuildBanner` in `src/apps/fastcache-bench/BuildBanner.cpp`
+#: The banner's first line. `RenderBuildBanner` in `src/apps/pace-bench/BuildBanner.cpp`
 #: spells it; a rename there is meant to fail here, because this string is the only thing
 #: that says the listener ran at all.
-BANNER_FIRST_LINE = "fastcache-bench: the build these figures come from"
+BANNER_FIRST_LINE = "pace-bench: the build these figures come from"
 
 #: The verdict line, whatever the verdict is. The three leading characters are the emphasis
 #: run `MarkerTable` carries per standing, so this pattern matches all three without pinning
@@ -77,7 +77,7 @@ VERDICT_LINE = re.compile(r"^[-!?]{3} these figures are (.+?) -- ", re.MULTILINE
 
 #: One line per figure, naming the mean. `[` is part of it: the marker is what tells a
 #: reader whether the number beside it may be quoted.
-FIGURE_LINE = re.compile(r"^fastcache-bench figure \[[^\]]+\]: .+: mean = ", re.MULTILINE)
+FIGURE_LINE = re.compile(r"^pace-bench figure \[[^\]]+\]: .+: mean = ", re.MULTILINE)
 
 #: What the banner must say about Catch2's two columns, because confusing them is half of
 #: #1439. Two separate needles rather than a sentence: the wording is allowed to change and
@@ -183,7 +183,7 @@ def prove_the_detector() -> list[str]:
 def check_run(binary: Path) -> list[str]:
     """Run the binary once and report everything about that run that is wrong.
 
-    :param binary: the `fastcache-bench` executable
+    :param binary: the `pace-bench` executable
     :return: a description per finding, empty when the run satisfies every rule
     """
     completed = subprocess.run(
@@ -312,13 +312,13 @@ def main() -> int:
     :return: the process exit status, as the module docstring describes it
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", required=True, type=Path, help="the fastcache-bench executable to run")
+    parser.add_argument("--binary", required=True, type=Path, help="the pace-bench executable to run")
     arguments = parser.parse_args()
 
     if not arguments.binary.exists():
         print(
             f"SKIP: {arguments.binary} does not exist, so the banner was not checked. Build the "
-            f"`fastcache-bench` target (FASTCACHED_BUILD_BENCHMARKS=ON) and run this again.",
+            f"`pace-bench` target (PACE_BUILD_BENCHMARKS=ON) and run this again.",
             file=sys.stderr,
         )
         return 77
@@ -336,15 +336,15 @@ def main() -> int:
         for finding in findings:
             print(f"  * {finding}", file=sys.stderr)
         print(
-            "\nThe rule: fastcache-bench states the build its figures came from, before any case runs, on "
+            "\nThe rule: pace-bench states the build its figures came from, before any case runs, on "
             "stderr, and marks every figure with what that build makes of it. "
-            "src/apps/fastcache-bench/BuildBanner.hpp carries the reasoning.",
+            "src/apps/pace-bench/BuildBanner.hpp carries the reasoning.",
             file=sys.stderr,
         )
         return 1
 
     print(
-        f"ok: fastcache-bench states its build on stderr, marks every figure, and its XML document parses "
+        f"ok: pace-bench states its build on stderr, marks every figure, and its XML document parses "
         f"with no mixed content (2 instrument controls passed first)"
     )
     return 0

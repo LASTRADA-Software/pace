@@ -19,18 +19,18 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-if(NOT IS_DIRECTORY "${FASTCACHED_SOURCE_DIR}")
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR is not a directory: ${FASTCACHED_SOURCE_DIR}")
+if(NOT IS_DIRECTORY "${PACE_SOURCE_DIR}")
+    message(FATAL_ERROR "PACE_SOURCE_DIR is not a directory: ${PACE_SOURCE_DIR}")
 endif()
 
 # Under `cmake -P` the module returns after its pure computations, so this brings
 # in the function without the launcher probing, the download and the possible
 # daemon start.
-include("${FASTCACHED_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
+include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 
 if(NOT COMMAND _fc_debug_prefix_map_rules)
     message(FATAL_ERROR
@@ -150,7 +150,7 @@ endif()
 
 set(SourceLayouts
     # This project's own: a checkout and a per-user CPM cache in the home directory.
-    "/co/src|/home/u/.cache/fastcached/cpm|/co/src/=,/home/u/.cache/fastcached/cpm/=deps/"
+    "/co/src|/home/u/.cache/pace/cpm|/co/src/=,/home/u/.cache/pace/cpm/=deps/"
     # No dependency cache: the source rule alone.
     "/co/src||/co/src/="
     # A cache INSIDE the checkout: both rules, the cache's last so it wins.

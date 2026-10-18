@@ -5,7 +5,7 @@
 #
 # The check's acquisition half needs a real CMake to spawn and its answer depends
 # on the machine, so the DECISION is split out behind
-# `FASTCACHED_FATAL_EXIT_READINGS` and only the decision is driven here -- the
+# `PACE_FATAL_EXIT_READINGS` and only the decision is driven here -- the
 # rule `.agent/rules/testing.md` states about a stand-in whose measurement is
 # comparable to the instrument's own overhead. Acquisition is left alone; it is
 # exercised by the check itself on every platform CI builds.
@@ -23,18 +23,18 @@
 # pattern is exactly right.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-fatal-error-exit-selftest.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-fatal-error-exit-selftest.cmake
 #
 # Exit codes: whatever CMake gives it; the verdict is read from the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message("CMake Error: FASTCACHED_SOURCE_DIR is required")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message("CMake Error: PACE_SOURCE_DIR is required")
     return()
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-fatal-error-exit.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-fatal-error-exit.cmake")
 if(NOT EXISTS "${check}")
     message("CMake Error: ${check} does not exist, so nothing was driven")
     return()
@@ -67,7 +67,7 @@ foreach(case IN LISTS cases)
     list(GET parts 2 want)
     string(REPLACE "," ";" readings "${readings}")
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_FATAL_EXIT_READINGS=${readings}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_FATAL_EXIT_READINGS=${readings}" -P "${check}"
         RESULT_VARIABLE status
         OUTPUT_VARIABLE out
         ERROR_VARIABLE err

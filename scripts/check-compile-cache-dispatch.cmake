@@ -3,14 +3,14 @@
 # Whether configure's `[cache] dispatch` line is TRUE of the build it generates, and whether the
 # two settings the configure environment SEEDS stay where a `-D` put them.
 #
-# fastcache-cc dispatches a miss to a compile fleet when `FASTCACHE_SCHEDULER` names one, and it
+# pace-cc dispatches a miss to a compile fleet when `PACE_SCHEDULER` names one, and it
 # read that only from the environment of whatever ran the build. So a developer who set it in one
 # shell and built from another got a build that compiled everything locally, with configure having
-# said only that fastcache-cc was the launcher: measured on a workstation, 341 misses and
+# said only that pace-cc was the launcher: measured on a workstation, 341 misses and
 # `NOT_CONFIGURED` on every one of them, found from a fleet dashboard reading 0 compiling.
 # `cmake/portable/CompileCache.cmake` now decides dispatch at configure, holds it in the cache,
 # bakes it into the launcher and says which way it decided (`_fc_hold_setting`,
-# `_fc_dispatch_state`). `FASTCACHE_ADDR` is held by the same rule: the environment seeds a tree
+# `_fc_dispatch_state`). `PACE_ADDR` is held by the same rule: the environment seeds a tree
 # with no entry, and a later difference is REPORTED and never applied, because a rule that let
 # the environment retarget a held value could not see a `-D` typing the value already held.
 #
@@ -20,14 +20,14 @@
 #   1. The DECISION, as a pure computation over every combination of a cache entry and the
 #      configure environment -- including the ones a shell cannot easily stage. A failure here is
 #      reported and half 2 still runs, so one broken function does not hide what the wiring does.
-#   2. The WIRING: the fixture project configured with a stand-in fastcache-cc, in sequences that
+#   2. The WIRING: the fixture project configured with a stand-in pace-cc, in sequences that
 #      reconfigure one build tree the ways a real one is reconfigured -- by hand with and without a
 #      `-D`, from shells that do and do not hold the variables, and by ninja's own regeneration --
 #      with the values every `LAUNCHER =` line of the generated build.ninja carries compared with
 #      the table AND with what the configure printed, directly.
 #
 # The stand-in is BUILT here, from a few lines of C++, rather than being a script: the module's
-# probe runs it as a program and requires `fastcache-cc: MISS key=` on stderr, and a shell script
+# probe runs it as a program and requires `pace-cc: MISS key=` on stderr, and a shell script
 # is not a program on Windows -- where this defect was measured. A toolchain that cannot build it
 # is reported with `SKIP: `, never as a verdict about the module.
 #
@@ -36,14 +36,14 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
 
 # Under `cmake -P` the module returns after its pure computations.
-include("${FASTCACHED_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
+include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 foreach(command _fc_hold_setting _fc_unapplied_note _fc_dispatch_state)
     if(NOT COMMAND ${command})
         message(FATAL_ERROR
@@ -59,35 +59,35 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 #
 # setting | cached | cacheValue | envPresent | envValue | expected value | fragment | about
 #
-# For FASTCACHE_SCHEDULER the fragment is looked for in the dispatch line. For FASTCACHE_ADDR it is
+# For PACE_SCHEDULER the fragment is looked for in the dispatch line. For PACE_ADDR it is
 # looked for in the unapplied-value note, and `<none>` means no note may be produced. `envValue`
 # is what the module passes: the raw scheduler, and for the address what `_fc_resolve_addr`
 # resolved -- the default when the name is absent. No fragment may hold a ';' (CheckCommon.cmake).
 set(decisionRows
-    "FASTCACHE_SCHEDULER|OFF||OFF|||dispatch: off (no FASTCACHE_SCHEDULER in the configure environment, and this build tree now holds that|first configure, nothing said anywhere: off, and it says how to turn it on"
-    "FASTCACHE_SCHEDULER|OFF||ON|10.0.0.9:6674|10.0.0.9:6674|dispatch: 10.0.0.9:6674 (configured, seeded from the configure environment|first configure: the environment seeds"
-    "FASTCACHE_SCHEDULER|ON|10.0.0.9:6674|OFF||10.0.0.9:6674|dispatch: 10.0.0.9:6674 (configured, held in this build tree's cache|a re-run from a shell WITHOUT the variable keeps it -- the measured failure"
-    "FASTCACHE_SCHEDULER|ON|10.0.0.9:6674|ON|10.0.0.5:6674|10.0.0.9:6674|the 10.0.0.5:6674 in the environment is NOT applied -- -DFASTCACHE_SCHEDULER=10.0.0.5:6674 retargets it|a NEW environment value is reported and never applied"
-    "FASTCACHE_SCHEDULER|ON|10.0.0.9:6674|ON|10.0.0.9:6674|10.0.0.9:6674|not probed -- each compile records DISPATCHED or DECLINED in invocations.log|the same environment value: nothing unapplied, and the line says it is configuration"
-    "FASTCACHE_SCHEDULER|ON|10.0.0.7:6674|ON|10.0.0.9:6674|10.0.0.7:6674|dispatch: 10.0.0.7:6674 (configured, held in this build tree's cache, where a -DFASTCACHE_SCHEDULER|a -D on the first configure outranks the environment"
-    "FASTCACHE_SCHEDULER|ON|10.0.0.5:6674|ON|10.0.0.1:6674|10.0.0.5:6674|dispatch: 10.0.0.5:6674 (configured, held|a -D equal to the value already held still outranks a new environment value -- measured retargeted before"
-    "FASTCACHE_SCHEDULER|ON||ON|10.0.0.9:6674||which outranks the 10.0.0.9:6674 in the environment|an EMPTY -D turns dispatch off whatever the environment says -- measured turning it ON before"
-    "FASTCACHE_SCHEDULER|ON||ON|10.0.0.9:6674||-DFASTCACHE_SCHEDULER=10.0.0.9:6674 turns it on)|an off that outranks the environment says how to take the environment's value"
-    "FASTCACHE_SCHEDULER|ON||OFF|||dispatch: off (FASTCACHE_SCHEDULER is empty in this build tree's cache|an off held from before, with nothing in the environment"
-    "FASTCACHE_ADDR|OFF||OFF|127.0.0.1:6674|127.0.0.1:6674|<none>|first configure without the name: the default seeds"
-    "FASTCACHE_ADDR|OFF||ON|||<none>|first configure with the name set but EMPTY: the opt-out seeds (#372)"
-    "FASTCACHE_ADDR|ON|127.0.0.1:6674|OFF|127.0.0.1:6674|127.0.0.1:6674|<none>|a shell without the name says nothing"
-    "FASTCACHE_ADDR|ON|127.0.0.1:6674|ON|10.0.0.5:6674|127.0.0.1:6674|[cache] FASTCACHE_ADDR is '10.0.0.5:6674' in the environment and NOT applied: this build tree holds '127.0.0.1:6674', and the environment only seeds a tree with no FASTCACHE_ADDR entry -- -DFASTCACHE_ADDR=10.0.0.5:6674 applies it|a later environment is reported, never applied"
-    "FASTCACHE_ADDR|ON||ON|10.0.0.5:6674||this build tree holds it empty|an opt-out -D outranks an address in the environment"
-    "FASTCACHE_ADDR|ON|10.0.0.5:6674|ON||10.0.0.5:6674|FASTCACHE_ADDR is set but empty in the environment and NOT applied|a set-but-empty environment does not opt a held tree out: -DFASTCACHE_ADDR= does"
-    "FASTCACHE_ADDR|ON|10.0.0.5:6674|ON|10.0.0.5:6674|10.0.0.5:6674|<none>|the same address in the environment is no difference"
+    "PACE_SCHEDULER|OFF||OFF|||dispatch: off (no PACE_SCHEDULER in the configure environment, and this build tree now holds that|first configure, nothing said anywhere: off, and it says how to turn it on"
+    "PACE_SCHEDULER|OFF||ON|10.0.0.9:6674|10.0.0.9:6674|dispatch: 10.0.0.9:6674 (configured, seeded from the configure environment|first configure: the environment seeds"
+    "PACE_SCHEDULER|ON|10.0.0.9:6674|OFF||10.0.0.9:6674|dispatch: 10.0.0.9:6674 (configured, held in this build tree's cache|a re-run from a shell WITHOUT the variable keeps it -- the measured failure"
+    "PACE_SCHEDULER|ON|10.0.0.9:6674|ON|10.0.0.5:6674|10.0.0.9:6674|the 10.0.0.5:6674 in the environment is NOT applied -- -DPACE_SCHEDULER=10.0.0.5:6674 retargets it|a NEW environment value is reported and never applied"
+    "PACE_SCHEDULER|ON|10.0.0.9:6674|ON|10.0.0.9:6674|10.0.0.9:6674|not probed -- each compile records DISPATCHED or DECLINED in invocations.log|the same environment value: nothing unapplied, and the line says it is configuration"
+    "PACE_SCHEDULER|ON|10.0.0.7:6674|ON|10.0.0.9:6674|10.0.0.7:6674|dispatch: 10.0.0.7:6674 (configured, held in this build tree's cache, where a -DPACE_SCHEDULER|a -D on the first configure outranks the environment"
+    "PACE_SCHEDULER|ON|10.0.0.5:6674|ON|10.0.0.1:6674|10.0.0.5:6674|dispatch: 10.0.0.5:6674 (configured, held|a -D equal to the value already held still outranks a new environment value -- measured retargeted before"
+    "PACE_SCHEDULER|ON||ON|10.0.0.9:6674||which outranks the 10.0.0.9:6674 in the environment|an EMPTY -D turns dispatch off whatever the environment says -- measured turning it ON before"
+    "PACE_SCHEDULER|ON||ON|10.0.0.9:6674||-DPACE_SCHEDULER=10.0.0.9:6674 turns it on)|an off that outranks the environment says how to take the environment's value"
+    "PACE_SCHEDULER|ON||OFF|||dispatch: off (PACE_SCHEDULER is empty in this build tree's cache|an off held from before, with nothing in the environment"
+    "PACE_ADDR|OFF||OFF|127.0.0.1:6674|127.0.0.1:6674|<none>|first configure without the name: the default seeds"
+    "PACE_ADDR|OFF||ON|||<none>|first configure with the name set but EMPTY: the opt-out seeds (#372)"
+    "PACE_ADDR|ON|127.0.0.1:6674|OFF|127.0.0.1:6674|127.0.0.1:6674|<none>|a shell without the name says nothing"
+    "PACE_ADDR|ON|127.0.0.1:6674|ON|10.0.0.5:6674|127.0.0.1:6674|[cache] PACE_ADDR is '10.0.0.5:6674' in the environment and NOT applied: this build tree holds '127.0.0.1:6674', and the environment only seeds a tree with no PACE_ADDR entry -- -DPACE_ADDR=10.0.0.5:6674 applies it|a later environment is reported, never applied"
+    "PACE_ADDR|ON||ON|10.0.0.5:6674||this build tree holds it empty|an opt-out -D outranks an address in the environment"
+    "PACE_ADDR|ON|10.0.0.5:6674|ON||10.0.0.5:6674|PACE_ADDR is set but empty in the environment and NOT applied|a set-but-empty environment does not opt a held tree out: -DPACE_ADDR= does"
+    "PACE_ADDR|ON|10.0.0.5:6674|ON|10.0.0.5:6674|10.0.0.5:6674|<none>|the same address in the environment is no difference"
 )
 
 # One row that must fail, for `compile-cache-dispatch-verdict` alone: it asks how a decision
 # failure is SCORED, which only a failing decision can answer. Nothing else sets this.
-if(FASTCACHED_DISPATCH_PLANT_DECISION_FAILURE)
+if(PACE_DISPATCH_PLANT_DECISION_FAILURE)
     list(APPEND decisionRows
-         "FASTCACHE_SCHEDULER|OFF||OFF|||a fragment no dispatch line holds|planted by compile-cache-dispatch-verdict")
+         "PACE_SCHEDULER|OFF||OFF|||a fragment no dispatch line holds|planted by compile-cache-dispatch-verdict")
 endif()
 
 # Where half 1's failures wait for half 2. Reported at every exit below; on an exit before the
@@ -99,7 +99,7 @@ set(decidedOn 0)
 set(decidedOff 0)
 set(decidedNotes 0)
 foreach(row IN LISTS decisionRows)
-    fastcached_row_fields("${row}" setting cached cacheValue envPresent envValue wantValue wantFragment about)
+    pace_row_fields("${row}" setting cached cacheValue envPresent envValue wantValue wantFragment about)
     _fc_hold_setting("${cached}" "${cacheValue}" "${envPresent}" "${envValue}" gotValue gotSeeded gotUnapplied)
     math(EXPR decisions "${decisions} + 1")
 
@@ -110,7 +110,7 @@ foreach(row IN LISTS decisionRows)
         list(APPEND decisionFailures "${setting} '${about}': reports a value it held as seeded")
     endif()
 
-    if(setting STREQUAL "FASTCACHE_SCHEDULER")
+    if(setting STREQUAL "PACE_SCHEDULER")
         _fc_dispatch_state("${gotValue}" "${gotSeeded}" "${gotUnapplied}" "${envValue}" gotLine gotEntry)
         # One prefix for both states, so a reader or a script looking for `[cache] dispatch:` finds
         # the line whichever way the configure decided.
@@ -121,9 +121,9 @@ foreach(row IN LISTS decisionRows)
         endif()
         # The claim and the artefact from one value: the entry is baked in BOTH states, empty when
         # off, which is what stops the build's environment turning on a dispatch said to be off.
-        if(NOT "${gotEntry}" STREQUAL "FASTCACHE_SCHEDULER=${wantValue}")
+        if(NOT "${gotEntry}" STREQUAL "PACE_SCHEDULER=${wantValue}")
             list(APPEND decisionFailures
-                 "${setting} '${about}': bakes '${gotEntry}', expected 'FASTCACHE_SCHEDULER=${wantValue}'")
+                 "${setting} '${about}': bakes '${gotEntry}', expected 'PACE_SCHEDULER=${wantValue}'")
         endif()
         if("${wantValue}" STREQUAL "")
             math(EXPR decidedOff "${decidedOff} + 1")
@@ -181,31 +181,31 @@ endmacro()
 # ---------------------------------------------------------------------------
 # Half 2: the wiring.
 
-set(fixtureDir "${FASTCACHED_SOURCE_DIR}/src/tests/compile-cache-fixture")
-set(moduleDir "${FASTCACHED_SOURCE_DIR}/cmake/portable")
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    set(wiringUnmeasured "no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+set(fixtureDir "${PACE_SOURCE_DIR}/src/tests/compile-cache-fixture")
+set(moduleDir "${PACE_SOURCE_DIR}/cmake/portable")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    set(wiringUnmeasured "no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     EndWithoutWiring()
 endif()
 
-set(commonArguments "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}")
-if(FASTCACHED_MAKE_PROGRAM)
-    list(APPEND commonArguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+set(commonArguments "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}")
+if(PACE_MAKE_PROGRAM)
+    list(APPEND commonArguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
 endif()
-if(FASTCACHED_GENERATOR)
-    list(APPEND commonArguments -G "${FASTCACHED_GENERATOR}")
+if(PACE_GENERATOR)
+    list(APPEND commonArguments -G "${PACE_GENERATOR}")
 endif()
 
 # The stand-in: a program that reports a cache miss and exits 0, which is everything the module's
-# probe asks of fastcache-cc. It is never run by a build -- nothing here builds the fixture.
-set(standInSource "${FASTCACHED_SCRATCH_DIR}/stand-in")
-set(standInBuild "${FASTCACHED_SCRATCH_DIR}/stand-in-build")
+# probe asks of pace-cc. It is never run by a build -- nothing here builds the fixture.
+set(standInSource "${PACE_SCRATCH_DIR}/stand-in")
+set(standInBuild "${PACE_SCRATCH_DIR}/stand-in-build")
 file(REMOVE_RECURSE "${standInSource}" "${standInBuild}")
 file(WRITE "${standInSource}/CMakeLists.txt"
-     "cmake_minimum_required(VERSION 3.28)\nproject(fastcache-cc-stand-in LANGUAGES CXX)\n"
-     "add_executable(fastcache-cc-stand-in main.cpp)\n")
+     "cmake_minimum_required(VERSION 3.28)\nproject(pace-cc-stand-in LANGUAGES CXX)\n"
+     "add_executable(pace-cc-stand-in main.cpp)\n")
 file(WRITE "${standInSource}/main.cpp"
-     "#include <cstdio>\nint main() { std::fputs(\"fastcache-cc: MISS key=dispatch-stand-in\\n\", stderr); return 0; }\n")
+     "#include <cstdio>\nint main() { std::fputs(\"pace-cc: MISS key=dispatch-stand-in\\n\", stderr); return 0; }\n")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${standInSource}" -B "${standInBuild}" ${commonArguments}
     RESULT_VARIABLE standInConfigured OUTPUT_VARIABLE standInOutput ERROR_VARIABLE standInError TIMEOUT 300)
@@ -218,12 +218,12 @@ else()
 endif()
 # One traversal, filtered: a GLOB_RECURSE with two patterns walks the tree twice (#502).
 file(GLOB_RECURSE standInCandidates LIST_DIRECTORIES false "${standInBuild}/*")
-list(FILTER standInCandidates INCLUDE REGEX "/fastcache-cc-stand-in(\\.exe)?$")
+list(FILTER standInCandidates INCLUDE REGEX "/pace-cc-stand-in(\\.exe)?$")
 if(NOT standInBuilt EQUAL 0 OR NOT standInCandidates)
     # Not a verdict: a Windows shell that is not a Developer shell has a cl.exe that cannot compile.
     string(REPLACE "CMake Error" "CMake-Error" standInReport "${standInOutput}${standInError}")
     string(REPLACE "CMake Warning" "CMake-Warning" standInReport "${standInReport}")
-    string(CONCAT wiringUnmeasured "the stand-in fastcache-cc does not build with this toolchain (${standInBuilt}), "
+    string(CONCAT wiringUnmeasured "the stand-in pace-cc does not build with this toolchain (${standInBuilt}), "
                   "so no configure below would be measuring the module:\n${standInReport}")
     EndWithoutWiring()
 endif()
@@ -291,7 +291,7 @@ endfunction()
 #                `build.ninja` is built, which is the path a CMakeLists.txt edit takes mid-build).
 #   environment  `NAME=value` items, space-separated, or `-`. Both settings are UNSET unless named
 #                here: the process running ctest may well hold one, and this project's own build
-#                instructions set FASTCACHE_SCHEDULER.
+#                instructions set PACE_SCHEDULER.
 #   defines      `NAME=value` items passed as `-D`, value possibly empty, or `-`. A regenerate row
 #                takes none, since ninja passes none.
 #   wired        What every LAUNCHER line must carry; `<empty>` for a present, empty value.
@@ -299,29 +299,29 @@ endfunction()
 #
 # The `again` and `regenerate` rows are the ones that matter most, because every defect this
 # module has had here lived in a SECOND configure: ninja's re-run turning dispatch off, a retarget
-# turning an explicit `-DFASTCACHE_SCHEDULER=` back on, and the bookkeeping a retarget needed never
+# turning an explicit `-DPACE_SCHEDULER=` back on, and the bookkeeping a retarget needed never
 # being written.
 set(wiringRows
-    "unset-is-off|fresh|-|FASTCACHE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|dispatch: off (no FASTCACHE_SCHEDULER in the configure environment"
-    "environment-seeds|fresh|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1|10.0.0.9:6674|127.0.0.1:1|dispatch: 10.0.0.9:6674 (configured, seeded from the configure environment"
-    "rerun-without-it-keeps-it|again|-|FASTCACHE_ADDR=127.0.0.1:1|10.0.0.9:6674|127.0.0.1:1|dispatch: 10.0.0.9:6674 (configured, held in this build tree's cache"
+    "unset-is-off|fresh|-|PACE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|dispatch: off (no PACE_SCHEDULER in the configure environment"
+    "environment-seeds|fresh|PACE_SCHEDULER=10.0.0.9:6674|PACE_ADDR=127.0.0.1:1|10.0.0.9:6674|127.0.0.1:1|dispatch: 10.0.0.9:6674 (configured, seeded from the configure environment"
+    "rerun-without-it-keeps-it|again|-|PACE_ADDR=127.0.0.1:1|10.0.0.9:6674|127.0.0.1:1|dispatch: 10.0.0.9:6674 (configured, held in this build tree's cache"
     "ninja-regeneration-without-it-keeps-it|regenerate|-|-|10.0.0.9:6674|127.0.0.1:1|dispatch: 10.0.0.9:6674 (configured, held in this build tree's cache"
-    "a-new-environment-is-reported-not-applied|again|FASTCACHE_SCHEDULER=10.0.0.5:6674|FASTCACHE_ADDR=127.0.0.1:1|10.0.0.9:6674|127.0.0.1:1|-DFASTCACHE_SCHEDULER=10.0.0.5:6674 retargets it"
-    "a-define-retargets|again|FASTCACHE_SCHEDULER=10.0.0.5:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=10.0.0.5:6674|10.0.0.5:6674|127.0.0.1:1|dispatch: 10.0.0.5:6674 (configured, held"
-    "a-define-equal-to-the-held-value-outranks-the-environment|again|FASTCACHE_SCHEDULER=10.0.0.1:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=10.0.0.5:6674|10.0.0.5:6674|127.0.0.1:1|the 10.0.0.1:6674 in the environment is NOT applied"
-    "a-held-define-survives-a-rerun-with-the-environment|again|FASTCACHE_SCHEDULER=10.0.0.1:6674|FASTCACHE_ADDR=127.0.0.1:1|10.0.0.5:6674|127.0.0.1:1|dispatch: 10.0.0.5:6674 (configured, held"
-    "a-held-define-survives-ninja-regeneration-with-the-environment|regenerate|FASTCACHE_SCHEDULER=10.0.0.1:6674|-|10.0.0.5:6674|127.0.0.1:1|the 10.0.0.1:6674 in the environment is NOT applied"
-    "empty-define-turns-it-off|again|FASTCACHE_SCHEDULER=10.0.0.5:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=|<empty>|127.0.0.1:1|which outranks the 10.0.0.5:6674 in the environment"
-    "off-survives-a-rerun-with-the-environment|again|FASTCACHE_SCHEDULER=10.0.0.5:6674|FASTCACHE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|-DFASTCACHE_SCHEDULER=10.0.0.5:6674 turns it on)"
-    "measured-an-off-tree|fresh|-|FASTCACHE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|dispatch: off (no FASTCACHE_SCHEDULER in the configure environment"
-    "measured-stays-off-under-an-empty-define-from-a-shell-with-it|again|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=|<empty>|127.0.0.1:1|which outranks the 10.0.0.9:6674 in the environment"
-    "measured-stays-off-without-a-define-from-a-shell-with-it|again|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|which outranks the 10.0.0.9:6674 in the environment"
-    "a-define-outranks-the-environment-on-a-first-configure|fresh|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=10.0.0.7:6674|10.0.0.7:6674|127.0.0.1:1|dispatch: 10.0.0.7:6674 (configured, held in this build tree's cache, where a -DFASTCACHE_SCHEDULER"
-    "address-seeded-from-the-environment|fresh|FASTCACHE_ADDR=127.0.0.1:2|-|<empty>|127.0.0.1:2|Enabling fastcache-cc"
-    "address-held-over-a-new-environment|again|FASTCACHE_ADDR=127.0.0.1:3|-|<empty>|127.0.0.1:2|[cache] FASTCACHE_ADDR is '127.0.0.1:3' in the environment and NOT applied: this build tree holds '127.0.0.1:2'"
-    "address-define-equal-to-the-held-value-outranks-the-environment|again|FASTCACHE_ADDR=127.0.0.1:3|FASTCACHE_ADDR=127.0.0.1:2|<empty>|127.0.0.1:2|-DFASTCACHE_ADDR=127.0.0.1:3 applies it"
-    "address-held-over-ninja-regeneration-with-another|regenerate|FASTCACHE_ADDR=127.0.0.1:4|-|<empty>|127.0.0.1:2|[cache] FASTCACHE_ADDR is '127.0.0.1:4' in the environment and NOT applied"
-    "address-define-retargets|again|FASTCACHE_ADDR=127.0.0.1:4|FASTCACHE_ADDR=127.0.0.1:4|<empty>|127.0.0.1:4|Enabling fastcache-cc"
+    "a-new-environment-is-reported-not-applied|again|PACE_SCHEDULER=10.0.0.5:6674|PACE_ADDR=127.0.0.1:1|10.0.0.9:6674|127.0.0.1:1|-DPACE_SCHEDULER=10.0.0.5:6674 retargets it"
+    "a-define-retargets|again|PACE_SCHEDULER=10.0.0.5:6674|PACE_ADDR=127.0.0.1:1 PACE_SCHEDULER=10.0.0.5:6674|10.0.0.5:6674|127.0.0.1:1|dispatch: 10.0.0.5:6674 (configured, held"
+    "a-define-equal-to-the-held-value-outranks-the-environment|again|PACE_SCHEDULER=10.0.0.1:6674|PACE_ADDR=127.0.0.1:1 PACE_SCHEDULER=10.0.0.5:6674|10.0.0.5:6674|127.0.0.1:1|the 10.0.0.1:6674 in the environment is NOT applied"
+    "a-held-define-survives-a-rerun-with-the-environment|again|PACE_SCHEDULER=10.0.0.1:6674|PACE_ADDR=127.0.0.1:1|10.0.0.5:6674|127.0.0.1:1|dispatch: 10.0.0.5:6674 (configured, held"
+    "a-held-define-survives-ninja-regeneration-with-the-environment|regenerate|PACE_SCHEDULER=10.0.0.1:6674|-|10.0.0.5:6674|127.0.0.1:1|the 10.0.0.1:6674 in the environment is NOT applied"
+    "empty-define-turns-it-off|again|PACE_SCHEDULER=10.0.0.5:6674|PACE_ADDR=127.0.0.1:1 PACE_SCHEDULER=|<empty>|127.0.0.1:1|which outranks the 10.0.0.5:6674 in the environment"
+    "off-survives-a-rerun-with-the-environment|again|PACE_SCHEDULER=10.0.0.5:6674|PACE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|-DPACE_SCHEDULER=10.0.0.5:6674 turns it on)"
+    "measured-an-off-tree|fresh|-|PACE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|dispatch: off (no PACE_SCHEDULER in the configure environment"
+    "measured-stays-off-under-an-empty-define-from-a-shell-with-it|again|PACE_SCHEDULER=10.0.0.9:6674|PACE_ADDR=127.0.0.1:1 PACE_SCHEDULER=|<empty>|127.0.0.1:1|which outranks the 10.0.0.9:6674 in the environment"
+    "measured-stays-off-without-a-define-from-a-shell-with-it|again|PACE_SCHEDULER=10.0.0.9:6674|PACE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|which outranks the 10.0.0.9:6674 in the environment"
+    "a-define-outranks-the-environment-on-a-first-configure|fresh|PACE_SCHEDULER=10.0.0.9:6674|PACE_ADDR=127.0.0.1:1 PACE_SCHEDULER=10.0.0.7:6674|10.0.0.7:6674|127.0.0.1:1|dispatch: 10.0.0.7:6674 (configured, held in this build tree's cache, where a -DPACE_SCHEDULER"
+    "address-seeded-from-the-environment|fresh|PACE_ADDR=127.0.0.1:2|-|<empty>|127.0.0.1:2|Enabling pace-cc"
+    "address-held-over-a-new-environment|again|PACE_ADDR=127.0.0.1:3|-|<empty>|127.0.0.1:2|[cache] PACE_ADDR is '127.0.0.1:3' in the environment and NOT applied: this build tree holds '127.0.0.1:2'"
+    "address-define-equal-to-the-held-value-outranks-the-environment|again|PACE_ADDR=127.0.0.1:3|PACE_ADDR=127.0.0.1:2|<empty>|127.0.0.1:2|-DPACE_ADDR=127.0.0.1:3 applies it"
+    "address-held-over-ninja-regeneration-with-another|regenerate|PACE_ADDR=127.0.0.1:4|-|<empty>|127.0.0.1:2|[cache] PACE_ADDR is '127.0.0.1:4' in the environment and NOT applied"
+    "address-define-retargets|again|PACE_ADDR=127.0.0.1:4|PACE_ADDR=127.0.0.1:4|<empty>|127.0.0.1:4|Enabling pace-cc"
 )
 
 set(violations "")
@@ -329,9 +329,9 @@ set(wiringRowsRead 0)
 set(regenerated 0)
 set(freshTrees 0)
 foreach(row IN LISTS wiringRows)
-    fastcached_row_fields("${row}" name step environment defines wantScheduler wantAddress wantFragment)
+    pace_row_fields("${row}" name step environment defines wantScheduler wantAddress wantFragment)
 
-    set(environmentArguments "--unset=FASTCACHE_SCHEDULER" "--unset=FASTCACHE_ADDR")
+    set(environmentArguments "--unset=PACE_SCHEDULER" "--unset=PACE_ADDR")
     if(NOT environment STREQUAL "-")
         string(REPLACE " " ";" assignments "${environment}")
         list(APPEND environmentArguments ${assignments})
@@ -348,7 +348,7 @@ foreach(row IN LISTS wiringRows)
         # Numbered, not named: a row name is a sentence, and a tree under it put the compiler
         # check's own scratch objects past MAX_PATH on Windows, failing the configure (measured).
         math(EXPR freshTrees "${freshTrees} + 1")
-        set(binaryDir "${FASTCACHED_SCRATCH_DIR}/tree${freshTrees}")
+        set(binaryDir "${PACE_SCRATCH_DIR}/tree${freshTrees}")
         file(REMOVE_RECURSE "${binaryDir}")
     elseif(NOT DEFINED binaryDir OR NOT (step STREQUAL "again" OR step STREQUAL "regenerate"))
         message(FATAL_ERROR "wiring row ${name}: step '${step}' is not fresh, nor again or regenerate after a fresh row")
@@ -366,8 +366,8 @@ foreach(row IN LISTS wiringRows)
     else()
         set(command "${CMAKE_COMMAND}" -S "${fixtureDir}" -B "${binaryDir}"
                     ${commonArguments}
-                    "-DFASTCACHED_MODULE_DIR=${moduleDir}"
-                    "-DFASTCACHE_CC=${standIn}" "-DSCCACHE=" "-DCCACHE="
+                    "-DPACE_MODULE_DIR=${moduleDir}"
+                    "-DPACE_CC=${standIn}" "-DSCCACHE=" "-DCCACHE="
                     ${defineArguments})
     endif()
     execute_process(
@@ -386,7 +386,7 @@ foreach(row IN LISTS wiringRows)
         list(APPEND violations "${name}: ${step} failed (${configured}); the module must never fail a configure\n${echoed}")
         continue()
     endif()
-    string(FIND "${output}" "Enabling fastcache-cc" enabledAt)
+    string(FIND "${output}" "Enabling pace-cc" enabledAt)
     if(enabledAt EQUAL -1)
         list(APPEND violations "${name}: no configure that took the stand-in as the launcher ran (a regeneration "
                                "ninja did not perform, or the row was not taken), so nothing below measures it\n${echoed}")
@@ -401,8 +401,8 @@ foreach(row IN LISTS wiringRows)
         list(APPEND violations "${name}: expected the output to contain \"${wantFragment}\"\n${echoed}")
     endif()
 
-    LauncherValues("${binaryDir}" FASTCACHE_SCHEDULER wiredScheduler lines)
-    LauncherValues("${binaryDir}" FASTCACHE_ADDR wiredAddress addressLines)
+    LauncherValues("${binaryDir}" PACE_SCHEDULER wiredScheduler lines)
+    LauncherValues("${binaryDir}" PACE_ADDR wiredAddress addressLines)
     if(lines EQUAL 0)
         list(APPEND violations "${name}: no LAUNCHER line in ${binaryDir}/build.ninja to read (another generator, "
                                "or no compile edge): the wiring is UNREAD, which is not the same as unwired")
@@ -411,17 +411,17 @@ foreach(row IN LISTS wiringRows)
     math(EXPR wiringRowsRead "${wiringRowsRead} + 1")
     if(NOT "${wiredScheduler}" STREQUAL "${wantScheduler}")
         list(APPEND violations
-             "${name}: the ${lines} LAUNCHER line(s) carry FASTCACHE_SCHEDULER [${wiredScheduler}], the table expects [${wantScheduler}]")
+             "${name}: the ${lines} LAUNCHER line(s) carry PACE_SCHEDULER [${wiredScheduler}], the table expects [${wantScheduler}]")
     endif()
     if(NOT "${wiredAddress}" STREQUAL "${wantAddress}")
         list(APPEND violations
-             "${name}: the ${lines} LAUNCHER line(s) carry FASTCACHE_ADDR [${wiredAddress}], the table expects [${wantAddress}]")
+             "${name}: the ${lines} LAUNCHER line(s) carry PACE_ADDR [${wiredAddress}], the table expects [${wantAddress}]")
     endif()
     # The claim against the artefact, with the table out of it.
     DispatchClaim("${output}" claimed)
     if(NOT "${claimed}" STREQUAL "${wiredScheduler}")
         list(APPEND violations
-             "${name}: configure CLAIMED dispatch [${claimed}] and the LAUNCHER line(s) carry FASTCACHE_SCHEDULER "
+             "${name}: configure CLAIMED dispatch [${claimed}] and the LAUNCHER line(s) carry PACE_SCHEDULER "
              "[${wiredScheduler}]\n${echoed}")
     endif()
 endforeach()

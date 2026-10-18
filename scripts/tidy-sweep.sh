@@ -38,7 +38,7 @@
 # declares, as the PyPI wheel it names (#1404), into the site this script and
 # `local-gate.sh` look in when `TIDY` is unset:
 #
-#   python3 -m pip install --target "${XDG_DATA_HOME:-$HOME/.local/share}/fastcached/clang-tidy/<version>" \
+#   python3 -m pip install --target "${XDG_DATA_HOME:-$HOME/.local/share}/pace/clang-tidy/<version>" \
 #       "$(bash scripts/check-clang-tidy-version.sh --requirement)"
 #
 # A host whose python3 has no pip can unzip the wheel into that directory instead
@@ -51,8 +51,8 @@
 # with CI's own flags, into a directory of its own:
 #
 #   cmake --preset clang-debug -B out/build/tidy22 -DENABLE_TIDY=OFF \
-#         -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON \
-#         -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+#         -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON \
+#         -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 #
 # That line is the `clang-tidy` job's `Configure` step verbatim plus `-B`, and
 # `check-tidy-sweep-database.sh` asserts it stays that way. It is deliberately NOT
@@ -517,9 +517,9 @@ declare -A includers=()
 
 # Build the reverse include graph over a set of first-party files.
 #
-# An include spelling is resolved by longest path SUFFIX, so `<FastCache/Core/
+# An include spelling is resolved by longest path SUFFIX, so `<Pace/Core/
 # Logger.hpp>`, `"Core/Logger.hpp"` and `"Logger.hpp"` all reach
-# `src/FastCache/Core/Logger.hpp` without this script having to know a single
+# `src/Pace/Core/Logger.hpp` without this script having to know a single
 # include directory. An ambiguous suffix resolves to every candidate, and a
 # spelling that resolves to nothing is a system header and is dropped -- both
 # failure directions land on "sweep more", which is the safe one.
@@ -1394,12 +1394,12 @@ SelfTest() {
     }
     ExpectForce ".clang-tidy" yes
     ExpectForce "cmake/portable/CompileCache.cmake" yes
-    ExpectForce "src/FastCache/CMakeLists.txt" yes
+    ExpectForce "src/Pace/CMakeLists.txt" yes
     ExpectForce "scripts/tidy-sweep.sh" yes
-    ExpectForce "src/FastCache/Core/Version.hpp.in" yes
+    ExpectForce "src/Pace/Core/Version.hpp.in" yes
     ExpectForce "vcpkg.json" yes
-    ExpectForce "src/FastCache/Core/Logger.hpp" no
-    ExpectForce "src/FastCache/Core/Logger.cpp" no
+    ExpectForce "src/Pace/Core/Logger.hpp" no
+    ExpectForce "src/Pace/Core/Logger.cpp" no
     ExpectForce "README.md" no
     ExpectForce ".agent/rules/testing.md" no
 
@@ -1774,9 +1774,9 @@ STUB
     # that only recognised `/` would refuse the very run that proves the filter works.
     local hdrSib="TidyHeaderCanarySibling.hpp" hdrInc="TidyHeaderCanaryIncluded.hpp"
     local winSib="C:\\Temp\\tmp.x\\header-canary\\src\\tests\\${hdrSib}:4:12: error: invalid case style for global variable ${SQ}g_siblingCanary${SQ} [readability-identifier-naming,-warnings-as-errors]"
-    local winInc="C:/Temp/tmp.x/header-canary/src\\FastCache/${hdrInc}:4:12: error: invalid case style for global variable ${SQ}g_includedCanary${SQ} [readability-identifier-naming,-warnings-as-errors]"
+    local winInc="C:/Temp/tmp.x/header-canary/src\\Pace/${hdrInc}:4:12: error: invalid case style for global variable ${SQ}g_includedCanary${SQ} [readability-identifier-naming,-warnings-as-errors]"
     local posixSib="/tmp/tmp.x/header-canary/src/tests/${hdrSib}:4:12: warning: invalid case style for global variable ${SQ}g_siblingCanary${SQ} [readability-identifier-naming]"
-    local posixInc="/tmp/tmp.x/header-canary/src/FastCache/${hdrInc}:4:12: warning: invalid case style for global variable ${SQ}g_includedCanary${SQ} [readability-identifier-naming]"
+    local posixInc="/tmp/tmp.x/header-canary/src/Pace/${hdrInc}:4:12: warning: invalid case style for global variable ${SQ}g_includedCanary${SQ} [readability-identifier-naming]"
     local suppressed="Suppressed 2 warnings (2 in non-user code)."
     Expect "both header findings reported with Windows spellings pass the header canary" \
            "ok" "$(HeaderCanaryVerdict 1 "2 warnings generated.
@@ -1813,7 +1813,7 @@ ${winInc}" "$hdrSib" "$hdrInc")"
     Expect "another check's finding at the header does not count either" \
            "unreported ${hdrInc}" \
            "$(HeaderCanaryVerdict 1 "${winSib}
-C:/Temp/src\\FastCache/${hdrInc}:4:1: error: variable is non-const [cppcoreguidelines-avoid-non-const-global-variables,-warnings-as-errors]" "$hdrSib" "$hdrInc")"
+C:/Temp/src\\Pace/${hdrInc}:4:1: error: variable is non-const [cppcoreguidelines-avoid-non-const-global-variables,-warnings-as-errors]" "$hdrSib" "$hdrInc")"
     # The configuration never read is its own outcome, not `unreported`: it is what a
     # path the analyser could not open looks like, and it exits 1 with nothing else said.
     Expect "an unreadable --config-file is config-unread, never unreported" \
@@ -1872,12 +1872,12 @@ C:/Temp/src\\FastCache/${hdrInc}:4:1: error: variable is non-const [cppcoreguide
     # The generated-sources step asks for exactly the object-order phonies, once each,
     # and nothing else: not `all`, which would compile the tree, and not an object.
     Expect "the object-order phony targets are selected, once each, and nothing else" \
-           "cmake_object_order_depends_target_FastCache cmake_object_order_depends_target_unicode_ucd" \
+           "cmake_object_order_depends_target_Pace cmake_object_order_depends_target_unicode_ucd" \
            "$(ObjectOrderTargets "$(printf '%s\n' \
                'cmake_object_order_depends_target_unicode_ucd: phony' \
                'all: phony' \
-               'CMakeFiles/FastCache.dir/src/FastCache/Core/Base64.cpp.o: CXX_COMPILER__FastCache_unscanned_Debug' \
-               'cmake_object_order_depends_target_FastCache: phony' \
+               'CMakeFiles/Pace.dir/src/Pace/Core/Base64.cpp.o: CXX_COMPILER__Pace_unscanned_Debug' \
+               'cmake_object_order_depends_target_Pace: phony' \
                'cmake_object_order_depends_target_unicode_ucd: phony')" | tr '\n' ' ' | sed 's/ $//')"
     Expect "a listing with no object-order phony selects nothing, which the step refuses" \
            "" "$(ObjectOrderTargets "$(printf 'all: phony\nclean: CLEAN\n')")"
@@ -1984,7 +1984,7 @@ trap "rm -rf '$scratch'" EXIT
 # The unit of work is a COMPILE COMMAND, not a file, and that is what keeps this
 # equivalent to the build-driven tidy it replaced. A source compiled into two
 # targets is two translation units with two preprocessor states -- `Stats.cpp`
-# builds into `fastcache-cc`, `fastcache-cc-tests` and `fastcache-compile-node`,
+# builds into `pace-cc`, `pace-cc-tests` and `pace-node`,
 # and those targets do not agree about `FC_COMPRESSION_ENABLED` -- so one
 # invocation per file would silently stop checking the other configurations.
 #
@@ -2106,7 +2106,7 @@ PLAN
 # being believed, and a sweep with no units earns no verdict.
 Canary() {
     local probe_file probe probe_rc verdict
-    probe_file="$(git ls-files 'src/FastCache/Core/*.cpp' | head -1)"
+    probe_file="$(git ls-files 'src/Pace/Core/*.cpp' | head -1)"
     [[ -n "$probe_file" ]] || fatal "no probe file to canary against"
     probe="$("$TIDY" -p "$DB" --quiet "$probe_file" 2>&1)"
     probe_rc=$?
@@ -2126,7 +2126,7 @@ Canary() {
 # each holding a naming violation, reached the two ways clang builds a header path:
 # `TidyHeaderCanarySibling.hpp` by a quote include beside the unit (on Windows,
 # `...\src\tests\TidyHeaderCanarySibling.hpp`) and `TidyHeaderCanaryIncluded.hpp` through
-# `-I<root>/src` and `<FastCache/...>` (on Windows, `...\src\FastCache/...`, the mixed
+# `-I<root>/src` and `<Pace/...>` (on Windows, `...\src\Pace/...`, the mixed
 # spelling). Both must be REPORTED under this tree's own `.clang-tidy`, or the sweep
 # stops: a clean verdict from a run that discards every header finding is a claim about
 # no header at all. Measured with the pinned clang-tidy, natively on Windows from Git
@@ -2142,13 +2142,13 @@ Canary() {
 # includes nothing else, and the header filter is a question about PATHS.
 HeaderCanary() {
     local canary="${scratch}/header-canary" probe probe_rc verdict
-    mkdir -p "${canary}/src/tests" "${canary}/src/FastCache" \
+    mkdir -p "${canary}/src/tests" "${canary}/src/Pace" \
         || fatal "cannot create the header canary's scratch tree"
-    printf '#pragma once\nnamespace FastCache::TidyHeaderCanary\n{\ninline int g_siblingCanary = 0;\n}\n' \
+    printf '#pragma once\nnamespace Pace::TidyHeaderCanary\n{\ninline int g_siblingCanary = 0;\n}\n' \
         > "${canary}/src/tests/TidyHeaderCanarySibling.hpp"
-    printf '#pragma once\nnamespace FastCache::TidyHeaderCanary\n{\ninline int g_includedCanary = 0;\n}\n' \
-        > "${canary}/src/FastCache/TidyHeaderCanaryIncluded.hpp"
-    printf '#include "TidyHeaderCanarySibling.hpp"\n#include <FastCache/TidyHeaderCanaryIncluded.hpp>\n' \
+    printf '#pragma once\nnamespace Pace::TidyHeaderCanary\n{\ninline int g_includedCanary = 0;\n}\n' \
+        > "${canary}/src/Pace/TidyHeaderCanaryIncluded.hpp"
+    printf '#include "TidyHeaderCanarySibling.hpp"\n#include <Pace/TidyHeaderCanaryIncluded.hpp>\n' \
         > "${canary}/src/tests/TidyHeaderCanary.cpp"
     # Colour off: `.clang-tidy` turns it on, and an escape sequence between a path and
     # `error:` is a finding the verdict cannot see -- measured, it refused a run that

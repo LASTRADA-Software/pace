@@ -80,9 +80,9 @@
 # `e2e_begin` after the EXIT trap, because it installs a TERM trap whose whole
 # purpose is to let the EXIT trap run (see `fail`).
 #
-# And a fixture exports its OWN `FASTCACHE_*` settings AFTER sourcing this file,
+# And a fixture exports its OWN `PACE_*` settings AFTER sourcing this file,
 # because sourcing it clears every one it inherited -- see
-# `e2e_scrub_fastcache_environment` below.
+# `e2e_scrub_pace_environment` below.
 
 # The text every failure message is prefixed with, so a suite log says which
 # fixture stopped. Set by `e2e_begin`.
@@ -113,14 +113,14 @@ _e2e_on_fail=""
 _e2e_wait_seconds=20
 
 # ---------------------------------------------------------------------------
-# A fixture inherits no FASTCACHE_* setting
+# A fixture inherits no PACE_* setting
 # ---------------------------------------------------------------------------
 #
-# The launcher, fastcached and the node read their whole configuration from
-# FASTCACHE_* variables, so one this shell inherited decides what a fixture
-# measures: an operator's FASTCACHE_SCHEDULER dispatches each "local" compile to
+# The launcher, pace-kv and the node read their whole configuration from
+# PACE_* variables, so one this shell inherited decides what a fixture
+# measures: an operator's PACE_SCHEDULER dispatches each "local" compile to
 # their fleet, whose objects name a worker's scratch directory instead of the
-# fixture's checkout, and FASTCACHE_VERIFY or FASTCACHE_NO_DIRECT changes the
+# fixture's checkout, and PACE_VERIFY or PACE_NO_DIRECT changes the
 # outcome a case asserts. A fixture sets what it means and inherits nothing.
 #
 # So SOURCING this file clears them, and every fixture gets that by construction.
@@ -134,17 +134,17 @@ _e2e_wait_seconds=20
 # would silently turn the knob off. A row here is a claim that nothing this project
 # ships reads the name -- a launcher setting must never be added.
 #
-#   FASTCACHE_TSAN_TIMEOUT  `tsan-gate.sh`'s per-target bound, read after it
+#   PACE_TSAN_TIMEOUT  `tsan-gate.sh`'s per-target bound, read after it
 #                           sources this file.
-E2eInheritedKnobs="FASTCACHE_TSAN_TIMEOUT"
+E2eInheritedKnobs="PACE_TSAN_TIMEOUT"
 
-# Unset every FASTCACHE_* variable in this shell's environment except the harness
+# Unset every PACE_* variable in this shell's environment except the harness
 # knobs in `E2eInheritedKnobs`. Runs when this file is sourced; callable again.
-e2e_scrub_fastcache_environment() {
+e2e_scrub_pace_environment() {
     local name
     for name in $(compgen -e); do
         case "$name" in
-            FASTCACHE_*)
+            PACE_*)
                 case " ${E2eInheritedKnobs} " in
                     *" ${name} "*) ;;
                     *) unset "$name" ;;
@@ -153,7 +153,7 @@ e2e_scrub_fastcache_environment() {
         esac
     done
 }
-e2e_scrub_fastcache_environment
+e2e_scrub_pace_environment
 
 # Begin a run. Call once, at the top level, after the EXIT trap is installed.
 #
@@ -574,15 +574,15 @@ EOF
 
 # Which tool this host answers with: `ss`, `lsof`, `netstat`, or `none`.
 #
-# Overridable through `FASTCACHED_E2E_LISTENER_TOOL` **only so the self-test can drive the
+# Overridable through `PACE_E2E_LISTENER_TOOL` **only so the self-test can drive the
 # rows this host cannot reach**; production sets nothing. Without it, `lsof` is dead code
 # on Linux and on Windows, `netstat` is dead code everywhere but Windows, and `none` --
 # the arm the whole `unattributable` outcome exists for -- is reachable on no developer
 # machine at all. An arm nobody has watched fire is untested rather than proven, and this
 # one fails OPEN, so an untested `none` would look exactly like a working one.
 _e2e_listener_tool() {
-    if [ -n "${FASTCACHED_E2E_LISTENER_TOOL:-}" ]; then
-        echo "$FASTCACHED_E2E_LISTENER_TOOL"
+    if [ -n "${PACE_E2E_LISTENER_TOOL:-}" ]; then
+        echo "$PACE_E2E_LISTENER_TOOL"
         return 0
     fi
     case "$(uname -s)" in
@@ -766,7 +766,7 @@ _e2e_poll_pause=0.2
 # is the same defect as a figure with no conditions, and it propagated by being
 # copied rather than asked.)
 # NOT measured on bash 3.2, which macOS ships as `/bin/bash` and which
-# `FASTCACHED_BASH` resolves to on every non-Windows platform -- so the one
+# `PACE_BASH` resolves to on every non-Windows platform -- so the one
 # interpreter this file is most careful about is the one the reading cannot be
 # checked on. A marker FILE has no such question on any bash: the timer creates it
 # or it does not, and `[ -e ]` is the whole reading.
@@ -1132,7 +1132,7 @@ _e2e_wait_retire_deadline() {
 # So the rule is "a pid this shell may signal, or `-`", and `-` is not a lesser
 # answer -- the verdict reports it as its own outcome, which is honest, where a
 # borrowed pid is simply wrong. `macos-package-e2e` is the live case: its
-# LaunchDaemon runs as `_fastcached`, so it passes `-`, while
+# LaunchDaemon runs as `_pace-kv`, so it passes `-`, while
 # `macos-service-e2e`'s agent runs as the test user and is `kill -0`-ed by the
 # fixture itself three lines earlier, so it passes the pid.
 #
@@ -1264,7 +1264,7 @@ wait_until() {
 # `      11` on macOS. A fixture that captures that and compares it as a STRING is
 # green on one platform and red on the other, saying `wrote       11 bytes, expected
 # 11` -- a message whose two numbers are equal, which reads as the instrument being
-# broken rather than as the shell. `fastcache-cli-e2e` shipped that way and it was
+# broken rather than as the shell. `pacectl-e2e` shipped that way and it was
 # the fixture's first run on macOS that found it.
 #
 # Arithmetic contexts (`$(( ))`) and numeric tests (`[ x -eq y ]`) normalise on
@@ -1544,7 +1544,7 @@ wait_for_registration() {
 # behaviour are different jobs.
 E2eNodeReadyMarker="compile node ready"
 
-# The line `fastcached` logs once every acceptor is armed, and the marker
+# The line `pace-kv` logs once every acceptor is armed, and the marker
 # `wait_for_daemon_ready` below waits on.
 #
 # The second row of `Core/ReadinessMarker.hpp`, and the two constants here are that
@@ -1632,7 +1632,7 @@ wait_for_node_ready() {
     _e2e_wait_ready "$E2eNodeReadyMarker" wait_for_node_ready ${@+"$@"}
 }
 
-# Wait until a `fastcached` daemon is ACCEPTING, not merely bound.
+# Wait until a `pace-kv` daemon is ACCEPTING, not merely bound.
 #
 # The daemon's half of the rule above, and it is not a weaker version of it: its
 # marker is emitted by `ReadinessAnnouncer` once the LAST acceptor has armed, so
@@ -1940,7 +1940,7 @@ _e2e_counter_wait() {
 # SIGKILL cannot be caught, and that is not the same as prompt: the kernel finishes
 # a kill only when the process leaves the system call it is in, and one stuck in
 # uninterruptible I/O never does. Observed, not argued: on a WSL VM whose 9p client
-# sat in a kernel soft lockup, a `fastcached` that never became ready was still alive
+# sat in a kernel soft lockup, a `pace-kv` that never became ready was still alive
 # a second after SIGTERM and again a second after SIGKILL, and was only a zombie
 # minutes later -- and a local gate's `wait` on such a daemon hung for 80 minutes.
 # So nothing here `wait`s on a killed process until `kill -0` says it has gone; one
@@ -2048,9 +2048,9 @@ stop_and_require_exit() {
 # handler and every destructor after it never ran -- and for a process that handles
 # TERM, that teardown is the very thing this stop exists to watch. A process that does
 # NOT handle TERM names that with `term-ends-it` as the fifth argument, and only then
-# is 143 its clean stop. A `fastcache-compile-node` handles TERM; it is never one.
+# is 143 its clean stop. A `pace-node` handles TERM; it is never one.
 #
-# The shape it guards: `fastcache-compile-node`'s `~SharedCacheHost` ABORTS when a
+# The shape it guards: `pace-node`'s `~SharedCacheHost` ABORTS when a
 # reader still borrows the host, which is `main` destroying its locals in the wrong
 # ORDER -- deterministic, on every stop of every node holding a private tier and an
 # identity, and after the last line `main` logs ("compile node stopped"), so no grep
@@ -2096,7 +2096,7 @@ stop_and_require_clean_exit() {
 #
 # IT IS ALSO COUPLED TO A NUMBER IN THE DAEMON, and nothing checks that. It must
 # stay STRICTLY ABOVE `AdminHttpServer::RequestTimeout`
-# (`src/FastCache/Server/AdminHttpServer.hpp`, 2000 ms today), because
+# (`src/Pace/Server/AdminHttpServer.hpp`, 2000 ms today), because
 # `http_response_to_silence` reads a silent server's CLOSE as its answer: if the
 # server's deadline ever reaches this bound, the probe returns
 # `$E2eSilenceInconclusive` and `fleet-dashboard-e2e.sh` FAILS rather than skips.
@@ -3291,7 +3291,7 @@ e2e_exit_if_reap_left_survivors() {
 # A fixture's launcher records into a state directory of the run's own
 # ---------------------------------------------------------------------------
 #
-# The launcher keeps its statistics in `<state>/fastcache-cc/invocations.log`, and `-z`
+# The launcher keeps its statistics in `<state>/pace-cc/invocations.log`, and `-z`
 # DELETES that file. A fixture that runs `-z` against the developer's state directory
 # deletes their statistics; one that merely compiles appends its records to them. Both
 # happened: the Windows launcher e2e did the first, and three fixtures the second.
@@ -3324,11 +3324,11 @@ e2e_exit_if_reap_left_survivors() {
 # log is the ordinary state of every CI runner and of anybody who just ran `-z`.
 
 # Where the launcher decides its state directory. Read, never restated.
-_e2e_launcher_state_source="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/src/apps/fastcache-cc/Stats.cpp"
+_e2e_launcher_state_source="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/src/apps/pace-cc/Stats.cpp"
 # Where under a state base the launcher keeps its log. RESTATED, because `e2e_begin` needs
 # it before any launcher may be asked; `e2e_launcher_state_enter` refuses when the
 # launcher's own answer disagrees, so a move is a refusal rather than an unchecked log.
-_e2e_launcher_state_log_rel="fastcache-cc/invocations.log"
+_e2e_launcher_state_log_rel="pace-cc/invocations.log"
 _e2e_launcher_state_root=""
 _e2e_launcher_state_log=""
 # This run's trees, one per line: a caller record naming one of them is this run's.
@@ -3402,9 +3402,9 @@ e2e_launcher_state_rows() {
     # match on a line, leftmost first. Its exit says which shape it refused.
     # Through ENVIRON and not `-v`: BWK awk, macOS's, refuses a newline in a `-v` value.
     rows="$(E2E_STATE_PLATFORM="$platform" awk '
-        # Every `IDENT = FastCache::ReadEnvironmentVariable("NAME")` on the line, in order.
+        # Every `IDENT = Pace::ReadEnvironmentVariable("NAME")` on the line, in order.
         function reads_on(s,   m, id, name) {
-            while (match(s, /[A-Za-z_][A-Za-z0-9_]* = FastCache::ReadEnvironmentVariable\("[A-Z_]+"\)/)) {
+            while (match(s, /[A-Za-z_][A-Za-z0-9_]* = Pace::ReadEnvironmentVariable\("[A-Z_]+"\)/)) {
                 m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
                 id = m; sub(/ = .*/, "", id)
                 name = m; sub(/^.*\("/, "", name); sub(/"\)$/, "", name)
@@ -3629,7 +3629,7 @@ e2e_launcher_state_enter() {
     real="${!var-}"
     [ -n "$real" ] && [ -x "$real" ] || fail "e2e_launcher_state_enter: \$${var} is not an executable launcher: '${real}'"
     # Absolute before it is written into the shim, which may be run from any directory: CI passes
-    # `--launcher out/build/.../fastcache-cc`, and a fixture section that `cd`s first (the
+    # `--launcher out/build/.../pace-cc`, and a fixture section that `cd`s first (the
     # relative-paths case) then exec'd a path that resolved to nothing -- a red reading as a
     # failed compile, with no word about the launcher.
     case "$real" in
@@ -3820,7 +3820,7 @@ _e2e_launcher_state_misdirected() {
 # `-z`, which clears the log. That the caller's log was spared is no evidence the launcher
 # recorded HERE -- a launcher recording nowhere spares it too.
 #
-# `--no-stats` is for a fixture whose every launcher run sets FASTCACHE_NO_STATS=1. Such a
+# `--no-stats` is for a fixture whose every launcher run sets PACE_NO_STATS=1. Such a
 # run writes NOTHING to the state directory -- the toolchain fingerprint cache beside the
 # log is written only by a dispatch or by `--print-toolchain-fingerprint` -- so there is no
 # record to count, and the control is the shim's own record instead: at least one run
@@ -3839,11 +3839,11 @@ e2e_launcher_state_assert_used() {
     fi
     if [ "${1-}" = "--no-stats" ]; then
         [ ! -f "$_e2e_launcher_state_log" ] \
-            || fail "every launcher run here sets FASTCACHE_NO_STATS=1, yet this run's state log exists (${_e2e_launcher_state_log})"
+            || fail "every launcher run here sets PACE_NO_STATS=1, yet this run's state log exists (${_e2e_launcher_state_log})"
         # The guard in `e2e_launcher_state_enter` is one of them.
         [ "${runs:-0}" -ge 2 ] \
             || fail "no launcher run of this fixture went through the launcher-state shim (${runs:-0} run(s), the guard included), so nothing says its runs were redirected"
-        e2e_note "$(( runs - 1 )) launcher run(s) went through the launcher-state shim with every state variable at this run's root, and recorded no statistics, as FASTCACHE_NO_STATS asks"
+        e2e_note "$(( runs - 1 )) launcher run(s) went through the launcher-state shim with every state variable at this run's root, and recorded no statistics, as PACE_NO_STATS asks"
         return 0
     fi
     if [ -f "$_e2e_launcher_state_log" ]; then

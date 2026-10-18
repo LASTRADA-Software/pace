@@ -91,7 +91,7 @@
 # stops working exactly when several people are working.
 set -uo pipefail
 
-Repo="${FASTCACHED_REPO:-LASTRADA-Software/fastcached}"
+Repo="${PACE_REPO:-LASTRADA-Software/pace}"
 TestName="node-scratch-isolation-e2e"
 JobName="Windows-clangcl-release"
 Pages=3

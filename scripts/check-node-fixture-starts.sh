@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every fixture that STARTS `fastcache-compile-node` says which of its default fleet
+# Every fixture that STARTS `pace-node` says which of its default fleet
 # features it turns off, and where it keeps its state.
 #
 # ## Why this exists
@@ -36,7 +36,7 @@
 #   one-shot   names a verb that answers and exits (`--print-surfaces`, `--cluster-status`,
 #              `--install-service`, ...): nothing bound, nothing written. Passes. The verbs
 #              are READ from the node's own table -- the `FileExclusion::Verb` rows of
-#              `notFromFile` in `src/apps/fastcache-compile-node/NodeConfig.cpp`, the list
+#              `notFromFile` in `src/apps/pace-node/NodeConfig.cpp`, the list
 #              the build already holds every flag a file may not carry to -- so a verb the
 #              node retires stops passing here, and one it adds passes, with no edit to this
 #              script. A table this cannot read, or one naming no `--help`, is refused.
@@ -89,17 +89,17 @@
 #         that will not parse).
 set -uo pipefail
 
-FastCachedRoot="${FASTCACHED_FIXTURE_STARTS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-FastCachedTable="${FASTCACHED_FIXTURE_STARTS_TABLE:-${FastCachedRoot}/scripts/check-node-fixture-starts-exemptions.txt}"
+PaceRoot="${PACE_FIXTURE_STARTS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PaceTable="${PACE_FIXTURE_STARTS_TABLE:-${PaceRoot}/scripts/check-node-fixture-starts-exemptions.txt}"
 # shellcheck source=scripts/lib/third-party-roots.sh
-. "${FastCachedRoot}/scripts/lib/third-party-roots.sh" \
+. "${PaceRoot}/scripts/lib/third-party-roots.sh" \
     || { echo "check-node-fixture-starts: cannot read scripts/lib/third-party-roots.sh" >&2; exit 2; }
 
 # Where the node's verbs are read from: the option table's own source. The one-shot list is
 # DERIVED from it (`NodeVerbs`), never restated here -- a restated list kept two retired verbs
 # and missed two new ones (whole-branch review W-15). A NAME list rather than a pattern over
 # `--cluster-`, because `--cluster-dir` is a setting.
-NodeTableSource="${FastCachedRoot}/src/apps/fastcache-compile-node/NodeConfig.cpp"
+NodeTableSource="${PaceRoot}/src/apps/pace-node/NodeConfig.cpp"
 # The verb that writes this node's identity, and so needs `--cluster-dir` and nothing else. A
 # property of what the verb DOES rather than of the table, so it is stated here, and taken out
 # of the derived one-shot list.
@@ -128,11 +128,11 @@ if [ "${1:-}" = "--self-test" ]; then
         cp "${me%/*}/lib/third-party-roots.sh" "$scratch/tree/scripts/lib/"
         cp "${me%/*}/lib/third-party-roots.txt" "$scratch/tree/scripts/lib/"
         : > "$scratch/tree/table.txt"
-        mkdir -p "$scratch/tree/src/apps/fastcache-compile-node"
+        mkdir -p "$scratch/tree/src/apps/pace-node"
         NodeTable '"--print-surfaces"' '"--print-identity"' '"--help"' '"--cluster-status"'
         printf '%s\n' 'add_test(' '    NAME "fixture"' \
             '    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/fixture.sh"' \
-            '        "$<TARGET_FILE:fastcache-compile-node>")' > "$scratch/tree/src/tests/CMakeLists.txt"
+            '        "$<TARGET_FILE:pace-node>")' > "$scratch/tree/src/tests/CMakeLists.txt"
         scratch_git -C "$scratch/tree" init -q 2>/dev/null
     }
     Track() { scratch_git -C "$scratch/tree" add -A -f >/dev/null 2>&1; }
@@ -148,7 +148,7 @@ if [ "${1:-}" = "--self-test" ]; then
                 printf '%s\n' '        { .kind = FileExclusion::Verb,' "          .flag = ${verb}," '          .reason = "answers and exits" },'
             done
             printf '%s\n' '    });'
-        } > "$scratch/tree/src/apps/fastcache-compile-node/NodeConfig.cpp"
+        } > "$scratch/tree/src/apps/pace-node/NodeConfig.cpp"
     }
 
     # @param 1 what is being staged  @param 2 want-pass|want-fail|want-refuse
@@ -156,8 +156,8 @@ if [ "${1:-}" = "--self-test" ]; then
         local what="$1" want="$2" out got=0
         selfTestCases=$((selfTestCases + 1))
         Track
-        out="$(FASTCACHED_FIXTURE_STARTS_ROOT="$scratch/tree" \
-               FASTCACHED_FIXTURE_STARTS_TABLE="$scratch/tree/table.txt" \
+        out="$(PACE_FIXTURE_STARTS_ROOT="$scratch/tree" \
+               PACE_FIXTURE_STARTS_TABLE="$scratch/tree/table.txt" \
                bash "$me" 2>&1)" || got=$?
         case "$want" in
             want-pass)   [ "$got" -eq 0 ] && { echo "  ok    ($want) $what"; return; } ;;
@@ -217,7 +217,7 @@ if [ "${1:-}" = "--self-test" ]; then
     Case "a Context row of the table is not a verb, so a start naming it is still judged -- REFUSED" want-fail
 
     Stage
-    rm -f "$scratch/tree/src/apps/fastcache-compile-node/NodeConfig.cpp"
+    rm -f "$scratch/tree/src/apps/pace-node/NodeConfig.cpp"
     Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
     Case "a tree with no node table is REFUSED, never read as a list of no verbs" want-refuse
 
@@ -323,7 +323,7 @@ if [ "${1:-}" = "--self-test" ]; then
     Stage
     Fixture 'bin="$1"' '"$bin" --listen-node=127.0.0.1:1 &'
     printf '%s
-' 'set(_node "$<TARGET_FILE:fastcache-compile-node>")' 'add_test(' '    NAME "fixture"'         '    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/fixture.sh"'         '        --node "${_node}")' > "$scratch/tree/src/tests/CMakeLists.txt"
+' 'set(_node "$<TARGET_FILE:pace-node>")' 'add_test(' '    NAME "fixture"'         '    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/fixture.sh"'         '        --node "${_node}")' > "$scratch/tree/src/tests/CMakeLists.txt"
     printf '%s
 ' 'exec bash "$@"' > "$scratch/tree/scripts/run-check.sh"
     Case "the node passed through a variable, behind a wrapper, still makes its script a subject -- REFUSED" want-fail
@@ -331,7 +331,7 @@ if [ "${1:-}" = "--self-test" ]; then
     Stage
     Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
     printf '%s
-' 'set(_node "$<TARGET_FILE:fastcache-compile-node>")' 'add_test(' '    NAME "fixture"'         '    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/fixture.sh"'         '        --node "${_node}")' > "$scratch/tree/src/tests/CMakeLists.txt"
+' 'set(_node "$<TARGET_FILE:pace-node>")' 'add_test(' '    NAME "fixture"'         '    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/fixture.sh"'         '        --node "${_node}")' > "$scratch/tree/src/tests/CMakeLists.txt"
     printf '%s
 ' 'exec bash "$@"' > "$scratch/tree/scripts/run-check.sh"
     Case "and the same registration over a recognised start passes, the wrapper not being the subject" want-pass
@@ -415,7 +415,7 @@ Fail() { echo "  FAIL: $*" >&2; Problems=$((Problems + 1)); }
 NodeVerbs() {
     local verbs
     [ -r "${NodeTableSource}" ] || {
-        echo "check-node-fixture-starts: cannot read the node's table at ${NodeTableSource#"${FastCachedRoot}/"}." >&2
+        echo "check-node-fixture-starts: cannot read the node's table at ${NodeTableSource#"${PaceRoot}/"}." >&2
         echo "  Its one-shot verbs are read from there; refused rather than judged with none." >&2
         return 2
     }
@@ -434,7 +434,7 @@ NodeVerbs() {
             }
         }
     ' "${NodeTableSource}")" || {
-        echo "check-node-fixture-starts: no std::to_array<NotFromFile>( array in ${NodeTableSource#"${FastCachedRoot}/"}." >&2
+        echo "check-node-fixture-starts: no std::to_array<NotFromFile>( array in ${NodeTableSource#"${PaceRoot}/"}." >&2
         echo "  The one-shot verbs are its FileExclusion::Verb rows; refused rather than judged with none." >&2
         return 2
     }
@@ -453,13 +453,13 @@ OneShotVerbs="$(NodeVerbs)" || exit 2
 # Every first-party script a start could be in, one per line, through git.
 Subjects() {
     local tracked firstParty
-    tracked="$(git -C "${FastCachedRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.ps1')" || return 2
+    tracked="$(git -C "${PaceRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.ps1')" || return 2
     if [ -z "${tracked}" ]; then
         echo "check-node-fixture-starts: git ls-files named no script under scripts/, which cannot be true." >&2
         echo "  Refused rather than read as 'no fixture starts the node'." >&2
         return 2
     fi
-    firstParty="$(first_party_paths "${FastCachedRoot}" "${tracked}")" || {
+    firstParty="$(first_party_paths "${PaceRoot}" "${tracked}")" || {
         echo "check-node-fixture-starts: the third-party roots could not be read. Refused." >&2
         return 2
     }
@@ -467,13 +467,13 @@ Subjects() {
 }
 
 # The scripts `src/tests/CMakeLists.txt` hands the node binary, read per `add_test( ... )` block:
-# a block that names `$<TARGET_FILE:fastcache-compile-node>` -- directly, or through a variable
-# `set()` to it, which is how `fastcache-cli-e2e` passes it -- hands it to the LAST script path
+# a block that names `$<TARGET_FILE:pace-node>` -- directly, or through a variable
+# `set()` to it, which is how `pacectl-e2e` passes it -- hands it to the LAST script path
 # the block names, since a wrapper (`run-check.sh`) comes before the script it runs.
 HandedTheNode() {
     awk '
         function opens(s,    t) { t = s; return gsub(/\(/, "", t) - gsub(/\)/, "", s) }
-        match($0, /set\([A-Za-z0-9_]+[ \t]+"\$<TARGET_FILE:fastcache-compile-node>"/) {
+        match($0, /set\([A-Za-z0-9_]+[ \t]+"\$<TARGET_FILE:pace-node>"/) {
             name = substr($0, RSTART + 4, RLENGTH - 4)
             sub(/[ \t].*$/, "", name)
             nodeVars[name] = 1
@@ -484,7 +484,7 @@ HandedTheNode() {
             depth += opens($0)
             if (depth > 0) next
             inTest = 0
-            handed = (block ~ /TARGET_FILE:fastcache-compile-node>/)
+            handed = (block ~ /TARGET_FILE:pace-node>/)
             for (name in nodeVars) if (index(block, "${" name "}")) handed = 1
             if (!handed) next
             last = ""
@@ -495,7 +495,7 @@ HandedTheNode() {
             }
             if (last != "") print last
         }
-    ' "${FastCachedRoot}/src/tests/CMakeLists.txt" 2>/dev/null | sort -u
+    ' "${PaceRoot}/src/tests/CMakeLists.txt" 2>/dev/null | sort -u
 }
 
 # Judge every start in every subject, in ONE awk pass over all of them -- one process for the
@@ -509,9 +509,9 @@ HandedTheNode() {
 JudgeAll() {
     local files=() path
     while IFS= read -r path; do
-        [ -n "${path}" ] && files+=("${FastCachedRoot}/${path}")
+        [ -n "${path}" ] && files+=("${PaceRoot}/${path}")
     done < <(printf '%s\n' "$1")
-    awk -v root="${FastCachedRoot}/" -v table="${FastCachedTable}" \
+    awk -v root="${PaceRoot}/" -v table="${PaceTable}" \
         -v subjectList="$(printf '%s\n' "$1" | tr '\n' '\034')" \
         -v handedList="$(printf '%s\n' "$2" | tr '\n' '\034')" \
         -v oneShot="${OneShotVerbs}" -v minting="${MintingVerbs}" -v cap="${StatementCap}" '
@@ -766,12 +766,12 @@ if [ "${1:-}" = "--read-rows" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-if [ ! -f "${FastCachedTable}" ]; then
-    echo "check-node-fixture-starts: no table at ${FastCachedTable}. A missing table is refused, not read" >&2
+if [ ! -f "${PaceTable}" ]; then
+    echo "check-node-fixture-starts: no table at ${PaceTable}. A missing table is refused, not read" >&2
     echo "  as an empty one: two empty answers agree perfectly." >&2
     exit 2
 fi
-if ! awk -F'\t' '/^[ \t]*(#|$)/ { next } NF < 4 || $4 == "" || ($1 != "helper" && $1 != "exempt" && $1 != "census") { bad = 1; print "  row " NR ": " $0 > "/dev/stderr" } END { exit bad }' "${FastCachedTable}"; then
+if ! awk -F'\t' '/^[ \t]*(#|$)/ { next } NF < 4 || $4 == "" || ($1 != "helper" && $1 != "exempt" && $1 != "census") { bad = 1; print "  row " NR ": " $0 > "/dev/stderr" } END { exit bad }' "${PaceTable}"; then
     echo "check-node-fixture-starts: the table has a row that is not <helper|exempt|census> TAB <path> TAB <what> TAB <reason>." >&2
     echo "  A row with no reason is refused rather than read as a permission." >&2
     exit 2

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Distributed/LeaseSigner.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Distributed/LeaseSigner.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -23,7 +23,7 @@
 /// one machine's grant verifies and another's does not, so the facts a copy must get right --
 /// which key a signer has, what a revocation leaves, what an expired roster answers -- are
 /// exactly what a wrong copy would get wrong while every case went on passing.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The grant signer a test's scheduler signs with: @p machine's test key, as that member.
@@ -125,4 +125,4 @@ class FixedLeaseRoster final: public Distributed::ILeaseRoster
     Distributed::RosterStanding _standing { Distributed::RosterStanding::Current };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

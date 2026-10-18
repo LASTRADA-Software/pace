@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A `fastcache-compile-node` keeps working — as worker, scheduler and Raft voter — when its
+**Goal:** A `pace-node` keeps working — as worker, scheduler and Raft voter — when its
 host's IP changes (DHCP, Wi-Fi ↔ LAN, network moves), with no config edit and no restart, and a
 stock socket-activated package install starts without `--advertise`.
 
@@ -55,14 +55,14 @@ change: the worker re-registers, presence announces, the leader re-proposes the 
 ### Task 1: `IRouteProbe` — which local address routes to a host
 
 **Files:**
-- Create: `src/FastCache/Platform/RouteProbe.hpp`, `src/FastCache/Platform/RouteProbe.cpp`,
-  `src/FastCache/Platform/RouteProbe_test.cpp`
-- Modify: `src/FastCache/CMakeLists.txt` (add `Platform/RouteProbe.cpp` beside `Platform/LocalAddresses.cpp`)
-- Modify: `scripts/check-udp-opener.cmake:66-68` (second `FastCachedUdpOpenerUnits` row)
+- Create: `src/Pace/Platform/RouteProbe.hpp`, `src/Pace/Platform/RouteProbe.cpp`,
+  `src/Pace/Platform/RouteProbe_test.cpp`
+- Modify: `src/Pace/CMakeLists.txt` (add `Platform/RouteProbe.cpp` beside `Platform/LocalAddresses.cpp`)
+- Modify: `scripts/check-udp-opener.cmake:66-68` (second `PaceUdpOpenerUnits` row)
 
 **Interfaces — Produces:**
 ```cpp
-namespace FastCache {
+namespace Pace {
 /// Why a route probe produced no address.
 enum class RouteProbeError : std::uint8_t { InvalidTarget, NoRoute, Unsupported, Last };
 
@@ -88,7 +88,7 @@ inline constexpr std::array<std::string_view, 2> DefaultRouteProbeTargets { "192
 - [ ] **Step 2: Build + run** `ctest --preset clang-debug -R "route probe"` — FAIL (undefined).
 - [ ] **Step 3: Implement** `RouteProbe.cpp`: parse literal with `inet_pton` (v4 then v6) → `InvalidTarget` on failure; `socket(family, SOCK_DGRAM, IPPROTO_UDP)` (Winsock on `_WIN32`, `closesocket`), RAII close; `connect()` to port 9; `ENETUNREACH`/`EHOSTUNREACH`/`EADDRNOTAVAIL`/`WSAENETUNREACH` → `NoRoute`, `EAFNOSUPPORT` → `Unsupported`; `getsockname` → format with `inet_ntop` exactly like `QueryLocalAddresses` (no scope). Keep the errno → error mapping a small table.
 - [ ] **Step 4: Register the opener** — add row
-  `"src/FastCache/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice; it never sends or receives, so no firewall rule is involved"`
+  `"src/Pace/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice; it never sends or receives, so no firewall rule is involved"`
   and run `ctest --preset clang-debug -R udp-opener` — PASS (also run its selftest if one exists: `-R udp-opener`).
 - [ ] **Step 5: Run tests** — PASS. clang-format changed files.
 - [ ] **Step 6: Commit** `feat(platform): add a route probe for the local address that reaches a host`.
@@ -96,16 +96,16 @@ inline constexpr std::array<std::string_view, 2> DefaultRouteProbeTargets { "192
 ### Task 2: POSIX network-change watchers (Linux netlink, macOS route socket)
 
 **Files:**
-- Create: `src/FastCache/Platform/NetworkChangeMessages.hpp/.cpp` (pure classifiers),
-  `src/FastCache/Platform/NetworkChangeMessages_test.cpp`
-- Modify: `src/FastCache/Platform/NetworkChangeWatcher.cpp:69-75` (POSIX branch),
-  `src/FastCache/Platform/NetworkChangeWatcher.hpp` (doc), `NetworkChangeWatcher_test.cpp:183` (expectation),
-  `src/FastCache/CMakeLists.txt`
-- Modify: `src/apps/fastcache-compile-node/main.cpp:2738-2747` (start POSIX watcher after the fork)
+- Create: `src/Pace/Platform/NetworkChangeMessages.hpp/.cpp` (pure classifiers),
+  `src/Pace/Platform/NetworkChangeMessages_test.cpp`
+- Modify: `src/Pace/Platform/NetworkChangeWatcher.cpp:69-75` (POSIX branch),
+  `src/Pace/Platform/NetworkChangeWatcher.hpp` (doc), `NetworkChangeWatcher_test.cpp:183` (expectation),
+  `src/Pace/CMakeLists.txt`
+- Modify: `src/apps/pace-node/main.cpp:2738-2747` (start POSIX watcher after the fork)
 
 **Interfaces — Produces:**
 ```cpp
-namespace FastCache {
+namespace Pace {
 /// Whether a buffer read from the OS change socket reports an interface or address change.
 /// Linux: a sequence of `nlmsghdr` (native endian: u32 len, u16 type, u16 flags, u32 seq, u32 pid),
 /// types RTM_NEWLINK=16, RTM_DELLINK=17, RTM_NEWADDR=20, RTM_DELADDR=21 count; NLMSG_DONE/ERROR/NOOP do not.
@@ -152,17 +152,17 @@ their length field, stop at a truncated/zero-length header (return what was seen
 ### Task 3: Advertise policy — `auto`, pinned names and literals; `--raft-self` reloadable; `routeHost`
 
 **Files:**
-- Modify: `src/apps/fastcache-compile-node/NodeConfig.hpp/.cpp` (rows at 975-1010 and 1190-1203,
+- Modify: `src/apps/pace-node/NodeConfig.hpp/.cpp` (rows at 975-1010 and 1190-1203,
   `ParseAdvertise` 391-406, `AddressReloadableFlags` 1144, `AdvertisedEndpoint` 2809-2849,
   `RaftSelfEndpoint` 2759-2785, `AdvertisedNameWithheld` 2851-2857)
-- Modify: `src/apps/fastcache-compile-node/NodeDefaults.hpp` (apply helper beside `ApplyHostNames`)
-- Modify: `docs/tools/fastcache-compile-node.md:2931-2941` (reloadable table: add `raft_self`),
-  `packaging/config/fastcache-compile-node.yaml:13-31` (count SEVEN → EIGHT; describe `auto`)
-- Test: `src/apps/fastcache-compile-node/NodeConfig_test.cpp`
+- Modify: `src/apps/pace-node/NodeDefaults.hpp` (apply helper beside `ApplyHostNames`)
+- Modify: `docs/tools/pace-node.md:2931-2941` (reloadable table: add `raft_self`),
+  `packaging/config/pace-node.yaml:13-31` (count SEVEN → EIGHT; describe `auto`)
+- Test: `src/apps/pace-node/NodeConfig_test.cpp`
 
 **Interfaces — Produces:**
 ```cpp
-namespace FastCache::Node {
+namespace Pace::Node {
 /// How an advertised address is chosen.
 enum class AdvertiseMode : std::uint8_t { Auto, PinnedName, PinnedLiteral, Last };
 /// One row per mode: what the mode promises.
@@ -213,16 +213,16 @@ Semantics:
 ### Task 4: `EndpointResolver` — the sole publisher of the node's endpoints
 
 **Files:**
-- Create: `src/apps/fastcache-compile-node/EndpointResolver.hpp/.cpp`, `EndpointResolver_test.cpp`
-  (register both in `src/apps/fastcache-compile-node/CMakeLists.txt`: source list and `fastcache-compile-node-tests` list near :181)
+- Create: `src/apps/pace-node/EndpointResolver.hpp/.cpp`, `EndpointResolver_test.cpp`
+  (register both in `src/apps/pace-node/CMakeLists.txt`: source list and `pace-node-tests` list near :181)
 - Modify: `WorkerTier.cpp:446-464, 533-565` + `WorkerTier.hpp` (re-register on published change)
 - Modify: `NodeAnnounce.hpp/.cpp` (`AdvertisedEndpointChange` retired or reduced — see below)
 - Modify: `NodeReload.hpp:52`, `NodeReload.cpp:26-29` (reload applies the live route host)
 - Modify: `main.cpp` (~:646-657 construct resolver + two `AnnouncedEndpoint`s; subscribe it to
   `hostEvents` FIRST; pass raft endpoint source on; ~:2538-2547 apply initial route host to `cfg`
   and `cliOnly` before `StartupPolicyRejection`)
-- Modify: `src/FastCache/Metrics/IMetricsSink.hpp`, `MetricsCatalog.hpp`, `StatsReading.hpp:542`
-  (`CounterSoleWriterTable`), `docs/tools/fastcache-compile-node.md` metrics table
+- Modify: `src/Pace/Metrics/IMetricsSink.hpp`, `MetricsCatalog.hpp`, `StatsReading.hpp:542`
+  (`CounterSoleWriterTable`), `docs/tools/pace-node.md` metrics table
 - Test: `WorkerTier_test.cpp` (fixture `WorkerTierTestFixture.hpp`)
 
 **Interfaces — Consumes:** `IRouteProbe`, `DefaultRouteProbeTargets` (Task 1); `ApplyRouteHost`,
@@ -230,7 +230,7 @@ Semantics:
 `HostEvent::NetworkChanged`; `AnnouncedEndpoint` (NodeAnnounce.hpp:78).
 **Produces:**
 ```cpp
-namespace FastCache::Node {
+namespace Pace::Node {
 /// Literal IP hosts worth probing before the default route (e.g. applied schedulers given as IPs).
 class IProbeTargets { public: /*...*/ [[nodiscard]] virtual std::vector<std::string> Targets() const = 0; };
 
@@ -274,8 +274,8 @@ Behaviour:
   `WorkerTier` gets the resolver through its parts struct (`WorkerTierParts`, WorkerTier.hpp:135 area).
 - **Reload:** `ReloadBasis` gains `std::function<std::string()> routeHost`; `ReloadCandidateReader`
   calls `ApplyRouteHost(candidate, basis.routeHost ? basis.routeHost() : "")` after `ApplyHostNames`.
-- **Metrics:** two enumerators before `Last`, rows `fastcache_node_endpoint_changes_total` /
-  `fastcache_node_raft_endpoint_changes_total` (help text: "Times this node's advertised ... moved
+- **Metrics:** two enumerators before `Last`, rows `pace_node_endpoint_changes_total` /
+  `pace_node_raft_endpoint_changes_total` (help text: "Times this node's advertised ... moved
   because the address it routes from changed or a reload re-pinned it."), sole-writer rows on the
   node surface the compile node already uses for node-tier counters (find one with grep in
   `StatsReading.hpp`), and the two series in the docs metrics tables.
@@ -303,18 +303,18 @@ Behaviour:
 ### Task 5: Socket activation derives the advertised address
 
 **Files:**
-- Modify: `src/apps/fastcache-compile-node/main.cpp:252-291, 1775-1782`
-- Create or modify: a testable home for the decision, e.g. `src/apps/fastcache-compile-node/NodeActivation.hpp/.cpp`
+- Modify: `src/apps/pace-node/main.cpp:252-291, 1775-1782`
+- Create or modify: a testable home for the decision, e.g. `src/apps/pace-node/NodeActivation.hpp/.cpp`
   (+ `_test.cpp`, registered in the app CMakeLists) — `main.cpp` is in no test target.
-- Modify: `packaging/linux/fastcache-compile-node.socket`, `.service` comments;
+- Modify: `packaging/linux/pace-node.socket`, `.service` comments;
   `.agent/rules/distributed-compilation.md:266-276` (rule rewritten: the inherited socket's bound
   address is read with `getsockname`; wildcard → Auto; specific → pinned).
 
-**Interfaces — Consumes:** `BoundEndpointOfDescriptor(int)` (`src/FastCache/Transport/NativeListen.hpp`,
+**Interfaces — Consumes:** `BoundEndpointOfDescriptor(int)` (`src/Pace/Transport/NativeListen.hpp`,
 returns `std::optional<BoundEndpoint>`), Task 3 policy.
 **Produces:**
 ```cpp
-namespace FastCache::Node {
+namespace Pace::Node {
 /// Make the configuration describe the socket a supervisor handed over: the Node surface's bind
 /// becomes the descriptor's bound host and port, so the advertised endpoint is derived as for any bind.
 /// @return The refusal when the descriptor cannot be asked what it is bound to.
@@ -337,11 +337,11 @@ namespace FastCache::Node {
 ### Task 6: Cluster — Raft endpoint follows the announced host; own move resets sessions; live beacon
 
 **Files:**
-- Modify: `src/FastCache/Cluster/AnnouncedEndpoints.hpp/.cpp` (+ `_test.cpp`)
-- Modify: `src/FastCache/Consensus/RaftPeerTransport.hpp/.cpp` (public `ResetSessions()`)
-- Modify: `src/apps/fastcache-compile-node/ConsensusTier.hpp/.cpp` (raft source; reconcile)
+- Modify: `src/Pace/Cluster/AnnouncedEndpoints.hpp/.cpp` (+ `_test.cpp`)
+- Modify: `src/Pace/Consensus/RaftPeerTransport.hpp/.cpp` (public `ResetSessions()`)
+- Modify: `src/apps/pace-node/ConsensusTier.hpp/.cpp` (raft source; reconcile)
 - Modify: `main.cpp:1239` + `DiscoveryTier.cpp:102-123` (live fleet summary)
-- Test: `src/FastCache/Cluster/MembershipCluster_test.cpp`, `RaftPeerTransport_test.cpp`, `ConsensusTier_test.cpp`
+- Test: `src/Pace/Cluster/MembershipCluster_test.cpp`, `RaftPeerTransport_test.cpp`, `ConsensusTier_test.cpp`
 
 **Interfaces — Consumes:** raft `AnnouncedEndpoint` (Task 4) as `Cc::IAdvertisedEndpointSource const&`.
 **Produces:**
@@ -388,8 +388,8 @@ void ResetSessions();
 ### Task 7: Raft acceptor keeps one one-way session per proven dialler
 
 **Files:**
-- Modify: `src/FastCache/Consensus/RaftPeerServer.hpp/.cpp` (~251-281 accept path)
-- Test: `src/FastCache/Consensus/RaftPeerLink_test.cpp` (or `RaftPeerServer_test.cpp` if present)
+- Modify: `src/Pace/Consensus/RaftPeerServer.hpp/.cpp` (~251-281 accept path)
+- Test: `src/Pace/Consensus/RaftPeerLink_test.cpp` (or `RaftPeerServer_test.cpp` if present)
 
 **Behaviour:** after a one-way handshake proves `dialler`, the server records
 `dialler → socket` (map guarded like `_links`); if an older one-way socket for that dialler exists
@@ -417,7 +417,7 @@ Two-way (learner) sessions are untouched (they already attach as links).
 - `.agent/rules/consensus-and-cluster.md` :1839-1849 (announced move also moves a coupled Raft endpoint).
 - `AGENT.md` rulebook tripwires for any new rule (keep within `scripts/agent-md-budget.txt`;
   `ctest -R "rulebook-tripwires|agent-md-budget"`).
-- `docs/tools/fastcache-compile-node.md` (flags, "sleep, wake and network change" ~:2881-2905),
+- `docs/tools/pace-node.md` (flags, "sleep, wake and network change" ~:2881-2905),
   `docs/operations/cluster-communication.md` (~470-510 re-addressing), `docs/operations/windows-office-fleet.md`
   (~450-470: names are opt-in now; #1605 is mitigated by auto), `docs/getting-started/distributed-compilation.md` if it shows `--advertise`.
 - Release note: find the project's changelog/metainfo convention (`git log -p -1 -- '*metainfo*' 'CHANGELOG*' docs/about`); add an entry incl. the upgrade hint "remove a literal `--advertise` work-around under socket activation, or the node stays pinned".

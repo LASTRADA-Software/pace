@@ -1,6 +1,6 @@
 # Upgrading a fleet
 
-**A `fastcache-compile-node` fleet upgrades as a unit. A rolling upgrade — replacing
+**A `pace-node` fleet upgrades as a unit. A rolling upgrade — replacing
 one node at a time while the others keep serving — is not supported in this release,
 and this page is here so that is something you plan around rather than discover during
 a rollout.**
@@ -24,10 +24,10 @@ the field it expected and continues. Refusing the older version outright is
 `UnsupportedVersion`, which names the supported range and arrives before any source is
 sent. A loud, immediate, named refusal is the better failure.
 
-Version 9 is such a step: it adds the live-stats stream `fastcache-cli live-stats`
-subscribes to ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)), and
-every node, every `fastcached` serving `0xFC`, every `fastcache-cc` and every
-`fastcache-cli` has to move to it together.
+Version 9 is such a step: it adds the live-stats stream `pacectl live-stats`
+subscribes to ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)), and
+every node, every `pace-kv` serving `0xFC`, every `pace-cc` and every
+`pacectl` has to move to it together.
 
 What makes it a *fleet* problem rather than a daemon problem is that a fleet has more
 than one process. A cache daemon is upgraded, restarted, and done; twenty nodes cannot
@@ -35,8 +35,8 @@ be.
 
 ## This release: 0xFC version 15, discovery version 3, consensus version 5
 
-Every one of the three wires changed its grammar, so every node, every `fastcached` serving
-`0xFC`, every `fastcache-cc` and every `fastcache-cli` moves together (the supported procedure
+Every one of the three wires changed its grammar, so every node, every `pace-kv` serving
+`0xFC`, every `pace-cc` and every `pacectl` moves together (the supported procedure
 below).
 
 - **`0xFC` 15:**
@@ -57,27 +57,27 @@ below).
 - **Consensus 5:** see [the consensus peer wire](#the-consensus-peer-wire-version-5).
 - **Every cached object misses once.** The launcher's key moved (`objkey-v7`, `manifest-v7`,
   value generation 7). This costs one cold build per fleet and needs no step.
-- **`fastcache-cli live-stats` from an older build** refuses the newer layout. Upgrade the
+- **`pacectl live-stats` from an older build** refuses the newer layout. Upgrade the
   clients too.
 
 ### What refuses to start after the upgrade, and the step
 
 | What | Refused as | Step |
 |---|---|---|
-| A state directory whose `node-key` other accounts can read (an older install) | the identity-key refusal (`Exposed`), naming the file | Delete the state directory (`%ProgramData%\fastcache-node` on Windows). The key counts as disclosed. The node mints a new identity; forget the old id with `--cluster-forget`. |
+| A state directory whose `node-key` other accounts can read (an older install) | the identity-key refusal (`Exposed`), naming the file | Delete the state directory (`%ProgramData%\pace-node` on Windows). The key counts as disclosed. The node mints a new identity; forget the old id with `--cluster-forget`. |
 | A Raft snapshot older than state version 10, a log entry older than command version 6, or one holding a retired command kind (3, 4 or 6) | `UnsupportedFormatVersion` (the held state's start refusal), or the retired kind by name, naming the directory | Move `raft-state`, `raft-log` and `raft-snapshot` aside ([the consensus state directory](#the-consensus-state-directory)) |
 | `<cluster-dir>/roster` left behind | an entry this build keeps nothing for | Delete that file alone ([signed leases](#signed-leases-checked-against-the-state-each-node-applied)) |
 | A formation record below format 7 (builds of this branch only; no release wrote one) | `UnsupportedFormatVersion` | Move `formation` aside. The node re-forms as a new solitary cluster: re-enroll it. |
 | A configuration file naming `scheduler` (on a serving node), `fleet_member`, `scheduler_token_file`, `cluster_admit_client`, `cluster_forget_client`, `raft_peer`, `raft_join`, `cluster_id`, `serve_scheduler`, `voter_key`, `enroll_from` or `cluster_admit_worker` | refused by name, with its step | Remove the key |
 | A service registration replaying any of those flags, or `--scheduler` on a node that serves | refuses to start under the service manager | `--install-service` again. The MSI does this on upgrade. |
-| MSI properties `FASTCACHE_NODE_SCHEDULER` and `FASTCACHE_NODE_ADVERTISE` | not read; an upgrade forgets the remembered advertised endpoint | Drop them from scripted installs |
+| MSI properties `PACE_NODE_SCHEDULER` and `PACE_NODE_ADVERTISE` | not read; an upgrade forgets the remembered advertised endpoint | Drop them from scripted installs |
 
 ### Coming from 0.4.0: nodes follow their own address
 
 `--advertise` and `--raft-self` now default to `auto`: the address the machine routes from,
 re-derived when the network changes, so a node keeps working across a DHCP renewal, a move
 from Wi-Fi to wired or another network, with no edit and no restart (see
-[the node's flags](../tools/fastcache-compile-node.md#-advertise-is-the-flag-to-get-right)).
+[the node's flags](../tools/pace-node.md#-advertise-is-the-flag-to-get-right)).
 A socket-activated node no longer needs `--advertise` either: it reads the address off the
 socket it is handed. This moves no wire version and no stored format.
 
@@ -98,13 +98,13 @@ once* above applies only to a build older than 0.4.0. No step.
 
 ## The supported procedure
 
-1. **Stop the builds.** Anything running `fastcache-cc` against the fleet should be
+1. **Stop the builds.** Anything running `pace-cc` against the fleet should be
    quiescent. Builds do not break — see *What a mismatch looks like* — but they compile
    locally, so a build started here is slow rather than wrong.
 2. **Stop every node**, including any machine running only the scheduler or only a
    cache tier.
 3. **Upgrade every node and every client to the same release.** The launcher
-   (`fastcache-cc`) speaks this wire too, so a client left behind stops using the
+   (`pace-cc`) speaks this wire too, so a client left behind stops using the
    cache — saying so on the developer's terminal, where you are not looking.
 4. **Start the nodes**, schedulers first if you run them separately.
 5. **Confirm** with the counter below before releasing the builds.
@@ -113,7 +113,7 @@ The order matters only in that nothing old should be running once anything new i
 
 ## What a mismatch looks like, and why you must go looking
 
-**A version mismatch never fails a build.** `fastcache-cc` treats an unusable cache as a
+**A version mismatch never fails a build.** `pace-cc` treats an unusable cache as a
 miss and compiles locally, which is the contract that keeps a cache problem from
 becoming a build problem. The cost is quiet: every affected client loses the cache and
 every dispatched compile stops being dispatched, and what a client says about it is said
@@ -126,10 +126,10 @@ nothing about the others.
 
 | Series | Refused where |
 |---|---|
-| `fastcache_node_cache_requests_refused_unsupported_version_total` | a node's cache tier |
-| `fastcache_worker_frames_refused_unsupported_version_total` | a node's compile worker |
-| `fastcached_dispatch_frames_refused_unsupported_version_total` | the fleet scheduler's port |
-| `fastcached_cache_frames_refused_unsupported_version_total` | the `fastcached` daemon's compile-cache port |
+| `pace_node_cache_requests_refused_unsupported_version_total` | a node's cache tier |
+| `pace_worker_frames_refused_unsupported_version_total` | a node's compile worker |
+| `pace_dispatch_frames_refused_unsupported_version_total` | the fleet scheduler's port |
+| `pace_cache_frames_refused_unsupported_version_total` | the `pace-kv` daemon's compile-cache port |
 
 Any of them non-zero and rising means something is still speaking the other version.
 These are the *only* places a mismatch is visible, so an operator who has not been told
@@ -137,9 +137,9 @@ to watch them will not see one — which is why they are named here rather than 
 be found during a rollout.
 
 The three node counters are on every node whatever it was started with:
-`fastcache-cli node-metrics` reads them over the node's `0xFC` port, and a node with
+`pacectl node-metrics` reads them over the node's `0xFC` port, and a node with
 `--admin-listen` also serves them on `/metrics`. The daemon's is exported only when
-`fastcached` runs with `--metrics`. If you cannot read them, you cannot tell whether the
+`pace-kv` runs with `--metrics`. If you cannot read them, you cannot tell whether the
 upgrade was complete, which is a reason to do step 5 rather than a reason to skip it.
 
 **The servers count every refusal; a client only mentions it, on its own machine.** A
@@ -150,7 +150,7 @@ the servers.
 
 And a fleet on **one wire at two builds** is refused by nothing at all, so none of the
 counters above moves. The leader raises the `mixed-node-versions` condition for that,
-naming each build and the machines running it (`fastcache-cli fleet`, its conditions section).
+naming each build and the machines running it (`pacectl fleet`, its conditions section).
 
 ## The consensus peer wire, version 5
 
@@ -160,7 +160,7 @@ its session, so the two refuse each other at the handshake, by version. **Only t
 side can see it**, because the acceptor challenges first:
 
 - an upgraded member DIALLING a version-4 member meets its version-4 challenge, refuses it,
-  and counts `fastcache_raft_peer_dials_refused_no_challenge_total`, with the version in the
+  and counts `pace_raft_peer_dials_refused_no_challenge_total`, with the version in the
   log line;
 - a version-4 member dialling an upgraded one refuses the version-5 challenge and closes
   without a proof, so the upgraded ACCEPTOR counts nothing at all.
@@ -176,17 +176,17 @@ still named one another with `--raft-peer`; that flag is gone since
 [the formation record decides a cluster's shape](#the-flags-that-carried-a-clusters-shape),
 and before you upgraded, you gave each member's `--raft-peer` list every other member's key:
 
-1. On each member, run `fastcache-compile-node --print-identity` with the flags it runs
+1. On each member, run `pace-node --print-identity` with the flags it runs
    with, as the account it runs as. It prints the member's `raft-peer` token, key included.
    A member that already has a state directory keeps its id; a key is minted beside it.
 2. Put every token into every member's `--raft-peer` list.
 3. Stop all of them, upgrade, start all of them.
 
 A member left out of step 2 is refused by the others as a key never given
-(`fastcache_raft_peer_connections_refused_unknown_key_total`) until the cluster records its
+(`pace_raft_peer_connections_refused_unknown_key_total`) until the cluster records its
 key -- which the leader does for itself when it leads, and which `--cluster-admit` with
 `@<key>` does for anybody else. A mixed cluster shows as
-`fastcache_raft_peer_dials_refused_no_challenge_total` on the new nodes, counted where they
+`pace_raft_peer_dials_refused_no_challenge_total` on the new nodes, counted where they
 dial an old one; the acceptor challenges first, so an old node dialling a new one closes
 before its proof and the new node counts nothing.
 
@@ -204,7 +204,7 @@ A node that names one refuses to start, by name, and so does a service registrat
 replays one: remove them from every command line, configuration file and registration
 before upgrading. A member upgraded from a build that had them starts as a cluster of one,
 and rejoins its fleet by admission, as any machine does — see
-[adding a machine to a running cluster](../tools/fastcache-compile-node.md#adding-a-machine-to-a-running-cluster).
+[adding a machine to a running cluster](../tools/pace-node.md#adding-a-machine-to-a-running-cluster).
 
 The flags that admitted by **address** are gone too, because an address admits nobody any
 more: `--fleet-member`, `--scheduler-token-file`, `--cluster-admit-client` and
@@ -242,7 +242,7 @@ the whole-fleet step above, and what each machine is started with gets simpler:
    `--fleet-seed=<host>` where no beacon reaches, asks to join, and is approved on a voter with
    `--enroll-approve` (or under `--enroll-auto-approve`); see
    [cluster discovery](../getting-started/cluster-discovery.md). There is no key to type.
-3. **Confirm on the workers.** `fastcache_worker_jobs_refused_lease_no_roster_total`
+3. **Confirm on the workers.** `pace_worker_jobs_refused_lease_no_roster_total`
    rising without stopping means a worker's applied state names no voter yet: it has not been
    admitted, and its leases are refused `grant-unverifiable`.
 
@@ -295,7 +295,7 @@ tombstones). Either way the directory is intact; what an operator does is:
 
 A RUNNING member offered a snapshot by a leader on another state format does not stop: it
 refuses the snapshot and stays behind, raising the `unreadable-leader-snapshot` condition
-(`fastcache-cli node-conditions`, and the fleet page). It follows no change the cluster makes
+(`pacectl node-conditions`, and the fleet page). It follows no change the cluster makes
 until it can read what the leader sends, and catches up by itself once it runs the leader's
 build — nothing needs moving aside. That is the one condition a mixed fleet shows on its own,
 and the reason to finish an upgrade rather than leave it half done.

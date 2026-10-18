@@ -3,7 +3,7 @@
 # `bind-failure-seam` must be seen to fail, in each of the four ways it can.
 #
 # The check it drives is the CODE half of
-# [#352](https://github.com/LASTRADA-Software/fastcached/issues/352). The table half
+# [#352](https://github.com/LASTRADA-Software/pace/issues/352). The table half
 # is a `static_assert` and needs no selftest: a row omitting the column does not
 # compile, which is a fact anyone can verify by trying it. The code half is a source
 # scan, and a source scan that has never been watched refuse is indistinguishable
@@ -26,27 +26,27 @@
 # SUCCESS path. Staying in CMake means neither applies rather than surviving both.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-bind-failure-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-bind-failure-seam.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-bind-failure-seam.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(nodeDirectory "src/apps/fastcache-compile-node")
-set(root "${FASTCACHED_SCRATCH_DIR}/bind-failure-selftest")
+set(nodeDirectory "src/apps/pace-node")
+set(root "${PACE_SCRATCH_DIR}/bind-failure-selftest")
 file(REMOVE_RECURSE "${root}")
 
 set(failures "")
@@ -61,7 +61,7 @@ set(compliantBody [==[
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeSurfaces.hpp"
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::expected<void, std::string> OpenEverything(NodeIoLoop& io, NodeConfig const& cfg, ILogger& logger)
@@ -81,14 +81,14 @@ std::expected<void, std::string> OpenEverything(NodeIoLoop& io, NodeConfig const
     return {};
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node
 ]==])
 
 # Build a tree: the compliant file, plus an optional extra file.
 # @param name Which case; also the directory.
 # @param extraPath Where the case's own file goes, or empty for none.
 # @param extraBody What that file contains.
-function(fastcached_make_tree name extraPath extraBody outVar)
+function(pace_make_tree name extraPath extraBody outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/${nodeDirectory}")
@@ -102,9 +102,9 @@ function(fastcached_make_tree name extraPath extraBody outVar)
 endfunction()
 
 # Run the check against a tree and record whether it objected.
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErrors
         RESULT_VARIABLE ignored)
@@ -134,8 +134,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # 1. Clean. Catches a check that refuses everything, which is as useless as one that
 #    refuses nothing and much easier to ship.
-fastcached_make_tree("clean" "" "" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("clean" "" "" tree)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "clean: the check objected to a tree whose only opener routes through the seam")
 endif()
@@ -155,8 +155,8 @@ std::expected<void, std::string> StartFifthSurface(ILogger& logger)
     return {};
 }
 ]==])
-fastcached_make_tree("bypass" "${nodeDirectory}/FifthSurface.cpp" "${bypassBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("bypass" "${nodeDirectory}/FifthSurface.cpp" "${bypassBody}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "bypass: an opener that binds and refuses on its own did not fail the check -- which is the whole of #352's code half")
 else()
@@ -181,8 +181,8 @@ struct SomethingDocumented
 {
 };
 ]==])
-fastcached_make_tree("prose" "${nodeDirectory}/Documented.hpp" "${proseBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("prose" "${nodeDirectory}/Documented.hpp" "${proseBody}" tree)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "prose: a file NAMING a bind primitive in a doc comment was reported as an opener, so the check cannot survive its own documentation")
 endif()
@@ -192,7 +192,7 @@ endif()
 set(tree "${root}/empty")
 file(REMOVE_RECURSE "${tree}")
 file(MAKE_DIRECTORY "${tree}/${nodeDirectory}")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "empty: a tree with no source file at all passed, so a moved source root would report a clean scan")
 else()
@@ -228,7 +228,7 @@ set(tree "${root}/renamed")
 file(REMOVE_RECURSE "${tree}")
 file(MAKE_DIRECTORY "${tree}/${nodeDirectory}")
 file(WRITE "${tree}/${nodeDirectory}/OpenSome.cpp" "${renamedBody}")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "renamed: a tree where core::net::openSharedPortUdpSocket appears nowhere passed, so a renamed primitive would leave the check guarding a name nobody calls")
 else()
@@ -246,7 +246,7 @@ file(REMOVE_RECURSE "${tree}")
 file(MAKE_DIRECTORY "${tree}/${nodeDirectory}")
 string(REPLACE "JudgeBindFailure" "SomeOtherName" seamlessBody "${compliantBody}")
 file(WRITE "${tree}/${nodeDirectory}/Compliant.cpp" "${seamlessBody}")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "no-seam: a tree where nothing calls the seam passed, so renaming JudgeBindFailure would disarm the check silently")
 else()

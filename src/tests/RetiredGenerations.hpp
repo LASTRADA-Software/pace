@@ -11,14 +11,14 @@
 #include <string_view>
 #include <type_traits>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// One generation of a versioned digest contract: what NAMED it, and the digest
 /// taken under it.
 ///
 /// Two tables in this tree keep this shape and kept it separately — the key space's
-/// schema tags (`apps/fastcache-cc/`, keyed on a string) and the stored-value
+/// schema tags (`apps/pace-cc/`, keyed on a string) and the stored-value
 /// contract's generations (`CompileCache/`, keyed on a `CompileValueVersion` byte).
 /// They could not share a definition because **a library test may not include an app
 /// header**, which is the same constraint that put `FleetHarness.hpp` here rather
@@ -195,7 +195,7 @@ void RequireNoRetiredDigest(std::string_view live, std::span<Generation<Key> con
 /// asymmetry is a decision rather than an oversight.** A table keeping its retired
 /// rows holds DATED RECORDS: a digest describing the corpus as that generation met
 /// it, which nothing can recompute once the corpus or the behaviour has moved
-/// ([#583](https://github.com/LASTRADA-Software/fastcached/issues/583)). Demanding
+/// ([#583](https://github.com/LASTRADA-Software/pace/issues/583)). Demanding
 /// those digests be re-derivable is demanding they stop being dated records, and it
 /// would refuse a correct tree. That is worth saying HERE rather than only at the
 /// precondition, because an inconsistency between two tables in one header reads as
@@ -243,4 +243,4 @@ void RequireLiveGenerationIsLast(Key live, std::span<Generation<Key> const> rows
     CHECK(RenderGenerationKey(live) == RenderGenerationKey(rows.back().key));
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

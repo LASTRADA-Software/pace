@@ -2,7 +2,7 @@
 
 **Protocols:** Redis RESP2
 
-Removes every entry. fastcached has a single keyspace, so this is
+Removes every entry. pace-kv has a single keyspace, so this is
 identical to [FLUSHALL](flushall.md).
 
 ## Synopsis

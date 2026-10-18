@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstddef>
 #include <optional>
 #include <span>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file WireReply.hpp
@@ -38,11 +38,11 @@ namespace FastCache::Testing
 /// - **`CompileCacheHandler_test`** takes an already-decoded `ReplyFrame` rather than
 ///   bytes and answers a `DecodedError { present, code, message }` built from
 ///   `DecodeErrorPayload`. Same name, different parameter and different return.
-/// - **`fastcache-cc/WorkerProtocol_test`** is TOTAL where the one below is partial:
+/// - **`pace-cc/WorkerProtocol_test`** is TOTAL where the one below is partial:
 ///   it returns a bare `ErrorCode`, using `MalformedFrame` as its cannot-read value
 ///   rather than `nullopt`, and all of its call sites compare with `==`. Folding it
 ///   would rewrite every one of them. **Reachability is not the reason** -- the
-///   tempting argument is that the launcher does not link `FastCache`, and it does not
+///   tempting argument is that the launcher does not link `Pace`, and it does not
 ///   hold: that file already includes three `src/tests/` headers, and this one depends
 ///   only on `CompileCacheWire.hpp`, which is header-only and dependency-free by rule.
 ///   It is the SHAPE that excludes it, and stating the wrong reason would send the
@@ -76,4 +76,4 @@ namespace FastCache::Testing
     return reply.subspan(CompileCacheWire::ReplyHeaderSize);
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

@@ -16,7 +16,7 @@
 #
 #   clang-format  the BUILD CI formats with: the PyPI release .clang-format-version
 #                 declares, refused before `-i` when no binary on PATH (or in
-#                 FASTCACHED_CLANG_FORMAT) is it (#1349, #1407). Two builds -- even of one release number --
+#                 PACE_CLANG_FORMAT) is it (#1349, #1407). Two builds -- even of one release number --
 #                 can disagree about formatting, so a tree clean under whatever is on
 #                 PATH can still be rejected, for code nobody mis-wrote.
 #   clang-debug   PEDANTIC + ASan + UBSan + clang-tidy, the ANALYSER pinned to the
@@ -74,9 +74,9 @@
 # A real run takes this host's gate lock ITSELF, before it reads the tree, so run it
 # bare -- see "One gate per host, and the lock is taken HERE" below (#1379).
 #
-#   FASTCACHED_GATE_LOCK       the lock file. Default `$HOME/.fastcached-local-gate.lock`.
-#   FASTCACHED_GATE_LOCK_WAIT  seconds to queue for it before refusing. Default 10800.
-#   FASTCACHED_GATE_STOP_AFTER_LOCK  the self-test's seam: stop once the lock stage has
+#   PACE_GATE_LOCK       the lock file. Default `$HOME/.pace-local-gate.lock`.
+#   PACE_GATE_LOCK_WAIT  seconds to queue for it before refusing. Default 10800.
+#   PACE_GATE_STOP_AFTER_LOCK  the self-test's seam: stop once the lock stage has
 #                              decided, checking nothing, with `no-gate-run`'s status.
 #
 # ## A run that never concluded (#584)
@@ -155,7 +155,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Where a build tree goes when the root is on a protocol filesystem (#1227). The local disk
 # of whoever runs the gate, keyed per worktree below -- never shared between trees.
-gate_build_home="${FASTCACHED_GATE_BUILD_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/fastcached/gate}"
+gate_build_home="${PACE_GATE_BUILD_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/pace/gate}"
 cd "$repo_root" || exit 1
 
 # The status a usage error exits with. Defined here because the argument loop below
@@ -291,7 +291,7 @@ unset _gate_row
 # The default-OFF targets the gate turns ON, so its `ctest` total describes the
 # same target set CI's does (#1144).
 #
-# `FASTCACHED_BUILD_TESTCLIENT` and `FASTCACHED_BUILD_BENCHMARKS` default OFF in
+# `PACE_BUILD_TESTCLIENT` and `PACE_BUILD_BENCHMARKS` default OFF in
 # `src/apps/CMakeLists.txt` and no preset mentions them, so both gate legs took
 # the default and `compile-cache-testclient-tests` was never built by any gate
 # run that has ever happened. Nothing said so: there is no flag to notice
@@ -313,7 +313,7 @@ unset _gate_row
 # nothing, and refuses a flag name that gates nothing: a misspelled `-D` sets an
 # unused cache variable and changes no target.
 #
-# It does NOT model which jobs run ctest. Every `FASTCACHED_BUILD_*=ON` the
+# It does NOT model which jobs run ctest. Every `PACE_BUILD_*=ON` the
 # workflow passes anywhere is CI's side, because deriving *this job runs tests*
 # from the YAML is fragile in the direction that fails silent. So a job that
 # turns one on WITHOUT running tests makes that check refuse, and the answer is
@@ -326,8 +326,8 @@ unset _gate_row
 # cannot tell a narrowed gate from a full one. Both, because either alone leaves
 # the other failure open.
 gate_target_flags=(
-    FASTCACHED_BUILD_TESTCLIENT
-    FASTCACHED_BUILD_BENCHMARKS
+    PACE_BUILD_TESTCLIENT
+    PACE_BUILD_BENCHMARKS
 )
 
 # What each leg has done so far, by index into the table above. Declared empty and
@@ -793,7 +793,7 @@ gate_lock_flock_file() {
 # shell describes some other process and is ignored rather than trusted.
 #
 # @param 1 the lock this run resolved
-# @param 2 FASTCACHED_GATE_LOCK_HELD as found (`pid:path`), possibly empty
+# @param 2 PACE_GATE_LOCK_HELD as found (`pid:path`), possibly empty
 # @param 3 ancestor records, nearest first, one `pid<TAB>cwd<TAB>argv` line each with
 #          argv fields $'\037'-separated; a `?<TAB><TAB><pid>` line means the chain could
 #          not be read past <pid>. Injected, so the self-test stages a process tree
@@ -935,7 +935,7 @@ gate_lock_ancestors() {
 #
 # @param 1 lock file  @param 2 seconds to queue  @param 3 refused status
 # @param 4 unusable status  @param 5.. the command, which is handed
-#          FASTCACHED_GATE_LOCK_RAN -- a path to create as soon as it starts.
+#          PACE_GATE_LOCK_RAN -- a path to create as soon as it starts.
 # Returns the command's own status, or @3 / @4 with the line naming it printed.
 gate_lock_run() {
     local lock="$1" wait="$2" refused="$3" unusable="$4"
@@ -944,7 +944,7 @@ gate_lock_run() {
     limits="It serialises gates run by this user on this host -- not CI, not another machine, not another user."
     case "$wait" in
         ''|*[!0-9]*)
-            echo "$gate_lock_unusable_marker -- FASTCACHED_GATE_LOCK_WAIT='$wait' is not a whole number of seconds."
+            echo "$gate_lock_unusable_marker -- PACE_GATE_LOCK_WAIT='$wait' is not a whole number of seconds."
             return "$unusable"
             ;;
     esac
@@ -960,7 +960,7 @@ gate_lock_run() {
     if [[ $? -eq "$refused" ]]; then
         echo "$gate_lock_waiting_marker -- another gate on this host holds $lock; queued for up to ${wait}s. $limits"
     fi
-    FASTCACHED_GATE_LOCK_RAN="$scratch/ran" flock -o -w "$wait" -E "$refused" "$lock" "$@"
+    PACE_GATE_LOCK_RAN="$scratch/ran" flock -o -w "$wait" -E "$refused" "$lock" "$@"
     rc=$?
     if [[ -e "$scratch/ran" ]]; then
         rm -rf "$scratch"
@@ -1113,8 +1113,8 @@ skip_report() {
 #
 # `Not Run` is here because it was shown EMISSIBLE rather than assumed: Catch2's
 # `catch_discover_tests` writes a `<TARGET>_NOT_BUILT-<hash>` sentinel whenever a
-# test target was not built, and `FASTCACHED_BUILD_TESTCLIENT` and
-# `FASTCACHED_BUILD_BENCHMARKS` default OFF, so a partial build produces it
+# test target was not built, and `PACE_BUILD_TESTCLIENT` and
+# `PACE_BUILD_BENCHMARKS` default OFF, so a partial build produces it
 # (#1159's measurement). #1158 asked for it to be covered or shown impossible; it
 # is covered, because it is not impossible.
 #
@@ -1503,7 +1503,7 @@ gate_inconclusive() {
 #                       and compares unequal, which is the point: a directory
 #                       configured on a machine that had no clang-tidy must not be
 #                       accepted as one that has the right clang-tidy. Same shape
-#                       as the stale `FASTCACHE_CC-NOTFOUND` which kept whole build
+#                       as the stale `PACE_CC-NOTFOUND` which kept whole build
 #                       trees on sccache without ever saying so.
 #   USE_COMPILER_CACHE  whether a compiler-cache launcher fronts the compiler. Its
 #                       default is ON, so a directory that has never been told
@@ -1654,7 +1654,7 @@ compiler_shim_verdict() {
 
     base="$(basename "$resolved")"
     case "$base" in
-        ccache | sccache | distcc | icecc | fastcache-cc)
+        ccache | sccache | distcc | icecc | pace-cc)
             echo "$base"
             return 0
             ;;
@@ -1845,7 +1845,7 @@ header_filter_coverage() {
 # split from the enumeration so `--self-test` can drive them at a SYNTHETIC root:
 # where a checkout lives is part of the outcome, and a case that used the real root
 # would assert the opposite thing depending on which machine ran it -- passing on
-# CI's `.../fastcached/` for the very layout that fails in a lane worktree, which is
+# CI's `.../pace/` for the very layout that fails in a lane worktree, which is
 # #1040's own blind spot rebuilt inside its guard.
 
 # What the gate says about that coverage.
@@ -1916,7 +1916,7 @@ header_filter_report() {
             return 1
             ;;
         0/*)
-            echo "clang-tidy's HeaderFilterRegex in $config matches NONE of this tree's $total tracked first-party headers, so every header finding would be discarded as non-user code and the analyser would report clean by analysing nothing (#1040). This is a property of where this checkout LIVES: three patterns anchored on the directory name have now missed a real layout, most recently every lane worktree at .../fastcached-worktrees/<lane>/src/. Fix the pattern, do not delete this check"
+            echo "clang-tidy's HeaderFilterRegex in $config matches NONE of this tree's $total tracked first-party headers, so every header finding would be discarded as non-user code and the analyser would report clean by analysing nothing (#1040). This is a property of where this checkout LIVES: three patterns anchored on the directory name have now missed a real layout, most recently every lane worktree at .../pace-worktrees/<lane>/src/. Fix the pattern, do not delete this check"
             return 1
             ;;
     esac
@@ -2370,7 +2370,7 @@ target_set_report() {
 # true number comparable to nothing. #877: a required CI leg went red on a change
 # this gate had passed, and the check that failed -- `tidy-blind-spots` -- **could
 # not have run here at all**. It registers only under ASan AND
-# `FASTCACHED_ENABLE_TLS`, and `gate-clang-debug` has the first and not the second.
+# `PACE_ENABLE_TLS`, and `gate-clang-debug` has the first and not the second.
 # Nothing was broken and nobody made a mistake; the gate simply cannot reach it and
 # said nothing about that. The same lane had already read `17 tests, 100% passed`
 # as covering the check earlier that session. It was ABSENT, not passing, and the
@@ -2823,7 +2823,7 @@ if [[ "$self_test" -eq 1 ]]; then
                 printf 'build x.o: CXX_COMPILER__foo x.cpp\n  DEP_FILE = x.o.d\n' \
                     > "$scratch/$1/build.ninja" ;;
             fronted)
-                printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/fastcache-cc \n' \
+                printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/pace-cc \n' \
                     > "$scratch/$1/build.ninja" ;;
             none) ;;
             # A mistyped or newly-invented mode would otherwise produce a directory
@@ -2876,7 +2876,7 @@ if [[ "$self_test" -eq 1 ]]; then
     # the same fact arrived at deliberately, and gets the same answer for the same
     # reason -- what it costs is identical, and a configure fixes both.
     fixture targets-narrow "CLANG_TIDY_EXE:FILEPATH=/usr/bin/clang-tidy-22\nUSE_COMPILER_CACHE:BOOL=OFF\n"  ninja
-    fixture targets-off    "CLANG_TIDY_EXE:FILEPATH=/usr/bin/clang-tidy-22\nUSE_COMPILER_CACHE:BOOL=OFF\nFASTCACHED_BUILD_TESTCLIENT:BOOL=OFF\nFASTCACHED_BUILD_BENCHMARKS:BOOL=ON\n" ninja
+    fixture targets-off    "CLANG_TIDY_EXE:FILEPATH=/usr/bin/clang-tidy-22\nUSE_COMPILER_CACHE:BOOL=OFF\nPACE_BUILD_TESTCLIENT:BOOL=OFF\nPACE_BUILD_BENCHMARKS:BOOL=ON\n" ninja
 
     expect "reads the cached analyser" \
         "/usr/bin/clang-tidy-20" "$(cached_entry "$scratch/wrong/CMakeCache.txt" CLANG_TIDY_EXE)"
@@ -2946,13 +2946,13 @@ if [[ "$self_test" -eq 1 ]]; then
     # configure line. A `-D` that is never reached because nothing asked for a
     # configure is a flag the build directory does not have.
     expect "a directory that predates the target set is re-configured" \
-        "FASTCACHED_BUILD_TESTCLIENT is absent, not ON; FASTCACHED_BUILD_BENCHMARKS is absent, not ON" \
+        "PACE_BUILD_TESTCLIENT is absent, not ON; PACE_BUILD_BENCHMARKS is absent, not ON" \
         "$(configure_reason "$scratch/targets-narrow" tidy /usr/bin/clang-tidy-22)"
     expect "a no-tidy preset is re-configured over the target set too" \
-        "FASTCACHED_BUILD_TESTCLIENT is absent, not ON; FASTCACHED_BUILD_BENCHMARKS is absent, not ON" \
+        "PACE_BUILD_TESTCLIENT is absent, not ON; PACE_BUILD_BENCHMARKS is absent, not ON" \
         "$(configure_reason "$scratch/targets-narrow" no-tidy /usr/bin/clang-tidy-22)"
     expect "one target off is reported, and only that one" \
-        "FASTCACHED_BUILD_TESTCLIENT is OFF, not ON" \
+        "PACE_BUILD_TESTCLIENT is OFF, not ON" \
         "$(configure_reason "$scratch/targets-off" tidy /usr/bin/clang-tidy-22)"
     # The ACCEPTING direction, which is the half a guard nobody has watched accept
     # does not have: every fixture above carries the entries ON, so a clause that
@@ -2966,20 +2966,20 @@ if [[ "$self_test" -eq 1 ]]; then
     # which is the disagreement that means a target failed to build; `discovered`
     # has both and is the ordinary line.
     expect "the report names every flag and says when the derivation found nothing" \
-        "target set: FASTCACHED_BUILD_TESTCLIENT=ON FASTCACHED_BUILD_BENCHMARKS=ON; Catch2 binaries discovered: NONE FOUND (this line's derivation, not the build)" \
+        "target set: PACE_BUILD_TESTCLIENT=ON PACE_BUILD_BENCHMARKS=ON; Catch2 binaries discovered: NONE FOUND (this line's derivation, not the build)" \
         "$(target_set_report "$scratch/right")"
     mkdir -p "$scratch/discovered/src/tests" "$scratch/discovered/src/CowTree"
     printf 'CLANG_TIDY_EXE:FILEPATH=/usr/bin/clang-tidy-22\n%b' "$targets_on" > "$scratch/discovered/CMakeCache.txt"
-    : > "$scratch/discovered/src/tests/FastCacheTest-abc1234_tests.cmake"
+    : > "$scratch/discovered/src/tests/PaceTest-abc1234_tests.cmake"
     : > "$scratch/discovered/src/CowTree/CowTreeTests-abc1234_tests.cmake"
     expect "the report counts catch_discover_tests' own output, one per Catch2 binary" \
-        "target set: FASTCACHED_BUILD_TESTCLIENT=ON FASTCACHED_BUILD_BENCHMARKS=ON; Catch2 binaries discovered: 2" \
+        "target set: PACE_BUILD_TESTCLIENT=ON PACE_BUILD_BENCHMARKS=ON; Catch2 binaries discovered: 2" \
         "$(target_set_report "$scratch/discovered")"
     # `absent` renders as a WORD, never as an empty gap in the sentence: a leg
-    # printing `FASTCACHED_BUILD_TESTCLIENT=` beside a total is the same silence
+    # printing `PACE_BUILD_TESTCLIENT=` beside a total is the same silence
     # this line exists to end.
     expect "an absent entry says absent rather than rendering blank" \
-        "target set: FASTCACHED_BUILD_TESTCLIENT=absent FASTCACHED_BUILD_BENCHMARKS=absent; Catch2 binaries discovered: NONE FOUND (this line's derivation, not the build)" \
+        "target set: PACE_BUILD_TESTCLIENT=absent PACE_BUILD_BENCHMARKS=absent; Catch2 binaries discovered: NONE FOUND (this line's derivation, not the build)" \
         "$(target_set_report "$scratch/targets-narrow")"
 
     # A directory the refusal cannot READ must be re-configured rather than left to
@@ -3003,7 +3003,7 @@ if [[ "$self_test" -eq 1 ]]; then
     # can get. The fronted fixture carries a real `LAUNCHER = ` line, verbatim from a
     # gate directory, rather than the bare word: what is being tested is that the
     # gate recognises what CMake actually emits, including the leading indent.
-    printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env FASTCACHE_ADDR=127.0.0.1:6674 /usr/bin/fastcache-cc \n  DEP_FILE = x.o.d\nbuild y.o: CXX_COMPILER__foo y.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/fastcache-cc \n' \
+    printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env PACE_ADDR=127.0.0.1:6674 /usr/bin/pace-cc \n  DEP_FILE = x.o.d\nbuild y.o: CXX_COMPILER__foo y.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/pace-cc \n' \
         > "$scratch/ninja-fronted"
 
     # Two edges rather than one, because a count is what the refusal reports and a
@@ -3203,34 +3203,34 @@ CONTINUED" \
     # the whole defect is that the answer depends on where a checkout lives: a
     # case using this run's own root would assert one thing in a lane worktree
     # and the opposite on CI, which is the blind spot being closed.
-    _hdrs="src/FastCache/Core/Base64.hpp
-src/apps/fastcached/Main.hpp"
+    _hdrs="src/Pace/Core/Base64.hpp
+src/apps/pace-kv/Main.hpp"
     # The LAYOUT cases ask the `posix` spelling alone: they are about where a
     # checkout lives, and the historical patterns are /-only, so every spelling
     # would make each of them a separator case as well and assert two things at once.
-    _old='.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*'
-    _slash='.*/src/(CowTree|FastCache|apps|tests)/.*'
-    _new='.*[/\\]src[/\\](CowTree|FastCache|apps|tests)[/\\].*'
+    _old='.*/(pace[^/]*|worktrees/[^/]+)/src/.*'
+    _slash='.*/src/(CowTree|Pace|apps|tests)/.*'
+    _new='.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
     _exc=''
 
     # The three layouts the old pattern covered, which must not regress...
     expect "the old pattern covered the primary checkout" \
-        "2/2" "$(header_filter_match "$_old" "" /w/fastcached posix <<< "$_hdrs")"
+        "2/2" "$(header_filter_match "$_old" "" /w/pace posix <<< "$_hdrs")"
     expect "the old pattern covered a .claude worktree" \
-        "2/2" "$(header_filter_match "$_old" "" /w/fastcached/.claude/worktrees/w1 posix <<< "$_hdrs")"
+        "2/2" "$(header_filter_match "$_old" "" /w/pace/.claude/worktrees/w1 posix <<< "$_hdrs")"
     expect "the old pattern covered a wt-NNN checkout" \
-        "2/2" "$(header_filter_match "$_old" "" /w/fastcached-wt-139 posix <<< "$_hdrs")"
+        "2/2" "$(header_filter_match "$_old" "" /w/pace-wt-139 posix <<< "$_hdrs")"
 
     # ... and the one it did NOT, which is the ticket. Zero of two, and the
     # verdict names the first header that would have gone unanalysed.
     expect "the old pattern covered NO header in a lane worktree" \
-        "0/2 src/FastCache/Core/Base64.hpp" \
-        "$(header_filter_match "$_old" "" /w/fastcached-worktrees/lane-a posix <<< "$_hdrs")"
+        "0/2 src/Pace/Core/Base64.hpp" \
+        "$(header_filter_match "$_old" "" /w/pace-worktrees/lane-a posix <<< "$_hdrs")"
 
     # The /-only replacement covered all four as POSIX paths -- which is why this
     # guard read 363/363 over a filter that matched nothing on Windows.
-    for _root in /w/fastcached /w/fastcached/.claude/worktrees/w1 \
-                 /w/fastcached-wt-139 /w/fastcached-worktrees/lane-a; do
+    for _root in /w/pace /w/pace/.claude/worktrees/w1 \
+                 /w/pace-wt-139 /w/pace-worktrees/lane-a; do
         expect "the /-only pattern covers $_root as POSIX paths" \
             "2/2" "$(header_filter_match "$_slash" "$_exc" "$_root" posix <<< "$_hdrs")"
     done
@@ -3239,25 +3239,25 @@ src/apps/fastcached/Main.hpp"
     # nothing, and the verdict names the spelling rather than a layout: a path taken
     # in one spelling and not another is a separator defect, not a location one.
     expect "the /-only pattern covers NO header in the all-backslash spelling" \
-        "0/2 src/FastCache/Core/Base64.hpp (windows spelling)" \
-        "$(header_filter_match "$_slash" "" /w/fastcached-worktrees/lane-a <<< "$_hdrs")"
+        "0/2 src/Pace/Core/Base64.hpp (windows spelling)" \
+        "$(header_filter_match "$_slash" "" /w/pace-worktrees/lane-a <<< "$_hdrs")"
     # A pattern written for both separators as two separate copies -- the edit the
     # remedy text warns against -- still misses MSVC's mix: a backslashed include
     # directory, then a slashed `#include` name.
-    _twocopies='(.*/src/(CowTree|FastCache|apps|tests)/.*|.*\\src\\(CowTree|FastCache|apps|tests)\\.*)'
+    _twocopies='(.*/src/(CowTree|Pace|apps|tests)/.*|.*\\src\\(CowTree|Pace|apps|tests)\\.*)'
     expect "two copies of the pattern miss the MSVC mix of separators" \
-        "0/2 src/FastCache/Core/Base64.hpp (msvc spelling)" \
-        "$(header_filter_match "$_twocopies" "" /w/fastcached <<< "$_hdrs")"
+        "0/2 src/Pace/Core/Base64.hpp (msvc spelling)" \
+        "$(header_filter_match "$_twocopies" "" /w/pace <<< "$_hdrs")"
     expect "... which is what the MSVC spelling IS" \
-        '\w\fastcached\src/FastCache/Core/Base64.hpp' \
-        "$(header_filter_spell msvc /w/fastcached/src/FastCache/Core/Base64.hpp)"
+        '\w\pace\src/Pace/Core/Base64.hpp' \
+        "$(header_filter_spell msvc /w/pace/src/Pace/Core/Base64.hpp)"
     expect "a spelling nobody defined is refused, never skipped" \
         "2" "$(header_filter_spell dos /w/x >/dev/null 2>&1; echo $?)"
 
     # The separator-agnostic pattern covers all four layouts in every spelling,
     # which is the point of naming neither a layout nor a separator.
-    for _root in /w/fastcached /w/fastcached/.claude/worktrees/w1 \
-                 /w/fastcached-wt-139 /w/fastcached-worktrees/lane-a; do
+    for _root in /w/pace /w/pace/.claude/worktrees/w1 \
+                 /w/pace-wt-139 /w/pace-worktrees/lane-a; do
         expect "the new pattern covers $_root in every spelling" \
             "2/2" "$(header_filter_match "$_new" "$_exc" "$_root" <<< "$_hdrs")"
     done
@@ -3271,7 +3271,7 @@ src/apps/fastcached/Main.hpp"
     for _dep in "$_dep_deps" "$_dep_cpm"; do
         expect "a dependency header is reached in no spelling: $_dep" \
             "0/1" \
-            "$(header_filter_reach "$_new" "" /w/fastcached-worktrees/lane-a <<< "$_dep")"
+            "$(header_filter_reach "$_new" "" /w/pace-worktrees/lane-a <<< "$_dep")"
     done
     # A leak is a question of ANY spelling, and coverage's every-spelling count
     # cannot ask it: a filter taking catch2 only when it is spelled with
@@ -3279,10 +3279,10 @@ src/apps/fastcached/Main.hpp"
     _depwin="${_new}|"'.*\\_deps\\.*'
     expect "a dependency taken in the backslash spelling alone is REACHED" \
         "1/1 $_dep_deps (windows spelling)" \
-        "$(header_filter_reach "$_depwin" "" /w/fastcached-worktrees/lane-a <<< "$_dep_deps")"
+        "$(header_filter_reach "$_depwin" "" /w/pace-worktrees/lane-a <<< "$_dep_deps")"
     expect "... where the every-spelling count would have read it as untaken" \
         "0/1 $_dep_deps (posix spelling)" \
-        "$(header_filter_match "$_depwin" "" /w/fastcached-worktrees/lane-a <<< "$_dep_deps")"
+        "$(header_filter_match "$_depwin" "" /w/pace-worktrees/lane-a <<< "$_dep_deps")"
 
     # Pinned as the inequality it is. The first #1040 fix -- broad
     # `.*/src/.*` with `_deps` excluded -- is correct for one layout and takes the
@@ -3290,16 +3290,16 @@ src/apps/fastcached/Main.hpp"
     # clean. A case driven only against `_deps` passes under that bug.
     expect "the old broad+exclude pattern kept _deps out" \
         "0/1 $_dep_deps" \
-        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/fastcached-worktrees/lane-a posix <<< "$_dep_deps")"
+        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/pace-worktrees/lane-a posix <<< "$_dep_deps")"
     expect "... and TOOK the CPM layout, which is the defect CI caught" \
         "1/1" \
-        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/fastcached-worktrees/lane-a posix <<< "$_dep_cpm")"
+        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/pace-worktrees/lane-a posix <<< "$_dep_cpm")"
 
     # A partial match is its own outcome: an analyser blind to 1 of 2 headers
     # still reports findings, so it looks like it is working.
     expect "a partial match names how many and which" \
-        "1/2 src/apps/fastcached/Main.hpp" \
-        "$(header_filter_match '.*/src/FastCache/.*' "" /w/fastcached posix <<< "$_hdrs")"
+        "1/2 src/apps/pace-kv/Main.hpp" \
+        "$(header_filter_match '.*/src/Pace/.*' "" /w/pace posix <<< "$_hdrs")"
 
     # The reporter. `all` is the only arm that carries on -- asserted as the
     # STATUS beside the text, since a reporter that says the right words and
@@ -3315,9 +3315,9 @@ src/apps/fastcached/Main.hpp"
     # headers were taken "as POSIX paths" -- that is the one spelling that did NOT take them, a
     # confident wrong signal. Driven through the real match, so the verdict is the one a gate
     # would produce, not one typed here.
-    _p3="$(header_filter_match '.*\\src\\(CowTree|FastCache|apps|tests)\\.*' "" /w/fastcached <<< "$_hdrs")"
+    _p3="$(header_filter_match '.*\\src\\(CowTree|Pace|apps|tests)\\.*' "" /w/pace <<< "$_hdrs")"
     expect "P3: a backslash-only filter's miss is named in the posix spelling" \
-        "0/2 src/FastCache/Core/Base64.hpp (posix spelling)" "$_p3"
+        "0/2 src/Pace/Core/Base64.hpp (posix spelling)" "$_p3"
     # `if`, never `case`, inside `$( )`: bash 3.2 reads a case pattern's `)` as the
     # substitution's end (#1224) -- at RUN time, which `check-bash32-parse.sh` cannot see.
     _p3_report="$(header_filter_report /w/.clang-tidy "$_p3" 2>&1)"
@@ -3346,9 +3346,9 @@ src/apps/fastcached/Main.hpp"
     # P1: a filter taking one root in every spelling and another as POSIX paths only -- a
     # PARTIAL miss in one spelling. Driven through the real match. Its cause is the separators,
     # and #1040 (where a checkout lives) must not be named for it.
-    _p1="$(header_filter_match '(.*/src/(CowTree|FastCache|apps|tests)/.*|.*[/\\]src[/\\]FastCache[/\\].*)' "" /w/fastcached <<< "$_hdrs")"
+    _p1="$(header_filter_match '(.*/src/(CowTree|Pace|apps|tests)/.*|.*[/\\]src[/\\]Pace[/\\].*)' "" /w/pace <<< "$_hdrs")"
     expect "P1: a partial miss in one spelling is named in that spelling" \
-        "1/2 src/apps/fastcached/Main.hpp (windows spelling)" "$_p1"
+        "1/2 src/apps/pace-kv/Main.hpp (windows spelling)" "$_p1"
     expect "P1: ... and its cause is the separators" \
         "said|1" "$(report_says 'the cause is the pattern'"'"'s SEPARATORS, not where this checkout lives' header_filter_report /w/.clang-tidy "$_p1")"
     expect "P1: ... and its remedy prints the class as .clang-tidy spells it" \
@@ -3401,15 +3401,15 @@ src/apps/fastcached/Main.hpp"
     # spells uniqueness the one way this repository has been bitten by (`$$` is
     # shared inside a subshell on bash 3.2).
     _hf_tree="$scratch/header-filter"
-    _hf_clean='.*[/\\]src[/\\](CowTree|FastCache|apps|tests)[/\\].*'
+    _hf_clean='.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
     _hf_config() { printf "HeaderFilterRegex: '%s'\n" "$1" > "$_hf_tree/.clang-tidy"; }
     # The roots come from the TREE (#1370), so the tree plants its own file -- and a
     # second root, `thirdparty`, which no line of this script names: a split still
     # keyed on `vendor` would count its header as first-party and go 1/2.
     _hf_roots() { { echo '# planted'; printf '%s\n' "$@"; } > "$_hf_tree/scripts/lib/third-party-roots.txt"; }
-    mkdir -p "$_hf_tree/src/FastCache/Core" "$_hf_tree/vendor/endo/tui" \
+    mkdir -p "$_hf_tree/src/Pace/Core" "$_hf_tree/vendor/endo/tui" \
              "$_hf_tree/thirdparty/lib" "$_hf_tree/scripts/lib"
-    : > "$_hf_tree/src/FastCache/Core/Base64.hpp"
+    : > "$_hf_tree/src/Pace/Core/Base64.hpp"
     : > "$_hf_tree/vendor/endo/tui/Sixel.hpp"
     : > "$_hf_tree/thirdparty/lib/Upstream.hpp"
     # A declared package, so the dependency layouts are DERIVED from something: the
@@ -3988,7 +3988,7 @@ $_started"
 
         rm -f "$_ran"
         _out="$(gate_lock_run "$_lk" 5 "$_refused" "$_unusable" \
-            sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"; : > "$1"' _ "$_ran" 2>&1)"
+            sh -c ': > "$PACE_GATE_LOCK_RAN"; : > "$1"' _ "$_ran" 2>&1)"
         _rc=$?
         expect "an uncontended lock runs the command" "0 yes" "$_rc $([[ -e "$_ran" ]] && echo yes || echo no)"
         expect "an uncontended lock prints no waiting line" "no" "$(_has "$_out" "$gate_lock_waiting_marker")"
@@ -4010,7 +4010,7 @@ $_started"
         if [[ -e "$_ready" ]]; then
             rm -f "$_ran"
             _out="$(gate_lock_run "$_lk" 1 "$_refused" "$_unusable" \
-                sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"; : > "$1"' _ "$_ran" 2>&1)"
+                sh -c ': > "$PACE_GATE_LOCK_RAN"; : > "$1"' _ "$_ran" 2>&1)"
             _rc=$?
             expect "a held lock refuses with its own status" "$_refused" "$_rc"
             expect "a held lock does not run the command" "no" "$([[ -e "$_ran" ]] && echo yes || echo no)"
@@ -4025,19 +4025,19 @@ $_started"
 
         rm -f "$_ran"
         _out="$(gate_lock_run "$_lk" 10 "$_refused" "$_unusable" \
-            sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"; : > "$1"' _ "$_ran" 2>&1)"
+            sh -c ': > "$PACE_GATE_LOCK_RAN"; : > "$1"' _ "$_ran" 2>&1)"
         _rc=$?
         expect "a released lock is acquired and runs the command" "0 yes" "$_rc $([[ -e "$_ran" ]] && echo yes || echo no)"
 
         # The sentinel, not the status: a command that exits with the refusal status RAN.
         _out="$(gate_lock_run "$_lk" 5 "$_refused" "$_unusable" \
-            sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"; exit "$1"' _ "$_refused" 2>&1)"
+            sh -c ': > "$PACE_GATE_LOCK_RAN"; exit "$1"' _ "$_refused" 2>&1)"
         _rc=$?
         expect "a command exiting the refusal status keeps its status" "$_refused" "$_rc"
         expect "a command exiting the refusal status is not reported refused" "no" \
             "$(_has "$_out" "$gate_lock_refused_marker")"
         _out="$(gate_lock_run "$_lk" 5 "$_refused" "$_unusable" \
-            sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"; exit 3' 2>&1)"
+            sh -c ': > "$PACE_GATE_LOCK_RAN"; exit 3' 2>&1)"
         _rc=$?
         expect "a command's own status passes through" "3" "$_rc"
 
@@ -4048,13 +4048,13 @@ $_started"
         # Its stdio goes to /dev/null or the `$( )` capture would wait for it to exit.
         _straggler="$scratch/lock/straggler.pid"
         _out="$(gate_lock_run "$_lk" 5 "$_refused" "$_unusable" \
-            sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"; sleep 20 </dev/null >/dev/null 2>&1 & echo $! > "$1"' _ "$_straggler" 2>&1)"
+            sh -c ': > "$PACE_GATE_LOCK_RAN"; sleep 20 </dev/null >/dev/null 2>&1 & echo $! > "$1"' _ "$_straggler" 2>&1)"
         flock -n -E "$_refused" "$_lk" true 2>/dev/null
         expect "a descendant left running does not hold the lock after the run" "0" "$?"
         [[ ! -s "$_straggler" ]] || kill -KILL "$(cat "$_straggler")" 2>/dev/null
 
         _out="$(gate_lock_run "$scratch/lock/no-such-dir/gate.lock" 1 "$_refused" "$_unusable" \
-            sh -c ': > "$FASTCACHED_GATE_LOCK_RAN"' 2>&1)"
+            sh -c ': > "$PACE_GATE_LOCK_RAN"' 2>&1)"
         _rc=$?
         expect "a lock that cannot be opened is unusable, not refused" "$_unusable" "$_rc"
         expect "an unopenable lock prints no waiting line" "no" "$(_has "$_out" "$gate_lock_waiting_marker")"
@@ -4074,8 +4074,8 @@ $_started"
         _e2e="$scratch/lock/main-path.lock"
         _stopped="$(gate_outcome_status no-gate-run)"
         _gate_env() {
-            env -u FASTCACHED_GATE_LOCK_HELD -u FASTCACHED_GATE_LOCK_RAN -u FASTCACHED_GATE_LOCK_QUEUED_AT \
-                FASTCACHED_GATE_LOCK="$_e2e" FASTCACHED_GATE_LOCK_WAIT=2 FASTCACHED_GATE_STOP_AFTER_LOCK=1 "$@"
+            env -u PACE_GATE_LOCK_HELD -u PACE_GATE_LOCK_RAN -u PACE_GATE_LOCK_QUEUED_AT \
+                PACE_GATE_LOCK="$_e2e" PACE_GATE_LOCK_WAIT=2 PACE_GATE_STOP_AFTER_LOCK=1 "$@"
         }
         _out="$(_gate_env "$BASH" "$_gate_script" 2>&1)"
         _rc=$?
@@ -4511,8 +4511,8 @@ unresolved src/tests/CMakeLists.txt:288' 'alpha' 2 2)" == *"does not claim to ha
     #
     # The pure rows above cannot see a parser that reads the wrong files or the
     # wrong shape, and that is where this went wrong first: a draft matched every
-    # `NAME "..."` in the CMake sources and reported `DEB-DEFAULT`, `fastcached`
-    # and `fastcached.service` as unreachable tests -- CPack components and install
+    # `NAME "..."` in the CMake sources and reported `DEB-DEFAULT`, `pace-kv`
+    # and `pace-kv.service` as unreachable tests -- CPack components and install
     # RENAMEs, matched because the pattern was broader than its author read it.
     # Anchoring to `add_test(` is what fixed it, and only a run against the real
     # tree could have shown it.
@@ -4537,7 +4537,7 @@ unresolved src/tests/CMakeLists.txt:288' 'alpha' 2 2)" == *"does not claim to ha
         expect "a CPack component NAME is not read as a test registration" \
             "0" "$(printf '%s\n' "$coverage_declared" | grep -cx 'literal DEB-DEFAULT' || true)"
         expect "an install(RENAME) target is not read as a test registration" \
-            "0" "$(printf '%s\n' "$coverage_declared" | grep -cx 'literal fastcached.service' || true)"
+            "0" "$(printf '%s\n' "$coverage_declared" | grep -cx 'literal pace-kv.service' || true)"
         # The same-line shape, which 157 of 158 registrations do not use and which
         # a parser written from the common case alone would silently drop -- and it
         # is the one registration whose name genuinely cannot be resolved, so
@@ -4652,12 +4652,12 @@ fi
 # is what keeps every existing `flock <path> bash scripts/local-gate.sh` working after this
 # lands. Without that, `flock` taking a SECOND descriptor on the path would block against
 # the wrapper's own descriptor for the whole wait.
-gate_lock_path="${FASTCACHED_GATE_LOCK:-${HOME:+$HOME/.fastcached-local-gate.lock}}"
+gate_lock_path="${PACE_GATE_LOCK:-${HOME:+$HOME/.pace-local-gate.lock}}"
 if [[ -z "$gate_lock_path" ]]; then
-    echo "$gate_lock_unusable_marker -- neither FASTCACHED_GATE_LOCK nor HOME is set, so there is no lock file to name."
+    echo "$gate_lock_unusable_marker -- neither PACE_GATE_LOCK nor HOME is set, so there is no lock file to name."
     exit "$(gate_outcome_status lock-unusable)"
 fi
-gate_lock_marker="${FASTCACHED_GATE_LOCK_HELD:-}"
+gate_lock_marker="${PACE_GATE_LOCK_HELD:-}"
 gate_lock_found="$(gate_lock_holder "$gate_lock_path" "$gate_lock_marker" "$(gate_lock_ancestors)")"
 gate_lock_word="${gate_lock_found%%|*}"
 gate_lock_rest="${gate_lock_found#*|}"
@@ -4665,16 +4665,16 @@ gate_lock_holder_pid="${gate_lock_rest%%|*}"
 gate_lock_holder_path="${gate_lock_rest#*|}"
 case "$gate_lock_word" in
     marker|marker-unverified)
-        [[ -z "${FASTCACHED_GATE_LOCK_RAN:-}" ]] || : > "$FASTCACHED_GATE_LOCK_RAN"
+        [[ -z "${PACE_GATE_LOCK_RAN:-}" ]] || : > "$PACE_GATE_LOCK_RAN"
         [[ "$gate_lock_word" == "marker" ]] || \
-            echo "== gate lock: this run's ancestry could not be read far enough to find pid $gate_lock_holder_pid, so FASTCACHED_GATE_LOCK_HELD is trusted without that check."
+            echo "== gate lock: this run's ancestry could not be read far enough to find pid $gate_lock_holder_pid, so PACE_GATE_LOCK_HELD is trusted without that check."
         gate_lock_queued=""
-        case "${FASTCACHED_GATE_LOCK_QUEUED_AT:-}" in
+        case "${PACE_GATE_LOCK_QUEUED_AT:-}" in
             ''|*[!0-9]*) ;;
             *)
                 # By the wall clock, which steps here, so a negative reading is said to be
                 # unknown rather than printed as the shortest queue there could be.
-                gate_lock_queued=$(( $(date +%s) - FASTCACHED_GATE_LOCK_QUEUED_AT ))
+                gate_lock_queued=$(( $(date +%s) - PACE_GATE_LOCK_QUEUED_AT ))
                 if [[ "$gate_lock_queued" -ge 0 ]]; then
                     gate_lock_queued=", after ~${gate_lock_queued}s queued by the wall clock"
                 else
@@ -4682,7 +4682,7 @@ case "$gate_lock_word" in
                 fi
                 ;;
         esac
-        unset FASTCACHED_GATE_LOCK_RAN FASTCACHED_GATE_LOCK_QUEUED_AT
+        unset PACE_GATE_LOCK_RAN PACE_GATE_LOCK_QUEUED_AT
         echo "== gate lock $gate_lock_path held for this run (taken by pid $gate_lock_holder_pid${gate_lock_queued})"
         ;;
     wrapper)
@@ -4697,7 +4697,7 @@ case "$gate_lock_word" in
             echo "== gate lock: this run's ancestry could not be read to its root, so a wrapper already holding $gate_lock_path cannot be seen. If this run then waits on its own wrapper, run the gate bare."
         fi
         [[ -z "$gate_lock_marker" ]] || \
-            echo "== gate lock: ignoring FASTCACHED_GATE_LOCK_HELD='$gate_lock_marker' -- that pid is not an ancestor of this run holding this lock, so it describes some other process."
+            echo "== gate lock: ignoring PACE_GATE_LOCK_HELD='$gate_lock_marker' -- that pid is not an ancestor of this run holding this lock, so it describes some other process."
         if [[ "$gate_lock_word" == "foreign" ]]; then
             echo "== GATE LOCK MISMATCH -- the calling wrapper's flock (pid $gate_lock_holder_pid) holds $gate_lock_holder_path, but this gate's lock is $gate_lock_path. That wrapper serialises this run against nothing that uses $gate_lock_path, so this gate takes $gate_lock_path as well."
         fi
@@ -4706,9 +4706,9 @@ case "$gate_lock_word" in
             # would fail closed unconditionally there, which reads as "my branch is bad".
             echo "== GATE LOCK UNAVAILABLE -- flock is not on PATH, so this run is NOT serialised against other gates on this host."
         else
-            gate_lock_run "$gate_lock_path" "${FASTCACHED_GATE_LOCK_WAIT:-10800}" \
+            gate_lock_run "$gate_lock_path" "${PACE_GATE_LOCK_WAIT:-10800}" \
                 "$(gate_outcome_status lock-not-acquired)" "$(gate_outcome_status lock-unusable)" \
-                env "FASTCACHED_GATE_LOCK_HELD=$$:$gate_lock_path" "FASTCACHED_GATE_LOCK_QUEUED_AT=$(date +%s)" \
+                env "PACE_GATE_LOCK_HELD=$$:$gate_lock_path" "PACE_GATE_LOCK_QUEUED_AT=$(date +%s)" \
                 "$BASH" "$repo_root/scripts/${BASH_SOURCE[0]##*/}" ${1+"$@"}
             exit $?
         fi
@@ -4724,8 +4724,8 @@ esac
 # broken -- three one-line mutants of this path each passed it and broke every real run --
 # so it runs this script and stops here. It exits with `no-gate-run`'s status, which is what
 # `--classify` says of the log it leaves, and it says plainly that nothing was checked.
-if [[ -n "${FASTCACHED_GATE_STOP_AFTER_LOCK:-}" ]]; then
-    echo "== GATE STOPPED AFTER THE LOCK STAGE -- FASTCACHED_GATE_STOP_AFTER_LOCK is set, so nothing about the tree was checked. This is the self-test's seam, not a way to run the gate."
+if [[ -n "${PACE_GATE_STOP_AFTER_LOCK:-}" ]]; then
+    echo "== GATE STOPPED AFTER THE LOCK STAGE -- PACE_GATE_STOP_AFTER_LOCK is set, so nothing about the tree was checked. This is the self-test's seam, not a way to run the gate."
     exit "$(gate_outcome_status no-gate-run)"
 fi
 
@@ -4835,7 +4835,7 @@ if [[ "$format" -eq 1 ]]; then
     # `clang-format-$CLANG_TOOLS_VERSION` by name -- a major on apt.llvm.org's rolling
     # snapshot, so a machine a month behind CI held a different formatter under the right
     # name, and this pass WRITES. Resolved by the same rule the format-on-edit hook and
-    # `Check C++ style` use -- `FASTCACHED_CLANG_FORMAT` if set, else the declared build among
+    # `Check C++ style` use -- `PACE_CLANG_FORMAT` if set, else the declared build among
     # every clang-format on PATH -- and
     # refused BEFORE `-i`, never after: a refusal once the tree is rewritten is a report on
     # a tree this gate changed. The resolver prints what it found and the install commands.
@@ -5038,7 +5038,7 @@ run_preset() {
     # genuinely cannot share (a daemon, a fixed port) carry RUN_SERIAL.
     #
     # getconf rather than nproc: this gate runs on macOS too.
-    local jobs="${FASTCACHE_GATE_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+    local jobs="${PACE_GATE_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
     local _reconcile
 
     echo "== $preset: test (--parallel $jobs)"

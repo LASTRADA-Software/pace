@@ -58,25 +58,25 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-succeed-not-skip-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-succeed-not-skip.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-succeed-not-skip.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -95,7 +95,7 @@ string(ASCII 59 SEMI)
 # files carry forty-character names. Measured in a checkout under a long temporary path:
 # `git add` inside the fixture failed with "Filename too long" and two verdicts came back
 # wrong for a reason that had nothing to do with the check under test.
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 
@@ -109,7 +109,7 @@ set(cleanSite "TEST_CASE(\"ran\")\n{\n    SUCCEED(\"the completion landed on a l
 # @param relative Where the source goes, relative to the tree root.
 # @param body What it contains.
 # @param outVar Receives the tree path.
-function(fastcached_make_tree name relative body outVar)
+function(pace_make_tree name relative body outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     get_filename_component(directory "${tree}/${relative}" DIRECTORY)
@@ -122,9 +122,9 @@ endfunction()
 # @param tree The tree to scan.
 # @param outObjected Receives TRUE when the check reported a failure.
 # @param outOutput Receives everything it printed.
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErrors
         RESULT_VARIABLE ignored)
@@ -155,16 +155,16 @@ endfunction()
 # @param output What the check printed.
 # @param needle The phrase that must appear.
 # @param complaint What to record when it does not.
-macro(fastcached_expect_text output needle complaint)
-    string(FIND "${output}" "${needle}" fastcachedNeedlePosition)
-    if(fastcachedNeedlePosition EQUAL -1)
+macro(pace_expect_text output needle complaint)
+    string(FIND "${output}" "${needle}" paceKvNeedlePosition)
+    if(paceKvNeedlePosition EQUAL -1)
         list(APPEND failures "${complaint}")
     endif()
 endmacro()
 
 # 1. Clean. The check must stay silent on a `SUCCEED` that ends a case.
-fastcached_make_tree("clean" "src/thing/Thing_test.cpp" "${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("clean" "src/thing/Thing_test.cpp" "${cleanSite}" tree)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "clean: the check objected to a SUCCEED that ends a case -- it now refuses everything, which is as useless as refusing nothing")
 endif()
@@ -172,60 +172,60 @@ endif()
 # And it must say it took the WALK. A synthetic tree is not a git repository, so every
 # case above the git ones exercises the fallback -- asserted on both sides so neither half
 # can quietly become the only one exercised.
-fastcached_expect_text("${output}" "directory walk"
+pace_expect_text("${output}" "directory walk"
     "clean: the check did not report scanning via the directory walk, so the fallback -- the mode a release tarball with no git index takes -- was not the mode this case exercised")
 
 # 2. `SUCCEED()` with no message. A case that ran with nothing left to assert.
-fastcached_make_tree("bare" "src/thing/Thing_test.cpp"
+pace_make_tree("bare" "src/thing/Thing_test.cpp"
     "TEST_CASE(\"ranges\")\n{\n    static_assert(true)${SEMI}\n    SUCCEED()${SEMI}\n}\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "bare: SUCCEED() with no message was reported, but a case that ran with nothing left to assert is exactly what SUCCEED is for")
 endif()
 
 # 3. The idiom in a COMMENT. This rule is documented in prose that quotes it, so a scan
 #    that cannot tell prose from code refuses the documentation of its own rule.
-fastcached_make_tree("commented" "src/thing/Thing_test.cpp"
+pace_make_tree("commented" "src/thing/Thing_test.cpp"
     "// Never write SUCCEED(\"no loopback listener available on this host\")${SEMI}\n${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "commented: a SUCCEED quoted in a comment was reported as code, so this check refuses the prose that documents it")
 endif()
 
 # 4. The bail-out shape -- the structural half of the defect.
-fastcached_make_tree("bail-out" "src/thing/Thing_test.cpp"
+pace_make_tree("bail-out" "src/thing/Thing_test.cpp"
     "TEST_CASE(\"bails\")\n{\n    if (!ready)\n    {\n        SUCCEED(\"all good here\")${SEMI}\n        return${SEMI}\n    }\n    CHECK(Property())${SEMI}\n}\n${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "bail-out: a SUCCEED followed by a bare `return` did not fail the check -- that is the shape every one of #685's twenty-one sites had")
 else()
-    fastcached_expect_text("${output}" "src/thing/Thing_test.cpp"
+    pace_expect_text("${output}" "src/thing/Thing_test.cpp"
         "bail-out: the check objected but did not name the offending file, so a person reading the failure cannot act on it")
-    fastcached_expect_text("${output}" "followed by a bare"
+    pace_expect_text("${output}" "followed by a bare"
         "bail-out: the check objected for some other reason than the bail-out shape, so the structural signal is not what fired and may not work at all")
 endif()
 
 # 4b. The same defect written on ONE line. A scan that starts at the line AFTER the
 #     `SUCCEED` walks straight past it, and the message is in no vocabulary row, so
 #     nothing else would catch it either.
-fastcached_make_tree("one-line" "src/thing/Thing_test.cpp"
+pace_make_tree("one-line" "src/thing/Thing_test.cpp"
     "TEST_CASE(\"bails\")\n{\n    if (!ready) { SUCCEED(\"all good here\")${SEMI} return${SEMI} }\n    CHECK(Property())${SEMI}\n}\n${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     # No `${SEMI}` in a failure MESSAGE: a raw semicolon splits it into two list elements
     # and tears the sentence in half, so one wrong verdict reports as three.
     list(APPEND failures "one-line: a SUCCEED and its bare `return` written inside one set of braces on a single line passed -- the bail-out signal only looks at the FOLLOWING line, so the same defect written in one line is invisible")
 else()
-    fastcached_expect_text("${output}" "followed by a bare"
+    pace_expect_text("${output}" "followed by a bare"
         "one-line: the check objected for some other reason than the bail-out shape, so the one-line form is not what it caught")
 endif()
 
 # 4c. A `/* ... */` block written without leading stars. Its body is what a historic note
 #     quoting this rule looks like, and refusing it leaves a contributor no way to make
 #     the build green but rewording the comment.
-fastcached_make_tree("block-comment" "src/thing/Thing_test.cpp"
+pace_make_tree("block-comment" "src/thing/Thing_test.cpp"
     "/*\n    Historic note, do not do this:\n    SUCCEED(\"no loopback listener available on this host\")${SEMI}\n    return${SEMI}\n*/\n${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "block-comment: the idiom quoted inside a /* ... */ block was reported as code, so this check refuses the prose that documents it and the only repair is to reword the comment")
 endif()
@@ -233,55 +233,55 @@ endif()
 # 5. Skip vocabulary with NO return. The two signals must each work alone, or one of them
 #    is decoration -- and it is the message half that catches the sites written as an
 #    `if`/`else` rather than an early return.
-fastcached_make_tree("vocabulary" "src/thing/Thing_test.cpp"
+pace_make_tree("vocabulary" "src/thing/Thing_test.cpp"
     "TEST_CASE(\"cannot\")\n{\n    if (listener == nullptr)\n        SUCCEED(\"no loopback listener available on this host\")${SEMI}\n    else\n        CHECK(Property())${SEMI}\n}\n${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "vocabulary: a SUCCEED whose message says the facility was unavailable passed, so the message signal does nothing on its own and only the bail-out shape is really checked")
 else()
-    fastcached_expect_text("${output}" "says a facility was not available"
+    pace_expect_text("${output}" "says a facility was not available"
         "vocabulary: the check objected for some other reason than the message, so the vocabulary table is not what fired")
 endif()
 
 # 6. Unreadable. Inconclusive is refused as its own outcome, never scored as clean.
-fastcached_make_tree("unreadable" "src/thing/Thing_test.cpp"
+pace_make_tree("unreadable" "src/thing/Thing_test.cpp"
     "TEST_CASE(\"split\")\n{\n    SUCCEED(\n        \"a message on its own line\")${SEMI}\n}\n${cleanSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "unreadable: a SUCCEED this scan cannot read was passed over silently -- a site it could not read is not a site it cleared")
 else()
-    fastcached_expect_text("${output}" "cannot read the SUCCEED on one line"
+    pace_expect_text("${output}" "cannot read the SUCCEED on one line"
         "unreadable: the check objected for some other reason, so it is not reporting the inconclusive case as its own outcome")
 endif()
 
 # 7. Nothing to find. Must be a broken scan, never a clean tree.
-fastcached_make_tree("none" "src/thing/Thing_test.cpp"
+pace_make_tree("none" "src/thing/Thing_test.cpp"
     "TEST_CASE(\"ordinary\")\n{\n    CHECK(Property())${SEMI}\n}\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "none: test sources with no SUCCEED at all passed as clean; zero findings must be reported as a scan that stopped working")
 else()
-    fastcached_expect_text("${output}" "the scan matched nothing and cannot conclude"
+    pace_expect_text("${output}" "the scan matched nothing and cannot conclude"
         "none: the check objected without saying its scan found no SUCCEED, so a renamed macro would read as ordinary source")
 endif()
 
 # 8. No test source at all -- a different repair from case 7, so a different sentence.
-fastcached_make_tree("no-sources" "src/thing/Thing.cpp"
+pace_make_tree("no-sources" "src/thing/Thing.cpp"
     "int Thing()\n{\n    return 0${SEMI}\n}\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "no-sources: a tree with no test source at all passed; a moved source root must be reported, not scored as a clean tree")
 else()
-    fastcached_expect_text("${output}" "matched no test sources"
+    pace_expect_text("${output}" "matched no test sources"
         "no-sources: the check objected without distinguishing an empty scan from a scan that found sources but no SUCCEED -- two different repairs, one message")
 endif()
 
 # 9. A build tree. Catch2's own self-tests are full of `SUCCEED` and are not ours to edit.
-fastcached_make_tree("excluded" "src/thing/Thing_test.cpp" "${cleanSite}" tree)
+pace_make_tree("excluded" "src/thing/Thing_test.cpp" "${cleanSite}" tree)
 file(MAKE_DIRECTORY "${tree}/out/build/x/_deps/catch2-src/tests")
 file(WRITE "${tree}/out/build/x/_deps/catch2-src/tests/Vendored_test.cpp"
      "TEST_CASE(\"vendored\")\n{\n    SUCCEED(\"cannot run here\")${SEMI}\n    return${SEMI}\n}\n")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "excluded: a violation inside a build tree was reported -- vendored third-party code is not ours to edit and must not fail this check")
 endif()
@@ -301,8 +301,8 @@ endif()
 #     tracked `*_test.cpp` files copied verbatim from upstream, which nobody here may
 #     edit, so the discriminator is now "tracked AND under src/". Both directions are
 #     asserted, because a scan narrowed to nothing at all also reports no violations.
-find_program(FASTCACHED_GIT NAMES git)
-if(NOT FASTCACHED_GIT)
+find_program(PACE_GIT NAMES git)
+if(NOT PACE_GIT)
     list(APPEND failures
          "git-mode: no git executable, so the mode CI actually uses could not be exercised at all -- inconclusive, not a pass")
 else()
@@ -334,7 +334,7 @@ else()
         # and the check falls back to the directory walk, which reads as two unrelated
         # verdicts being wrong. A broken fixture must say it is broken.
         set(gitSetup "")
-        fastcached_scratch_git("${FASTCACHED_GIT}" scratchGit)
+        pace_scratch_git("${PACE_GIT}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_VARIABLE gitError RESULT_VARIABLE gitStatus)
         if(NOT gitStatus EQUAL 0)
@@ -378,13 +378,13 @@ else()
             file(REMOVE "${tree}/src/thing/Gone_test.cpp")
         endif()
 
-        fastcached_run_check("${tree}" objected output)
+        pace_run_check("${tree}" objected output)
         if(case STREQUAL "untracked")
             if(objected)
                 list(APPEND failures
                      "git-untracked: a violation git does not track was reported -- CPM resolves dependencies inside the source tree and nobody here can edit them")
             endif()
-            fastcached_expect_text("${output}" "git ls-files"
+            pace_expect_text("${output}" "git ls-files"
                 "git-untracked: the check did not report scanning via git ls-files, so this case exercised the fallback and proves nothing about the mode CI uses")
         elseif(case STREQUAL "tracked-deleted")
             if(objected)
@@ -400,7 +400,7 @@ else()
                 list(APPEND failures
                      "git-tracked-vendored: a violation in a TRACKED vendored file was reported -- vendor/ is copied verbatim from upstream and nobody here may edit it, so the first upstream sync adding a SUCCEED would redden a check about OUR code")
             endif()
-            fastcached_expect_text("${output}" "in 2 test source(s)"
+            pace_expect_text("${output}" "in 2 test source(s)"
                 "git-tracked-vendored: the vendored file was ignored, but the scan did not go on to cover the 2 first-party sources beside it -- a scan narrowed to nothing reports no violations too, so this case would pass with all coverage gone")
         elseif(NOT objected)
             list(APPEND failures
@@ -409,7 +409,7 @@ else()
             # The refusal is asserted by its own phrase, like every other failing case:
             # a bare `objected` would accept the emptiness guard, or an unreadable file,
             # as proof that a tracked violation was caught.
-            fastcached_expect_text("${output}" "says the check could not be performed"
+            pace_expect_text("${output}" "says the check could not be performed"
                 "git-tracked-bad: the check objected for some other reason than the first-party file's message, so this case does not show a TRACKED violation being caught")
         endif()
     endforeach()
@@ -426,12 +426,12 @@ endif()
 # still reported, one line early, so a filename assertion passes under the defect and
 # certifies nothing. The violation sits BELOW the backslash for the same reason.
 set(mergeSite "#define TWO_LINES(x) \\\n    do { (void) (x)${SEMI} } while (false)\n\nTEST_CASE(\"ran\")\n{\n    SUCCEED(\"no loopback available, skipping\")${SEMI}\n}\n")
-fastcached_make_tree("trailing-backslash" "src/thing/Thing_test.cpp" "${mergeSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("trailing-backslash" "src/thing/Thing_test.cpp" "${mergeSite}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "trailing-backslash: the check missed a SUCCEED that sits below a line ending in a backslash -- the merged element begins with the earlier line, so the violation is hidden entirely")
 else()
-    fastcached_expect_text("${output}" "Thing_test.cpp:6:"
+    pace_expect_text("${output}" "Thing_test.cpp:6:"
         "trailing-backslash: the violation is on line 6 and was reported elsewhere -- a line ending in a backslash merged with the next and shifted every line number below it")
 endif()
 
@@ -441,12 +441,12 @@ endif()
 # them, so every quoted message carrying one was echoed doubled. A separate fault from
 # the merge above and asserted separately: one fix must not be assumed to cover both.
 set(doubledSite "TEST_CASE(\"ran\")\n{\n    SUCCEED(\"no path C:\\dev available, skipping\")${SEMI}\n}\n")
-fastcached_make_tree("interior-backslash" "src/thing/Thing_test.cpp" "${doubledSite}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("interior-backslash" "src/thing/Thing_test.cpp" "${doubledSite}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "interior-backslash: the check did not object to a SUCCEED whose message says it is skipping")
 else()
-    # NOT through `fastcached_expect_text`: it is a MACRO, so its argument is
+    # NOT through `pace_expect_text`: it is a MACRO, so its argument is
     # substituted textually and re-parsed, and a backslash in the needle is then read
     # as an escape -- CMake refuses the selftest with `Invalid character escape`. A
     # quoted variable reference inside `string(FIND)` is expanded without that second

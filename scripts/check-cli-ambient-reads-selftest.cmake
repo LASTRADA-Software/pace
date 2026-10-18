@@ -33,25 +33,25 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         [-DGIT_EXECUTABLE=<git>] -P scripts/check-cli-ambient-reads-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-cli-ambient-reads.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-cli-ambient-reads.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -66,10 +66,10 @@ endif()
 set(baseCliSource
 "// SPDX-License-Identifier: Apache-2.0
 /// The behavioural half of the getenv/isatty/ioctl/GetConsoleMode scan.
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 int Clean() { return 0; }
-} // namespace FastCache::Cli
+} // namespace Pace::Cli
 ")
 
 set(basePlatformSource
@@ -82,8 +82,8 @@ set(tableHeader "# SPDX-License-Identifier: Apache-2.0\n# <path>|<token>|<reason
 
 # ---------------------------------------------------------------------------
 # Stage a tree, apply one case, run the check, return its collapsed output.
-function(fastcached_stage_and_run name target path content exemptions outOutput)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target path content exemptions outOutput)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     # `~n~`, `~lb~`, `~rb~`, `~sc~`, `~bar~` and `~bs~` are a newline, `[`, `]`, `;`, `|`
@@ -124,11 +124,11 @@ function(fastcached_stage_and_run name target path content exemptions outOutput)
     endif()
 
     if(writeCli)
-        file(WRITE "${tree}/src/apps/fastcache-cli/Clean.hpp" "${baseCliSource}")
+        file(WRITE "${tree}/src/apps/pacectl/Clean.hpp" "${baseCliSource}")
     else()
-        file(MAKE_DIRECTORY "${tree}/src/apps/fastcache-cli")
+        file(MAKE_DIRECTORY "${tree}/src/apps/pacectl")
     endif()
-    file(WRITE "${tree}/src/FastCache/Platform/Terminal.cpp" "${platformText}")
+    file(WRITE "${tree}/src/Pace/Platform/Terminal.cpp" "${platformText}")
     if(writeTable)
         if(exemptions STREQUAL "-")
             file(WRITE "${tree}/scripts/cli-ambient-read-exemptions.txt" "${tableHeader}")
@@ -143,7 +143,7 @@ function(fastcached_stage_and_run name target path content exemptions outOutput)
                 "case `${name}` asks for the git enumeration path and no git was found. "
                 "Skipping it would leave the mode CI takes untested")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE addStatus)
         if(NOT initStatus EQUAL 0 OR NOT addStatus EQUAL 0)
@@ -154,7 +154,7 @@ function(fastcached_stage_and_run name target path content exemptions outOutput)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -170,60 +170,60 @@ endfunction()
 #
 # Needle fields are ' && '-separated; `-` means none. The field count is asserted per row,
 # because a row that does not parse runs as a different case than it reads as.
-set(FastCachedAmbientReadCases
+set(PaceAmbientReadCases
     # THE ACCEPTING ARM, in both modes, with the comment naming every token present.
     "baseline via walk|none|-|-|-|no getenv, isatty, ioctl, GetConsoleMode across && directory walk && 0 exemption row(s) && the control recognised 1 read(s)|CMake Error"
     "baseline via git|none-git|-|-|-|no getenv, isatty, ioctl, GetConsoleMode across && git ls-files|CMake Error"
 
     # THE RED ARM, one planted read per token, each named by file, line and token.
-    "a getenv is refused|newfile|src/apps/fastcache-cli/Env.cpp|#include <cstdlib>~n~char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|-|src/apps/fastcache-cli/Env.cpp:2: getenv && 1 ambient read(s)|-"
-    "an isatty is refused via git|newfile-git|src/apps/fastcache-cli/Tty.cpp|#include <unistd.h>~n~bool Tty() { return ::isatty(1) != 0~sc~ }~n~|-|src/apps/fastcache-cli/Tty.cpp:2: isatty && git ls-files|-"
-    "an ioctl is refused|newfile|src/apps/fastcache-cli/Size.cpp|#include <sys/ioctl.h>~n~int Rows() { winsize w {}~sc~ ::ioctl(1, TIOCGWINSZ, &w)~sc~ return w.ws_row~sc~ }~n~|-|src/apps/fastcache-cli/Size.cpp:1: ioctl && src/apps/fastcache-cli/Size.cpp:2: ioctl|-"
-    "a GetConsoleMode is refused|newfile|src/apps/fastcache-cli/Console.cpp|bool Vt(void* h) { unsigned long m = 0~sc~ return ::GetConsoleMode(h, &m) != 0~sc~ }~n~|-|src/apps/fastcache-cli/Console.cpp:1: GetConsoleMode|-"
+    "a getenv is refused|newfile|src/apps/pacectl/Env.cpp|#include <cstdlib>~n~char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|-|src/apps/pacectl/Env.cpp:2: getenv && 1 ambient read(s)|-"
+    "an isatty is refused via git|newfile-git|src/apps/pacectl/Tty.cpp|#include <unistd.h>~n~bool Tty() { return ::isatty(1) != 0~sc~ }~n~|-|src/apps/pacectl/Tty.cpp:2: isatty && git ls-files|-"
+    "an ioctl is refused|newfile|src/apps/pacectl/Size.cpp|#include <sys/ioctl.h>~n~int Rows() { winsize w {}~sc~ ::ioctl(1, TIOCGWINSZ, &w)~sc~ return w.ws_row~sc~ }~n~|-|src/apps/pacectl/Size.cpp:1: ioctl && src/apps/pacectl/Size.cpp:2: ioctl|-"
+    "a GetConsoleMode is refused|newfile|src/apps/pacectl/Console.cpp|bool Vt(void* h) { unsigned long m = 0~sc~ return ::GetConsoleMode(h, &m) != 0~sc~ }~n~|-|src/apps/pacectl/Console.cpp:1: GetConsoleMode|-"
 
     # The same question through another door: a word-boundary match would pass these.
-    "a prefixed variant is the same read|newfile|src/apps/fastcache-cli/Win.cpp|int Tty() { return ::_isatty(1)~sc~ }~n~char* Home() { return ::secure_getenv(\"HOME\")~sc~ }~n~|-|src/apps/fastcache-cli/Win.cpp:1: isatty && src/apps/fastcache-cli/Win.cpp:2: getenv|-"
+    "a prefixed variant is the same read|newfile|src/apps/pacectl/Win.cpp|int Tty() { return ::_isatty(1)~sc~ }~n~char* Home() { return ::secure_getenv(\"HOME\")~sc~ }~n~|-|src/apps/pacectl/Win.cpp:1: isatty && src/apps/pacectl/Win.cpp:2: getenv|-"
 
     # PROSE is not a read, on either comment form.
-    "a line comment naming a token is not a read|newfile|src/apps/fastcache-cli/Note.cpp|// Never call isatty here: take TerminalCapabilities.~n~int Note() { return 0~sc~ }~n~|-|no getenv, isatty|CMake Error"
-    "a block comment naming a token is not a read|newfile|src/apps/fastcache-cli/Note.cpp|/*~n~ getenv and ioctl belong in Platform.~n~*/~n~int Note() { return 0~sc~ }~n~|-|no getenv, isatty|CMake Error"
+    "a line comment naming a token is not a read|newfile|src/apps/pacectl/Note.cpp|// Never call isatty here: take TerminalCapabilities.~n~int Note() { return 0~sc~ }~n~|-|no getenv, isatty|CMake Error"
+    "a block comment naming a token is not a read|newfile|src/apps/pacectl/Note.cpp|/*~n~ getenv and ioctl belong in Platform.~n~*/~n~int Note() { return 0~sc~ }~n~|-|no getenv, isatty|CMake Error"
 
     # COMMENT ORDERING: a line comment NAMING a block opener must not open one, or the read
     # on the next line is skipped while a clean count is printed.
-    "a line comment naming a block opener does not hide the next line|newfile|src/apps/fastcache-cli/Order.cpp|// no isatty in a /* block either~n~bool T() { return ::isatty(0) != 0~sc~ }~n~|-|src/apps/fastcache-cli/Order.cpp:2: isatty|Order.cpp:1"
+    "a line comment naming a block opener does not hide the next line|newfile|src/apps/pacectl/Order.cpp|// no isatty in a /* block either~n~bool T() { return ::isatty(0) != 0~sc~ }~n~|-|src/apps/pacectl/Order.cpp:2: isatty|Order.cpp:1"
 
     # LINE NUMBERS survive the characters that are CMake list structure.
-    "line number survives brackets and semicolons|newfile|src/apps/fastcache-cli/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash ~bs~~n~char const* H() { return std::getenv(\"H\")~sc~ }~n~|-|src/apps/fastcache-cli/Drift.cpp:4: getenv|-"
+    "line number survives brackets and semicolons|newfile|src/apps/pacectl/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash ~bs~~n~char const* H() { return std::getenv(\"H\")~sc~ }~n~|-|src/apps/pacectl/Drift.cpp:4: getenv|-"
 
     # --- the exemption table ---
 
     # A row with a reason covers exactly its (file, token), and is counted.
-    "an exemption row covers its read|newfile|src/apps/fastcache-cli/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/fastcache-cli/Env.cpp~bar~getenv~bar~reads a variable before any seam exists|1 exemption row(s) && no getenv|CMake Error"
+    "an exemption row covers its read|newfile|src/apps/pacectl/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/pacectl/Env.cpp~bar~getenv~bar~reads a variable before any seam exists|1 exemption row(s) && no getenv|CMake Error"
 
     # A reason may itself contain a bar: fields split on the first two only.
-    "a reason may contain a bar|newfile|src/apps/fastcache-cli/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/fastcache-cli/Env.cpp~bar~getenv~bar~one ~bar~ two|1 exemption row(s)|CMake Error"
+    "a reason may contain a bar|newfile|src/apps/pacectl/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/pacectl/Env.cpp~bar~getenv~bar~one ~bar~ two|1 exemption row(s)|CMake Error"
 
     # A row for ANOTHER token covers nothing, and is itself stale.
-    "a row for another token is stale and covers nothing|newfile|src/apps/fastcache-cli/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/fastcache-cli/Env.cpp~bar~isatty~bar~a reason|STALE -- src/apps/fastcache-cli/Env.cpp no longer names isatty|-"
+    "a row for another token is stale and covers nothing|newfile|src/apps/pacectl/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/pacectl/Env.cpp~bar~isatty~bar~a reason|STALE -- src/apps/pacectl/Env.cpp no longer names isatty|-"
 
     # THE STALE ROW: a permission for a read that is gone is refused, not tolerated.
-    "a stale row is refused|none|-|-|src/apps/fastcache-cli/Clean.hpp~bar~getenv~bar~it used to read HOME|STALE -- src/apps/fastcache-cli/Clean.hpp no longer names getenv && problem(s) in scripts/cli-ambient-read-exemptions.txt|-"
-    "a row naming a file outside the subject is stale|none|-|-|src/tools/Other.cpp~bar~getenv~bar~a reason|STALE -- src/tools/Other.cpp is not a source under src/apps/fastcache-cli/|-"
-    "a row with no reason is refused|newfile|src/apps/fastcache-cli/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/fastcache-cli/Env.cpp~bar~getenv~bar~|the row gives no reason|-"
-    "a row naming an unknown token is refused|none|-|-|src/apps/fastcache-cli/Clean.hpp~bar~popen~bar~a reason|`popen` is not a token this scan matches|-"
-    "a row that is not three fields is refused|none|-|-|src/apps/fastcache-cli/Clean.hpp getenv|not a <path>~bar~<token>~bar~<reason> row|-"
+    "a stale row is refused|none|-|-|src/apps/pacectl/Clean.hpp~bar~getenv~bar~it used to read HOME|STALE -- src/apps/pacectl/Clean.hpp no longer names getenv && problem(s) in scripts/cli-ambient-read-exemptions.txt|-"
+    "a row naming a file outside the subject is stale|none|-|-|src/tools/Other.cpp~bar~getenv~bar~a reason|STALE -- src/tools/Other.cpp is not a source under src/apps/pacectl/|-"
+    "a row with no reason is refused|newfile|src/apps/pacectl/Env.cpp|char const* Home() { return std::getenv(\"HOME\")~sc~ }~n~|src/apps/pacectl/Env.cpp~bar~getenv~bar~|the row gives no reason|-"
+    "a row naming an unknown token is refused|none|-|-|src/apps/pacectl/Clean.hpp~bar~popen~bar~a reason|`popen` is not a token this scan matches|-"
+    "a row that is not three fields is refused|none|-|-|src/apps/pacectl/Clean.hpp getenv|not a <path>~bar~<token>~bar~<reason> row|-"
 
     # --- fails CLOSED ---
     "a missing table is not an empty one|notable|-|-|-|the exemption table scripts/cli-ambient-read-exemptions.txt is missing|-"
     "a scanner blind in the seams cannot conclude|nocontrol|-|-|-|the scanner recognised no read in the platform seams|-"
-    "no subject sources at all|nosubject|-|-|-|matched no sources under src/apps/fastcache-cli|-"
+    "no subject sources at all|nosubject|-|-|-|matched no sources under src/apps/pacectl|-"
 )
 
 # ---------------------------------------------------------------------------
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedAmbientReadCases)
+foreach(row IN LISTS PaceAmbientReadCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 7)
@@ -240,7 +240,7 @@ foreach(row IN LISTS FastCachedAmbientReadCases)
     list(GET fields 6 caseMustNotAppear)
 
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${casePath}" "${caseContent}" "${caseExemptions}" output)
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${casePath}" "${caseContent}" "${caseExemptions}" output)
 
     foreach(field must mustNot)
         if(field STREQUAL "must")

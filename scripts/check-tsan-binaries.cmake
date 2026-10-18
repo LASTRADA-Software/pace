@@ -9,8 +9,8 @@ cmake_minimum_required(VERSION 3.28)
 #
 # ## Why this is a check and not a review item (#1209)
 #
-# `fastcache-cc-tests` sat outside the sanitized scope for as long as it existed.
-# No tag could have reached it: the launcher does not link the FastCache library,
+# `pace-cc-tests` sat outside the sanitized scope for as long as it existed.
+# No tag could have reached it: the launcher does not link the Pace library,
 # so it is a separate binary, and the gate's other rows name binaries that cannot
 # contain its cases. `scripts/check-tsan-scope.cmake` could not see it either --
 # that check asks whether a scoped test CASE carries a tag the gate selects, which
@@ -18,9 +18,9 @@ cmake_minimum_required(VERSION 3.28)
 #
 # The ticket enumerated the test binaries by hand and its table listed four. This
 # tree registers SIX with `catch_discover_tests`, five of them in a default
-# configuration; `fastcache-cli-tests` and `CowTreeTests` were in neither the
+# configuration; `pacectl-tests` and `CowTreeTests` were in neither the
 # table nor any row. Neither was threaded then, so the ticket's conclusion survived
-# its census (`fastcache-cli-tests` stopped being so with #134 and is a gate row
+# its census (`pacectl-tests` stopped being so with #134 and is a gate row
 # now) -- but a hand list is exact about what it knows and silent about what it
 # does not, and that silence reads identically to complete coverage (#492). The
 # census was written by whoever understood the gap best, and it still missed two.
@@ -52,13 +52,13 @@ cmake_minimum_required(VERSION 3.28)
 #
 # Every exemption this table has carried rested on one claim: *no source under
 # this directory names a thread primitive*. That claim was written down with a
-# date and then never read again, and it went false -- `fastcache-cli-tests`
+# date and then never read again, and it went false -- `pacectl-tests`
 # stayed exempt as "single-threaded" after #134 gave it a thread pool and two
 # suites asserting on thread identities, and this check went on passing, because
 # a reason was a string it only required to be non-empty.
 #
 # So a row names the DIRECTORY its claim is about, and the check scans it: a row
-# whose directory names a primitive in `FastCachedTsanThreadPrimitives` outside a
+# whose directory names a primitive in `PaceTsanThreadPrimitives` outside a
 # comment is refused, and so is a directory that is missing or holds no C++
 # source, since a claim about nothing verifies nothing.
 #
@@ -79,40 +79,40 @@ cmake_minimum_required(VERSION 3.28)
 # where the claim is the kind a scan can re-take.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-tsan-binaries.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-tsan-binaries.cmake
 #
 # Exit: the verdict is the OUTPUT, not the status -- read through
 # `FAIL_REGULAR_EXPRESSION`, because a `-P` script that merely WARNS exits 0.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
 # The binaries the gate RUNS, read from the one reader that parses that table.
 #
 # `check-tsan-scope.cmake` already walks `TARGETS` and refuses a table it cannot
-# read; including it with `FastCachedTsanScopeDefinitionsOnly` returns before its
+# read; including it with `PaceTsanScopeDefinitionsOnly` returns before its
 # own scan. So this file holds no copy of the row set -- a second parser is a
 # second thing to be wrong, and one that had drifted would agree with itself
 # perfectly on every run.
 # ---------------------------------------------------------------------------
-set(FastCachedScopeCheck "${FASTCACHED_SOURCE_DIR}/scripts/check-tsan-scope.cmake")
-if(NOT EXISTS "${FastCachedScopeCheck}")
+set(PaceScopeCheck "${PACE_SOURCE_DIR}/scripts/check-tsan-scope.cmake")
+if(NOT EXISTS "${PaceScopeCheck}")
     message(FATAL_ERROR
-        "check-tsan-binaries: ${FastCachedScopeCheck} does not exist.\n"
+        "check-tsan-binaries: ${PaceScopeCheck} does not exist.\n"
         "The gate's TARGETS table is read through that file rather than parsed "
         "again here. If it moved, point this at it; do not restore a copy of the "
         "row set. The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
-set(FastCachedTsanScopeDefinitionsOnly TRUE)
-include("${FastCachedScopeCheck}")
-unset(FastCachedTsanScopeDefinitionsOnly)
+set(PaceTsanScopeDefinitionsOnly TRUE)
+include("${PaceScopeCheck}")
+unset(PaceTsanScopeDefinitionsOnly)
 
-if(NOT FastCachedTsanGateTargets)
+if(NOT PaceTsanGateTargets)
     message(FATAL_ERROR
-        "check-tsan-binaries: including ${FastCachedScopeCheck} yielded no gate "
+        "check-tsan-binaries: including ${PaceScopeCheck} yielded no gate "
         "target names.\n"
         "Every verdict below is a comparison against that set, so an empty one "
         "would report every registered binary as uncovered -- or, with the "
@@ -138,8 +138,8 @@ endif()
 # whose whole job is that a row means one thing. The refusal below says so, since
 # `carries no |` is a true description of a symptom whose cause is somewhere else.
 # ---------------------------------------------------------------------------
-set(FastCachedTsanBinaryExemptions
-    "compile-cache-testclient-tests|src/apps/compile-cache-testclient|FASTCACHED_BUILD_TESTCLIENT is default OFF, so the clang-tsan configure does not declare this target at all, and its sources name no thread primitive"
+set(PaceTsanBinaryExemptions
+    "compile-cache-testclient-tests|src/apps/compile-cache-testclient|PACE_BUILD_TESTCLIENT is default OFF, so the clang-tsan configure does not declare this target at all, and its sources name no thread primitive"
     "CowTreeTests|src/CowTree|its sources name no thread primitive. The CoW store's concurrency question is a SECOND PROCESS -- an exclusive flock taken at Open, refusing the second opener by name -- which is not a data race and which ThreadSanitizer cannot observe from inside one process"
 )
 
@@ -151,7 +151,7 @@ set(FastCachedTsanBinaryExemptions
 # in its spawning, and that is precisely the shape the stale CLI row missed.
 # Matched as whole identifiers, so `std::this_thread` and a longer name that
 # merely begins with one of these are not hits.
-set(FastCachedTsanThreadPrimitives
+set(PaceTsanThreadPrimitives
     "std::thread"
     "std::jthread"
     "std::async"
@@ -161,7 +161,7 @@ set(FastCachedTsanThreadPrimitives
 
 # How many hits a refusal lists before counting the rest. One is enough to act
 # on; the count says how far the claim is from true, in the same unit it lists.
-set(FastCachedTsanClaimHitsShown 8)
+set(PaceTsanClaimHitsShown 8)
 
 # Set by `check-tsan-binaries-selftest.cmake` alone, so that it can stage its
 # trees from the row set above and from the gate table this file just read,
@@ -170,7 +170,7 @@ set(FastCachedTsanClaimHitsShown 8)
 # Nothing else may use this. It is not a mode this check offers to an operator --
 # there is no argument that reaches it and `cmake -P` never sets it -- so the
 # scanning path cannot be skipped from a command line.
-if(FastCachedTsanBinariesDefinitionsOnly)
+if(PaceTsanBinariesDefinitionsOnly)
     return()
 endif()
 
@@ -197,16 +197,16 @@ endif()
 # filters, because either alone lets one class through.
 # ---------------------------------------------------------------------------
 set(scanFiles "")
-file(GLOB_RECURSE srcCMakeFiles "${FASTCACHED_SOURCE_DIR}/src/CMakeLists.txt")
+file(GLOB_RECURSE srcCMakeFiles "${PACE_SOURCE_DIR}/src/CMakeLists.txt")
 list(APPEND scanFiles ${srcCMakeFiles})
-if(EXISTS "${FASTCACHED_SOURCE_DIR}/CMakeLists.txt")
-    list(APPEND scanFiles "${FASTCACHED_SOURCE_DIR}/CMakeLists.txt")
+if(EXISTS "${PACE_SOURCE_DIR}/CMakeLists.txt")
+    list(APPEND scanFiles "${PACE_SOURCE_DIR}/CMakeLists.txt")
 endif()
 
 if(NOT scanFiles)
     message(FATAL_ERROR
         "check-tsan-binaries: found no CMakeLists.txt to scan under "
-        "${FASTCACHED_SOURCE_DIR}/src.\n"
+        "${PACE_SOURCE_DIR}/src.\n"
         "A scan that matches nothing is this reader having stopped working, not a "
         "tree with no test binaries -- and the two produce the same clean run "
         "otherwise. The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
@@ -217,7 +217,7 @@ set(registrationSites "")
 foreach(scanFile IN LISTS scanFiles)
     file(READ "${scanFile}" scanContent)
     string(REPLACE "\r\n" "\n" scanContent "${scanContent}")
-    file(RELATIVE_PATH scanRelative "${FASTCACHED_SOURCE_DIR}" "${scanFile}")
+    file(RELATIVE_PATH scanRelative "${PACE_SOURCE_DIR}" "${scanFile}")
     set(lineNumber 0)
     while(NOT scanContent STREQUAL "")
         string(FIND "${scanContent}" "\n" scanNewline)
@@ -250,7 +250,7 @@ list(REMOVE_DUPLICATES registeredBinaries)
 if(NOT registeredBinaries)
     message(FATAL_ERROR
         "check-tsan-binaries: scanned the CMakeLists.txt files under "
-        "${FASTCACHED_SOURCE_DIR}/src and found no `catch_discover_tests(` "
+        "${PACE_SOURCE_DIR}/src and found no `catch_discover_tests(` "
         "registration at all.\n"
         "Zero rows is the absence of a verdict, not a verdict. Either every Catch2 "
         "binary stopped being registered -- in which case this check has nothing "
@@ -265,7 +265,7 @@ set(exemptTargets "")
 set(problems "")
 set(scannedSourceCount 0)
 
-foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
+foreach(exemptionRow IN LISTS PaceTsanBinaryExemptions)
     string(FIND "${exemptionRow}" "|" exemptionBar)
     if(exemptionBar EQUAL -1)
         string(APPEND problems
@@ -319,7 +319,7 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
         continue()
     endif()
 
-    list(FIND FastCachedTsanGateTargets "${exemptTarget}" exemptIsGated)
+    list(FIND PaceTsanGateTargets "${exemptTarget}" exemptIsGated)
     if(NOT exemptIsGated EQUAL -1)
         string(APPEND problems
             "  `${exemptTarget}` is BOTH a TARGETS row in scripts/tsan-gate.sh and "
@@ -328,7 +328,7 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
     endif()
 
     # The claim, re-taken.
-    set(claimRoot "${FASTCACHED_SOURCE_DIR}/${exemptDirectory}")
+    set(claimRoot "${PACE_SOURCE_DIR}/${exemptDirectory}")
     if(NOT IS_DIRECTORY "${claimRoot}")
         string(APPEND problems
             "  `${exemptTarget}` is exempt about `${exemptDirectory}`, which does not "
@@ -355,7 +355,7 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
         # one by line only when a raw FIND says a primitive is somewhere in it keeps
         # the clean case -- nearly all of them -- to one read and a few FINDs.
         set(claimMaybe FALSE)
-        foreach(primitive IN LISTS FastCachedTsanThreadPrimitives)
+        foreach(primitive IN LISTS PaceTsanThreadPrimitives)
             string(FIND "${claimContent}" "${primitive}" primitiveAt)
             if(NOT primitiveAt EQUAL -1)
                 set(claimMaybe TRUE)
@@ -366,7 +366,7 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
             continue()
         endif()
 
-        file(RELATIVE_PATH claimRelative "${FASTCACHED_SOURCE_DIR}" "${claimSource}")
+        file(RELATIVE_PATH claimRelative "${PACE_SOURCE_DIR}" "${claimSource}")
         set(claimLineNumber 0)
         while(NOT claimContent STREQUAL "")
             string(FIND "${claimContent}" "\n" claimNewline)
@@ -385,7 +385,7 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
             if(claimLine MATCHES "^[ \t]*(//|/[*]|[*])")
                 continue()
             endif()
-            foreach(primitive IN LISTS FastCachedTsanThreadPrimitives)
+            foreach(primitive IN LISTS PaceTsanThreadPrimitives)
                 string(FIND "${claimLine}" "${primitive}" primitiveAt)
                 if(primitiveAt EQUAL -1)
                     continue()
@@ -393,7 +393,7 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
                 string(REPLACE "." "[.]" primitivePattern "${primitive}")
                 if(claimLine MATCHES "(^|[^A-Za-z0-9_])${primitivePattern}([^A-Za-z0-9_]|$)")
                     math(EXPR claimHitCount "${claimHitCount} + 1")
-                    if(claimHitCount LESS_EQUAL FastCachedTsanClaimHitsShown)
+                    if(claimHitCount LESS_EQUAL PaceTsanClaimHitsShown)
                         string(APPEND claimHits "      ${claimRelative}:${claimLineNumber} names ${primitive}\n")
                     endif()
                 endif()
@@ -401,8 +401,8 @@ foreach(exemptionRow IN LISTS FastCachedTsanBinaryExemptions)
         endwhile()
     endforeach()
 
-    if(claimHitCount GREATER FastCachedTsanClaimHitsShown)
-        math(EXPR claimHitsHidden "${claimHitCount} - ${FastCachedTsanClaimHitsShown}")
+    if(claimHitCount GREATER PaceTsanClaimHitsShown)
+        math(EXPR claimHitsHidden "${claimHitCount} - ${PaceTsanClaimHitsShown}")
         string(APPEND claimHits
             "      and ${claimHitsHidden} more of ${claimHitCount} (line, primitive) hit(s), not listed\n")
     endif()
@@ -425,7 +425,7 @@ endforeach()
 
 set(uncoveredBinaries "")
 foreach(binary IN LISTS registeredBinaries)
-    list(FIND FastCachedTsanGateTargets "${binary}" isGated)
+    list(FIND PaceTsanGateTargets "${binary}" isGated)
     list(FIND exemptTargets "${binary}" isExempt)
     if(isGated EQUAL -1 AND isExempt EQUAL -1)
         set(site "")
@@ -447,7 +447,7 @@ if(NOT problems STREQUAL "")
 endif()
 
 if(NOT uncoveredBinaries STREQUAL "")
-    string(REPLACE ";" ", " renderedGateTargets "${FastCachedTsanGateTargets}")
+    string(REPLACE ";" ", " renderedGateTargets "${PaceTsanGateTargets}")
     message(FATAL_ERROR
         "These Catch2 test BINARIES are registered with catch_discover_tests and "
         "are neither run by the ThreadSanitizer gate nor exempt:\n"
@@ -459,18 +459,18 @@ if(NOT uncoveredBinaries STREQUAL "")
         "the clang-tsan job red for the next person -- and add the target to that "
         "job's build step in .github/workflows/build.yml, or the gate refuses a "
         "binary that was never built. If it holds nothing concurrent, add a row to "
-        "`FastCachedTsanBinaryExemptions` in ${CMAKE_CURRENT_LIST_FILE} saying what "
+        "`PaceTsanBinaryExemptions` in ${CMAKE_CURRENT_LIST_FILE} saying what "
         "you measured and when.\n"
         "What must NOT happen is neither: that is the state this check exists to "
-        "end, and it is how `fastcache-cc-tests` went unsanitized for its whole "
+        "end, and it is how `pace-cc-tests` went unsanitized for its whole "
         "life (#1209).")
 endif()
 
 list(LENGTH registeredBinaries registeredCount)
-list(LENGTH FastCachedTsanGateTargets gatedCount)
+list(LENGTH PaceTsanGateTargets gatedCount)
 list(LENGTH exemptTargets exemptCount)
 list(LENGTH scanFiles scanCount)
-string(REPLACE ";" ", " renderedGateTargets "${FastCachedTsanGateTargets}")
+string(REPLACE ";" ", " renderedGateTargets "${PaceTsanGateTargets}")
 string(REPLACE ";" ", " renderedExempt "${exemptTargets}")
 message("tsan binaries: ${registeredCount} Catch2 binary(ies) registered across "
         "${scanCount} CMakeLists.txt file(s); ${gatedCount} sanitized "

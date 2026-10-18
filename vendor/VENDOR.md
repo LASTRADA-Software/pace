@@ -18,7 +18,7 @@ file names, so a new copy needs a row here the day it arrives.
 | `vendor/monocypher` | Monocypher 4.0.3, "`vendor/monocypher`" below | 6 | 4,182 |
 
 **`vendor/endo` is gone (#1596).** It was a verbatim copy of endo's terminal UI, with the slice of
-endo's platform layer and contour's coroutine vocabulary that UI needed, behind `fastcache-cli
+endo's platform layer and contour's coroutine vocabulary that UI needed, behind `pacectl
 live-stats`. That code is core-cpp's now (`core::tui`, fetched by CPM at a release tag), and every
 local change this copy carried is in core-cpp's v0.1.0: the four merged into endo as
 [contour-terminal/endo#184](https://github.com/contour-terminal/endo/pull/184), which core-cpp
@@ -28,7 +28,7 @@ A fix to that code is a pull request against
 
 ## `vendor/monocypher`: Monocypher 4.0.3
 
-The Ed25519 and X25519 implementation behind `src/FastCache/Core/{Ed25519,X25519}` (#178), which
+The Ed25519 and X25519 implementation behind `src/Pace/Core/{Ed25519,X25519}` (#178), which
 give every node an identity of its own in place of the cluster's shared key.
 
 | | |
@@ -56,12 +56,12 @@ attribution. The tests, the manual, the makefile, the README and the changelog b
 attribute nothing, so they are left upstream; each file's hash is its `MANIFEST` line.
 
 **What the build does with it.** `cmake/Monocypher.cmake`, which is ours, declares one static
-library, `fastcache-monocypher`, from the two `.c` files compiled as C++ with upstream's
+library, `pace-monocypher`, from the two `.c` files compiled as C++ with upstream's
 `MONOCYPHER_CPP_NAMESPACE` -- that file says why C++, why the namespace, and why it is built
-unconditionally. It has no dependency, so `fastcache-cc` can
-link it without FastCache.
+unconditionally. It has no dependency, so `pace-cc` can
+link it without Pace.
 
-**Who may use it.** Only `src/FastCache/Core/Ed25519.cpp` and `src/FastCache/Core/X25519.cpp`
+**Who may use it.** Only `src/Pace/Core/Ed25519.cpp` and `src/Pace/Core/X25519.cpp`
 include a Monocypher header; `ctest -R crypto-seam` refuses any other first-party file that does.
 Everything else goes through those two headers and `Core/Hkdf.hpp`, which is where a new primitive
 is added and checked against its RFC's vectors.
@@ -70,7 +70,7 @@ is added and checked against its RFC's vectors.
 against the sha512 monocypher.org publishes, and extract the six files from the ARCHIVE (for
 instance `tar -xzOf monocypher-X.Y.Z.tar.gz monocypher-X.Y.Z/<path> > vendor/monocypher/<path>`),
 never from a checkout, whose sources carry `__git__`. Then
-`cmake -DFASTCACHED_SOURCE_DIR=<root> -DFASTCACHED_VENDOR_WRITE_MANIFEST=RESYNC -DFASTCACHED_VENDOR_RESYNC_ROOT=vendor/monocypher -P scripts/check-vendor-verbatim.cmake`,
+`cmake -DPACE_SOURCE_DIR=<root> -DPACE_VENDOR_WRITE_MANIFEST=RESYNC -DPACE_VENDOR_RESYNC_ROOT=vendor/monocypher -P scripts/check-vendor-verbatim.cmake`,
 update the table above and the row in "The copies", and run the vectors. A change goes to
 LoupVaillant/Monocypher as a pull request first; a local change would be a row below, and there is
 none.

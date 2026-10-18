@@ -1,6 +1,6 @@
 # Commands
 
-Every command fastcached recognises, grouped by protocol and category.
+Every command pace-kv recognises, grouped by protocol and category.
 Each page describes the wire form, response codes, and at least one
 working example.
 

@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Core/Logger.hpp>
+
+#include <chrono>
+#include <format>
+#include <ostream>
+#include <string>
+
+namespace Pace
+{
+
+// -- ConsoleLogger ---------------------------------------------------------
+
+ConsoleLogger::ConsoleLogger(std::ostream& sink, LogLevel initialMinLevel, LogTimestamps timestamps) noexcept:
+    _sink { sink },
+    _minLevel { initialMinLevel },
+    _timestamps { timestamps }
+{
+}
+
+void ConsoleLogger::Log(LogLevel level, std::string_view message)
+{
+    if (level < _minLevel.load(std::memory_order_relaxed))
+        return;
+
+    std::string line;
+    if (_timestamps == LogTimestamps::Yes)
+    {
+        auto const now = std::chrono::floor<std::chrono::microseconds>(std::chrono::system_clock::now());
+        line = std::format("{:%FT%T}Z [{}] {}\n", now, ToStringView(level), message);
+    }
+    else
+    {
+        line = std::format("[{}] {}\n", ToStringView(level), message);
+    }
+    std::scoped_lock const lock { _writeMutex };
+    _sink.write(line.data(), static_cast<std::streamsize>(line.size()));
+}
+
+LogLevel ConsoleLogger::MinLevel() const noexcept
+{
+    return _minLevel.load(std::memory_order_relaxed);
+}
+
+void ConsoleLogger::SetMinLevel(LogLevel level) noexcept
+{
+    _minLevel.store(level, std::memory_order_relaxed);
+}
+
+// -- SourceLogger ----------------------------------------------------------
+
+SourceLogger::SourceLogger(ILogger& inner, std::string source) noexcept:
+    _inner { inner },
+    _source { std::move(source) }
+{
+}
+
+void SourceLogger::Log(LogLevel level, std::string_view message)
+{
+    if (_source.empty())
+    {
+        _inner.Log(level, message);
+        return;
+    }
+    _inner.Log(level, std::format("{} {}", _source, message));
+}
+
+LogLevel SourceLogger::MinLevel() const noexcept
+{
+    return _inner.MinLevel();
+}
+
+void SourceLogger::SetMinLevel(LogLevel level) noexcept
+{
+    _inner.SetMinLevel(level);
+}
+
+// -- CapturingLogger -------------------------------------------------------
+
+CapturingLogger::CapturingLogger(LogLevel initialMinLevel) noexcept:
+    _minLevel { initialMinLevel }
+{
+}
+
+void CapturingLogger::Log(LogLevel level, std::string_view message)
+{
+    if (level < _minLevel.load(std::memory_order_relaxed))
+        return;
+
+    std::scoped_lock const lock { _mutex };
+    _records.push_back(Record { .level = level, .message = std::string { message } });
+}
+
+LogLevel CapturingLogger::MinLevel() const noexcept
+{
+    return _minLevel.load(std::memory_order_relaxed);
+}
+
+void CapturingLogger::SetMinLevel(LogLevel level) noexcept
+{
+    _minLevel.store(level, std::memory_order_relaxed);
+}
+
+std::vector<CapturingLogger::Record> CapturingLogger::Snapshot() const
+{
+    std::scoped_lock const lock { _mutex };
+    return _records;
+}
+
+void CapturingLogger::Clear()
+{
+    std::scoped_lock const lock { _mutex };
+    _records.clear();
+}
+
+} // namespace Pace

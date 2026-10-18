@@ -3,8 +3,8 @@
 Everything in this directory is written to be copied. Each module uses nothing
 but stock CMake, names no target of the project it sits in, and depends on no
 other file here — so another project can vendor one and have it work, whether or
-not it has ever heard of fastcached. That is the whole reason the directory
-exists: `../` holds the modules that only make sense while building fastcached,
+not it has ever heard of pace-kv. That is the whole reason the directory
+exists: `../` holds the modules that only make sense while building pace-kv,
 and this holds the ones that travel.
 
 Anything added here has to keep that property. Nothing checks it automatically —
@@ -42,7 +42,7 @@ suppressed. This project's rows are in `../PedanticSuppressions.cmake`.
 
 ## `CompileCache.cmake`
 
-Picks a compiler-cache launcher — `fastcache-cc`, `sccache` or `ccache` — and,
+Picks a compiler-cache launcher — `pace-cc`, `sccache` or `ccache` — and,
 when asked, installs one that is missing.
 
 ### Using it
@@ -60,12 +60,12 @@ any dependency is fetched, so fetched dependencies are cached too.
 
 It picks the first launcher that is both installed and usable:
 
-1. **`fastcache-cc`**, but only when a `fastcached` daemon actually answers.
+1. **`pace-cc`**, but only when a `pace-kv` daemon actually answers.
    Its cache entries are keyed independently of the checkout path, so a CI
    runner and a developer working from different directories share hits.
 2. **`sccache`**, but only with `-DALLOW_SCCACHE_FALLBACK=ON`. It is never picked
    for you: a launcher nobody chose is a launcher nobody checks, and it silently
-   standing in for a `fastcache-cc` that could not talk to its daemon is how a
+   standing in for a `pace-cc` that could not talk to its daemon is how a
    project stops noticing that its own cache is not in use. Opted into, it keeps
    this position, ahead of `ccache`.
 3. **`ccache`**
@@ -89,14 +89,14 @@ does not fail configures.
 
 ### Installing the launcher automatically
 
-By default the module uses what is already installed. `FASTCACHE_AUTO_INSTALL`
-lets it fetch `fastcache-cc` instead of leaving the build uncached:
+By default the module uses what is already installed. `PACE_AUTO_INSTALL`
+lets it fetch `pace-cc` instead of leaving the build uncached:
 
 ```cmake
-set(FASTCACHE_AUTO_INSTALL ON CACHE BOOL "" FORCE)   # before include(CompileCache)
+set(PACE_AUTO_INSTALL ON CACHE BOOL "" FORCE)   # before include(CompileCache)
 ```
 
-or `-DFASTCACHE_AUTO_INSTALL=ON` on the command line.
+or `-DPACE_AUTO_INSTALL=ON` on the command line.
 
 It downloads a prebuilt binary for the host's OS and architecture from the
 latest stable release, verifies the published SHA-256, checks the binary runs,
@@ -116,16 +116,16 @@ here.
 | --- | --- | --- |
 | `USE_COMPILER_CACHE` | `ON` | Use a launcher at all. |
 | `ALLOW_SCCACHE_FALLBACK` | `OFF` | Let `sccache` be selected automatically. Off, it is skipped with a status line saying so. |
-| `FASTCACHE_ADDR` | `127.0.0.1:6674` | Where the daemon is. Empty opts out of `fastcache-cc` entirely. |
-| `FASTCACHE_AUTO_INSTALL` | `OFF` | Fetch `fastcache-cc` when no launcher is installed. |
-| `FASTCACHE_AUTO_INSTALL_VERSION` | *(empty)* | Install this exact version instead of resolving the latest. |
-| `FASTCACHE_AUTO_INSTALL_DIR` | per-user cache dir | Where fetched binaries are staged. |
-| `FASTCACHE_AUTO_INSTALL_REPO` | `LASTRADA-Software/fastcached` | Repository to fetch from. |
-| `FASTCACHE_AUTO_INSTALL_API` | `https://api.github.com` | API used to resolve the latest release. |
-| `FASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE` | `https://github.com` | Where release archives are downloaded from. |
-| `FASTCACHE_AUTO_INSTALL_TTL_HOURS` | `24` | How long a resolved "latest" is reused before asking again. |
-| `FASTCACHE_AUTO_INSTALL_HOST_SYSTEM` | *(empty: `CMAKE_HOST_SYSTEM_NAME`)* | Fetch the binary published for this system instead of the host's. One that does not run here is removed again and declined, never used. |
-| `FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR` | *(empty: `CMAKE_HOST_SYSTEM_PROCESSOR`)* | The same, for the processor. |
+| `PACE_ADDR` | `127.0.0.1:6674` | Where the daemon is. Empty opts out of `pace-cc` entirely. |
+| `PACE_AUTO_INSTALL` | `OFF` | Fetch `pace-cc` when no launcher is installed. |
+| `PACE_AUTO_INSTALL_VERSION` | *(empty)* | Install this exact version instead of resolving the latest. |
+| `PACE_AUTO_INSTALL_DIR` | per-user cache dir | Where fetched binaries are staged. |
+| `PACE_AUTO_INSTALL_REPO` | `LASTRADA-Software/pace` | Repository to fetch from. |
+| `PACE_AUTO_INSTALL_API` | `https://api.github.com` | API used to resolve the latest release. |
+| `PACE_AUTO_INSTALL_DOWNLOAD_BASE` | `https://github.com` | Where release archives are downloaded from. |
+| `PACE_AUTO_INSTALL_TTL_HOURS` | `24` | How long a resolved "latest" is reused before asking again. |
+| `PACE_AUTO_INSTALL_HOST_SYSTEM` | *(empty: `CMAKE_HOST_SYSTEM_NAME`)* | Fetch the binary published for this system instead of the host's. One that does not run here is removed again and declined, never used. |
+| `PACE_AUTO_INSTALL_HOST_PROCESSOR` | *(empty: `CMAKE_HOST_SYSTEM_PROCESSOR`)* | The same, for the processor. |
 
 #### What it will not do
 
@@ -135,7 +135,7 @@ in a single status line and a fall-through to the next launcher, or to no
 caching at all. A project that vendors this file must keep building on a laptop
 on a train.
 
-**It will not reach the network unless asked.** `FASTCACHE_AUTO_INSTALL`
+**It will not reach the network unless asked.** `PACE_AUTO_INSTALL`
 defaults to `OFF`. With it on, the API is consulted at most once per day per
 machine (the resolved answer is cached), and not at all once the binary for that
 version is staged.
@@ -154,65 +154,65 @@ To install without reaching GitHub at all, mirror the release archives and pin a
 version:
 
 ```cmake
--DFASTCACHE_AUTO_INSTALL=ON
--DFASTCACHE_AUTO_INSTALL_VERSION=0.1.0
--DFASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE=https://mirror.example.com
+-DPACE_AUTO_INSTALL=ON
+-DPACE_AUTO_INSTALL_VERSION=0.1.0
+-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=https://mirror.example.com
 ```
 
 The archive is then expected at
-`<base>/<repo>/releases/download/v<version>/fastcached-<version>-<platform>.tar.gz`,
+`<base>/<repo>/releases/download/v<version>/pace-<version>-<platform>.tar.gz`,
 laid out exactly as the release archive is.
 
 ### Starting a daemon automatically
 
-`FASTCACHE_AUTO_INSTALL` alone still leaves a genuinely clean machine
-uncached: `fastcache-cc` caches nothing unless a `fastcached` daemon answers
-at `FASTCACHE_ADDR`, and installing the launcher does not install one.
-`FASTCACHE_AUTO_START` closes that gap:
+`PACE_AUTO_INSTALL` alone still leaves a genuinely clean machine
+uncached: `pace-cc` caches nothing unless a `pace-kv` daemon answers
+at `PACE_ADDR`, and installing the launcher does not install one.
+`PACE_AUTO_START` closes that gap:
 
 ```cmake
-set(FASTCACHE_AUTO_START ON CACHE BOOL "" FORCE)   # before include(CompileCache)
+set(PACE_AUTO_START ON CACHE BOOL "" FORCE)   # before include(CompileCache)
 ```
 
-or `-DFASTCACHE_AUTO_START=ON` on the command line. When nothing answers at
-`FASTCACHE_ADDR`, the module stages a `fastcached` binary from the very same
+or `-DPACE_AUTO_START=ON` on the command line. When nothing answers at
+`PACE_ADDR`, the module stages a `pace-kv` binary from the very same
 release archive it fetched (or would fetch) the launcher from, and starts it
 in the background — persistently, with its cache on disk under
-`FASTCACHE_AUTO_START_STORAGE_DIR` so it survives being restarted. It keeps
+`PACE_AUTO_START_STORAGE_DIR` so it survives being restarted. It keeps
 running after the configure exits: on a developer machine that is the point,
 and nothing here stops it for you.
 
-It is a separate opt-in from `FASTCACHE_AUTO_INSTALL`, and defaults `OFF`
+It is a separate opt-in from `PACE_AUTO_INSTALL`, and defaults `OFF`
 independently, for two reasons. Starting a long-lived background process is a
 materially bigger side effect than downloading a file, so wanting one must not
 imply wanting the other. And several projects rely on CI having **no**
-`fastcached` reachable, so a build transparently falls through to whatever else
-is installed and usable — `FASTCACHE_AUTO_START` would remove that boundary if it
+`pace-kv` reachable, so a build transparently falls through to whatever else
+is installed and usable — `PACE_AUTO_START` would remove that boundary if it
 defaulted on for everyone rather than only those who ask for it. (Which launcher
 it lands on does not enter into that: `ccache`, an `sccache` that
 `ALLOW_SCCACHE_FALLBACK` opted into, or nothing at all.) There is no
-CI-environment detection backing this up; an explicit `-DFASTCACHE_AUTO_START=ON`
+CI-environment detection backing this up; an explicit `-DPACE_AUTO_START=ON`
 is trusted exactly like every other flag here.
 
-Two configures racing on the same `FASTCACHE_ADDR` — two build trees on one
+Two configures racing on the same `PACE_ADDR` — two build trees on one
 machine, say — do not both try to start one: before starting anything, the
 module checks whether something is already answering there, and if so treats
 it as its own. Losing that race is success, not failure.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `FASTCACHE_AUTO_START` | `OFF` | Start a fetched `fastcached` in the background when none answers at `FASTCACHE_ADDR`. |
-| `FASTCACHE_AUTO_START_STORAGE_DIR` | `<FASTCACHE_AUTO_INSTALL_DIR>/daemon-storage` | Where the auto-started daemon keeps its persistent cache. |
+| `PACE_AUTO_START` | `OFF` | Start a fetched `pace-kv` in the background when none answers at `PACE_ADDR`. |
+| `PACE_AUTO_START_STORAGE_DIR` | `<PACE_AUTO_INSTALL_DIR>/daemon-storage` | Where the auto-started daemon keeps its persistent cache. |
 
 **It will not fail your configure either.** No daemon binary published for
 this platform, the archive fetch failing, the process exiting immediately —
 each ends in one status line and a fall-through to the probe finding no
-daemon, exactly the behaviour without `FASTCACHE_AUTO_START` at all.
+daemon, exactly the behaviour without `PACE_AUTO_START` at all.
 
 **It will not register a service.** This is a plain background process, not
 something `--install-service` would set up under the SCM or launchd — those
 are a deliberate, human-driven decision documented separately. Nor does it
-install anything system-wide: the daemon binds `FASTCACHE_ADDR`'s own host
+install anything system-wide: the daemon binds `PACE_ADDR`'s own host
 (loopback by default) and keeps its cache in a per-user directory.
 
 ### Caveats worth knowing

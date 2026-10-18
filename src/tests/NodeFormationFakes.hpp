@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
-#include <apps/fastcache-compile-node/NodeFormation.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
+#include <apps/pace-node/NodeFormation.hpp>
 
 /// @file NodeFormationFakes.hpp
 /// Shape a test configuration the way `main` shapes every configuration it judges.
@@ -21,7 +21,7 @@
 /// every case about a node that runs one has to be shaped first -- and a copy that shaped it by
 /// a different record (a minted cluster id, say) would change the lease cluster field under
 /// cases that are about something else entirely.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @p cfg shaped as `main` shapes it before the first start has minted anything: by the
@@ -68,4 +68,4 @@ inline void ShapeAsFirstStart(Node::NodeConfig& cfg)
     return cfg;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

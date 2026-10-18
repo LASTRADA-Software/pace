@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Distributed/TicketVerifier.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
 
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A ticket audience that is exactly one endpoint, as the presenter dialled it.
@@ -34,4 +34,4 @@ class ExactAudience final: public Distributed::IAudience
     std::string _endpoint;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

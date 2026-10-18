@@ -152,7 +152,7 @@ WIRING_ROWS = [
     ),
     Wiring(
         path=os.path.join("cmake", "CPM.cmake"),
-        needle='INACTIVITY_TIMEOUT "${FASTCACHED_FETCH_SILENCE_SECONDS}"',
+        needle='INACTIVITY_TIMEOUT "${PACE_FETCH_SILENCE_SECONDS}"',
         before=None,
         why="the bootstrap download would carry a number of its own, and the tree "
         "would state one policy in two places",
@@ -775,7 +775,7 @@ def read_shipped_numbers(arguments, workspace):
     and from the module otherwise. That distinction is the whole point: the
     module's numbers are CACHE variables, and a `cmake -P` has no cache, so a
     probe alone always reads the defaults -- it would have reported "shipped
-    window is 120s" for a tree configured with `-DFASTCACHED_FETCH_SILENCE_SECONDS=0`,
+    window is 120s" for a tree configured with `-DPACE_FETCH_SILENCE_SECONDS=0`,
     which is the one tree where the answer matters.
 
     The probe still runs, because it is what asserts the DELIVERY CHANNEL: that
@@ -855,14 +855,14 @@ def main():
     parser.add_argument(
         "--configured-window",
         default="",
-        help="FASTCACHED_FETCH_SILENCE_SECONDS as THIS BUILD TREE resolved it; "
+        help="PACE_FETCH_SILENCE_SECONDS as THIS BUILD TREE resolved it; "
         "passed by the ctest registration, because a `cmake -P` probe has no cache "
         "and would always read the module's default instead",
     )
     parser.add_argument(
         "--configured-floor",
         default="",
-        help="FASTCACHED_FETCH_MIN_BYTES_PER_SECOND as this build tree resolved it",
+        help="PACE_FETCH_MIN_BYTES_PER_SECOND as this build tree resolved it",
     )
     arguments = parser.parse_args()
 

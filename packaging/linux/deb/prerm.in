@@ -4,9 +4,9 @@
 # upgrade — postinst's try-restart handles that, so the cache stays warm.
 set -e
 
-SERVICE="@FASTCACHED_SERVICE_NAME@"
-NODE_SERVICE="fastcache-compile-node.service"
-NODE_SOCKET="fastcache-compile-node.socket"
+SERVICE="@PACE_SERVICE_NAME@"
+NODE_SERVICE="pace-node.service"
+NODE_SOCKET="pace-node.socket"
 
 case "$1" in
     remove|deconfigure)

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# sccache smoke test (POSIX). Start fastcached, point sccache at it over the
+# sccache smoke test (POSIX). Start pace-kv, point sccache at it over the
 # chosen wire protocol, compile a one-file program twice, and assert the
 # second compile is served from cache. Shared by the CI smoke jobs and the
 # CTest `smoke` tests so both exercise exactly the same path.
 #
 # Usage:
-#   sccache-smoke.sh --fastcached <path> [--protocol memcached|redis]
+#   sccache-smoke.sh --pace-kv <path> [--protocol memcached|redis]
 #                    [--port <n>] [--compiler <cxx>] [--expect-flavor <name>]
 #
 # Exit codes: 0 = every assertion held; 1 = ran and something was wrong; 77 = a
-# runtime prerequisite (sccache / fastcached / compiler / a backend that is not
+# runtime prerequisite (sccache / pace-kv / compiler / a backend that is not
 # compiled into this sccache) was missing.
 #
 # **77 IS A SKIP UNDER CTEST AND A JOB FAILURE IN CI**, and the difference is not
@@ -27,7 +27,7 @@
 # ## What this asserts, and why one assertion was never enough
 #
 # The original assertion was `Cache hits >= 1` alone, and sccache satisfies that
-# from its own LOCAL DISK cache -- so the fixture passed with no fastcached in the
+# from its own LOCAL DISK cache -- so the fixture passed with no pace-kv in the
 # picture at all, for as long as it existed (#1318). Three questions have to be
 # asked, because each is satisfied by the failing state of the next:
 #
@@ -43,7 +43,7 @@
 # defect re-established deliberately.
 set -euo pipefail
 
-fastcached=""
+pace_kv=""
 protocol="memcached"
 # Empty means DRAW one; `--port` still overrides, which is what CI and a human
 # debugging a run need. A FIXED port needs a reaper and this fixture never had one,
@@ -73,7 +73,7 @@ expectFlavor=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached)    fastcached="$2";   shift 2 ;;
+        --pace-kv)    pace_kv="$2";   shift 2 ;;
         --protocol)      protocol="$2";     shift 2 ;;
         --port)          port="$2";         shift 2 ;;
         --compiler)      compiler="$2";     shift 2 ;;
@@ -114,7 +114,7 @@ SccacheFeatureEnabled() {
     # FAILURE on the success path.
     grep -qE "^[[:space:]]*${feature}:[[:space:]]+true[[:space:]]*$" <<< "$help"
 }
-[[ -n "$fastcached" && -x "$fastcached" ]] || { echo "fastcached not found: '$fastcached'; skipping"; exit "$SKIP"; }
+[[ -n "$pace_kv" && -x "$pace_kv" ]] || { echo "pace-kv not found: '$pace_kv'; skipping"; exit "$SKIP"; }
 command -v "$compiler" >/dev/null 2>&1 || { echo "compiler not found: '$compiler'; skipping"; exit "$SKIP"; }
 
 # One row per protocol, and every column this fixture needs about it. A table
@@ -184,7 +184,7 @@ export SCCACHE_NO_DAEMON=0
 workdir="$(mktemp -d)"
 src="${workdir}/hello.cpp"
 obj="${workdir}/hello.o"
-daemon_log="${workdir}/fastcached.log"
+daemon_log="${workdir}/pace-kv.log"
 # sccache's own server log, for the half of a failure the daemon cannot see: a
 # lookup that sccache abandoned, timed out or could not decode reaches the daemon
 # as an ordinary GET, or not at all. Debug, because a miss is not an error to it.
@@ -215,7 +215,7 @@ print_log_tail() {
 # missed and nothing about why, and the run could not be repeated locally.
 print_failure_logs() {
     sccache --stop-server >/dev/null 2>&1 || true
-    print_log_tail "fastcached log" "$daemon_log"
+    print_log_tail "pace-kv log" "$daemon_log"
     print_log_tail "sccache log" "$sccache_log"
 }
 cat > "$src" <<'EOF'
@@ -267,13 +267,13 @@ export "${backendEnv}=${backendScheme}://127.0.0.1:${port}"
 #
 # No production change was needed for this: the daemon has always known which
 # dialect it was spoken to and has always been able to say so. Nothing asked.
-"$fastcached" --port="$port" --log-level=trace --log-everything > "$daemon_log" 2>&1 &
+"$pace_kv" --port="$port" --log-level=trace --log-everything > "$daemon_log" 2>&1 &
 server_pid=$!
 # Waits on the LISTENER, bounded, and says which kind of failure it was: a flat
 # `sleep 1` is either flaky on a cold runner or slow on a warm one, and when it is
 # too short the failure surfaces later as sccache being unable to reach a backend
 # that was merely not up yet.
-wait_for_port 127.0.0.1 "$port" "$server_pid" "fastcached" "$daemon_log"
+wait_for_port 127.0.0.1 "$port" "$server_pid" "pace-kv" "$daemon_log"
 
 # THE STOP IS THE WHOLE MECHANISM, so its outcome is captured rather than discarded.
 #
@@ -381,7 +381,7 @@ names_backend "$(sccache --show-stats)" || {
 
 sccache --zero-stats >/dev/null
 
-# First compile: cache miss, and it is what populates fastcached.
+# First compile: cache miss, and it is what populates pace-kv.
 sccache "$compiler" -std=c++23 -c "$src" -o "$obj"
 rm -f "$obj"
 
@@ -404,7 +404,7 @@ names_backend "$firstStats" || {
     echo "  expected 'Cache location' to name '${backendLocation}'." >&2
     echo "  got: ${backend_location_line:-(no Cache location line at all)}" >&2
     echo "  sccache falls back to its own local disk cache SILENTLY, and a hit from" >&2
-    echo "  that cache satisfies the hit assertion with no fastcached involved (#1318)." >&2
+    echo "  that cache satisfies the hit assertion with no pace-kv involved (#1318)." >&2
     exit 1
 }
 
@@ -428,7 +428,7 @@ names_backend "$firstStats" || {
 # The marker excludes sccache's `.sccache_check` probe, which also STOREs -- an
 # object key is sharded hex (`f/7/9/…`), the probe key is not.
 wait_for_log 'storage: SET key=[0-9a-f]/' "$server_pid" \
-    "fastcached to store the first compile's object" "$daemon_log"
+    "pace-kv to store the first compile's object" "$daemon_log"
 
 # Second compile: must now be a cache hit.
 sccache "$compiler" -std=c++23 -c "$src" -o "$obj"

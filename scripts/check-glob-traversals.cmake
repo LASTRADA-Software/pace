@@ -7,7 +7,7 @@
 # `check-sccache-backend-caveat` handed it ~19 patterns per root across two calls, and
 # on a DrvFs checkout — a supported working environment — it took **78.7 s against a
 # 60 s budget**, so the documented local gate could not go green for anyone working
-# that way ([#502](https://github.com/LASTRADA-Software/fastcached/issues/502)).
+# that way ([#502](https://github.com/LASTRADA-Software/pace/issues/502)).
 #
 # ## The measurement, with its conditions, because the number alone misleads
 #
@@ -69,7 +69,7 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-glob-traversals.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-glob-traversals.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -83,8 +83,8 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # Keywords `file(GLOB_RECURSE)` accepts that are not patterns. The two that take a
@@ -92,8 +92,8 @@ endif()
 set(valuedKeywords "RELATIVE" "LIST_DIRECTORIES")
 set(bareKeywords "CONFIGURE_DEPENDS" "FOLLOW_SYMLINKS")
 
-file(GLOB scriptFiles RELATIVE "${FASTCACHED_SOURCE_DIR}"
-     "${FASTCACHED_SOURCE_DIR}/scripts/*.cmake")
+file(GLOB scriptFiles RELATIVE "${PACE_SOURCE_DIR}"
+     "${PACE_SOURCE_DIR}/scripts/*.cmake")
 list(SORT scriptFiles)
 
 if(NOT scriptFiles)
@@ -101,7 +101,7 @@ if(NOT scriptFiles)
     message("  No scripts/*.cmake was found at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "glob traversals: the scan matched no script and cannot conclude")
 endif()
 
@@ -109,7 +109,7 @@ set(violations "")
 set(callCount 0)
 
 foreach(relative IN LISTS scriptFiles)
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" content)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" content)
 
     # Cheap reject: most scripts contain none of these at all.
     string(FIND "${content}" "GLOB_RECURSE" found)
@@ -126,7 +126,7 @@ foreach(relative IN LISTS scriptFiles)
     # and this is its splitter. Lossy on the four characters it blanks, none of which
     # a `file(GLOB_RECURSE ...)` argument list contains. Fifth copy of this idiom;
     # consolidating them is #495.
-    fastcached_split_lines_tokenised("${content}" lines)
+    pace_split_lines_tokenised("${content}" lines)
 
     set(lineNumber 0)
     foreach(line IN LISTS lines)

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# The exit codes `docs/tools/fastcache-cli.md` lists are `OutcomeTable`'s, row for row:
+# The exit codes `docs/tools/pacectl.md` lists are `OutcomeTable`'s, row for row:
 # the same codes, the same names, the same meanings.
 #
 # ## Why this exists
 #
-# `OutcomeTable` in `src/apps/fastcache-cli/CliAnswer.hpp` is where an exit code is
+# `OutcomeTable` in `src/apps/pacectl/CliAnswer.hpp` is where an exit code is
 # decided, and `--help` renders it, so the help cannot drift. The operator page could:
 # its `## Exit codes` section restated all six codes by hand, under a sentence that
 # restated their COUNT as well, and #134 added a seventh (`local`). A listing written by
@@ -108,7 +108,7 @@ TableOutcomes() {
 # cell loses its backticks. An escaped `\|` is a literal pipe in markdown and is masked
 # before the split, so a meaning carrying one is not cut in half.
 #
-# @param 1 path to fastcache-cli.md
+# @param 1 path to pacectl.md
 DocOutcomes() {
     awk '
         function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -175,8 +175,8 @@ Disagreements() {
 # @param 1 source directory
 Verify() {
     local dir="$1"
-    local impl="${dir}/src/apps/fastcache-cli/CliAnswer.hpp"
-    local doc="${dir}/docs/tools/fastcache-cli.md"
+    local impl="${dir}/src/apps/pacectl/CliAnswer.hpp"
+    local doc="${dir}/docs/tools/pacectl.md"
     local tableFile docFile line tableCount docCount
 
     if [ ! -r "$impl" ]; then
@@ -235,7 +235,7 @@ Verify() {
 Stage() {
     local root="$1" tableRows="$2" docRows="$3"
     local row code rest name meaning first="yes"
-    mkdir -p "${root}/src/apps/fastcache-cli" "${root}/docs/tools"
+    mkdir -p "${root}/src/apps/pacectl" "${root}/docs/tools"
     {
         echo 'inline constexpr EnumTable<Outcome, OutcomeSpec> OutcomeTable { {'
         while IFS= read -r row; do
@@ -258,9 +258,9 @@ Stage() {
         echo '{'
         echo '    return { .outcome = Outcome::Decoy, .code = 99, .name = "decoy", .meaning = "not a row" };'
         echo '}'
-    } > "${root}/src/apps/fastcache-cli/CliAnswer.hpp"
+    } > "${root}/src/apps/pacectl/CliAnswer.hpp"
     {
-        echo '# `fastcache-cli`'
+        echo '# `pacectl`'
         echo ''
         echo '## Exit codes'
         echo ''
@@ -279,7 +279,7 @@ Stage() {
         echo '| | |'
         echo '|--:|---|'
         echo '| 9 | `decoy` | a numbered table outside the section |'
-    } > "${root}/docs/tools/fastcache-cli.md"
+    } > "${root}/docs/tools/pacectl.md"
 }
 
 RunCase() {
@@ -358,15 +358,15 @@ SelfTest() {
     # renamed literal or a renamed heading, forever.
     Stage "${tmp}/renamed-table" "$rows" "$rows"
     sed 's/OutcomeTable { {/RenamedTable { {/' \
-        "${tmp}/renamed-table/src/apps/fastcache-cli/CliAnswer.hpp" > "${tmp}/renamed-table/x" \
-        && mv "${tmp}/renamed-table/x" "${tmp}/renamed-table/src/apps/fastcache-cli/CliAnswer.hpp"
+        "${tmp}/renamed-table/src/apps/pacectl/CliAnswer.hpp" > "${tmp}/renamed-table/x" \
+        && mv "${tmp}/renamed-table/x" "${tmp}/renamed-table/src/apps/pacectl/CliAnswer.hpp"
     RunCase "a renamed table literal refuses rather than reading nothing" fail "${tmp}/renamed-table" || bad=1
     ran=$(( ran + 1 ))
 
     Stage "${tmp}/renamed-heading" "$rows" "$rows"
     sed 's/^## Exit codes/## Statuses/' \
-        "${tmp}/renamed-heading/docs/tools/fastcache-cli.md" > "${tmp}/renamed-heading/x" \
-        && mv "${tmp}/renamed-heading/x" "${tmp}/renamed-heading/docs/tools/fastcache-cli.md"
+        "${tmp}/renamed-heading/docs/tools/pacectl.md" > "${tmp}/renamed-heading/x" \
+        && mv "${tmp}/renamed-heading/x" "${tmp}/renamed-heading/docs/tools/pacectl.md"
     RunCase "a renamed doc heading refuses rather than reading nothing" fail "${tmp}/renamed-heading" || bad=1
     ran=$(( ran + 1 ))
 
@@ -375,8 +375,8 @@ SelfTest() {
     Stage "${tmp}/split-literal" "$rows" "$rows"
     sed 's/"the server answered and declined"/"the server answered "\
       "and declined"/' \
-        "${tmp}/split-literal/src/apps/fastcache-cli/CliAnswer.hpp" > "${tmp}/split-literal/x" \
-        && mv "${tmp}/split-literal/x" "${tmp}/split-literal/src/apps/fastcache-cli/CliAnswer.hpp"
+        "${tmp}/split-literal/src/apps/pacectl/CliAnswer.hpp" > "${tmp}/split-literal/x" \
+        && mv "${tmp}/split-literal/x" "${tmp}/split-literal/src/apps/pacectl/CliAnswer.hpp"
     RunCase "a meaning split across two literals refuses rather than passing" fail "${tmp}/split-literal" || bad=1
     ran=$(( ran + 1 ))
 
@@ -384,21 +384,21 @@ SelfTest() {
     # comparison would still find every row of the other missing, but two empty lists
     # compare equal and would report a clean tree.
     Stage "${tmp}/renamed-both" "$rows" "$rows"
-    sed 's/OutcomeTable { {/RenamedTable { {/'         "${tmp}/renamed-both/src/apps/fastcache-cli/CliAnswer.hpp" > "${tmp}/renamed-both/x"         && mv "${tmp}/renamed-both/x" "${tmp}/renamed-both/src/apps/fastcache-cli/CliAnswer.hpp"
-    sed 's/^## Exit codes/## Statuses/'         "${tmp}/renamed-both/docs/tools/fastcache-cli.md" > "${tmp}/renamed-both/x"         && mv "${tmp}/renamed-both/x" "${tmp}/renamed-both/docs/tools/fastcache-cli.md"
+    sed 's/OutcomeTable { {/RenamedTable { {/'         "${tmp}/renamed-both/src/apps/pacectl/CliAnswer.hpp" > "${tmp}/renamed-both/x"         && mv "${tmp}/renamed-both/x" "${tmp}/renamed-both/src/apps/pacectl/CliAnswer.hpp"
+    sed 's/^## Exit codes/## Statuses/'         "${tmp}/renamed-both/docs/tools/pacectl.md" > "${tmp}/renamed-both/x"         && mv "${tmp}/renamed-both/x" "${tmp}/renamed-both/docs/tools/pacectl.md"
     RunCase "a renamed literal AND a renamed heading refuse rather than agreeing on nothing" fail "${tmp}/renamed-both" || bad=1
     ran=$(( ran + 1 ))
 
     Stage "${tmp}/missing-doc" "$rows" "$rows"
-    rm -f "${tmp}/missing-doc/docs/tools/fastcache-cli.md"
+    rm -f "${tmp}/missing-doc/docs/tools/pacectl.md"
     RunCase "a missing doc is a refusal, not a pass" fail "${tmp}/missing-doc" || bad=1
     ran=$(( ran + 1 ))
 
     # The decoys are what make the bounded reads worth having, and the fixtures carry
     # them silently -- so this says out loud that they are there, rather than letting
     # the property rest on the fixture unobserved.
-    if grep -Fq '.code = 99, .name = "decoy"' "${tmp}/agree/src/apps/fastcache-cli/CliAnswer.hpp" \
-        && grep -Fq '| 9 | `decoy` |' "${tmp}/agree/docs/tools/fastcache-cli.md"; then
+    if grep -Fq '.code = 99, .name = "decoy"' "${tmp}/agree/src/apps/pacectl/CliAnswer.hpp" \
+        && grep -Fq '| 9 | `decoy` |' "${tmp}/agree/docs/tools/pacectl.md"; then
         echo "  ok   the fixtures carry a decoy row below the literal and a numbered table outside the section"
         ran=$(( ran + 1 ))
     else

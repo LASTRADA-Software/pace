@@ -1,6 +1,6 @@
 # Cluster discovery
 
-How `fastcache-compile-node` machines find one another and become one fleet with no
+How `pace-node` machines find one another and become one fleet with no
 configuration, and how one proves which machine it is before anything it claims is
 believed.
 
@@ -9,7 +9,7 @@ empty `--discovery=` turns it off. A discovery proof is a signature by the node'
 identity key, the same key every consensus connection proves — see
 [Raft peer authentication](../operations/cluster-communication.md#raft-peer-authentication).
 The flags are under
-[finding peers instead of typing them](../tools/fastcache-compile-node.md#finding-peers-instead-of-typing-them);
+[finding peers instead of typing them](../tools/pace-node.md#finding-peers-instead-of-typing-them);
 where this exchange sits among everything else a fleet says to itself — and which ports
 it needs open — is [Cluster communication](../operations/cluster-communication.md).
 
@@ -24,9 +24,9 @@ id and the identity key are minted into its state directory and read back foreve
 
 | Source | What it is | Preference |
 |---|---|---|
-| `--fleet-seed` | `<host>` or `<host>:<port>`, typed at install (on Windows the installer's `FASTCACHE_FLEET_SEED`) — what reaches across a VPN, where no beacon does | first: asked before anything is decided, whatever a beacon says |
+| `--fleet-seed` | `<host>` or `<host>:<port>`, typed at install (on Windows the installer's `PACE_FLEET_SEED`) — what reaches across a VPN, where no beacon does | first: asked before anything is decided, whatever a beacon says |
 | remembered | the fleet's voters' endpoints, kept in the state directory after a join | second |
-| DNS SRV | `_fastcache._tcp.<this machine's DNS suffix>`, when the machine has one | third |
+| DNS SRV | `_pace._tcp.<this machine's DNS suffix>`, when the machine has one | third |
 | the LAN beacon | every node broadcasts its fleet summary every 15 seconds on every eligible interface's directed broadcast | last: anything on the segment can beacon |
 
 The three seed sources are dialled in `SeedSourceTable`'s order — remembered, then
@@ -60,8 +60,8 @@ given up and asked again later; a rejection keeps it from asking that fleet for 
 **A person approves it** — on the fleet's leader, or with `--scheduler` naming it:
 
 ```sh
-fastcache-compile-node --enroll-list
-fastcache-compile-node --enroll-approve=<id>@<key>
+pace-node --enroll-list
+pace-node --enroll-approve=<id>@<key>
 ```
 
 `--enroll-list` prints each waiting machine with the key it asked with and the paste-ready
@@ -70,18 +70,18 @@ when many machines join, an operator can delegate that comparison for a bounded 
 instead:
 
 ```sh
-fastcache-compile-node --enroll-auto-approve=15min
-fastcache-compile-node --enroll-auto-approve=off
+pace-node --enroll-auto-approve=15min
+pace-node --enroll-auto-approve=off
 ```
 
 The deadline lives in the leader's memory alone — at most `24h`, refused by name above
 that — so a restart or a change of leader ends it. `enrollment-window-open` is raised while
-it is armed, `fastcache-cli node` reads `auto-approve (N min left)`, `--enroll-list` marks every
+it is armed, `pacectl node` reads `auto-approve (N min left)`, `--enroll-list` marks every
 row it admitted with when it was armed, and
-`fastcache_enrollment_approvals_auto_total` counts them apart from a person's approvals.
+`pace_enrollment_approvals_auto_total` counts them apart from a person's approvals.
 A machine that asks again under the same id with a different key is never auto-approved.
 Details are under
-[enrolling a machine instead of typing it](../tools/fastcache-compile-node.md#enrolling-a-machine-instead-of-typing-it).
+[enrolling a machine instead of typing it](../tools/pace-node.md#enrolling-a-machine-instead-of-typing-it).
 
 **Approved, the joiner dissolves its own cluster and becomes a learner.** It records the
 fleet it joined, archives its solitary cluster's consensus store under
@@ -97,12 +97,12 @@ machine that founded it — until somebody promotes another, with the id and add
 `--cluster-status` shows:
 
 ```sh
-fastcache-compile-node --cluster-admit=<id>=<host>:6680
+pace-node --cluster-admit=<id>=<host>:6680
 ```
 
 A promotion takes effect once the learner has caught up. Promote machines that stay on —
 two more for three voters, which survive losing one — and leave laptops as learners; see
-[a machine that is usually away](../tools/fastcache-compile-node.md#a-machine-that-is-usually-away-admitting-a-learner).
+[a machine that is usually away](../tools/pace-node.md#a-machine-that-is-usually-away-admitting-a-learner).
 
 ## What problem the beacon solves
 
@@ -113,7 +113,7 @@ stays independent of *where* they are — so the beacon also supplies the addres
 member now answers at.
 
 **It supplies addresses, never admissions**
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). A machine whose key
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). A machine whose key
 the roster does not hold proves it perfectly well and is still only *reported*: counted,
 and logged with its id, the address it came from, its key and the `--cluster-admit` that
 would admit it. Joining is the enrollment above. Under the retired shared key it was not: a
@@ -189,7 +189,7 @@ the challenge and the proof are both unicast back to wherever the previous datag
 from, a node answering out of the shared socket would be answering for its whole
 *machine*. Two nodes on one host therefore saw each other's beacons and never finished the
 handshake, with nothing logged, because every rejection along the way is one the protocol
-is supposed to make ([#126](https://github.com/LASTRADA-Software/fastcached/issues/126)).
+is supposed to make ([#126](https://github.com/LASTRADA-Software/pace/issues/126)).
 
 So every node holds two:
 
@@ -216,7 +216,7 @@ GRAMMAR change, which an older reader could only refuse as malformed:
 
 - **2** replaced the proof's 32-byte HMAC under the shared key with a 32-byte public key and
   a 64-byte signature, so its arity and its field widths changed. That is the opposite of
-  [#402](https://github.com/LASTRADA-Software/fastcached/issues/402), which changed only
+  [#402](https://github.com/LASTRADA-Software/pace/issues/402), which changed only
   what the MAC covered and rightly left the version alone.
 - **3** put the fleet's signed summary in the beacon and the proof where an id and an
   endpoint were, padded the beacon and the challenge by one field each, and made the proof
@@ -265,7 +265,7 @@ remembered for well over a beacon interval, so a lost datagram costs nothing.
 | Attacker can… | Outcome |
 |---|---|
 | Listen to the segment | Learns that fleets exist, which endpoints serve them, their member ids and the public keys their members hold. None of that admits anybody. |
-| Send arbitrary datagrams | Can provoke a challenge, and answer it under a key of its own — which is reported and never desired. Cannot grow a table without bound: there is no challenge table, every table a beacon can grow is bounded, and a displacement is counted (`fastcache_discovery_beacons_over_bound_total`). Cannot flood the log: an unaccepted key is reported at most once a minute, with how many it stands for, and every one is counted. Cannot make a node an amplifier: no reply is larger than the datagram that provoked it, and answers are rate-limited per source. |
+| Send arbitrary datagrams | Can provoke a challenge, and answer it under a key of its own — which is reported and never desired. Cannot grow a table without bound: there is no challenge table, every table a beacon can grow is bounded, and a displacement is counted (`pace_discovery_beacons_over_bound_total`). Cannot flood the log: an unaccepted key is reported at most once a minute, with how many it stands for, and every one is counted. Cannot make a node an amplifier: no reply is larger than the datagram that provoked it, and answers are rate-limited per source. |
 | Replay a captured proof | Refused: the cookie it answers has been spent, or was issued to another address. |
 | Capture a proof and re-aim it at another endpoint | Refused: the endpoint is inside the signature. |
 | Claim a known member's id | Reported as an unknown key: the id is a label, and the key the roster holds for it is the credential. |
@@ -278,7 +278,7 @@ admitted: a new install waiting to be enrolled, or one that was removed. The war
 which, names the key whole — it verified, so only its holder could have signed it — and for
 an unknown key gives the `--cluster-admit` an operator would run if it belongs. The three
 refusals are counted apart
-(`fastcache_discovery_proofs_refused_{unknown_key,revoked_key,forged}_total`), because
+(`pace_discovery_proofs_refused_{unknown_key,revoked_key,forged}_total`), because
 their remedies are different.
 
 ### Threat model: LAN discovery is trust-on-first-use
@@ -329,8 +329,8 @@ included.
 
 The pin is the operator's remedy for exactly this, one setting per machine, while zero-config
 formation stays the default: see
-[pinning a node to one fleet](../tools/fastcache-compile-node.md#pinning-a-node-to-one-fleet).
-`fastcache-cli node` prints the pin to paste (`fleet-id`), so nobody composes keys by hand.
+[pinning a node to one fleet](../tools/pace-node.md#pinning-a-node-to-one-fleet).
+`pacectl node` prints the pin to paste (`fleet-id`), so nobody composes keys by hand.
 
 ## Implementation notes
 

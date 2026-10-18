@@ -1,0 +1,597 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include "NodeConfig.hpp"
+
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Pace::Node
+{
+
+/// A port this node LISTENS on.
+///
+/// The vocabulary is surfaces rather than flags, because one of the four is not one
+/// flag: discovery is an address plus an optional private reply port. A `ListenFlag`
+/// enum would have had to leave it out, which is how the port map came to live in
+/// five places.
+///
+/// `--advertise` is deliberately **not** here. It is what this node tells other
+/// machines to dial, not a socket it opens -- it defaults to what the `Node` row
+/// resolves to and binds nothing -- so a firewall rule derived from it would open a
+/// port twice and
+/// still miss whatever the supervisor actually chose.
+enum class NodeSurface : std::uint8_t
+{
+    /// This node's own `0xFC` port: the cache verbs `pace-cc` on this machine
+    /// reads and writes through, the compiles clients dispatch to it, and -- where its
+    /// mode serves them -- the verbs the fleet asks this node for capacity with
+    /// while it leads.
+    ///
+    /// **One surface where there were three** (#290). They were separated by the port
+    /// a frame arrived on, which made the listener the policy: a frame on the cache
+    /// port was a cache frame. That is now a lookup instead, and every question the
+    /// listener used to answer by existing -- who is admitted, whether a credential is
+    /// required, which counter a refusal moves -- is asked of the component that owns
+    /// the verb. See `MergedResponder`.
+    ///
+    /// It is the ONLY port a worker opens for the protocol, so a node serving nothing
+    /// else still binds it: there is nowhere else for a compile to arrive.
+    Node = 0,
+    Admin,     ///< `/metrics`, `/healthz` and the fleet dashboard.
+    Raft,      ///< Where this node's peers send consensus traffic.
+    Discovery, ///< The LAN beacon, and the port it is answered on.
+    Last,      ///< Count; never a surface.
+};
+
+/// Whether a surface speaks TCP or UDP.
+///
+/// A column rather than an assumption, and it is load-bearing for the one row that
+/// is not TCP: an operator handed a five-row worksheet writes five rules, and if one of
+/// them silently needs UDP the beacon reaches nobody. That presents as a fleet that
+/// never forms -- a diagnosis costing hours, pointed at consensus rather than at a
+/// firewall -- because every other surface works perfectly.
+enum class SurfaceProtocol : std::uint8_t
+{
+    Tcp = 0,
+    Udp,
+};
+
+/// What this node does when a surface cannot be bound.
+///
+/// Decided per surface and stated nowhere until #352. Four openers each reached
+/// their own conclusion, all four agreed, and the reasoning survived in two of
+/// them, in a third only as a parenthetical inside a *different* surface's comment,
+/// and in the fourth not at all.
+///
+/// **`Unstated` is why this is an enum and not a `bool`.** It is the zero value, so
+/// a row that omits the column has it, and the table `static_assert`s no row does --
+/// a new surface therefore fails the build rather than inheriting whichever
+/// neighbour its author copied. That is `LeaseEpochCheck`'s argument and the wire
+/// table's `PreAuth` column's: a row that does not state its classification does not
+/// compile. It is never a policy, only the absence of one.
+enum class BindFailurePolicy : std::uint8_t
+{
+    /// No row may hold this. Present so omission is a build failure.
+    Unstated = 0,
+
+    /// The node refuses to start. The opener's own message reaches the operator.
+    Refuse,
+
+    /// `JudgeBindFailure` logs and reports that the caller may carry on.
+    ///
+    /// **No row is `Tolerate`, and no opener implements carrying one.** The seam
+    /// understands the verdict -- it is what the `Tolerate` tests exercise -- but
+    /// every opener today refuses one it is handed, because none of their callers can
+    /// use a surface that is absent: two would dereference the null they were given.
+    /// Flipping a row is therefore a change to this table AND to that surface's
+    /// opener, and the `static_assert` beside the table is what says so at the moment
+    /// somebody tries.
+    ///
+    /// Written rather than implemented, because a tolerance path nothing exercises
+    /// reads as supported and is not -- which is `PurgeExpired`'s shape, correct and
+    /// tested and with no production caller at all. The column's justification was
+    /// never the flip: it is that the four reasons had to be WRITTEN, and one of them
+    /// existed nowhere in the tree.
+    ///
+    /// ### Why this enumerator stays, given an assert makes it unreachable
+    ///
+    /// **Because deleting it makes the failure worse.** The obvious next thought is
+    /// that an enumerator no row may hold is dead weight, and it is worth answering
+    /// where somebody has it: this name is what the person who NEEDS tolerance reaches
+    /// for. With it here they write `Tolerate`, the build stops, and the message tells
+    /// them which openers are unsound, why, and what to write. Without it they invent
+    /// an enumerator, meet an unhandled-`switch` error in `JudgeBindFailure`, and are
+    /// told nothing at all about the two callers that would dereference a null.
+    ///
+    /// So the enumerator is not a placeholder for a feature. It is the vocabulary the
+    /// column needs in order to refuse well -- an absent concept cannot carry a
+    /// diagnostic, and the diagnostic is the entire value of the guard.
+    ///
+    /// The concept is not speculative even so: the compile port held this policy until
+    /// #290, on the provenance bit #286 added, and it remains `pace-kv`'s answer for
+    /// the admin surface -- which is why the node's Admin row explains itself against
+    /// the daemon rather than in isolation.
+    Tolerate,
+};
+
+/// Who chooses the port an endpoint binds.
+///
+/// **Private**: never transmitted or persisted. A column of the resolved endpoint rather than a
+/// port of 0 each consumer interprets, because the consumers disagree about what 0 is: a socket
+/// API reads it as "the kernel chooses", a worksheet would print it as a port, and a firewall
+/// rule on port 0 admits nothing. Discovery's reply socket is the endpoint that needs it -- its
+/// port is the kernel's unless `--discovery-reply-port` names one, and an endpoint left out of
+/// the resolution because it had no number was a socket no firewall rule and no worksheet line
+/// covered.
+enum class SurfacePortKind : std::uint8_t
+{
+    /// The configuration names the port, and `SurfaceEndpoint::port` is it.
+    Fixed,
+    /// The kernel chooses it at bind: `SurfaceEndpoint::port` is 0, which is how a socket API is
+    /// asked for one, and the worksheet prints `*` in its place.
+    KernelChosen,
+    Last, ///< Count; never a kind.
+};
+
+/// One port kind, described once.
+struct SurfacePortKindRow
+{
+    SurfacePortKind kind {}; ///< Which kind; its own index.
+
+    /// How the worksheet spells the port: the number, or `*` for one nobody can name in advance.
+    std::string (*portText)(std::uint16_t port) = nullptr;
+
+    /// What the worksheet adds after the protocol; empty when the port says everything.
+    std::string_view trailer {};
+};
+
+/// @param kind A port kind.
+/// @return Its row.
+[[nodiscard]] SurfacePortKindRow const& SurfacePortKindRowOf(SurfacePortKind kind) noexcept;
+
+/// One endpoint a surface would actually bind.
+///
+/// Owning, deliberately. `role` points into the static table and outlives any call;
+/// `host` is built by resolving a spec against a default and must not borrow from the
+/// configuration it was derived from, which is the rule a `*View` type would be
+/// announcing and this one is not.
+struct SurfaceEndpoint
+{
+    std::string host;      ///< The address that would be bound.
+    std::uint16_t port {}; ///< The port that would be bound; 0 when `portKind` says the kernel chooses.
+
+    /// Whether `port` is the configuration's or the kernel's. Beside `port` rather than last, so
+    /// the one-byte field packs into the padding after it.
+    SurfacePortKind portKind { SurfacePortKind::Fixed };
+
+    std::string_view role {}; ///< Empty for a surface's only endpoint; names the second when there is one.
+};
+
+/// What a surface would bind under one configuration: none, one, or two.
+///
+/// "One or two endpoints" rather than "one or two flags", because the two awkward
+/// surfaces strain the row in different directions and only this shape absorbs both.
+/// The compile port is two flags of two types; discovery is one spec plus an optional
+/// second port, opened as a shared listen socket and a private reply socket. A row
+/// built for two flags takes the first and not the second.
+using SurfaceEndpoints = std::vector<SurfaceEndpoint>;
+
+/// A listen-value grammar and the shape a refusal shows for it.
+///
+/// Together, never apart: the predicate decides and the string is what an operator is
+/// told to type, so a row pairing one surface's predicate with another's shape would
+/// refuse a value while advertising the spelling that produces it.
+struct Grammar
+{
+    bool (*parses)(std::string_view) = nullptr; ///< Whether the text is acceptable; null when a surface has no spec.
+    std::string_view shape {};                  ///< What it should have looked like.
+};
+
+/// One listening surface, described once.
+///
+/// This is the port map. Every consumer -- the code that OPENS the surface, the
+/// install-time grammar refusal, `--print-surfaces`, and the operator documentation
+/// -- reads these rows, so that adding a surface is adding a row rather than a row
+/// plus edits in four other places that can each be forgotten separately.
+struct SurfaceRow
+{
+    /// Which surface this row describes; its own index in the table.
+    NodeSurface surface {};
+
+    /// The operator-facing label, and the tag the startup lines already use.
+    std::string_view name;
+
+    /// The flags that configure it: one, or two for discovery.
+    ///
+    /// One field rather than a `flag` plus a `secondFlag` that is empty for three rows
+    /// out of four. The second entry is empty when the surface takes one flag, and
+    /// `FlagsOf` hands back only what is populated.
+    std::array<std::string_view, 2> flags {};
+
+    /// TCP or UDP.
+    SurfaceProtocol protocol {};
+
+    /// What happens when this surface cannot be bound.
+    ///
+    /// **Read by `JudgeBindFailure`, which every opener routes its bind failure
+    /// through** -- so this column decides behaviour rather than describing it. That
+    /// distinction is why it is here at all: `presence` and `HostOrigin` were both
+    /// written and both removed, and `HostOrigin`'s epitaph is that "nothing in
+    /// production ever read it: it documented rather than drove". A policy column
+    /// nothing consults would fail the same test.
+    BindFailurePolicy bindFailure {};
+
+    /// Why, in one sentence an operator or a maintainer can read.
+    ///
+    /// `static_assert`ed non-empty, which is the half of #352 that a policy
+    /// enumerator alone would not deliver: the ticket's complaint was never that the
+    /// four surfaces disagreed -- they do not -- but that the reasoning existed in
+    /// two of them, in a third only inside another surface's comment, and in the
+    /// fourth nowhere. A column that forced only the verdict would have left Raft's
+    /// sentence unwritten, since `Refuse` is what it already did.
+    ///
+    /// It is the RATIONALE, never the operator-facing refusal. Each opener keeps its
+    /// own message: the compile port's is a remedy rather than a diagnosis (#229) and
+    /// naming what probably holds the port is worth more at three in the morning than
+    /// any sentence here. `JudgeBindFailure` passes the opener's message through
+    /// untouched and uses this only on the `Tolerate` path, where there is no refusal
+    /// to carry it.
+    std::string_view bindFailureReason {};
+
+    // There is deliberately **no** `presence` column. It was written, and it was
+    // both redundant and wrong.
+    //
+    // Redundant, because `resolve` already answers it: a surface is served exactly
+    // when it resolves to an endpoint, so "on by default" is `resolve(NodeConfig{})`
+    // and a column restating that is a second author of one fact -- which is the
+    // thing this table exists to stop.
+    //
+    // Wrong, because its own contract could not survive the raft row. "Not served
+    // until an operator names an address" is false there: `--listen-raft` names one
+    // and binds nothing until `--node-id` turns consensus on, so the column would
+    // have rendered "not requested" for a surface the operator did request. A cell
+    // that misdescribes why a port is closed is the same class of defect as one that
+    // misdescribes where it is open.
+    //
+    // What a reader needs beyond "not served" is *why*, and that is not uniform
+    // enough to be an enumerator: raft's reason is knowable from the configuration
+    // and the compile port's is not knowable at all. Each row says its own in `note`.
+
+    /// The host a bare port falls back to, and the only host discovery ever binds.
+    ///
+    /// There is deliberately **no** `HostOrigin` column beside it saying which of
+    /// those two this is. One was written -- `DefaultConstant` / `OperatorFlag` /
+    /// `Fixed` -- and nothing in production ever read it: it documented rather than
+    /// drove, its only test asserted it agreed with the column it was derived from,
+    /// and its own doc had already gone stale against its own table, claiming this
+    /// field is empty unless the origin is `DefaultConstant` while discovery was
+    /// `Fixed` with a non-empty one. That is the third column here to fail the same
+    /// test, after `presence` and the `explicitBit` that was never added.
+    ///
+    /// The distinction it tried to record is real and lives in `note`, where prose
+    /// belongs: `--discovery`'s host half is where beacons are SENT, and its sockets
+    /// bind this wildcard whatever the operator wrote. What ENFORCES that is
+    /// discovery's resolver, not an enumerator -- so the protection is in the code
+    /// that produces the address rather than in a label describing it.
+    std::string_view defaultHost {};
+
+    /// Where the raw `[<host>:]<port>` text lives, or null when there is none.
+    ///
+    /// Null for the compile port alone: its halves are a `std::string` and a
+    /// `std::uint16_t` validated by their own value parsers, never a spec string, so
+    /// there is nothing here for a grammar to check.
+    std::string NodeConfig::* spec = nullptr;
+
+    /// The grammar `spec` must satisfy, and the shape a refusal shows for it.
+    ///
+    /// **One column, so a mismatch is unrepresentable.** They were two -- a predicate
+    /// and a `shape` string -- and nothing could check that the right shape sat beside
+    /// the right predicate: a row pairing the bare-port-accepting grammar with
+    /// `<address>:<port>` compiled, and told an operator to write something the parser
+    /// would then refuse. The `static_assert` could only ask whether both were present.
+    /// Paired in one constant, the wrong combination cannot be written down.
+    Grammar grammar {};
+
+    /// How this surface resolves.
+    ///
+    /// Every row has one; there is no "null means the default" case to get wrong. The
+    /// three whose resolution is entirely their own columns share `ResolveFromSpec`,
+    /// which reads `spec` and `defaultHost` off the row rather than naming them a
+    /// second time -- they used to carry a lambda restating the very member pointer and
+    /// constant the row already held, which is two copies of one fact inside the table
+    /// built to delete exactly that.
+    ///
+    /// It takes its own row, which is what makes that sharing possible, and is why raft
+    /// can gate on `--node-id` and then delegate rather than re-spelling the fallback.
+    /// Call it through `Resolve`.
+    SurfaceEndpoints (*resolve)(SurfaceRow const&, NodeConfig const&) = nullptr;
+
+    /// Why `resolve` answered nothing, when the reason is this row's own rather than its flag's.
+    ///
+    /// Null for a row whose only way to go unserved is its flag, which `WhyNotServed` answers.
+    /// The Raft row's port is opened by the formation record's MODE, and "set --listen-raft" is
+    /// the wrong answer for a learner that dials the leader: the row says so itself, rather than
+    /// `WhyNotServed` naming the row.
+    /// @return The trailing column, or nothing when the reason is not this row's.
+    std::optional<std::string> (*closedBecause)(NodeConfig const&) = nullptr;
+
+    /// What an operator has to know about this row that the columns cannot say.
+    ///
+    /// Empty for most. It carries the two facts that are neither a port nor a host
+    /// and would otherwise be lost: that a `.socket` unit overrides the compile
+    /// port's flags entirely, and that the admin surface's loopback default is what
+    /// its credential rule turns on.
+    ///
+    /// The compile port's note is a **third** instance of one rule rather than a new
+    /// observation -- "a flag that describes nothing under socket activation cannot
+    /// answer whether a port faces the network"
+    /// ([`distributed-compilation.md`](../../../.agent/rules/distributed-compilation.md)).
+    /// `--bind` answered the wrong question for the lease validator; here it answers
+    /// the wrong question for a firewall worksheet. Same flag, same mechanism, a
+    /// different consumer each time, which is why the note points at the rule instead
+    /// of restating the reasoning: a reader who meets it here should land on the
+    /// general statement rather than on one instance of it.
+    ///
+    /// **The row states what this CONFIGURATION would bind; it never claims to know
+    /// whether a listener was inherited.** That fact belongs to the running node,
+    /// which has it (`main.cpp` binds only when nothing was handed over), and not to
+    /// this table -- because the table's other consumer, `--print-surfaces`, is run
+    /// by hand and is therefore never under the supervisor that would set it. An
+    /// enumerator that cannot be computed truthfully where it is read would look
+    /// authoritative and be wrong for exactly the deployed service it described.
+    std::string_view note {};
+
+    /// What @p cfg would bind for this surface: none, one, or two endpoints.
+    /// @param cfg What the operator asked for.
+    /// @return The endpoints it would bind; empty when it is not served.
+    [[nodiscard]] SurfaceEndpoints Resolve(NodeConfig const& cfg) const
+    {
+        return resolve(*this, cfg);
+    }
+};
+
+/// Every listening surface, one row each, indexed by `NodeSurface`.
+///
+/// @return The table; stable for the life of the process.
+[[nodiscard]] std::array<SurfaceRow, EnumeratorCount<NodeSurface>> const& NodeSurfaceTable() noexcept;
+
+/// Which METRICS surfaces this binary serves, for deciding which catalogue counters it could
+/// ever write (#1484).
+///
+/// Empty, and that is the whole statement: a compile node serves none of the surfaces any
+/// counter row is attributed to. Specifically it has no cache-daemon accept path -- it
+/// constructs neither `Server` nor `ReactorServerLoop`, the only writers of
+/// `pace_connections_*`, and its own accept path has separate counters of its own
+/// (`pace_node_frame_connections_refused_at_capacity_total`). So those rows read ABSENT
+/// here rather than as a plausible zero saying nothing has ever connected to this node.
+///
+/// It lives beside `NodeSurfaceTable()` because that table is already this binary's answer to
+/// *which surfaces do I serve*, and a second answer kept somewhere else is how the two come to
+/// disagree. It is deliberately not DERIVED from that table: these are metrics surfaces, a
+/// coarser vocabulary than listening ports, and a derivation would have to claim a mapping
+/// between them that nobody has established.
+///
+/// Empty is not "unknown". A process that has not been narrowed passes `EverySurface`, which is
+/// the default on every convenience overload -- so the direction of a mistake here is stated:
+/// too wide renders a zero, too narrow invents a `-`.
+struct ServedSurfaces
+{
+    /// Room for every surface; `count` says how many are real.
+    ///
+    /// **Defaulted to `EverySurface`, and an empty default would have been a bug.** A
+    /// default-constructed value means *this call site has not been narrowed*, and the two
+    /// readings of that are not symmetric: every surface renders a plausible zero, which is
+    /// what the tree did before this existed, while no surface renders `-` for all 148 rows.
+    /// The empty version passed the build and was caught by one case out of 4900 --
+    /// `MetricsDoors` in `CacheTier_test.cpp` builds `NodeLiveStatsParts` without naming
+    /// surfaces, and its `node-metrics` body came back carrying the snapshot and not one
+    /// counter. Every other case that acquires parts this way asserts something narrower and
+    /// went on passing.
+    std::array<MetricsSurface, EnumeratorCount<MetricsSurface>> storage = EverySurface;
+    std::size_t count { EverySurface.size() };
+
+    /// The surfaces, as the metrics API takes them.
+    ///
+    /// **Borrowed from `storage`, so the owner must outlive the reader.** `AdminHttpServer`
+    /// keeps the span it is handed, which is why this type exists at all rather than a
+    /// function returning an array by value: `NodeServedSurfacesFor(cfg).Span()` on a
+    /// temporary dangles, and the two spellings look identical at a call site.
+    /// @return A view of the served surfaces.
+    [[nodiscard]] std::span<MetricsSurface const> Span() const noexcept
+    {
+        return std::span<MetricsSurface const> { storage }.first(count);
+    }
+};
+
+/// Which metrics surfaces a node started with @p cfg serves.
+///
+/// **Was an empty `constexpr` array, and the emptiness was load-bearing in a way that stopped
+/// being true.** It said *this binary serves none of the surfaces any counter is attributed
+/// to*, which was right while `CacheAcceptPath` was the only surface and the node genuinely
+/// serves none of it. #1501 attributed all 148 catalogue rows, so a constant empty set would
+/// now render every one of this node's OWN counters absent -- the silent direction, on the one
+/// binary the attribution exists to help.
+///
+/// Three of the ten are never served here and that is a property of the BINARY: a compile node
+/// constructs no `Server`, no `CacheEngine` and no daemon-side `0xFC` executor. The rest are
+/// decided by flags the operator already set, which is what makes the narrowing worth having --
+/// `--slots=0` means no worker, and a worker's refusal counters then read `-` rather than as a
+/// zero claiming nothing was ever refused.
+///
+/// @param cfg What the operator asked for.
+/// @return The surfaces this node serves.
+[[nodiscard]] ServedSurfaces NodeServedSurfacesFor(NodeConfig const& cfg);
+
+/// Apply @p row's bind-failure policy to a bind that failed.
+///
+/// The one place the verdict is reached, so a fifth surface cannot arrive at its own.
+/// It takes the ROW rather than a `NodeSurface`, which is what lets a test hand it a
+/// synthetic row -- including one whose policy is `Tolerate`, a shape no production
+/// row has. A test that only asserted today's four refuse would pass forever once
+/// somebody added a tolerant fifth.
+///
+/// **What this decides is the VERDICT, and that is the whole of the promise.** A
+/// success here means "this row does not consider the failure fatal", not "your
+/// caller is ready to run without the surface" -- see `BindFailurePolicy::Tolerate`,
+/// which no opener implements. Every opener refuses a tolerated verdict by name, so
+/// flipping a row is a two-file change and the build says so.
+///
+/// @param row The surface that would not bind.
+/// @param message The opener's own operator-facing sentence, passed through unchanged.
+/// @param logger Where a tolerated failure is reported.
+/// @return Nothing when the row does not consider the failure fatal; @p message when it does.
+[[nodiscard]] std::expected<void, std::string> JudgeBindFailure(SurfaceRow const& row, std::string message, ILogger& logger);
+
+/// The refusal an opener returns when it is handed a tolerated verdict it cannot carry.
+///
+/// `JudgeBindFailure` decides the verdict; whether an opener can CARRY a tolerated one
+/// is a separate fact, and today the answer is no for all four (see
+/// `BindFailurePolicy::Tolerate`). Rather than fabricating a success -- a null surface
+/// inside a satisfied `expected`, which two callers dereference unconditionally -- an
+/// opener refuses and says the refusal is about ITS code, not about the surface.
+///
+/// One sentence shape and four reasons, so the four openers do not each invent a
+/// spelling for the same programmer error. It is the same answer `JudgeBindFailure`
+/// gives an `Unstated` row: refuse, and name the caller rather than the port.
+///
+/// @param row The surface whose row said the failure was tolerable.
+/// @param why What this opener's caller would do with a surface that is not there.
+/// @return The refusal text.
+[[nodiscard]] std::string BindToleranceUnsupported(SurfaceRow const& row, std::string_view why);
+
+/// The flags a row names, without the empty second entry.
+/// @param row The surface to read.
+/// @return One or two flag spellings.
+[[nodiscard]] std::vector<std::string_view> FlagsOf(SurfaceRow const& row);
+
+/// The flag a refusal about this surface should name.
+///
+/// `flags[0]`, which the table `static_assert`s non-empty -- so this is the invariant
+/// the build already proves rather than a vector materialised to read one entry.
+/// @param row The surface to read.
+/// @return Its primary flag spelling.
+[[nodiscard]] std::string_view PrimaryFlag(SurfaceRow const& row) noexcept;
+
+/// The row describing @p surface.
+/// @param surface Which surface.
+/// @return Its row.
+[[nodiscard]] SurfaceRow const& RowFor(NodeSurface surface) noexcept;
+
+/// The single endpoint @p surface would bind, or why it would bind none.
+///
+/// For the four surfaces served by exactly one socket, which is every one but
+/// discovery. Written once because it was written four times: each opener resolved
+/// the row, refused an empty result and took `front()`, and the three refusals said
+/// three different things about one condition -- so an operator met a different
+/// sentence per surface for an identical fault, and a fifth TCP surface would have
+/// re-derived it a fifth time. That is the shape this table exists to delete,
+/// reappearing at the table's own consumers.
+/// @param surface Which surface to open.
+/// @param cfg What the operator asked for.
+/// @return Its endpoint, or a message naming the flag that failed to supply one.
+[[nodiscard]] std::expected<SurfaceEndpoint, std::string> SoleEndpointOf(NodeSurface surface, NodeConfig const& cfg);
+
+/// Every port this configuration would open, as a firewall worksheet.
+///
+/// **The RESOLVED configuration, never the defaults.** A worksheet naming a port
+/// nothing listens on is a wasted rule; one claiming `127.0.0.1` for a node started
+/// with `--listen-node 0.0.0.0:6674` tells an operator a surface is loopback-only
+/// when it is open to the network. Those are not two versions of one mistake: the
+/// first is untidy and the second is a security misstatement, which is why this
+/// takes a configuration rather than rendering the table alone.
+///
+/// The protocol column is not decoration. Discovery is UDP and the other four are
+/// TCP, so a worksheet without it yields four correct rules and one wrong one -- and
+/// a beacon that reaches nobody presents as a fleet that never forms rather than as
+/// a firewall mistake.
+///
+/// What it cannot know, it says rather than guesses: under socket activation the
+/// unit owns the compile port and this process is never told which port it got, so
+/// that row carries a note instead of a claim. `--print-surfaces` is run by hand and
+/// is therefore never under the supervisor that would tell it, which is why the fact
+/// is a note on the row and not a value in a column.
+/// @param cfg What the operator asked for.
+/// @return The worksheet, one line per endpoint plus each row's notes.
+[[nodiscard]] std::string RenderSurfaces(NodeConfig const& cfg);
+
+/// The worksheet, plus whether this configuration would also START.
+///
+/// **`--print-surfaces` printed the map and exited 0 for a configuration the node
+/// then refuses to run** ([#582](https://github.com/LASTRADA-Software/pace/issues/582)).
+/// The flag prints the RESOLVED configuration, which is exactly what makes it the
+/// natural thing to reach for before writing a unit file -- so used that way it is a
+/// pre-flight check, and it answered "fine" to a command line with no chance of
+/// starting. The operator writes the unit and finds out at deploy time.
+///
+/// **Printing the map for a broken configuration is the feature; reporting SUCCESS
+/// for it is not.** Those are two decisions that one `return 0` merged, and only the
+/// second was wrong -- so the map is rendered exactly as before, unconditionally and
+/// before any judgement, and the verdict travels beside it instead of replacing it.
+/// An operator reaches for this flag BECAUSE a port is wrong, and withholding the
+/// worksheet until the configuration is already valid would withhold it precisely
+/// when it is wanted.
+///
+/// **The refusal is `StartupPolicyRejection`'s own text, never a second phrasing.**
+/// A rule that depends on nothing but the parsed configuration belongs in that table,
+/// and a second copy of its wording is a second thing to be wrong -- which is the
+/// defect [#386](https://github.com/LASTRADA-Software/pace/issues/386) records
+/// for this very ladder, one flag along.
+///
+/// **Why this is a function here rather than four lines in `main()`.** It is one of
+/// FIVE verbs that answer and exit before the startup table ever runs
+/// (`--print-surfaces`, `--install-service`/`--uninstall-service`, `--migrate-cache`
+/// and the cluster actions), and that class has no name in the code. Written as a
+/// special case at the call site, the next verb to want a verdict gets the same four
+/// lines written a second time, in a file no test target compiles. The class members
+/// do NOT all want the same answer, which is the part worth recording:
+///
+/// - `--install-service` is judged already, and by the STRICTER
+///   `NodeInstallRejection` -- a registration replays its command line forever, so it
+///   must satisfy the install rules as well as these.
+/// - `--migrate-cache` deliberately is NOT judged. A store of the wrong vintage stops
+///   the node running, and demanding a valid `--scheduler` first would be demanding
+///   the operator fix a running configuration before being allowed to fix the thing
+///   that stops it running.
+/// - The cluster actions are NOT judged either: they are questions asked OF a running
+///   cluster rather than a node starting, and they need a scheduler endpoint but no
+///   toolchain.
+///
+/// So the mechanism is named and reusable, and each verb's answer is a decision on
+/// record rather than whatever the ladder happens to give it.
+struct SurfaceReport
+{
+    /// The worksheet. Always populated, whatever the verdict.
+    std::string text;
+
+    /// Why this configuration would not start, or nullopt when it would.
+    ///
+    /// The refusal rather than a `bool`, so a caller states the reason it was given
+    /// instead of inventing one -- and an `optional` rather than an empty string,
+    /// because "would start" and "was refused with no words" are different answers
+    /// and a string renders them the same.
+    std::optional<std::string> refusal;
+
+    /// How `--print-surfaces` ends: `Completed` with no refusal, `Declined` for a verdict, and
+    /// `Failed` for a state directory whose reading failed on an I/O arm (`UnreadStateStage`) --
+    /// which a re-run may get past.
+    CommandEnding ending { CommandEnding::Completed };
+};
+
+/// Render the worksheet and judge the configuration behind it.
+/// @param cfg What the operator asked for.
+/// @return The worksheet, and the startup table's refusal when there is one.
+[[nodiscard]] SurfaceReport ReportSurfaces(NodeConfig const& cfg);
+
+} // namespace Pace::Node

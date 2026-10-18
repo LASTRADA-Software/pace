@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <cstdint>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A sink that cannot carry one catalogue row: the in-process shape of #1353's build skew.
@@ -48,4 +48,4 @@ class SkewedMetricsSink final: public IMetricsSink
     Counter _missing;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

@@ -4,14 +4,14 @@
 # installed: 1 on a fresh install, 2 or more during an upgrade.
 set -e
 
-SERVICE="@FASTCACHED_SERVICE_NAME@"
+SERVICE="@PACE_SERVICE_NAME@"
 
 if [ -x /usr/bin/systemd-sysusers ]; then
-    systemd-sysusers "@FASTCACHED_SYSUSERS_FILE@" >/dev/null 2>&1 || true
-    systemd-sysusers "@FASTCACHED_NODE_SYSUSERS_FILE@" >/dev/null 2>&1 || true
+    systemd-sysusers "@PACE_SYSUSERS_FILE@" >/dev/null 2>&1 || true
+    systemd-sysusers "@PACE_NODE_SYSUSERS_FILE@" >/dev/null 2>&1 || true
 fi
 if [ -x /usr/bin/systemd-tmpfiles ]; then
-    systemd-tmpfiles --create "@FASTCACHED_TMPFILES_FILE@" >/dev/null 2>&1 || true
+    systemd-tmpfiles --create "@PACE_TMPFILES_FILE@" >/dev/null 2>&1 || true
 fi
 
 
@@ -25,16 +25,16 @@ fi
 # These are the files the product's guidance tells operators to put `requirepass`
 # into, and `Platform/FileTrust` already warns when a secret is read from a
 # broadly-readable file -- the daemon complained about the file its own package
-# shipped ([#861](https://github.com/LASTRADA-Software/fastcached/issues/861)).
+# shipped ([#861](https://github.com/LASTRADA-Software/pace/issues/861)).
 #
-# DIFFERENT groups: the two units run as `fastcached` and `fastcache-node`, and
-# `fastcache-compile-node.sysusers` says sharing an account would let a compromised
+# DIFFERENT groups: the two units run as `pace-kv` and `pace-node`, and
+# `pace-node.sysusers` says sharing an account would let a compromised
 # compile rewrite every cached object -- a shared group is that hole one notch
 # weaker. Repaired only when the file is CURRENTLY WORLD-readable, so a group an
 # operator chose is left alone -- and so this loop is idempotent, since the 0640 it
 # writes is not world-readable and no later upgrade re-asserts it.
-for _pair in "/@FASTCACHED_SYSCONF_DIR@/fastcached.yaml:fastcached" \
-             "/@FASTCACHED_SYSCONF_DIR@/fastcache-compile-node.yaml:fastcache-node"; do
+for _pair in "/@PACE_SYSCONF_DIR@/pace-kv.yaml:pace-kv" \
+             "/@PACE_SYSCONF_DIR@/pace-node.yaml:pace-node"; do
     _conf=${_pair%:*}
     _grp=${_pair##*:}
     [ -f "$_conf" ] || continue

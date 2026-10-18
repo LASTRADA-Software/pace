@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,11 +12,11 @@
 #include <string_view>
 #include <vector>
 
-#include <apps/fastcache-cc/Dispatch.hpp>
-#include <apps/fastcache-cc/TicketCredentials.hpp>
+#include <apps/pace-cc/Dispatch.hpp>
+#include <apps/pace-cc/TicketCredentials.hpp>
 #include <tests/Unwrap.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file TicketFakes.hpp
@@ -76,4 +76,4 @@ class PresentsNothing final: public Cc::ICredentialFor
     }
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

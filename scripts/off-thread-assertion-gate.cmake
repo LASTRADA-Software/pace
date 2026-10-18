@@ -24,18 +24,18 @@ cmake_minimum_required(VERSION 3.28)
 # assertion would pass a refusal-only gate and break every test binary in the tree.
 #
 # Usage:
-#   cmake -DFASTCACHED_CANARY=<path> -P scripts/off-thread-assertion-gate.cmake
-if(NOT DEFINED FASTCACHED_CANARY)
-    message(FATAL_ERROR "off-thread-assertion-gate: FASTCACHED_CANARY must be set to the canary executable")
+#   cmake -DPACE_CANARY=<path> -P scripts/off-thread-assertion-gate.cmake
+if(NOT DEFINED PACE_CANARY)
+    message(FATAL_ERROR "off-thread-assertion-gate: PACE_CANARY must be set to the canary executable")
 endif()
-if(NOT EXISTS "${FASTCACHED_CANARY}")
-    message(FATAL_ERROR "off-thread-assertion-gate: the canary does not exist: ${FASTCACHED_CANARY}")
+if(NOT EXISTS "${PACE_CANARY}")
+    message(FATAL_ERROR "off-thread-assertion-gate: the canary does not exist: ${PACE_CANARY}")
 endif()
 
 # Merged, because the canary's progress markers and the guard's message both go to stderr
 # and the ORDER between them is what this gate reads.
 execute_process(
-    COMMAND "${FASTCACHED_CANARY}"
+    COMMAND "${PACE_CANARY}"
     RESULT_VARIABLE canaryResult
     OUTPUT_VARIABLE canaryOut
     ERROR_VARIABLE canaryErr

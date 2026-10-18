@@ -1,0 +1,291 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Core/Logger.hpp>
+
+#include <cstddef>
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Pace::Node
+{
+
+/// How many `NotLeader` redirects one heartbeat round will follow.
+///
+/// Two, for the same reasons `Dispatch.cpp`'s `MaxLeaseRedirects` is two: one hop
+/// covers the ordinary case of asking a follower, and the spare covers the leader
+/// having moved again between the two, which an election in progress makes
+/// ordinary rather than exotic.
+///
+/// Bounded at all because the chain is not this node's to trust. Two schedulers
+/// that disagree about who leads -- a partition healing, a stale `_knownLeader` --
+/// can name each other indefinitely, and a worker without a ceiling would spend a
+/// heartbeat interval discovering that instead of announcing itself.
+///
+/// A separate constant from the launcher's rather than a shared one, deliberately:
+/// a lease chain is spent inside one compile and answers a client that can always
+/// fall back to compiling locally, while this chain is spent once per heartbeat
+/// interval and decides whether a machine is in the fleet at all. They are the
+/// same number today because the argument for two happens to hold on both
+/// surfaces, not because one is derived from the other.
+constexpr int MaxAnnounceRedirects = 2;
+
+/// Where a node registers NOW: the scheduler endpoints a round walks, re-read at the start of every
+/// round (`SchedulerLink::BeginRound`).
+///
+/// A seam rather than a list, because the answer moves while the node runs: a node that serves no
+/// scheduler registers at its fleet's voters, and a voter that moves its `0xFC` endpoint announces
+/// the new one, proven, and the leader records it -- so the APPLIED state names the new endpoint while
+/// the formation record still remembers the old one until a reform. `Node::AppliedSchedulers` is the
+/// production answer.
+class ISchedulerEndpointSource
+{
+  public:
+    ISchedulerEndpointSource() = default;
+    ISchedulerEndpointSource(ISchedulerEndpointSource const&) = delete;
+    ISchedulerEndpointSource(ISchedulerEndpointSource&&) = delete;
+    ISchedulerEndpointSource& operator=(ISchedulerEndpointSource const&) = delete;
+    ISchedulerEndpointSource& operator=(ISchedulerEndpointSource&&) = delete;
+    virtual ~ISchedulerEndpointSource() = default;
+
+    /// @return The endpoints to register with, in the order a round tries them; empty when none is
+    ///         known. Called from a round's own thread while another thread may move the answer.
+    [[nodiscard]] virtual std::vector<std::string> Current() const = 0;
+};
+
+/// Where this node believes the scheduler's leader is, across heartbeat rounds.
+///
+/// **Pure**: no socket, no clock, no logger. The heartbeat thread dials whatever
+/// `Target()` names and reports back what happened, so every decision this makes
+/// is testable without a fleet. That matters because the alternative home for it
+/// is `main.cpp`, which is in no test target -- the same reason
+/// `MakeWorkerLeaseValidator` moved out of `main` rather than staying a lambda
+/// there.
+///
+/// ## Why a node has to follow a redirect at all
+///
+/// `SchedulerService::Gate()` refuses **every** verb, `Register` included, when the
+/// node it reached is not the leader. Before this existed, the heartbeat thread
+/// dialled the configured `--scheduler` unconditionally and logged the refusal, so
+/// after an election every worker went on announcing itself to the demoted node,
+/// expired out of the new leader's registry inside the heartbeat timeout, and the
+/// leader answered every lease `NoWorker`. A launcher that correctly followed the
+/// redirect -- the client half of
+/// [#237](https://github.com/LASTRADA-Software/pace/issues/237) -- then
+/// arrived at a leader with an empty fleet and compiled locally, behind a green
+/// build and counters that all read zero. This is the other half.
+///
+/// ## What is remembered, and when
+///
+/// A leader is committed only once a round has actually been **accepted** there,
+/// never merely because some scheduler named it. A redirect this node followed to
+/// an endpoint that then refused for its own reasons -- not a member, a
+/// fingerprint it will not take -- must not become the endpoint every future round
+/// starts at. So `Redirect` moves this round, and `Accepted` is what makes it
+/// stick.
+///
+/// A remembered leader that stops answering is forgotten and the configured
+/// scheduler endpoint is tried again **in the same round**, rather than a heartbeat
+/// interval later: the configured endpoint is the one an operator can actually
+/// fix, and skipping a round to reach it doubles the window in which this machine
+/// is missing from the fleet.
+///
+/// ## Several configured endpoints (#1310)
+///
+/// `SchedulersOf` is a list, and the fallback walks it: a round that cannot get
+/// through at one configured endpoint tries the next, still in the same round, until
+/// each has been tried once. The walk starts at the configured endpoint that last
+/// ACCEPTED a round, so a fleet whose first entry was retired pays that entry's
+/// connect timeout once rather than every heartbeat -- and it wraps, so an operator's
+/// first choice is still tried in a round that begins further down.
+///
+/// **Each configured endpoint is dialled at most once per round.** A redirect target
+/// that then fails falls back to the next configured endpoint NOT yet tried, never to
+/// the one that just issued the redirect: that one answered a moment ago and would
+/// name the same unreachable leader again. Every round is therefore bounded by the
+/// list's length plus `MaxAnnounceRedirects`.
+///
+/// A `NotLeader` is an INSTRUCTION and is followed to the endpoint it names without
+/// consulting the list at all -- the list says where to start asking, never who leads.
+class SchedulerLink
+{
+  public:
+    /// A link over @p configured, or nothing when it names no scheduler.
+    ///
+    /// **A factory rather than a constructor with a precondition, because an empty list
+    /// is a legal CONFIGURATION** (#206): a node running no worker names no scheduler. A
+    /// constructor that assumed otherwise would hold only because of WHERE `WorkerBody`
+    /// builds it, and breaking that reads the first element of nothing in a release
+    /// build. So the link cannot be built from an empty list, and a caller handles "no
+    /// scheduler" where it decides whether a worker runs.
+    ///
+    /// On a configuration the startup table accepts, the answer is present exactly when
+    /// `RunsWorker` is true, which `NodeConfig_test` asserts.
+    /// @param configured The endpoints to register with, in order -- a node's formation record's
+    ///        answer (`SchedulersOf`). Never forgotten, and what this falls back through.
+    /// @return The link, or nothing when @p configured is empty.
+    [[nodiscard]] static std::optional<SchedulerLink> For(std::vector<std::string> configured);
+
+    /// A link over what @p source answers now, re-read at the start of every round, or nothing when
+    /// it answers none. A name of its own rather than an overload of `For`, which a braced empty list
+    /// would make ambiguous.
+    ///
+    /// **Re-read in `BeginRound`, the one call every round makes**, never by each loop beside it: a
+    /// voter that moved its `0xFC` endpoint is reached at the next round of BOTH loops that dial
+    /// through a link, and neither can forget to ask.
+    /// @param source Where this node registers now; must outlive the link.
+    /// @return The link, or nothing when @p source answers an empty list.
+    [[nodiscard]] static std::optional<SchedulerLink> Over(ISchedulerEndpointSource const& source);
+
+    /// @return The endpoints the current round walks, in order. Moved only by `BeginRound`, so read
+    ///         it on the round's own thread, or before the first round.
+    [[nodiscard]] std::vector<std::string> const& Configured() const noexcept
+    {
+        return _configured;
+    }
+
+    /// Walk @p configured from the next round on.
+    ///
+    /// The walk keeps its place by ENDPOINT rather than by position: the endpoint that last accepted
+    /// a round stays where the next round starts when it is still listed, and the list's first entry
+    /// is where a round starts when it is not. A remembered leader is kept -- it is not a configured
+    /// endpoint, and a moved list says nothing about who leads. An empty list changes nothing: a
+    /// source that knows no endpoint for a moment is no reason to forget every one this link knew.
+    /// @param configured The endpoints, in order.
+    void Retarget(std::vector<std::string> configured);
+
+    /// Start a heartbeat round, resetting the per-round redirect budget, and re-read where this node
+    /// registers when the link was built over a source (`Retarget`).
+    ///
+    /// The budget is per round rather than per process: a fleet that re-elects
+    /// once an hour should spend one redirect an hour, not exhaust a lifetime
+    /// ceiling and then never follow one again.
+    void BeginRound();
+
+    /// Where this round's next dial should go.
+    [[nodiscard]] std::string const& Target() const noexcept;
+
+    /// `Target()` refused `NotLeader` and named `leader`.
+    /// @param leader The endpoint it named; already validated by `RedirectTarget`.
+    /// @return True when the caller should dial `Target()` again, now pointing at
+    ///         `leader`; false when this round's chain is spent, which the caller
+    ///         answers by giving up until the next round rather than by looping.
+    [[nodiscard]] bool Redirect(std::string leader);
+
+    /// A round was accepted at `Target()`, committing it for future rounds.
+    ///
+    /// Committing a configured endpoint means *forgetting* any remembered leader,
+    /// which is how a fleet that re-elects back to a configured scheduler stops
+    /// paying a redirect per heartbeat -- and makes it where the next round's walk
+    /// of the configured list starts.
+    void Accepted();
+
+    /// `Target()` could not be reached, or refused for something that is not a
+    /// redirect.
+    /// @return The endpoint to try instead **right now** -- the next configured one
+    ///         this round has not tried -- or nothing when every configured endpoint
+    ///         has been tried this round.
+    [[nodiscard]] std::optional<std::string> Lost();
+
+  private:
+    /// @param configured The `--scheduler` endpoints; non-empty, which `For` ensures.
+    explicit SchedulerLink(std::vector<std::string> configured);
+
+    /// The configured endpoint @p offset places after `_home`, wrapping.
+    /// @param offset How far along this round's walk.
+    /// @return The endpoint.
+    [[nodiscard]] std::string const& ConfiguredAt(std::size_t offset) const noexcept;
+
+    std::vector<std::string> _configured;
+    /// Where `BeginRound` re-reads the list; null for a link built over a fixed one.
+    ISchedulerEndpointSource const* _source { nullptr };
+    /// The leader a round has been accepted at, when that is not a configured
+    /// endpoint; empty until one has been.
+    std::optional<std::string> _learned;
+    /// Index of the configured endpoint a round's walk starts at: the one that last
+    /// accepted a round, or the first.
+    std::size_t _home = 0;
+    /// Where this round is dialling right now.
+    std::string _current;
+    /// Configured endpoints this round has dialled as a start or a fallback.
+    std::size_t _walked = 0;
+    /// Redirects followed this round.
+    int _hops = 0;
+};
+
+/// What one announcement round did, and how loudly to say it.
+///
+/// **A heartbeat and a registration are different events and one tally cannot carry
+/// both** (#999). `AnnounceOnce` counted only `accepted`, incremented on both paths,
+/// so a steady round of six heartbeats reported "6 of 6 toolchain(s) registered" every
+/// interval forever -- which reads as a node re-announcing its whole toolchain set on a
+/// timer. Measured on a live install: six registrations in the startup second, and every
+/// round after that heartbeats. The line described work nobody was doing, and cost an
+/// operator the question.
+///
+/// A pure function, for `RecheckDepthFor`'s reason: `main.cpp` is in no test target
+/// (#909), so a rule left as an expression in the announce loop can be checked only by
+/// reading it -- and the wording is the whole defect here, so it has to be assertable.
+struct RoundReport
+{
+    LogLevel level;      ///< How loudly to say it.
+    std::string message; ///< What to say, without the endpoint prefix.
+};
+
+/// Describe one announcement round.
+///
+/// Four outcomes, not two, and the third is the one worth catching: a heartbeat that
+/// FELL THROUGH to a registration means the scheduler had forgotten this worker, which
+/// is a real event wearing a steady round's clothes.
+///
+/// The all-heartbeat round is `Trace`, beside `Op::Heartbeat`'s own level (#992) and for
+/// #993's reason: it is narration, it repeats identically forever, and after #992 moved
+/// the heartbeat exchange to `Trace` this line became the only per-round output at
+/// `Debug` -- so it inherited the exact property that argued the heartbeat down.
+///
+/// @param beats         Registrars that heartbeated successfully.
+/// @param registrations Registrars that registered this round.
+/// @param total         Registrars attempted.
+/// @return The level and the sentence.
+[[nodiscard]] inline RoundReport DescribeAnnounceRound(std::size_t beats, std::size_t registrations, std::size_t total)
+{
+    auto const accepted = beats + registrations;
+
+    // **The wording of the ACCEPTED and SHORTFALL forms is a fixture contract** and is
+    // deliberately unchanged. `E2eRegisteredMarker` in `scripts/lib/e2e-common.sh` is
+    // "1 of 1 toolchain(s) registered", and its whole purpose is to tell an accepted
+    // worker from one the scheduler turned away -- `0 of 1` matching the bare word
+    // `registered` is #445, a wait that returned for a worker that never got in.
+    // Rewording either form breaks that distinction in a fixture rather than in a
+    // build, which is a timeout with no failed assertion. #999 is about the STEADY
+    // round, which no fixture waits on, so only that gains a new sentence.
+    //
+    // Debug, whoever caused it. A shortfall is registrars a scheduler refused or redirected, and each
+    // of those is said on its own: a refusal by `SchedulerReachability`, at Warn on its transition and
+    // quietly while it lasts; a redirect at Info, as the round follows it. This line only counts them,
+    // on every round, so anything louder than Debug would say each refusal again every interval.
+    if (accepted < total)
+        return { .level = LogLevel::Debug, .message = std::format("{} of {} toolchain(s) registered", accepted, total) };
+
+    // A heartbeat that fell through to a registration: the scheduler had forgotten this
+    // worker and it re-announced itself. Named rather than folded into either pure case,
+    // because it is the one an operator would want to see in a fleet that keeps losing
+    // workers -- and a round can be entirely successful and still be this. This form is
+    // NEW, so it carries the breakdown the other two do not need.
+    if (registrations > 0 && beats > 0)
+        return { .level = LogLevel::Info,
+                 .message = std::format("{} of {} toolchain(s) re-registered after a heartbeat was refused, {} still live",
+                                        registrations,
+                                        total,
+                                        beats) };
+
+    if (registrations > 0)
+        return { .level = LogLevel::Info, .message = std::format("{} of {} toolchain(s) registered", registrations, total) };
+
+    return { .level = LogLevel::Trace, .message = std::format("{} toolchain(s) still registered", beats) };
+}
+
+} // namespace Pace::Node

@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# System-wide pace-kv unit.
+#
+# Type=simple and NOT --daemon: the daemon's POSIX daemonize path double-forks
+# and redirects stdout/stderr to /dev/null, which would silence journald
+# entirely. Run in the foreground and let systemd own the process; pace-kv
+# logs to stderr, which journald captures as-is.
+#
+# Override anything here with a drop-in rather than editing this file (it is
+# replaced on upgrade):
+#
+#     systemctl edit pace-kv
+
+[Unit]
+Description=pace-kv — fast cache daemon
+Documentation=https://github.com/LASTRADA-Software/pace
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/pace-kv --config=/etc/pace/pace-kv.yaml
+
+# SIGHUP re-reads the config file. Note that only a subset of settings is
+# reloadable — bind/port/listeners/storage*/threads are validated as immutable
+# and cause the whole reload to be rejected (the daemon logs the reason and
+# keeps running with the previous config). Changing those needs a restart.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# SIGTERM triggers a graceful shutdown; the stop flag is polled at 100 ms, so
+# a clean stop takes well under a second plus connection drain.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=1
+# A start refused on its configuration, or on a defect in its own build, exits 78
+# (EX_CONFIG, `ProcessExit::Refused` in src/Pace/Platform/ProcessExit.hpp), and the
+# next start would refuse it again, so
+# it is not restarted: the unit stays failed, with the reason in the journal. Every other
+# failure -- a port still held by a process that was exiting, a store another process
+# holds, a named file that is absent or could not be read -- is restarted, within
+# systemd's default start limit of five starts in ten seconds. Measured on systemd 259: a refusal ran once and stayed failed, whether it
+# arrived at once or after three seconds; a failure after three seconds was restarted
+# nine times in forty seconds and went on; eight restarts by hand three seconds apart
+# were all honoured, and five starts inside ten seconds are honoured too -- it is a
+# SIXTH, the fifth restart typed right after a start, that the default limit refuses.
+RestartPreventExitStatus=78
+
+User=pace-kv
+Group=pace-kv
+
+# Creates and owns /var/lib/pace-kv (0750). This is where the example
+# config points `storage_path`, and it survives restarts but is cleaned up on
+# package purge.
+StateDirectory=pace-kv
+StateDirectoryMode=0750
+
+# --- Hardening -------------------------------------------------------------
+# pace-kv never drops privileges itself, so every restriction below has to
+# come from systemd. Keep this list in sync with `systemd-analyze security
+# pace-kv.service` when adding features that need new access.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectProc=invisible
+# AF_UNIX and AF_NETLINK are not for listening — they are what glibc's
+# getaddrinfo needs to resolve a non-numeric `bind:` value, which the shipped
+# config explicitly invites. NSS reaches systemd-resolved over an AF_UNIX
+# socket and enumerates interfaces over AF_NETLINK; without both, `bind:
+# cache.internal` fails at startup with an opaque resolver error that does not
+# reproduce outside the unit.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+# Binding a port below 1024 (the default 6674 is not) additionally needs:
+#     AmbientCapabilities=CAP_NET_BIND_SERVICE
+#     CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

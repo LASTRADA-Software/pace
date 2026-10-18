@@ -6,7 +6,7 @@
 #include <expected>
 #include <optional>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Unwrap an optional for assertion, yielding a default-constructed value when
@@ -109,4 +109,4 @@ template <typename T, typename E>
     return *value;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

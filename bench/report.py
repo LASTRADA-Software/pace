@@ -84,13 +84,13 @@ def write_json(path: Path, env: dict, comparisons: list[Comparison]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-# --- Multi-target (fastcached vs real redis/memcached) ------------------------
+# --- Multi-target (pace-kv vs real redis/memcached) ------------------------
 
-def fastcached_speedup(by_target: dict) -> float | None:
-    """fastcached throughput / best competitor throughput (>1 means fastcached wins)."""
-    fc = by_target.get("fastcached")
+def pace_speedup(by_target: dict) -> float | None:
+    """pace-kv throughput / best competitor throughput (>1 means pace-kv wins)."""
+    fc = by_target.get("pace-kv")
     others = [r.throughput_ops_per_sec for name, r in by_target.items()
-              if name != "fastcached" and r is not None]
+              if name != "pace-kv" and r is not None]
     if fc is None or not others:
         return None
     best_other = max(others)
@@ -105,7 +105,7 @@ def write_multitarget_json(path: Path, env: dict, target_names: list[str], rows:
         "scenarios": [
             {
                 "name": name,
-                "fastcached_speedup_vs_best": fastcached_speedup(by_target),
+                "pace_speedup_vs_best": pace_speedup(by_target),
                 "targets": {t: (r.as_dict() if r is not None else None) for t, r in by_target.items()},
             }
             for name, by_target in rows
@@ -115,7 +115,7 @@ def write_multitarget_json(path: Path, env: dict, target_names: list[str], rows:
 
 
 def write_multitarget_markdown(path: Path, env: dict, target_names: list[str], rows: list, png_files: list) -> None:
-    lines: list[str] = ["# fastcached vs real redis / memcached\n", "## Environment\n",
+    lines: list[str] = ["# pace-kv vs real redis / memcached\n", "## Environment\n",
                         "| Field | Value |", "| --- | --- |"]
     for key in ("timestamp", "host", "os", "cpu", "cores", "python", "preset", "profile", "reps", "candidate_ref"):
         if key in env:
@@ -125,7 +125,7 @@ def write_multitarget_markdown(path: Path, env: dict, target_names: list[str], r
         lines.append("## Charts\n")
         lines += [f"![{p.stem}]({p.name})\n" for p in png_files]
     lines.append("## Throughput (ops/sec, median of reps; higher is better)\n")
-    header = "| Scenario | " + " | ".join(target_names) + " | fastcached vs best |"
+    header = "| Scenario | " + " | ".join(target_names) + " | pace-kv vs best |"
     lines.append(header)
     lines.append("| --- | " + " | ".join("---:" for _ in target_names) + " | ---: |")
     for name, by_target in rows:
@@ -133,7 +133,7 @@ def write_multitarget_markdown(path: Path, env: dict, target_names: list[str], r
         for target in target_names:
             result = by_target.get(target)
             cells.append(f"{result.throughput_ops_per_sec:,.0f}" if result is not None else "—")
-        speedup = fastcached_speedup(by_target)
+        speedup = pace_speedup(by_target)
         speedup_text = f"{speedup:.2f}x" if speedup is not None else "—"
         lines.append(f"| {name} | " + " | ".join(cells) + f" | {speedup_text} |")
     lines.append("")
@@ -187,7 +187,7 @@ def write_markdown(
 ) -> None:
     """Write the human-readable report, embedding any generated PNGs."""
     lines: list[str] = []
-    lines.append("# fastcached benchmark — base vs candidate\n")
+    lines.append("# pace-kv benchmark — base vs candidate\n")
     lines.append("## Environment\n")
     lines.append("| Field | Value |")
     lines.append("| --- | --- |")

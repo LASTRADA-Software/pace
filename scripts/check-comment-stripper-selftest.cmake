@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Drives `fastcached_strip_comment_line` in `scripts/lib/CheckCommon.cmake` over single lines.
+# Drives `pace_strip_comment_line` in `scripts/lib/CheckCommon.cmake` over single lines.
 #
 # ## Why this file exists at all
 #
@@ -10,7 +10,7 @@
 # is a defect in all of them at once, silent in the direction that matters. It had one.
 #
 # A comment introducer inside a STRING LITERAL was read as a real introducer. On this tree
-# `src/apps/fastcache-cli/SocketExchange.cpp:410` carries `"...Accept: */*\r\n..."`, whose three
+# `src/apps/pacectl/SocketExchange.cpp:410` carries `"...Accept: */*\r\n..."`, whose three
 # characters `*` `/` `*` contain a `/*`; nothing closed it, and the remaining 51 lines of that
 # file -- a `for (;;)` among them -- were blanked while the caller printed a clean count over
 # lines it had never read. The sibling shape, a `//` inside a literal, truncated 21 lines across
@@ -46,7 +46,7 @@
 # prove a substring case can fail at all.
 cmake_minimum_required(VERSION 3.28)
 
-set(FASTCACHED_STRIPPER_SOURCE "${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
+set(PACE_STRIPPER_SOURCE "${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
 # ---------------------------------------------------------------------------
 # Verdicts. A failing assertion prints and is counted; it does not end the run, or the cases
@@ -94,7 +94,7 @@ function(Case)
     else()
         set(entering FALSE)
     endif()
-    fastcached_strip_comment_line("${arg_LINE}" "${entering}" code skip open)
+    pace_strip_comment_line("${arg_LINE}" "${entering}" code skip open)
 
     foreach(needle IN LISTS arg_SURVIVES)
         string(FIND "${code}" "${needle}" at)
@@ -152,7 +152,7 @@ endfunction()
 ## @param line The line.
 ## @param expected The required stripped text.
 function(CaseExact name entering line expected)
-    fastcached_strip_comment_line("${line}" "${entering}" code skip open)
+    pace_strip_comment_line("${line}" "${entering}" code skip open)
     string(COMPARE EQUAL "${code}" "${expected}" held)
     Expect("${name}" "exact text" "${held}" "expected [${expected}] got [${code}]")
     set(caseCount "${caseCount}" PARENT_SCOPE)
@@ -160,7 +160,7 @@ function(CaseExact name entering line expected)
     set(failedNames "${failedNames}" PARENT_SCOPE)
 endfunction()
 
-## A whole file through `fastcached_strip_comments`, compared exactly. The multi-line function
+## A whole file through `pace_strip_comments`, compared exactly. The multi-line function
 ## copies a run of comment-free lines in one step and answers a comment-only line inline, so
 ## what it returns has to be pinned as TEXT -- CRs, indentation and newlines included -- or a
 ## run that kept its CRs would pass every single-line case above.
@@ -168,7 +168,7 @@ endfunction()
 ## @param content The file content.
 ## @param expected The required result.
 function(CaseContent name content expected)
-    fastcached_strip_comments("${content}" code)
+    pace_strip_comments("${content}" code)
     string(COMPARE EQUAL "${code}" "${expected}" held)
     string(REPLACE "\r" "<CR>" shownCode "${code}")
     string(REPLACE "\r" "<CR>" shownExpected "${expected}")
@@ -254,7 +254,7 @@ function(RunEveryCase)
     Case(NAME "rawStringFirstLine" LINE "constexpr std::string_view Css = R\"CSS("
          SURVIVES "R\"CSS(")
 
-    # -- Whole files through `fastcached_strip_comments`, which copies comment-free runs in one
+    # -- Whole files through `pace_strip_comments`, which copies comment-free runs in one
     #    step and answers a comment-only line inline. Each expected text is what the one-line-
     #    at-a-time walk it replaced returned for the same content.
     string(ASCII 13 CR)
@@ -284,8 +284,8 @@ endfunction()
 # The verdict is the OUTPUT, and `CASES-RAN:` is printed before it so a parent can tell a child
 # that found nothing from one that never started.
 
-if(DEFINED FASTCACHED_STRIPPER_LIBRARY)
-    include("${FASTCACHED_STRIPPER_LIBRARY}")
+if(DEFINED PACE_STRIPPER_LIBRARY)
+    include("${PACE_STRIPPER_LIBRARY}")
     RunEveryCase()
     list(REMOVE_DUPLICATES failedNames)
     message("CASES-RAN: ${caseCount}")
@@ -294,19 +294,19 @@ if(DEFINED FASTCACHED_STRIPPER_LIBRARY)
     endforeach()
     message("CHILD-DONE")
 else()
-    include("${FASTCACHED_STRIPPER_SOURCE}")
+    include("${PACE_STRIPPER_SOURCE}")
     RunEveryCase()
     set(shippedFailures "${failureCount}")
     set(shippedCases "${caseCount}")
 
-    if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
+    if(NOT DEFINED PACE_SCRATCH_DIR)
         message(FATAL_ERROR
-            "comment-stripper-selftest: FASTCACHED_SCRATCH_DIR is required -- the neuter runs "
+            "comment-stripper-selftest: PACE_SCRATCH_DIR is required -- the neuter runs "
             "need somewhere to write a modified copy of the library.")
     endif()
-    file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
-    file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
-    file(READ "${FASTCACHED_STRIPPER_SOURCE}" pristine)
+    file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
+    file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
+    file(READ "${PACE_STRIPPER_SOURCE}" pristine)
 
     set(neuterCount 0)
     set(inertNeuters "")
@@ -343,11 +343,11 @@ else()
             return()
         endif()
 
-        set(copy "${FASTCACHED_SCRATCH_DIR}/${name}.cmake")
+        set(copy "${PACE_SCRATCH_DIR}/${name}.cmake")
         file(WRITE "${copy}" "${broken}")
         execute_process(
             COMMAND "${CMAKE_COMMAND}"
-                    "-DFASTCACHED_STRIPPER_LIBRARY=${copy}"
+                    "-DPACE_STRIPPER_LIBRARY=${copy}"
                     -P "${CMAKE_CURRENT_LIST_FILE}"
             OUTPUT_VARIABLE childOut
             ERROR_VARIABLE childErr

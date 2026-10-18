@@ -29,7 +29,7 @@
 # allowed to hold the first.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-counter-index-seam.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-counter-index-seam.cmake
 #
 # Exit codes: 0 = one converter. 1 = a second one has appeared. (But read the
 # OUTPUT, not the code -- see above.)
@@ -43,7 +43,7 @@ cmake_minimum_required(VERSION 3.28)
 # or `Counter` as a word ending there -- `counter`, `row.counter`,
 # `IMetricsSink::Counter::Last`, `NodeCounter::WorkerJobsCompleted`. The operand is the
 # BALANCED parenthesised expression the cast opens, walked character by character
-# (`fastcached_casts_a_counter`), so a name AFTER the cast's closing parenthesis is not
+# (`pace_casts_a_counter`), so a name AFTER the cast's closing parenthesis is not
 # its operand: `Table[static_cast<std::size_t>(outcome)].counter` casts an outcome, and a
 # scan that read it as a counter conversion OVERSTATED what is wrong -- the same defect as
 # understating it, and the one this check shipped with until a caller met it.
@@ -70,9 +70,9 @@ cmake_minimum_required(VERSION 3.28)
 # Full-line and trailing `//` comments are stripped first, so prose that spells the
 # cast in backticks is not a violation: a check that failed on the reasoning would
 # make the reasoning unwritable.
-set(FastCachedCounterConversionRegex
+set(PaceCounterConversionRegex
     "(static_cast<[^>]*>|to_underlying)[ \t]*\\([^;]*[Cc]ounter([^A-Za-z0-9_]|$)")
-set(FastCachedCounterPrefilter "ounter")
+set(PaceCounterPrefilter "ounter")
 
 # ---------------------------------------------------------------------------
 # Where a conversion may be written. One row per file:
@@ -82,29 +82,29 @@ set(FastCachedCounterPrefilter "ounter")
 # The count is exact in both directions -- see the header. Adding a row, or raising a
 # count, adds a second place a `Counter` becomes a number, which is the decision #1366
 # exists to make deliberate. No row may contain a ';'.
-set(FastCachedCounterConverters
-    "FastCache/Metrics/IMetricsSink.hpp|2|CounterIndex, the one conversion, and CounterCount, the extent every Counter-keyed table is sized by. The header is included by fastcache-cc, which does not link FastCache, so the extent is a cast here rather than EnumeratorCount."
+set(PaceCounterConverters
+    "Pace/Metrics/IMetricsSink.hpp|2|CounterIndex, the one conversion, and CounterCount, the extent every Counter-keyed table is sized by. The header is included by pace-cc, which does not link Pace, so the extent is a cast here rather than EnumeratorCount."
 )
 
 # Which files count as source. Tests included: a test that indexes a table by a cast
 # is the same hand-rolled conversion, and the next production site is written by
 # copying it.
-set(FastCachedCounterSourceGlobs
+set(PaceCounterSourceGlobs
     "*.hpp" "*.h" "*.hh" "*.hxx" "*.inl" "*.ipp"
     "*.cpp" "*.cc" "*.cxx" "*.hpp.in" "*.h.in"
 )
 
 # ---------------------------------------------------------------------------
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
+if(NOT DEFINED PACE_SOURCE_DIR)
     message(FATAL_ERROR
-        "FASTCACHED_SOURCE_DIR is not set. Invoke this script as: cmake "
-        "-DFASTCACHED_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
+        "PACE_SOURCE_DIR is not set. Invoke this script as: cmake "
+        "-DPACE_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
 endif()
 
-set(sourceRoot "${FASTCACHED_SOURCE_DIR}/src")
+set(sourceRoot "${PACE_SOURCE_DIR}/src")
 if(NOT IS_DIRECTORY "${sourceRoot}")
-    message(FATAL_ERROR "'${sourceRoot}' is not a directory. Is FASTCACHED_SOURCE_DIR the source root?")
+    message(FATAL_ERROR "'${sourceRoot}' is not a directory. Is PACE_SOURCE_DIR the source root?")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
@@ -114,7 +114,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # consolidating the copies that remain is #495.
 # @param globs The shell globs, each like `*.hpp` or `*.hpp.in`.
 # @param outVar Set to an anchored alternation regex.
-function(fastcached_globs_to_regex globs outVar)
+function(pace_globs_to_regex globs outVar)
     set(parts "")
     foreach(glob IN LISTS globs)
         string(REPLACE "." "PLACEHOLDERDOT" one "${glob}")
@@ -129,8 +129,8 @@ endfunction()
 set(allowedPaths)
 set(allowedCounts)
 set(allowedReasons)
-foreach(row IN LISTS FastCachedCounterConverters)
-    fastcached_row_fields("${row}" rowPath rowCount rowReason)
+foreach(row IN LISTS PaceCounterConverters)
+    pace_row_fields("${row}" rowPath rowCount rowReason)
     if(NOT rowCount MATCHES "^[1-9][0-9]*$")
         message(FATAL_ERROR "Malformed converter row (the count must be a positive integer): ${row}")
     endif()
@@ -147,7 +147,7 @@ endforeach()
 # exact and fails closed. Every cast on the line is asked, not only the first.
 # @param code One line, comments stripped.
 # @param outVar Set TRUE or FALSE.
-function(fastcached_casts_a_counter code outVar)
+function(pace_casts_a_counter code outVar)
     set(rest "${code}")
     while(TRUE)
         string(REGEX MATCH "(static_cast<[^>]*>|to_underlying)[ \t]*\\(" opener "${rest}")
@@ -189,18 +189,18 @@ function(fastcached_casts_a_counter code outVar)
     set(${outVar} FALSE PARENT_SCOPE)
 endfunction()
 
-fastcached_globs_to_regex("${FastCachedCounterSourceGlobs}" sourceRegex)
+pace_globs_to_regex("${PaceCounterSourceGlobs}" sourceRegex)
 
-# Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its files,
+# Through `pace_tracked_files`, this tree's one answer to HOW a check finds its files,
 # rather than a traversal of its own: on DrvFs -- where every local gate tree takes its
 # sources from -- walking the tree and reading every file it found cost seconds a single
 # `git grep` spends in under half of one, and several lanes gating at once took this check
 # past its budget. CONTAINING names the literal every match must contain, so a file without
 # it is not read at all; the count printed is still over the whole set.
-fastcached_tracked_files("${sourceRoot}"
+pace_tracked_files("${sourceRoot}"
     GLOBS "*"
     FILTER "${sourceRegex}"
-    CONTAINING "${FastCachedCounterPrefilter}" CONTAINING_OUT sourcesHolding
+    CONTAINING "${PaceCounterPrefilter}" CONTAINING_OUT sourcesHolding
     FILES_OUT sources MODE_OUT sourcesMode)
 list(TRANSFORM sources PREPEND "${sourceRoot}/")
 list(TRANSFORM sourcesHolding PREPEND "${sourceRoot}/")
@@ -234,7 +234,7 @@ foreach(source IN LISTS sources)
         continue()
     endif()
     file(READ "${source}" content)
-    string(FIND "${content}" "${FastCachedCounterPrefilter}" prefilterAt)
+    string(FIND "${content}" "${PaceCounterPrefilter}" prefilterAt)
     if(prefilterAt EQUAL -1)
         continue()
     endif()
@@ -242,7 +242,7 @@ foreach(source IN LISTS sources)
     # VERBATIM, because a violation is printed with its `file:line`. Brackets are
     # blanked there, which is safe for this pattern: it matches on none, and a blanked
     # `table[static_cast<...>(counter)]` still reads `table static_cast<...>(counter) `.
-    fastcached_split_lines_verbatim("${content}" lines)
+    pace_split_lines_verbatim("${content}" lines)
 
     set(lineNumber 0)
     set(matchedHere 0)
@@ -250,10 +250,10 @@ foreach(source IN LISTS sources)
     foreach(line IN LISTS lines)
         math(EXPR lineNumber "${lineNumber} + 1")
         string(REGEX REPLACE "//.*$" "" code "${line}")
-        if(NOT code MATCHES "${FastCachedCounterConversionRegex}")
+        if(NOT code MATCHES "${PaceCounterConversionRegex}")
             continue()
         endif()
-        fastcached_casts_a_counter("${code}" castsOne)
+        pace_casts_a_counter("${code}" castsOne)
         if(NOT castsOne)
             continue()
         endif()
@@ -339,7 +339,7 @@ if(violationCount GREATER 0)
         "${violationReport}\n\n"
         "What an index at or past Counter::Last means is stated on IMetricsSink::Carries, and a "
         "cast written here answers none of it. Reach a table keyed by the enum through "
-        "CounterCells::Find, or ask CounterIndex (src/FastCache/Metrics/IMetricsSink.hpp) and "
+        "CounterCells::Find, or ask CounterIndex (src/Pace/Metrics/IMetricsSink.hpp) and "
         "handle its absent answer; a loop that only needs distinct values can number its rows "
         "itself. Only these may convert:\n\n"
         "${table}\n"

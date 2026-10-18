@@ -1,7 +1,7 @@
 # Distributed compilation
 
 A cache makes the *second* build of a commit fast. It can do nothing about the
-first one: on a miss, `fastcache-cc` runs the real compiler locally and stores
+first one: on a miss, `pace-cc` runs the real compiler locally and stores
 the result.
 
 Distributed compilation absorbs those misses. Machines that would otherwise sit
@@ -28,39 +28,39 @@ below easier to place.
 ## Architecture
 
 Three roles across two programs, with the shared cache behind them.
-**Scheduler and worker are the same binary** — `fastcache-compile-node` —
+**Scheduler and worker are the same binary** — `pace-node` —
 because being the one that hands out capacity is a *role* a node takes, not a
 different program.
 
 | Role | Program | What it does |
 |------|---------|--------------|
-| **Client** | `fastcache-cc` | Fronts each compile. Checks the cache, and on a miss asks for a worker. |
-| **Scheduler** | `fastcache-compile-node` | Tracks the fleet's workers and hands one out. Exactly one node at a time: whichever leads the cluster. |
-| **Worker** | `fastcache-compile-node` | Compiles what it is sent. Also holds a cache tier of its own, unless you turn it off. |
-| **Shared cache** | `fastcached` | Optional, and *not* the scheduler. Where objects end up so other machines get them. |
+| **Client** | `pace-cc` | Fronts each compile. Checks the cache, and on a miss asks for a worker. |
+| **Scheduler** | `pace-node` | Tracks the fleet's workers and hands one out. Exactly one node at a time: whichever leads the cluster. |
+| **Worker** | `pace-node` | Compiles what it is sent. Also holds a cache tier of its own, unless you turn it off. |
+| **Shared cache** | `pace-kv` | Optional, and *not* the scheduler. Where objects end up so other machines get them. |
 
 ```
    ┌──────────────┐          ┌───────────────────────────────┐
-   │ fastcache-cc │          │ fastcache-compile-node        │
+   │ pace-cc │          │ pace-node        │
    │  (client)    │          │  (this one leads: scheduler)  │
    └──────┬───────┘          └───────────────┬───────────────┘
           │                                  │
           │  1. FETCH ──────────────────────►│ :6674  its cache tier,
           │     ◄──────────── hit: done      │        reading through to
-          │                                  │        fastcached upstream
+          │                                  │        pace-kv upstream
           │  2. miss: "give me a worker" ───►│ :6675  scheduler
           │     ◄──────── endpoint + lease   │
           │                                  ▲
           │                                  │ register + heartbeat
           │                   ┌──────────────┴─────────┐
-          │  3. compile this ►│ fastcache-compile-node │ :6674
+          │  3. compile this ►│ pace-node │ :6674
           │     ◄──── object  │      (a worker)        │
           │                   └────────────────────────┘
           │
           └─ 4. STORE the object ─► :6674  ← the CLIENT stores, not the worker
 ```
 
-`fastcached` is behind all of it as the fleet-wide store a node's `--upstream`
+`pace-kv` is behind all of it as the fleet-wide store a node's `--upstream`
 points at. It serves the cache verbs and nothing else: a scheduling verb arriving
 at one of its listeners is refused with a typed `dispatch-not-permitted` naming
 where the scheduler went.
@@ -98,7 +98,7 @@ Workers are given **no cache credentials at all**.
 
 ### 1. The client preprocesses, and that is the part that cannot be distributed
 
-`fastcache-cc` must preprocess to compute the cache key *before* it can know
+`pace-cc` must preprocess to compute the cache key *before* it can know
 whether there is a miss. That work is unavoidable and always local — roughly
 45 ms against compiles of 300 ms–2 s, which is where the ceiling of about
 10–40× comes from. Distribution is not linear scaling and should not be sized as
@@ -181,7 +181,7 @@ crossed reply accepted as an answer is a wrong object under a correct key, which
 succeeds, gets stored, and is then served to every other machine that fetches that
 key. There is nothing else in the pipeline that would notice. The refusal is
 therefore a refusal — the translation unit is compiled locally and the launcher
-prints a line naming the worker, whether or not `FASTCACHE_VERBOSE` is set.
+prints a line naming the worker, whether or not `PACE_VERBOSE` is set.
 
 It is integrity against **accident** — a connection reused wrongly, a scratch
 collision, a worker answering out of order — not against a hostile worker: the
@@ -206,14 +206,14 @@ translation unit compiles locally, and `--show-stats` counts it as
 The scheduler is a **compile node**, not the cache. Pick one machine and start it:
 
 ```sh
-fastcache-compile-node \
+pace-node \
     --listen-node=0.0.0.0:6675 \
     --raft-self=scheduler.internal \
     --advertise=scheduler.internal:6675
 ```
 
 **A scheduler is a cluster, even of one**
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). It signs every
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). It signs every
 lease with its own identity key, and its workers check that signature against the
 cluster's voters and their keys as their own consensus applied them, so it holds
 replicated state and runs consensus to keep it. No flag asks for either: its first
@@ -233,18 +233,18 @@ record says that.
 
 There is **no shared secret to provision**: the pre-shared `--cluster-key-file` a fleet
 used to copy to every member is gone
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). Every machine
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). Every machine
 proves its own identity key instead -- a member to the other members, a worker to its
 scheduler -- and removing one machine is revoking that one key. What that buys is under
 [Security](#security).
 
-It used to be `fastcached --listen-dispatch=...`, and that flag is **gone** rather
+It used to be `pace-kv --listen-dispatch=...`, and that flag is **gone** rather
 than deprecated. The two jobs have opposite deployment shapes: a cache is shared
 infrastructure somebody operates, while handing out capacity is a decision only
 **one** node may make at a time — and nothing in the cache daemon can establish
 which node that is. So scheduling moved to where cluster leadership lives.
 
-A scheduling verb arriving at a `fastcached` listener is refused with a typed
+A scheduling verb arriving at a `pace-kv` listener is refused with a typed
 error naming where the scheduler went, so a client configured for the old layout
 tells you what to fix instead of failing mysteriously.
 
@@ -259,22 +259,22 @@ surveys no compilers, claims no scratch directory, registers nothing and is neve
 sent a compile, so a setting only a worker reads — `--toolchain` or `--node-class`,
 say — refuses to start it, by name. What it can still run is the scheduler, consensus and a cache tier; a node
 running none of those is refused too. Until
-[#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440) its `/metrics`
+[#1440](https://github.com/LASTRADA-Software/pace/issues/1440) its `/metrics`
 and history still read 0 slots.
 
 ```sh
-fastcache-compile-node --slots=0 \
+pace-node --slots=0 \
     --listen-node=0.0.0.0:6674 ...
 ```
 
 Such a machine shows among the cluster's **members** when it runs consensus, and
 not among the fleet page's **machines**, which are built from worker registrations;
-its own history is not handed to a leader either ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+its own history is not handed to a leader either ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 
 Once several nodes schedule, exactly one of them may at a time, which is what the
 same consensus decides once it has more than one member: one machine founds the
 cluster, every other one joins it as a learner and is admitted by its identity key. See
-[a cluster, and who leads it](../tools/fastcache-compile-node.md#a-cluster-and-who-leads-it).
+[a cluster, and who leads it](../tools/pace-node.md#a-cluster-and-who-leads-it).
 
 #### Who may use the fleet
 
@@ -287,7 +287,7 @@ VPN or DHCP usable at all. It is **not** only the worker list: every scheduler v
 gated, `LEASE` included, so a machine whose key the cluster does not hold is refused a
 lease and compiles locally. Admit the machines that *ask* as well as the machines that
 *answer*: see [a machine that only
-asks](../tools/fastcache-compile-node.md#a-machine-that-only-asks-tickets).
+asks](../tools/pace-node.md#a-machine-that-only-asks-tickets).
 
 `--fleet-open` admits every caller, for one machine or a network that is already your
 boundary. A node with neither a roster nor `--fleet-open` refuses every caller but its own
@@ -301,9 +301,9 @@ spent.
 
 It does not gate the node's own **cache tier**, which serves this machine and
 nothing else however either list reads
-([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)): that tier is
+([#287](https://github.com/LASTRADA-Software/pace/issues/287)): that tier is
 a developer's whole build output, and contributing capacity does not entitle
-another machine to read it. Nor does it gate the shared `fastcached`, where a
+another machine to read it. Nor does it gate the shared `pace-kv`, where a
 non-member reads and writes objects exactly as before — that one is infrastructure
 somebody operates, and it is what a cache several machines share looks like.
 
@@ -319,12 +319,12 @@ admission against.
 On each machine that should take work:
 
 ```sh
-fastcache-compile-node \
+pace-node \
     --fleet-seed=scheduler.internal:6675 \
     --listen-node=0.0.0.0:6674 \
     --advertise=worker-01.internal:6674 \
     --fleet-open \
-    --cluster-dir=/var/lib/fastcache-node
+    --cluster-dir=/var/lib/pace-node
 ```
 
 **A worker joins the scheduler's fleet as a LEARNER, and that is the only way a machine
@@ -335,11 +335,11 @@ scheduler compares the key and approves it:
 
 ```sh
 # on the scheduler: what is waiting, each row with the key to compare and the line to approve it
-fastcache-compile-node --enroll-list
-fastcache-compile-node --enroll-approve=<id>@<key>
+pace-node --enroll-list
+pace-node --enroll-approve=<id>@<key>
 
 # or, while a known batch of machines is being added, admit whoever asks for a while
-fastcache-compile-node --enroll-auto-approve=30min
+pace-node --enroll-auto-approve=30min
 ```
 
 The approved machine becomes a learner of the fleet: it applies the fleet's replicated
@@ -355,7 +355,7 @@ key to type, and a voter the fleet revokes stops verifying the moment the learne
 the revocation. A worker another machine can reach **will not start** with no way to check
 a lease; one reachable only from its own machine needs none.
 
-An address still admits a *client* -- a developer's `fastcache-cc` asking for a lease
+An address still admits a *client* -- a developer's `pace-cc` asking for a lease
 needs no identity -- but never a machine joining the fleet.
 
 **`--listen-node` and `--advertise` may both be left alone on a worker that serves a
@@ -375,7 +375,7 @@ the part people leave off. Membership gates this node's *compile verbs*, so a wo
 that admits its own machine and nothing else is leased out, dialled, and the compile
 is refused `not-a-member` and run locally instead. The scheduler's counters stay flat
 and correct while that happens, because the lease *was* granted
-([#235](https://github.com/LASTRADA-Software/fastcached/issues/235)). The worker says
+([#235](https://github.com/LASTRADA-Software/pace/issues/235)). The worker says
 what it admits in its own startup line:
 
 ```
@@ -387,7 +387,7 @@ drop it: the worker's roster — the fleet's state, which it applies — admits 
 the cluster admitted, by the key each proves or the ticket each presents, and everyone
 else stays refused, whatever address they dial from. A client machine is admitted by its
 key too, as a learner: see [a machine that only
-asks](../tools/fastcache-compile-node.md#a-machine-that-only-asks-tickets).
+asks](../tools/pace-node.md#a-machine-that-only-asks-tickets).
 
 The worker then surveys the machine at startup and serves every compiler it
 finds, naming each one and the layout it came from:
@@ -409,15 +409,15 @@ asking for one. Point it at the shared cache with `--upstream` and a local rebui
 stops reaching the wire at all. `--cache-memory=0` with no `--cache-dir` turns the
 tier off, which is what a machine that only compiles for others wants. The whole
 of it is on
-[the node's own page](../tools/fastcache-compile-node.md#a-cache-of-its-own).
+[the node's own page](../tools/pace-node.md#a-cache-of-its-own).
 
 On Linux the package ships a socket-activated unit; put the settings in
-`/etc/fastcached/fastcache-compile-node.yaml` — every key is one flag, spelled
-with underscores, and a worker needs `cluster_dir: /var/lib/fastcache-node`, the
+`/etc/pace/pace-node.yaml` — every key is one flag, spelled
+with underscores, and a worker needs `cluster_dir: /var/lib/pace-node`, the
 state directory the unit creates for its identity key — and enable the **socket**:
 
 ```sh
-sudo systemctl enable --now fastcache-compile-node.socket
+sudo systemctl enable --now pace-node.socket
 ```
 
 !!! warning "`--advertise` is the flag to get wrong"
@@ -430,27 +430,27 @@ sudo systemctl enable --now fastcache-compile-node.socket
 ### The clients
 
 ```sh
-export FASTCACHE_ADDR=build-cache.internal:6674
-export FASTCACHE_SCHEDULER=scheduler.internal:6675
-cmake -DCMAKE_CXX_COMPILER_LAUNCHER=fastcache-cc ...
+export PACE_ADDR=build-cache.internal:6674
+export PACE_SCHEDULER=scheduler.internal:6675
+cmake -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc ...
 ```
 
-`FASTCACHE_ADDR` is the **cache** — a `fastcached`, or the local node's own
+`PACE_ADDR` is the **cache** — a `pace-kv`, or the local node's own
 `--listen-node`. It defaults to `127.0.0.1:6674` when unset, which is where a
 node on this machine already answers, so a developer running a node needs only
-the scheduler line. `FASTCACHE_ADDR=` (set but empty) is the opt-out -- on a POSIX shell. PowerShell cannot
-express a set-but-empty variable: `$env:FASTCACHE_ADDR = ""` looks set from inside
+the scheduler line. `PACE_ADDR=` (set but empty) is the opt-out -- on a POSIX shell. PowerShell cannot
+express a set-but-empty variable: `$env:PACE_ADDR = ""` looks set from inside
 PowerShell and reaches the child process as *unset*, so the launcher takes its default
-and goes on caching. Use `-DFASTCACHE_ADDR=` or `-DUSE_COMPILER_CACHE=OFF` there; see
-[the launcher's note](../tools/fastcache-cc.md#the-empty-opt-out-does-not-work-from-powershell).
+and goes on caching. Use `-DPACE_ADDR=` or `-DUSE_COMPILER_CACHE=OFF` there; see
+[the launcher's note](../tools/pace-cc.md#the-empty-opt-out-does-not-work-from-powershell).
 
 Getting it **wrong** costs the cache and nothing else: a daemon that cannot be
 reached, or that answers and refuses, is reported (`cache unavailable (…)`,
 counted under `unavailable` by `--show-stats`) and the translation unit is
-dispatched anyway. The `FASTCACHE_ADDR=` opt-out above is different, and turns
+dispatched anyway. The `PACE_ADDR=` opt-out above is different, and turns
 both off — it is how a build says it wants no launcher at all.
 
-`FASTCACHE_SCHEDULER` is the **scheduler**, which is the `--listen-node` port of
+`PACE_SCHEDULER` is the **scheduler**, which is the `--listen-node` port of
 some node that serves it. Once this machine runs a node that has joined the fleet,
 `127.0.0.1:6674` — this machine's own node — is the value to use: a node that runs
 no scheduler answers with the leader's address, and the launcher follows it there,
@@ -458,22 +458,22 @@ wherever the leader moves. Unset it and every miss compiles
 locally again — the behaviour without this feature, and the way to turn it off
 for one build.
 
-`FASTCACHE_DISPATCH_TIMEOUT` is how long the client will wait for one remote
+`PACE_DISPATCH_TIMEOUT` is how long the client will wait for one remote
 compile, measured from the request to the last byte of the reply — the dial has
-its own `FASTCACHE_CONNECT_TIMEOUT`. It defaults to **`10min`** and is deliberately
-not the cache's `FASTCACHE_TIMEOUT`: a worker writes nothing
+its own `PACE_CONNECT_TIMEOUT`. It defaults to **`10min`** and is deliberately
+not the cache's `PACE_TIMEOUT`: a worker writes nothing
 until the compiler has finished, so the client waits out the whole compile in a
 single read, and while the two shared one number every translation unit taking
 longer than ten seconds was abandoned and rebuilt locally — precisely the ones
-worth distributing ([#223](https://github.com/LASTRADA-Software/fastcached/issues/223)).
+worth distributing ([#223](https://github.com/LASTRADA-Software/pace/issues/223)).
 Ten minutes because that is `LeaseTable`'s own lease timeout: waiting longer
 means waiting on a lease the scheduler has already reclaimed.
 
-`FASTCACHE_DISPATCH_IDLE` is the companion knob and the one that answers the
+`PACE_DISPATCH_IDLE` is the companion knob and the one that answers the
 other question: how long the worker may say **nothing**. It defaults to **`30s`**. A worker writes a five-byte progress frame every few seconds
 while a compile is running, so the client measures *silence* rather than
 *duration* — which is what lets this be seconds while the total above stays
-minutes ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)).
+minutes ([#245](https://github.com/LASTRADA-Software/pace/issues/245)).
 Setting it to `0s` turns it off and restores one flat deadline. All four are
 durations — a whole number and a unit (`ms`, `s`, `min`, `h`, `d`); a bare number is
 not one and is ignored, so the launcher runs under the default.
@@ -494,8 +494,8 @@ against a worker that has stopped, for the reason in the next box.
     |---|---|---|
     | process exits, crashes, is killed | the client's own parked read — FIN or RST | immediately |
     | host vanishes: powered off, unplugged, suspended, VPN dropped | TCP keepalive on the compile dial | ~16 s on Linux and macOS, ~30 s on Windows |
-    | host answers while the process makes no progress | the missing progress frames — `FASTCACHE_DISPATCH_IDLE` | ~30 s |
-    | compiler runs longer than anybody is prepared to wait | `FASTCACHE_DISPATCH_TIMEOUT` | at the deadline |
+    | host answers while the process makes no progress | the missing progress frames — `PACE_DISPATCH_IDLE` | ~30 s |
+    | compiler runs longer than anybody is prepared to wait | `PACE_DISPATCH_TIMEOUT` | at the deadline |
 
     In every one of them the client hands the lease back and compiles locally, so
     nothing is lost and the key is **not** pinned for the scheduler's lease timeout.
@@ -507,7 +507,7 @@ against a worker that has stopped, for the reason in the next box.
     nothing below the protocol knows anything is wrong. The worker therefore says so
     itself: while a compile is running it writes a `Status::Progress` frame every
     five seconds, carrying nothing at all, and the client gives up after thirty
-    seconds of silence. The launcher's own fall-back line (`FASTCACHE_VERBOSE`) then
+    seconds of silence. The launcher's own fall-back line (`PACE_VERBOSE`) then
     reads *stopped reporting progress* rather than *ran out of budget*, because
     "that machine has wedged" and "that compile was slow" are fixed in different
     places by different people. On the `--show-stats` axis both are tallied as
@@ -522,13 +522,13 @@ against a worker that has stopped, for the reason in the next box.
 
     The worker notices the client has gone and skips writing the object back, so
     the transfer is not paid for. The compile itself still runs to completion, so
-    that CPU is spent twice and `fastcache_worker_jobs_completed_total` still counts
-    the job; `fastcache_worker_jobs_abandoned_client_gone_total` counts the delivery
+    that CPU is spent twice and `pace_worker_jobs_completed_total` still counts
+    the job; `pace_worker_jobs_abandoned_client_gone_total` counts the delivery
     that was skipped.
 
-!!! note "`FASTCACHE_TOKEN` is the cache's password, and a node never receives it"
+!!! note "`PACE_TOKEN` is the cache's password, and a node never receives it"
 
-    `FASTCACHE_TOKEN` is presented to the cache at `FASTCACHE_ADDR` and to nothing
+    `PACE_TOKEN` is presented to the cache at `PACE_ADDR` and to nothing
     else. Every exchange with another machine — the scheduler, a worker, a remote
     cache — presents a **machine ticket** instead, minted for that exchange by this
     machine's own node, so a password is never sent where it was not configured.
@@ -542,20 +542,20 @@ against a worker that has stopped, for the reason in the next box.
     launcher treats as fatal and returns in place of the answer to the request it
     actually sent — so every `LEASE` was declined and every compile happened
     locally, behind a green build
-    ([#340](https://github.com/LASTRADA-Software/fastcached/issues/340)).
+    ([#340](https://github.com/LASTRADA-Software/pace/issues/340)).
 
 ---
 
 ## Confirming it works
 
-With `FASTCACHE_VERBOSE=1` the launcher says what happened to each translation
+With `PACE_VERBOSE=1` the launcher says what happened to each translation
 unit:
 
 ```
-fastcache-cc: HIT key=…                                          served from cache
-fastcache-cc: DISPATCHED to worker-01.internal:6674 key=…        compiled remotely
-fastcache-cc: not dispatched (rejected (no-worker)); compiling locally
-fastcache-cc: cache unavailable (fetch exchange failed); compiling this translation unit anyway
+pace-cc: HIT key=…                                          served from cache
+pace-cc: DISPATCHED to worker-01.internal:6674 key=…        compiled remotely
+pace-cc: not dispatched (rejected (no-worker)); compiling locally
+pace-cc: cache unavailable (fetch exchange failed); compiling this translation unit anyway
 ```
 
 The last of those is a **cache** problem, not a fleet one, and the line says so
@@ -566,25 +566,25 @@ start it with `--admin-listen` and these count the outcomes.
 
 | Counter | Rising means |
 |---------|--------------|
-| `fastcached_dispatch_leases_granted_total` | Work is being distributed. |
-| `fastcached_dispatch_leases_released_total` | Clients are reporting their jobs done. Granted minus released is what is outstanding; flat while granted climbs means clients are dying mid-job, or predate the verb. |
-| `fastcached_dispatch_leases_no_worker_total` | The fleet is **misconfigured** — workers are up but nobody matches. |
-| `fastcached_dispatch_leases_no_capacity_total` | The fleet is **too small** — full of your own build — or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
-| `fastcached_dispatch_leases_withdrawn_total` | The fleet is **unavailable** — slots free on paper, machines busy elsewhere or out of scratch space. |
-| `fastcached_dispatch_leases_all_excluded_total` | The fleet is **unreachable from its clients** — every matching worker was on the asking client's exclusion list. A network problem, not a missing toolchain. Check the VPN and the workers' advertised names. |
-| `fastcached_dispatch_leases_duplicate_total` | Duplicate-work suppression is doing its job. Not a problem. |
-| `fastcached_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
-| `fastcached_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. Any rise names a machine that is **not** in the fleet. |
-| `fastcached_dispatch_worker_endpoint_mismatch_total` | A worker was **admitted** while advertising an endpoint whose host is not the address it connected from. Not a fault by itself — DNS names, a node dialling itself, NAT, a VPN and multi-homing all land here. See [the endpoint a registration names is not verified](../operations/cluster-communication.md#the-endpoint-a-registration-names-is-not-verified). |
-| `fastcached_dispatch_workers_expired_total` | A machine stopped heartbeating and was dropped. Rising beside a rising registration count is a fleet whose heartbeats are not arriving, not one that is growing. |
-| `fastcached_dispatch_workers_withdrawn_total` | A machine re-surveyed, found it no longer serves a toolchain, and retired that registration itself rather than letting it time out. Never sum it with the expiry counter above: an expiry is a machine that stopped answering, this is one that said so, and adding them makes every routine toolchain upgrade read as a heartbeat failure. |
-| `fastcached_dispatch_leases_reclaimed_total` | A machine went away mid-job, or restarted, and the keys it was building were freed. Work nobody will report done — a build that lost part of its distribution, which is a different thing to fix from a fleet that is merely full. |
-| `fastcached_dispatch_leases_unauthorized_total` | A client handed back a lease token this cluster never signed. Never sum it with the `unknown-lease` refusals beside it: those name a lease this scheduler *did* issue and has since forgotten, while a rise here is a forged release — or, far more likely, a launcher predating signed leases, in which case it tracks a rollout and stops when the rollout finishes. |
-| `fastcached_dispatch_leases_released_late_total` | A client reported a job whose lease had **already expired**: a real compile outran the lease timeout. Read it as a fraction of `released_total` — a steady fraction means the lease bound is shorter than this site's slowest translation unit. **Not** a count of leases that expired: a client that never reports back at all reaches this nowhere, and is `reclaimed` or nothing. |
-| `fastcached_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused before anything it named was kept. `fastcache-cc` checks its label before sending it, so any rise names a client that does not. |
-| `fastcached_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused before any of it was kept. Each is a few dozen bytes from a real client, and `fastcache-cc` sends none longer, so any rise names a client that does. |
-| `fastcached_dispatch_worker_registrations_field_too_long_total` | A worker registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused before any of it was kept. Each is kept in the worker's entry, and this project's nodes send none that long -- a compiler whose name would overrun its ceiling registers without the name -- so any rise names a peer that does. |
-| `fastcached_dispatch_node_announcements_field_too_long_total` | A machine announced itself with an endpoint or version longer than a scheduler records, and was refused before any of it was kept. A condition field has a ceiling too, but an overlong one is refused earlier, when the frame is decoded, as a malformed frame no counter moves for -- so this series never sees it from the network. This project's nodes send none that long, so any rise names a peer that does. |
+| `pace_dispatch_leases_granted_total` | Work is being distributed. |
+| `pace_dispatch_leases_released_total` | Clients are reporting their jobs done. Granted minus released is what is outstanding; flat while granted climbs means clients are dying mid-job, or predate the verb. |
+| `pace_dispatch_leases_no_worker_total` | The fleet is **misconfigured** — workers are up but nobody matches. |
+| `pace_dispatch_leases_no_capacity_total` | The fleet is **too small** — full of your own build — or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
+| `pace_dispatch_leases_withdrawn_total` | The fleet is **unavailable** — slots free on paper, machines busy elsewhere or out of scratch space. |
+| `pace_dispatch_leases_all_excluded_total` | The fleet is **unreachable from its clients** — every matching worker was on the asking client's exclusion list. A network problem, not a missing toolchain. Check the VPN and the workers' advertised names. |
+| `pace_dispatch_leases_duplicate_total` | Duplicate-work suppression is doing its job. Not a problem. |
+| `pace_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
+| `pace_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. Any rise names a machine that is **not** in the fleet. |
+| `pace_dispatch_worker_endpoint_mismatch_total` | A worker was **admitted** while advertising an endpoint whose host is not the address it connected from. Not a fault by itself — DNS names, a node dialling itself, NAT, a VPN and multi-homing all land here. See [the endpoint a registration names is not verified](../operations/cluster-communication.md#the-endpoint-a-registration-names-is-not-verified). |
+| `pace_dispatch_workers_expired_total` | A machine stopped heartbeating and was dropped. Rising beside a rising registration count is a fleet whose heartbeats are not arriving, not one that is growing. |
+| `pace_dispatch_workers_withdrawn_total` | A machine re-surveyed, found it no longer serves a toolchain, and retired that registration itself rather than letting it time out. Never sum it with the expiry counter above: an expiry is a machine that stopped answering, this is one that said so, and adding them makes every routine toolchain upgrade read as a heartbeat failure. |
+| `pace_dispatch_leases_reclaimed_total` | A machine went away mid-job, or restarted, and the keys it was building were freed. Work nobody will report done — a build that lost part of its distribution, which is a different thing to fix from a fleet that is merely full. |
+| `pace_dispatch_leases_unauthorized_total` | A client handed back a lease token this cluster never signed. Never sum it with the `unknown-lease` refusals beside it: those name a lease this scheduler *did* issue and has since forgotten, while a rise here is a forged release — or, far more likely, a launcher predating signed leases, in which case it tracks a rollout and stops when the rollout finishes. |
+| `pace_dispatch_leases_released_late_total` | A client reported a job whose lease had **already expired**: a real compile outran the lease timeout. Read it as a fraction of `released_total` — a steady fraction means the lease bound is shorter than this site's slowest translation unit. **Not** a count of leases that expired: a client that never reports back at all reaches this nowhere, and is `reclaimed` or nothing. |
+| `pace_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused before anything it named was kept. `pace-cc` checks its label before sending it, so any rise names a client that does not. |
+| `pace_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused before any of it was kept. Each is a few dozen bytes from a real client, and `pace-cc` sends none longer, so any rise names a client that does. |
+| `pace_dispatch_worker_registrations_field_too_long_total` | A worker registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused before any of it was kept. Each is kept in the worker's entry, and this project's nodes send none that long -- a compiler whose name would overrun its ceiling registers without the name -- so any rise names a peer that does. |
+| `pace_dispatch_node_announcements_field_too_long_total` | A machine announced itself with an endpoint or version longer than a scheduler records, and was refused before any of it was kept. A condition field has a ceiling too, but an overlong one is refused earlier, when the frame is decoded, as a malformed frame no counter moves for -- so this series never sees it from the network. This project's nodes send none that long, so any rise names a peer that does. |
 
 The first three refusals are different operator problems and are deliberately
 counted apart: summing them hides a misconfiguration behind a busy fleet, and
@@ -597,80 +597,80 @@ was talking to drew the same flat line.
 
 | Counter | Rising means |
 |---------|--------------|
-| `fastcached_dispatch_frames_refused_unsupported_version_total` | A peer built against another release of the wire. During a rollout this tracks the rollout; afterwards it names a machine nobody upgraded. |
-| `fastcached_dispatch_frames_refused_unknown_opcode_total` | A frame naming a verb no build has. A scanner, or a client speaking something else entirely at this port. |
-| `fastcached_dispatch_frames_refused_not_permitted_total` | A frame naming a verb that exists and is served on a **different** port — typically a cache or compile request sent to the scheduler's address. Any rise names a client pointed at the wrong one. |
-| `fastcached_dispatch_frames_refused_truncated_total` | A frame whose header disagreed with what arrived: a framing or transport fault, before any verb was routed. Never sum it with a `malformed_payload` series — those are payloads that decoded wrong, and share only the wire code. |
+| `pace_dispatch_frames_refused_unsupported_version_total` | A peer built against another release of the wire. During a rollout this tracks the rollout; afterwards it names a machine nobody upgraded. |
+| `pace_dispatch_frames_refused_unknown_opcode_total` | A frame naming a verb no build has. A scanner, or a client speaking something else entirely at this port. |
+| `pace_dispatch_frames_refused_not_permitted_total` | A frame naming a verb that exists and is served on a **different** port — typically a cache or compile request sent to the scheduler's address. Any rise names a client pointed at the wrong one. |
+| `pace_dispatch_frames_refused_truncated_total` | A frame whose header disagreed with what arrived: a framing or transport fault, before any verb was routed. Never sum it with a `malformed_payload` series — those are payloads that decoded wrong, and share only the wire code. |
 
 A non-member caller is **not** in this table: that refusal is decided one layer
 down, in `SchedulerService`, which deliberately counts it nowhere so a client
 retrying past a momentarily full surface cannot bury the credential series.
 Whether it should get a series of its own is
-[#592](https://github.com/LASTRADA-Software/fastcached/issues/592).
+[#592](https://github.com/LASTRADA-Software/pace/issues/592).
 
 On each **worker**, start it with `--admin-listen` and the same endpoint reports
 what that machine is doing:
 
 | Counter | Rising means |
 |---------|--------------|
-| `fastcache_worker_jobs_started_total` | Jobs accepted. |
-| `fastcache_worker_jobs_completed_total` | Jobs that ran to an exit code — including a **non-zero** one, which is the client's answer rather than a worker failure. |
-| `fastcache_worker_compile_milliseconds_total` | Compile wall time. Divide by `..._jobs_completed_total` for the mean; both are counters, so a rate over a window gives you the current one. |
-| `fastcache_worker_jobs_abandoned_client_gone_total` | The client had **disconnected** before the object could be written back, so it was not sent. The compile still counts in `..._jobs_completed_total` — it ran and this machine paid for it, and only the delivery found nobody there. A rise is a client-side story: cancelled builds, `Ctrl-C`, a CI runner reclaimed mid-job. What it saves is the transfer; the CPU is spent either way until [#661](https://github.com/LASTRADA-Software/fastcached/issues/661). A client that half-closes its write side after sending and still waits for its object is read as gone and counted here — nothing shipped in this project does that, but a third-party client speaking the protocol over a raw socket could. |
-| `fastcache_worker_jobs_refused_no_slot_total` | This worker is **full**. Pair it with the scheduler's `..._no_capacity_total`. |
-| `fastcache_worker_jobs_refused_unknown_fingerprint_total` | Somebody is dispatching a toolchain this worker does not have. |
-| `fastcache_worker_jobs_refused_rejected_argument_total` | A command line carrying something that could name a file. |
-| `fastcache_worker_jobs_refused_scratch_unavailable_total` | The scratch disk is full or unwritable. |
-| `fastcache_worker_jobs_refused_spawn_failed_total` | The toolchain is configured but cannot be executed. |
-| `fastcache_worker_jobs_refused_compiler_unclassified_total` | The toolchain runs, and this build cannot tell which driver it is, so no command line can be built for it. The remedy is the `--toolchain` on that node, not a path. The node also says this once at survey time, so check its startup log before this counter. |
-| `fastcache_worker_jobs_refused_not_a_member_total` | A caller this worker does not admit tried to compile on it. **Check your own fleet first**: if this worker holds no roster and is not `--fleet-open`, it admits its own machine and nothing else, and this counter is your clients being turned away one hop after a lease was granted; a client whose machine the cluster has not admitted lands here too, and `fastcache-cli explain-admission <machine>` says so. Once the policy is right, a rise here is somebody with no claim on the machine — check who can reach `--listen-node`. |
-| `fastcache_worker_jobs_refused_envelope_declared_too_large_total` | A request declared its payload expands past this worker's ceiling. Nothing honest does that by accident: a probe of the port, or a client with a larger ceiling than the worker. |
-| `fastcache_worker_jobs_refused_envelope_unsupported_codec_total` | A client compressed with a codec this worker was not built with. A packaging difference between two honest machines; each one cost a local compile. |
-| `fastcache_worker_jobs_refused_envelope_malformed_total` | A payload envelope that did not parse: a version skew, or something on the port that is not this protocol. |
-| `fastcache_worker_jobs_refused_envelope_corrupt_total` | Bytes that parsed and then did not expand to their declared size. The one refusal here that implicates the **transport**. |
-| `fastcache_worker_jobs_refused_lease_unauthorized_total` | The lease presented was not signed by any voter the worker's roster names. The one counter here that is unambiguously a **security** signal rather than a capacity or configuration one — or a launcher predating this lease format, which is told apart by whether the rise tracks a rollout. |
-| `fastcache_worker_jobs_refused_lease_signer_revoked_total` | The lease verifies — under a key the cluster has **revoked**. The removed machine itself, still leasing out work: it should read zero forever, and a rise names a machine somebody removed and nobody stopped. |
-| `fastcache_worker_jobs_refused_lease_wrong_cluster_total` | An **authentic** lease was signed by a different fleet. Never sum it with `..._unauthorized_total` beside it: that one is a bad signature, this one is a good signature from somebody else. A rise here is a provisioning mistake — one identity key voting in two clusters, which is what copying a `--cluster-dir` to a second site produces — and the fix is a fresh state directory on one of them, not a firewall. |
-| `fastcache_worker_jobs_refused_lease_replayed_total` | An **authentic**, unexpired lease that this worker had **already run**. A lease authorizes exactly one compile — one grant per lease, presented once, with no retry — so nothing honest produces this and it should read zero forever. Any rise is somebody presenting a captured grant a second time. Do not sum it with `..._wrong_cluster_total` either: they share a wire code and nothing else, and they send you to opposite places. |
-| `fastcache_worker_jobs_refused_lease_endpoint_mismatch_total` | An **authentic** lease named a different worker. Almost never a replay and almost always a worker registered under an address clients do not dial — a NAT, or a hostname where clients resolve an address. |
-| `fastcache_worker_jobs_refused_lease_expired_total` | An **authentic** lease had expired. A rise on one machine and nowhere else is that machine's clock, not the fleet's leases — which is why the check carries skew slack and why this is worth seeing per node. |
-| `fastcache_worker_jobs_refused_lease_isolated_total` | This worker has heard from **no leader** its fleet counts for longer than it may trust the state it applied (65 minutes), so a voter the fleet forgot meanwhile could still be in it, and every lease is refused until one speaks again. Should read zero; a rise means the worker is cut off from its fleet's consensus while something still hands it leases. |
-| `fastcache_worker_jobs_refused_lease_no_roster_total` | The state this worker applied records **no voter's key** yet, so no lease from anybody can verify. A few while a node starts or joins are ordinary; a rise that does not stop means this node never applied its fleet's state. |
-| `fastcache_worker_scratch_roots_reclaimed_total` | This worker took over a scratch root left behind by a node that exited without cleaning up. The work itself is correct — a root is only reclaimed once its previous owner's exclusive claim is free, which the OS releases however that process died. A rise means nodes are **dying rather than stopping**, which is worth knowing and is visible nowhere else. |
-| `fastcache_worker_bytes_received_total` / `..._returned_total` | Link volume, counted at the socket. |
+| `pace_worker_jobs_started_total` | Jobs accepted. |
+| `pace_worker_jobs_completed_total` | Jobs that ran to an exit code — including a **non-zero** one, which is the client's answer rather than a worker failure. |
+| `pace_worker_compile_milliseconds_total` | Compile wall time. Divide by `..._jobs_completed_total` for the mean; both are counters, so a rate over a window gives you the current one. |
+| `pace_worker_jobs_abandoned_client_gone_total` | The client had **disconnected** before the object could be written back, so it was not sent. The compile still counts in `..._jobs_completed_total` — it ran and this machine paid for it, and only the delivery found nobody there. A rise is a client-side story: cancelled builds, `Ctrl-C`, a CI runner reclaimed mid-job. What it saves is the transfer; the CPU is spent either way until [#661](https://github.com/LASTRADA-Software/pace/issues/661). A client that half-closes its write side after sending and still waits for its object is read as gone and counted here — nothing shipped in this project does that, but a third-party client speaking the protocol over a raw socket could. |
+| `pace_worker_jobs_refused_no_slot_total` | This worker is **full**. Pair it with the scheduler's `..._no_capacity_total`. |
+| `pace_worker_jobs_refused_unknown_fingerprint_total` | Somebody is dispatching a toolchain this worker does not have. |
+| `pace_worker_jobs_refused_rejected_argument_total` | A command line carrying something that could name a file. |
+| `pace_worker_jobs_refused_scratch_unavailable_total` | The scratch disk is full or unwritable. |
+| `pace_worker_jobs_refused_spawn_failed_total` | The toolchain is configured but cannot be executed. |
+| `pace_worker_jobs_refused_compiler_unclassified_total` | The toolchain runs, and this build cannot tell which driver it is, so no command line can be built for it. The remedy is the `--toolchain` on that node, not a path. The node also says this once at survey time, so check its startup log before this counter. |
+| `pace_worker_jobs_refused_not_a_member_total` | A caller this worker does not admit tried to compile on it. **Check your own fleet first**: if this worker holds no roster and is not `--fleet-open`, it admits its own machine and nothing else, and this counter is your clients being turned away one hop after a lease was granted; a client whose machine the cluster has not admitted lands here too, and `pacectl explain-admission <machine>` says so. Once the policy is right, a rise here is somebody with no claim on the machine — check who can reach `--listen-node`. |
+| `pace_worker_jobs_refused_envelope_declared_too_large_total` | A request declared its payload expands past this worker's ceiling. Nothing honest does that by accident: a probe of the port, or a client with a larger ceiling than the worker. |
+| `pace_worker_jobs_refused_envelope_unsupported_codec_total` | A client compressed with a codec this worker was not built with. A packaging difference between two honest machines; each one cost a local compile. |
+| `pace_worker_jobs_refused_envelope_malformed_total` | A payload envelope that did not parse: a version skew, or something on the port that is not this protocol. |
+| `pace_worker_jobs_refused_envelope_corrupt_total` | Bytes that parsed and then did not expand to their declared size. The one refusal here that implicates the **transport**. |
+| `pace_worker_jobs_refused_lease_unauthorized_total` | The lease presented was not signed by any voter the worker's roster names. The one counter here that is unambiguously a **security** signal rather than a capacity or configuration one — or a launcher predating this lease format, which is told apart by whether the rise tracks a rollout. |
+| `pace_worker_jobs_refused_lease_signer_revoked_total` | The lease verifies — under a key the cluster has **revoked**. The removed machine itself, still leasing out work: it should read zero forever, and a rise names a machine somebody removed and nobody stopped. |
+| `pace_worker_jobs_refused_lease_wrong_cluster_total` | An **authentic** lease was signed by a different fleet. Never sum it with `..._unauthorized_total` beside it: that one is a bad signature, this one is a good signature from somebody else. A rise here is a provisioning mistake — one identity key voting in two clusters, which is what copying a `--cluster-dir` to a second site produces — and the fix is a fresh state directory on one of them, not a firewall. |
+| `pace_worker_jobs_refused_lease_replayed_total` | An **authentic**, unexpired lease that this worker had **already run**. A lease authorizes exactly one compile — one grant per lease, presented once, with no retry — so nothing honest produces this and it should read zero forever. Any rise is somebody presenting a captured grant a second time. Do not sum it with `..._wrong_cluster_total` either: they share a wire code and nothing else, and they send you to opposite places. |
+| `pace_worker_jobs_refused_lease_endpoint_mismatch_total` | An **authentic** lease named a different worker. Almost never a replay and almost always a worker registered under an address clients do not dial — a NAT, or a hostname where clients resolve an address. |
+| `pace_worker_jobs_refused_lease_expired_total` | An **authentic** lease had expired. A rise on one machine and nowhere else is that machine's clock, not the fleet's leases — which is why the check carries skew slack and why this is worth seeing per node. |
+| `pace_worker_jobs_refused_lease_isolated_total` | This worker has heard from **no leader** its fleet counts for longer than it may trust the state it applied (65 minutes), so a voter the fleet forgot meanwhile could still be in it, and every lease is refused until one speaks again. Should read zero; a rise means the worker is cut off from its fleet's consensus while something still hands it leases. |
+| `pace_worker_jobs_refused_lease_no_roster_total` | The state this worker applied records **no voter's key** yet, so no lease from anybody can verify. A few while a node starts or joins are ordinary; a rise that does not stop means this node never applied its fleet's state. |
+| `pace_worker_scratch_roots_reclaimed_total` | This worker took over a scratch root left behind by a node that exited without cleaning up. The work itself is correct — a root is only reclaimed once its previous owner's exclusive claim is free, which the OS releases however that process died. A rise means nodes are **dying rather than stopping**, which is worth knowing and is visible nowhere else. |
+| `pace_worker_bytes_received_total` / `..._returned_total` | Link volume, counted at the socket. |
 
 The refusals are split by reason for the same reason the scheduler's two are:
 a full worker and a misconfigured one are different problems with different
 fixes, and one number covering both tells you neither.
 
-> **Retired series.** `fastcache_worker_jobs_refused_lease_stale_epoch_total` no longer
-> exists, as of [#614](https://github.com/LASTRADA-Software/fastcached/issues/614). If a
+> **Retired series.** `pace_worker_jobs_refused_lease_stale_epoch_total` no longer
+> exists, as of [#614](https://github.com/LASTRADA-Software/pace/issues/614). If a
 > dashboard or alert of yours scrapes it, it will now find nothing — that is the change,
 > not a fault. The refusal it counted **can no longer happen**: a worker adopts a
 > scheduler term that went backwards instead of refusing it, because replay is closed by
 > grants being spendable once. Point those alerts at
-> `fastcache_worker_jobs_refused_lease_replayed_total` (somebody presenting a captured
-> grant twice) and `fastcache_worker_scheduler_term_regressions_total` (a scheduler term
+> `pace_worker_jobs_refused_lease_replayed_total` (somebody presenting a captured
+> grant twice) and `pace_worker_scheduler_term_regressions_total` (a scheduler term
 > that went backwards). The reasoning is under "A grant is spendable once" below. It was retired rather
 > than left exported at zero because a series that reads zero for ever because its event
 > is impossible looks exactly like one reading zero because the event has not happened,
 > and only one of those means your fleet is healthy.
 >
-> **Retired with the certified roster.** `fastcache_worker_jobs_refused_lease_roster_expired_total`,
-> `fastcache_node_roster_expires_in_seconds`, `fastcache_worker_rosters_refused_uncertified_total`,
-> `fastcache_worker_rosters_refused_expired_total` and
-> `fastcache_scheduler_roster_endorsements_refused_total` no longer exist. Every node verifies a
+> **Retired with the certified roster.** `pace_worker_jobs_refused_lease_roster_expired_total`,
+> `pace_node_roster_expires_in_seconds`, `pace_worker_rosters_refused_uncertified_total`,
+> `pace_worker_rosters_refused_expired_total` and
+> `pace_scheduler_roster_endorsements_refused_total` no longer exist. Every node verifies a
 > grant against the state its own consensus applied, which nothing certifies and nothing lapses,
 > so none of those events can happen. Point those alerts at
-> `fastcache_worker_jobs_refused_lease_no_roster_total` (a node whose applied state names no voter
-> yet) and `fastcache_worker_jobs_refused_lease_signer_revoked_total` (a machine the cluster
+> `pace_worker_jobs_refused_lease_no_roster_total` (a node whose applied state names no voter
+> yet) and `pace_worker_jobs_refused_lease_signer_revoked_total` (a machine the cluster
 > removed, still minting).
 
 The `..._lease_*` counters move only on a worker that checks leases: a consensus
 member -- a learner included -- against the state it applies. A worker that checks nothing says so at startup rather than leaving
 these at zero and looking healthy — and one another machine could dial is refused
-outright ([#282](https://github.com/LASTRADA-Software/fastcached/issues/282),
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178)).
+outright ([#282](https://github.com/LASTRADA-Software/pace/issues/282),
+[#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 
 **Four** of them — `..._unauthorized_total`, `..._signer_revoked_total`,
 `..._wrong_cluster_total` and `..._replayed_total` — share the wire code
@@ -696,9 +696,9 @@ A lease authorizes exactly one compile. The scheduler mints one grant per lease,
 launcher presents it in exactly one request with no retry, and it hands the lease back
 to the *scheduler* rather than to the worker — so a grant arriving twice at one worker
 is a replay and never an honest client. Since
-[#614](https://github.com/LASTRADA-Software/fastcached/issues/614) a worker enforces
+[#614](https://github.com/LASTRADA-Software/pace/issues/614) a worker enforces
 that: the second presentation is refused and
-`fastcache_worker_jobs_refused_lease_replayed_total` moves. Before it, a captured grant
+`pace_worker_jobs_refused_lease_replayed_total` moves. Before it, a captured grant
 could be replayed at its worker until it expired.
 
 A grant refused for anything else — a wrong toolchain, a wrong endpoint, an expiry — is
@@ -723,11 +723,11 @@ scheduler honestly reset to term 0, it refused the fresh grant and *accepted* a 
 captured under term 7. The check written to stop replay refused every legitimate grant
 and admitted the replayed one. Grants being spendable once is what actually answers that
 question, so the term check is gone and
-`fastcache_worker_jobs_refused_lease_stale_epoch_total` was **retired** — the refusal it
+`pace_worker_jobs_refused_lease_stale_epoch_total` was **retired** — the refusal it
 named can no longer happen, and a series reading zero because its event is impossible
 looks exactly like one reading zero because the event did not happen.
 
-What you watch instead is `fastcache_worker_scheduler_term_regressions_total`, which counts
+What you watch instead is `pace_worker_scheduler_term_regressions_total`, which counts
 a worker adopting a term that went backwards, alongside one `WARN` line naming both terms.
 
 **It does not mean somebody reset a cluster, and you have to read the rate to know which
@@ -752,16 +752,16 @@ expiry. That is the weaker of the two bounds. It could not be kept — a schedul
 legitimately reset and a replayed older grant look identical inside a token, and refusing
 them together is what stopped the fleet.
 
-The worker also reports what the machine **is** — `fastcache_node_logical_cores`,
-`fastcache_node_memory_total_bytes`, `fastcache_node_disk_capacity_bytes`,
-`fastcache_node_disk_free_bytes`, `fastcache_node_slots_configured` and
-`fastcache_node_slots_busy`. Those are gauges: "is this node pulling its weight"
+The worker also reports what the machine **is** — `pace_node_logical_cores`,
+`pace_node_memory_total_bytes`, `pace_node_disk_capacity_bytes`,
+`pace_node_disk_free_bytes`, `pace_node_slots_configured` and
+`pace_node_slots_busy`. Those are gauges: "is this node pulling its weight"
 is not answerable without knowing how big it is. Beside them is what the machine is
-**doing** — `fastcache_node_memory_available_bytes`, and the CPU as two tick counters,
-`fastcache_node_cpu_busy_ticks_total` over `fastcache_node_cpu_ticks_total`, whose rates
+**doing** — `pace_node_memory_available_bytes`, and the CPU as two tick counters,
+`pace_node_cpu_busy_ticks_total` over `pace_node_cpu_ticks_total`, whose rates
 divide into the busy share.
 
-And what its **cache tier** is doing — `fastcache_node_cache_hits_total` and
+And what its **cache tier** is doing — `pace_node_cache_hits_total` and
 `..._misses_total` for the tier itself, `..._upstream_hits_total` for what the
 shared cache answered after a local miss, and `..._fill_failures_total`,
 `..._store_failures_total`, `..._upstream_stores_total` and
@@ -769,13 +769,13 @@ shared cache answered after a local miss, and `..._fill_failures_total`,
 against a low local one means the tier is too small for this machine's working
 set, which is a different problem from a fleet that is missing a lot.
 
-Beside them, what it is **holding** — `fastcached_items`, `fastcached_bytes_used`
-and `fastcached_bytes_limit` for the cache as a whole, plus a
-`fastcached_tier_*{tier="memory"|"disk"}` set for the split. A node whose cache is
+Beside them, what it is **holding** — `pace_items`, `pace_bytes_used`
+and `pace_bytes_limit` for the cache as a whole, plus a
+`pace_tier_*{tier="memory"|"disk"}` set for the split. A node whose cache is
 effectively empty sends every rebuild to the wire; one whose evictions climb while
 its hit rate falls has a budget too small for the tree it builds. Both are
 invisible from the scheduler's own counters, which only see the work that reached
-it. See [the node's own page](../tools/fastcache-compile-node.md#reading-it) for
+it. See [the node's own page](../tools/pace-node.md#reading-it) for
 why these must not be summed across tiers, and why a node running no tier reports
 the series as **absent** rather than as zero.
 
@@ -793,10 +793,10 @@ hostname, endpoint, software version, capacity and cache, plus charts of the las
 24 hours or 7 days:
 
 ```sh
-fastcache-compile-node ... \
+pace-node ... \
     --listen-node=6675 \
     --admin-listen=6677 \
-    --dashboard --dashboard-token-file=/etc/fastcached/dashboard.token
+    --dashboard --dashboard-token-file=/etc/pace/dashboard.token
 ```
 
 Only the **leader** answers it in full; anyone else replies `503` naming the
@@ -806,7 +806,7 @@ own file rather than `--requirepass`. `/metrics` and `/healthz` stay outside it,
 so a scraper or a probe is unaffected — and `/metrics` remains the source of truth
 for anything you alert on. The full account, including what each column means and
 why a value nobody reported renders as `–` rather than `0`, is under
-[looking at the whole fleet](../tools/fastcache-compile-node.md#looking-at-the-whole-fleet).
+[looking at the whole fleet](../tools/pace-node.md#looking-at-the-whole-fleet).
 
 ### "No worker matches this toolchain"
 
@@ -814,8 +814,8 @@ The commonest setup failure. A worker is matched only if its toolchain
 fingerprint is byte-identical to the client's, so ask both ends:
 
 ```sh
-fastcache-cc --print-toolchain-fingerprint /usr/bin/g++    # on a client
-journalctl -u fastcache-compile-node | grep serving        # on a worker
+pace-cc --print-toolchain-fingerprint /usr/bin/g++    # on a client
+journalctl -u pace-node | grep serving        # on a worker
 ```
 
 If they differ, the machines really do have different toolchains — different
@@ -893,7 +893,7 @@ have — but it looks like a cold cache the first time a fleet upgrades past it.
   calculation, so a worker cannot end up fuller and slower than the scheduler
   believes at the same moment. `--slots=0` is not a count: it runs no worker at
   all (see [The scheduler](#the-scheduler) above). See
-  [the worker's own page](../tools/fastcache-compile-node.md#capacity).
+  [the worker's own page](../tools/pace-node.md#capacity).
 - **`--node-class` defaults to `workstation`,** which is the safe answer rather
   than the common one: a node nobody classified is somebody's desktop until
   proven otherwise. Set `--node-class dedicated` on build servers, or the fleet
@@ -910,7 +910,7 @@ have — but it looks like a cold cache the first time a fleet upgrades past it.
   nobody serves, `no-capacity` means the fleet is too small, `withdrawn` means
   the machines are there and unavailable, and `all-excluded` means the machines
   are there and the client itself could not reach them. Each has its own
-  `fastcached_dispatch_leases_*_total`, because the fixes are different and
+  `pace_dispatch_leases_*_total`, because the fixes are different and
   folding `withdrawn` into `no-capacity` sends an operator to buy hardware they
   already own, while `all-excluded` folded into `no-worker` sends them chasing
   a toolchain that is not missing.
@@ -933,7 +933,7 @@ identity key on every connection to its scheduler, and every frame after that pr
 sealed under a key only the two ends hold -- so something on the path can neither speak
 for a worker nor slip a verb into a connection the worker's proof admitted. A machine the
 cluster forgets with `--cluster-forget` is refused on its key, from any address. See
-[A node proves which machine it is](../tools/fastcache-compile-node.md#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
+[A node proves which machine it is](../tools/pace-node.md#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
 
 A node is closed by default. Its compile port and its scheduler admit **this machine,
 and machines whose key the cluster admitted** — by a proof, or by a machine ticket — or
@@ -945,10 +945,10 @@ would otherwise have your machine run their compiler on source they chose.
 
 Its **own cache tier admits this machine and nothing else**, whatever the roster
 says and whatever it is bound to
-([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)). A peer that
+([#287](https://github.com/LASTRADA-Software/pace/issues/287)). A peer that
 may spend this machine's CPU is not thereby entitled to read everything it has ever
 compiled, and the tier is exactly that. A cache several machines share is a
-`fastcached` behind `--upstream`.
+`pace-kv` behind `--upstream`.
 
 Membership alone was never enough, because *admitted to the fleet* is not *granted
 this compile*: an admitted machine could spend any worker's CPU without ever asking
@@ -956,9 +956,9 @@ the scheduler for a slot. So a lease grant is a **signed capability**. The sched
 signs the granted worker's endpoint, the toolchain, the object key and an expiry with
 its own Ed25519 identity key, and the worker checks that signature — against the
 cluster's roster of voters, unrevoked — before it decompresses anything
-([#281](https://github.com/LASTRADA-Software/fastcached/issues/281),
-[#282](https://github.com/LASTRADA-Software/fastcached/issues/282),
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). The endpoint is
+([#281](https://github.com/LASTRADA-Software/pace/issues/281),
+[#282](https://github.com/LASTRADA-Software/pace/issues/282),
+[#178](https://github.com/LASTRADA-Software/pace/issues/178)). The endpoint is
 inside the signature, so a token captured on the way to one machine cannot be
 replayed against the rest of the fleet; and a signature is one machine's, so a
 scheduler the cluster removes stops being able to lease anything out the moment its
@@ -996,11 +996,11 @@ accordingly.
 So: keep a scheduling node's port off any network you would not run a compiler for,
 and put mTLS in front of every port for anything beyond a trusted build network.
 The two remaining credentials in this system are real and unaffected —
-`--dashboard-token-file` guards the fleet page and the live-stats fleet stream, and `fastcached`'s own
+`--dashboard-token-file` guards the fleet page and the live-stats fleet stream, and `pace-kv`'s own
 `--requirepass` guards the shared cache.
 
 Also worth knowing: no **source address** admits anybody but a node's own machine
-([#180](https://github.com/LASTRADA-Software/fastcached/issues/180)) — a machine is
+([#180](https://github.com/LASTRADA-Software/pace/issues/180)) — a machine is
 admitted by its key — so a spoofed address buys a stranger nothing. A captured ticket buys
 one replay at no other node and no later moment, since each names one endpoint, lives a
 minute and is spent once.
@@ -1014,7 +1014,7 @@ minute and is spent once.
   across checkouts too. `-fmacro-prefix-map` travels to the worker verbatim, which applies
   it to the client's paths; a line carrying `-ffile-prefix-map` **compiles locally**, since
   it also rewrites debug records a worker maps by its own rules. See
-  [the launcher's own account](../tools/fastcache-cc.md#debug-paths-in-a-replayed-object).
+  [the launcher's own account](../tools/pace-cc.md#debug-paths-in-a-replayed-object).
 - **Diagnostics from a failed remote compile are not shown.** A worker reporting
   a non-zero exit is retried locally and the local result is what you see —
   which also regenerates the diagnostics with correct line numbers.
@@ -1047,17 +1047,17 @@ minute and is spent once.
   form such as `-x assembler`, or `/Tc<file>` / `/Tp<file>`, which name a file. A
   plain `/TP`, `/TC` or `-x c++` — CMake puts `/TP` on every C++ source it hands
   MSVC — is folded into the language the launcher states, and dispatched. Run with
-  `FASTCACHE_VERBOSE=1` to see which of these applied.
+  `PACE_VERBOSE=1` to see which of these applied.
 
 - **A node's `--requirepass` is for its `--upstream` alone.** It is the secret of the
-  shared `fastcached`, presented there and nowhere else. The fleet's own traffic is
+  shared `pace-kv`, presented there and nowhere else. The fleet's own traffic is
   authenticated by machine keys instead (see [Security](#security)): a node proves its
   identity key on every connection to its scheduler, and any other machine presents a
   ticket its own node minted. So there is no fleet password to set.
 
 ## Reference
 
-- [fastcache-compile-node](../tools/fastcache-compile-node.md) — every flag, the
+- [pace-node](../tools/pace-node.md) — every flag, the
   node's cache tier, the cluster, and the fleet dashboard.
 - [Cluster communication](../operations/cluster-communication.md) — one compile
   as the fleet sees it, every connection in one table, and firewall rules.

@@ -22,48 +22,48 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-launcher-env-reference-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-launcher-env-reference.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-launcher-env-reference.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}/launcher-env-reference-selftest")
+set(root "${PACE_SCRATCH_DIR}/launcher-env-reference-selftest")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 set(ran 0)
 
 # A tree carrying only the two files the check reads, at the paths it reads them from.
-function(fastcached_make_tree name header page outVar)
+function(pace_make_tree name header page outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
-    file(MAKE_DIRECTORY "${tree}/src/apps/fastcache-cc")
+    file(MAKE_DIRECTORY "${tree}/src/apps/pace-cc")
     file(MAKE_DIRECTORY "${tree}/docs/tools")
-    file(WRITE "${tree}/src/apps/fastcache-cc/LauncherCli.hpp" "${header}")
-    file(WRITE "${tree}/docs/tools/fastcache-cc.md" "${page}")
+    file(WRITE "${tree}/src/apps/pace-cc/LauncherCli.hpp" "${header}")
+    file(WRITE "${tree}/docs/tools/pace-cc.md" "${page}")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
 
 # `want` is OBJECTED or ACCEPTED. The verdict is read from the OUTPUT, never from the
 # exit status: `message(WARNING)` exits 0 while printing `CMake Warning`, and a check
 # that shells out to another `cmake -P` exits 0 carrying its child's error on stdout.
-function(fastcached_case name header page want)
-    fastcached_make_tree("${name}" "${header}" "${page}" tree)
+function(pace_case name header page want)
+    pace_make_tree("${name}" "${header}" "${page}" tree)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE ignored)
     set(combined "${captured}${capturedErrors}")
 
@@ -92,55 +92,55 @@ endfunction()
 
 set(twoDecls
     "namespace EnvName\n{\n"
-    "    constexpr std::string_view Addr = \"FASTCACHE_ADDR\"\;\n"
-    "    constexpr std::string_view Token = \"FASTCACHE_TOKEN\"\;\n}\n")
+    "    constexpr std::string_view Addr = \"PACE_ADDR\"\;\n"
+    "    constexpr std::string_view Token = \"PACE_TOKEN\"\;\n}\n")
 string(JOIN "" twoDecls ${twoDecls})
 
 set(twoRows
     "| Variable | Meaning | Default |\n|---|---|---|\n"
-    "| `FASTCACHE_ADDR` | where the cache is | none |\n"
-    "| `FASTCACHE_TOKEN` | the credential | unset |\n")
+    "| `PACE_ADDR` | where the cache is | none |\n"
+    "| `PACE_TOKEN` | the credential | unset |\n")
 string(JOIN "" twoRows ${twoRows})
 
-fastcached_case("agree" "${twoDecls}" "${twoRows}" "ACCEPTED")
+pace_case("agree" "${twoDecls}" "${twoRows}" "ACCEPTED")
 
 # Declared and undocumented: the direction #881 is about.
 set(threeDecls "${twoDecls}")
-string(REPLACE "}\n" "    constexpr std::string_view Extra = \"FASTCACHE_EXTRA\"\;\n}\n" threeDecls "${threeDecls}")
-fastcached_case("declared-undocumented" "${threeDecls}" "${twoRows}" "OBJECTED")
+string(REPLACE "}\n" "    constexpr std::string_view Extra = \"PACE_EXTRA\"\;\n}\n" threeDecls "${threeDecls}")
+pace_case("declared-undocumented" "${threeDecls}" "${twoRows}" "OBJECTED")
 
 # Documented and never read: advice that silently does nothing.
-set(threeRows "${twoRows}| `FASTCACHE_GONE` | a name nothing reads | unset |\n")
-fastcached_case("documented-unread" "${twoDecls}" "${threeRows}" "OBJECTED")
+set(threeRows "${twoRows}| `PACE_GONE` | a name nothing reads | unset |\n")
+pace_case("documented-unread" "${twoDecls}" "${threeRows}" "OBJECTED")
 
 # A mention in PROSE is not a row. Without this case the check could match anywhere in
 # the page and would call every variable documented that anybody wrote a sentence about.
-set(proseOnly "${twoRows}\nSet `FASTCACHE_EXTRA` to change behaviour; see above.\n")
-fastcached_case("prose-only" "${threeDecls}" "${proseOnly}" "OBJECTED")
+set(proseOnly "${twoRows}\nSet `PACE_EXTRA` to change behaviour; see above.\n")
+pace_case("prose-only" "${threeDecls}" "${proseOnly}" "OBJECTED")
 
 # The bracket claim in the check's header, asserted rather than assumed. A
 # `file(STRINGS)` reader merges elements across a stray `]`, which is how two of this
 # repository's readers passed over a real violation in silence.
 set(bracketed
     "| Variable | Meaning | Default |\n|---|---|---|\n"
-    "| `FASTCACHE_ADDR` | see [the protocol page](../protocols/compile-cache.md#error-codes) | none |\n"
-    "| `FASTCACHE_TOKEN` | a credential [1] and a stray ] bracket | unset |\n")
+    "| `PACE_ADDR` | see [the protocol page](../protocols/compile-cache.md#error-codes) | none |\n"
+    "| `PACE_TOKEN` | a credential [1] and a stray ] bracket | unset |\n")
 string(JOIN "" bracketed ${bracketed})
-fastcached_case("bracketed" "${twoDecls}" "${bracketed}" "ACCEPTED")
+pace_case("bracketed" "${twoDecls}" "${bracketed}" "ACCEPTED")
 
 # And bracketed AND wrong, so the case above cannot pass by the check having been
 # blinded: brackets must not swallow a violation either.
-set(bracketedWrong "${bracketed}| `FASTCACHE_GONE` | [nothing](x) reads this | unset |\n")
-fastcached_case("bracketed-violation" "${twoDecls}" "${bracketedWrong}" "OBJECTED")
+set(bracketedWrong "${bracketed}| `PACE_GONE` | [nothing](x) reads this | unset |\n")
+pace_case("bracketed-violation" "${twoDecls}" "${bracketedWrong}" "OBJECTED")
 
 # Two empty lists agree perfectly. Both halves, because one guard is not the other.
-fastcached_case("empty-header" "namespace EnvName\n{\n}\n" "${twoRows}" "OBJECTED")
-fastcached_case("empty-page" "${twoDecls}" "no table here at all\n" "OBJECTED")
+pace_case("empty-header" "namespace EnvName\n{\n}\n" "${twoRows}" "OBJECTED")
+pace_case("empty-page" "${twoDecls}" "no table here at all\n" "OBJECTED")
 
 # A declaration-shaped line in a COMMENT is not a declaration. The real header carries
 # several sentences naming these variables.
-set(commentedDecl "${twoDecls}// constexpr std::string_view Ghost = \"FASTCACHE_GHOST\"\;\n")
-fastcached_case("comment-is-not-a-declaration" "${commentedDecl}" "${twoRows}" "ACCEPTED")
+set(commentedDecl "${twoDecls}// constexpr std::string_view Ghost = \"PACE_GHOST\"\;\n")
+pace_case("comment-is-not-a-declaration" "${commentedDecl}" "${twoRows}" "ACCEPTED")
 
 if(failures)
     set(text "")

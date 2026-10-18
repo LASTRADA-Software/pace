@@ -29,7 +29,7 @@
 # ## What it matches
 #
 # Over the file with its comments removed and its newlines kept
-# (`fastcached_strip_comments`), so prose explaining a rule is not read as breaking it and a
+# (`pace_strip_comments`), so prose explaining a rule is not read as breaking it and a
 # header broken across lines is still one header:
 #
 #   * a `for (` whose header reaches TWO `;` before the `)` that closes it -- a range-for
@@ -99,7 +99,7 @@
 # failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-test-loops.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-test-loops.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -107,8 +107,8 @@ cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ endif()
 # is about waits in TESTS. So `loop` widens to all of `src/` (#1452) and they do not.
 #
 # pathspec|rules|what it is
-set(FastCachedTestLoopScope
+set(PaceTestLoopScope
     "src/*_test.cpp|loop spin poll|every Catch2 test source (#1446)"
     "src/tests/*.cpp|loop spin poll|the shared test programs and canaries (#1446)"
     "src/tests/*.hpp|loop spin poll|the shared test helpers (#1446)"
@@ -160,24 +160,24 @@ set(FastCachedTestLoopScope
 # a message about matching no site, which reads as the site having been converted. None of the four
 # fields may contain `|` or `;`, and the text may not contain `[` or `]`: these rows are a
 # CMake list. Checked below rather than left as a comment nothing reads.
-set(FastCachedTestLoopExemptions
+set(PaceTestLoopExemptions
     "loop|src/tests/TsanCanary.cpp|for (|The ThreadSanitizer canary's loops are its race: a change to this file is judged by a RATE over a few hundred runs (scripts/tsan-canary-rate.sh), never by a green run, and rewriting three loops would re-open that measurement for a spelling."
-    "spin|src/FastCache/Protocol/LiveStreamReactors_test.cpp|stopping->load(|Not a wait: a heartbeat coroutine that beats until the case says stop, and whose frame the rig's reactors free when a case ends early."
-    "loop|src/apps/fastcache-cc/ToolchainProbe.cpp|it != end|A recursive_directory_iterator advanced by the error-code overload. A range-based for calls ++it, which THROWS on an unreadable directory instead of setting ec -- and surviving that to report a PARTIAL walk is this loop's whole purpose, so converting it would be a behaviour regression rather than a modernisation."
-    "loop|src/apps/fastcache-cc/ProcessRunner.cpp|char const* cursor = inherited|GetEnvironmentStringsA returns a double-NUL-terminated block of NUL-separated strings with no size anywhere: the terminator IS the bound, so no range can be formed without first walking the block to find its end."
-    "loop|src/apps/fastcache-cc/ProcessRunner.cpp|char** entry = inherited|The POSIX environment array is a NULL-terminated char** with no size. Same reason as the Windows block above, and C++23 has no standard adaptor over a sentinel-terminated C array."
-    "loop|src/apps/fastcache-cli/CliCommand.cpp|index < args.size()|The argv walk, and the one option-parser loop of the three #1452 found that does NOT convert. `ApplyOneOption` advances `index` to consume a value, and FIVE `continue` paths -- end-of-options, a refused option while settled, a Stop flow, an operand after the action settled, and a word alias -- advance nothing in the body, so every one of them depends on the head. A `while` therefore needs five duplicated `++index` statements, which is the copy-pasted increment this project forbids elsewhere, or an RAII scope-exit whose only purpose is to satisfy a loop-shape rule. Both are worse than the `for`. Its two clean siblings DID convert in the same change: Cli/Options.hpp ParseOptionsInto has no `continue` at all, and Config/FileOptions.hpp ClearListsNamedOn had one that inverted into an `if`."
-    "loop|src/apps/fastcache-cli/SocketExchange.cpp|for (|Five deliberate infinite loops reading framed replies off a socket. A for whose condition clause is empty names no sequence, so there is no range to form -- each one ends on a break or a return decided from bytes that have arrived, which is a fact about the wire rather than an index. Spelling them while (true) would satisfy no guideline, since the rule exists to replace hand-rolled index arithmetic and there is none here. The text is the bare keyword because it has to be: the header such a loop presents to this scan is the keyword and two empty clauses, and no field of this table may contain the character those clauses are separated by, so no narrower fragment can be written. That makes this row FILE-WIDE for C-style loops, and a real counting loop added to this file would be silently covered by it -- the same residual the TsanCanary.cpp row carries."
-    "loop|src/apps/fastcache-compile-node/NodeAnnounce.cpp|for (link.BeginRound()|The scheduler dial walk. Its init resets the per-round redirect budget and its condition is absent, so what ends it is a break inside -- an accepted round, an exhausted endpoint list, or the redirect bound that stops two nodes with stale leader memories naming each other forever. The sequence it walks is the endpoint SchedulerLink hands out next, which depends on what the last scheduler answered, so it is not expressible as a view."
-    "loop|src/apps/fastcache-cc/ParallelFor.cpp|index = next.fetch_add(1, std::memory_order_relaxed)|A work-stealing queue over a shared atomic, run by every worker thread. The indices ONE thread sees are whichever the others did not claim, so the sequence is not a property of this loop at all and no view can describe it. Converting it would mean giving each thread a fixed slice, which is a different scheduling decision -- and the wrong one here, since the point is that a slow slice does not hold up the others."
-    "loop|src/apps/fastcache-compile-node/NodeToolchains.cpp|index = next.fetch_add(1)|The toolchain survey's work-stealing walk, and the same fact as ParallelFor.cpp above: the indices this thread sees are the ones no sibling claimed first. A fingerprint probe spawns a compiler, so the durations are wildly uneven and a fixed slice per thread is measurably worse -- which is why the shape is what it is rather than an oversight."
-    "loop|src/FastCache/Cli/UsageDoc.cpp|auto at = out.find(token)|A find-and-replace walk, and it is not merely a scan: the body calls out.replace, so each search runs over a string the previous iteration rewrote. The resume offset is at + value.size() rather than at + token.size() for exactly that reason -- it steps past the REPLACEMENT, so a token whose value contains it does not expand forever. No range over the original text can express a walk whose subject changes underneath it."
-    "loop|src/apps/fastcache-cli/DashboardPanel.cpp|at = note.find(DeltaMark)|The same shape as UsageDoc.cpp above, with the mutation on the other side: the body calls note.remove_prefix, so the view being searched shrinks each iteration and the unqualified find always looks from the start of what is left. A range over the original note would walk bytes this loop has already consumed."
-    "loop|src/FastCache/Platform/LocalAddresses.cpp|auto const* adapter = head|GetAdaptersAddresses answers with a C linked list of adapters, each holding a C linked list of unicast addresses: no size and no iterator at either level, so each head's Next step IS the sequence and nullptr its end. No standard view walks a nullptr-terminated list -- the gap the ProcessRunner.cpp rows record -- and a `while` would move a constant step from the head to a foot that the next `continue` anybody writes skips."
-    "loop|src/FastCache/Platform/LocalAddresses.cpp|auto const* unicast = adapter->FirstUnicastAddress|The inner half of the adapter walk the row above describes: one adapter's unicast addresses, the same nullptr-terminated Next list, exempt for the same reason."
-    "loop|src/FastCache/Platform/LocalAddresses.cpp|auto const* entry = head|getifaddrs answers with a C linked list threaded through ifa_next -- the POSIX twin of the adapter walk above, and exempt for the same reason: the head's step is the sequence, and no standard view walks a nullptr-terminated list."
-    "loop|src/apps/fastcache-compile-node/ScratchClaim.cpp|auto iterator = std::filesystem::directory_iterator|A directory_iterator advanced by the error-code overload, as ToolchainProbe.cpp's is and for the same reason: a range-based for calls operator++, which THROWS where increment(ec) sets ec, and emptying a claimed scratch root is exactly where an entry vanishing under the walk must stop it quietly rather than end the node."
-    "loop|src/apps/fastcached/main.cpp|!ec && entry != end|The same error-code directory_iterator walk, over the shard files a migration converts, and the comment above it says why: a range-based for advances through the throwing operator++, so an entry vanishing mid-scan or an unreadable subdirectory would terminate the process instead of reporting that the directory cannot be listed."
+    "spin|src/Pace/Protocol/LiveStreamReactors_test.cpp|stopping->load(|Not a wait: a heartbeat coroutine that beats until the case says stop, and whose frame the rig's reactors free when a case ends early."
+    "loop|src/apps/pace-cc/ToolchainProbe.cpp|it != end|A recursive_directory_iterator advanced by the error-code overload. A range-based for calls ++it, which THROWS on an unreadable directory instead of setting ec -- and surviving that to report a PARTIAL walk is this loop's whole purpose, so converting it would be a behaviour regression rather than a modernisation."
+    "loop|src/apps/pace-cc/ProcessRunner.cpp|char const* cursor = inherited|GetEnvironmentStringsA returns a double-NUL-terminated block of NUL-separated strings with no size anywhere: the terminator IS the bound, so no range can be formed without first walking the block to find its end."
+    "loop|src/apps/pace-cc/ProcessRunner.cpp|char** entry = inherited|The POSIX environment array is a NULL-terminated char** with no size. Same reason as the Windows block above, and C++23 has no standard adaptor over a sentinel-terminated C array."
+    "loop|src/apps/pacectl/CliCommand.cpp|index < args.size()|The argv walk, and the one option-parser loop of the three #1452 found that does NOT convert. `ApplyOneOption` advances `index` to consume a value, and FIVE `continue` paths -- end-of-options, a refused option while settled, a Stop flow, an operand after the action settled, and a word alias -- advance nothing in the body, so every one of them depends on the head. A `while` therefore needs five duplicated `++index` statements, which is the copy-pasted increment this project forbids elsewhere, or an RAII scope-exit whose only purpose is to satisfy a loop-shape rule. Both are worse than the `for`. Its two clean siblings DID convert in the same change: Cli/Options.hpp ParseOptionsInto has no `continue` at all, and Config/FileOptions.hpp ClearListsNamedOn had one that inverted into an `if`."
+    "loop|src/apps/pacectl/SocketExchange.cpp|for (|Five deliberate infinite loops reading framed replies off a socket. A for whose condition clause is empty names no sequence, so there is no range to form -- each one ends on a break or a return decided from bytes that have arrived, which is a fact about the wire rather than an index. Spelling them while (true) would satisfy no guideline, since the rule exists to replace hand-rolled index arithmetic and there is none here. The text is the bare keyword because it has to be: the header such a loop presents to this scan is the keyword and two empty clauses, and no field of this table may contain the character those clauses are separated by, so no narrower fragment can be written. That makes this row FILE-WIDE for C-style loops, and a real counting loop added to this file would be silently covered by it -- the same residual the TsanCanary.cpp row carries."
+    "loop|src/apps/pace-node/NodeAnnounce.cpp|for (link.BeginRound()|The scheduler dial walk. Its init resets the per-round redirect budget and its condition is absent, so what ends it is a break inside -- an accepted round, an exhausted endpoint list, or the redirect bound that stops two nodes with stale leader memories naming each other forever. The sequence it walks is the endpoint SchedulerLink hands out next, which depends on what the last scheduler answered, so it is not expressible as a view."
+    "loop|src/apps/pace-cc/ParallelFor.cpp|index = next.fetch_add(1, std::memory_order_relaxed)|A work-stealing queue over a shared atomic, run by every worker thread. The indices ONE thread sees are whichever the others did not claim, so the sequence is not a property of this loop at all and no view can describe it. Converting it would mean giving each thread a fixed slice, which is a different scheduling decision -- and the wrong one here, since the point is that a slow slice does not hold up the others."
+    "loop|src/apps/pace-node/NodeToolchains.cpp|index = next.fetch_add(1)|The toolchain survey's work-stealing walk, and the same fact as ParallelFor.cpp above: the indices this thread sees are the ones no sibling claimed first. A fingerprint probe spawns a compiler, so the durations are wildly uneven and a fixed slice per thread is measurably worse -- which is why the shape is what it is rather than an oversight."
+    "loop|src/Pace/Cli/UsageDoc.cpp|auto at = out.find(token)|A find-and-replace walk, and it is not merely a scan: the body calls out.replace, so each search runs over a string the previous iteration rewrote. The resume offset is at + value.size() rather than at + token.size() for exactly that reason -- it steps past the REPLACEMENT, so a token whose value contains it does not expand forever. No range over the original text can express a walk whose subject changes underneath it."
+    "loop|src/apps/pacectl/DashboardPanel.cpp|at = note.find(DeltaMark)|The same shape as UsageDoc.cpp above, with the mutation on the other side: the body calls note.remove_prefix, so the view being searched shrinks each iteration and the unqualified find always looks from the start of what is left. A range over the original note would walk bytes this loop has already consumed."
+    "loop|src/Pace/Platform/LocalAddresses.cpp|auto const* adapter = head|GetAdaptersAddresses answers with a C linked list of adapters, each holding a C linked list of unicast addresses: no size and no iterator at either level, so each head's Next step IS the sequence and nullptr its end. No standard view walks a nullptr-terminated list -- the gap the ProcessRunner.cpp rows record -- and a `while` would move a constant step from the head to a foot that the next `continue` anybody writes skips."
+    "loop|src/Pace/Platform/LocalAddresses.cpp|auto const* unicast = adapter->FirstUnicastAddress|The inner half of the adapter walk the row above describes: one adapter's unicast addresses, the same nullptr-terminated Next list, exempt for the same reason."
+    "loop|src/Pace/Platform/LocalAddresses.cpp|auto const* entry = head|getifaddrs answers with a C linked list threaded through ifa_next -- the POSIX twin of the adapter walk above, and exempt for the same reason: the head's step is the sequence, and no standard view walks a nullptr-terminated list."
+    "loop|src/apps/pace-node/ScratchClaim.cpp|auto iterator = std::filesystem::directory_iterator|A directory_iterator advanced by the error-code overload, as ToolchainProbe.cpp's is and for the same reason: a range-based for calls operator++, which THROWS where increment(ec) sets ec, and emptying a claimed scratch root is exactly where an entry vanishing under the walk must stop it quietly rather than end the node."
+    "loop|src/apps/pace-kv/main.cpp|!ec && entry != end|The same error-code directory_iterator walk, over the shard files a migration converts, and the comment above it says why: a range-based for advances through the throwing operator++, so an entry vanishing mid-scan or an unreadable subdirectory would terminate the process instead of reporting that the directory cannot be listed."
 )
 
 # One element of a loop header's clause: an ordinary character, a brace group (a lambda body,
@@ -211,7 +211,7 @@ set(pollPatternAnchored
 # ---------------------------------------------------------------------------
 # Exemption rows, checked for shape before anything is decided from them.
 set(exemptionIndex 0)
-foreach(row IN LISTS FastCachedTestLoopExemptions)
+foreach(row IN LISTS PaceTestLoopExemptions)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 4)
@@ -264,7 +264,7 @@ endif()
 set(useGit FALSE)
 if(GIT_EXECUTABLE)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${FASTCACHED_SOURCE_DIR}" rev-parse --show-prefix
+        COMMAND "${GIT_EXECUTABLE}" -C "${PACE_SOURCE_DIR}" rev-parse --show-prefix
         OUTPUT_VARIABLE prefixInWorkTree ERROR_QUIET RESULT_VARIABLE gitStatus
         OUTPUT_STRIP_TRAILING_WHITESPACE)
     if(gitStatus EQUAL 0 AND prefixInWorkTree STREQUAL "")
@@ -287,28 +287,28 @@ message(STATUS "test-loops: mode: ${scanMode}")
 # synthetic tree. That is a seam a self-test takes and CI does not, so the resolved path is part
 # of this check's OUTPUT on every run -- a guard whose self-test exercised one mode while CI
 # exercised another has already shipped in this tree and passed.
-if(NOT DEFINED FASTCACHED_TEST_LOOPS_BACKLOG)
-    set(FASTCACHED_TEST_LOOPS_BACKLOG "${CMAKE_CURRENT_LIST_DIR}/check-test-loops-backlog.txt")
+if(NOT DEFINED PACE_TEST_LOOPS_BACKLOG)
+    set(PACE_TEST_LOOPS_BACKLOG "${CMAKE_CURRENT_LIST_DIR}/check-test-loops-backlog.txt")
 endif()
-if(NOT EXISTS "${FASTCACHED_TEST_LOOPS_BACKLOG}")
+if(NOT EXISTS "${PACE_TEST_LOOPS_BACKLOG}")
     message("")
-    message("  The backlog file is not there: ${FASTCACHED_TEST_LOOPS_BACKLOG}")
+    message("  The backlog file is not there: ${PACE_TEST_LOOPS_BACKLOG}")
     message("")
     message("Refused by name rather than read as an empty backlog. Empty would refuse every")
     message("un-converted site in the tree -- loudly, and with a diagnosis that sends whoever")
     message("meets it to the loops rather than to the missing file.")
     message(FATAL_ERROR "test-loops: the backlog file cannot be read")
 endif()
-file(STRINGS "${FASTCACHED_TEST_LOOPS_BACKLOG}" backlogLines)
-set(FastCachedTestLoopBacklog "")
+file(STRINGS "${PACE_TEST_LOOPS_BACKLOG}" backlogLines)
+set(PaceTestLoopBacklog "")
 foreach(backlogLine IN LISTS backlogLines)
     string(STRIP "${backlogLine}" backlogLine)
     if(backlogLine STREQUAL "" OR backlogLine MATCHES "^#")
         continue()
     endif()
-    list(APPEND FastCachedTestLoopBacklog "${backlogLine}")
+    list(APPEND PaceTestLoopBacklog "${backlogLine}")
 endforeach()
-get_filename_component(backlogShown "${FASTCACHED_TEST_LOOPS_BACKLOG}" NAME)
+get_filename_component(backlogShown "${PACE_TEST_LOOPS_BACKLOG}" NAME)
 # WHICH backlog, on every run and before any row is judged: the path is overridable so
 # the self-test can stage one, and a run judged against the wrong table would otherwise
 # look exactly like a run judged against the right one.
@@ -320,12 +320,12 @@ message(STATUS "test-loops: backlog file: ${backlogShown}")
 set(backlogIndex 0)
 set(backlogIssues "")
 set(backlogSeen "")
-foreach(row IN LISTS FastCachedTestLoopBacklog)
+foreach(row IN LISTS PaceTestLoopBacklog)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 4)
         message("")
-        message("  FastCachedTestLoopBacklog row has ${fieldCount} field(s), not 4:")
+        message("  PaceTestLoopBacklog row has ${fieldCount} field(s), not 4:")
         message("    ${row}")
         message("")
         message("The shape is rule|file|count|issue. A row this reader cannot split would be read")
@@ -356,7 +356,7 @@ foreach(row IN LISTS FastCachedTestLoopBacklog)
     # in every clause and sends whoever reads it looking for a conversion that never happened.
     if("${backlogRule}/${backlogFile}" IN_LIST backlogSeen)
         message("")
-        message("  FastCachedTestLoopBacklog has two rows for ${backlogRule} in ${backlogFile}:")
+        message("  PaceTestLoopBacklog has two rows for ${backlogRule} in ${backlogFile}:")
         message("    ${row}")
         message("")
         message("One row per rule per file. With two, the scan matches the first and the second")
@@ -380,7 +380,7 @@ set(sourceFiles "")
 set(ruleFiles_loop "")
 set(ruleFiles_spin "")
 set(ruleFiles_poll "")
-foreach(scopeRow IN LISTS FastCachedTestLoopScope)
+foreach(scopeRow IN LISTS PaceTestLoopScope)
     string(REPLACE "|" ";" scopeFields "${scopeRow}")
     list(LENGTH scopeFields scopeFieldCount)
     if(scopeFieldCount LESS 3)
@@ -407,7 +407,7 @@ foreach(scopeRow IN LISTS FastCachedTestLoopScope)
     set(rowFiles "")
     if(useGit)
         execute_process(
-            COMMAND "${GIT_EXECUTABLE}" -C "${FASTCACHED_SOURCE_DIR}" ls-files -- "${pathspec}"
+            COMMAND "${GIT_EXECUTABLE}" -C "${PACE_SOURCE_DIR}" ls-files -- "${pathspec}"
             OUTPUT_VARIABLE tracked RESULT_VARIABLE lsStatus OUTPUT_STRIP_TRAILING_WHITESPACE)
         if(NOT lsStatus EQUAL 0)
             message(FATAL_ERROR "test-loops: `git ls-files -- ${pathspec}` failed (${lsStatus}), so the scope cannot be read")
@@ -416,7 +416,7 @@ foreach(scopeRow IN LISTS FastCachedTestLoopScope)
             string(REPLACE "\n" ";" rowFiles "${tracked}")
         endif()
     else()
-        file(GLOB_RECURSE rowFiles RELATIVE "${FASTCACHED_SOURCE_DIR}" "${FASTCACHED_SOURCE_DIR}/${pathspec}")
+        file(GLOB_RECURSE rowFiles RELATIVE "${PACE_SOURCE_DIR}" "${PACE_SOURCE_DIR}/${pathspec}")
     endif()
     if(NOT rowFiles)
         message("")
@@ -459,10 +459,10 @@ set(exemptedCount 0)
 set(staleBacklog "")
 
 foreach(sourceFile IN LISTS sourceFiles)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${sourceFile}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${sourceFile}")
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${sourceFile}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${sourceFile}" wholeFile)
     # Whole-file filters first: the walk below is O(n^2), and a file with no `for` and no
     # `while` has nothing to say.
     string(FIND "${wholeFile}" "for" forAt)
@@ -470,7 +470,7 @@ foreach(sourceFile IN LISTS sourceFiles)
     if(forAt EQUAL -1 AND whileAt EQUAL -1)
         continue()
     endif()
-    fastcached_strip_comments("${wholeFile}" code)
+    pace_strip_comments("${wholeFile}" code)
 
     # Every `for (` at all, for the matched-nothing guard: this tree's tests are full of
     # range-fors, so a scan that sees none is not reading what it thinks it is.
@@ -611,7 +611,7 @@ foreach(sourceFile IN LISTS sourceFiles)
             string(APPEND violations "${ruleSiteText}")
             if(allowed GREATER 0)
                 string(APPEND violations
-                    "\n      ^ ${ruleSites} ${rule} site(s) here, and FastCachedTestLoopBacklog records ${allowed} for ${allowedIssue}")
+                    "\n      ^ ${ruleSites} ${rule} site(s) here, and PaceTestLoopBacklog records ${allowed} for ${allowedIssue}")
             endif()
         elseif(ruleSites LESS allowed)
             math(EXPR fixed "${allowed} - ${ruleSites}")
@@ -675,8 +675,8 @@ if(violationCount GREATER 0)
     message("it parks, or `vendor/`. The `loop` rule reaches every C++ source under src/ (#1452);")
     message("`spin` and `poll` are test-only, because the wait they ask for is a test helper.")
     message("")
-    message("A site that must STAY takes a row in FastCachedTestLoopExemptions, with its reason.")
-    message("A site nobody has decided about yet belongs in FastCachedTestLoopBacklog with the")
+    message("A site that must STAY takes a row in PaceTestLoopExemptions, with its reason.")
+    message("A site nobody has decided about yet belongs in PaceTestLoopBacklog with the")
     message("issue that will decide it -- and if the count for its file is already there, then")
     message("this is a NEW site and the answer is to convert it, not to raise the number. Both")
     message("tables are in ${CMAKE_CURRENT_LIST_FILE}.")
@@ -689,7 +689,7 @@ endif()
 
 if(NOT staleBacklog STREQUAL "")
     message("")
-    message("FastCachedTestLoopBacklog no longer describes the tree:${staleBacklog}")
+    message("PaceTestLoopBacklog no longer describes the tree:${staleBacklog}")
     message("")
     message("This is the ratchet, and it only turns one way. A converted site comes OFF the")
     message("backlog in the same change that converts it, or the number it left behind is room")
@@ -699,7 +699,7 @@ endif()
 
 if(NOT staleRows STREQUAL "")
     message("")
-    message("FastCachedTestLoopExemptions has STALE row(s) matching no site:${staleRows}")
+    message("PaceTestLoopExemptions has STALE row(s) matching no site:${staleRows}")
     message("")
     message("The site was converted, moved or deleted -- OR the text names something outside the header as extracted, which ends at the SECOND `;`, so an increment clause cannot be matched. Check that before concluding the site is gone. Remove the row -- a standing exemption")
     message("for a site that is gone would wave the next one of that text through silently.")

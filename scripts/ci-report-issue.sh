@@ -47,7 +47,7 @@
 #
 # `.github/workflows/build.yml`'s clang-tidy job carries an inline copy of this
 # logic for the master-sweep report it opens. Folding it into this script is
-# [#717](https://github.com/LASTRADA-Software/fastcached/issues/717) rather than
+# [#717](https://github.com/LASTRADA-Software/pace/issues/717) rather than
 # part of #684: that step lives inside a REQUIRED context, it is reachable only
 # on a master push that has already failed, and editing it to remove a
 # duplication would put a required job's YAML at risk for no gain this change
@@ -114,20 +114,20 @@ if [[ "$seen" -ge "$limit" ]]; then
 fi
 
 if [[ -n "$existing" ]]; then
-    # `FASTCACHED_REPORT_ONLY_IF_NEW` -- report the TRANSITION, not the state.
+    # `PACE_REPORT_ONLY_IF_NEW` -- report the TRANSITION, not the state.
     #
     # A merge-group failure is a one-shot event, so a repeat is a new fact and a
     # comment is right. A master push that stays broken fails on EVERY subsequent
     # push, so the same comment would land indefinitely on one issue and say
     # nothing anybody did not know -- which is the objection
-    # [#774](https://github.com/LASTRADA-Software/fastcached/issues/774) raises
+    # [#774](https://github.com/LASTRADA-Software/pace/issues/774) raises
     # against reporting pushes at all. Answered here rather than by not reporting.
     #
     # It is per CALLER and not a property of this script, because the two callers
     # genuinely differ: whoever adds a third has to decide, and there is no default
     # that is right for both.
-    if [[ -n "${FASTCACHED_REPORT_ONLY_IF_NEW:-}" ]]; then
-        echo "report #${existing} is already open and FASTCACHED_REPORT_ONLY_IF_NEW is set; not commenting (searched ${seen} open issues)"
+    if [[ -n "${PACE_REPORT_ONLY_IF_NEW:-}" ]]; then
+        echo "report #${existing} is already open and PACE_REPORT_ONLY_IF_NEW is set; not commenting (searched ${seen} open issues)"
         exit 0
     fi
     echo "updating existing report #${existing} (searched ${seen} open issues)"

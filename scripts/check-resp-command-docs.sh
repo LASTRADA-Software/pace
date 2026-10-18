@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every RESP verb fastcached serves is documented, and every verb the docs claim is
+# Every RESP verb pace-kv serves is documented, and every verb the docs claim is
 # served exists.
 #
 # ## Why this exists
@@ -174,7 +174,7 @@ DocStatedCount() {
 # @param 1 source directory
 Verify() {
     local dir="$1"
-    local impl="${dir}/src/FastCache/Protocol/RedisResp.cpp"
+    local impl="${dir}/src/Pace/Protocol/RedisResp.cpp"
     local doc="${dir}/docs/protocols/redis-resp.md"
     local tableFile docFile verb stated tableCount docCount
 
@@ -263,8 +263,8 @@ Verify() {
 
 StageTree() {
     local tree="$1" impl="$2" doc="$3"
-    mkdir -p "${tree}/src/FastCache/Protocol" "${tree}/docs/protocols"
-    printf '%s' "$impl" > "${tree}/src/FastCache/Protocol/RedisResp.cpp"
+    mkdir -p "${tree}/src/Pace/Protocol" "${tree}/docs/protocols"
+    printf '%s' "$impl" > "${tree}/src/Pace/Protocol/RedisResp.cpp"
     printf '%s' "$doc" > "${tree}/docs/protocols/redis-resp.md"
 }
 
@@ -290,7 +290,7 @@ GoodDoc() {
 # Redis RESP
 
 The authoritative list is `CommandTable` in
-`src/FastCache/Protocol/RedisResp.cpp` (**3 CommandTable rows**) plus `AUTH`,
+`src/Pace/Protocol/RedisResp.cpp` (**3 CommandTable rows**) plus `AUTH`,
 `QUIT` and `RESET`.
 
 ## Supported commands

@@ -1,0 +1,590 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "SocketExchange.hpp"
+
+#include <Pace/Core/ConnectCeiling.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
+
+#include <array>
+#include <charconv>
+#include <format>
+#include <utility>
+
+#include <core/async/AsTask.hpp>
+#include <core/async/SyncRun.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/TcpClient.hpp>
+
+namespace Pace::Cli
+{
+
+namespace
+{
+    /// How much to ask the socket for at a time.
+    constexpr std::size_t ReadChunkBytes = 16U * 1024U;
+
+    /// One read from a socket, as a task `core::async::syncRun` can drive.
+    ///
+    /// @param socket The socket. A pointer, never a reference: a coroutine parameter
+    ///        that is a reference dangles, because the frame outlives the call
+    ///        expression that made it.
+    /// @param buffer Destination. Must be non-empty and must outlive the awaitable.
+    /// @return Bytes read, `0` for EOF, or the failure.
+    [[nodiscard]] core::async::Task<core::net::IoResult> ReadSome(core::net::ISocket* socket, std::span<std::byte> buffer)
+    {
+        co_return co_await socket->read(buffer);
+    }
+
+    /// Convert bytes to a string without reinterpreting them as text.
+    /// @param bytes The bytes.
+    /// @return The same bytes in a `std::string`.
+    [[nodiscard]] std::string AsChars(std::span<std::byte const> bytes)
+    {
+        std::string out;
+        out.reserve(bytes.size());
+        for (auto const byte: bytes)
+            out.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
+        return out;
+    }
+
+    /// Encode a string as bytes for the wire.
+    /// @param text The text.
+    /// @return The same characters as bytes.
+    [[nodiscard]] std::vector<std::byte> AsBytes(std::string_view text)
+    {
+        std::vector<std::byte> out;
+        out.reserve(text.size());
+        for (auto const ch: text)
+            out.push_back(static_cast<std::byte>(static_cast<unsigned char>(ch)));
+        return out;
+    }
+
+    /// What a failed read says, in the words of what was being read.
+    struct ReadWords
+    {
+        std::string_view failed;        ///< The connection failed mid-read; the transport's context follows.
+        std::string_view closedBetween; ///< EOF with nothing pending: the peer finished between two frames.
+        std::string_view closedWithin;  ///< EOF with part of a frame pending: a truncation.
+    };
+
+    /// An exchange's answer: every RESP, memcached and one-reply `0xFC` read.
+    constexpr auto ReplyWords = ReadWords { .failed = "the connection failed while reading the reply",
+                                            .closedBetween = "the server closed the connection without answering",
+                                            .closedWithin = "the server closed the connection part-way through a reply" };
+
+    /// One frame of a subscription (#1399): it has no reply, and pushes came before whatever ended it.
+    constexpr auto StreamWords = ReadWords { .failed = "the stream was lost",
+                                             .closedBetween = "the server closed the stream",
+                                             .closedWithin = "the server closed the stream part-way through a frame" };
+
+    /// Read one chunk from @p socket and append it to @p pending.
+    ///
+    /// **The EOF rule lives here and nowhere else.** Both wires' read loops need it and
+    /// it is the subtle part: EOF means *this peer has finished sending*, which is a
+    /// complete statement when a reply was already parsed and a truncation when one was
+    /// not. The two sentences are separate because they are separate problems -- a
+    /// server that closes without answering is usually an auth gate or a wrong port,
+    /// one that closes mid-reply is a broken connection -- and a second copy of that
+    /// distinction is a second thing to get wrong.
+    ///
+    /// The chunk is appended straight from the read buffer, with no intermediate string, and the
+    /// read buffer is wiped once it has been: a `0xFC` reply can be a minted ticket.
+    ///
+    /// @param socket The connected socket.
+    /// @param pending The buffer to append to; its emptiness is what the EOF arms read.
+    /// @param words What the read is of, as its failure says it.
+    /// @return Nothing on success, or why the read did not happen.
+    template <typename Buffer>
+    [[nodiscard]] std::expected<void, ExchangeError> FillMore(core::net::ISocket* socket,
+                                                              Buffer& pending,
+                                                              ReadWords const& words)
+    {
+        std::array<std::byte, ReadChunkBytes> chunk {};
+        auto const got = core::async::syncRun(ReadSome(socket, chunk));
+        if (!got.has_value())
+            return std::unexpected(ExchangeError { .kind = ExchangeFailure::Transport,
+                                                   .detail = std::format("{} ({})", words.failed, got.error().context) });
+        if (*got == 0)
+            return std::unexpected(
+                ExchangeError { .kind = ExchangeFailure::Transport,
+                                .detail = std::string { pending.empty() ? words.closedBetween : words.closedWithin } });
+        auto const* const first = reinterpret_cast<char const*>(chunk.data());
+        pending.insert(pending.end(), first, first + *got);
+        SecureZero(chunk.data(), *got);
+        return {};
+    }
+
+    /// Dial and hand back the socket.
+    /// @param endpoint Where.
+    /// @param timeouts How long.
+    /// @return The socket, or why there is none.
+    [[nodiscard]] std::expected<std::unique_ptr<core::net::ISocket>, ExchangeError> Dial(Endpoint const& endpoint,
+                                                                                         DialTimeouts timeouts)
+    {
+        return DialTcp(endpoint, timeouts);
+    }
+
+    /// Why a mint produced no ticket, and what the line adds to the fixed reason.
+    struct MintRefusal
+    {
+        Cc::MintFailure failure; ///< Which way it failed.
+        std::string detail;      ///< The source, and the node's own words.
+    };
+
+    /// Mint a ticket naming @p audience from this machine's node.
+    ///
+    /// Connecting to it is capped at `Cc::LoopbackConnectBound`, whatever `--connect-timeout` says
+    /// (#1669): the source is a loopback literal (`Cc::TicketSourceFor`), and on Windows a connect to
+    /// a closed loopback port is refused only after ~2 s, so a machine with no node would otherwise
+    /// wait that out on every exchange with another machine. The reads keep `timeouts.io`: a node
+    /// that accepted may still be busy.
+    /// @param audience The endpoint the ticket is for, as `EndpointText` spells it.
+    /// @param mintFrom `--mint-from`, or unset for @p audience's port.
+    /// @param timeouts How long, as configured; the connect is capped here.
+    /// @param dial How the node is reached.
+    /// @return The ticket, held where it is wiped on release, or why there is none.
+    [[nodiscard]] std::expected<SecureString, MintRefusal> MintTicket(std::string_view audience,
+                                                                      Endpoint const& mintFrom,
+                                                                      DialTimeouts timeouts,
+                                                                      SocketDial const& dial)
+    {
+        // `TicketSourceFor` is the launcher's rule and not a copy of it: a loopback literal at the
+        // port, never a name a resolver could send anywhere.
+        auto const source = Cc::TicketSourceFor(mintFrom.Configured() ? EndpointText(mintFrom) : std::string { audience });
+        auto const parsed = source.has_value() ? ParseDialEndpoint(*source) : std::nullopt;
+        if (!parsed.has_value())
+            return std::unexpected(
+                MintRefusal { .failure = Cc::MintFailure::NoSource, .detail = std::format("{} names no port", audience) });
+        auto const at = Endpoint { .host = parsed->first, .port = parsed->second };
+
+        // Presenting nothing: the mint is admitted as this machine, by the connection, and a loopback
+        // audience is one `ChooseCredential` answers with nothing -- so this cannot recurse.
+        auto const mintTimeouts =
+            DialTimeouts { .connect = ConnectAtMost(timeouts.connect, Cc::LoopbackConnectBound), .io = timeouts.io };
+        auto minter = NodeExchange::Open(at, mintTimeouts, NodeCredentials {}, dial);
+        if (!minter.has_value())
+            return std::unexpected(MintRefusal { .failure = Cc::MintFailure::Unreachable,
+                                                 .detail = std::format("at {}: {}", *source, minter.error().detail) });
+        auto reply = (*minter)->Send(CompileCacheWire::EncodeMintTicketRequest(audience));
+        if (!reply.has_value())
+            return std::unexpected(MintRefusal { .failure = Cc::MintFailure::Unreachable,
+                                                 .detail = std::format("at {}: {}", *source, reply.error().detail) });
+        if (reply->status != CompileCacheWire::Status::Ok)
+            return std::unexpected(MintRefusal { .failure = Cc::MintFailure::Refused,
+                                                 .detail = ExplainRefusal("mint-ticket", *source, *reply) });
+        if (reply->payload.empty())
+            return std::unexpected(
+                MintRefusal { .failure = Cc::MintFailure::NoTicket, .detail = std::format("at {}", *source) });
+
+        // Named for the credential-container scan's `machineTicket` row, and its type spelled out:
+        // the scan reads the type written before the name, so `auto` would hide it.
+        SecureString machineTicket { CompileCacheWire::AsStringView(reply->payload) };
+        // Where the ticket has been on its way here, and what became of each: the read chunk is
+        // wiped by `FillMore` once appended; the connection's `_pending` zeroes the consumed frame
+        // and frees through a wiping allocator; and the reply's payload, which `DecodeNodeReply`
+        // copied it into, is wiped here before it is freed. So the one copy left is the one wiped
+        // on release. What this process cannot reach is the kernel's socket buffer.
+        SecureZero(reply->payload.data(), reply->payload.size());
+        return machineTicket;
+    }
+} // namespace
+
+std::expected<std::unique_ptr<core::net::ISocket>, ExchangeError> DialTcp(Endpoint const& endpoint, DialTimeouts timeouts)
+{
+    auto socket = core::async::syncRun(core::net::connectTcp(endpoint.host, endpoint.port, timeouts.connect, timeouts.io));
+    if (!socket.has_value())
+        return std::unexpected(ExchangeError {
+            .kind = ExchangeFailure::Unreachable,
+            .detail = std::format("cannot reach {}:{} ({})", endpoint.host, endpoint.port, socket.error().context) });
+    return std::move(*socket);
+}
+
+SocketExchange::SocketExchange(std::unique_ptr<core::net::ISocket> socket, ParseLimits limits) noexcept:
+    _socket { std::move(socket) },
+    _limits { limits }
+{
+}
+
+SocketExchange::~SocketExchange()
+{
+    if (_socket == nullptr)
+        return;
+    // A courtesy, and only that: the server frees the connection on EOF regardless.
+    // Its reply is deliberately not read -- there is nothing to do with it, and
+    // waiting for it would make closing able to block.
+    auto const quit = std::vector<std::string> { "QUIT" };
+    (void) core::async::syncRun(core::net::sendAll(_socket.get(), EncodeCommand(quit)));
+    _socket->close();
+}
+
+std::expected<std::unique_ptr<SocketExchange>, ExchangeError> SocketExchange::Open(Endpoint const& endpoint,
+                                                                                   DialTimeouts timeouts,
+                                                                                   Credential const& credential,
+                                                                                   ParseLimits const& limits)
+{
+    auto socket = Dial(endpoint, timeouts);
+    if (!socket.has_value())
+        return std::unexpected(socket.error());
+
+    auto exchange = std::unique_ptr<SocketExchange> { new SocketExchange { std::move(*socket), limits } };
+    if (!credential.Configured())
+        return exchange;
+
+    auto argv = std::vector<std::string> { "AUTH" };
+    if (!credential.username.empty())
+        argv.push_back(credential.username);
+    // The one plain copy the RESP wire needs: `AUTH` is encoded from strings (#1578).
+    argv.emplace_back(credential.secret.View());
+
+    auto const reply = exchange->Call(argv);
+    if (!reply.has_value())
+        return std::unexpected(reply.error());
+
+    if (IsError(*reply))
+    {
+        auto const code = ErrorCodeWord(reply->text);
+        if (code == ErrorCode::WrongPass)
+            return std::unexpected(
+                ExchangeError { .kind = ExchangeFailure::Transport,
+                                .detail = std::format("the server rejected the credential ({})", reply->text) });
+        // Not about the credential: this server has no password set. Proceed
+        // unauthenticated and say so, rather than refusing a command the server
+        // would have answered.
+        exchange->_advisories.push_back(
+            std::format("a credential was configured and this server does not require one ({})", reply->text));
+    }
+    return exchange;
+}
+
+std::span<std::string const> SocketExchange::Advisories() const noexcept
+{
+    return _advisories;
+}
+
+std::expected<RespValue, ExchangeError> SocketExchange::Call(std::span<std::string const> argv)
+{
+    if (!core::async::syncRun(core::net::sendAll(_socket.get(), EncodeCommand(argv))))
+        return std::unexpected(ExchangeError { .kind = ExchangeFailure::Transport,
+                                               .detail = "the connection failed while sending the command" });
+    return ReadReply();
+}
+
+std::expected<RespValue, ExchangeError> SocketExchange::ReadReply()
+{
+    for (;;)
+    {
+        auto parsed = ParseReply(_pending, _limits);
+        switch (parsed.state)
+        {
+            case ParseState::Complete:
+                _pending.erase(0, parsed.consumed);
+                return std::move(parsed.value);
+            case ParseState::Malformed:
+                return std::unexpected(
+                    ExchangeError { .kind = ExchangeFailure::Malformed, .detail = std::move(parsed.diagnostic) });
+            case ParseState::Incomplete:
+            case ParseState::Last:
+                break;
+        }
+
+        if (auto const filled = FillMore(_socket.get(), _pending, ReplyWords); !filled.has_value())
+            return std::unexpected(filled.error());
+    }
+}
+
+MemcachedExchange::MemcachedExchange(std::unique_ptr<core::net::ISocket> socket, McParseLimits limits) noexcept:
+    _socket { std::move(socket) },
+    _limits { limits }
+{
+}
+
+MemcachedExchange::~MemcachedExchange()
+{
+    if (_socket == nullptr)
+        return;
+    // `quit` is one of the two verbs this surface answers before authentication, so
+    // this courtesy works against a password-protected daemon as well. Its reply is
+    // not read, for the reason `~SocketExchange` gives: there is nothing to do with
+    // one, and waiting would make closing able to block.
+    (void) core::async::syncRun(core::net::sendAll(_socket.get(), AsBytes(EncodeMemcachedCommand("quit", {}))));
+    _socket->close();
+}
+
+std::expected<std::unique_ptr<MemcachedExchange>, ExchangeError> MemcachedExchange::Open(Endpoint const& endpoint,
+                                                                                         DialTimeouts timeouts,
+                                                                                         McParseLimits const& limits)
+{
+    auto socket = Dial(endpoint, timeouts);
+    if (!socket.has_value())
+        return std::unexpected(socket.error());
+    return std::unique_ptr<MemcachedExchange> { new MemcachedExchange { std::move(*socket), limits } };
+}
+
+std::expected<McReply, ExchangeError> MemcachedExchange::Send(std::string_view request)
+{
+    if (!core::async::syncRun(core::net::sendAll(_socket.get(), AsBytes(request))))
+        return std::unexpected(ExchangeError { .kind = ExchangeFailure::Transport,
+                                               .detail = "the connection failed while sending the command" });
+
+    for (;;)
+    {
+        auto parsed = ParseMemcachedReply(_pending, _limits);
+        switch (parsed.state)
+        {
+            case McParseState::Complete:
+                _pending.erase(0, parsed.consumed);
+                return std::move(parsed.reply);
+            case McParseState::Malformed:
+                return std::unexpected(
+                    ExchangeError { .kind = ExchangeFailure::Malformed, .detail = std::move(parsed.diagnostic) });
+            case McParseState::Incomplete:
+            case McParseState::Last:
+                break;
+        }
+
+        if (auto const filled = FillMore(_socket.get(), _pending, ReplyWords); !filled.has_value())
+            return std::unexpected(filled.error());
+    }
+}
+
+NodeExchange::NodeExchange(std::unique_ptr<core::net::ISocket> socket, std::string endpoint) noexcept:
+    _socket { std::move(socket) },
+    _endpoint { std::move(endpoint) }
+{
+}
+
+NodeExchange::~NodeExchange()
+{
+    if (_socket != nullptr)
+        _socket->close();
+}
+
+std::expected<std::unique_ptr<NodeExchange>, ExchangeError> NodeExchange::Open(Endpoint const& endpoint,
+                                                                               DialTimeouts timeouts,
+                                                                               NodeCredentials const& credentials)
+{
+    return Open(endpoint, timeouts, credentials, &Dial);
+}
+
+std::expected<std::unique_ptr<NodeExchange>, ExchangeError> NodeExchange::Open(Endpoint const& endpoint,
+                                                                               DialTimeouts timeouts,
+                                                                               NodeCredentials const& credentials,
+                                                                               SocketDial const& dial)
+{
+    auto socket = dial(endpoint, timeouts);
+    if (!socket.has_value())
+        return std::unexpected(socket.error());
+
+    std::unique_ptr<NodeExchange> exchange { new NodeExchange { std::move(*socket),
+                                                                std::format("{}:{}", endpoint.host, endpoint.port) } };
+
+    // The launcher's decision, asked of the endpoint as `EndpointText` spells it -- the same spelling
+    // `passwordFor` was taken in, so an IPv6 `--addr` still matches itself.
+    auto const audience = EndpointText(endpoint);
+    auto const passwordFor = credentials.password != nullptr && credentials.password->Configured()
+                                 ? std::string_view { credentials.passwordFor }
+                                 : std::string_view {};
+    switch (Cc::ChooseCredential(audience, passwordFor))
+    {
+        case Cc::CredentialChoice::None:
+        case Cc::CredentialChoice::Last:
+            return exchange;
+        case Cc::CredentialChoice::Password:
+            return Authenticated(std::move(exchange),
+                                 { .kind = CompileCacheWire::AuthKind::Password,
+                                   .username = credentials.password->username,
+                                   .secret = credentials.password->secret.View() });
+        case Cc::CredentialChoice::Ticket:
+            break;
+    }
+
+    std::expected<SecureString, MintRefusal> const machineTicket =
+        MintTicket(audience, credentials.mintFrom, timeouts, dial);
+    if (!machineTicket.has_value())
+    {
+        exchange->_missingTicket = machineTicket.error().failure;
+        exchange->_advisories.push_back(std::format("{} ({}); continuing without a credential, so {} answers as it does "
+                                                    "to a machine it does not know",
+                                                    Cc::ReasonFor(machineTicket.error().failure),
+                                                    machineTicket.error().detail,
+                                                    audience));
+        return exchange;
+    }
+    return Authenticated(
+        std::move(exchange),
+        { .kind = CompileCacheWire::AuthKind::MachineTicket, .username = {}, .secret = machineTicket->View() });
+}
+
+std::expected<std::unique_ptr<NodeExchange>, ExchangeError> NodeExchange::Authenticated(
+    std::unique_ptr<NodeExchange> exchange, CompileCacheWire::AuthRequest const& request)
+{
+    auto const reply = exchange->Send(CompileCacheWire::EncodeAuth(request));
+    if (!reply.has_value())
+        return std::unexpected(reply.error());
+
+    if (reply->status == CompileCacheWire::Status::Ok)
+        return exchange;
+
+    // **`UnimplementedVerb` on AUTH alone falls through; every other refusal is about
+    // the credential and is reported.** This is #283/#340's rule from the client side:
+    // a surface that holds no policy is one a credential cannot help and must not
+    // break, and a build with no `AUTH` verb at all is one an operator can still use.
+    // Anything else -- a rejected secret, a malformed one -- is about what was
+    // presented, and stopping there is what keeps a wrong token from looking like an
+    // empty node.
+    if (reply->code.has_value() && ClassifyRefusal(*reply->code) == NodeRefusalKind::Unimplemented)
+    {
+        exchange->_advisories.push_back(
+            std::format("{} does not implement AUTH; continuing without presenting the credential", exchange->_endpoint));
+        return exchange;
+    }
+
+    return std::unexpected(
+        ExchangeError { .kind = ExchangeFailure::Transport, .detail = ExplainRefusal("auth", exchange->_endpoint, *reply) });
+}
+
+std::span<std::string const> NodeExchange::Advisories() const noexcept
+{
+    return _advisories;
+}
+
+std::expected<void, ExchangeError> NodeExchange::Post(std::span<std::byte const> request)
+{
+    if (!core::async::syncRun(core::net::sendAll(_socket.get(), request)))
+        return std::unexpected(
+            ExchangeError { .kind = ExchangeFailure::Transport,
+                            .detail = std::format("the connection to {} failed while sending the request", _endpoint) });
+    return {};
+}
+
+void NodeExchange::SetReceiveDeadline(std::chrono::milliseconds deadline) noexcept
+{
+    _socket->setReceiveDeadline(deadline);
+}
+
+void NodeExchange::ShutdownWrite() noexcept
+{
+    // A blocking socket half-closes inline, so `syncRun` completes it. Its answer is not reported,
+    // as it never was: a peer that has gone is what the read after this finds out.
+    static_cast<void>(core::async::syncRun(core::async::asTask(_socket->shutdownWrite())));
+}
+
+std::expected<NodeReply, ExchangeError> NodeExchange::Send(std::span<std::byte const> request)
+{
+    if (auto posted = Post(request); !posted.has_value())
+        return std::unexpected(std::move(posted).error());
+
+    // **Loop to a TERMINAL status**, never to the first frame. A reply carries a status
+    // byte and no kind, so the step-over-what-you-do-not-know property is REQUEST-side
+    // only -- a reader that stops at frame one reads a liveness pulse as the answer.
+    // What bounds how many arrive is the exchange's own I/O deadline, which every read
+    // below is subject to.
+    for (;;)
+    {
+        auto frame = ReadOne(Reading::Reply);
+        if (!frame.has_value())
+            return frame;
+        if (CompileCacheWire::IsTerminalStatus(frame->status))
+            return frame;
+    }
+}
+
+std::expected<NodeReply, ExchangeError> NodeExchange::ReadFrame()
+{
+    return ReadOne(Reading::Stream);
+}
+
+std::expected<NodeReply, ExchangeError> NodeExchange::ReadOne(Reading reading)
+{
+    for (;;)
+    {
+        // The header first, then exactly what it declared. A peer-declared length sizes
+        // nothing on its own: this waits for the bytes rather than reserving for them,
+        // so a header claiming four gigabytes costs this process nothing at all.
+        if (_pending.size() >= CompileCacheWire::ReplyHeaderSize)
+        {
+            auto const bytes =
+                std::span<std::byte const> { reinterpret_cast<std::byte const*>(_pending.data()), _pending.size() };
+            auto const header = CompileCacheWire::DecodeReplyHeader(bytes);
+            if (!header.has_value())
+                return std::unexpected(ExchangeError { .kind = ExchangeFailure::Malformed,
+                                                       .detail = std::format("{} answered something that is not a 0xFC "
+                                                                             "frame -- is that really a pace port?",
+                                                                             _endpoint) });
+
+            auto const whole = CompileCacheWire::ReplyHeaderSize + header->payloadLength;
+            if (_pending.size() >= whole)
+            {
+                auto reply = DecodeNodeReply(bytes.subspan(0, whole));
+                // Zeroed BEFORE the rest moves down over it, so no copy of a consumed frame -- a
+                // minted ticket's among them -- survives in the storage past the new end.
+                SecureZero(_pending.data(), whole);
+                _pending.erase(_pending.begin(), _pending.begin() + static_cast<std::ptrdiff_t>(whole));
+                return reply;
+            }
+        }
+
+        auto const& words = reading == Reading::Stream ? StreamWords : ReplyWords;
+        if (auto const filled = FillMore(_socket.get(), _pending, words); !filled.has_value())
+            return std::unexpected(filled.error());
+    }
+}
+
+std::expected<HttpResponse, ExchangeError> HttpGet(Endpoint const& endpoint,
+                                                   std::string_view path,
+                                                   DialTimeouts timeouts,
+                                                   std::size_t maxBodyBytes)
+{
+    auto socket = Dial(endpoint, timeouts);
+    if (!socket.has_value())
+        return std::unexpected(socket.error());
+
+    auto const request = std::format(
+        "GET {} HTTP/1.1\r\nHost: {}:{}\r\nAccept: */*\r\nConnection: close\r\n\r\n", path, endpoint.host, endpoint.port);
+
+    if (!core::async::syncRun(core::net::sendAll(socket->get(), AsBytes(request))))
+        return std::unexpected(ExchangeError { .kind = ExchangeFailure::Transport,
+                                               .detail = "the connection failed while sending the request" });
+
+    std::string raw;
+    for (;;)
+    {
+        std::array<std::byte, ReadChunkBytes> chunk {};
+        auto const got = core::async::syncRun(ReadSome(socket->get(), chunk));
+        if (!got.has_value())
+            return std::unexpected(ExchangeError {
+                .kind = ExchangeFailure::Transport,
+                .detail = std::format("the connection failed while reading the response ({})", got.error().context) });
+        if (*got == 0)
+            break;
+        raw += AsChars(std::span<std::byte const> { chunk.data(), *got });
+        if (raw.size() > maxBodyBytes)
+            return std::unexpected(
+                ExchangeError { .kind = ExchangeFailure::Malformed,
+                                .detail = std::format("the response exceeds the {}-byte cap", maxBodyBytes) });
+    }
+
+    auto const headEnd = raw.find("\r\n\r\n");
+    if (headEnd == std::string::npos)
+        return std::unexpected(
+            ExchangeError { .kind = ExchangeFailure::Malformed, .detail = "the response has no header terminator" });
+
+    auto const statusLineEnd = raw.find("\r\n");
+    auto const statusLine = std::string_view { raw }.substr(0, statusLineEnd);
+    auto const firstSpace = statusLine.find(' ');
+    if (firstSpace == std::string_view::npos)
+        return std::unexpected(
+            ExchangeError { .kind = ExchangeFailure::Malformed, .detail = "the response has no status line" });
+
+    auto const codeText = statusLine.substr(firstSpace + 1, 3);
+    int status = 0;
+    auto const [ptr, ec] = std::from_chars(codeText.data(), codeText.data() + codeText.size(), status);
+    if (ec != std::errc {} || ptr != codeText.data() + codeText.size())
+        return std::unexpected(ExchangeError { .kind = ExchangeFailure::Malformed,
+                                               .detail = std::format("'{}' is not a status code", codeText) });
+
+    return HttpResponse { .status = status, .body = raw.substr(headEnd + 4) };
+}
+
+} // namespace Pace::Cli

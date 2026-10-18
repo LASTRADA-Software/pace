@@ -1,0 +1,162 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Consensus/RaftTypes.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
+
+namespace Pace::Node
+{
+
+/// Whether the state this node's consensus applied has caught up with the log it recovered at start.
+///
+/// PRIVATE: persisted and transmitted nowhere -- what travels is the refusal it selects
+/// (`RosterNotYetApplied`). Three answers, because "no tier to ask" is neither of the others, and a
+/// `bool` would have to call it one of them.
+enum class AppliedStateReading : std::uint8_t
+{
+    /// No tier answers: consensus has not started yet, or this process is stopping.
+    Unknown,
+    /// Applied short of the log it recovered: a key the cluster holds may not be in the roster yet.
+    Behind,
+    /// Applied through what it recovered: a key the roster lacks is one the state it applied lacks.
+    CaughtUp,
+};
+
+/// The reading for a node that has applied through @p applied, holds a log through @p lastLog, and
+/// recovered a log through @p recovered when it started.
+///
+/// **Through the SHORTER of the recovered log and the log it holds now**: a follower's recovered tail
+/// may be entries no leader ever committed, which its leader then truncates and may never write past
+/// again -- measured against the recovered index alone, such a node would answer "not yet" forever.
+/// Against the log it holds it catches up the moment it applies what its leader committed. A node that
+/// recovered no log at all (a first start) has nothing to catch up with.
+/// @param applied The highest index applied, consensus' own entries included.
+/// @param lastLog The last index its log holds now.
+/// @param recovered The last index its log held when it started.
+/// @return `Behind` or `CaughtUp`.
+[[nodiscard]] constexpr AppliedStateReading AppliedStateOf(Consensus::LogIndex applied,
+                                                           Consensus::LogIndex lastLog,
+                                                           Consensus::LogIndex recovered) noexcept
+{
+    return applied.value >= std::min(recovered.value, lastLog.value) ? AppliedStateReading::CaughtUp
+                                                                     : AppliedStateReading::Behind;
+}
+
+/// Where this node sits in its own consensus configuration, asked when somebody asks (#1449).
+///
+/// A seam rather than a pointer to the tier, for the reason `LiveStatsSourceSlot` is one: the
+/// `NodeStatus` surface that reports this is built before consensus, and a narrow question keeps
+/// that surface from depending on everything a consensus tier is.
+class IConsensusStandingSource
+{
+  public:
+    IConsensusStandingSource() = default;
+    IConsensusStandingSource(IConsensusStandingSource const&) = delete;
+    IConsensusStandingSource(IConsensusStandingSource&&) = delete;
+    IConsensusStandingSource& operator=(IConsensusStandingSource const&) = delete;
+    IConsensusStandingSource& operator=(IConsensusStandingSource&&) = delete;
+    virtual ~IConsensusStandingSource() = default;
+
+    /// This node's standing in the configuration it operates under right now.
+    ///
+    /// The configuration CONSENSUS holds, never the replicated member record: the record says
+    /// what an operator admitted a member as, and consensus moves towards it one change at a
+    /// time, so the two can differ for as long as a change is replicating.
+    /// @return The standing, or nullopt when there is nothing to ask -- nothing attached yet,
+    ///         or this process is stopping.
+    [[nodiscard]] virtual std::optional<Consensus::Standing> CurrentStanding() const = 0;
+
+    /// Whether the state this node applied has caught up with the log it recovered at start
+    /// (`AppliedStateOf`) -- what decides whether a key absent from its roster is absent from its
+    /// cluster or only not applied yet (`NodeProofResponder`).
+    /// @return The reading; never `Unknown` from a tier, which exists only while consensus runs.
+    [[nodiscard]] virtual AppliedStateReading CurrentAppliedState() const = 0;
+};
+
+/// The consensus tier's standing, attached once the tier exists and detached before it goes.
+///
+/// **Why a slot rather than a constructor argument**, which is `LiveStatsSourceSlot`'s argument
+/// one surface along: a node's `NodeStatus` answer is built before consensus, because consensus
+/// is told the `0xFC` surface's bound endpoint, so the tier is attached after it exists and
+/// **detached before it is destroyed**. The detach is the attachment's destructor, which makes
+/// it a fact about declaration order rather than a line at one return path.
+///
+/// A detached slot answers nothing, so a `NodeStatus` asked while the process stops reports the
+/// field absent rather than reading freed memory. The lock is shared by every reader and taken
+/// exclusively only to attach and to detach.
+class ConsensusStandingSlot final: public IConsensusStandingSource
+{
+  public:
+    /// Holds a source attached; detaches it when destroyed.
+    class Attachment
+    {
+      public:
+        /// @param slot The slot to detach from.
+        explicit Attachment(ConsensusStandingSlot& slot) noexcept:
+            _slot { &slot }
+        {
+        }
+
+        ~Attachment()
+        {
+            _slot->Detach();
+        }
+
+        Attachment(Attachment const&) = delete;
+        Attachment(Attachment&&) = delete;
+        Attachment& operator=(Attachment const&) = delete;
+        Attachment& operator=(Attachment&&) = delete;
+
+      private:
+        ConsensusStandingSlot* _slot;
+    };
+
+    ConsensusStandingSlot() = default;
+
+    /// Start answering from @p source, until the returned attachment is destroyed.
+    ///
+    /// Null is legal and attaches nothing, so a node that runs no consensus -- whose tier
+    /// pointer is null -- is spelled the same way as one that does, with no `if` at the site.
+    /// @param source What to ask; must outlive the attachment when non-null.
+    /// @return The attachment. Declare it after @p source.
+    [[nodiscard]] Attachment Attach(IConsensusStandingSource const* source)
+    {
+        {
+            std::unique_lock const guard { _mutex };
+            _source = source;
+        }
+        return Attachment { *this };
+    }
+
+    /// @return The attached source's answer, or nullopt when none is attached.
+    [[nodiscard]] std::optional<Consensus::Standing> CurrentStanding() const override
+    {
+        std::shared_lock const guard { _mutex };
+        return _source != nullptr ? _source->CurrentStanding() : std::nullopt;
+    }
+
+    /// @return The attached source's answer, or `Unknown` when none is attached.
+    [[nodiscard]] AppliedStateReading CurrentAppliedState() const override
+    {
+        std::shared_lock const guard { _mutex };
+        return _source != nullptr ? _source->CurrentAppliedState() : AppliedStateReading::Unknown;
+    }
+
+  private:
+    /// Stop answering; returns only once no reader is inside the source.
+    void Detach()
+    {
+        std::unique_lock const guard { _mutex };
+        _source = nullptr;
+    }
+
+    mutable std::shared_mutex _mutex;
+    IConsensusStandingSource const* _source { nullptr };
+};
+
+} // namespace Pace::Node

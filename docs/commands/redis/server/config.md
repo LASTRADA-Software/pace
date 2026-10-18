@@ -3,7 +3,7 @@
 **Protocols:** Redis RESP2
 
 A compatibility stub. Redis client libraries probe parameters such as
-`maxmemory` and `save` on connect; fastcached exposes no runtime
+`maxmemory` and `save` on connect; pace-kv exposes no runtime
 tunables, so it answers these probes without holding any configuration
 state.
 

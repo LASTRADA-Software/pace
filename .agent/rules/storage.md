@@ -48,7 +48,7 @@ record still verified.
   always "these bytes are not a well-formed value of that type".
 - **Taking the code away is half the fix; the other half is that something still
   counts.** `MalformedValue` is deliberately not a persistence failure, so it no
-  longer moves `fastcached_write_errors_total` nor writes a `storage write failed`
+  longer moves `pace_write_errors_total` nor writes a `storage write failed`
   warning -- which on its own would trade a wrong signal for **no** signal.
   `CacheMalformedValues` is the row that keeps "clients are sending nonsense"
   visible and separate from "this disk is failing".
@@ -87,8 +87,8 @@ because the store now truncates its free tail after a durable flush and both sur
 metas may still name the cut ids. No list page a surviving meta names is ever cut, which
 is what keeps the link check a damage check. So the reach that can refuse is the meta
 slots, the free-list chain and the two reserved keys. Damage inside that reach refuses the process to start, and damage
-anywhere else is found per key while the process serves. Both `fastcached` and
-`fastcache-compile-node` treat a store that will not open as **fatal**, on purpose
+anywhere else is found per key while the process serves. Both `pace-kv` and
+`pace-node` treat a store that will not open as **fatal**, on purpose
 — the operator named a path, and coming up without it delivers less than was
 configured — which makes the first an outage and the second a degradation.
 Anything that makes `Open` touch more of the store converts the second into the
@@ -208,14 +208,14 @@ snapshot was read as a steady state.
 It is pinned twice, in two suites, and not by accident: `CowTreeStorage_test`
 asks the operator's question — a daemon's store opens, serves, stays quiet, and
 does not spend its surviving slot — and `FilePageStore_test` asks the library's,
-which is the same three facts without FastCache present. The surviving-slot
+which is the same three facts without Pace present. The surviving-slot
 property is therefore pinned in **both**, for two different reasons rather than
 by duplication: `_lastDurableSlot` is a `FilePageStore` member, so the library's
 own guarantee has to be assertable from a suite that links only `CowTree`, while
 the other suite asserts what the same behaviour costs an operator.
 `src/CowTree/` is a standalone sibling that any project can pick up.
 
-What cannot be shared is a TEST helper: `src/tests/` and `src/FastCache/` are off
+What cannot be shared is a TEST helper: `src/tests/` and `src/Pace/` are off
 `CowTreeTests`' include path, which is the boundary that keeps the library
 standalone. That is narrower than "nothing can be shared", and the wider claim was
 in this file first — `src/CowTree/CowTree/` is on **both** suites' paths under the
@@ -241,7 +241,7 @@ test wanting it; and a rulebook sentence that describes where code currently liv
 is a fact with an expiry date, so it has to be searched for when the code moves.
 
 **The signals are not the same on both binaries.** `WriteErrorReportingStorage` is
-constructed only by `fastcached`, so `fastcached_write_errors_total` and the
+constructed only by `pace-kv`, so `pace_write_errors_total` and the
 `storage write failed` warning cannot move on a compile node — its tier is wrapped
 in `ShardedStorage` and nothing else. A counter that is exported and can never rise
 is the shape the metrics rules already name, so anything written about reacting to
@@ -269,7 +269,7 @@ store: the free list is written into free pages, `Allocate` takes the lowest fre
 and each durable flush cuts the free tail (`FilePageStore::PagesInUse` states the
 relation). **Both directions:** the file is never shorter than the footprint, and longer
 by the free pages until a flush or later churn removes them --
-`fastcached_tier_file_bytes` reports the length beside `bytesUsed` so the gap is visible.
+`pace_tier_file_bytes` reports the length beside `bytesUsed` so the gap is visible.
 
 **An entry's cost is the pages its eviction frees, which for an inline value is nothing
 until its leaf empties.** The tree frees an empty leaf and never merges underfull ones,
@@ -443,7 +443,7 @@ system error and then discarded it, so the refusal reached a log as
 `code=14 errno=0 ctx=FilePageStore::Open` — `InUse`, and nothing about which errno decided it.
 
 That one missing integer is the whole cost of
-[#1507](https://github.com/LASTRADA-Software/fastcached/issues/1507). `InUse` asserts *somebody
+[#1507](https://github.com/LASTRADA-Software/pace/issues/1507). `InUse` asserts *somebody
 holds this file*, and on the failure that opened the ticket **that claim was false**: 31 of 32
 test processes had drawn the same filename, because `std::random_device` answers zero for 57% of
 draws on that host, so `flock` was refusing exactly as designed. Diagnosing it meant patching
@@ -557,7 +557,7 @@ not support. It undercounts, which is the honest direction.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1633](https://github.com/LASTRADA-Software/fastcached/issues/1633)** — under Fsync, a
+- **[#1633](https://github.com/LASTRADA-Software/pace/issues/1633)** — under Fsync, a
   meta that `CommitMetaLocked` has written whose fsync then FAILS leaves `_lastDurableSlot`
   where it was, and `CowTree::AbortTxn` returns that transaction's pages to `_freeList`. The
   next commit's list pages and data pages may then be written into pages that the possibly

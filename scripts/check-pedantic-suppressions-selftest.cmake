@@ -24,20 +24,20 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(checkScript "${FASTCACHED_SOURCE_DIR}/scripts/check-pedantic-suppressions.cmake")
-set(probeDir "${FASTCACHED_SOURCE_DIR}/scripts/pedantic-flag-probe")
+set(checkScript "${PACE_SOURCE_DIR}/scripts/check-pedantic-suppressions.cmake")
+set(probeDir "${PACE_SOURCE_DIR}/scripts/pedantic-flag-probe")
 
 # The verdict ctest reads, passed in by the registration from the single
 # definition in src/tests/CMakeLists.txt rather than respelled here. A second
 # spelling of a wire constant can drift from the property that actually judges the
 # check, and then this file certifies a verdict nobody is using.
-if(NOT DEFINED FASTCACHED_SCRIPT_CHECK_FAILED)
+if(NOT DEFINED PACE_SCRIPT_CHECK_FAILED)
     message(FATAL_ERROR
-        "FASTCACHED_SCRIPT_CHECK_FAILED must be passed in from src/tests/CMakeLists.txt, which is "
+        "PACE_SCRIPT_CHECK_FAILED must be passed in from src/tests/CMakeLists.txt, which is "
         "where it is defined.\n\n"
         "This used to carry a literal fallback copy of the pattern, which is the very thing the "
         "paragraph above argues against: if the canonical pattern widens and the hand-over is "
@@ -50,11 +50,11 @@ if(NOT EXISTS "${checkScript}")
     message(FATAL_ERROR "the check under test is not there: ${checkScript}")
 endif()
 
-if(NOT DEFINED FASTCACHED_SELFTEST_DIR)
-    set(FASTCACHED_SELFTEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/pedantic-suppressions-selftest")
+if(NOT DEFINED PACE_SELFTEST_DIR)
+    set(PACE_SELFTEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/pedantic-suppressions-selftest")
 endif()
-file(REMOVE_RECURSE "${FASTCACHED_SELFTEST_DIR}")
-file(MAKE_DIRECTORY "${FASTCACHED_SELFTEST_DIR}")
+file(REMOVE_RECURSE "${PACE_SELFTEST_DIR}")
+file(MAKE_DIRECTORY "${PACE_SELFTEST_DIR}")
 
 set(failures "")
 
@@ -108,8 +108,8 @@ set(subjectMsvcArm "    try_add_compile_options(/W4)")
 function(pedantic_selftest_run caseName expectation wantedText)
     execute_process(
         COMMAND ${CMAKE_COMMAND}
-            "-DFASTCACHED_SOURCE_DIR=${FASTCACHED_SOURCE_DIR}"
-            "-DFASTCACHED_PEDANTIC_PROBE_DIR=${probeDir}"
+            "-DPACE_SOURCE_DIR=${PACE_SOURCE_DIR}"
+            "-DPACE_PEDANTIC_PROBE_DIR=${probeDir}"
             ${ARGN}
             -P "${checkScript}"
         RESULT_VARIABLE status
@@ -122,7 +122,7 @@ function(pedantic_selftest_run caseName expectation wantedText)
     # `message(FATAL_ERROR ...)` is WORD-WRAPPED by CMake at about 76 columns with
     # indented continuations, so where a line breaks is a function of how long the
     # strings interpolated into it are -- and two of these messages begin with a
-    # PATH. Measured before this: with FASTCACHED_SELFTEST_DIR 17-24 characters the
+    # PATH. Measured before this: with PACE_SELFTEST_DIR 17-24 characters the
     # absent-probe-stub case failed, at 28-48 the absent-subject case failed, and at
     # 52 or more both passed. `cmake -B /tmp/b` would have failed this test on a
     # tree with nothing wrong, while the repository's own deep
@@ -139,7 +139,7 @@ function(pedantic_selftest_run caseName expectation wantedText)
     # output. Reading only the status would miss a check that warns, and reading
     # only the output would miss one that dies before printing.
     set(refused FALSE)
-    if(NOT status EQUAL 0 OR combined MATCHES "${FASTCACHED_SCRIPT_CHECK_FAILED}")
+    if(NOT status EQUAL 0 OR combined MATCHES "${PACE_SCRIPT_CHECK_FAILED}")
         set(refused TRUE)
     endif()
 
@@ -169,11 +169,11 @@ function(pedantic_selftest_case caseName expectation wantedText body)
     if(NOT "${ARGN}" STREQUAL "")
         set(msvcArm "${ARGN}")
     endif()
-    set(subjectFile "${FASTCACHED_SELFTEST_DIR}/${caseName}.cmake")
+    set(subjectFile "${PACE_SELFTEST_DIR}/${caseName}.cmake")
     file(WRITE "${subjectFile}"
          "${subjectPreamble}${msvcArm}\nelse()\n${body}\nendif()\nendif()\n")
     pedantic_selftest_run("${caseName}" "${expectation}" "${wantedText}"
-                          "-DFASTCACHED_PEDANTIC_FILE=${subjectFile}")
+                          "-DPACE_PEDANTIC_FILE=${subjectFile}")
     set(failures "${failures}" PARENT_SCOPE)
     set(casesRun "${casesRun}" PARENT_SCOPE)
 endfunction()
@@ -272,11 +272,11 @@ pedantic_selftest_case(msvc-arm-gone-is-not-a-pass fail "/W4 is not added"
 # @param 1 Case name, which is also the file name.
 # @param 2 The flag written unconditionally after the arms.
 function(pedantic_selftest_unconditional caseName flag)
-    set(subjectFile "${FASTCACHED_SELFTEST_DIR}/${caseName}.cmake")
+    set(subjectFile "${PACE_SELFTEST_DIR}/${caseName}.cmake")
     file(WRITE "${subjectFile}"
          "${subjectPreamble}${subjectMsvcArm}\nelse()\n    try_add_compile_options(-pedantic)\nendif()\nendif()\ntry_add_compile_options(${flag})\n")
     pedantic_selftest_run("${caseName}" fail "${flag} is added when PEDANTIC_COMPILER is OFF"
-        "-DFASTCACHED_PEDANTIC_FILE=${subjectFile}")
+        "-DPACE_PEDANTIC_FILE=${subjectFile}")
     set(failures "${failures}" PARENT_SCOPE)
     set(casesRun "${casesRun}" PARENT_SCOPE)
 endfunction()
@@ -291,13 +291,13 @@ pedantic_selftest_unconditional(suppression-unconditional-gnu-all -w)
 # Through the same helper as every other case, so all nine are judged by one
 # predicate.
 pedantic_selftest_run(absent-subject fail "the subject file is not there"
-    "-DFASTCACHED_PEDANTIC_FILE=${FASTCACHED_SELFTEST_DIR}/no-such-file.cmake")
+    "-DPACE_PEDANTIC_FILE=${PACE_SELFTEST_DIR}/no-such-file.cmake")
 
 # The probe stub is part of the instrument: without it every flag goes through a
 # real `try_compile`, which script mode does not have. That must be named rather
 # than presenting as a clean run.
 pedantic_selftest_run(absent-probe-stub fail "the probe stub is not there"
-    "-DFASTCACHED_PEDANTIC_PROBE_DIR=${FASTCACHED_SELFTEST_DIR}/no-such-dir")
+    "-DPACE_PEDANTIC_PROBE_DIR=${PACE_SELFTEST_DIR}/no-such-dir")
 
 # A self-test that stopped early must not look like one that judged something, so
 # the cases are named whatever the verdict (#723).

@@ -18,7 +18,7 @@
 # `mapfile`, no `declare -A`, no `${var^^}`, no `local -n`.
 #
 # Usage:
-#   scripts/node-config-file-e2e.sh <path-to-fastcache-compile-node>
+#   scripts/node-config-file-e2e.sh <path-to-pace-node>
 #
 # Exit codes: 0 = every case behaved. 1 = at least one did not.
 
@@ -26,7 +26,7 @@ set -u
 
 NODE="${1:-}"
 if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
-    echo "node-config-file-e2e: usage: $0 <path-to-fastcache-compile-node>" >&2
+    echo "node-config-file-e2e: usage: $0 <path-to-pace-node>" >&2
     exit 1
 fi
 
@@ -296,8 +296,8 @@ if [ "$(id -u)" = "0" ]; then
     echo "skip: a file found by the lookup is read with no --config (root; per-user rows are trust-checked)"
     echo "skip: no configuration file anywhere is not an error (needs the case above)"
 else
-mkdir -p "$WORK/xdg/fastcache-compile-node"
-printf 'listen_node: 0.0.0.0:6697\n' > "$WORK/xdg/fastcache-compile-node/fastcache-compile-node.yaml"
+mkdir -p "$WORK/xdg/pace"
+printf 'listen_node: 0.0.0.0:6697\n' > "$WORK/xdg/pace/pace-node.yaml"
 out="$(XDG_CONFIG_HOME="$WORK/xdg" HOME="$WORK" "$NODE" --print-surfaces 2>&1)"
 case "$out" in
     *"0.0.0.0:6697"*) echo "ok: a file found by the lookup is read with no --config" ;;
@@ -309,7 +309,7 @@ esac
 # The other half of the same rule, and the half a strict reading would break: a
 # machine with no configuration file at all must start on built-in defaults
 # rather than refuse. Only a path the operator NAMED is strict.
-rm -rf "$WORK/xdg/fastcache-compile-node"
+rm -rf "$WORK/xdg/pace-node"
 out="$(XDG_CONFIG_HOME="$WORK/xdg" HOME="$WORK" "$NODE" "${STATE_FOR_STARTUP[@]}" --print-surfaces 2>&1)"
 rc=$?
 if [ "$rc" -eq 0 ]; then
@@ -324,7 +324,7 @@ fi
 # It is 240 lines nobody compiles, and a stray character in it is a package that
 # installs a worker which cannot start. Located relative to this script so the
 # check follows the file rather than a build layout.
-REFERENCE="$(dirname "$0")/../packaging/config/fastcache-compile-node.yaml"
+REFERENCE="$(dirname "$0")/../packaging/config/pace-node.yaml"
 if [ -f "$REFERENCE" ]; then
     expect_ok "the shipped reference configuration parses" "compile" \
         "${STATE_FOR_STARTUP[@]}" "--config=$REFERENCE"

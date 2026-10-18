@@ -1,6 +1,6 @@
 # Known limitations
 
-A single page enumerating everything fastcached does not currently
+A single page enumerating everything pace-kv does not currently
 do, so a reader evaluating the project can see the gaps in one
 place.
 
@@ -17,7 +17,7 @@ place.
 - **`shutdown` (memcached text)**: not implemented. Stop the daemon
   via the OS (`Ctrl-C`, `SIGTERM`, systemd, Windows service control).
 - **`stats conns` (memcached text)**: returns an empty result.
-  fastcached does not track an active-connection registry.
+  pace-kv does not track an active-connection registry.
 - **`stats sizes` (memcached text)**: returns a single approximate
   bucket because the storage engine does not track per-entry sizes
   bucketed by size class.
@@ -34,7 +34,7 @@ place.
   or `stats cachedump` on any protocol, so a client cannot list the
   keyspace. Use the `/metrics` endpoint for aggregate counts.
 - **`SELECT db` (Redis)**: accepted as a no-op for any index — the
-  reply is always `+OK`, but fastcached is a single flat keyspace, so
+  reply is always `+OK`, but pace-kv is a single flat keyspace, so
   the index is ignored rather than selecting a distinct database.
 - **Keyspace notifications for memcached and `0xFC` writes**: not fired. A
   memcached `set`/`delete`/`incr`, and a compile-cache `store` or
@@ -70,9 +70,9 @@ lapses.** Everything below follows from that.
   off and leaves expiry purely access-driven, which is what the daemon did
   before it had one.
 
-  `fastcached_expiry_cycles_total` is flat when the cycle is disabled or
+  `pace_expiry_cycles_total` is flat when the cycle is disabled or
   wedged — which otherwise looks exactly like nothing having expired — and
-  `fastcached_expiry_keys_reclaimed_total` counts what it found.
+  `pace_expiry_keys_reclaimed_total` counts what it found.
 
 - **A plain `SET` over a lapsed key does not fire `expired`.** It overwrites
   the record without looking up the old one, so nothing is reclaimed — you
@@ -100,12 +100,12 @@ lapses.** Everything below follows from that.
 - When one call reclaims more keys at once than the notification buffer
   holds — a `maxmemory` shrink on a large cache is the realistic case —
   the surplus events are dropped and counted in
-  `fastcached_keyspace_reclaim_events_dropped_total`. A non-zero value
+  `pace_keyspace_reclaim_events_dropped_total`. A non-zero value
   there is the difference between "nothing expired" and "you were not told".
 
 ## Storage model differences from memcached
 
-- No slab allocator. fastcached uses a flat LRU. `slabs *`,
+- No slab allocator. pace-kv uses a flat LRU. `slabs *`,
   `lru *`, and `lru_crawler *` commands are recognised as synthetic
   stubs and return `OK` without changing state.
 - `stats items`, `stats slabs`, `stats sizes` therefore return
@@ -115,7 +115,7 @@ lapses.** Everything below follows from that.
 ## Storage model differences from Redis
 
 - No data-structure commands (lists, sets, hashes, sorted sets,
-  streams, bitfields). fastcached's engine is key-value only.
+  streams, bitfields). pace-kv's engine is key-value only.
 - No scripting (EVAL). Pub/sub (`SUBSCRIBE`, `PSUBSCRIBE`, `PUBLISH`,
   and the `__keyspace@0__` / `__keyevent@0__` channels) and transactions
   (`MULTI` / `EXEC` / `WATCH` / `DISCARD`) are implemented.
@@ -127,13 +127,13 @@ lapses.** Everything below follows from that.
   snapshot and, when `--metrics` is set, a Prometheus `/metrics` endpoint
   (plus a `/healthz` liveness probe) served on a dedicated HTTP port.
 - TLS termination is opt-in and only present in builds compiled with
-  `-DFASTCACHED_ENABLE_TLS=ON` (links OpenSSL). Enable at runtime with
+  `-DPACE_ENABLE_TLS=ON` (links OpenSSL). Enable at runtime with
   `--tls --tls-cert <pem> --tls-key <pem>`. The default build links no
   OpenSSL and `--tls` then exits with a clear error; run behind a
   TLS-terminating proxy in that case. Client-certificate (mutual TLS)
   authentication is not yet implemented.
 
-- **A `fastcache-compile-node` fleet has no rolling upgrade.** A build accepts exactly
+- **A `pace-node` fleet has no rolling upgrade.** A build accepts exactly
   one `0xFC` wire version, so the moment one end moves every peer on the old version is
   refused. Upgrading is a flag day: stop everything, upgrade every node *and every
   client*, start again. A mismatch never fails a build — the launcher treats an unusable

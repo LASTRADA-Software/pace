@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Consensus/IRaftPeerIdentity.hpp>
-#include <FastCache/Consensus/IRaftPeerKeys.hpp>
-#include <FastCache/Consensus/RaftTypes.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Sha256.hpp>
-#include <FastCache/Core/WireFields.hpp>
+#include <Pace/Consensus/IRaftPeerIdentity.hpp>
+#include <Pace/Consensus/IRaftPeerKeys.hpp>
+#include <Pace/Consensus/RaftTypes.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Sha256.hpp>
+#include <Pace/Core/WireFields.hpp>
 
 #include <algorithm>
 #include <map>
@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file RaftPeerKeyFakes.hpp
@@ -38,7 +38,7 @@ namespace FastCache::Testing
 /// @return Its key pair.
 [[nodiscard]] inline Ed25519KeyPair TestKeyPair(std::string const& machine)
 {
-    auto const seed = Sha256::Hash(WireFields::AsBytes("fastcache-test-node-key:" + machine));
+    auto const seed = Sha256::Hash(WireFields::AsBytes("pace-test-node-key:" + machine));
     auto pair = Ed25519KeyPair::FromSeed(seed);
     if (!pair.has_value())
         throw std::logic_error { "a 32-byte seed must make a key pair" };
@@ -195,4 +195,4 @@ class TestPeerIdentity final: public Consensus::IRaftPeerIdentity
     Consensus::RaftPeerIdentity _identity;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

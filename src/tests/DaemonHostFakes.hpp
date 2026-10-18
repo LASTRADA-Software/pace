@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/IDaemonHost.hpp>
-#include <FastCache/Platform/IServiceControlManager.hpp>
-#include <FastCache/Platform/ServiceStatusPlan.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/IDaemonHost.hpp>
+#include <Pace/Platform/IServiceControlManager.hpp>
+#include <Pace/Platform/ServiceStatusPlan.hpp>
 
 #include <algorithm>
 #include <array>
@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// An `IDaemonHost` that records what it was asked to do and what it answered.
@@ -425,4 +425,4 @@ class ScriptedServiceControlManager final: public IServiceControlManager
     bool _stopped = false;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # Catch2 test binary. Picks up every *_test.cpp adjacent to source files in
-# src/FastCache so adding a test file is a one-step operation: drop it next
+# src/Pace so adding a test file is a one-step operation: drop it next
 # to the implementation and re-configure.
 
-file(GLOB_RECURSE FASTCACHE_TEST_SOURCES
+file(GLOB_RECURSE PACE_TEST_SOURCES
     CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/src/FastCache/*_test.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/*_test.cpp"
 )
 
-add_executable(FastCacheTest
+add_executable(PaceTest
     test_main.cpp
-    # The shared test helpers' own cases: not under src/FastCache, so the glob above cannot reach them.
+    # The shared test helpers' own cases: not under src/Pace, so the glob above cannot reach them.
     ScratchPath_test.cpp
-    ${FASTCACHE_TEST_SOURCES}
+    ${PACE_TEST_SOURCES}
 )
 
-target_link_libraries(FastCacheTest
+target_link_libraries(PaceTest
     PRIVATE
-        FastCache
+        Pace
         Catch2::Catch2
 )
 
@@ -67,7 +67,7 @@ include(Catch)
 # property is exact. The argument is there, one place pointed at rather than restated,
 # because this comment exists five times over; `catch-skip-exit-contract` below runs the
 # shapes against the linked Catch2, so the contract cannot rot into a false rule.
-catch_discover_tests(FastCacheTest PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+catch_discover_tests(PaceTest PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
 
 # ---------------------------------------------------------------------------
 # The ThreadSanitizer canary: a program that MUST fail, so that a green sanitizer
@@ -82,7 +82,7 @@ catch_discover_tests(FastCacheTest PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MOD
 # the defect that module's own comment records. A canary built with hand-written
 # flags would keep passing through exactly that failure.
 #
-# Deliberately NOT linked against FastCache: it answers "is the toolchain
+# Deliberately NOT linked against Pace: it answers "is the toolchain
 # instrumenting and reporting", which has to stay answerable even when the
 # library does not build.
 #
@@ -195,7 +195,7 @@ endif()
 # happened to be noticed.
 #
 # `script-check-warning-canary` below is the matching must-be-seen-to-warn half.
-set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
+set(PACE_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
 
 # ---------------------------------------------------------------------------
 # The interpreter every script-driven test runs under (#379).
@@ -245,7 +245,7 @@ set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
 # asserts every registration uses it. A literal `/bin/bash` is refused too: it
 # would be correct today and break the Windows rows the day somebody adds one.
 if(WIN32)
-    set(FASTCACHED_BASH bash)
+    set(PACE_BASH bash)
     file(TO_CMAKE_PATH "$ENV{ProgramFiles}" _programFiles)
     set(_gitBashCandidates "${_programFiles}/Git/bin/bash.exe")
     if(GIT_EXECUTABLE)
@@ -267,21 +267,21 @@ if(WIN32)
             TIMEOUT 30
         )
         if(_gitBashSystem)
-            get_filename_component(FASTCACHED_BASH "${_gitBash}" ABSOLUTE)
+            get_filename_component(PACE_BASH "${_gitBash}" ABSOLUTE)
             break()
         endif()
     endforeach()
-    if(FASTCACHED_BASH STREQUAL "bash")
+    if(PACE_BASH STREQUAL "bash")
         message(STATUS "[bash] no Git for Windows bin/bash.exe answered, so script tests take `bash` from PATH at run time -- where a WSL launcher can come first")
     else()
-        message(STATUS "[bash] script tests run under ${FASTCACHED_BASH}")
+        message(STATUS "[bash] script tests run under ${PACE_BASH}")
     endif()
 
     # And no test inherits the caller's MSYS path-conversion switch (#1355). A Git Bash that
     # exported `MSYS_NO_PATHCONV=1` / `MSYS2_ARG_CONV_EXCL='*'` -- which the rulebook tells a
     # developer driving MSVC to do -- handed it to every script `ctest` started, and a script
     # spelling a POSIX path to a native program depends on the conversion it switches off.
-    # Measured: `fastcache-cli-e2e` started `fastcached.exe` on `/tmp/.../empty.yaml` and
+    # Measured: `pacectl-e2e` started `pace-kv.exe` on `/tmp/.../empty.yaml` and
     # reported the daemon DIED, deterministically, and only with the switch exported.
     #
     # Every test in this directory rather than a list of the ones seen failing: a list is exact
@@ -289,19 +289,19 @@ if(WIN32)
     # registration appended below this line is covered too. A script that needs the switch pins
     # it itself (`check-banner-probe-identity.sh`), and `run-check.sh` unsets it as well, for a
     # check run by hand outside `ctest`.
-    function(_fastcached_unset_msys_conversion)
+    function(_pace_unset_msys_conversion)
         get_property(_tests DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY TESTS)
         foreach(_test IN LISTS _tests)
             set_property(TEST "${_test}" APPEND PROPERTY ENVIRONMENT_MODIFICATION
                 "MSYS_NO_PATHCONV=unset:" "MSYS2_ARG_CONV_EXCL=unset:")
         endforeach()
     endfunction()
-    cmake_language(DEFER CALL _fastcached_unset_msys_conversion)
+    cmake_language(DEFER CALL _pace_unset_msys_conversion)
 else()
-    set(FASTCACHED_BASH /bin/bash)
+    set(PACE_BASH /bin/bash)
 endif()
 
-# The PowerShell interpreter, resolved once, for the same reason `FASTCACHED_BASH` is.
+# The PowerShell interpreter, resolved once, for the same reason `PACE_BASH` is.
 #
 # A bare `pwsh` in a COMMAND is left unresolved in `CTestTestfile.cmake` and picked from
 # PATH at RUN time, so which interpreter a `.ps1` test gets is a property of the image.
@@ -325,7 +325,7 @@ endif()
 # than the `if(WIN32)` it replaces"), failed by carrying one script's measurement over to
 # another. Err NARROW: a 5.1-only host now SKIPS both, which is honest, where the wider
 # list failed one of them.
-find_program(FASTCACHED_PWSH NAMES pwsh pwsh-preview)
+find_program(PACE_PWSH NAMES pwsh pwsh-preview)
 
 # Register a test that could NOT be run here, as a SKIP.
 #
@@ -338,7 +338,7 @@ find_program(FASTCACHED_PWSH NAMES pwsh pwsh-preview)
 # OMISSION, and the omission is silent in the worst direction. `cmake -E echo` exits 0, so
 # a site that loses the property reports **Passed** for a property nothing established --
 # #685's SUCCEED-standing-in-for-a-skip defect, reachable by forgetting one line.
-function(fastcached_register_skipped_test name reason)
+function(pace_register_skipped_test name reason)
     add_test(NAME "${name}" COMMAND ${CMAKE_COMMAND} -E echo "SKIP: ${reason}")
     set_tests_properties("${name}" PROPERTIES
         LABELS "hygiene"
@@ -384,15 +384,15 @@ endfunction()
 # off Windows, and PATH's `bash` there can be a WSL launcher: measured, the probe started a
 # Linux interpreter at configure and printed `[bash44] C:/Windows/System32/bash.exe is 5.2`
 # for a variable nothing on that host reads.
-set(FASTCACHED_BASH44 "")
-set(FASTCACHED_BASH44_VERSION "")
+set(PACE_BASH44 "")
+set(PACE_BASH44_VERSION "")
 set(_bashCandidates "")
 if(NOT WIN32)
-    find_program(FASTCACHED_BASH44_ON_PATH NAMES bash)
+    find_program(PACE_BASH44_ON_PATH NAMES bash)
     set(_bashCandidates
         /opt/homebrew/bin/bash          # Homebrew, Apple Silicon
         /usr/local/bin/bash             # Homebrew, Intel
-        "${FASTCACHED_BASH44_ON_PATH}"  # whatever PATH offers
+        "${PACE_BASH44_ON_PATH}"  # whatever PATH offers
         /bin/bash)                      # the system interpreter, last
 endif()
 # On a stock macOS the third and fourth are the SAME binary -- PATH's `bash` IS
@@ -415,21 +415,34 @@ foreach(_bashCandidate IN LISTS _bashCandidates)
         ENCODING NONE
     )
     if(_candidateVersion AND NOT _candidateVersion VERSION_LESS "4.4")
-        set(FASTCACHED_BASH44 "${_bashCandidate}")
-        set(FASTCACHED_BASH44_VERSION "${_candidateVersion}")
+        set(PACE_BASH44 "${_bashCandidate}")
+        set(PACE_BASH44_VERSION "${_candidateVersion}")
         break()
     endif()
 endforeach()
 
 if(WIN32)
     message(STATUS "[bash44] not probed on Windows, where tidy-sweep's self-test is not registered")
-elseif(FASTCACHED_BASH44)
-    message(STATUS "[bash44] ${FASTCACHED_BASH44} is ${FASTCACHED_BASH44_VERSION}")
+elseif(PACE_BASH44)
+    message(STATUS "[bash44] ${PACE_BASH44} is ${PACE_BASH44_VERSION}")
 else()
     message(STATUS
         "[bash44] no bash >= 4.4 among the candidates, so tidy-sweep's self-test will "
         "report SKIPPED on this host")
 endif()
+
+# The configure refusal of a build tree configured before the rename to Pace
+# (cmake/RetiredOptions.cmake, #1713): its decision names a FASTCACHED_ entry and passes
+# PACE_ ones. Judged by output, as every script check is.
+add_test(
+    NAME "retired-cmake-options"
+    COMMAND ${CMAKE_COMMAND} -DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P "${CMAKE_SOURCE_DIR}/scripts/check-retired-options.cmake"
+)
+set_tests_properties("retired-cmake-options" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
+    LABELS "hygiene"
+    TIMEOUT 60
+)
 
 # The canary: a check that must be seen to fail. See scripts/script-check-canary.cmake
 # for why a property needs one. WILL_FAIL inverts the verdict, so this reports
@@ -452,7 +465,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND} -P "${CMAKE_SOURCE_DIR}/scripts/script-check-canary.cmake"
 )
 set_tests_properties("script-check-canary" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     WILL_FAIL TRUE
     LABELS "hygiene"
     TIMEOUT 60
@@ -469,7 +482,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND} -P "${CMAKE_SOURCE_DIR}/scripts/script-check-warning-canary.cmake"
 )
 set_tests_properties("script-check-warning-canary" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     WILL_FAIL TRUE
     LABELS "hygiene"
     TIMEOUT 60
@@ -504,11 +517,11 @@ set_tests_properties("script-check-warning-canary" PROPERTIES
 add_test(
     NAME "script-check-signals"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-script-check-signals.cmake"
 )
 set_tests_properties("script-check-signals" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -536,7 +549,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND} -P "${CMAKE_SOURCE_DIR}/scripts/check-fatal-error-exit.cmake"
 )
 set_tests_properties("fatal-error-exit" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -549,11 +562,11 @@ set_tests_properties("fatal-error-exit" PROPERTIES
 add_test(
     NAME "fatal-error-exit-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-fatal-error-exit-selftest.cmake"
 )
 set_tests_properties("fatal-error-exit-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -582,17 +595,17 @@ set_tests_properties("fatal-error-exit-selftest" PROPERTIES
 add_test(
     NAME "script-check-signals-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/script-check-signals-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/script-check-signals-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-script-check-signals-selftest.cmake"
 )
 set_tests_properties("script-check-signals-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
 
-# Every script-driven test runs through `${FASTCACHED_BASH}` (#379).
+# Every script-driven test runs through `${PACE_BASH}` (#379).
 #
 # The rule requiring bash 3.2 compatibility had nothing running it -- or so #379
 # said. Measured, it did: on `macOS-clang-release` a bare `bash` and `/bin/bash`
@@ -611,11 +624,11 @@ set_tests_properties("script-check-signals-selftest" PROPERTIES
 add_test(
     NAME "script-interpreter"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-script-interpreter.cmake"
 )
 set_tests_properties("script-interpreter" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -640,12 +653,12 @@ set_tests_properties("script-interpreter" PROPERTIES
 add_test(
     NAME "script-interpreter-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/script-interpreter-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/script-interpreter-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-script-interpreter-selftest.cmake"
 )
 set_tests_properties("script-interpreter-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -673,11 +686,11 @@ set_tests_properties("script-interpreter-selftest" PROPERTIES
 add_test(
     NAME "glob-traversals"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-glob-traversals.cmake"
 )
 set_tests_properties("glob-traversals" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -704,12 +717,12 @@ set_tests_properties("glob-traversals" PROPERTIES
 add_test(
     NAME "glob-traversals-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/glob-traversals-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/glob-traversals-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-glob-traversals-selftest.cmake"
 )
 set_tests_properties("glob-traversals-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -741,12 +754,12 @@ set_tests_properties("glob-traversals-selftest" PROPERTIES
 add_test(
     NAME "catch-skip-return-code"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-catch-skip-return-code.cmake"
 )
 set_tests_properties("catch-skip-return-code" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -768,12 +781,12 @@ set_tests_properties("catch-skip-return-code" PROPERTIES
 add_test(
     NAME "catch-skip-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch-skip-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch-skip-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-catch-skip-selftest.cmake"
 )
 set_tests_properties("catch-skip-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -804,7 +817,7 @@ add_test(
         -P "${CMAKE_SOURCE_DIR}/scripts/check-catch-skip-exit-contract.cmake"
 )
 set_tests_properties("catch-skip-exit-contract" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -827,12 +840,12 @@ set_tests_properties("catch-skip-exit-contract" PROPERTIES
 add_test(
     NAME "succeed-not-skip"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-succeed-not-skip.cmake"
 )
 set_tests_properties("succeed-not-skip" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -860,12 +873,12 @@ set_tests_properties("succeed-not-skip" PROPERTIES
 add_test(
     NAME "succeed-not-skip-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/succeed-not-skip-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/succeed-not-skip-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-succeed-not-skip-selftest.cmake"
 )
 set_tests_properties("succeed-not-skip-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -880,19 +893,19 @@ set_tests_properties("succeed-not-skip-selftest" PROPERTIES
 add_test(
     NAME "debug-prefix-map-rules"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-debug-prefix-map.cmake"
 )
 set_tests_properties("debug-prefix-map-rules" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
 
 # ---------------------------------------------------------------------------
-# Whether a set-but-EMPTY FASTCACHE_ADDR opts out of the launcher, as the
+# Whether a set-but-EMPTY PACE_ADDR opts out of the launcher, as the
 # operator documentation promises. The module folded it into the default, so
-# `export FASTCACHE_ADDR=` kept caching on every shell and every platform (#372).
+# `export PACE_ADDR=` kept caching on every shell and every platform (#372).
 #
 # Driven as a pure computation for a reason the fixture could not work around:
 # the two inputs that matter differ ONLY in whether the environment defines the
@@ -903,19 +916,19 @@ set_tests_properties("debug-prefix-map-rules" PROPERTIES
 #
 # Not labelled "smoke": it starts nothing and finishes in milliseconds.
 add_test(
-    NAME "fastcache-addr-opt-out"
+    NAME "pace-addr-opt-out"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        -P "${CMAKE_SOURCE_DIR}/scripts/check-fastcache-addr-opt-out.cmake"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        -P "${CMAKE_SOURCE_DIR}/scripts/check-pace-addr-opt-out.cmake"
 )
-set_tests_properties("fastcache-addr-opt-out" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+set_tests_properties("pace-addr-opt-out" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
 
 # ---------------------------------------------------------------------------
-# A version-mismatched fastcache-cc falling through to sccache must say so where
+# A version-mismatched pace-cc falling through to sccache must say so where
 # the fallback happens, not eighty lines from the warning about what sccache
 # costs under MSVC (#658). Narrow: only that reason, only that winner, and only
 # where the caveat exists at all.
@@ -926,11 +939,11 @@ set_tests_properties("fastcache-addr-opt-out" PROPERTIES
 add_test(
     NAME "version-fallback-warning"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-version-fallback-warning.cmake"
 )
 set_tests_properties("version-fallback-warning" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -938,7 +951,7 @@ set_tests_properties("version-fallback-warning" PROPERTIES
 # A git query that does not answer is never read as its negative: an unanswered dirty check
 # is `-dirty-unknown` and never "clean", an unanswered distance fails the git-tag row and never
 # yields the bare tag, and either makes the version Provisional, so
-# FASTCACHED_REQUIRE_EXACT_VERSION refuses it. Drives the real GetVersionInformation against a
+# PACE_REQUIRE_EXACT_VERSION refuses it. Drives the real GetVersionInformation against a
 # stub git (a `.cmd` on Windows, a shell script elsewhere) that holds one chosen query past an
 # injected bound. The all-answer cases are the positive control that the stub ran. Its
 # `classifications` table is the cross-version guard: it hands every measured CMake spelling
@@ -948,12 +961,12 @@ set_tests_properties("version-fallback-warning" PROPERTIES
 add_test(
     NAME "version-git-unanswered"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/version-git-unanswered"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/version-git-unanswered"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-version-git-unanswered.cmake"
 )
 set_tests_properties("version-git-unanswered" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     PASS_REGULAR_EXPRESSION "version-git-unanswered: [0-9]+ case\\(s\\) run"
     LABELS "hygiene"
     TIMEOUT 180
@@ -979,7 +992,7 @@ set_tests_properties("version-git-unanswered" PROPERTIES
 # DIRECTLY, so the gate this project tells every contributor to run refused on a
 # fresh checkout with `Permission denied`. Thirteen siblings shared the mode and
 # did not care, because every one of them is registered here as
-# `COMMAND ${FASTCACHED_BASH} <path>` -- so the interpreter is explicit and the
+# `COMMAND ${PACE_BASH} <path>` -- so the interpreter is explicit and the
 # bit is irrelevant. The one script with NO automated caller is the one that bit,
 # and its not being run leaves no trace anywhere.
 #
@@ -1015,7 +1028,7 @@ set_tests_properties("version-git-unanswered" PROPERTIES
 # kill rather than wait to catch one.
 add_test(
     NAME "run-check-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" --self-test
 )
 set_tests_properties("run-check-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1027,7 +1040,7 @@ set_tests_properties("run-check-selftest" PROPERTIES
 # again -- so the set is DERIVED from the registrations rather than listed (#492).
 add_test(
     NAME "run-check-coverage"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-run-check-coverage.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-run-check-coverage.sh"
 )
 set_tests_properties("run-check-coverage" PROPERTIES
     LABELS "hygiene"
@@ -1039,7 +1052,7 @@ set_tests_properties("run-check-coverage" PROPERTIES
 # check wrapped) and an unwrapped mention inside a COMMENT, which is not a call site.
 add_test(
     NAME "run-check-coverage-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-run-check-coverage.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-run-check-coverage.sh" --self-test
 )
 set_tests_properties("run-check-coverage-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1048,7 +1061,7 @@ set_tests_properties("run-check-coverage-selftest" PROPERTIES
 
 add_test(
     NAME "workflow-script-invocations"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-script-invocations.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-script-invocations.sh"
 )
 set_tests_properties("workflow-script-invocations" PROPERTIES
     LABELS "hygiene"
@@ -1061,7 +1074,7 @@ set_tests_properties("workflow-script-invocations" PROPERTIES
 # dropping the entry silently.
 add_test(
     NAME "workflow-script-invocations-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-script-invocations.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-script-invocations.sh" --self-test
 )
 set_tests_properties("workflow-script-invocations-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1080,7 +1093,7 @@ set_tests_properties("workflow-script-invocations-selftest" PROPERTIES
 # self-test built on either would pass under the bug.
 add_test(
     NAME "flake-rate-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/flake-rate.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/flake-rate.sh" --self-test
 )
 set_tests_properties("flake-rate-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1103,7 +1116,7 @@ set_tests_properties("flake-rate-selftest" PROPERTIES
 # written by somebody who has never read this.
 add_test(
     NAME "apt-update-wrapped"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-apt-update.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-apt-update.sh"
 )
 set_tests_properties("apt-update-wrapped" PROPERTIES
     LABELS "hygiene"
@@ -1132,7 +1145,7 @@ set_tests_properties("apt-update-wrapped" PROPERTIES
 # macOS runner, which is the only real 3.2 in this project's world.
 add_test(
     NAME "bash32-parse-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-bash32-parse.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-bash32-parse.sh" --self-test
 )
 set_tests_properties("bash32-parse-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1141,7 +1154,7 @@ set_tests_properties("bash32-parse-selftest" PROPERTIES
 
 add_test(
     NAME "apt-update-wrapped-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-apt-update.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-apt-update.sh" --self-test
 )
 set_tests_properties("apt-update-wrapped-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1165,7 +1178,7 @@ set_tests_properties("apt-update-wrapped-selftest" PROPERTIES
 # where this suite runs and NTFS is one of them.
 add_test(
     NAME "apt-sweep-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-apt-update.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-apt-update.sh" --self-test
 )
 set_tests_properties("apt-sweep-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1192,7 +1205,7 @@ set_tests_properties("apt-sweep-selftest" PROPERTIES
 # to fail at all. It SKIPs when PyYAML is absent rather than passing quietly.
 add_test(
     NAME "mkdocs-validation"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-mkdocs-validation.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-mkdocs-validation.sh"
 )
 set_tests_properties("mkdocs-validation" PROPERTIES
     LABELS "hygiene"
@@ -1215,11 +1228,11 @@ set_tests_properties("mkdocs-validation" PROPERTIES
 add_test(
     NAME "selftest-registered"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-selftest-registered.cmake"
 )
 set_tests_properties("selftest-registered" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -1242,12 +1255,12 @@ set_tests_properties("selftest-registered" PROPERTIES
 add_test(
     NAME "selftest-registered-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_CHECK=${CMAKE_SOURCE_DIR}/scripts/check-selftest-registered.cmake"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DPACE_CHECK=${CMAKE_SOURCE_DIR}/scripts/check-selftest-registered.cmake"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-selftest-registered-selftest.cmake"
 )
 set_tests_properties("selftest-registered-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -1274,7 +1287,7 @@ set_tests_properties("selftest-registered-selftest" PROPERTIES
 # verdict would describe a tool nobody runs and be wrong in the reassuring direction.
 add_test(
     NAME "windows-header-order"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-windows-header-order.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-windows-header-order.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("windows-header-order" PROPERTIES
     LABELS "hygiene;smoke"
@@ -1290,7 +1303,7 @@ set_tests_properties("windows-header-order" PROPERTIES
 # prevent, one level up.
 add_test(
     NAME "windows-header-order-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-windows-header-order.sh" --self-test "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-windows-header-order.sh" --self-test "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("windows-header-order-selftest" PROPERTIES
     LABELS "hygiene;smoke"
@@ -1311,7 +1324,7 @@ set_tests_properties("windows-header-order-selftest" PROPERTIES
 # formatter, so a registration would skip on every leg it ran on (#1135). That job runs it.
 add_test(
     NAME "clang-format-version"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-format-version.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-format-version.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("clang-format-version" PROPERTIES
     LABELS "hygiene"
@@ -1322,11 +1335,11 @@ set_tests_properties("clang-format-version" PROPERTIES
 # a second declared build, the snapshot / vendor / suffixed / short banners, the requirement
 # derived and refused, the #1349 case itself -- the pinned release number from another
 # source -- the resolver finding the declared build behind another clang-format, honouring
-# and never stepping over FASTCACHED_CLANG_FORMAT, and naming the install commands (a
+# and never stepping over PACE_CLANG_FORMAT, and naming the install commands (a
 # pip-less host's included) when there is none; the shipped declaration accepts.
 add_test(
     NAME "clang-format-version-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-format-version.sh" --self-test "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-format-version.sh" --self-test "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("clang-format-version-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1344,7 +1357,7 @@ set_tests_properties("clang-format-version-selftest" PROPERTIES
 # tidy jobs and the gate have the analyser, so a registration would skip everywhere (#1135).
 add_test(
     NAME "clang-tidy-version"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-version.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-version.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("clang-tidy-version" PROPERTIES
     LABELS "hygiene"
@@ -1358,7 +1371,7 @@ set_tests_properties("clang-tidy-version" PROPERTIES
 # exactly its own case.
 add_test(
     NAME "clang-tidy-version-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-version.sh" --self-test "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-version.sh" --self-test "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("clang-tidy-version-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1375,7 +1388,7 @@ set_tests_properties("clang-tidy-version-selftest" PROPERTIES
 # ctest, for the reason `clang-tidy-version` gives (#1135).
 add_test(
     NAME "clang-tidy-known-defects"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-known-defects.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-known-defects.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("clang-tidy-known-defects" PROPERTIES
     LABELS "hygiene"
@@ -1388,7 +1401,7 @@ set_tests_properties("clang-tidy-known-defects" PROPERTIES
 # empty shipped table is exercised as well as a full one.
 add_test(
     NAME "clang-tidy-known-defects-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-known-defects.sh" --self-test "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-clang-tidy-known-defects.sh" --self-test "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("clang-tidy-known-defects-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1397,7 +1410,7 @@ set_tests_properties("clang-tidy-known-defects-selftest" PROPERTIES
 
 add_test(
     NAME "script-modes"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-script-modes.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-script-modes.sh"
 )
 set_tests_properties("script-modes" PROPERTIES
     LABELS "hygiene"
@@ -1410,7 +1423,7 @@ set_tests_properties("script-modes" PROPERTIES
 # perfectly -- a scan that matched nothing would otherwise report success.
 add_test(
     NAME "script-modes-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-script-modes.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-script-modes.sh" --self-test
 )
 set_tests_properties("script-modes-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1420,7 +1433,7 @@ set_tests_properties("script-modes-selftest" PROPERTIES
 add_test(
     NAME "repository-hygiene"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-repository-hygiene.cmake"
 )
@@ -1432,7 +1445,7 @@ add_test(
 # decoration. See the script header. TIMEOUT 60 rather than CTest's 1500s
 # default: a wedged git should report in a minute, not stall the suite.
 set_tests_properties("repository-hygiene" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 60
@@ -1457,7 +1470,7 @@ set_tests_properties("repository-hygiene" PROPERTIES
 # mistaken for one.
 add_test(
     NAME "tsan-suppressions"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tsan-suppressions.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tsan-suppressions.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("tsan-suppressions" PROPERTIES
     LABELS "hygiene"
@@ -1470,7 +1483,7 @@ set_tests_properties("tsan-suppressions" PROPERTIES
 # repository would exercise one arm of four and pass.
 add_test(
     NAME "tsan-suppressions-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tsan-suppressions.sh" --self-test "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tsan-suppressions.sh" --self-test "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("tsan-suppressions-selftest" PROPERTIES
     LABELS "hygiene"
@@ -1493,12 +1506,12 @@ set_tests_properties("tsan-suppressions-selftest" PROPERTIES
 add_test(
     NAME "control-bytes"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-control-bytes.cmake"
 )
 set_tests_properties("control-bytes" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -1510,12 +1523,12 @@ set_tests_properties("control-bytes" PROPERTIES
 add_test(
     NAME "control-bytes-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-bytes-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-bytes-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-control-bytes-selftest.cmake"
 )
 set_tests_properties("control-bytes-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 300
 )
@@ -1531,15 +1544,15 @@ set_tests_properties("control-bytes-selftest" PROPERTIES
 add_test(
     NAME "repository-hygiene-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/repository-hygiene-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/repository-hygiene-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-repository-hygiene-selftest.cmake"
 )
 # No SKIP_REGULAR_EXPRESSION: this one drives the skip paths as SUBJECTS, so its own
 # output quotes `SKIP: ` and a skip marker here would score the driver as skipped on
 # the very run in which it judged them.
 set_tests_properties("repository-hygiene-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -1547,7 +1560,7 @@ set_tests_properties("repository-hygiene-selftest" PROPERTIES
 # A stall is retried; a verdict is not.
 #
 # `cmake/MacOSNotarizePkg.cmake` bounds `notarytool submit --wait` and retries it
-# ([#376](https://github.com/LASTRADA-Software/fastcached/issues/376)). The property
+# ([#376](https://github.com/LASTRADA-Software/pace/issues/376)). The property
 # that needs a guard is not the timeout -- it is that Apple answering "Invalid" is an
 # ANSWER, so retrying it spends half an hour of the step budget to be told the same
 # thing. That condition is exactly what gets simplified away while making a retry
@@ -1573,10 +1586,10 @@ set_tests_properties("repository-hygiene-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "notarize-retry"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-notarize-retry.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-notarize-retry.sh"
     )
     set_tests_properties("notarize-retry" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
@@ -1598,7 +1611,7 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # The `clang-tidy` job runs on `ubuntu-24.04` and `scripts/local-gate.sh` tidies
 # through the Linux presets, so a TU whose whole body sits behind a guard that is
 # false on Linux preprocesses to nothing and is reported CLEAN without being read
-# ([#682](https://github.com/LASTRADA-Software/fastcached/issues/682)).
+# ([#682](https://github.com/LASTRADA-Software/pace/issues/682)).
 #
 # **Registered on Linux only, and that is about the SUBJECT rather than about
 # portability.** The question is what the CI sweep cannot see, and that sweep runs on
@@ -1613,7 +1626,7 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # signature is two symbols because AddressSanitizer adds them; without ASan an empty
 # unit defines nothing and so does one that defines only inline or template entities,
 # and the check would report both alike -- measured, 11 in the sweep's configuration
-# against 26 in a Release build of the same tree. `FASTCACHED_ENABLE_TLS` matters for
+# against 26 in a Release build of the same tree. `PACE_ENABLE_TLS` matters for
 # the same reason one level up: with TLS off, two TLS test units are legitimately
 # empty and the blind set is a different set than the table records.
 #
@@ -1638,14 +1651,14 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # `--python3` is not passed here on purpose: this registration is Linux-only under a
 # configuration that has `python3` on PATH by construction, and the flag exists for the
 # registration below, which runs on Windows too.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ENABLE_SANITIZER_ADDRESS AND FASTCACHED_ENABLE_TLS)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ENABLE_SANITIZER_ADDRESS AND PACE_ENABLE_TLS)
     add_test(
         NAME "tidy-blind-spots"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-blind-spots.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-blind-spots.sh"
                 "${CMAKE_BINARY_DIR}"
     )
     set_tests_properties("tidy-blind-spots" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 300
     )
@@ -1664,10 +1677,10 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "tidy-blind-spots-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-blind-spots-selftest.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-blind-spots-selftest.sh"
     )
     set_tests_properties("tidy-blind-spots-selftest" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
@@ -1699,16 +1712,16 @@ if(NOT Python3_Interpreter_FOUND)
     message(WARNING
         "tidy-blind-spots-table: no Python 3 interpreter found, so the blind-spot table's "
         "own rules (#589) are NOT guarded in this build tree")
-    fastcached_register_skipped_test("tidy-blind-spots-table"
+    pace_register_skipped_test("tidy-blind-spots-table"
         "no Python 3 interpreter found, so the blind-spot table's own rules (#589) are NOT guarded in this build tree")
 else()
     add_test(
         NAME "tidy-blind-spots-table"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-blind-spots.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-blind-spots.sh"
                 --table-only --python3 "${Python3_EXECUTABLE}"
     )
     set_tests_properties("tidy-blind-spots-table" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
@@ -1726,7 +1739,7 @@ endif()
 # nothing at all.
 #
 # A unit test cannot reach the other two. The daemon's `StorageOpenFailure` is in
-# an ANONYMOUS NAMESPACE in `main.cpp`, behind `add_executable(fastcached
+# an ANONYMOUS NAMESPACE in `main.cpp`, behind `add_executable(pace-kv
 # main.cpp)` with no test target; the node's sentence is composed in a third
 # file in a different binary. A check that READS BOTH SIDES needs no linkage,
 # which is the STORE lane's recommendation and the reason this is a check rather
@@ -1745,11 +1758,11 @@ endif()
 add_test(
     NAME "corrupt-store-diagnostics"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-corrupt-store-diagnostics.cmake"
 )
 set_tests_properties("corrupt-store-diagnostics" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -1772,12 +1785,12 @@ set_tests_properties("corrupt-store-diagnostics" PROPERTIES
 add_test(
     NAME "corrupt-store-diagnostics-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/corrupt-store-diagnostics-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/corrupt-store-diagnostics-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-corrupt-store-diagnostics-selftest.cmake"
 )
 set_tests_properties("corrupt-store-diagnostics-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -1807,11 +1820,11 @@ set_tests_properties("corrupt-store-diagnostics-selftest" PROPERTIES
 add_test(
     NAME "test-name-hygiene"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-test-names.cmake"
 )
 set_tests_properties("test-name-hygiene" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -1827,12 +1840,12 @@ set_tests_properties("test-name-hygiene" PROPERTIES
 add_test(
     NAME "test-name-hygiene-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-name-hygiene-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-name-hygiene-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-test-names-selftest.cmake"
 )
 set_tests_properties("test-name-hygiene-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 300
 )
@@ -1851,11 +1864,11 @@ set_tests_properties("test-name-hygiene-selftest" PROPERTIES
 add_test(
     NAME "test-loops"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-test-loops.cmake"
 )
 set_tests_properties("test-loops" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -1868,12 +1881,12 @@ set_tests_properties("test-loops" PROPERTIES
 add_test(
     NAME "test-loops-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-loops-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-loops-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-test-loops-selftest.cmake"
 )
 set_tests_properties("test-loops-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     # 600 rather than 120, and the number comes from a measurement rather than from a red run.
     # Fifty cases, each staging a tree and spawning a `cmake -P`:
@@ -1916,11 +1929,11 @@ set_tests_properties("test-loops-selftest" PROPERTIES
 add_test(
     NAME "membership-fakes"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-membership-fakes.cmake"
 )
 set_tests_properties("membership-fakes" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -1935,12 +1948,12 @@ set_tests_properties("membership-fakes" PROPERTIES
 add_test(
     NAME "membership-fakes-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/membership-fakes-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/membership-fakes-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-membership-fakes-selftest.cmake"
 )
 set_tests_properties("membership-fakes-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     # The default 120 s, and the number comes from a measurement rather than from a red run.
     # Ten cases, each staging a tree, a `git init` and a `cmake -P`:
@@ -1974,11 +1987,11 @@ set_tests_properties("membership-fakes-selftest" PROPERTIES
 add_test(
     NAME "unique-temp-paths"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-unique-temp-paths.cmake"
 )
 set_tests_properties("unique-temp-paths" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -1993,12 +2006,12 @@ set_tests_properties("unique-temp-paths" PROPERTIES
 add_test(
     NAME "unique-temp-paths-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/unique-temp-paths-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/unique-temp-paths-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-unique-temp-paths-selftest.cmake"
 )
 set_tests_properties("unique-temp-paths-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -2019,15 +2032,15 @@ set_tests_properties("unique-temp-paths-selftest" PROPERTIES
 # Not guarded to Debug, unlike the canary gates it is shaped like: nothing here is an
 # `assert`, and the generator a Release build ships is the one worth asking.
 add_executable(secure-random-probe SecureRandomProbe.cpp)
-target_link_libraries(secure-random-probe PRIVATE FastCache)
+target_link_libraries(secure-random-probe PRIVATE Pace)
 add_test(
     NAME "secure-random-cross-process"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_PROBE=$<TARGET_FILE:secure-random-probe>"
+        "-DPACE_PROBE=$<TARGET_FILE:secure-random-probe>"
         -P "${CMAKE_SOURCE_DIR}/scripts/secure-random-gate.cmake"
 )
 set_tests_properties("secure-random-cross-process" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -2082,7 +2095,7 @@ add_test(
         -P "${CMAKE_SOURCE_DIR}/scripts/check-architecture-conditioned-tests.cmake"
 )
 set_tests_properties("architecture-conditioned-tests" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2126,11 +2139,11 @@ set_tests_properties("architecture-conditioned-tests" PROPERTIES
 add_test(
     NAME "byte-order-qualifier"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-byte-order-qualifier.cmake"
 )
 set_tests_properties("byte-order-qualifier" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2152,11 +2165,11 @@ set_tests_properties("byte-order-qualifier" PROPERTIES
 add_test(
     NAME "vslang-probe-only"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-vslang-probe-only.cmake"
 )
 set_tests_properties("vslang-probe-only" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2185,11 +2198,11 @@ set_tests_properties("vslang-probe-only" PROPERTIES
 add_test(
     NAME "pedantic-suppressions"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-pedantic-suppressions.cmake"
 )
 set_tests_properties("pedantic-suppressions" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2210,20 +2223,20 @@ set_tests_properties("pedantic-suppressions" PROPERTIES
 # "move the flag, do not copy it". A guard that reads as enforcing something it
 # cannot is worse than no guard.
 #
-# `FASTCACHED_SCRIPT_CHECK_FAILED` is handed over rather than respelled in the
+# `PACE_SCRIPT_CHECK_FAILED` is handed over rather than respelled in the
 # script, so the selftest judges a refusal by the same pattern ctest does. A second
 # spelling of it could drift from the property that actually decides these tests,
 # and this file would then certify a verdict nobody reads.
 add_test(
     NAME "pedantic-suppressions-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SELFTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/pedantic-suppressions-selftest"
-        "-DFASTCACHED_SCRIPT_CHECK_FAILED=${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SELFTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/pedantic-suppressions-selftest"
+        "-DPACE_SCRIPT_CHECK_FAILED=${PACE_SCRIPT_CHECK_FAILED}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-pedantic-suppressions-selftest.cmake"
 )
 set_tests_properties("pedantic-suppressions-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -2253,7 +2266,7 @@ set_tests_properties("pedantic-suppressions-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "e2e-helpers-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-e2e-helpers.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-e2e-helpers.sh"
     )
     # Neither guard against a background helper running the fixture's cleanup may be
     # removed (#1084).
@@ -2276,7 +2289,7 @@ if(NOT WIN32)
     # removing each from the real library in turn.
     add_test(
         NAME "fixture-cleanup-guards"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-fixture-cleanup-guards.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-fixture-cleanup-guards.sh"
     )
     set_tests_properties("fixture-cleanup-guards" PROPERTIES
         LABELS "hygiene"
@@ -2284,7 +2297,7 @@ if(NOT WIN32)
     )
     add_test(
         NAME "fixture-cleanup-guards-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-fixture-cleanup-guards.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-fixture-cleanup-guards.sh" --self-test
     )
     set_tests_properties("fixture-cleanup-guards-selftest" PROPERTIES
         LABELS "hygiene"
@@ -2364,11 +2377,11 @@ else()
     # no row for this at all, and the ticket that found it named the test anyway -- from a
     # run by hand -- which is the absence reading as a result. The reason is the measured one
     # above, so the skip says what a green here would have meant.
-    fastcached_register_skipped_test("e2e-helpers-selftest"
+    pace_register_skipped_test("e2e-helpers-selftest"
         "the helper library is POSIX and serves POSIX fixtures; on msys2 bash a /dev/tcp connect to an unbound loopback port can SUCCEED, so its socket cases would pass against a listener that is not there")
 endif()
 
-# Every fixture handed a launcher -- `$<TARGET_FILE:fastcache-cc>` on its registration, or
+# Every fixture handed a launcher -- `$<TARGET_FILE:pace-cc>` on its registration, or
 # a launcher parameter it declares -- calls the launcher-state seam, so the launcher
 # records into the run's own state directory rather than the developer's. The Windows
 # launcher e2e deleted the developer's statistics (`-z`) on every run, and three fixtures
@@ -2405,7 +2418,7 @@ endif()
 # cheaper again rather than raising it.
 add_test(
     NAME "launcher-state-isolation"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-launcher-state-isolation.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-launcher-state-isolation.sh"
 )
 set_tests_properties("launcher-state-isolation" PROPERTIES
     LABELS "hygiene"
@@ -2413,7 +2426,7 @@ set_tests_properties("launcher-state-isolation" PROPERTIES
 )
 add_test(
     NAME "launcher-state-isolation-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-launcher-state-isolation.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-launcher-state-isolation.sh" --self-test
 )
 set_tests_properties("launcher-state-isolation-selftest" PROPERTIES
     LABELS "hygiene"
@@ -2437,14 +2450,14 @@ set_tests_properties("launcher-state-isolation-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "vendored-libraries-static-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-vendored-libraries-static.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-vendored-libraries-static.sh" --self-test
     )
     set_tests_properties("vendored-libraries-static-selftest" PROPERTIES
         LABELS "hygiene"
         TIMEOUT 60
     )
 else()
-    fastcached_register_skipped_test("vendored-libraries-static-selftest"
+    pace_register_skipped_test("vendored-libraries-static-selftest"
         "the script is POSIX and its subject is ELF; Windows ships no shared yaml-cpp and the guard runs only in the Linux package job")
 endif()
 
@@ -2456,8 +2469,8 @@ endif()
 # Such a reference is not a test that gets skipped -- it is a hard error at
 # GENERATE time, so the whole configure fails and the message names CMake rather
 # than the option the operator set. #390: `tls-smoke` was guarded on
-# `FASTCACHED_ENABLE_TLS` and the sccache smokes on `SCCACHE`, so
-# `-DFASTCACHED_BUILD_DAEMON=OFF` could not be configured at all.
+# `PACE_ENABLE_TLS` and the sccache smokes on `SCCACHE`, so
+# `-DPACE_BUILD_DAEMON=OFF` could not be configured at all.
 #
 # It ran green for everyone who does not have sccache installed, because the
 # sccache rows are themselves gated on finding the binary. That is why this
@@ -2469,11 +2482,11 @@ endif()
 add_test(
     NAME "target-file-guards"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-target-file-guards.cmake"
 )
 set_tests_properties("target-file-guards" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2494,7 +2507,7 @@ set_tests_properties("target-file-guards" PROPERTIES
 # Two more pin the frame walker the reference scan uses: a condition spelled across lines
 # is followed, and an `endif()` with no open `if()` is reported where it happened. They are
 # what is left of the fifteen #1369 added for a SECOND source of optional targets -- a
-# directory the root added only under a `FASTCACHED_BUILD_*` option outside `src/`, which
+# directory the root added only under a `PACE_BUILD_*` option outside `src/`, which
 # was `vendor/` -- and #1596 removed with that directory and its reader. The run states
 # how many trees it built: 7.
 #
@@ -2510,12 +2523,12 @@ set_tests_properties("target-file-guards" PROPERTIES
 add_test(
     NAME "target-file-guards-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/target-file-guards-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/target-file-guards-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-target-file-guards-selftest.cmake"
 )
 set_tests_properties("target-file-guards-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -2549,11 +2562,11 @@ set_tests_properties("target-file-guards-selftest" PROPERTIES
 add_test(
     NAME "worker-refusals-counted"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-worker-refusals-counted.cmake"
 )
 set_tests_properties("worker-refusals-counted" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2578,12 +2591,12 @@ set_tests_properties("worker-refusals-counted" PROPERTIES
 add_test(
     NAME "worker-refusals-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/worker-refusals-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/worker-refusals-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-worker-refusals-selftest.cmake"
 )
 set_tests_properties("worker-refusals-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -2609,11 +2622,11 @@ set_tests_properties("worker-refusals-selftest" PROPERTIES
 add_test(
     NAME "bind-failure-seam"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-bind-failure-seam.cmake"
 )
 set_tests_properties("bind-failure-seam" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2635,12 +2648,12 @@ set_tests_properties("bind-failure-seam" PROPERTIES
 add_test(
     NAME "bind-failure-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/bind-failure-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/bind-failure-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-bind-failure-selftest.cmake"
 )
 set_tests_properties("bind-failure-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -2669,11 +2682,11 @@ set_tests_properties("bind-failure-selftest" PROPERTIES
 add_test(
     NAME "config-permissions"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-config-permissions.cmake"
 )
 set_tests_properties("config-permissions" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2697,13 +2710,44 @@ set_tests_properties("config-permissions" PROPERTIES
 add_test(
     NAME "launcher-env-reference"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-launcher-env-reference.cmake"
 )
 set_tests_properties("launcher-env-reference" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
+)
+
+# The rename to Pace (0.6.0) is complete: no first-party tracked file or path spells the old
+# product name except where scripts/brand-leftovers-exemptions.tsv says why, and no row of
+# that table has outlived its reason. `docs-subject`, because most of what it reads is prose.
+add_test(
+    NAME "brand-leftovers"
+    COMMAND ${CMAKE_COMMAND}
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        -P "${CMAKE_SOURCE_DIR}/scripts/check-brand-leftovers.cmake"
+)
+set_tests_properties("brand-leftovers" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
+    LABELS "hygiene;docs-subject"
+    TIMEOUT 120
+)
+
+# Both directions over synthetic git trees: a planted leftover and a stale row refuse, an
+# exempted one and a clean tree pass, and a tracked PATH is never exempt. `hygiene` only, as every
+# selftest: its scratch directory is a build-tree fact, so it cannot run from a bare tree.
+add_test(
+    NAME "brand-leftovers-selftest"
+    COMMAND ${CMAKE_COMMAND}
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/brand-leftovers-selftest"
+        -P "${CMAKE_SOURCE_DIR}/scripts/check-brand-leftovers-selftest.cmake"
+)
+set_tests_properties("brand-leftovers-selftest" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
+    LABELS "hygiene"
+    TIMEOUT 120
 )
 
 # The two files agree today, at 17 names each, so a green run exercises the ACCEPTING
@@ -2714,12 +2758,12 @@ set_tests_properties("launcher-env-reference" PROPERTIES
 add_test(
     NAME "launcher-env-reference-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/launcher-env-reference-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/launcher-env-reference-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-launcher-env-reference-selftest.cmake"
 )
 set_tests_properties("launcher-env-reference-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -2727,11 +2771,11 @@ set_tests_properties("launcher-env-reference-selftest" PROPERTIES
 add_test(
     NAME "node-config-reference"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-node-config-reference.cmake"
 )
 set_tests_properties("node-config-reference" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -2765,21 +2809,21 @@ set_tests_properties("node-config-reference" PROPERTIES
 add_test(
     NAME "daemon-config-reference"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_TABLE=src/FastCache/Config/CliParser.cpp"
-        "-DFASTCACHED_REFERENCE=packaging/config/fastcached.yaml"
-        "-DFASTCACHED_LABEL=fastcached"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_TABLE=src/Pace/Config/CliParser.cpp"
+        "-DPACE_REFERENCE=packaging/config/pace-kv.yaml"
+        "-DPACE_LABEL=pace-kv"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-config-reference.cmake"
 )
 set_tests_properties("daemon-config-reference" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
 
 # ---------------------------------------------------------------------------
 # Every reference configuration under packaging/config/ must reach the Linux,
-# macOS and Windows payloads. `fastcache-compile-node.yaml` reached only Linux for
+# macOS and Windows payloads. `pace-node.yaml` reached only Linux for
 # four releases (#397) and nothing said so: a file missing from two of three
 # payloads reads exactly like a file nobody needs.
 #
@@ -2789,11 +2833,11 @@ set_tests_properties("daemon-config-reference" PROPERTIES
 add_test(
     NAME "config-reference-reach"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-config-reference-reach.cmake"
 )
 set_tests_properties("config-reference-reach" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -2811,11 +2855,11 @@ set_tests_properties("config-reference-reach" PROPERTIES
 add_test(
     NAME "wix-fragment"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-wix-fragment.cmake"
 )
 set_tests_properties("wix-fragment" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2827,11 +2871,11 @@ set_tests_properties("wix-fragment" PROPERTIES
 add_test(
     NAME "wix-service-table"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-wix-service-table.cmake"
 )
 set_tests_properties("wix-service-table" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -2842,10 +2886,10 @@ set_tests_properties("wix-service-table" PROPERTIES
 # could not say "wrong" would pass every transaction there unseen. This drives each one
 # in both directions against the real service control manager and an MSI database it
 # creates, and installs nothing. Windows only: those two exist nowhere else.
-if(WIN32 AND FASTCACHED_PWSH)
+if(WIN32 AND PACE_PWSH)
     add_test(
         NAME "msi-service-table-selftest"
-        COMMAND "${FASTCACHED_PWSH}" -NoProfile -Command
+        COMMAND "${PACE_PWSH}" -NoProfile -Command
                 "Import-Module '${CMAKE_SOURCE_DIR}/scripts/lib/MsiServiceTable.psm1'; Invoke-MsiServiceTableSelfTest"
     )
     set_tests_properties("msi-service-table-selftest" PROPERTIES
@@ -2853,10 +2897,10 @@ if(WIN32 AND FASTCACHED_PWSH)
         TIMEOUT 120
     )
 elseif(WIN32)
-    fastcached_register_skipped_test("msi-service-table-selftest"
+    pace_register_skipped_test("msi-service-table-selftest"
         "no PowerShell 7 interpreter found (pwsh, pwsh-preview), so the MSI service table helpers were not exercised on this host")
 else()
-    fastcached_register_skipped_test("msi-service-table-selftest"
+    pace_register_skipped_test("msi-service-table-selftest"
         "not Windows: the MSI service table helpers read the service control manager and Windows Installer")
 endif()
 
@@ -2865,10 +2909,10 @@ endif()
 # in, its PowerShell parsed by Windows PowerShell 5.1, and the read-only waits started for real in
 # both directions. The WiX build looks at none of that, and an action started in an install root an
 # upgrade had just removed failed the 0.3.0 upgrade on CI in under 100 ms (round 5).
-if(WIN32 AND FASTCACHED_PWSH)
+if(WIN32 AND PACE_PWSH)
     add_test(
         NAME "msi-custom-action-commands"
-        COMMAND "${FASTCACHED_PWSH}" -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/check-msi-custom-actions.ps1"
+        COMMAND "${PACE_PWSH}" -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/check-msi-custom-actions.ps1"
                 -SourceDir "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties("msi-custom-action-commands" PROPERTIES
@@ -2876,10 +2920,10 @@ if(WIN32 AND FASTCACHED_PWSH)
         TIMEOUT 180
     )
 elseif(WIN32)
-    fastcached_register_skipped_test("msi-custom-action-commands"
+    pace_register_skipped_test("msi-custom-action-commands"
         "no PowerShell 7 interpreter found (pwsh, pwsh-preview), so the MSI's custom actions were not run")
 else()
-    fastcached_register_skipped_test("msi-custom-action-commands"
+    pace_register_skipped_test("msi-custom-action-commands"
         "not Windows: the MSI's custom actions are Windows command lines")
 endif()
 
@@ -2924,11 +2968,11 @@ endif()
 add_test(
     NAME "node-surface-docs"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-node-surface-docs.cmake"
 )
 set_tests_properties("node-surface-docs" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -2957,12 +3001,12 @@ set_tests_properties("node-surface-docs" PROPERTIES
 add_test(
     NAME "node-surface-docs-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/node-surface-docs-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/node-surface-docs-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-node-surface-docs-selftest.cmake"
 )
 set_tests_properties("node-surface-docs-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     # Ten `cmake -P` spawns, each over a synthesised tree of about ten small
     # files. Measured across three runs on the bridged filesystem this repository
@@ -2993,11 +3037,11 @@ set_tests_properties("node-surface-docs-selftest" PROPERTIES
 add_test(
     NAME "tsan-scope-hygiene"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tsan-scope.cmake"
 )
 set_tests_properties("tsan-scope-hygiene" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -3008,19 +3052,19 @@ set_tests_properties("tsan-scope-hygiene" PROPERTIES
 # check working and with the check having quietly stopped reading -- #317 is exactly
 # that, a file-level match reporting COVERED over a case that had left the scope.
 #
-# The tree is staged from the check's own `FastCachedTsanScope` and copies of the
+# The tree is staged from the check's own `PaceTsanScope` and copies of the
 # real `scripts/tsan-gate.sh` and root `CMakeLists.txt`, so the cases drive the
 # shipped table and the shipped tag expression rather than a second copy of either.
 # It is staged once and restored after each case (#1423).
 add_test(
     NAME "tsan-scope-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tsan-scope-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tsan-scope-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tsan-scope-selftest.cmake"
 )
 set_tests_properties("tsan-scope-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -3049,7 +3093,7 @@ set_tests_properties("tsan-scope-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "ci-scope"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh"
     )
     set_tests_properties("ci-scope" PROPERTIES
         LABELS "hygiene"
@@ -3078,7 +3122,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "merge-queue-contexts"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-queue-contexts.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-queue-contexts.sh"
     )
     set_tests_properties("merge-queue-contexts" PROPERTIES
         LABELS "hygiene"
@@ -3099,7 +3143,7 @@ if(NOT WIN32)
     # own parser tests the parser it ships with, not the one that runs.
     add_test(
         NAME "merge-queue-contexts-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-queue-contexts.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-queue-contexts.sh" --self-test
     )
     set_tests_properties("merge-queue-contexts-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3128,7 +3172,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "gated-jobs-fail-safe"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gated-jobs.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gated-jobs.sh"
     )
     set_tests_properties("gated-jobs-fail-safe" PROPERTIES
         LABELS "hygiene"
@@ -3148,7 +3192,7 @@ if(NOT WIN32)
     # argument for a baseline case rather than only negative ones.
     add_test(
         NAME "gated-jobs-fail-safe-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gated-jobs.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gated-jobs.sh" --self-test
     )
     set_tests_properties("gated-jobs-fail-safe-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3173,7 +3217,7 @@ endif()
 # it actually runs.
 add_test(
     NAME "ctest-red-reading-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-ctest-red-reading.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-ctest-red-reading.sh" --self-test
 )
 set_tests_properties("ctest-red-reading-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3205,7 +3249,7 @@ set_tests_properties("ctest-red-reading-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "merge-group-report"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-group-report.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-group-report.sh"
     )
     set_tests_properties("merge-group-report" PROPERTIES
         LABELS "hygiene"
@@ -3214,7 +3258,7 @@ if(NOT WIN32)
 
     add_test(
         NAME "merge-group-report-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-group-report.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-merge-group-report.sh" --self-test
     )
     set_tests_properties("merge-group-report-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3229,7 +3273,7 @@ endif()
 # every platform: it reads text with bash and awk, and runs under Git Bash as it does under bash.
 add_test(
     NAME "workflow-step-env"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-step-env.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-step-env.sh"
 )
 set_tests_properties("workflow-step-env" PROPERTIES
     LABELS "hygiene"
@@ -3238,7 +3282,7 @@ set_tests_properties("workflow-step-env" PROPERTIES
 
 add_test(
     NAME "workflow-step-env-plant"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-step-env.sh" --plant
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-step-env.sh" --plant
 )
 set_tests_properties("workflow-step-env-plant" PROPERTIES
     LABELS "hygiene"
@@ -3256,12 +3300,12 @@ set_tests_properties("workflow-step-env-plant" PROPERTIES
 # Every SHIPPING configure in a workflow runs the instruction-set check, in its own job and before
 # that job's build (#1450). #1442 put the step into the three `Package` jobs and nothing made a
 # FOURTH get it -- and `Package` jobs are not required contexts, so its absence is green everywhere.
-# The selector is the `-DFASTCACHED_BUILD_TESTS=OFF` flag rather than three job names, and its
+# The selector is the `-DPACE_BUILD_TESTS=OFF` flag rather than three job names, and its
 # self-test's last case deletes one real guard step from a copy of `build.yml` and requires the
 # refusal to NAME that job.
 add_test(
     NAME "shipping-configure-guard"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-shipping-configure-guard.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-shipping-configure-guard.sh"
 )
 set_tests_properties("shipping-configure-guard" PROPERTIES
     LABELS "hygiene"
@@ -3270,7 +3314,7 @@ set_tests_properties("shipping-configure-guard" PROPERTIES
 
 add_test(
     NAME "shipping-configure-guard-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-shipping-configure-guard.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-shipping-configure-guard.sh" --self-test
 )
 set_tests_properties("shipping-configure-guard-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3279,7 +3323,7 @@ set_tests_properties("shipping-configure-guard-selftest" PROPERTIES
 
 add_test(
     NAME "workflow-walk-sole"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-walk-sole.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-walk-sole.sh"
 )
 set_tests_properties("workflow-walk-sole" PROPERTIES
     LABELS "hygiene"
@@ -3288,7 +3332,7 @@ set_tests_properties("workflow-walk-sole" PROPERTIES
 
 add_test(
     NAME "workflow-walk-sole-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-walk-sole.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-walk-sole.sh" --self-test
 )
 set_tests_properties("workflow-walk-sole-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3297,7 +3341,7 @@ set_tests_properties("workflow-walk-sole-selftest" PROPERTIES
 
 # ---------------------------------------------------------------------------
 # Every git WRITE a script or fixture runs goes through `scratch_git` (scripts/lib/git-scrub.sh)
-# or `fastcached_scratch_git` (scripts/lib/CheckCommon.cmake), which remove the inherited
+# or `pace_scratch_git` (scripts/lib/CheckCommon.cmake), which remove the inherited
 # `GIT_DIR` and the rest of scripts/lib/git-scrub-variables.txt from that one command. An
 # exported `GIT_DIR` around a ctest run once made every self-test's scratch `git init` write
 # `core.worktree` into the configuration all worktrees share. The header carries the pattern and
@@ -3305,7 +3349,7 @@ set_tests_properties("workflow-walk-sole-selftest" PROPERTIES
 # one `cmake -P` self-test, and prints how many cases ran.
 add_test(
     NAME "scratch-git"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-scratch-git.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-scratch-git.sh"
 )
 set_tests_properties("scratch-git" PROPERTIES
     LABELS "hygiene"
@@ -3314,7 +3358,7 @@ set_tests_properties("scratch-git" PROPERTIES
 
 add_test(
     NAME "scratch-git-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-scratch-git.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-scratch-git.sh" --self-test
         --cmake "${CMAKE_COMMAND}" --git "${GIT_EXECUTABLE}"
 )
 set_tests_properties("scratch-git-selftest" PROPERTIES
@@ -3323,14 +3367,14 @@ set_tests_properties("scratch-git-selftest" PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# Every fixture that starts `fastcache-compile-node` names `--cluster-dir` and turns off the
+# Every fixture that starts `pace-node` names `--cluster-dir` and turns off the
 # default fleet features it does not test (`--listen-raft=`, or `--discovery=` on a consensus
 # node). A node with no flags is a fleet member on shared default ports, keeping its identity in
 # the real per-user state directory; the rule stated in the files that obey it reaches no file
 # that does not, so this is the scan. Its header carries the pattern and what it cannot see.
 add_test(
     NAME "node-fixture-starts"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-node-fixture-starts.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-node-fixture-starts.sh"
 )
 set_tests_properties("node-fixture-starts" PROPERTIES
     LABELS "hygiene"
@@ -3339,7 +3383,7 @@ set_tests_properties("node-fixture-starts" PROPERTIES
 
 add_test(
     NAME "node-fixture-starts-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-node-fixture-starts.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-node-fixture-starts.sh" --self-test
 )
 set_tests_properties("node-fixture-starts-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3352,7 +3396,7 @@ set_tests_properties("node-fixture-starts-selftest" PROPERTIES
 # to stop spawning a process per assertion (#1432), not to buy more time.
 add_test(
     NAME "workflow-walk-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-walk-selftest.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-walk-selftest.sh"
 )
 set_tests_properties("workflow-walk-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3361,7 +3405,7 @@ set_tests_properties("workflow-walk-selftest" PROPERTIES
 
 add_test(
     NAME "workflow-step-env-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-step-env.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-workflow-step-env.sh" --self-test
 )
 set_tests_properties("workflow-step-env-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3394,12 +3438,12 @@ set_tests_properties("workflow-step-env-selftest" PROPERTIES
 # second execution of the three checks this file already registers.
 #
 # It has been seen to refuse: `sccache-backend-caveat` was labelled while its
-# `-DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSccacheCaveatBudgetSeconds}`
+# `-DPACE_SCAN_BUDGET_SECONDS=${PaceSccacheCaveatBudgetSeconds}`
 # could not be resolved, and this reported it BY NAME rather than skipping it.
 if(NOT WIN32)
     add_test(
         NAME "doc-subject-checks-derivation"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/doc-subject-checks.sh" --list
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/doc-subject-checks.sh" --list
     )
     set_tests_properties("doc-subject-checks-derivation" PROPERTIES
         LABELS "hygiene"
@@ -3419,7 +3463,7 @@ if(NOT WIN32)
     # one.)
     add_test(
         NAME "doc-subject-checks-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/doc-subject-checks.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/doc-subject-checks.sh" --self-test
     )
     set_tests_properties("doc-subject-checks-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3455,7 +3499,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "table-totals"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-table-totals.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-table-totals.sh"
                 "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties("table-totals" PROPERTIES
@@ -3471,7 +3515,7 @@ if(NOT WIN32)
     # unreadable multiplier and a mode it cannot name.
     add_test(
         NAME "table-totals-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-table-totals.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-table-totals.sh" --self-test
     )
     set_tests_properties("table-totals-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3499,7 +3543,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "resp-command-docs"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-resp-command-docs.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-resp-command-docs.sh"
                 "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties("resp-command-docs" PROPERTIES
@@ -3516,7 +3560,7 @@ if(NOT WIN32)
     # directions.
     add_test(
         NAME "resp-command-docs-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-resp-command-docs.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-resp-command-docs.sh" --self-test
     )
     set_tests_properties("resp-command-docs-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3525,14 +3569,14 @@ if(NOT WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
-# Every fastcache-cli verb is documented, and every documented verb exists.
+# Every pacectl verb is documented, and every documented verb exists.
 #
 # The same rule as resp-command-docs, over the table most likely to drift: the CLI's
 # verb list grows a block at a time, which is exactly the edit where a hand-kept doc
 # list is forgotten and exactly the size at which nobody notices it was.
 add_test(
     NAME "cli-verb-docs"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-verb-docs.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-verb-docs.sh"
             "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("cli-verb-docs" PROPERTIES
@@ -3544,7 +3588,7 @@ set_tests_properties("cli-verb-docs" PROPERTIES
 # reader can fail to LOOK, since two empty lists agree perfectly.
 add_test(
     NAME "cli-verb-docs-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-verb-docs.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-verb-docs.sh" --self-test
 )
 set_tests_properties("cli-verb-docs-selftest" PROPERTIES
     LABELS "hygiene"
@@ -3581,7 +3625,7 @@ set_tests_properties("cli-verb-docs-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "obsolete-conffiles"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-obsolete-conffiles.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-obsolete-conffiles.sh"
                 "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties("obsolete-conffiles" PROPERTIES
@@ -3597,7 +3641,7 @@ if(NOT WIN32)
     # deleted, since each reads exactly like a clean tree.
     add_test(
         NAME "obsolete-conffiles-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-obsolete-conffiles.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-obsolete-conffiles.sh" --self-test
     )
     set_tests_properties("obsolete-conffiles-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3659,7 +3703,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "rulebook-open-work"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-open-work.sh" --extract
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-open-work.sh" --extract
     )
     set_tests_properties("rulebook-open-work" PROPERTIES
         LABELS "hygiene;docs-subject"
@@ -3681,7 +3725,7 @@ if(NOT WIN32)
     # the quantity that varies is the network and not the tree.
     add_test(
         NAME "rulebook-open-work-state"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-open-work.sh" --resolve
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-open-work.sh" --resolve
     )
     set_tests_properties("rulebook-open-work-state" PROPERTIES
         LABELS "hygiene;smoke"
@@ -3691,7 +3735,7 @@ if(NOT WIN32)
 
     add_test(
         NAME "rulebook-open-work-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-open-work.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-open-work.sh" --self-test
     )
     set_tests_properties("rulebook-open-work-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3726,7 +3770,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "rulebook-tripwires"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-tripwires.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-tripwires.sh"
                 "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties("rulebook-tripwires" PROPERTIES
@@ -3743,7 +3787,7 @@ if(NOT WIN32)
     # exactly like a clean tree.
     add_test(
         NAME "rulebook-tripwires-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-tripwires.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-rulebook-tripwires.sh" --self-test
     )
     set_tests_properties("rulebook-tripwires-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3764,7 +3808,7 @@ if(NOT WIN32)
     # absence. Default set, not `smoke` -- it opens no socket.
     add_test(
         NAME "agent-md-budget"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-agent-md-budget.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-agent-md-budget.sh"
                 "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties("agent-md-budget" PROPERTIES
@@ -3781,7 +3825,7 @@ if(NOT WIN32)
     # check can fail to LOOK.
     add_test(
         NAME "agent-md-budget-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-agent-md-budget.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-agent-md-budget.sh" --self-test
     )
     set_tests_properties("agent-md-budget-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3817,7 +3861,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "tidy-sweep-scope"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-scope.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-scope.sh"
     )
     set_tests_properties("tidy-sweep-scope" PROPERTIES
         LABELS "hygiene"
@@ -3826,7 +3870,7 @@ if(NOT WIN32)
 
     add_test(
         NAME "tidy-sweep-scope-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-scope.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-scope.sh" --self-test
     )
     set_tests_properties("tidy-sweep-scope-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3863,7 +3907,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "tidy-sweep-database"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-database.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-database.sh"
     )
     set_tests_properties("tidy-sweep-database" PROPERTIES
         LABELS "hygiene"
@@ -3891,7 +3935,7 @@ if(NOT WIN32)
     # refuses).
     add_test(
         NAME "tidy-sweep-database-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-database.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-sweep-database.sh" --self-test
     )
     set_tests_properties("tidy-sweep-database-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3920,7 +3964,7 @@ endif()
 # when `CMakeCache.txt` was ABSENT, so a build directory kept whichever clang-tidy
 # it first found forever and re-running the gate could not fix it -- re-running the
 # gate is what skipped the configure. The same shape as the stale
-# `FASTCACHE_CC-NOTFOUND` that kept build trees on sccache silently. And
+# `PACE_CC-NOTFOUND` that kept build trees on sccache silently. And
 # `USE_COMPILER_CACHE` defaults to ON, so a gate that never mentioned it built both
 # configurations through whatever launcher was installed -- 148 and 618
 # launcher-fronted edges when it was measured (#471), against the standing
@@ -3933,7 +3977,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "local-gate-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/local-gate.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/local-gate.sh" --self-test
     )
     set_tests_properties("local-gate-selftest" PROPERTIES
         LABELS "hygiene"
@@ -3957,7 +4001,7 @@ endif()
 # `--self-test` drives the verdicts against staged object trees: a suite binary
 # with one uninstrumented object, an uninstrumented canary, a fully instrumented
 # target, an instrumented translation unit with no functions (the six
-# platform-gated files in FastCacheTest, which carry `__tsan_init` and no
+# platform-gated files in PaceTest, which carry `__tsan_init` and no
 # per-function hooks -- a rule built on `__tsan_func_entry` would refuse them), an
 # unreadable object, a missing object directory, two candidate directories, an
 # empty one, and a binary that was never built.
@@ -3965,7 +4009,7 @@ endif()
 # The suite case is the one that matters and is deliberately first. An
 # uninstrumented CANARY already failed closed -- it exits 0, reports no race, and
 # the gate refuses. The test binaries had no backstop at all, so an uninstrumented
-# `FastCacheTest` ran, reported assertions, exited 0, and the gate printed
+# `PaceTest` ran, reported assertions, exited 0, and the gate printed
 # "all scoped targets clean". A guard demonstrated only on the backstopped half
 # would be a guard nobody has seen fire where it matters.
 #
@@ -3981,7 +4025,7 @@ endif()
 if(NOT WIN32)
     add_test(
         NAME "tsan-gate-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/tsan-gate.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/tsan-gate.sh" --self-test
     )
     set_tests_properties("tsan-gate-selftest" PROPERTIES
         LABELS "hygiene"
@@ -4034,7 +4078,7 @@ endif()
 # The real reason is the one at line 390: the bash 4.4 probe is deliberately not
 # asked on Windows (#1355), because PATH's `bash` there can be a WSL launcher --
 # measured, it printed `C:/Windows/System32/bash.exe is 5.2` for a Linux
-# interpreter. `FASTCACHED_BASH44` is therefore empty on Windows and there is no
+# interpreter. `PACE_BASH44` is therefore empty on Windows and there is no
 # interpreter to register with; registering PATH's `bash` anyway would run the
 # sweep's scope computation against a Linux view of a Windows checkout, which
 # answers a different question rather than the same one less well.
@@ -4044,8 +4088,8 @@ endif()
 # Said here because the two lines look like a contradiction until you know which
 # question each one answers.
 if(NOT WIN32)
-    if(FASTCACHED_BASH44)
-        # `${FASTCACHED_BASH44}` and not `${FASTCACHED_BASH}` -- see the derivation above
+    if(PACE_BASH44)
+        # `${PACE_BASH44}` and not `${PACE_BASH}` -- see the derivation above
         # and the exemption row in `check-script-interpreter.cmake`, which names this
         # script and only this script.
         #
@@ -4062,14 +4106,14 @@ if(NOT WIN32)
         # were already met when it was picked up.
         add_test(
             NAME "tidy-sweep-selftest"
-            COMMAND ${FASTCACHED_BASH44} "${CMAKE_SOURCE_DIR}/scripts/tidy-sweep.sh" --self-test
+            COMMAND ${PACE_BASH44} "${CMAKE_SOURCE_DIR}/scripts/tidy-sweep.sh" --self-test
         )
         # `PASS_REGULAR_EXPRESSION` replaces the exit status as the verdict, and that is
         # the point: an EARLY STOP -- a `return 0` planted at the top of `SelfTest`, a helper
         # that returns before its block -- exits 0 having judged nothing, and ctest scored
         # it green on the exit code alone (measured). The script prints the line only once
         # every case ran, the case count agreed with `SelfTestCases`, and nothing failed.
-        # `FASTCACHED_SCRIPT_CHECK_FAILED` is the tree's one spelling for a `cmake -P`
+        # `PACE_SCRIPT_CHECK_FAILED` is the tree's one spelling for a `cmake -P`
         # check's verdict and does not apply: this is a bash self-test naming its own pass.
         set_tests_properties("tidy-sweep-selftest" PROPERTIES
             LABELS "hygiene"
@@ -4081,14 +4125,14 @@ if(NOT WIN32)
         # No interpreter clears the floor. Registered anyway, and SKIPPED -- absent is not
         # skipped, and dropping the row is what makes a permanent gap indistinguishable
         # from a platform that was never meant to run it.
-        fastcached_register_skipped_test("tidy-sweep-selftest"
+        pace_register_skipped_test("tidy-sweep-selftest"
             "no bash >= 4.4 on this host, so tidy-sweep.sh's scope computation and canary verdict were not exercised")
     endif()
 endif()
 
 # ---------------------------------------------------------------------------
 # The sccache-backend caveat. Fails when a file recommends pointing sccache at
-# fastcached -- which is what naming either of the two `SCCACHE_*` backend
+# pace-kv -- which is what naming either of the two `SCCACHE_*` backend
 # variables is -- without saying, within 40 lines, what that costs under MSVC and
 # clang-cl.
 # scripts/check-sccache-backend-caveat.cmake carries the tables and prints them
@@ -4130,7 +4174,7 @@ endif()
 # read as a fact about the check when all three are facts about a filesystem.
 # The check now measures itself and prints the cost, the band it lands in and
 # the headroom on EVERY run, so the margin is an observation anybody can act on
-# rather than a claim written once. `FastCachedSccacheScanCostBands` in the
+# rather than a claim written once. `PaceSccacheScanCostBands` in the
 # script carries the conditions table; do not copy a number back out of it.
 #
 # The bound below is a BACKSTOP AGAINST PATHOLOGY, not a deadline, and the
@@ -4145,7 +4189,7 @@ endif()
 #
 # It is defensible only while a run that is going long SAYS SO. The script
 # narrates progress with its measured per-file cost once a run passes
-# `FastCachedSccacheScanNarrateAfterSeconds`, and ctest captures the output of a
+# `PaceSccacheScanNarrateAfterSeconds`, and ctest captures the output of a
 # test it kills, so a kill at this bound arrives with the reason attached. It
 # narrates through both phases -- per scan root while walking, per hundred files
 # while reading -- and the one window it cannot narrate inside is a single
@@ -4160,18 +4204,18 @@ endif()
 # headroom the script prints has to be headroom against the number ctest
 # actually enforces. Two numbers that agree today is precisely how this file came
 # to hold three figures for one check.
-set(FastCachedSccacheCaveatBudgetSeconds 180)
+set(PaceSccacheCaveatBudgetSeconds 180)
 add_test(
     NAME "sccache-backend-caveat"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSccacheCaveatBudgetSeconds}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCAN_BUDGET_SECONDS=${PaceSccacheCaveatBudgetSeconds}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-sccache-backend-caveat.cmake"
 )
 set_tests_properties("sccache-backend-caveat" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
-    TIMEOUT ${FastCachedSccacheCaveatBudgetSeconds}
+    TIMEOUT ${PaceSccacheCaveatBudgetSeconds}
 )
 
 # ---------------------------------------------------------------------------
@@ -4196,12 +4240,12 @@ set_tests_properties("sccache-backend-caveat" PROPERTIES
 add_test(
     NAME "sccache-backend-caveat-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/sccache-backend-caveat-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/sccache-backend-caveat-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-sccache-backend-caveat-selftest.cmake"
 )
 set_tests_properties("sccache-backend-caveat-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     # Not derived from the budget above, and not a bare number by accident: this
     # drives the check against a 26-file synthesised tree, one `cmake -P` spawn
@@ -4227,8 +4271,8 @@ set_tests_properties("sccache-backend-caveat-selftest" PROPERTIES
 # UserName it cannot resolve, bootstraps the job, and simply never spawns it -- so
 # the install-time refusal in ServiceControl.cpp is the only thing standing between
 # an operator and a service that reports installed and never runs. Issue #87 was the
-# other half of that refusal missing: `fastcache-compile-node` named `fastcache-node`
-# and the package created only `_fastcached`.
+# other half of that refusal missing: `pace-node` named `pace-node`
+# and the package created only `_pace-kv`.
 #
 # Registered here rather than left to the macOS packaging job precisely because it
 # is macOS-only in effect: a check only one platform can run reports after the
@@ -4242,11 +4286,11 @@ set_tests_properties("sccache-backend-caveat-selftest" PROPERTIES
 add_test(
     NAME "service-accounts"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-service-accounts.cmake"
 )
 set_tests_properties("service-accounts" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -4272,7 +4316,7 @@ set_tests_properties("service-accounts" PROPERTIES
 #
 # It also reads where the node's DISK TIER can live: the unit's `CacheDirectory=`,
 # judged against every `cache_dir` the docs and the shipped reference configuration
-# cite. The unit shipped without one while the docs named /var/cache/fastcache-node,
+# cite. The unit shipped without one while the docs named /var/cache/pace-node,
 # a path ProtectSystem=strict left read-only, and the state directory -- the one
 # persistent directory the service could write -- is refused by the node as a
 # cache_dir, so following the docs gave no disk tier and the obvious workaround gave
@@ -4290,11 +4334,11 @@ set_tests_properties("service-accounts" PROPERTIES
 add_test(
     NAME "node-working-directory"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-node-working-directory.cmake"
 )
 set_tests_properties("node-working-directory" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -4318,12 +4362,12 @@ set_tests_properties("node-working-directory" PROPERTIES
 add_test(
     NAME "node-working-directory-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/node-working-directory-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/node-working-directory-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-node-working-directory-selftest.cmake"
 )
 set_tests_properties("node-working-directory-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -4360,7 +4404,7 @@ set_tests_properties("node-working-directory-selftest" PROPERTIES
 # the binary; do not make it go away by changing a code page, and read the
 # script's header before reaching for `ENCODING`, one value of which reports a
 # PASS for the very defect this checks for.
-foreach(_utf8ArgvTarget IN ITEMS fastcached fastcache-cc fastcache-compile-node fastcache-cli compile-cache-testclient)
+foreach(_utf8ArgvTarget IN ITEMS pace-kv pace-cc pace-node pacectl compile-cache-testclient)
     if(TARGET ${_utf8ArgvTarget})
         add_test(
             NAME "utf8-argv-${_utf8ArgvTarget}"
@@ -4370,7 +4414,7 @@ foreach(_utf8ArgvTarget IN ITEMS fastcached fastcache-cc fastcache-compile-node 
                 -P "${CMAKE_SOURCE_DIR}/scripts/check-utf8-argv.cmake"
         )
         set_tests_properties("utf8-argv-${_utf8ArgvTarget}" PROPERTIES
-            FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+            FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
             LABELS "hygiene"
             TIMEOUT 60
         )
@@ -4383,7 +4427,7 @@ endforeach()
 # each one to end in a status message and a clean fall-through.
 #
 # What it defends is the property that makes cmake/portable/CompileCache.cmake safe to
-# vendor: it is copied into repositories that never asked for fastcached, so a
+# vendor: it is copied into repositories that never asked for Pace, so a
 # cache it cannot download has to cost them a slower build and nothing else. A
 # configure that aborts because GitHub was unreachable would be a far worse
 # failure than the missing cache it is reporting.
@@ -4399,18 +4443,18 @@ endforeach()
 add_test(
     NAME "compile-cache-autoinstall"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-autoinstall"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-autoinstall"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-autoinstall.cmake"
 )
 # Windows and a host without uname both report by printing `SKIP: ` and exiting
 # 0 — see the script header for why the sandbox it needs is POSIX-only, and
 # repository-hygiene above for why a `cmake -P` script cannot return 77.
 set_tests_properties("compile-cache-autoinstall" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 600
@@ -4451,12 +4495,12 @@ endif()
 add_test(
     NAME "compile-cache-caveat"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-caveat"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
-        "-DFASTCACHED_MSVC_LIKE=${_fc_caveat_msvc_like}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-caveat"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_MSVC_LIKE=${_fc_caveat_msvc_like}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-caveat.cmake"
 )
 # A shell that is not a Developer shell has a cl.exe that exists and cannot
@@ -4465,7 +4509,7 @@ add_test(
 # for a toolchain nobody set up. repository-hygiene above says why a `cmake -P`
 # script cannot return 77 instead.
 set_tests_properties("compile-cache-caveat" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 600
@@ -4474,16 +4518,16 @@ set_tests_properties("compile-cache-caveat" PROPERTIES
 # ---------------------------------------------------------------------------
 # compile-cache-dispatch: configure's `[cache] dispatch:` line is true of the build.
 #
-# fastcache-cc dispatched a miss only when the environment of whatever ran the BUILD named
-# FASTCACHE_SCHEDULER, so a developer who set it in one shell and built from another compiled
-# everything locally while configure said only that fastcache-cc was the launcher -- measured:
+# pace-cc dispatched a miss only when the environment of whatever ran the BUILD named
+# PACE_SCHEDULER, so a developer who set it in one shell and built from another compiled
+# everything locally while configure said only that pace-cc was the launcher -- measured:
 # 341 misses, `NOT_CONFIGURED` on each. The module now decides at configure, bakes it into the
 # launcher and says so; this asserts the decision over every source combination, and then
 # configures the fixture with a stand-in launcher it builds and compares the printed line with
-# the `FASTCACHE_SCHEDULER=` every generated LAUNCHER line carries. Both states, both sources,
+# the `PACE_SCHEDULER=` every generated LAUNCHER line carries. Both states, both sources,
 # reconfigures with and without a -D from shells with and without the variable, and ninja's own
 # regeneration -- where a first version of the fix turned dispatch off, and a retarget turned an
-# explicit -DFASTCACHE_SCHEDULER= back on. FASTCACHE_ADDR is held by the same rule and pinned
+# explicit -DPACE_SCHEDULER= back on. PACE_ADDR is held by the same rule and pinned
 # the same way.
 #
 # Runs on Windows as well -- the stand-in is compiled, not a script -- and reports a toolchain
@@ -4493,15 +4537,15 @@ set_tests_properties("compile-cache-caveat" PROPERTIES
 add_test(
     NAME "compile-cache-dispatch"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-dispatch"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-dispatch"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-dispatch.cmake"
 )
 set_tests_properties("compile-cache-dispatch" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 600
@@ -4517,44 +4561,44 @@ set_tests_properties("compile-cache-dispatch" PROPERTIES
 add_test(
     NAME "compile-cache-dispatch-verdict"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-dispatch-verdict"
-        "-DFASTCACHED_CTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
-        "-DFASTCACHED_BUILD_DIR=${CMAKE_BINARY_DIR}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-dispatch-verdict"
+        "-DPACE_CTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
+        "-DPACE_BUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-dispatch-verdict.cmake"
 )
 set_tests_properties("compile-cache-dispatch-verdict" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 900
 )
 
 # The other half: that it can actually install one. Serves a synthetic release
-# over file:// through FASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE — the same seam an
+# over file:// through PACE_AUTO_INSTALL_DOWNLOAD_BASE — the same seam an
 # organisation uses to install from an internal mirror — so the happy path is
 # covered without the network, and without spending the GitHub API budget that
 # a fleet of CI runners behind one address has to share.
 add_test(
     NAME "compile-cache-install"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-install"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-install"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-install.cmake"
 )
 set_tests_properties("compile-cache-install" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 600
 )
 
 # ---------------------------------------------------------------------------
-# FASTCACHE_AUTO_START staging (issue #90): the daemon binary comes from the
+# PACE_AUTO_START staging (issue #90): the daemon binary comes from the
 # SAME release archive the launcher does, so this proves one download serves
 # both members rather than fetching (or failing to fetch) the archive twice.
 # Same file:// mirror technique as compile-cache-install, for the same
@@ -4565,15 +4609,15 @@ set_tests_properties("compile-cache-install" PROPERTIES
 add_test(
     NAME "compile-cache-daemon-staging"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-daemon-staging"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-daemon-staging"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-daemon-staging.cmake"
 )
 set_tests_properties("compile-cache-daemon-staging" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 600
@@ -4584,7 +4628,7 @@ set_tests_properties("compile-cache-daemon-staging" PROPERTIES
 #
 # The staging test above is green whether or not that is explained: its stand-in exits 3
 # with nothing on either stream, so it reaches this very branch and asserts only that a
-# daemon was MENTIONED. `_fc_auto_start_fastcached` spawned under `OUTPUT_QUIET
+# daemon was MENTIONED. `_fc_auto_start_pace_kv` spawned under `OUTPUT_QUIET
 # ERROR_QUIET` and reported `(127)` -- a number that reads as *not found* for a binary
 # the module has just staged and knows the path of, while the sentence that explains it
 # sat on the child's stderr.
@@ -4595,15 +4639,15 @@ set_tests_properties("compile-cache-daemon-staging" PROPERTIES
 add_test(
     NAME "compile-cache-daemon-diagnostic"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-daemon-diagnostic"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/compile-cache-daemon-diagnostic"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-daemon-diagnostic.cmake"
 )
 set_tests_properties("compile-cache-daemon-diagnostic" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     TIMEOUT 600
@@ -4620,7 +4664,7 @@ set_tests_properties("compile-cache-daemon-diagnostic" PROPERTIES
 #
 # Registered HERE and not beside the launcher, and that is load-bearing rather
 # than tidiness: src/apps processes its table in order, so at the point
-# src/apps/fastcache-cc is configured the fastcache-compile-node target does not
+# src/apps/pace-cc is configured the pace-node target does not
 # exist yet and a $<TARGET_FILE:> guard on it silently skips the test. src/tests
 # is added after src/apps (see the top-level CMakeLists), so every target this
 # needs is defined by the time this runs -- which is also why
@@ -4668,7 +4712,7 @@ set_tests_properties("compile-cache-daemon-diagnostic" PROPERTIES
 # NOT labelled "smoke": it opens no socket, starts no daemon and needs no
 # compiler. `--print-surfaces` renders the resolved configuration and exits, so
 # every case is a process that lives for milliseconds.
-if(NOT TARGET fastcache-compile-node)
+if(NOT TARGET pace-node)
     message(STATUS "node-config-file-e2e: compile node not built -- skipping")
 elseif(WIN32)
     # POSIX-only, the way the fixtures below record for themselves: a PowerShell
@@ -4678,8 +4722,8 @@ elseif(WIN32)
 else()
     add_test(
         NAME "node-config-file-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-config-file-e2e.sh"
-            "$<TARGET_FILE:fastcache-compile-node>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-config-file-e2e.sh"
+            "$<TARGET_FILE:pace-node>"
     )
     set_tests_properties("node-config-file-e2e" PROPERTIES
         LABELS "hygiene"
@@ -4698,18 +4742,18 @@ endif()
 #
 # NOT labelled "smoke": every case is a refusal that exits before anything is opened,
 # bound or registered.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-compile-node)
-    message(STATUS "exit-codes-e2e: fastcached or the compile node not built -- skipping")
+if(NOT TARGET pace-kv OR NOT TARGET pace-node)
+    message(STATUS "exit-codes-e2e: pace-kv or the compile node not built -- skipping")
 elseif(WIN32)
     # REGISTERED and skipped, never omitted (#1355), for `e2e-helpers-selftest`'s reason: the
     # bounded runner every case goes through is the shared POSIX library.
-    fastcached_register_skipped_test("exit-codes-e2e"
+    pace_register_skipped_test("exit-codes-e2e"
         "every case is bounded by scripts/lib/e2e-common.sh's run_bounded, and that library is POSIX; the tables it drives are unit-tested on every platform")
 else()
     add_test(
         NAME "exit-codes-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/exit-codes-e2e.sh"
-            "$<TARGET_FILE:fastcached>" "$<TARGET_FILE:fastcache-compile-node>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/exit-codes-e2e.sh"
+            "$<TARGET_FILE:pace-kv>" "$<TARGET_FILE:pace-node>"
     )
     set_tests_properties("exit-codes-e2e" PROPERTIES
         LABELS "hygiene"
@@ -4729,7 +4773,7 @@ endif()
 # loop over a real bound port, that `/metrics` on that same port is byte-for-byte
 # unaffected by the credential (the assertion protecting every existing scraper),
 # and that a node registering with its own scheduler reaches the rendered page.
-if(NOT TARGET fastcache-compile-node)
+if(NOT TARGET pace-node)
     message(STATUS "fleet-dashboard-e2e: compile node not built — skipping")
 elseif(WIN32)
     # POSIX-only for now: the fixture is
@@ -4745,8 +4789,8 @@ else()
     # ran in so a green run is never silently the skip.
     add_test(
         NAME "node-socket-activation-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-socket-activation-e2e.sh"
-            --node "$<TARGET_FILE:fastcache-compile-node>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-socket-activation-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
     )
     # Serial for `fleet-dashboard-e2e`'s reason: it starts a real node and reads a
     # well-known default port, so it must not race the other server-starting fixtures.
@@ -4760,8 +4804,8 @@ else()
     # socket, which is the stock package's configuration.
     add_test(
         NAME "node-socket-activation-derived-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-socket-activation-e2e.sh"
-            --node "$<TARGET_FILE:fastcache-compile-node>" --derive-advertise
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-socket-activation-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>" --derive-advertise
     )
     set_tests_properties("node-socket-activation-derived-e2e" PROPERTIES
         LABELS "smoke"
@@ -4772,8 +4816,8 @@ else()
 
     add_test(
         NAME "fleet-dashboard-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
-            --node "$<TARGET_FILE:fastcache-compile-node>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
     )
     # Starts a real node with three listeners, so it must not race the other
     # server-starting smoke tests for ports.
@@ -4790,11 +4834,11 @@ else()
     # coverage. It additionally proves the handshake is REAL, by checking that a
     # plaintext request to the TLS port is not served: a port that merely answers
     # would otherwise pass every assertion above it.
-    if(FASTCACHED_ENABLE_TLS)
+    if(PACE_ENABLE_TLS)
         add_test(
             NAME "fleet-dashboard-tls-e2e"
-            COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
-                --node "$<TARGET_FILE:fastcache-compile-node>"
+            COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
+                --node "$<TARGET_FILE:pace-node>"
                 --tls-cert "${CMAKE_SOURCE_DIR}/testdata/tls/server.crt"
                 --tls-key "${CMAKE_SOURCE_DIR}/testdata/tls/server.key"
         )
@@ -4813,8 +4857,8 @@ else()
         # different things reports which one broke by not saying.
         add_test(
             NAME "fleet-dashboard-self-signed-e2e"
-            COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
-                --node "$<TARGET_FILE:fastcache-compile-node>"
+            COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
+                --node "$<TARGET_FILE:pace-node>"
                 --tls-self-signed
         )
         set_tests_properties("fleet-dashboard-self-signed-e2e" PROPERTIES
@@ -4841,7 +4885,7 @@ endif()
 # Windows-only for now, the way `fleet-dashboard-e2e` records for itself. The claim
 # path for both platforms is covered by the unit tests, which run everywhere; what is
 # missing here is the POSIX half of the ORCHESTRATION, not of the guard.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-compile-node OR NOT TARGET fastcache-cc)
+if(NOT TARGET pace-kv OR NOT TARGET pace-node OR NOT TARGET pace-cc)
     message(STATUS "node-scratch-isolation-e2e: daemon, compile node or launcher not built — skipping")
 elseif(NOT WIN32)
     message(STATUS "node-scratch-isolation-e2e: Windows-only fixture — skipping")
@@ -4849,9 +4893,9 @@ else()
     add_test(
         NAME "node-scratch-isolation-e2e"
         COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/node-scratch-isolation-e2e.ps1"
-            -Fastcached "$<TARGET_FILE:fastcached>"
-            -Node "$<TARGET_FILE:fastcache-compile-node>"
-            -Launcher "$<TARGET_FILE:fastcache-cc>"
+            -PaceKv "$<TARGET_FILE:pace-kv>"
+            -Node "$<TARGET_FILE:pace-node>"
+            -Launcher "$<TARGET_FILE:pace-cc>"
     )
     # Starts three nodes and a daemon twice over and drives real compiles, so it must
     # not race the other server-starting smoke tests for ports or for CPU.
@@ -4918,15 +4962,15 @@ endif()
 # platform. GitHub's `ubuntu-*` images carry `pwsh`, so the coverage costs ~1.2 s.
 #
 # An interpreter that could not run it would turn this skip into a FAILURE, which is worse
-# than the `if(WIN32)` it replaces -- so `FASTCACHED_PWSH` names pwsh only. This script
+# than the `if(WIN32)` it replaces -- so `PACE_PWSH` names pwsh only. This script
 # itself passes under Windows PowerShell 5.1 as well -- re-measured 2026-09-10 on
 # 5.1.26100.9444 and on pwsh 7.6.5, both green; its sibling
 # `dist-compile-e2e.ps1` does not, and they share the gate. See the derivation beside
-# `find_program(FASTCACHED_PWSH ...)`.
-if(FASTCACHED_PWSH)
+# `find_program(PACE_PWSH ...)`.
+if(PACE_PWSH)
     add_test(
         NAME "node-scratch-isolation-e2e-selftest"
-        COMMAND "${FASTCACHED_PWSH}" -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/node-scratch-isolation-e2e.ps1" -SelfTest
+        COMMAND "${PACE_PWSH}" -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/node-scratch-isolation-e2e.ps1" -SelfTest
     )
     set_tests_properties("node-scratch-isolation-e2e-selftest" PROPERTIES
         LABELS "hygiene"
@@ -4935,8 +4979,8 @@ if(FASTCACHED_PWSH)
 else()
     # Registered and SKIPPED rather than omitted -- absent is not skipped, and
     # `if(WIN32)` left every non-Windows runner in the absent state for as long as it
-    # stood. See `fastcached_register_skipped_test`, which owns the sentinel.
-    fastcached_register_skipped_test("node-scratch-isolation-e2e-selftest"
+    # stood. See `pace_register_skipped_test`, which owns the sentinel.
+    pace_register_skipped_test("node-scratch-isolation-e2e-selftest"
         "no PowerShell 7 interpreter found (pwsh, pwsh-preview), so the wait classifier's decision table was not exercised on this host")
 endif()
 
@@ -4945,7 +4989,7 @@ endif()
 # the compile or before a dispatch preprocess. Built for the e2e fixtures below and never
 # installed. It is copied there under the real compiler's own file name, because the launcher
 # picks its driver grammar by that name.
-if(TARGET fastcache-cc)
+if(TARGET pace-cc)
     add_executable(mid-compile-edit-stub MidCompileEditStub.cpp)
 endif()
 # Passed whenever it was built, and a fixture that is not handed it FAILS rather than skips:
@@ -4966,7 +5010,7 @@ endif()
 #
 # Registered HERE and not beside the launcher, for the reason `dist-compile-e2e`
 # below records and this test learned the hard way: src/apps processes its table
-# in order, so at the point src/apps/fastcache-cc is configured the
+# in order, so at the point src/apps/pace-cc is configured the
 # compile-cache-testclient target does not exist yet, and `if(TARGET
 # compile-cache-testclient)` there is not a condition -- it is the constant
 # FALSE. The fixture would have reported its wrong-object case SKIPPED on every
@@ -4986,19 +5030,19 @@ endif()
 # (`HitVerification`) is platform-neutral and unit-tested on every platform; what
 # the fixture adds is the end-to-end path, and one platform proving that is what
 # the rule about duplicating a case asks for.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-cc)
+if(NOT TARGET pace-kv OR NOT TARGET pace-cc)
     message(STATUS "compile-cache-e2e: daemon or launcher not built — skipping")
 elseif(WIN32)
     add_test(
         NAME "compile-cache-e2e"
-        COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cc/run-launcher-e2e.ps1"
-            -Fastcached "$<TARGET_FILE:fastcached>"
-            -Launcher "$<TARGET_FILE:fastcache-cc>"
+        COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/run-launcher-e2e.ps1"
+            -PaceKv "$<TARGET_FILE:pace-kv>"
+            -Launcher "$<TARGET_FILE:pace-cc>"
             ${_fc_e2e_edit_stub_windows}
     )
 else()
     # Passed when it was built, and the fixture says out loud which of the two it
-    # is running as -- FASTCACHED_BUILD_TESTCLIENT is off by default and on for
+    # is running as -- PACE_BUILD_TESTCLIENT is off by default and on for
     # the linux and clang-tidy jobs, so a reader of a local run and a reader of a
     # CI log are looking at different tests and must be told so.
     set(_fc_e2e_testclient "")
@@ -5007,15 +5051,15 @@ else()
     endif()
     add_test(
         NAME "compile-cache-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/compile-cache-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --launcher "$<TARGET_FILE:fastcache-cc>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/compile-cache-e2e.sh"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
             ${_fc_e2e_testclient}
             ${_fc_e2e_edit_stub_posix}
     )
 endif()
-if(TARGET fastcached AND TARGET fastcache-cc)
+if(TARGET pace-kv AND TARGET pace-cc)
     # Binds a port and spawns a daemon, so it must not run concurrently with the
     # other server-starting smoke tests. The port is DRAWN per run since #220 --
     # `RUN_SERIAL` stays because the daemon is still a shared machine resource and
@@ -5031,7 +5075,7 @@ endif()
 #
 # `run-launcher-e2e.ps1` used to bind a constant `21714`, so a run that did not
 # reach its cleanup left a daemon listening for as long as the machine was up and
-# every later run failed at `fastcached exited immediately (exit 1)` -- naming
+# every later run failed at `pace-kv exited immediately (exit 1)` -- naming
 # neither the port nor the process, and reading exactly like a daemon that cannot
 # start. It was diagnosed once by hand from `Get-NetTCPConnection`, after it
 # survived a rebase and looked like a regression the rebase had introduced.
@@ -5044,15 +5088,15 @@ endif()
 # over staged holder records AND against real listeners on this machine, and needs
 # none of the three.
 #
-# Not guarded on `TARGET fastcached`, deliberately: needing no binary is the whole
+# Not guarded on `TARGET pace-kv`, deliberately: needing no binary is the whole
 # point, and gating it on one would put it back to running only where the fixture
 # already ran.
-find_program(FASTCACHED_PWSH NAMES pwsh)
-if(FASTCACHED_PWSH)
+find_program(PACE_PWSH NAMES pwsh)
+if(PACE_PWSH)
     add_test(
         NAME "launcher-e2e-ports-selftest"
-        COMMAND "${FASTCACHED_PWSH}" -NoProfile -File
-                "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cc/run-launcher-e2e.ps1" -SelfTestPorts
+        COMMAND "${PACE_PWSH}" -NoProfile -File
+                "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/run-launcher-e2e.ps1" -SelfTestPorts
     )
     set_tests_properties("launcher-e2e-ports-selftest" PROPERTIES
         LABELS "hygiene"
@@ -5061,12 +5105,12 @@ if(FASTCACHED_PWSH)
 else()
     # Absent is not skipped, and dropping the row is what makes a permanent gap
     # indistinguishable from a platform that was never meant to run it.
-    fastcached_register_skipped_test("launcher-e2e-ports-selftest"
+    pace_register_skipped_test("launcher-e2e-ports-selftest"
         "no pwsh on this host, so run-launcher-e2e.ps1's port decision was not exercised")
 endif()
 
 # ---------------------------------------------------------------------------
-if(NOT TARGET fastcached OR NOT TARGET fastcache-compile-node OR NOT TARGET fastcache-cc)
+if(NOT TARGET pace-kv OR NOT TARGET pace-node OR NOT TARGET pace-cc)
     message(STATUS "dist-compile-e2e: daemon, compile node or launcher not built — skipping")
 else()
     if(WIN32)
@@ -5100,15 +5144,15 @@ else()
         # required: without it that reading is absent, and absent confirms nothing,
         # so a withdrawal stays a failure rather than the test disappearing.
         set(_fc_dist_e2e_cli)
-        if(TARGET fastcache-cli)
-            set(_fc_dist_e2e_cli -Cli "$<TARGET_FILE:fastcache-cli>")
+        if(TARGET pacectl)
+            set(_fc_dist_e2e_cli -Cli "$<TARGET_FILE:pacectl>")
         endif()
         add_test(
             NAME "dist-compile-e2e"
             COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.ps1"
-                -Fastcached "$<TARGET_FILE:fastcached>"
-                -Node "$<TARGET_FILE:fastcache-compile-node>"
-                -Launcher "$<TARGET_FILE:fastcache-cc>"
+                -PaceKv "$<TARGET_FILE:pace-kv>"
+                -Node "$<TARGET_FILE:pace-node>"
+                -Launcher "$<TARGET_FILE:pace-cc>"
                 ${_fc_dist_e2e_cli}
                 ${_fc_e2e_edit_stub_windows}
         )
@@ -5116,15 +5160,15 @@ else()
         # The client reads the scheduler's record of a worker whose lease came back
         # `withdrawn`, for the reason the Windows registration above gives.
         set(_fc_dist_e2e_cli)
-        if(TARGET fastcache-cli)
-            set(_fc_dist_e2e_cli --cli "$<TARGET_FILE:fastcache-cli>")
+        if(TARGET pacectl)
+            set(_fc_dist_e2e_cli --cli "$<TARGET_FILE:pacectl>")
         endif()
         add_test(
             NAME "dist-compile-e2e"
-            COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.sh"
-                --fastcached "$<TARGET_FILE:fastcached>"
-                --node "$<TARGET_FILE:fastcache-compile-node>"
-                --launcher "$<TARGET_FILE:fastcache-cc>"
+            COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.sh"
+                --pace-kv "$<TARGET_FILE:pace-kv>"
+                --node "$<TARGET_FILE:pace-node>"
+                --launcher "$<TARGET_FILE:pace-cc>"
                 --compiler "${CMAKE_CXX_COMPILER}"
                 ${_fc_dist_e2e_cli}
                 ${_fc_e2e_edit_stub_posix}
@@ -5165,7 +5209,7 @@ else()
     # fixture's decisions -- how a Prometheus series is read, and how a DWARF
     # attribute is read out of whichever of three readers a host has -- were
     # asserted nowhere, on the platform most CI legs run
-    # ([#597](https://github.com/LASTRADA-Software/fastcached/issues/597)).
+    # ([#597](https://github.com/LASTRADA-Software/pace/issues/597)).
     #
     # **The two self-tests do NOT cover the same decisions, and #597 asked that they
     # should.** They cannot: the Windows fixture compares COFF objects and this one
@@ -5181,7 +5225,7 @@ else()
     if(NOT WIN32)
         add_test(
             NAME "dist-compile-e2e-posix-selftest"
-            COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.sh" --self-test
+            COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.sh" --self-test
         )
         set_tests_properties("dist-compile-e2e-posix-selftest" PROPERTIES
             LABELS "hygiene"
@@ -5209,45 +5253,45 @@ else()
     # calls a pure decision over synthetic COFF input, gated `if(WIN32)`, so it could only
     # ever run on one platform. Converting one of the two and reporting the constraint
     # enforced is this file's own #379 lesson -- six call sites named, thirty in the tree.
-    if(FASTCACHED_PWSH)
+    if(PACE_PWSH)
         add_test(
             NAME "dist-compile-e2e-selftest"
-            COMMAND "${FASTCACHED_PWSH}" -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.ps1" -SelfTest
+            COMMAND "${PACE_PWSH}" -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.ps1" -SelfTest
         )
         set_tests_properties("dist-compile-e2e-selftest" PROPERTIES
             LABELS "hygiene"
             TIMEOUT 120
         )
     else()
-        fastcached_register_skipped_test("dist-compile-e2e-selftest"
+        pace_register_skipped_test("dist-compile-e2e-selftest"
             "no PowerShell 7 interpreter found (pwsh, pwsh-preview), so the object-comparison decision table was not exercised on this host")
     endif()
 endif()
 
 # ---------------------------------------------------------------------------
-# FASTCACHE_AUTO_START spawn+probe (issue #90), the real-binary counterpart to
+# PACE_AUTO_START spawn+probe (issue #90), the real-binary counterpart to
 # compile-cache-daemon-staging above. That test proves the staging plumbing
 # with fake --version-only stand-ins; a fake has no socket to accept on, so it
-# cannot prove _fc_auto_start_fastcached actually starts something that
-# answers a real connection. This drives the real, freshly built fastcached
-# and fastcache-cc instead: a configure with no daemon reachable spawns one, a
+# cannot prove _fc_auto_start_pace_kv actually starts something that
+# answers a real connection. This drives the real, freshly built pace-kv
+# and pace-cc instead: a configure with no daemon reachable spawns one, a
 # real translation unit compiled through the configured launcher reports a
 # real MISS then a real HIT against it, and a second configure against the
 # same address finds that daemon rather than starting another.
 #
 # Registered here rather than beside the launcher for the same reason
-# dist-compile-e2e is: this needs the fastcached target, so it belongs after
+# dist-compile-e2e is: this needs the pace-kv target, so it belongs after
 # src/apps has defined it. POSIX only for now, matching
 # check-compile-cache-install.cmake's and check-compile-cache-autoinstall.cmake's
 # own scoping — the process bookkeeping here is pidfile-based and POSIX's
-# --daemon has no Windows equivalent; Windows coverage of FASTCACHE_AUTO_START
+# --daemon has no Windows equivalent; Windows coverage of PACE_AUTO_START
 # is left as follow-up work.
-if(NOT WIN32 AND TARGET fastcached AND TARGET fastcache-cc)
+if(NOT WIN32 AND TARGET pace-kv AND TARGET pace-cc)
     add_test(
         NAME "compile-cache-daemon-start"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-daemon-start.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --launcher "$<TARGET_FILE:fastcache-cc>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-daemon-start.sh"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
             --source-dir "${CMAKE_SOURCE_DIR}"
     )
@@ -5264,7 +5308,7 @@ endif()
 # ---------------------------------------------------------------------------
 # sccache smoke tests. Registered only when an sccache binary is present
 # (SCCACHE is the find_program result from cmake/portable/CompileCache.cmake). Each test
-# the freshly-built fastcached, points sccache at it over one wire protocol,
+# the freshly-built pace-kv, points sccache at it over one wire protocol,
 # and asserts a cache hit — the same compile-twice check the CI smoke jobs run,
 # via the same scripts/sccache-smoke driver.
 #
@@ -5275,38 +5319,38 @@ endif()
 
 # ---------------------------------------------------------------------------
 # TLS smoke test. Registered only in TLS-enabled builds. Starts the freshly
-# built fastcached with the checked-in self-signed cert, connects a real TLS
+# built pace-kv with the checked-in self-signed cert, connects a real TLS
 # client, and asserts a RESP PING is answered +PONG over the encrypted channel
 # — end-to-end coverage of the TlsSocket handshake/pump. A missing runtime
 # prerequisite exits 77 (reported as skipped).
 #
 # The daemon target is part of the guard, not only the TLS option: a
 # `$<TARGET_FILE:>` naming a target that does not exist is a hard generate
-# error, so `-DFASTCACHED_BUILD_DAEMON=OFF` failed the configure outright
+# error, so `-DPACE_BUILD_DAEMON=OFF` failed the configure outright
 # instead of skipping this. Every other daemon-starting block here already
-# tests `TARGET fastcached`; these two were the omissions.
-if(NOT TARGET fastcached)
+# tests `TARGET pace-kv`; these two were the omissions.
+if(NOT TARGET pace-kv)
     message(STATUS "tls-smoke: daemon not built — skipping")
-elseif(FASTCACHED_ENABLE_TLS)
+elseif(PACE_ENABLE_TLS)
     if(WIN32)
         add_test(
             NAME "tls-smoke"
             COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/tls-smoke.ps1"
-                -Fastcached "$<TARGET_FILE:fastcached>"
+                -PaceKv "$<TARGET_FILE:pace-kv>"
                 -Cert "${CMAKE_SOURCE_DIR}/testdata/tls/server.crt"
                 -Key "${CMAKE_SOURCE_DIR}/testdata/tls/server.key"
         )
     else()
         add_test(
             NAME "tls-smoke"
-            COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/tls-smoke.sh"
-                --fastcached "$<TARGET_FILE:fastcached>"
+            COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/tls-smoke.sh"
+                --pace-kv "$<TARGET_FILE:pace-kv>"
                 --cert "${CMAKE_SOURCE_DIR}/testdata/tls/server.crt"
                 --key "${CMAKE_SOURCE_DIR}/testdata/tls/server.key"
         )
     endif()
     # RUN_SERIAL for the reason every other daemon-starting test here carries it:
-    # this one binds a port and spawns fastcached, so under `ctest --parallel` it
+    # this one binds a port and spawns pace-kv, so under `ctest --parallel` it
     # would race the sccache smokes and compile-cache-daemon-start for it.
     set_tests_properties("tls-smoke" PROPERTIES
         LABELS "smoke"
@@ -5315,7 +5359,7 @@ elseif(FASTCACHED_ENABLE_TLS)
     )
 endif()
 
-if(NOT TARGET fastcached)
+if(NOT TARGET pace-kv)
     message(STATUS "sccache smoke tests: daemon not built — skipping")
 elseif(SCCACHE)
     # EMPTY by default, and that emptiness is half of #183's port fix rather than a
@@ -5328,24 +5372,24 @@ elseif(SCCACHE)
     #
     # Both drivers draw now, so an empty value here means "draw one" on either
     # platform rather than only on POSIX (#183).
-    set(FASTCACHED_SMOKE_PORT "" CACHE STRING
-        "TCP port the sccache smoke tests bind fastcached to; empty draws one per run")
+    set(PACE_SMOKE_PORT "" CACHE STRING
+        "TCP port the sccache smoke tests bind pace-kv to; empty draws one per run")
     set(_smoke_port_arg "")
-    if(FASTCACHED_SMOKE_PORT)
-        set(_smoke_port_arg --port ${FASTCACHED_SMOKE_PORT})
+    if(PACE_SMOKE_PORT)
+        set(_smoke_port_arg --port ${PACE_SMOKE_PORT})
     endif()
 
     if(WIN32)
         set(_smoke_driver pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/sccache-smoke.ps1")
     else()
-        set(_smoke_driver ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/sccache-smoke.sh")
+        set(_smoke_driver ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/sccache-smoke.sh")
     endif()
 
     foreach(_proto IN ITEMS memcached redis)
         add_test(
             NAME "sccache-smoke-${_proto}"
             COMMAND ${_smoke_driver}
-                --fastcached "$<TARGET_FILE:fastcached>"
+                --pace-kv "$<TARGET_FILE:pace-kv>"
                 --protocol ${_proto}
                 ${_smoke_port_arg}
                 --compiler "${CMAKE_CXX_COMPILER}"
@@ -5364,7 +5408,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# migrate-storage-e2e: `fastcached --migrate-storage` over both storage shapes.
+# migrate-storage-e2e: `pace-kv --migrate-storage` over both storage shapes.
 #
 # What it covers that the unit tests cannot: `MigrateConfiguredStorage` and
 # `StorageShardPaths` live in `main.cpp`, which is in no test target -- and the
@@ -5372,7 +5416,7 @@ endif()
 # that the flag enumerates the SAME files the daemon opens. A conversion walking
 # a different set would exit zero and leave the daemon still refusing to start on
 # the store it missed.
-if(NOT TARGET fastcached)
+if(NOT TARGET pace-kv)
     message(STATUS "migrate-storage-e2e: daemon not built — skipping")
 elseif(WIN32)
     # POSIX-only fixture, the way `fleet-dashboard-e2e` records for itself: it is
@@ -5383,8 +5427,8 @@ elseif(WIN32)
 else()
     add_test(
         NAME "migrate-storage-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/migrate-storage-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/migrate-storage-e2e.sh"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
     )
     # Starts a real daemon to create the stores, so it must not race the other
     # server-starting smoke tests.
@@ -5397,13 +5441,13 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# fastcache-cli-e2e: the client against a real daemon.
+# pacectl-e2e: the client against a real daemon.
 #
 # Registered HERE and not beside the app because it names two targets, and
 # `src/apps` walks its table in order: a `$<TARGET_FILE:>` guard on a target
 # configured later does not fail, it silently skips the test forever.
 #
-# What this reaches that `fastcache-cli-tests` cannot is the exit codes against a
+# What this reaches that `pacectl-tests` cannot is the exit codes against a
 # live server. The unit tests drive every handler over a scripted exchange and can
 # prove the mapping from an outcome to a code; only a real daemon proves that a
 # miss, a refused credential and a closed port arrive as three different outcomes
@@ -5414,10 +5458,10 @@ endif()
 # rather than an assumption: it was run to completion on Windows through Git Bash
 # before this registration was written. It uses `mktemp`, `/dev/tcp` through
 # `wait_for_port`, and the shared helpers -- all of which Git Bash supplies.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-cli)
-    message(STATUS "fastcache-cli-e2e: daemon or client not built — skipping")
+if(NOT TARGET pace-kv OR NOT TARGET pacectl)
+    message(STATUS "pacectl-e2e: daemon or client not built — skipping")
 else()
-    # The node is OPTIONAL -- `FASTCACHED_BUILD_NODE` can be off -- and the eight cases
+    # The node is OPTIONAL -- `PACE_BUILD_NODE` can be off -- and the eight cases
     # that need none are worth running anyway, so it is an ARGUMENT rather than a
     # condition on the whole registration.
     #
@@ -5428,21 +5472,21 @@ else()
     # so a reference wearing one is indistinguishable from an unguarded one -- which
     # is #390's failure shape, where a guard that was never a guard read as compliance.
     set(_fc_cli_e2e_node "")
-    if(TARGET fastcache-compile-node)
-        set(_fc_cli_e2e_node "$<TARGET_FILE:fastcache-compile-node>")
+    if(TARGET pace-node)
+        set(_fc_cli_e2e_node "$<TARGET_FILE:pace-node>")
     endif()
     add_test(
-        NAME "fastcache-cli-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fastcache-cli-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --cli "$<TARGET_FILE:fastcache-cli>"
+        NAME "pacectl-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/pacectl-e2e.sh"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --cli "$<TARGET_FILE:pacectl>"
             # Empty when the node is not built, which the script reads as *skip cases
             # 11-13 and SAY SO*.
             --node "${_fc_cli_e2e_node}"
     )
     # Starts real daemons on drawn ports, so it must not race the other
     # server-starting smoke tests.
-    set_tests_properties("fastcache-cli-e2e" PROPERTIES
+    set_tests_properties("pacectl-e2e" PROPERTIES
         LABELS "smoke"
         SKIP_RETURN_CODE 77
         RUN_SERIAL TRUE
@@ -5497,11 +5541,11 @@ if(NOT Python3_Interpreter_FOUND)
     # three tests -- is the subject: the assertion is that `ctest -N` returns the
     # SAME number with and without a python3 on PATH, which is the only form of
     # the claim a count cannot be wrong about.
-    fastcached_register_skipped_test("fetch-transfer-bound"
+    pace_register_skipped_test("fetch-transfer-bound"
         "no Python 3 interpreter found, so the dependency-fetch transfer bound (#526) is NOT guarded in this build tree")
-    fastcached_register_skipped_test("fetch-transfer-bound-selftest"
+    pace_register_skipped_test("fetch-transfer-bound-selftest"
         "no Python 3 interpreter found, so the transfer-bound verdict machinery (#1469) is NOT guarded in this build tree")
-    fastcached_register_skipped_test("msvc-arm64-coro-stack-slots-selftest"
+    pace_register_skipped_test("msvc-arm64-coro-stack-slots-selftest"
         "no Python 3 interpreter found, so the MSVC ARM64 coroutine probe's self-test (#1274) is NOT guarded in this build tree")
 else()
     add_test(
@@ -5515,10 +5559,10 @@ else()
             # and a `cmake -P` probe has no cache -- so the guard reading the
             # module on its own would always see the defaults, and would have
             # reported "the bound is 120s" for a tree configured with
-            # -DFASTCACHED_FETCH_SILENCE_SECONDS=0, which is the one tree where
+            # -DPACE_FETCH_SILENCE_SECONDS=0, which is the one tree where
             # the answer matters. Passed from here, where they are resolved.
-            --configured-window "${FASTCACHED_FETCH_SILENCE_SECONDS}"
-            --configured-floor "${FASTCACHED_FETCH_MIN_BYTES_PER_SECOND}"
+            --configured-window "${PACE_FETCH_SILENCE_SECONDS}"
+            --configured-floor "${PACE_FETCH_MIN_BYTES_PER_SECOND}"
     )
     # 77 is this file's script-driven convention for "a prerequisite is
     # missing", which here means git or cmake could not be run at all. TIMEOUT
@@ -5599,11 +5643,11 @@ endif()
 add_test(
     NAME "counter-index-seam"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-counter-index-seam.cmake"
 )
 set_tests_properties("counter-index-seam" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -5620,12 +5664,12 @@ set_tests_properties("counter-index-seam" PROPERTIES
 add_test(
     NAME "counter-index-seam-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/counter-index-seam-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/counter-index-seam-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-counter-index-seam-selftest.cmake"
 )
 set_tests_properties("counter-index-seam-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -5647,15 +5691,15 @@ set_tests_properties("counter-index-seam-selftest" PROPERTIES
 add_test(
     NAME "counter-extent-link"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/counter-extent-link"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/counter-extent-link"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-counter-extent-link.cmake"
 )
 set_tests_properties("counter-extent-link" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     LABELS "hygiene"
     TIMEOUT 600
@@ -5669,15 +5713,15 @@ set_tests_properties("counter-extent-link" PROPERTIES
 add_test(
     NAME "counter-extent-link-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/counter-extent-link-selftest"
-        "-DFASTCACHED_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-        "-DFASTCACHED_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-        "-DFASTCACHED_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/counter-extent-link-selftest"
+        "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-counter-extent-link-selftest.cmake"
 )
 set_tests_properties("counter-extent-link-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     LABELS "hygiene"
     TIMEOUT 600
@@ -5696,7 +5740,7 @@ set_tests_properties("counter-extent-link-selftest" PROPERTIES
 # `gc --auto`.
 add_test(
     NAME "configure-subprocess-bounds"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-configure-subprocess-bounds.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-configure-subprocess-bounds.sh"
 )
 set_tests_properties("configure-subprocess-bounds" PROPERTIES
     LABELS "hygiene"
@@ -5709,7 +5753,7 @@ set_tests_properties("configure-subprocess-bounds" PROPERTIES
 # two empty lists agree perfectly.
 add_test(
     NAME "configure-subprocess-bounds-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-configure-subprocess-bounds.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-configure-subprocess-bounds.sh" --self-test
 )
 set_tests_properties("configure-subprocess-bounds-selftest" PROPERTIES
     LABELS "hygiene"
@@ -5726,7 +5770,7 @@ set_tests_properties("configure-subprocess-bounds-selftest" PROPERTIES
 # Raising the limit is not a fix: it moves the cliff and hides that there is one.
 add_test(
     NAME "gh-listing-seam"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gh-listing-seam.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gh-listing-seam.sh"
 )
 set_tests_properties("gh-listing-seam" PROPERTIES
     LABELS "hygiene"
@@ -5737,7 +5781,7 @@ set_tests_properties("gh-listing-seam" PROPERTIES
 # while guarding nothing: an empty scan, and the seam itself having been deleted.
 add_test(
     NAME "gh-listing-seam-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gh-listing-seam.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-gh-listing-seam.sh" --self-test
 )
 set_tests_properties("gh-listing-seam-selftest" PROPERTIES
     LABELS "hygiene"
@@ -5761,7 +5805,7 @@ set_tests_properties("gh-listing-seam-selftest" PROPERTIES
 # #826 and left #866 open, which is the shape a count cannot see.
 add_test(
     NAME "pr-closing-keywords"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-pr-closing-keywords.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-pr-closing-keywords.sh" --self-test
 )
 set_tests_properties("pr-closing-keywords" PROPERTIES
     LABELS "hygiene"
@@ -5782,7 +5826,7 @@ set_tests_properties("pr-closing-keywords" PROPERTIES
 # target (#909), and the symptom is a slow build rather than a failure.
 add_test(
     NAME "cache-flow-continuations"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cache-flow-continuations.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cache-flow-continuations.sh"
 )
 set_tests_properties("cache-flow-continuations" PROPERTIES
     LABELS "hygiene"
@@ -5798,7 +5842,7 @@ set_tests_properties("cache-flow-continuations" PROPERTIES
 # and a count beside the list is a second claim that goes stale (round 10, M6).
 add_test(
     NAME "cache-flow-continuations-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cache-flow-continuations.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cache-flow-continuations.sh" --self-test
 )
 set_tests_properties("cache-flow-continuations-selftest" PROPERTIES
     LABELS "hygiene"
@@ -5825,11 +5869,11 @@ set_tests_properties("cache-flow-continuations-selftest" PROPERTIES
 add_test(
     NAME "tools-page-installed-set"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tools-page-installed-set.cmake"
 )
 set_tests_properties("tools-page-installed-set" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -5853,12 +5897,12 @@ set_tests_properties("tools-page-installed-set" PROPERTIES
 add_test(
     NAME "tools-page-installed-set-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tools-page-installed-set-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tools-page-installed-set-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tools-page-installed-set-selftest.cmake"
 )
 set_tests_properties("tools-page-installed-set-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -5887,12 +5931,12 @@ set_tests_properties("tools-page-installed-set-selftest" PROPERTIES
 add_test(
     NAME "istreambuf-iterator"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-istreambuf-iterator.cmake"
 )
 set_tests_properties("istreambuf-iterator" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -5912,7 +5956,7 @@ set_tests_properties("istreambuf-iterator" PROPERTIES
 # which is how `check-catch-skip-return-code` had six green self-test cases and a
 # red CI run with no contradiction between them. And one case plants `;`, `\`, `[`
 # and `]` ABOVE a violation and asserts the exact `file:line`: that case failed on
-# the first implementation, which used the house `fastcached_read_lines` splitting
+# the first implementation, which used the house `pace_read_lines` splitting
 # idiom, because a line ending in a backslash merges with the next one there -- the
 # one case that reader's own comment claims it prevents. The merged element began
 # with `//`, so the comment stripper ate the real code and the use was reported
@@ -5920,13 +5964,13 @@ set_tests_properties("istreambuf-iterator" PROPERTIES
 add_test(
     NAME "istreambuf-iterator-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/istreambuf-iterator-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/istreambuf-iterator-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-istreambuf-iterator-selftest.cmake"
 )
 set_tests_properties("istreambuf-iterator-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -5943,13 +5987,13 @@ set_tests_properties("istreambuf-iterator-selftest" PROPERTIES
 add_test(
     NAME "ranges-seam"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_RANGES_SEAM_HEADER=${core-cpp_SOURCE_DIR}/src/core/Ranges.hpp"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_RANGES_SEAM_HEADER=${core-cpp_SOURCE_DIR}/src/core/Ranges.hpp"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-ranges-seam.cmake"
 )
 set_tests_properties("ranges-seam" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -5962,32 +6006,32 @@ set_tests_properties("ranges-seam" PROPERTIES
 add_test(
     NAME "ranges-seam-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/ranges-seam-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/ranges-seam-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-ranges-seam-selftest.cmake"
 )
 set_tests_properties("ranges-seam-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
 
 # No first-party file includes a Monocypher header except `Core/Ed25519.cpp` and
 # `Core/X25519.cpp`, the crypto seam (#178). The include directories are PUBLIC on the
-# vendored library and FastCache links it PRIVATE, which keeps them from FastCache's consumers
-# and not from FastCache itself -- so the build cannot say this and a scan does. The permitted
+# vendored library and Pace links it PRIVATE, which keeps them from Pace's consumers
+# and not from Pace itself -- so the build cannot say this and a scan does. The permitted
 # rows are the positive control: each must be seen INCLUDING Monocypher, or it is refused as
 # stale, which is what a broken pattern or an enumeration that missed `src/` looks like.
 add_test(
     NAME "crypto-seam"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-crypto-seam.cmake"
 )
 set_tests_properties("crypto-seam" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -5998,13 +6042,13 @@ set_tests_properties("crypto-seam" PROPERTIES
 add_test(
     NAME "crypto-seam-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/crypto-seam-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/crypto-seam-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-crypto-seam-selftest.cmake"
 )
 set_tests_properties("crypto-seam-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -6019,12 +6063,12 @@ set_tests_properties("crypto-seam-selftest" PROPERTIES
 add_test(
     NAME "udp-opener"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-udp-opener.cmake"
 )
 set_tests_properties("udp-opener" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -6035,13 +6079,13 @@ set_tests_properties("udp-opener" PROPERTIES
 add_test(
     NAME "udp-opener-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/udp-opener-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/udp-opener-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-udp-opener-selftest.cmake"
 )
 set_tests_properties("udp-opener-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -6061,12 +6105,12 @@ set_tests_properties("udp-opener-selftest" PROPERTIES
 add_test(
     NAME "enumerator-walks"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-enumerator-walks.cmake"
 )
 set_tests_properties("enumerator-walks" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -6079,18 +6123,18 @@ set_tests_properties("enumerator-walks" PROPERTIES
 add_test(
     NAME "enumerator-walks-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/enumerator-walks-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/enumerator-walks-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-enumerator-walks-selftest.cmake"
 )
 set_tests_properties("enumerator-walks-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
 
-# `fastcached_tracked_files` is what every enumerating `check-*.cmake` now reads its file set
+# `pace_tracked_files` is what every enumerating `check-*.cmake` now reads its file set
 # through (#1485), so a defect in it is a defect in all of them at once. Consolidating eight
 # byte-identical copies removed eight chances of a silent miscount and ADDED one, and a single
 # point of failure with no guard on it has moved the risk rather than removed it.
@@ -6105,19 +6149,19 @@ set_tests_properties("enumerator-walks-selftest" PROPERTIES
 add_test(
     NAME "tracked-files-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tracked-files-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tracked-files-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tracked-files-selftest.cmake"
 )
 set_tests_properties("tracked-files-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
 
 # The OTHER single point of failure in `scripts/lib/CheckCommon.cmake`: eight checks read C++
-# through `fastcached_strip_comment_line`, so a defect there is a defect in all of them at once,
+# through `pace_strip_comment_line`, so a defect there is a defect in all of them at once,
 # and it had one. A comment introducer inside a STRING LITERAL was read as a real introducer --
 # a request literal whose `Accept: */*` contains a `/*` opened a block comment nothing closed,
 # and the 51 lines after it, a `for (;;)` among them, were invisible to a scan that reported a
@@ -6131,11 +6175,11 @@ set_tests_properties("tracked-files-selftest" PROPERTIES
 add_test(
     NAME "comment-stripper-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/comment-stripper-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/comment-stripper-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-comment-stripper-selftest.cmake"
 )
 set_tests_properties("comment-stripper-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -6174,7 +6218,7 @@ set_tests_properties("comment-stripper-selftest" PROPERTIES
 # `Windows-cl-debug`, plus the three Windows legs of one run -- span **97.39 to 114.64 s
 # against this 120 s budget**. It took required contexts red repeatedly, including on a
 # diff that changed nothing but a comment;
-# [#1150](https://github.com/LASTRADA-Software/fastcached/issues/1150) carries that
+# [#1150](https://github.com/LASTRADA-Software/pace/issues/1150) carries that
 # record and it is deliberately not tallied here, a hand-kept count beside a moving fact
 # being a second source of truth.
 #
@@ -6195,7 +6239,7 @@ set_tests_properties("comment-stripper-selftest" PROPERTIES
 # anybody reads a diff for a cause that is not in it.
 add_test(
     NAME "wall-clock-borrow"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wall-clock-borrow.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wall-clock-borrow.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("wall-clock-borrow" PROPERTIES
     LABELS "hygiene"
@@ -6213,7 +6257,7 @@ set_tests_properties("wall-clock-borrow" PROPERTIES
 # own line. The fixture is that now, and removing the handling reddens exactly it.
 add_test(
     NAME "wall-clock-borrow-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wall-clock-borrow.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wall-clock-borrow.sh" --self-test
 )
 set_tests_properties("wall-clock-borrow-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6235,7 +6279,7 @@ set_tests_properties("wall-clock-borrow-selftest" PROPERTIES
 # the real root on every platform, the gate asks the same thing before its tidy sweep.
 add_test(
     NAME "tidy-header-filter"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-header-filter.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-header-filter.sh"
 )
 set_tests_properties("tidy-header-filter" PROPERTIES
     LABELS "hygiene"
@@ -6243,7 +6287,7 @@ set_tests_properties("tidy-header-filter" PROPERTIES
 )
 add_test(
     NAME "tidy-header-filter-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-header-filter.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-tidy-header-filter.sh" --self-test
 )
 set_tests_properties("tidy-header-filter-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6266,7 +6310,7 @@ set_tests_properties("tidy-header-filter-selftest" PROPERTIES
 # distinction fails exactly its own case.
 add_test(
     NAME "macos-package-e2e-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/macos-package-e2e.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/macos-package-e2e.sh" --self-test
 )
 set_tests_properties("macos-package-e2e-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6293,7 +6337,7 @@ set_tests_properties("macos-package-e2e-selftest" PROPERTIES
 # number people tune rather than read.
 add_test(
     NAME "hygiene-headroom-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/hygiene-headroom.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/hygiene-headroom.sh" --self-test
 )
 set_tests_properties("hygiene-headroom-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6320,10 +6364,10 @@ set_tests_properties("hygiene-headroom-selftest" PROPERTIES
 # **36.01 to 45.89 s** across those same six hosted readings, rising to 55.70 s in the
 # run where its sibling timed out. On the shared 120 s budget that is 30-38% against its
 # sibling's 81-96%, which is the whole of why one fired and the other did not
-# ([#1150](https://github.com/LASTRADA-Software/fastcached/issues/1150)).
+# ([#1150](https://github.com/LASTRADA-Software/pace/issues/1150)).
 add_test(
     NAME "reloadable-docs"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-reloadable-docs.sh" "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-reloadable-docs.sh" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("reloadable-docs" PROPERTIES
     LABELS "hygiene;docs-subject"
@@ -6344,7 +6388,7 @@ set_tests_properties("reloadable-docs" PROPERTIES
 # every run, and that is the number to read.
 add_test(
     NAME "reloadable-docs-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-reloadable-docs.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-reloadable-docs.sh" --self-test
 )
 set_tests_properties("reloadable-docs-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6366,7 +6410,7 @@ set_tests_properties("reloadable-docs-selftest" PROPERTIES
 # row is a silent false negative.
 add_test(
     NAME "unguarded-prerequisites"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-unguarded-prerequisites.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-unguarded-prerequisites.sh"
 )
 set_tests_properties("unguarded-prerequisites" PROPERTIES
     LABELS "hygiene"
@@ -6386,7 +6430,7 @@ set_tests_properties("unguarded-prerequisites" PROPERTIES
 # neither can pass vacuously.
 add_test(
     NAME "unguarded-prerequisites-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-unguarded-prerequisites.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-unguarded-prerequisites.sh" --self-test
 )
 set_tests_properties("unguarded-prerequisites-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6550,7 +6594,7 @@ set_tests_properties("unguarded-prerequisites-selftest" PROPERTIES
 # (files x identifiers), so check whether your branch added either.
 add_test(
     NAME "credential-containers"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-credential-containers.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-credential-containers.sh"
 )
 set_tests_properties("credential-containers" PROPERTIES
     LABELS "hygiene"
@@ -6574,7 +6618,7 @@ set_tests_properties("credential-containers" PROPERTIES
 # which is the direction that gets acted on because a finding looks like work.
 add_test(
     NAME "credential-containers-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-credential-containers.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-credential-containers.sh" --self-test
 )
 set_tests_properties("credential-containers-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6647,7 +6691,7 @@ set_tests_properties("credential-containers-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "reap-my-gate-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/reap-my-gate.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/reap-my-gate.sh" --self-test
     )
     set_tests_properties("reap-my-gate-selftest" PROPERTIES
         FAIL_REGULAR_EXPRESSION "REAP SELF-TEST FAILED:"
@@ -6715,7 +6759,7 @@ endif()
 # repairs is CREATED, so it is the last platform to leave unchecked.
 add_test(
     NAME "repair-worktree-pointers-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/repair-worktree-pointers.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/repair-worktree-pointers.sh" --self-test
 )
 # `PASS_REGULAR_EXPRESSION` as well, for `tidy-sweep-selftest`'s reason: an EARLY
 # STOP exits 0 having judged nothing (a planted `return 0` printed nothing and ctest
@@ -6766,7 +6810,7 @@ if(NOT WIN32)
     # view of the array stayed right and hid it.
     add_test(
         NAME "pr-required"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-pr-required.sh"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-pr-required.sh"
     )
     set_tests_properties("pr-required" PROPERTIES
         LABELS "hygiene"
@@ -6782,7 +6826,7 @@ if(NOT WIN32)
     # report MERGEABLE, or every refusal below is evidence of nothing.
     add_test(
         NAME "pr-required-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-pr-required.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-pr-required.sh" --self-test
     )
     set_tests_properties("pr-required-selftest" PROPERTIES
         LABELS "hygiene"
@@ -6825,7 +6869,7 @@ endif()
 # ClangCl arm out of every run of the check, on the one platform where it lives.
 add_test(
     NAME "banner-probe-identity"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-banner-probe-identity.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-banner-probe-identity.sh"
 )
 set_tests_properties("banner-probe-identity" PROPERTIES
     LABELS "hygiene"
@@ -6856,7 +6900,7 @@ set_tests_properties("banner-probe-identity" PROPERTIES
 # broken instrument looks like as well as what a real pattern looks like.
 add_test(
     NAME "banner-probe-identity-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-banner-probe-identity.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-banner-probe-identity.sh" --self-test
 )
 set_tests_properties("banner-probe-identity-selftest" PROPERTIES
     LABELS "hygiene"
@@ -6894,11 +6938,11 @@ set_tests_properties("banner-probe-identity-selftest" PROPERTIES
 add_test(
     NAME "macro-bare-parameters"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-macro-bare-parameters.cmake"
 )
 set_tests_properties("macro-bare-parameters" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -6931,12 +6975,12 @@ set_tests_properties("macro-bare-parameters" PROPERTIES
 add_test(
     NAME "macro-bare-parameters-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/macro-bare-parameters-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/macro-bare-parameters-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-macro-bare-parameters-selftest.cmake"
 )
 set_tests_properties("macro-bare-parameters-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -6973,7 +7017,7 @@ set_tests_properties("macro-bare-parameters-selftest" PROPERTIES
 if(NOT WIN32)
     add_test(
         NAME "run-suite-selftest"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/run-suite.sh" --self-test
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/run-suite.sh" --self-test
     )
     set_tests_properties("run-suite-selftest" PROPERTIES
         LABELS "hygiene"
@@ -6986,8 +7030,8 @@ endif()
 #
 # `tsan-scope-hygiene` above asks whether a scoped test CASE carries a tag the
 # gate selects. That is a question about cases inside binaries the gate already
-# runs, so it could not see `fastcache-cc-tests`, which was in no row at all: the
-# launcher does not link the FastCache library, so no tag expression could ever
+# runs, so it could not see `pace-cc-tests`, which was in no row at all: the
+# launcher does not link the Pace library, so no tag expression could ever
 # have reached it.
 #
 # Derived, not tabulated. The set comes from the `catch_discover_tests(`
@@ -7000,11 +7044,11 @@ endif()
 add_test(
     NAME "tsan-binaries"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tsan-binaries.cmake"
 )
 set_tests_properties("tsan-binaries" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -7026,12 +7070,12 @@ set_tests_properties("tsan-binaries" PROPERTIES
 add_test(
     NAME "tsan-binaries-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tsan-binaries-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tsan-binaries-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-tsan-binaries-selftest.cmake"
 )
 set_tests_properties("tsan-binaries-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7040,8 +7084,8 @@ set_tests_properties("tsan-binaries-selftest" PROPERTIES
 # The local gate's optional-target set matches CI's (#1144, #1197).
 #
 # A ctest total is comparable only against the same tree, the same platform AND
-# the same target set. `FASTCACHED_BUILD_TESTCLIENT` and
-# `FASTCACHED_BUILD_BENCHMARKS` default OFF, so one commit gives two different
+# the same target set. `PACE_BUILD_TESTCLIENT` and
+# `PACE_BUILD_BENCHMARKS` default OFF, so one commit gives two different
 # totals depending only on which `-D` flags were passed -- and the smaller number
 # does not look wrong, the tree just looks smaller.
 #
@@ -7058,11 +7102,11 @@ set_tests_properties("tsan-binaries-selftest" PROPERTIES
 add_test(
     NAME "gate-target-set"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-gate-target-set.cmake"
 )
 set_tests_properties("gate-target-set" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -7081,17 +7125,17 @@ set_tests_properties("gate-target-set" PROPERTIES
 # and the case then passes or fails for a reason unrelated to the rule.
 #
 # One case caught a defect in the check while it was being written: the app-table
-# marker was a prefix, so `set(FASTCACHED_APPS_RENAMED` still matched it and the
+# marker was a prefix, so `set(PACE_APPS_RENAMED` still matched it and the
 # renamed-table case could not fire.
 add_test(
     NAME "gate-target-set-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/gate-target-set-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/gate-target-set-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-gate-target-set-selftest.cmake"
 )
 set_tests_properties("gate-target-set-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -7145,7 +7189,7 @@ if(NOT Python3_Interpreter_FOUND)
     # is kept rather than replaced: it is the louder of the two, and a configure
     # warning and a skipped row answer different questions -- one is read once by
     # whoever configured, the other by every count taken off `ctest -N` afterwards.
-    fastcached_register_skipped_test("mutation-harness-selftest"
+    pace_register_skipped_test("mutation-harness-selftest"
         "no Python 3 interpreter found, so the tracked mutation harness (#1252) is NOT guarded in this build tree")
 else()
     add_test(
@@ -7177,7 +7221,7 @@ endif()
 # Needs no compiler, no daemon, no socket and no network; it reads `scripts/`.
 add_test(
     NAME "required-context-table"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-table.sh" --root "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-table.sh" --root "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("required-context-table" PROPERTIES
     LABELS "hygiene"
@@ -7190,7 +7234,7 @@ set_tests_properties("required-context-table" PROPERTIES
 # one part of this check that can reduce its own coverage.
 add_test(
     NAME "required-context-table-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-table.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-table.sh" --self-test
 )
 set_tests_properties("required-context-table-selftest" PROPERTIES
     LABELS "hygiene"
@@ -7220,12 +7264,12 @@ set_tests_properties("required-context-table-selftest" PROPERTIES
 add_test(
     NAME "markup-entities"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-markup-entities.cmake"
 )
 set_tests_properties("markup-entities" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7252,13 +7296,13 @@ set_tests_properties("markup-entities" PROPERTIES
 add_test(
     NAME "markup-entities-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/markup-entities-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/markup-entities-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-markup-entities-selftest.cmake"
 )
 set_tests_properties("markup-entities-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 240
 )
@@ -7287,12 +7331,12 @@ set_tests_properties("markup-entities-selftest" PROPERTIES
 add_test(
     NAME "cli-text-cell"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-cli-text-cell.cmake"
 )
 set_tests_properties("cli-text-cell" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7321,37 +7365,37 @@ set_tests_properties("cli-text-cell" PROPERTIES
 add_test(
     NAME "cli-text-cell-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-text-cell-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-text-cell-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-cli-text-cell-selftest.cmake"
 )
 set_tests_properties("cli-text-cell-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
 
-# fastcache-cli asks neither the environment nor the terminal anything itself (#134 §9.11).
+# pacectl asks neither the environment nor the terminal anything itself (#134 §9.11).
 #
 # `live-stats` is HANDED what a terminal can draw (`TerminalCapabilities`) and reads the
 # environment only through `Platform/Environment` from `main`. A `getenv`, `isatty`,
-# `ioctl` or `GetConsoleMode` under `src/apps/fastcache-cli/` draws the right frame on the
+# `ioctl` or `GetConsoleMode` under `src/apps/pacectl/` draws the right frame on the
 # machine it was tested on and passes every behavioural test, so the clause is a scan.
 # Exemptions are rows with reasons in `scripts/cli-ambient-read-exemptions.txt`, and a row
 # that no longer describes the tree is refused. It fails closed: the same scanner must
-# recognise a read in `src/FastCache/Platform/`, where these calls live.
+# recognise a read in `src/Pace/Platform/`, where these calls live.
 #
 # DEFAULT set: no compiler, no daemon, no socket.
 add_test(
     NAME "cli-ambient-reads"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-cli-ambient-reads.cmake"
 )
 set_tests_properties("cli-ambient-reads" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7362,13 +7406,13 @@ set_tests_properties("cli-ambient-reads" PROPERTIES
 add_test(
     NAME "cli-ambient-reads-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-ambient-reads-selftest"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-ambient-reads-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-cli-ambient-reads-selftest.cmake"
 )
 set_tests_properties("cli-ambient-reads-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )
@@ -7390,11 +7434,11 @@ set_tests_properties("cli-ambient-reads-selftest" PROPERTIES
 add_test(
     NAME "vendor-verbatim"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-vendor-verbatim.cmake"
 )
 set_tests_properties("vendor-verbatim" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 300
 )
@@ -7410,11 +7454,11 @@ set_tests_properties("vendor-verbatim" PROPERTIES
 add_test(
     NAME "vendor-figures"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-vendor-figures.cmake"
 )
 set_tests_properties("vendor-figures" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
     TIMEOUT 60
 )
@@ -7424,21 +7468,21 @@ set_tests_properties("vendor-figures" PROPERTIES
 add_test(
     NAME "vendor-figures-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/vendor-figures-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/vendor-figures-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-vendor-figures-selftest.cmake"
 )
 set_tests_properties("vendor-figures-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
 
 # ---------------------------------------------------------------------------
-# cli-node-flags: `fastcache-cli --help` sends operators to flags that exist.
+# cli-node-flags: `pacectl --help` sends operators to flags that exist.
 #
 # The client's NOTES name the operator actions that live only in
-# `fastcache-compile-node` -- enrollment and `--print-surfaces` (#1307). That is prose
+# `pace-node` -- enrollment and `--print-surfaces` (#1307). That is prose
 # in one binary about another binary's option table, and nothing else connects them: a
 # flag renamed in `NodeConfig.cpp` would leave the help pointing at nothing while every
 # unit test in both binaries stays green. So the check asks both BINARIES, and requires
@@ -7452,16 +7496,16 @@ set_tests_properties("vendor-figures-selftest" PROPERTIES
 # the registration is guarded on both.
 #
 # Not POSIX-only: it runs two `--help`s and reads their text with CRs stripped. Measured
-# before this was written, and no further: through Git Bash, a Windows `fastcache-cli.exe`
+# before this was written, and no further: through Git Bash, a Windows `pacectl.exe`
 # (whose help carries CRs) was captured and judged, and the CRLF case is in the self-test.
-if(NOT TARGET fastcache-cli OR NOT TARGET fastcache-compile-node)
+if(NOT TARGET pacectl OR NOT TARGET pace-node)
     message(STATUS "cli-node-flags: client or compile node not built -- skipping")
 else()
     add_test(
         NAME "cli-node-flags"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-node-flags.sh"
-            --cli "$<TARGET_FILE:fastcache-cli>"
-            --node "$<TARGET_FILE:fastcache-compile-node>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-node-flags.sh"
+            --cli "$<TARGET_FILE:pacectl>"
+            --node "$<TARGET_FILE:pace-node>"
     )
     set_tests_properties("cli-node-flags" PROPERTIES
         LABELS "hygiene"
@@ -7474,7 +7518,7 @@ endif()
 # can fail to LOOK -- since an empty citation list agrees with any node perfectly.
 add_test(
     NAME "cli-node-flags-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-node-flags.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-node-flags.sh" --self-test
 )
 set_tests_properties("cli-node-flags-selftest" PROPERTIES
     LABELS "hygiene"
@@ -7503,11 +7547,11 @@ set_tests_properties("cli-node-flags-selftest" PROPERTIES
 add_test(
     NAME "third-party-roots"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-third-party-roots.cmake"
 )
 set_tests_properties("third-party-roots" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -7521,13 +7565,13 @@ set_tests_properties("third-party-roots" PROPERTIES
 add_test(
     NAME "third-party-roots-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/third-party-roots-selftest"
-        "-DFASTCACHED_BASH=${FASTCACHED_BASH}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/third-party-roots-selftest"
+        "-DPACE_BASH=${PACE_BASH}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-third-party-roots-selftest.cmake"
 )
 set_tests_properties("third-party-roots-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7551,11 +7595,11 @@ target_link_libraries(off-thread-assertion-canary PRIVATE Catch2::Catch2WithMain
 add_test(
     NAME "off-thread-assertion-canary"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_CANARY=$<TARGET_FILE:off-thread-assertion-canary>"
+        "-DPACE_CANARY=$<TARGET_FILE:off-thread-assertion-canary>"
         -P "${CMAKE_SOURCE_DIR}/scripts/off-thread-assertion-gate.cmake"
 )
 set_tests_properties("off-thread-assertion-canary" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7564,11 +7608,11 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DCONFIG=$<CONFIG>"
-        -DANCHOR=FastCacheTest
+        -DANCHOR=PaceTest
         -P "${CMAKE_SOURCE_DIR}/scripts/check-off-thread-assertion-guard.cmake"
 )
 set_tests_properties("off-thread-assertion-guard-coverage" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     LABELS "hygiene"
     TIMEOUT 120
@@ -7576,12 +7620,12 @@ set_tests_properties("off-thread-assertion-guard-coverage" PROPERTIES
 add_test(
     NAME "off-thread-assertion-guard-coverage-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/off-thread-assertion-guard-coverage-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/off-thread-assertion-guard-coverage-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-off-thread-assertion-guard-selftest.cmake"
 )
 set_tests_properties("off-thread-assertion-guard-coverage-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7607,12 +7651,12 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DCONFIG=$<CONFIG>"
-        -DANCHOR=FastCacheTest
-        "-DVARIABLE=${FASTCACHED_ERROR_DIALOG_VARIABLE}"
+        -DANCHOR=PaceTest
+        "-DVARIABLE=${PACE_ERROR_DIALOG_VARIABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-error-popups.cmake"
 )
 set_tests_properties("error-popup-coverage" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     LABELS "hygiene"
     TIMEOUT 120
@@ -7620,12 +7664,12 @@ set_tests_properties("error-popup-coverage" PROPERTIES
 add_test(
     NAME "error-popup-coverage-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/error-popup-coverage-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/error-popup-coverage-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-error-popups-selftest.cmake"
 )
 set_tests_properties("error-popup-coverage-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7640,11 +7684,11 @@ add_test(
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DCONFIG=$<CONFIG>"
         "-DMSVC_STYLE=$<BOOL:${MSVC}>"
-        -DANCHOR=FastCacheTest
+        -DANCHOR=PaceTest
         -P "${CMAKE_SOURCE_DIR}/scripts/check-incremental-link.cmake"
 )
 set_tests_properties("incremental-link" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     SKIP_REGULAR_EXPRESSION "SKIP: "
     LABELS "hygiene"
     TIMEOUT 120
@@ -7652,12 +7696,12 @@ set_tests_properties("incremental-link" PROPERTIES
 add_test(
     NAME "incremental-link-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/incremental-link-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/incremental-link-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-incremental-link-selftest.cmake"
 )
 set_tests_properties("incremental-link-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7671,30 +7715,30 @@ if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
             -P "${CMAKE_SOURCE_DIR}/scripts/error-popup-gate.cmake"
     )
     set_tests_properties("error-popup-canary" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
     # The PRODUCT policy, in both directions: this canary is built as a product binary is,
     # and its gate runs it with the variable and without.
     add_executable(error-popup-product-canary ErrorPopupProductCanary.cpp)
-    set_target_properties(error-popup-product-canary PROPERTIES FASTCACHED_ERROR_POPUPS_POLICY "on-request")
+    set_target_properties(error-popup-product-canary PROPERTIES PACE_ERROR_POPUPS_POLICY "on-request")
     add_test(
         NAME "error-popup-product-canary"
         COMMAND ${CMAKE_COMMAND}
             "-DCANARY=$<TARGET_FILE:error-popup-product-canary>"
-            "-DVARIABLE=${FASTCACHED_ERROR_DIALOG_VARIABLE}"
+            "-DVARIABLE=${PACE_ERROR_DIALOG_VARIABLE}"
             -P "${CMAKE_SOURCE_DIR}/scripts/error-popup-product-gate.cmake"
     )
     set_tests_properties("error-popup-product-canary" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
 else()
-    fastcached_register_skipped_test("error-popup-canary"
+    pace_register_skipped_test("error-popup-canary"
         "only an MSVC Debug CRT raises the assert dialog this canary proves gone, and this build is not one")
-    fastcached_register_skipped_test("error-popup-product-canary"
+    pace_register_skipped_test("error-popup-product-canary"
         "only an MSVC Debug CRT has an assert report mode to route, and this build is not one")
 endif()
 
@@ -7708,26 +7752,26 @@ endif()
 add_test(
     NAME "vendor-verbatim-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/vendor-verbatim-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/vendor-verbatim-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-vendor-verbatim-selftest.cmake"
 )
 set_tests_properties("vendor-verbatim-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
 
 # ---------------------------------------------------------------------------
-# The exit codes the fastcache-cli page lists are OutcomeTable's, code, name and meaning.
+# The exit codes the pacectl page lists are OutcomeTable's, code, name and meaning.
 #
 # `--help` renders the table and cannot drift; the operator page restated six codes and
 # their count by hand, and #134 added a seventh. Reads `OutcomeTable`'s literal in
-# `src/apps/fastcache-cli/CliAnswer.hpp` and the `## Exit codes` section of
-# `docs/tools/fastcache-cli.md`, so renaming either is a refusal here, by design.
+# `src/apps/pacectl/CliAnswer.hpp` and the `## Exit codes` section of
+# `docs/tools/pacectl.md`, so renaming either is a refusal here, by design.
 add_test(
     NAME "cli-exit-code-docs"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-exit-code-docs.sh"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-exit-code-docs.sh"
             "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("cli-exit-code-docs" PROPERTIES
@@ -7739,7 +7783,7 @@ set_tests_properties("cli-exit-code-docs" PROPERTIES
 # beside each bounded read, and both ways the reader can fail to LOOK.
 add_test(
     NAME "cli-exit-code-docs-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-exit-code-docs.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-exit-code-docs.sh" --self-test
 )
 set_tests_properties("cli-exit-code-docs-selftest" PROPERTIES
     LABELS "hygiene"
@@ -7760,9 +7804,9 @@ set_tests_properties("cli-exit-code-docs-selftest" PROPERTIES
 # unconditionally. And core-cpp (#1596), whose libraries that block instruments from its
 # `CORE_CPP_TARGETS` property: read here through the ones this build is sure to compile. core-cpp's
 # targets are EXCLUDE_FROM_ALL, so a library nothing links has no objects to read, and `core::tui`
-# -- behind the terminal wait on the pool -- is the one `fastcache-cli` links.
+# -- behind the terminal wait on the pool -- is the one `pacectl` links.
 if((ENABLE_SANITIZER_ADDRESS OR ENABLE_SANITIZER_THREAD) AND NOT MSVC AND CMAKE_NM)
-    set(_fcVendoredObjectTargets ${FASTCACHED_MONOCYPHER_TARGETS})
+    set(_fcVendoredObjectTargets ${PACE_MONOCYPHER_TARGETS})
     if(TARGET core::tui)
         get_target_property(_fcCoreCppTui core::tui ALIASED_TARGET)
         list(APPEND _fcVendoredObjectTargets ${_fcCoreCppTui})
@@ -7785,14 +7829,14 @@ if((ENABLE_SANITIZER_ADDRESS OR ENABLE_SANITIZER_THREAD) AND NOT MSVC AND CMAKE_
     add_test(
         NAME "vendor-sanitized"
         COMMAND ${CMAKE_COMMAND}
-            "-DFASTCACHED_NM=${CMAKE_NM}"
-            "-DFASTCACHED_SYMBOLS=${_fcSanitizerInitSymbols}"
-            "-DFASTCACHED_INSTRUMENTED=${_fcVendoredObjects}"
-            "-DFASTCACHED_UNINSTRUMENTED=$<JOIN:$<TARGET_OBJECTS:sanitizer-absent-probe>,|>"
+            "-DPACE_NM=${CMAKE_NM}"
+            "-DPACE_SYMBOLS=${_fcSanitizerInitSymbols}"
+            "-DPACE_INSTRUMENTED=${_fcVendoredObjects}"
+            "-DPACE_UNINSTRUMENTED=$<JOIN:$<TARGET_OBJECTS:sanitizer-absent-probe>,|>"
             -P "${CMAKE_SOURCE_DIR}/scripts/check-sanitized-objects.cmake"
     )
     set_tests_properties("vendor-sanitized" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
@@ -7806,8 +7850,8 @@ endif()
 add_test(
     NAME "instruction-set-flags-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/instruction-set-flags-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/instruction-set-flags-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-flags-selftest.cmake"
 )
 # TIMEOUT 300 against a ~9.5 s warm run, which is deliberate and is not slack. The
@@ -7820,7 +7864,7 @@ add_test(
 # process-heavy hygiene checks while a build finishes. A budget is the wrong place to
 # notice that, so the figure is stated here rather than left to be re-derived.
 set_tests_properties("instruction-set-flags-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 300
 )
@@ -7842,12 +7886,12 @@ add_test(
         "-DFRONTEND=${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}"
         "-DARCH=${_isaProbeArch}"
         "-DAPPLE_HOST=${APPLE}"
-        "-DPROBE=${FASTCACHED_INSTRUCTION_SET_PROBE}"
+        "-DPROBE=${PACE_INSTRUCTION_SET_PROBE}"
         "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/instruction-set-probe-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-probe-selftest.cmake"
 )
 set_tests_properties("instruction-set-probe-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -7858,12 +7902,12 @@ if(CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
     add_test(
         NAME "instruction-set-flags"
         COMMAND ${CMAKE_COMMAND}
-            "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-            "-DFASTCACHED_COMPILE_DATABASE=${CMAKE_BINARY_DIR}/compile_commands.json"
+            "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "-DPACE_COMPILE_DATABASE=${CMAKE_BINARY_DIR}/compile_commands.json"
             -P "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-flags.cmake"
     )
     set_tests_properties("instruction-set-flags" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
@@ -7871,26 +7915,26 @@ if(CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
     add_test(
         NAME "instruction-set-flags-plant"
         COMMAND ${CMAKE_COMMAND}
-            "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-            "-DFASTCACHED_COMPILE_DATABASE=${CMAKE_BINARY_DIR}/compile_commands.json"
-            "-DFASTCACHED_PLANT_UNIT=src/FastCache/Core/Sha256.cpp"
+            "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "-DPACE_COMPILE_DATABASE=${CMAKE_BINARY_DIR}/compile_commands.json"
+            "-DPACE_PLANT_UNIT=src/Pace/Core/Sha256.cpp"
             -P "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-flags.cmake"
     )
     set_tests_properties("instruction-set-flags-plant" PROPERTIES
-        FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+        FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
         LABELS "hygiene"
         TIMEOUT 120
     )
 else()
     foreach(name IN ITEMS "instruction-set-flags" "instruction-set-flags-plant")
-        fastcached_register_skipped_test("${name}"
+        pace_register_skipped_test("${name}"
             "the ${CMAKE_GENERATOR} generator writes no compile database, so no flag of this build was judged")
     endforeach()
 endif()
 
 add_test(
     NAME "instruction-set-flags-wrapper-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-flags.sh" --self-test --cmake "${CMAKE_COMMAND}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-flags.sh" --self-test --cmake "${CMAKE_COMMAND}"
 )
 set_tests_properties("instruction-set-flags-wrapper-selftest" PROPERTIES
     LABELS "hygiene"
@@ -7900,11 +7944,11 @@ set_tests_properties("instruction-set-flags-wrapper-selftest" PROPERTIES
 add_test(
     NAME "target-pragmas"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-target-pragmas.cmake"
 )
 set_tests_properties("target-pragmas" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -7912,18 +7956,18 @@ set_tests_properties("target-pragmas" PROPERTIES
 add_test(
     NAME "target-pragmas-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/target-pragmas-selftest"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/target-pragmas-selftest"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-target-pragmas-selftest.cmake"
 )
 set_tests_properties("target-pragmas-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
 
 # ---------------------------------------------------------------------------
-# `fastcache-bench` states the build its figures came from (#1439).
+# `pace-bench` states the build its figures came from (#1439).
 #
 # A timing is a quantity UNDER CONDITIONS, and the condition that decides whether it is
 # a cost at all is the build. That binary used to print nothing about it, and a Debug
@@ -7941,15 +7985,15 @@ set_tests_properties("target-pragmas-selftest" PROPERTIES
 #     `bench/inproc_bench.py` parses, every figure is marked, and that document carries
 #     no mixed content.
 #
-# Both guarded on `TARGET fastcache-bench` as well as on the option, because the two are
+# Both guarded on `TARGET pace-bench` as well as on the option, because the two are
 # independent and a `$<TARGET_FILE:>` naming a target this configure did not declare is
 # a hard error at GENERATE time rather than a skipped test (#390).
-if(TARGET fastcache-bench)
+if(TARGET pace-bench)
     # A plain `add_test` and deliberately NOT `catch_discover_tests`:
     # `scripts/check-tsan-binaries.cmake` derives "every Catch2 test binary this tree
     # registers" from that call and requires each to be a row of the ThreadSanitizer
     # gate or to carry an exemption whose claim is re-scanned -- and
-    # `src/apps/fastcache-bench/` names `std::thread`, so no exemption there could be
+    # `src/apps/pace-bench/` names `std::thread`, so no exemption there could be
     # honest. Registering this way would put a benchmark binary, scaling tier and all,
     # under TSan in order to run a handful of text-rendering cases.
     #
@@ -7959,7 +8003,7 @@ if(TARGET fastcache-bench)
     # non-zero, which reads as a failing subject rather than as an empty filter.
     add_test(
         NAME "bench-build-banner"
-        COMMAND $<TARGET_FILE:fastcache-bench> "[buildbanner]"
+        COMMAND $<TARGET_FILE:pace-bench> "[buildbanner]"
     )
     set_tests_properties("bench-build-banner" PROPERTIES
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape and
@@ -7986,14 +8030,14 @@ if(TARGET fastcache-bench)
     # 77 is this file's script-driven convention for a missing prerequisite, which here
     # means the target is declared and was not built, so nothing ran.
     if(NOT Python3_Interpreter_FOUND)
-        fastcached_register_skipped_test("bench-build-banner-streams"
-            "no Python 3 interpreter found, so what fastcache-bench writes to each stream is NOT guarded in this build tree")
+        pace_register_skipped_test("bench-build-banner-streams"
+            "no Python 3 interpreter found, so what pace-bench writes to each stream is NOT guarded in this build tree")
     else()
         add_test(
             NAME "bench-build-banner-streams"
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_SOURCE_DIR}/scripts/check-bench-build-banner.py"
-                --binary "$<TARGET_FILE:fastcache-bench>"
+                --binary "$<TARGET_FILE:pace-bench>"
         )
         # TIMEOUT is the outer supervisor rather than the measurement. Measured on this
         # tree's slowest configuration -- a clang-debug build with ASan and UBSan on, over
@@ -8032,7 +8076,7 @@ endif()
 # unreachable by the selector everyone believed covered them.
 add_test(
     NAME "wire-tag-reach"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wire-tag-reach.sh" --root "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wire-tag-reach.sh" --root "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("wire-tag-reach" PROPERTIES
     LABELS "hygiene"
@@ -8045,7 +8089,7 @@ set_tests_properties("wire-tag-reach" PROPERTIES
 # in a full-line comment must not be counted, or a comment could mask a missing tag.
 add_test(
     NAME "wire-tag-reach-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wire-tag-reach.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-wire-tag-reach.sh" --self-test
 )
 set_tests_properties("wire-tag-reach-selftest" PROPERTIES
     LABELS "hygiene"
@@ -8056,10 +8100,10 @@ set_tests_properties("wire-tag-reach-selftest" PROPERTIES
 # interesting: a `$<TARGET_FILE:x>` naming a target that was not built is a hard
 # error at GENERATE time, which fails the whole configure and names CMake rather
 # than the option the operator set.
-if(TARGET FastCacheTest)
+if(TARGET PaceTest)
     add_test(
         NAME "wire-tag-reach-count"
-        COMMAND $<TARGET_FILE:FastCacheTest> "[wire]"
+        COMMAND $<TARGET_FILE:PaceTest> "[wire]"
     )
     set_tests_properties("wire-tag-reach-count" PROPERTIES
         # The count is PINNED, not merely non-zero. `[1-9][0-9]*` -- the idiom
@@ -8104,7 +8148,7 @@ endif()
 # cache" step, which still runs it and is untouched by this block.
 #
 # WHY AN OPT-IN RATHER THAN AN UNCONDITIONAL RUN. The fixture configures and
-# builds three CMake trees of `fastcache-cc-tests`. This tree's `ctest` presets
+# builds three CMake trees of `pace-cc-tests`. This tree's `ctest` presets
 # carry no label filter, so a plain `ctest` runs `smoke` too -- registering it to
 # run by default would put three full builds into every developer's test run and
 # into every CI leg that calls `ctest`, none of which asked for them. The default
@@ -8115,21 +8159,21 @@ endif()
 # So `ctest -N` gains exactly one row and a `ctest` run gains zero builds. That is
 # measured rather than asserted -- see the commit -- because "it only registers a
 # skip" is precisely the kind of claim that is easy to believe and cheap to check.
-option(FASTCACHED_RUN_LAUNCHER_REPLAY_E2E
+option(PACE_RUN_LAUNCHER_REPLAY_E2E
     "Run the launcher replay end-to-end fixture as part of ctest. Costs three CMake builds." OFF)
 
 if(WIN32)
     # POSIX shell throughout, and the Windows launcher path has its own fixture
     # (`run-launcher-e2e.ps1`). Not a skip standing in for a pass: there is
     # nothing here for this platform to answer.
-    fastcached_register_skipped_test("launcher-replay-e2e"
+    pace_register_skipped_test("launcher-replay-e2e"
         "this fixture is POSIX-shell only; the Windows launcher path is covered by run-launcher-e2e.ps1")
-elseif(NOT FASTCACHED_RUN_LAUNCHER_REPLAY_E2E)
-    fastcached_register_skipped_test("launcher-replay-e2e"
-        "not opted in -- it configures and builds three CMake trees, so it is off by default. Set -DFASTCACHED_RUN_LAUNCHER_REPLAY_E2E=ON to run it here; CI runs it from build.yml's 'A real target, replayed from cache' step regardless")
-elseif(NOT TARGET fastcached OR NOT TARGET fastcache-cc OR NOT TARGET fastcache-cc-tests)
-    fastcached_register_skipped_test("launcher-replay-e2e"
-        "opted in, but one of fastcached / fastcache-cc / fastcache-cc-tests is not built in this tree, and the fixture needs all three")
+elseif(NOT PACE_RUN_LAUNCHER_REPLAY_E2E)
+    pace_register_skipped_test("launcher-replay-e2e"
+        "not opted in -- it configures and builds three CMake trees, so it is off by default. Set -DPACE_RUN_LAUNCHER_REPLAY_E2E=ON to run it here; CI runs it from build.yml's 'A real target, replayed from cache' step regardless")
+elseif(NOT TARGET pace-kv OR NOT TARGET pace-cc OR NOT TARGET pace-cc-tests)
+    pace_register_skipped_test("launcher-replay-e2e"
+        "opted in, but one of pace-kv / pace-cc / pace-cc-tests is not built in this tree, and the fixture needs all three")
 else()
     # No `--port`: the fixture draws one. A registration cannot name a port -- a
     # fixture CHOOSING one cannot see a port already held as an outbound
@@ -8141,11 +8185,11 @@ else()
     # a green run is indistinguishable from a fixture that cannot fail.
     add_test(
         NAME "launcher-replay-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/launcher-replay-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --launcher "$<TARGET_FILE:fastcache-cc>"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/launcher-replay-e2e.sh"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
-            --target fastcache-cc-tests
+            --target pace-cc-tests
             --canary
     )
     # `SKIP_RETURN_CODE 77` reads the fixture's own `skip`, which is the same 77
@@ -8183,7 +8227,7 @@ endif()
 # Needs no compiler, no build, no daemon, no socket and no network.
 add_test(
     NAME "conditional-check-reach"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-conditional-check-reach.sh" --root "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-conditional-check-reach.sh" --root "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("conditional-check-reach" PROPERTIES
     LABELS "hygiene"
@@ -8198,7 +8242,7 @@ set_tests_properties("conditional-check-reach" PROPERTIES
 # configuring from RUNNING, which is the whole property.
 add_test(
     NAME "conditional-check-reach-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-conditional-check-reach.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-conditional-check-reach.sh" --self-test
 )
 set_tests_properties("conditional-check-reach-selftest" PROPERTIES
     LABELS "hygiene"
@@ -8223,7 +8267,7 @@ set_tests_properties("conditional-check-reach-selftest" PROPERTIES
 # Needs no compiler, no build, no daemon, no socket and no network.
 add_test(
     NAME "ci-install-clang-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-install-clang.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-install-clang.sh" --self-test
 )
 set_tests_properties("ci-install-clang-selftest" PROPERTIES
     LABELS "hygiene"
@@ -8252,7 +8296,7 @@ set_tests_properties("ci-install-clang-selftest" PROPERTIES
 # Needs no compiler, no build, no daemon, no socket and no network.
 add_test(
     NAME "ci-triage-label-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-triage-label.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/ci-triage-label.sh" --self-test
 )
 set_tests_properties("ci-triage-label-selftest" PROPERTIES
     LABELS "hygiene"
@@ -8285,7 +8329,7 @@ set_tests_properties("ci-triage-label-selftest" PROPERTIES
 # decision covered on every machine.
 add_test(
     NAME "required-context-ruleset"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-ruleset.sh" --root "${CMAKE_SOURCE_DIR}"
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-ruleset.sh" --root "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties("required-context-ruleset" PROPERTIES
     LABELS "smoke"
@@ -8304,7 +8348,7 @@ set_tests_properties("required-context-ruleset" PROPERTIES
 # so deleting it is part of closing the ticket.
 add_test(
     NAME "required-context-ruleset-selftest"
-    COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-ruleset.sh" --self-test
+    COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-required-context-ruleset.sh" --self-test
 )
 set_tests_properties("required-context-ruleset-selftest" PROPERTIES
     LABELS "hygiene"
@@ -8338,11 +8382,11 @@ set_tests_properties("required-context-ruleset-selftest" PROPERTIES
 add_test(
     NAME "staged-stub-spawns"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-staged-stub-spawns.cmake"
 )
 set_tests_properties("staged-stub-spawns" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 120
 )
@@ -8356,12 +8400,12 @@ set_tests_properties("staged-stub-spawns" PROPERTIES
 add_test(
     NAME "staged-stub-spawns-selftest"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-staged-stub-spawns-selftest.cmake"
 )
 set_tests_properties("staged-stub-spawns-selftest" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 180
 )

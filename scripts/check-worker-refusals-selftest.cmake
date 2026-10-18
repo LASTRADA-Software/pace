@@ -5,7 +5,7 @@
 # The check it drives replaced a hand-maintained list of source files with a glob,
 # because the list was exact about the files it knew and silent about the ones it did
 # not -- and silence reads identically to complete coverage
-# ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)). A glob is only
+# ([#492](https://github.com/LASTRADA-Software/pace/issues/492)). A glob is only
 # worth more than the list if it actually bites on a file that was never named, and
 # **a guard nobody has seen fire is not a guard**.
 #
@@ -34,7 +34,7 @@
 # is the shape those two rules argue for anyway.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-worker-refusals-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
@@ -51,21 +51,21 @@
 # gate on the OTHER platform could tell the difference.
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-worker-refusals-counted.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-worker-refusals-counted.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(refusalHeader "src/FastCache/Protocol/SurfaceRefusal.hpp")
-set(wireHeader "src/FastCache/Protocol/CompileCacheWire.hpp")
-set(root "${FASTCACHED_SCRATCH_DIR}/worker-refusals-selftest")
+set(refusalHeader "src/Pace/Protocol/SurfaceRefusal.hpp")
+set(wireHeader "src/Pace/Protocol/CompileCacheWire.hpp")
+set(root "${PACE_SCRATCH_DIR}/worker-refusals-selftest")
 file(REMOVE_RECURSE "${root}")
 
 set(failures "")
@@ -79,12 +79,12 @@ set(failures "")
 # @param name Which case; also the directory.
 # @param extraPath Where the case's own file goes, or empty for none.
 # @param extraBody What that file contains.
-function(fastcached_make_tree name extraPath extraBody outVar)
+function(pace_make_tree name extraPath extraBody outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
-    file(MAKE_DIRECTORY "${tree}/src/FastCache/Protocol")
-    configure_file("${FASTCACHED_SOURCE_DIR}/${refusalHeader}" "${tree}/${refusalHeader}" COPYONLY)
-    configure_file("${FASTCACHED_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
+    file(MAKE_DIRECTORY "${tree}/src/Pace/Protocol")
+    configure_file("${PACE_SOURCE_DIR}/${refusalHeader}" "${tree}/${refusalHeader}" COPYONLY)
+    configure_file("${PACE_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
     if(NOT extraPath STREQUAL "")
         get_filename_component(directory "${tree}/${extraPath}" DIRECTORY)
         file(MAKE_DIRECTORY "${directory}")
@@ -95,9 +95,9 @@ endfunction()
 
 # Run the check against a tree and record whether it objected.
 # @param tree The synthetic source directory.
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErrors
         RESULT_VARIABLE ignored)
@@ -133,18 +133,18 @@ endfunction()
 # 1. Clean: one ordinary surface that refuses through the counted spelling.
 set(cleanBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
-std::vector<std::byte> AnswerSomething(FastCache::IMetricsSink& metrics)
+std::vector<std::byte> AnswerSomething(Pace::IMetricsSink& metrics)
 {
-    return FastCache::Cc::Refuse(metrics,
-                                 FastCache::Cc::SurfaceRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame,
-                                                                 .counter = FastCache::IMetricsSink::Counter::Nothing },
+    return Pace::Cc::Refuse(metrics,
+                                 Pace::Cc::SurfaceRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame,
+                                                                 .counter = Pace::IMetricsSink::Counter::Nothing },
                                  "synthetic");
 }
 ]==])
-fastcached_make_tree("clean" "src/apps/some-new-surface/NewSurface.cpp" "${cleanBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("clean" "src/apps/some-new-surface/NewSurface.cpp" "${cleanBody}" tree)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures
          "clean: the check objected to a tree whose only refusal is routed -- it now refuses everything, which is as useless as refusing nothing")
@@ -159,15 +159,15 @@ endif()
 #    file was invisible by construction, and five real sites accumulated that way.
 set(bareCallBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 std::vector<std::byte> AnswerSomething()
 {
     return CompileCacheWire::EncodeErrorReply(CompileCacheWire::ErrorCode::MalformedFrame, "synthetic");
 }
 ]==])
-fastcached_make_tree("new-source" "src/apps/some-new-surface/NewSurface.cpp" "${bareCallBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("new-source" "src/apps/some-new-surface/NewSurface.cpp" "${bareCallBody}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures
          "new-source: a NEW .cpp answering a refusal with a bare EncodeErrorReply did not fail the check -- which is exactly the hole #492 is about")
@@ -181,8 +181,8 @@ endif()
 
 # 3. The same call in a HEADER. #447 put two security counters in `Responders.hpp`
 #    and the old scan covered `.cpp` files only, so it could not see them at all.
-fastcached_make_tree("new-header" "src/apps/some-new-surface/NewSurface.hpp" "${bareCallBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("new-header" "src/apps/some-new-surface/NewSurface.hpp" "${bareCallBody}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures
          "new-header: a bare EncodeErrorReply in a HEADER did not fail the check -- headers are where refusal rows now legitimately live")
@@ -204,16 +204,16 @@ endif()
 #    "none awaiting triage", so this assertion is not simply always-fatal.
 set(untriagedBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 std::vector<std::byte> AnswerSomething()
 {
-    return FastCache::Cc::RefuseUntriaged(
-        FastCache::Cc::UntriagedRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame, .issue = 4242 });
+    return Pace::Cc::RefuseUntriaged(
+        Pace::Cc::UntriagedRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame, .issue = 4242 });
 }
 ]==])
-fastcached_make_tree("untriaged" "src/apps/some-new-surface/NewSurface.cpp" "${untriagedBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("untriaged" "src/apps/some-new-surface/NewSurface.cpp" "${untriagedBody}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures
          "untriaged: a site marked RefuseUntriaged did not fail the check -- #494 emptied the backlog, so a new one is a regression rather than a report")
@@ -243,15 +243,15 @@ endif()
 #    readings as the total would put the same silence back under a number.
 set(unnamedIssueBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 std::vector<std::byte> AnswerSomething()
 {
-    return FastCache::Cc::RefuseUntriaged(someRowFromSomewhereElse);
+    return Pace::Cc::RefuseUntriaged(someRowFromSomewhereElse);
 }
 ]==])
-fastcached_make_tree("issue-unnamed" "src/apps/some-new-surface/NewSurface.cpp" "${unnamedIssueBody}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("issue-unnamed" "src/apps/some-new-surface/NewSurface.cpp" "${unnamedIssueBody}" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures
          "issue-unnamed: an untriaged refusal naming no issue was folded into the backlog total instead of being reported as a tally that cannot conclude")
@@ -264,22 +264,22 @@ endif()
 #    must object to a spelling it does not know.
 set(tree "${root}/spelling-added")
 file(REMOVE_RECURSE "${tree}")
-file(MAKE_DIRECTORY "${tree}/src/FastCache/Protocol")
-configure_file("${FASTCACHED_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
-file(READ "${FASTCACHED_SOURCE_DIR}/${refusalHeader}" refusalContent)
+file(MAKE_DIRECTORY "${tree}/src/Pace/Protocol")
+configure_file("${PACE_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
+file(READ "${PACE_SOURCE_DIR}/${refusalHeader}" refusalContent)
 string(APPEND refusalContent [==[
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 [[nodiscard]] inline std::vector<std::byte> RefuseDeferred(UncountedRefusal const& refusal,
                                                            std::string_view detail = {})
 {
     return CompileCacheWire::EncodeErrorReply(refusal.code, detail);
 }
-} // namespace FastCache::Cc
+} // namespace Pace::Cc
 ]==])
 file(WRITE "${tree}/${refusalHeader}" "${refusalContent}")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures
          "spelling-added: a FOURTH refusal spelling in the allowed header did not fail the check -- every call site reaching it would pass the scan, join no backlog and assert nothing")
@@ -296,14 +296,14 @@ endif()
 #    getting wrong, and the one a passing check hides.
 set(tree "${root}/scan-broken")
 file(REMOVE_RECURSE "${tree}")
-file(MAKE_DIRECTORY "${tree}/src/FastCache/Protocol")
-configure_file("${FASTCACHED_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
+file(MAKE_DIRECTORY "${tree}/src/Pace/Protocol")
+configure_file("${PACE_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
 file(WRITE "${tree}/${refusalHeader}" [==[
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 // A SurfaceRefusal.hpp that refuses nothing: the spellings were renamed away.
 ]==])
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures
          "scan-broken: a SurfaceRefusal.hpp with no refusal spelling in it was reported as a clean tree, so a rename would silence this check without saying so")

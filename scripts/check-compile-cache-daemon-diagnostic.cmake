@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Assert that when FASTCACHE_AUTO_START's daemon dies on startup, the configure says
-# WHY and not merely with what number ([#1538](https://github.com/LASTRADA-Software/fastcached/issues/1538)).
+# Assert that when PACE_AUTO_START's daemon dies on startup, the configure says
+# WHY and not merely with what number ([#1538](https://github.com/LASTRADA-Software/pace/issues/1538)).
 #
 # ## What went wrong
 #
-# `_fc_auto_start_fastcached` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
-# and reported `fastcached exited immediately (${_rc})`. The commonest failure there is a
+# `_fc_auto_start_pace_kv` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
+# and reported `pace-kv exited immediately (${_rc})`. The commonest failure there is a
 # dynamic loader that cannot resolve a library, which answers **127** — a number that
 # reads as *not found* for a binary CMake has just staged and knows the path of. The one
 # sentence that explains it, `error while loading shared libraries: libyaml-cpp.so.0.8`,
@@ -18,7 +18,7 @@
 # failed here was the ACQUISITION — two `execute_process` calls that threw the stream
 # away. A test over the helper would have passed on the broken tree. So this drives the
 # module's real path, through the same file:// mirror
-# `check-compile-cache-daemon-staging.cmake` uses, with a staged `fastcached` that fails
+# `check-compile-cache-daemon-staging.cmake` uses, with a staged `pace-kv` that fails
 # the way the loader fails.
 #
 # ## Both directions
@@ -35,9 +35,9 @@
 # exits 3 with nothing on either stream, and that test was green throughout the defect.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<scratch>
-#         -DFASTCACHED_CXX_COMPILER=<c++> [-DFASTCACHED_MAKE_PROGRAM=<make>]
-#         [-DFASTCACHED_GENERATOR=<gen>]
+#   cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<scratch>
+#         -DPACE_CXX_COMPILER=<c++> [-DPACE_MAKE_PROGRAM=<make>]
+#         [-DPACE_GENERATOR=<gen>]
 #         -P scripts/check-compile-cache-daemon-diagnostic.cmake
 #
 # Exit codes: 0 = both shapes reported as specified, or skipped. 1 = they did not.
@@ -49,9 +49,9 @@ cmake_minimum_required(VERSION 3.28)
 # rather than agreed to by both sides at once.
 #
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
-set(FastCachedInstallOracle
-    "Linux|x86_64|Linux-x86_64|usr/bin/fastcache-cc|usr/bin/fastcached"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/fastcache-cc|opt/fastcached/bin/fastcached"
+set(PaceInstallOracle
+    "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
+    "Darwin|arm64|Darwin-arm64|opt/pace/bin/pace-cc|opt/pace/bin/pace-kv"
 )
 
 # Deliberately not a version that exists, so a bug that reached the real GitHub anyway
@@ -62,14 +62,14 @@ set(mirrorVersion "9.8.7")
 # phrase and short enough that no CMake status line could wrap it away.
 set(loaderLine "error while loading shared libraries: libyaml-cpp.so.0.8")
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
 
-set(fixtureDir "${FASTCACHED_SOURCE_DIR}/src/tests/compile-cache-fixture")
-set(moduleDir "${FASTCACHED_SOURCE_DIR}/cmake/portable")
+set(fixtureDir "${PACE_SOURCE_DIR}/src/tests/compile-cache-fixture")
+set(moduleDir "${PACE_SOURCE_DIR}/cmake/portable")
 if(NOT IS_DIRECTORY "${fixtureDir}")
     message(FATAL_ERROR "no fixture project at ${fixtureDir}")
 endif()
@@ -79,8 +79,8 @@ if(CMAKE_HOST_WIN32)
             "(see check-compile-cache-autoinstall.cmake's header)")
     return()
 endif()
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    message("SKIP: no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    message("SKIP: no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     return()
 endif()
 find_program(hostUname NAMES uname)
@@ -92,7 +92,7 @@ endif()
 cmake_host_system_information(RESULT hostProcessor QUERY OS_PLATFORM)
 
 set(platform "")
-foreach(row IN LISTS FastCachedInstallOracle)
+foreach(row IN LISTS PaceInstallOracle)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 rowSystem)
     list(GET fields 1 rowProcessor)
@@ -104,18 +104,18 @@ foreach(row IN LISTS FastCachedInstallOracle)
     endif()
 endforeach()
 if(NOT platform)
-    message("SKIP: no published fastcached is expected for "
+    message("SKIP: no published pace-kv is expected for "
             "${CMAKE_HOST_SYSTEM_NAME}-${hostProcessor}, so there is nothing to start")
     return()
 endif()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
-file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
+file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 
 # Run one configure against a mirror whose staged daemon fails as described.
 #
 # @param case A short label for the failure message.
-# @param daemonBody The shell body the fake fastcached runs when it is NOT asked
+# @param daemonBody The shell body the fake pace-kv runs when it is NOT asked
 #                   --version; it must exit non-zero, which is what puts the module on
 #                   the branch under test.
 # @param addrPort A port nothing on this host listens on, so `_fc_daemon_answering`
@@ -127,8 +127,8 @@ file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
 #                 literal, because it reads as though somebody had thought about it.
 # @param outVar Receives the configure's combined output.
 function(RunFailingStart case daemonBody addrPort outVar)
-    set(root "${FASTCACHED_SCRATCH_DIR}/${case}")
-    set(stem "fastcached-${mirrorVersion}-${platform}")
+    set(root "${PACE_SCRATCH_DIR}/${case}")
+    set(stem "pace-${mirrorVersion}-${platform}")
     set(payloadRoot "${root}/payload")
 
     # The launcher answers --version and nothing else, exactly as the staging test's
@@ -137,7 +137,7 @@ function(RunFailingStart case daemonBody addrPort outVar)
     get_filename_component(launcherDir "${payloadRoot}/${stem}/${launcherMember}" DIRECTORY)
     file(MAKE_DIRECTORY "${launcherDir}")
     file(WRITE "${payloadRoot}/${stem}/${launcherMember}"
-         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fastcache-cc ${mirrorVersion}'; exit 0; fi\nexit 3\n")
+         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'pace-cc ${mirrorVersion}'; exit 0; fi\nexit 3\n")
     file(CHMOD "${payloadRoot}/${stem}/${launcherMember}"
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
@@ -147,11 +147,11 @@ function(RunFailingStart case daemonBody addrPort outVar)
     get_filename_component(daemonDir "${payloadRoot}/${stem}/${daemonMember}" DIRECTORY)
     file(MAKE_DIRECTORY "${daemonDir}")
     file(WRITE "${payloadRoot}/${stem}/${daemonMember}"
-         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fastcached ${mirrorVersion}'; exit 0; fi\n${daemonBody}\n")
+         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'pace-kv ${mirrorVersion}'; exit 0; fi\n${daemonBody}\n")
     file(CHMOD "${payloadRoot}/${stem}/${daemonMember}"
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
-    set(mirrorDir "${root}/mirror/fastcached-mirror/releases/download/v${mirrorVersion}")
+    set(mirrorDir "${root}/mirror/pace-mirror/releases/download/v${mirrorVersion}")
     file(MAKE_DIRECTORY "${mirrorDir}")
     # `cmake -E tar` rather than file(ARCHIVE_CREATE): the latter's WORKING_DIRECTORY
     # option needs CMake 3.31, newer than the 3.28 floor this script targets.
@@ -169,23 +169,23 @@ function(RunFailingStart case daemonBody addrPort outVar)
     file(CREATE_LINK "${hostUname}" "${sandbox}/usr/bin/uname" COPY_ON_ERROR SYMBOLIC)
 
     set(arguments
-        "-DFASTCACHED_MODULE_DIR=${moduleDir}"
-        "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}"
+        "-DPACE_MODULE_DIR=${moduleDir}"
+        "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}"
         "-DCMAKE_FIND_ROOT_PATH=${sandbox}"
         "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
-        "-DFASTCACHE_AUTO_INSTALL=ON"
-        "-DFASTCACHE_AUTO_INSTALL_DIR=${root}/stage"
-        "-DFASTCACHE_AUTO_INSTALL_REPO=fastcached-mirror"
-        "-DFASTCACHE_AUTO_INSTALL_VERSION=${mirrorVersion}"
-        "-DFASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE=file://${root}/mirror"
-        "-DFASTCACHE_AUTO_START=ON"
-        "-DFASTCACHE_AUTO_START_STORAGE_DIR=${root}/storage"
-        "-DFASTCACHE_ADDR=127.0.0.1:${addrPort}")
-    if(FASTCACHED_MAKE_PROGRAM)
-        list(APPEND arguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+        "-DPACE_AUTO_INSTALL=ON"
+        "-DPACE_AUTO_INSTALL_DIR=${root}/stage"
+        "-DPACE_AUTO_INSTALL_REPO=pace-mirror"
+        "-DPACE_AUTO_INSTALL_VERSION=${mirrorVersion}"
+        "-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=file://${root}/mirror"
+        "-DPACE_AUTO_START=ON"
+        "-DPACE_AUTO_START_STORAGE_DIR=${root}/storage"
+        "-DPACE_ADDR=127.0.0.1:${addrPort}")
+    if(PACE_MAKE_PROGRAM)
+        list(APPEND arguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
     endif()
-    if(FASTCACHED_GENERATOR)
-        list(APPEND arguments -G "${FASTCACHED_GENERATOR}")
+    if(PACE_GENERATOR)
+        list(APPEND arguments -G "${PACE_GENERATOR}")
     endif()
 
     execute_process(
@@ -211,7 +211,7 @@ RunFailingStart("loader"
     18701
     loaderOutput)
 
-string(FIND "${loaderOutput}" "Not starting a daemon: fastcached exited immediately (127)" loaderStatusAt)
+string(FIND "${loaderOutput}" "Not starting a daemon: pace-kv exited immediately (127)" loaderStatusAt)
 if(loaderStatusAt EQUAL -1)
     list(APPEND violations
          "the configure never reported the daemon exiting immediately with 127:\n${loaderOutput}")
@@ -227,7 +227,7 @@ endif()
 # --- And the shape that says the capture is READ rather than pasted -------------------
 RunFailingStart("silent" "exit 4" 18702 silentOutput)
 
-string(FIND "${silentOutput}" "Not starting a daemon: fastcached exited immediately (4)" silentStatusAt)
+string(FIND "${silentOutput}" "Not starting a daemon: pace-kv exited immediately (4)" silentStatusAt)
 if(silentStatusAt EQUAL -1)
     list(APPEND violations
          "a daemon that died silently was not reported at all, or not with its status:\n${silentOutput}")
@@ -235,7 +235,7 @@ endif()
 # An empty capture must degrade to the old text rather than to text with a dangling
 # separator. Asserting on the colon is what distinguishes "no words were available" from
 # "the words were appended unconditionally and happened to be empty".
-string(FIND "${silentOutput}" "fastcached exited immediately (4):" silentSuffixAt)
+string(FIND "${silentOutput}" "pace-kv exited immediately (4):" silentSuffixAt)
 if(NOT silentSuffixAt EQUAL -1)
     list(APPEND violations
          "a daemon that said nothing still got a ':' suffix, so the message appends whatever it "

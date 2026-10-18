@@ -2,11 +2,11 @@
 # Packaging (CPack)
 #
 # Generators:
-#   - Windows: WIX (MSI) — installs fastcached.exe + fastcache-cc.exe and
-#              registers fastcached as an auto-start service
+#   - Windows: WIX (MSI) — installs pace-kv.exe + pace-cc.exe and
+#              registers pace-kv as an auto-start service
 #   - Linux  : TGZ + DEB + RPM — installs both binaries plus the systemd units
 #   - macOS  : TGZ + productbuild (.pkg) — installs both binaries under
-#              /opt/fastcached, puts them on PATH, and offers the launchd
+#              /opt/pace, puts them on PATH, and offers the launchd
 #              registration as installer choices
 #
 # The service-integration assets themselves (units, sysusers.d, tmpfiles.d, the
@@ -16,7 +16,7 @@
 # what is already installed.
 #
 # Linux and macOS ship a single Runtime payload; Windows ships one component
-# per application, the MSI's features. The FastCache/CowTree static libraries
+# per application, the MSI's features. The Pace/CowTree static libraries
 # are deliberately not installed (see the comment in the top-level
 # CMakeLists.txt), so there is no SDK component to separate out.
 # macOS additionally splits the two launchd registrations into their own
@@ -29,10 +29,10 @@ include(GNUInstallDirs)
 # Sourced from what the project already defines — project() and
 # cmake/Version.cmake — rather than restating the same strings here.
 
-set(CPACK_PACKAGE_NAME                "fastcached")
-set(CPACK_PACKAGE_VERSION             "${FASTCACHED_VERSION}")
+set(CPACK_PACKAGE_NAME                "pace")
+set(CPACK_PACKAGE_VERSION             "${PACE_VERSION}")
 set(CPACK_PACKAGE_VENDOR              "LASTRADA Software")
-set(CPACK_PACKAGE_HOMEPAGE_URL        "https://github.com/LASTRADA-Software/fastcached")
+set(CPACK_PACKAGE_HOMEPAGE_URL        "https://github.com/LASTRADA-Software/pace")
 set(CPACK_PACKAGE_CONTACT             "Christian Parpart <christian@parpart.family>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
 set(CPACK_RESOURCE_FILE_README        "${CMAKE_SOURCE_DIR}/README.md")
@@ -42,8 +42,8 @@ set(CPACK_RESOURCE_FILE_README        "${CMAKE_SOURCE_DIR}/README.md")
 # tree. Harmless for the archive/DEB/RPM generators, which take any path.
 configure_file("${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_BINARY_DIR}/LICENSE.txt" COPYONLY)
 set(CPACK_RESOURCE_FILE_LICENSE       "${CMAKE_BINARY_DIR}/LICENSE.txt")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY   "fastcached")
-set(CPACK_PACKAGE_FILE_NAME           "fastcached-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY   "Pace")
+set(CPACK_PACKAGE_FILE_NAME           "pace-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_VERBATIM_VARIABLES          ON)
 set(CPACK_STRIP_FILES                 ON)
 
@@ -56,14 +56,14 @@ set(CPACK_STRIP_FILES                 ON)
 # find-identity -v` prints them, e.g.
 #   Developer ID Application: Christian Parpart (6T525MU9UR)
 #   Developer ID Installer: Christian Parpart (6T525MU9UR)
-set(FASTCACHED_MACOS_SIGN_IDENTITY_APP "" CACHE STRING
+set(PACE_MACOS_SIGN_IDENTITY_APP "" CACHE STRING
     "Developer ID Application identity: signs the Mach-O binaries and the .dmg")
-set(FASTCACHED_MACOS_SIGN_IDENTITY_PKG "" CACHE STRING
+set(PACE_MACOS_SIGN_IDENTITY_PKG "" CACHE STRING
     "Developer ID Installer identity: signs the .pkg (a different certificate type)")
-set(FASTCACHED_MACOS_NOTARY_PROFILE "fastcached-notary" CACHE STRING
+set(PACE_MACOS_NOTARY_PROFILE "pace-notary" CACHE STRING
     "notarytool keychain profile (see `xcrun notarytool store-credentials`)")
-option(FASTCACHED_MACOS_NOTARIZE "Submit the macOS artifacts to Apple's notary service" OFF)
-option(FASTCACHED_MACOS_BUILD_DMG "Also wrap the macOS .pkg in a .dmg" ON)
+option(PACE_MACOS_NOTARIZE "Submit the macOS artifacts to Apple's notary service" OFF)
+option(PACE_MACOS_BUILD_DMG "Also wrap the macOS .pkg in a .dmg" ON)
 
 # Whether *Apple did not answer* fails this build (#1156).
 #
@@ -78,17 +78,17 @@ option(FASTCACHED_MACOS_BUILD_DMG "Also wrap the macOS .pkg in a .dmg" ON)
 #
 # A REJECTION is not covered by this and must not be: Apple having looked and
 # refused is a fact about the artefact, and it is fatal on every ref.
-option(FASTCACHED_MACOS_NOTARY_STALL_IS_FATAL
+option(PACE_MACOS_NOTARY_STALL_IS_FATAL
        "Fail the build when Apple does not answer a notarization submission in time" ON)
 
 # Apple rejects an unsigned or ad-hoc-signed submission — but only after the
 # multi-minute round trip to the notary service. Fail here instead, where the
 # mistake costs nothing.
-if(FASTCACHED_MACOS_NOTARIZE AND (NOT FASTCACHED_MACOS_SIGN_IDENTITY_APP OR NOT FASTCACHED_MACOS_SIGN_IDENTITY_PKG))
+if(PACE_MACOS_NOTARIZE AND (NOT PACE_MACOS_SIGN_IDENTITY_APP OR NOT PACE_MACOS_SIGN_IDENTITY_PKG))
     message(FATAL_ERROR
-        "FASTCACHED_MACOS_NOTARIZE needs both signing identities: "
-        "FASTCACHED_MACOS_SIGN_IDENTITY_APP (Developer ID Application, for the binaries and the .dmg) "
-        "and FASTCACHED_MACOS_SIGN_IDENTITY_PKG (Developer ID Installer, for the .pkg). "
+        "PACE_MACOS_NOTARIZE needs both signing identities: "
+        "PACE_MACOS_SIGN_IDENTITY_APP (Developer ID Application, for the binaries and the .dmg) "
+        "and PACE_MACOS_SIGN_IDENTITY_PKG (Developer ID Installer, for the .pkg). "
         "Apple rejects unsigned submissions.")
 endif()
 
@@ -97,7 +97,7 @@ endif()
 if(WIN32)
     if(NOT CPACK_GENERATOR)
         # The MSI installs; the ZIP is what a machine can unpack. cmake's
-        # portable/CompileCache.cmake fetches a prebuilt fastcache-cc out of the
+        # portable/CompileCache.cmake fetches a prebuilt pace-cc out of the
         # archives, and an .msi is not something it — or anyone without
         # Windows — can open. Linux and macOS already ship a TGZ for the same
         # reason, so this is Windows catching up rather than a new idea.
@@ -110,11 +110,11 @@ elseif(UNIX AND NOT APPLE)
 
     # Root the payload at / rather than the conventional /usr, because /etc
     # cannot live under a /usr prefix and systemd will not read config from
-    # /usr/etc/fastcached. Every prefix-relative destination therefore spells
-    # its own `usr/` — see FASTCACHED_INSTALL_* in the top-level CMakeLists.txt
+    # /usr/etc/pace. Every prefix-relative destination therefore spells
+    # its own `usr/` — see PACE_INSTALL_* in the top-level CMakeLists.txt
     # and the asset table in packaging/CMakeLists.txt.
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")
-elseif(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
+elseif(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
     if(NOT CPACK_GENERATOR)
         set(CPACK_GENERATOR "TGZ;productbuild")
     endif()
@@ -122,7 +122,7 @@ elseif(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
     # Same reasoning as Linux, plus a constraint of the generator: CPack always
     # invokes `pkgbuild --install-location /`, so the only way to place a file is
     # to spell its absolute path as a prefix-relative destination. Pointing this
-    # at /opt/fastcached instead would appear to work for the binaries and then
+    # at /opt/pace instead would appear to work for the binaries and then
     # write /etc/paths.d and /Library/LaunchDaemons straight onto the *build
     # host*, since an absolute install(DESTINATION) escapes the staging tree.
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")
@@ -132,11 +132,11 @@ else()
     endif()
 endif()
 
-get_property(_fcAppComponents GLOBAL PROPERTY FASTCACHED_APP_COMPONENTS)
-if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
+get_property(_fcAppComponents GLOBAL PROPERTY PACE_APP_COMPONENTS)
+if(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
     set(CPACK_COMPONENTS_ALL Runtime LaunchAgent LaunchDaemon)
 elseif(WIN32)
-    set(CPACK_COMPONENTS_ALL ${_fcAppComponents} "${FASTCACHED_SHARED_COMPONENT}")
+    set(CPACK_COMPONENTS_ALL ${_fcAppComponents} "${PACE_SHARED_COMPONENT}")
     list(REMOVE_DUPLICATES CPACK_COMPONENTS_ALL)
 else()
     set(CPACK_COMPONENTS_ALL Runtime)
@@ -148,12 +148,12 @@ endif()
 # binary on a release day.
 #
 # Blind spot, and it fails OPEN: the guard walks only the components that were REGISTERED in
-# FASTCACHED_FIRST_PARTY_COMPONENTS, never the install() rules themselves. An app whose row in
+# PACE_FIRST_PARTY_COMPONENTS, never the install() rules themselves. An app whose row in
 # the src/apps table carries `-` as its component (the test client, the benchmarks) registers
 # nothing, so if it later gains an install() rule, whatever component that rule names is one
 # this loop never hears of. Its files are then left out of every package and the configure
 # still passes. Such an app gets a real component in its table row before it installs anything.
-get_property(_fcFirstParty GLOBAL PROPERTY FASTCACHED_FIRST_PARTY_COMPONENTS)
+get_property(_fcFirstParty GLOBAL PROPERTY PACE_FIRST_PARTY_COMPONENTS)
 list(REMOVE_DUPLICATES _fcFirstParty)
 foreach(_fcComponent IN LISTS _fcFirstParty)
     if(NOT _fcComponent IN_LIST CPACK_COMPONENTS_ALL)
@@ -178,11 +178,17 @@ if(UNIX AND NOT APPLE)
     # The set genuinely varies with how the build was configured: yaml-cpp,
     # zstd and lz4 are CPM-vendored statically unless a system package happens
     # to be installed, and OpenSSL is a real shared dependency only when
-    # FASTCACHED_ENABLE_TLS=ON. A hard-coded list would silently rot.
+    # PACE_ENABLE_TLS=ON. A hard-coded list would silently rot.
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 
     # systemd ships the sysusers/tmpfiles tooling the maintainer scripts use.
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "systemd")
+    # Pace is the old package renamed, and installing it beside that package would put
+    # two daemons on one port under two sets of units: the package manager refuses, and
+    # the remedy is uninstalling the old package (docs/upgrading-to-pace.md). A conflict
+    # and nothing more -- no Replaces/Obsoletes, which would remove the old package as a
+    # side effect of an install and skip its own service teardown.
+    set(CPACK_DEBIAN_PACKAGE_CONFLICTS "fastcached")
 
     # dpkg reads the architecture from the build host. CMAKE_SYSTEM_PROCESSOR
     # is the wrong spelling for it (x86_64 vs amd64, aarch64 vs arm64), so ask
@@ -219,11 +225,11 @@ if(UNIX AND NOT APPLE)
     # file so dpkg preserves local edits across upgrades. There is no
     # CPACK_DEBIAN_PACKAGE_CONFFILES variable — the control file has to be
     # written out and shipped through CONTROL_EXTRA like the scriptlets.
-    if(FASTCACHED_SCRIPTLET_DIR)
+    if(PACE_SCRIPTLET_DIR)
         set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
-            "${FASTCACHED_SCRIPTLET_DIR}/deb/postinst"
-            "${FASTCACHED_SCRIPTLET_DIR}/deb/prerm"
-            "${FASTCACHED_SCRIPTLET_DIR}/deb/postrm"
+            "${PACE_SCRIPTLET_DIR}/deb/postinst"
+            "${PACE_SCRIPTLET_DIR}/deb/prerm"
+            "${PACE_SCRIPTLET_DIR}/deb/postrm"
         )
 
         # Live config files first, then the ones older packages shipped and this
@@ -237,18 +243,18 @@ if(UNIX AND NOT APPLE)
         # IGNORED rather than removed, so listing one without the flag is a
         # no-op that looks like a fix.
         set(_conffile_lines "")
-        foreach(_config IN LISTS FASTCACHED_PACKAGE_CONFIG_FILES)
+        foreach(_config IN LISTS PACE_PACKAGE_CONFIG_FILES)
             list(APPEND _conffile_lines "${_config}")
         endforeach()
-        foreach(_obsolete IN LISTS FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES)
+        foreach(_obsolete IN LISTS PACE_PACKAGE_OBSOLETE_CONFIG_FILES)
             list(APPEND _conffile_lines "remove-on-upgrade ${_obsolete}")
         endforeach()
 
         if(_conffile_lines)
             string(REPLACE ";" "\n" _conffiles "${_conffile_lines}")
-            file(WRITE "${FASTCACHED_SCRIPTLET_DIR}/deb/conffiles" "${_conffiles}\n")
+            file(WRITE "${PACE_SCRIPTLET_DIR}/deb/conffiles" "${_conffiles}\n")
             list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
-                "${FASTCACHED_SCRIPTLET_DIR}/deb/conffiles")
+                "${PACE_SCRIPTLET_DIR}/deb/conffiles")
         endif()
     endif()
 endif()
@@ -265,18 +271,20 @@ if(UNIX AND NOT APPLE)
     # Same reasoning as SHLIBDEPS above: let rpmbuild derive the dependencies.
     set(CPACK_RPM_PACKAGE_AUTOREQ ON)
     set(CPACK_RPM_PACKAGE_REQUIRES "systemd")
+    # The deb rule above, for the same reason: a conflict, never Obsoletes.
+    set(CPACK_RPM_PACKAGE_CONFLICTS "fastcached")
 
-    if(FASTCACHED_SCRIPTLET_DIR)
-        set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE   "${FASTCACHED_SCRIPTLET_DIR}/rpm/post")
-        set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE  "${FASTCACHED_SCRIPTLET_DIR}/rpm/preun")
-        set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${FASTCACHED_SCRIPTLET_DIR}/rpm/postun")
+    if(PACE_SCRIPTLET_DIR)
+        set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE   "${PACE_SCRIPTLET_DIR}/rpm/post")
+        set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE  "${PACE_SCRIPTLET_DIR}/rpm/preun")
+        set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${PACE_SCRIPTLET_DIR}/rpm/postun")
     endif()
 
     # %config(noreplace): keep the admin's edited YAML on upgrade, dropping the
     # new default alongside as .rpmnew.
-    if(FASTCACHED_PACKAGE_CONFIG_FILES)
+    if(PACE_PACKAGE_CONFIG_FILES)
         set(_rpm_user_filelist "")
-        foreach(_config IN LISTS FASTCACHED_PACKAGE_CONFIG_FILES)
+        foreach(_config IN LISTS PACE_PACKAGE_CONFIG_FILES)
             list(APPEND _rpm_user_filelist "%config(noreplace) ${_config}")
         endforeach()
         set(CPACK_RPM_USER_FILELIST "${_rpm_user_filelist}")
@@ -302,9 +310,15 @@ endif()
 if(WIN32)
     # Stable upgrade GUID. NEVER regenerate — without a stable GUID,
     # consecutive installer versions cannot upgrade each other in place.
-    # (Minted for fastcached; it must not be shared with any other product,
-    # or that product's installer would treat fastcached as an upgrade of it.)
-    set(CPACK_WIX_UPGRADE_GUID "581D183D-47A3-44FC-97E9-4B5491E792D8")
+    # (Minted for Pace in 0.6.0; it must not be shared with any other product,
+    # or that product's installer would treat Pace as an upgrade of it.)
+    #
+    # Pace is a NEW product rather than an upgrade of the one it was renamed from:
+    # that product's code (581D183D-...) is DETECTED by packaging/windows/service-actions.xml and
+    # refused with a remedy, never upgraded, because a major upgrade of it would
+    # leave the old services registered over deleted binaries (a nested removal
+    # does not run its uninstall-service actions). See docs/upgrading-to-pace.md.
+    set(CPACK_WIX_UPGRADE_GUID "C1481926-BE48-4A34-B279-516B5006C257")
 
     # WiX 4+ uses the unified `wix.exe` binary. CMake's CPack WIX module accepts
     # only the values "3" or "4" — WiX 5 is API-compatible with WiX 4 and is
@@ -320,7 +334,7 @@ if(WIN32)
         endforeach()
     endif()
 
-    set(CPACK_WIX_PROGRAM_MENU_FOLDER "fastcached")
+    set(CPACK_WIX_PROGRAM_MENU_FOLDER "Pace")
     set(CPACK_WIX_PROPERTY_ARPHELPLINK     "${CPACK_PACKAGE_HOMEPAGE_URL}")
     set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "${CPACK_PACKAGE_HOMEPAGE_URL}")
 
@@ -334,33 +348,33 @@ if(WIN32)
 
     # The service table: which service each selected feature registers, with which
     # start mode, and which is started. See packaging/windows/service-actions.xml.
-    if(FASTCACHED_WIX_PATCH_FILE)
-        set(CPACK_WIX_PATCH_FILE "${FASTCACHED_WIX_PATCH_FILE}")
+    if(PACE_WIX_PATCH_FILE)
+        set(CPACK_WIX_PATCH_FILE "${PACE_WIX_PATCH_FILE}")
     endif()
 
     # Pull in the redistributable VC++ runtime so the MSI can land on a clean
     # machine without a separate vcredist install. UCRT is on by default.
-    set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT "${FASTCACHED_SHARED_COMPONENT}")
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT "${PACE_SHARED_COMPONENT}")
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
     include(InstallRequiredSystemLibraries)
 endif()
 
 # --- productbuild (macOS .pkg) ---------------------------------------------
 
-if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
+if(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
     # Mint once, never change: macOS keys package receipts on this, and the
     # uninstaller finds what to `pkgutil --forget` by matching the prefix. Same
     # discipline as CPACK_WIX_UPGRADE_GUID above. Defined in the top-level
     # CMakeLists.txt, which is the only scope both this file and
     # packaging/CMakeLists.txt can read it from.
-    if(NOT FASTCACHED_MACOS_BUNDLE_ID)
+    if(NOT PACE_MACOS_BUNDLE_ID)
         message(FATAL_ERROR
-            "FASTCACHED_MACOS_BUNDLE_ID is empty. CPACK_PRODUCTBUILD_IDENTIFIER would fall back to "
+            "PACE_MACOS_BUNDLE_ID is empty. CPACK_PRODUCTBUILD_IDENTIFIER would fall back to "
             "a generated identifier, the package receipts would not carry the prefix the uninstaller "
-            "greps for, and `fastcached-uninstall` would silently leave macOS believing fastcached "
+            "greps for, and `pace-uninstall` would silently leave macOS believing pace-kv "
             "is still installed.")
     endif()
-    set(CPACK_PRODUCTBUILD_IDENTIFIER "${FASTCACHED_MACOS_BUNDLE_ID}")
+    set(CPACK_PRODUCTBUILD_IDENTIFIER "${PACE_MACOS_BUNDLE_ID}")
 
     # Which locations the installer offers. Stated explicitly because
     # cmake_minimum_required(3.28) leaves CMP0161 unset, and CPack then warns.
@@ -386,10 +400,12 @@ if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
     set(CPACK_RESOURCE_FILE_README  "${CMAKE_SOURCE_DIR}/packaging/macos/readme.html")
 
     # <COMPONENT> in these variable names is the component name uppercased.
-    if(FASTCACHED_MACOS_SCRIPT_DIR)
-        set(CPACK_POSTFLIGHT_RUNTIME_SCRIPT      "${FASTCACHED_MACOS_SCRIPT_DIR}/postinstall-runtime")
-        set(CPACK_POSTFLIGHT_LAUNCHAGENT_SCRIPT  "${FASTCACHED_MACOS_SCRIPT_DIR}/postinstall-launchagent")
-        set(CPACK_POSTFLIGHT_LAUNCHDAEMON_SCRIPT "${FASTCACHED_MACOS_SCRIPT_DIR}/postinstall-launchdaemon")
+    if(PACE_MACOS_SCRIPT_DIR)
+        # The preinstall refuses while the old product is installed (docs/upgrading-to-pace.md).
+        set(CPACK_PREFLIGHT_RUNTIME_SCRIPT       "${PACE_MACOS_SCRIPT_DIR}/preinstall-runtime")
+        set(CPACK_POSTFLIGHT_RUNTIME_SCRIPT      "${PACE_MACOS_SCRIPT_DIR}/postinstall-runtime")
+        set(CPACK_POSTFLIGHT_LAUNCHAGENT_SCRIPT  "${PACE_MACOS_SCRIPT_DIR}/postinstall-launchagent")
+        set(CPACK_POSTFLIGHT_LAUNCHDAEMON_SCRIPT "${PACE_MACOS_SCRIPT_DIR}/postinstall-launchdaemon")
     endif()
 
     # Signing. Two *different* certificate types are involved and mixing them up
@@ -397,28 +413,28 @@ if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
     # Mach-O binaries and disk images, while only a "Developer ID Installer"
     # certificate can sign a .pkg. Empty by default so a fork or a PR build
     # still produces an installable (if unsigned) package.
-    if(FASTCACHED_MACOS_SIGN_IDENTITY_PKG)
-        set(CPACK_PKGBUILD_IDENTITY_NAME     "${FASTCACHED_MACOS_SIGN_IDENTITY_PKG}")
-        set(CPACK_PRODUCTBUILD_IDENTITY_NAME "${FASTCACHED_MACOS_SIGN_IDENTITY_PKG}")
+    if(PACE_MACOS_SIGN_IDENTITY_PKG)
+        set(CPACK_PKGBUILD_IDENTITY_NAME     "${PACE_MACOS_SIGN_IDENTITY_PKG}")
+        set(CPACK_PRODUCTBUILD_IDENTITY_NAME "${PACE_MACOS_SIGN_IDENTITY_PKG}")
     endif()
 
     # The two hook scripts run as `cmake -P`, which only sees CPACK_-prefixed
     # variables, so the knobs are re-exported under that prefix.
-    set(CPACK_FASTCACHED_SIGN_IDENTITY_APP "${FASTCACHED_MACOS_SIGN_IDENTITY_APP}")
-    set(CPACK_FASTCACHED_MACOS_PREFIX      "${FASTCACHED_MACOS_PREFIX}")
-    set(CPACK_FASTCACHED_NOTARIZE          "${FASTCACHED_MACOS_NOTARIZE}")
-    set(CPACK_FASTCACHED_NOTARY_PROFILE    "${FASTCACHED_MACOS_NOTARY_PROFILE}")
-    set(CPACK_FASTCACHED_BUILD_DMG         "${FASTCACHED_MACOS_BUILD_DMG}")
-    set(CPACK_FASTCACHED_NOTARY_STALL_IS_FATAL "${FASTCACHED_MACOS_NOTARY_STALL_IS_FATAL}")
+    set(CPACK_PACE_SIGN_IDENTITY_APP "${PACE_MACOS_SIGN_IDENTITY_APP}")
+    set(CPACK_PACE_MACOS_PREFIX      "${PACE_MACOS_PREFIX}")
+    set(CPACK_PACE_NOTARIZE          "${PACE_MACOS_NOTARIZE}")
+    set(CPACK_PACE_NOTARY_PROFILE    "${PACE_MACOS_NOTARY_PROFILE}")
+    set(CPACK_PACE_BUILD_DMG         "${PACE_MACOS_BUILD_DMG}")
+    set(CPACK_PACE_NOTARY_STALL_IS_FATAL "${PACE_MACOS_NOTARY_STALL_IS_FATAL}")
     # One line per artefact the notarization hook considered, written in the order
     # things happened. The packaging job removes it before `cpack` and classifies
     # from it afterwards, so its ABSENCE is a state that hook did not run rather
     # than a state nothing happened -- see `cmake/MacOSNotarizePkg.cmake`.
-    set(CPACK_FASTCACHED_NOTARY_VERDICT_FILE "${CMAKE_BINARY_DIR}/notarization-verdict.txt")
+    set(CPACK_PACE_NOTARY_VERDICT_FILE "${CMAKE_BINARY_DIR}/notarization-verdict.txt")
     # CPack builds packages in a staging directory and copies them back
     # afterwards; a .dmg this hook creates is not part of that copy, so it must
     # be written to its final home directly.
-    set(CPACK_FASTCACHED_OUTPUT_DIRECTORY  "${CMAKE_BINARY_DIR}")
+    set(CPACK_PACE_OUTPUT_DIRECTORY  "${CMAKE_BINARY_DIR}")
 
     # Signing must happen after CPACK_STRIP_FILES and before pkgbuild seals the
     # payload — the pre-build hook is the only point that satisfies both.
@@ -433,13 +449,13 @@ if(WIN32)
     # One MSI feature per installed application. Display text lives here, keyed by the app
     # table's component column; a component the build did not produce declares nothing.
     #   component | display name | description | required
-    set(FASTCACHED_WINDOWS_FEATURES
-        "Cli|Command-line client|fastcache-cli, and the files every other feature shares.|REQUIRED"
-        "Daemon|fastcached cache daemon|The memcached- and Redis-compatible cache, registered as the FastCached service.|"
-        "Launcher|fastcache-cc compiler launcher|The launcher a build system runs in place of the compiler.|"
-        "Node|fastcache-compile-node|The compile worker and fleet node, registered as the FastCacheCompileNode service.|"
+    set(PACE_WINDOWS_FEATURES
+        "Cli|Command-line client|pacectl, and the files every other feature shares.|REQUIRED"
+        "Daemon|pace-kv cache daemon|The memcached- and Redis-compatible cache, registered as the pace-kv service.|"
+        "Launcher|pace-cc compiler launcher|The launcher a build system runs in place of the compiler.|"
+        "Node|pace-node|The compile worker and fleet node, registered as the pace-node service.|"
     )
-    foreach(_fcFeature IN LISTS FASTCACHED_WINDOWS_FEATURES)
+    foreach(_fcFeature IN LISTS PACE_WINDOWS_FEATURES)
         string(REPLACE "|" ";" _fcFields "${_fcFeature}")
         list(GET _fcFields 0 _fcName)
         list(GET _fcFields 1 _fcDisplay)
@@ -451,28 +467,28 @@ if(WIN32)
     endforeach()
 else()
     cpack_add_component(Runtime
-        DISPLAY_NAME "fastcached"
-        DESCRIPTION  "The fastcached daemon and the fastcache-cc compiler launcher."
+        DISPLAY_NAME "Pace"
+        DESCRIPTION  "Pace: the pace-kv daemon, the pace-node compile node, the pace-cc compiler launcher and pacectl."
         REQUIRED
     )
 endif()
 
-if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
+if(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
     # The two launchd registrations are alternatives: both bind 127.0.0.1:6674
-    # and fastcached has no unix-socket endpoint to fall back on. productbuild
+    # and pace-kv has no unix-socket endpoint to fall back on. productbuild
     # cannot express mutual exclusion — CPack only ever generates && / ||
     # dependency expressions for a choice's `selected` attribute — so the
     # postinstall scripts arbitrate at install time (the daemon wins) and the
     # descriptions below tell the user what the checkboxes really mean.
     cpack_add_component(LaunchAgent
         DISPLAY_NAME "Start at login (recommended)"
-        DESCRIPTION  "Run fastcached as you, starting at login. Best for a development machine. Ignored if the system-wide service below is also selected."
+        DESCRIPTION  "Run pace-kv as you, starting at login. Best for a development machine. Ignored if the system-wide service below is also selected."
     )
     # DISABLED renders the choice unchecked (start_selected="false"), so a
     # click-through install gets the per-user agent rather than a root daemon.
     cpack_add_component(LaunchDaemon
         DISPLAY_NAME "Start at boot, system-wide"
-        DESCRIPTION  "Run fastcached as a dedicated service account from boot, shared by every user. Creates the _fastcached account. Takes precedence over the per-user option above."
+        DESCRIPTION  "Run pace-kv as a dedicated service account from boot, shared by every user. Creates the _pace-kv account. Takes precedence over the per-user option above."
         DISABLED
     )
 endif()

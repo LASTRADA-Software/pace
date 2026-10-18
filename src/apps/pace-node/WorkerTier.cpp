@@ -1,0 +1,714 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "AdminEndpoint.hpp"
+#include "CacheTier.hpp"
+#include "NodeAnnounce.hpp"
+#include "NodeFormation.hpp"
+#include "NodeIoLoop.hpp"
+#include "WorkerTier.hpp"
+
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Platform/DaemonControls.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <format>
+#include <functional>
+#include <optional>
+#include <stop_token>
+#include <utility>
+
+#include <CacheProtocol.hpp>
+#include <Dispatch.hpp>
+
+namespace Pace::Node
+{
+
+namespace
+{
+
+    /// How often a worker tells the scheduler it is alive.
+    ///
+    /// Comfortably inside `WorkerRegistry::DefaultHeartbeatTimeout` (90 s), because the
+    /// two errors are not symmetric: a heartbeat that arrives late costs this worker
+    /// its place in the fleet until it re-registers, while one that arrives early costs
+    /// a few bytes.
+
+    /// How many heartbeats between unconditional toolchain sweeps.
+    ///
+    /// Every beat asks the recorded witnesses, which costs a handful of `stat` calls and
+    /// spawns nothing. This is the slower cadence at which the machine is surveyed
+    /// regardless -- the only way back from serving LESS than the machine has, since a
+    /// witness-driven recheck can only notice what it is already watching (#238).
+    ///
+    /// 45 beats is about a quarter of an hour at the default interval: long enough that
+    /// the survey's driver spawns are nothing against a machine's load, short enough that
+    /// a reinstalled compiler rejoins the fleet without anybody restarting a service.
+    constexpr std::uint64_t SweepEveryBeats = 45;
+
+    // The suspend's one dial must be able to fail and still leave the handler budget to return
+    // in: a connect bound at or past the budget spends all of it on a scheduler that is not there.
+    static_assert(SuspendDialTimeout < SuspendWithdrawBudget);
+
+    /// Tell `node-status` what a finished survey concluded.
+    ///
+    /// The rule this carries -- which state a served count implies -- lives in
+    /// `ToolchainStateFor`, where a test can reach it.
+    /// @param state Where the worker publishes.
+    /// @param served How many toolchains this node now serves.
+    /// @param discovered How many candidates the cheap half of the survey found.
+    void PublishToolchains(NodeRuntimeState& state, std::size_t served, std::size_t discovered)
+    {
+        state.PublishToolchains(ToolchainReading { .state = ToolchainStateFor(served),
+                                                   .served = static_cast<std::uint32_t>(served),
+                                                   .discovered = static_cast<std::uint32_t>(discovered) });
+    }
+
+    /// Tell `node-status` whether this node is getting through to a scheduler.
+    ///
+    /// Counted from the REGISTRARS rather than from the round's outcome, because they answer
+    /// different questions: `accepted` says *a scheduler took something just now*, and a
+    /// non-empty `WorkerId()` says *this registrar is currently registered somewhere*. A
+    /// worker whose scheduler has gone away keeps its ids and accepts nothing, which is
+    /// exactly the state worth being able to see.
+    /// @param state Where the worker publishes.
+    /// @param clock Stamps the acceptance; must be the clock `Describe()` differences it
+    ///        against, or the age it reports is the difference between two clocks.
+    /// @param held Every registration this node is trying to hold.
+    /// @param accepted How many entries a scheduler took this round.
+    void PublishRegistration(NodeRuntimeState& state,
+                             core::platform::IClock const& clock,
+                             std::vector<Cc::WorkerRegistrar> const& held,
+                             std::size_t accepted)
+    {
+        auto const registered =
+            std::ranges::count_if(held, [](Cc::WorkerRegistrar const& registrar) { return !registrar.WorkerId().empty(); });
+        state.PublishRegistration(static_cast<std::uint32_t>(registered),
+                                  static_cast<std::uint32_t>(held.size()),
+                                  accepted > 0 ? std::optional { clock.now() } : std::nullopt);
+    }
+
+    /// Claim this worker's private scratch root, or say why the node must not start.
+    ///
+    /// The root is claimed EXCLUSIVELY. It used to be `temp_directory_path() /
+    /// "pace-node"` with jobs numbered beneath it from a counter starting at 1
+    /// in every process, so a second node on this host derived the identical `job-1` -- and
+    /// `create_directories` succeeds on a directory that already exists, so it was told
+    /// nothing (#279). One node's cleanup then removed the directory under the other's
+    /// compile, or the two shared `tu.o` and one answered with the other's object.
+    ///
+    /// @param servesCompiles Whether the cheap survey found anything to compile with.
+    ///        Asked of what was DISCOVERED, not of what is served: nothing is served yet at
+    ///        this point (#365), and reading the served map here would claim no root on
+    ///        every node and then fail every compile for want of one.
+    /// @param claimant Takes the claim.
+    /// @param base Where the candidate roots live.
+    /// @param logger Where the outcome is announced.
+    /// @param conditions Where whether the root can be mapped is answered, every way out that
+    ///        does not refuse to start.
+    /// @return The held claim; a NULL claim when there is nothing to compile with; or why
+    ///         the node must refuse to start.
+    [[nodiscard]] std::expected<std::unique_ptr<IScratchClaim>, std::string> ClaimScratchRoot(
+        bool servesCompiles,
+        IScratchClaimant& claimant,
+        std::filesystem::path const& base,
+        ILogger& logger,
+        NodeConditions& conditions)
+    {
+        if (!servesCompiles)
+        {
+            // Not `Clear`: nothing was checked, because there is no root. A worker that later finds
+            // a toolchain still runs on the root it would have claimed here -- none -- so this stays
+            // what it is for the life of the process.
+            conditions.NotEvaluated(NodeCondition::ScratchRootUnmappable,
+                                    "this worker found nothing to compile with, so it claimed no scratch root");
+            return std::unique_ptr<IScratchClaim> {};
+        }
+
+        auto claimed = claimant.Claim(base, DefaultMaxScratchRoots);
+        if (!claimed.has_value())
+        {
+            // Named, and never a fallback to an unclaimed root. Carrying on without the
+            // claim would reintroduce #279 on exactly the machines least able to
+            // diagnose it, and would do so while every test passed.
+            auto const& row = DescribeScratchClaimRefusal(claimed.error());
+            return std::unexpected { std::format("{}: {}", row.name, row.remedy) };
+        }
+
+        auto claim = std::move(*claimed);
+        if (claim->Reclaimed())
+            // A root whose lock was free but whose contents were not: its owner died
+            // without running its cleanup. The COUNTER for it is raised by the tier's
+            // constructor, beside the rest of what the worker counts.
+            logger.Logf(LogLevel::Warn,
+                        "reclaimed the scratch root {} from a node that exited without cleaning up",
+                        claim->Root().string());
+        logger.Logf(LogLevel::Info, "scratch root {} claimed exclusively", claim->Root().string());
+
+        // **A root no mapping rule can name is said ONCE, here, in front of the operator.**
+        // The rule `WorkerSourceNameRule` builds has this root on its left-hand side, so a
+        // root carrying a space or an `=` makes every one of them unspellable and every
+        // dispatched object goes back to recording `<scratch>/job-N/<name>` -- silently,
+        // per job, with nothing counting it (#810). A warning and not a refusal: such a
+        // machine compiles perfectly well and only its dispatched objects' debug names
+        // degrade.
+        for (auto const& warning: Cc::ScratchRootMappingWarnings(claim->Root().string()))
+            logger.Logf(LogLevel::Warn, "{}", warning);
+
+        // And said again where somebody arriving later can ask for it (#1364), from the same
+        // derivation as the lines above, so the two cannot name different flags. Latched: the root
+        // is claimed once and held for the life of the process.
+        auto const unmappable = Cc::ScratchRootUnmappableFlags(claim->Root().string());
+        if (unmappable.empty())
+            conditions.Clear(NodeCondition::ScratchRootUnmappable);
+        else
+            conditions.Raise(NodeCondition::ScratchRootUnmappable,
+                             ListDetail(std::format("this worker's scratch root {} cannot be spelled inside a rule of:",
+                                                    claim->Root().string()),
+                                        std::vector<std::string> { unmappable.begin(), unmappable.end() }));
+        return claim;
+    }
+
+    /// What the runner needs of a served set: the compiler per fingerprint.
+    /// @param served The served toolchains.
+    /// @return The projection.
+    [[nodiscard]] std::map<std::string, std::string> CompilersOf(std::map<std::string, ServedToolchain> const& served)
+    {
+        std::map<std::string, std::string> compilers;
+        for (auto const& [fingerprint, toolchain]: served)
+            compilers.emplace(fingerprint, toolchain.compiler);
+        return compilers;
+    }
+
+} // namespace
+
+void AdoptAllowlist(Cc::CompileJobRunner& jobs,
+                    RefusedArgumentsReport& refused,
+                    ILogger& logger,
+                    std::vector<std::string>& inForce,
+                    std::vector<std::string> const& candidate)
+{
+    auto const said = AllowlistAnnouncement(AllowlistMoment::Reload, inForce, candidate);
+    if (!said)
+        return;
+
+    inForce = candidate;
+    jobs.ReplaceExtraAllowedArgs(inForce);
+    // The report RE-JUDGES what it named against the set now in force, rather than clearing. It
+    // cannot assume every refusal from here on was judged by that set: `CompileJobRunner::Run`
+    // copies the set when a job starts, so a job begun before the line above reports after it --
+    // and the report answers that by asking the set in force, not by trusting the order here.
+    refused.AllowlistChanged(inForce);
+    logger.Log(LogLevel::Warn, *said);
+}
+
+WorkerMachine MakeSystemWorkerMachine()
+{
+    auto runner = Cc::MakeProcessRunner();
+    auto host = Cc::MakeToolchainHost();
+    // Built UNCONDITIONALLY and consulted per call, since #403 made
+    // `--no-toolchain-discovery` reloadable. It costs nothing to hold: it stores two
+    // references and searches only when asked.
+    auto discovery = Cc::MakeToolchainDiscovery(*host, *runner);
+    return WorkerMachine { .runner = std::move(runner),
+                           .host = std::move(host),
+                           .discovery = std::move(discovery),
+                           .claimant = MakeLockFileScratchClaimant(),
+                           .scratchBase = ScratchBaseDirectory() };
+}
+
+std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> WorkerTier::Start(WorkerTierParts const& parts,
+                                                                          WorkerMachineFactory const& makeMachine)
+{
+    // Through `WorkerSlotsOf`, never `OfferableSlots` directly -- its header says which
+    // way the other spelling fails (#206). Absent is a node running no worker, and it
+    // gets no tier at all.
+    auto const slots = WorkerSlotsOf(parts.cfg, parts.capacity);
+    if (!slots.has_value())
+        return std::unique_ptr<WorkerTier> {};
+
+    // The link the heartbeat announces through, built HERE so a worker cannot exist
+    // without one: the tier's constructor takes it by value. Aimed where this node registers
+    // NOW (`AppliedSchedulers`: its own scheduler and then the other voters its applied state
+    // records, or those voters alone, else the formation record's answer), re-read at every round, never at `--scheduler`,
+    // which aims one-shot verbs and is refused on a node that serves.
+    auto link = SchedulerLink::Over(parts.schedulers);
+    if (!link.has_value())
+        return std::unexpected { Refusal(
+            NodeRefusalCause::EarlierRule,
+            "this worker has nowhere to register: its formation record names no scheduler -- a node serves its own "
+            "only while its consensus port is open, and a learner registers with the fleet endpoints it remembers -- "
+            "so it would never be leased and never be sent a job. Open consensus (--listen-raft), or give "
+            "--fleet-seed=<host> to join a fleet") };
+
+    // Only now, with a worker decided: see `MakeSystemWorkerMachine`.
+    auto machine = makeMachine();
+
+    // Only the CHEAP half of the survey runs here, and that split is the whole of #365.
+    // Deciding WHICH compilers to serve is a spawn per candidate; IDENTIFYING them walks
+    // every byte under every include root, measured at 5136 files and over 300 s on a
+    // cold Windows runner (#354). Discovery stays on the startup path because it is what
+    // refuses a misconfigured node promptly and by name; the walk runs on the heartbeat
+    // thread, and nothing registers until it answers.
+    //
+    // `discovery` is consulted per call against the configuration it is HANDED, since
+    // #403 made `--no-toolchain-discovery` reloadable: an object built only when the
+    // flag was off at startup is one the flag could never be turned back on for.
+    auto* const discovery = parts.cfg.toolchainDiscovery ? machine.discovery.get() : nullptr;
+    auto discovered = DiscoverToolchainEntries(parts.cfg, discovery, *machine.runner, parts.logger);
+    if (!discovered.has_value())
+        // The entry was named above, at Error, by the survey that could not read it.
+        return std::unexpected { Refusal(NodeRefusalCause::EarlierRule, "a malformed --toolchain was named") };
+
+    auto claim = ClaimScratchRoot(
+        !discovered->entries.empty(), *machine.claimant, machine.scratchBase, parts.logger, parts.conditions);
+    if (!claim.has_value())
+        return std::unexpected { Refusal(NodeRefusalCause::ScratchRoot, std::move(claim).error()) };
+
+    // What this worker keeps between lease checks: the grants it has already run (#614),
+    // the scheduler term the last authentic grant named (#421), and where a term going
+    // BACKWARDS is reported -- at Warn, because the term is a diagnostic rather than a
+    // gate since #614. Written by nothing but the validator, which borrows it for the
+    // tier's life; a heap object so that borrow survives the tier being built around it.
+    auto leaseState = std::make_unique<Distributed::WorkerLeaseState>(Distributed::SchedulerTermRegressionNotice {
+        [&logger = parts.logger](std::string_view line) { logger.Logf(LogLevel::Warn, "{}", line); } });
+
+    // The whole trust decision is one call, made and announced where a test can reach
+    // it: a grant carries its issuing voter's signature over this worker's endpoint, the
+    // toolchain and an expiry, checked against the roster this node holds (#178), so the check
+    // is local and costs the job nothing. A WALL clock, because the expiry was stamped on
+    // another machine.
+    //
+    // It verifies against the endpoint this worker is REGISTERED under -- the one the scheduler
+    // signs -- which the heartbeat moves as it re-registers, never the published one, which
+    // `EndpointResolver` moves first (`WorkerTier::Advertised`).
+    auto registeredAs = std::make_unique<AnnouncedEndpoint>(parts.announced.Current());
+    auto validator =
+        MakeWorkerLeaseValidator(parts.cfg,
+                                 parts.leaseRoster,
+                                 *registeredAs,
+                                 parts.prover != nullptr ? std::span<std::byte const> { parts.prover->Key().PublicKey() }
+                                                         : std::span<std::byte const> {},
+                                 parts.activatedNodeEndpoint.has_value() ? SocketActivation::Yes : SocketActivation::No,
+                                 core::platform::defaultSystemWallClock(),
+                                 *leaseState,
+                                 parts.metrics,
+                                 parts.logger,
+                                 parts.leaseCheck);
+    if (!validator.has_value())
+        return std::unexpected { Refusal(NodeRefusalCause::LeaseValidation, std::move(validator).error()) };
+
+    return std::unique_ptr<WorkerTier> { new WorkerTier(parts,
+                                                        std::move(machine),
+                                                        *std::move(discovered),
+                                                        *std::move(claim),
+                                                        std::move(leaseState),
+                                                        std::move(registeredAs),
+                                                        *std::move(validator),
+                                                        *std::move(link),
+                                                        *slots) };
+}
+
+WorkerTier::WorkerTier(WorkerTierParts const& parts,
+                       WorkerMachine machine,
+                       DiscoveredToolchains discovered,
+                       std::unique_ptr<IScratchClaim> scratchClaim,
+                       std::unique_ptr<Distributed::WorkerLeaseState> leaseState,
+                       std::unique_ptr<AnnouncedEndpoint> registeredAs,
+                       Cc::LeaseValidator validator,
+                       SchedulerLink link,
+                       std::uint32_t slots):
+    _cfg { parts.cfg },
+    _reloader { parts.reloader },
+    _cacheTier { parts.cacheTier },
+    _prover { parts.prover },
+    _metrics { parts.metrics },
+    _logger { parts.logger },
+    _announced { parts.announced },
+    _endpoints { parts.endpoints },
+    _registeredAs { std::move(registeredAs) },
+    _locality { parts.locality },
+    _machine { std::move(machine) },
+    _discovered { std::move(discovered) },
+    _scratchClaim { std::move(scratchClaim) },
+    // Constructed BEFORE anything has been identified, and told so. An empty map and an
+    // unanswered one are opposite answers to a client, so until the survey lands a job
+    // is refused `ToolchainSurveyInFlight` rather than `UnknownFingerprint` (#365).
+    _jobs { *_machine.runner,
+            _scratchClaim != nullptr ? _scratchClaim->Root() : _machine.scratchBase,
+            CompilersOf(_toolchains),
+            Cc::ToolchainSurvey::InFlight() },
+    _appliedExtraArgs { parts.cfg.extraAllowedArgs },
+    _leaseState { std::move(leaseState) },
+    _refusedArguments { parts.conditions, parts.logger, parts.cfg.extraAllowedArgs },
+    // The envelope ceiling is THIS surface's request cap, named rather than left to the
+    // decoder's default. `AvailableCodecs()`, never a literal: this list is what the
+    // worker answers a compile in, chosen against what the client accepts (#265).
+    // Every reply signed under the key this machine PROVES itself with -- the one the scheduler
+    // records at registration and names in each grant -- so a launcher can tell this worker from
+    // whatever else answers at its address (W-4). None where nothing proves: such a worker
+    // registers nowhere, so no grant names it.
+    _protocol { _jobs,
+                std::move(validator),
+                Cc::AvailableCodecs(),
+                parts.prover != nullptr ? &parts.prover->Key() : nullptr,
+                parts.metrics,
+                _refusedArguments,
+                CompileRequestMaxOf(parts.cfg) },
+    _slots { slots },
+    // Sized to the slot cap, which is what makes an admitted job always find a thread,
+    // and declared before the capacity and the responder, so neither outlives it.
+    _pool { slots },
+    // The budget follows the RESOLVED slot count unless the operator named one (#1667): a
+    // flat 256 MiB refused half the leases a 30-slot worker was granted.
+    _capacity { slots, CompileByteBudgetOf(parts.cfg, slots), parts.cfg.drainTimeout, parts.logger },
+    // The compile verbs on the node's own `0xFC` listener. A frame arrives on the reactor;
+    // the compile leaves it for the pool and the reply comes BACK to it, which is why
+    // `CompileResponder_test.cpp` asserts the thread identities (#213, #290).
+    _responder { _protocol, _capacity,          parts.membership, parts.locality,
+                 _pool,     parts.io.Reactor(), parts.metrics,    parts.logger },
+    // Seeded with the honest first reading: the cheap half has run and the walk has not,
+    // so this node is `Surveying` 0 of however many candidates there are.
+    _runtime { ToolchainReading { .state = CompileCacheWire::ToolchainState::Surveying,
+                                  .served = 0,
+                                  .discovered = static_cast<std::uint32_t>(_discovered.entries.size()) } },
+    _advertisedWire { Distributed::CapacityToWire(parts.capacity) },
+    _dialer { parts.schedulerDialer },
+    _link { std::move(link) },
+    _hostInbox { [this] { _capacity.WakeHeartbeat(); }, parts.suspendWait },
+    _hostSubscription { parts.hostEvents, _hostInbox },
+    _moveWatch { parts.endpoints, _moveWake }
+{
+    // Counted as well as logged because it is otherwise visible nowhere: a rise means
+    // nodes are dying rather than stopping.
+    if (_scratchClaim != nullptr && _scratchClaim->Reclaimed())
+        _metrics.Increment(IMetricsSink::Counter::WorkerScratchRootsReclaimed);
+
+    // The two memory ceilings, stated once at startup because `pacectl node` does not
+    // carry them yet (#1667): an operator reading `endpoint-busy` refusals needs the budget
+    // they ran into, and a derived one is a figure nobody typed. In the spelling the options
+    // take, so it can be handed straight back.
+    _logger.Logf(LogLevel::Info,
+                 "worker: {} slot(s), in-flight compile budget {}{}, largest request {}",
+                 _slots,
+                 FormatByteSize(_capacity.ByteBudget()),
+                 parts.cfg.compileInflightMaxBytes.has_value() ? "" : " (derived from the slots)",
+                 FormatByteSize(_protocol.MaxDecompressedBytes()));
+
+    // The operator's additions to the compile-argument allowlist, applied before the
+    // surface opens so no job is ever judged by a half-applied set -- and announced at
+    // WARN, the level a credential change is logged at, because this is the one setting
+    // that widens what a client may make this worker's compiler do (#293).
+    _jobs.ReplaceExtraAllowedArgs(_appliedExtraArgs);
+    if (auto const said = AllowlistAnnouncement(AllowlistMoment::Startup, {}, _appliedExtraArgs))
+        _logger.Log(LogLevel::Warn, *said);
+
+    // Compiled in, never configurable: the column this feeds tells an operator which
+    // binary is running on each machine, mid-upgrade most often. And the hostname, a
+    // LABEL that decides nothing (#1024). Both ride the capacity record because it is
+    // REGISTER's one extensible field.
+    //
+    // The version's own ceiling is `AdvertisedVersion`'s to hold, asked from both this
+    // registrar and the presence loop rather than each stamping its own copy; the name's
+    // is held here, at the most the host query can return at all.
+    static_assert(MaxHostNameBytes <= CompileCacheWire::MaxDisplayNameBytes,
+                  "a scheduler must record any host name this node can send");
+    _advertisedWire.version = AdvertisedVersion();
+    _advertisedWire.displayName = parts.host.Facts().hostName;
+}
+
+std::string RegisteredToolchainLabel(ServedToolchain const& toolchain, ILogger& logger)
+{
+    auto const withheld = Cc::ToolchainLabelWithheldBecause(toolchain.label);
+    if (!withheld.has_value())
+        return toolchain.label;
+    logger.Logf(LogLevel::Warn,
+                "scheduler: {} registers without its toolchain label, because {}; it is served all the same, and "
+                "the fleet page shows no name for it",
+                toolchain.compiler,
+                *withheld);
+    return {};
+}
+
+std::vector<Cc::WorkerRegistrar> WorkerTier::RegistrarsFor(std::map<std::string, ServedToolchain> const& served)
+{
+    // One registrar per toolchain, because REGISTER carries ONE fingerprint and
+    // `--toolchain` is repeatable. Every entry heartbeats the SAME machine-wide in-flight
+    // count, so the scheduler stops picking all of them together once this worker is busy.
+    //
+    // The endpoint is asked ONCE for the whole set rather than per registrar: every entry here
+    // describes the same machine at the same moment, and a publish landing between two
+    // of them would register one toolchain at the new address and the rest at the old.
+    return RegistrarsAt(served, _announced.Current());
+}
+
+std::vector<Cc::WorkerRegistrar> WorkerTier::RegistrarsAt(std::map<std::string, ServedToolchain> const& served,
+                                                          std::string const& advertised)
+{
+    std::vector<Cc::WorkerRegistrar> built;
+    built.reserve(served.size());
+    for (auto const& [fingerprint, toolchain]: served)
+    {
+        // A copy per registrar: the label is the one field of this record that is NOT
+        // node-wide (#194).
+        auto perToolchain = _advertisedWire;
+        perToolchain.toolchainLabel = RegisteredToolchainLabel(toolchain, _logger);
+        built.emplace_back(fingerprint, advertised, _slots, Cc::AvailableCodecs(), perToolchain);
+    }
+    return built;
+}
+
+void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
+{
+    _toolchains = std::move(served);
+    // The compile port first, the registration second: between the two this worker
+    // refuses a job naming a dropped fingerprint rather than serving it with the new
+    // compiler, and it never announces a fingerprint it is not yet ready to serve.
+    _jobs.ReplaceToolchains(CompilersOf(_toolchains));
+    // The endpoint read once and remembered with the set it built, so the next beat compares a
+    // publication against what was REGISTERED.
+    auto endpoint = _announced.Current();
+    AdoptRegistrars(RegistrarsAt(_toolchains, endpoint), _registrars, _withdrawals);
+    RegisterUnder(std::move(endpoint));
+    // AFTER the two calls above: this says the worker is serving, and it must not say so
+    // while the compile port still holds the previous answer.
+    PublishToolchains(_runtime, _toolchains.size(), _discovered.entries.size());
+}
+
+void WorkerTier::FollowAnnouncedEndpoint(core::platform::IClock const& statusClock)
+{
+    auto now = _announced.Current();
+    auto const was = _registeredAs->Current();
+    if (now == was)
+        return;
+
+    // The compile port is untouched, and that is the difference from `Serve`: the
+    // toolchains and the compilers behind them are unchanged, so nothing about what this
+    // worker will RUN moves. Only the address it is filed under does. The old registrars still
+    // hold the address they registered under -- `Cc::WorkerRegistrar` keeps its own endpoint
+    // precisely so a withdrawal names the entry that exists rather than the one about to.
+    AdoptRegistrars(RegistrarsAt(_toolchains, now), _registrars, _withdrawals);
+
+    // Republished for `node-status`, because the registered count drops to zero until the
+    // round that follows re-registers -- and a status still claiming those toolchains
+    // registered would be describing entries that were just withdrawn. Nothing was accepted,
+    // so the instant of the last acceptance is kept.
+    PublishRegistration(_runtime, statusClock, _registrars, 0);
+
+    // At Warn, beside the allowlist's: an address change is a fleet-visible event an operator
+    // is watching for, and the one thing that explains a burst of `LeaseEndpointMismatch` in
+    // the minutes after it. After the republish above, so a reader that sees the line also
+    // sees the registrations it retired.
+    _logger.Log(LogLevel::Warn, DescribeEndpointMove(was, now));
+    RegisterUnder(std::move(now));
+}
+
+void WorkerTier::RegisterUnder(std::string endpoint)
+{
+    // The lease check moves HERE, with the registrars, and not when the endpoint was published: the
+    // old registrations are queued for withdrawal in this same step, so from now on the scheduler is
+    // told the new endpoint first and a grant for it is the one honoured. Between the publish and
+    // this, a grant for the endpoint still registered stays valid. An empty endpoint is nothing a
+    // worker registers under (the startup table refuses it), so the previous one stays in force.
+    if (!endpoint.empty())
+        _registeredAs->Publish(std::move(endpoint));
+}
+
+WorkerHeartbeat WorkerTier::Launch(core::platform::IClock const& statusClock, SchedulerReachability& reachability)
+{
+    return WorkerHeartbeat { std::jthread {
+        [this, &statusClock, &reachability](std::stop_token const& stop) { Heartbeat(stop, statusClock, reachability); } } };
+}
+
+void WorkerTier::Heartbeat(std::stop_token const& stop,
+                           core::platform::IClock const& statusClock,
+                           SchedulerReachability& reachability)
+{
+    // One sampler for the whole loop, not one per heartbeat: CPU utilization is a
+    // difference between two readings, so a sampler per beat would report nothing,
+    // forever. Configured with the scratch path, whose filesystem this worker writes to.
+    auto const loadSampler = MakeHostLoadSampler(MakeSystemCounterSource(_jobs.ScratchRoot()));
+
+    HeartbeatRound const round { .cfg = _cfg,
+                                 .registrars = _registrars,
+                                 .withdrawals = _withdrawals,
+                                 .capacity = _capacity,
+                                 .loadSampler = *loadSampler,
+                                 .locality = _locality,
+                                 .addressCapNoticed = _addressCapNoticed,
+                                 .cacheTier = _cacheTier,
+                                 .metrics = _metrics,
+                                 .prover = _prover,
+                                 .lease = *_leaseState,
+                                 .logger = _logger,
+                                 .reachability = reachability };
+
+    // The configuration snapshot this thread last surveyed against, so a reload is
+    // noticed by COMPARISON rather than by a flag somebody else sets. Seeded BEFORE the
+    // initial survey, which is what makes the first beat comparable to every other one.
+    // Null only when this worker has no configuration file at all.
+    auto actedOn = _reloader != nullptr ? _reloader->Current() : nullptr;
+
+    // The initial survey, HERE rather than at startup because it is the expensive half
+    // (#354): off the startup path the node has already bound its port and said it is
+    // ready, so a machine that takes minutes to identify its toolchains spends them
+    // SERVING. The stop token is passed because a SIGTERM arriving mid-walk is caught,
+    // and an unobservable walk would make the process wait it out before stopping.
+    auto surveyed = FingerprintToolchains(_discovered, *_machine.runner, *_machine.host, _toolchainClock, _logger, stop);
+    switch (surveyed.outcome)
+    {
+        case SurveyOutcome::Served:
+            Serve(std::move(surveyed.served));
+            break;
+        case SurveyOutcome::NothingToServe:
+            // "Nothing to serve" was a startup refusal before #365 and stays one, only
+            // later: left running, such a worker registers nothing and reports a healthy
+            // ready line. Published first, so an operator asking what is wrong in the
+            // window before the stop lands gets a real answer.
+            PublishToolchains(_runtime, 0, _discovered.entries.size());
+            _surveyFoundNothing = true;
+            DaemonControls::Instance().RequestStop();
+            return;
+        case SurveyOutcome::NoneCouldBeAsked:
+            // **Not fatal** (#1060): every candidate left because it could not be ASKED,
+            // so this node is not misconfigured. Falls through to the loop, whose
+            // periodic sweep surveys again, exactly as it does for a machine that loses
+            // its last compiler while serving.
+            PublishToolchains(_runtime, 0, _discovered.entries.size());
+            break;
+        case SurveyOutcome::Cancelled:
+            // Already stopping, and interrupted rather than misconfigured.
+            return;
+    }
+
+    std::uint64_t beat = 0;
+    while (!stop.stop_requested())
+    {
+        ++beat;
+
+        // The configuration this beat acts on, read once and held for the whole beat:
+        // `Current()` can be swapped by a reload mid-beat.
+        auto const snapshot = _reloader != nullptr ? _reloader->Current() : nullptr;
+        auto const& liveCfg = snapshot ? *snapshot : _cfg;
+
+        auto const reloaded = ClaimsReloadedBetween(actedOn, snapshot);
+        actedOn = snapshot;
+
+        // Compared SEPARATELY from `reloaded`: extending the allowlist changes nothing
+        // this worker advertises, so gating it on that answer would be a reload an
+        // operator watched do nothing.
+        AdoptAllowlist(_jobs, _refusedArguments, _logger, _appliedExtraArgs, liveCfg.extraAllowedArgs);
+
+        // Compared SEPARATELY from `reloaded` as well, and for the opposite half of that
+        // reason: this changes what the fleet must be TOLD while changing nothing about
+        // the toolchains, so it must not ride the re-survey `reloaded` triggers -- an
+        // include-tree walk to move a string would be minutes of work telling the fleet
+        // nothing it could not have had at once. The resolver publishes the DERIVED
+        // endpoint -- a reload's and a network change's alike -- and is refreshed first, so
+        // a change this beat was woken for is published before it is compared.
+        _endpoints.Refresh();
+        FollowAnnouncedEndpoint(statusClock);
+        auto const depth = RecheckDepthFor(reloaded, beat, SweepEveryBeats);
+        auto const voice = SurveyVoiceFor(reloaded, depth);
+
+        auto* const discovery = liveCfg.toolchainDiscovery ? _machine.discovery.get() : nullptr;
+        if (auto refreshed = RefreshToolchains(
+                _toolchains, liveCfg, discovery, *_machine.runner, *_machine.host, _toolchainClock, _logger, depth, voice);
+            refreshed.changed)
+        {
+            Serve(std::move(refreshed.served));
+
+            // A worker that ends up serving nothing keeps running and says so rather than
+            // exiting: the compiler may come back with the next package, and a routine
+            // upgrade must not remove a machine from the fleet permanently.
+            if (_toolchains.empty())
+                _logger.Logf(LogLevel::Warn, "this machine now has no usable toolchain; serving nothing until one returns");
+        }
+
+        // Read BEFORE the round, so a cordon arriving while it runs is one the wake below
+        // still sees as a change.
+        auto const announcedCordon = _capacity.IsCordoned();
+        PublishRegistration(_runtime, statusClock, _registrars, AnnounceRound(round, _link, _dialer));
+
+        // A cordon, or its lifting, reaches the scheduler at once rather than a whole
+        // interval later (#1303), and so does a resume or a network change; a stop ends the
+        // wait immediately. Sooner while this node's own cluster has not recorded it, so the
+        // registrations follow the record by seconds rather than by a whole interval
+        // (`NextAnnounceWait`).
+        if (AwaitNextRound(stop,
+                           _capacity,
+                           _hostInbox,
+                           announcedCordon,
+                           NextAnnounceWait(_prover),
+                           [this, &round, &statusClock] { WithdrawForSuspend(round, statusClock); })
+            == HeartbeatWake::Stopped)
+            break;
+    }
+}
+
+void WorkerTier::WithdrawForSuspend(HeartbeatRound const& round, core::platform::IClock const& statusClock)
+{
+    auto endpoint = _announced.Current();
+    RetireAllRegistrations(RegistrarsAt(_toolchains, endpoint), _registrars, _withdrawals);
+    RegisterUnder(std::move(endpoint));
+    // Republished: node-status must not claim registrations that were just withdrawn. Nothing
+    // was accepted, so the instant of the last acceptance is kept.
+    PublishRegistration(_runtime, statusClock, _registrars, 0);
+    auto const retired = WithdrawOnce(round, _link, _dialer);
+    _logger.Logf(LogLevel::Info,
+                 "this machine is going to sleep: withdrew {} registration(s) so no client is leased it meanwhile",
+                 retired);
+}
+
+HeartbeatWake AwaitNextRound(std::stop_token const& stop,
+                             CompileCapacity& capacity,
+                             HostEventInbox& inbox,
+                             bool announcedCordon,
+                             std::chrono::milliseconds interval,
+                             std::function<void()> const& withdrawForSuspend)
+{
+    auto wake = capacity.WaitForHeartbeat(stop, announcedCordon, interval);
+    auto withdrew = false;
+    // Taken whatever woke the wait: an event can land as the interval runs out, and the round
+    // about to run answers it either way.
+    while (wake != HeartbeatWake::Stopped)
+    {
+        auto const action = inbox.Take();
+        if (action == std::optional { HostEventAction::WithdrawNow })
+        {
+            withdrawForSuspend();
+            // Settled here rather than by the callback, so no withdrawal can forget to let the
+            // suspend go and hold the machine for the whole budget.
+            inbox.Settle();
+            withdrew = true;
+            wake = inbox.HasPending() ? HeartbeatWake::HostEvent
+                                      : capacity.WaitForHeartbeat(stop, capacity.IsCordoned(), interval);
+            continue;
+        }
+        // A wake whose event was already taken: the posting thread sets the action BEFORE it wakes
+        // this one, so a suspend taken on another wake leaves its own wake request behind. After a
+        // withdrawal that request owes nothing, and a round for it would register the machine that
+        // is about to sleep -- so wait on.
+        if (withdrew && !action.has_value() && wake == HeartbeatWake::HostEvent)
+        {
+            wake = capacity.WaitForHeartbeat(stop, capacity.IsCordoned(), interval);
+            continue;
+        }
+        break;
+    }
+    return wake;
+}
+
+void WorkerTier::StopAndDrain()
+{
+    // Both doors closed and every compile drained while the node's reactor is still
+    // turning: a compile admitted through the merged surface finishes on the pool and then
+    // hops back onto the reactor to hand back its reply, so tearing the surface down first
+    // can stop the reactor with a compile still out. Destruction order cannot express
+    // this, because the surface points at the responder and the responder at this
+    // capacity, which is why the drain is callable rather than only a destructor.
+    _capacity.BeginShutdown();
+    _capacity.Drain();
+}
+
+} // namespace Pace::Node

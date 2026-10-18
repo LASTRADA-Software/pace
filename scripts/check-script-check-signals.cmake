@@ -67,7 +67,7 @@
 # to its own rule, and is registered with the property like everything else.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-script-check-signals.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-script-check-signals.cmake
 #
 # Exit codes: whatever CMake gives it, which for `message(FATAL_ERROR)` is 1 on
 # every version measured. The verdict is still read from the presence of
@@ -90,11 +90,11 @@ cmake_minimum_required(VERSION 3.28)
 # support the copy.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(testsFile "${FASTCACHED_SOURCE_DIR}/src/tests/CMakeLists.txt")
+set(testsFile "${PACE_SOURCE_DIR}/src/tests/CMakeLists.txt")
 if(NOT EXISTS "${testsFile}")
     message(FATAL_ERROR "the test registration file is missing: ${testsFile}")
 endif()
@@ -125,7 +125,7 @@ endif()
 # example: the same fix took it from three refusal spellings to zero, and it now
 # walks its lines without ever building a CMake list.
 file(READ "${testsFile}" content)
-fastcached_split_lines_verbatim("${content}" lines)
+pace_split_lines_verbatim("${content}" lines)
 
 # ---------------------------------------------------------------------------
 # Pass 1: which tests are registered by running a `cmake -P` script.
@@ -193,7 +193,7 @@ set(willFailRegistrations "")
 # The rows are `<test name>|<signalled>|<will fail>` and the FIRST block for a name
 # wins, which is what the per-registration walk did by stopping at the one it
 # found. One list of rows rather than parallel lists, for the reason
-# `fastcached_registration_fields` gives one row for a name and a path: two lists
+# `pace_registration_fields` gives one row for a name and a path: two lists
 # appended in step are two lists that can stop being in step.
 #
 # The name is now compared EXACTLY where it used to be a regex over a partially
@@ -218,10 +218,10 @@ set(currentWillFail FALSE)
 #
 # @param wanted The ctest name.
 # @param rowOut Set to the matching `<name>|<signalled>|<will fail>` row, or "".
-function(fastcached_block_row wanted rowOut)
+function(pace_block_row wanted rowOut)
     set(${rowOut} "" PARENT_SCOPE)
     foreach(row IN LISTS propertyBlocks)
-        fastcached_row_fields("${row}" rowName rowRest)
+        pace_row_fields("${row}" rowName rowRest)
         if(rowName STREQUAL wanted)
             set(${rowOut} "${row}" PARENT_SCOPE)
             return()
@@ -233,7 +233,7 @@ endfunction()
 # this scope; called at the closing `)` and again at end of file, because the
 # per-registration walk recorded a property the moment it saw it and did not need
 # the block to be closed for that.
-macro(fastcached_close_block)
+macro(pace_close_block)
     if(NOT currentBlock STREQUAL "")
         list(APPEND propertyBlocks "${currentBlock}|${currentSignalled}|${currentWillFail}")
         set(currentBlock "")
@@ -246,9 +246,9 @@ foreach(line IN LISTS lines)
     endif()
 
     if(line MATCHES "set_tests_properties\\([ \t]*\"([^\"]+)\"")
-        fastcached_close_block()
+        pace_close_block()
         set(candidate "${CMAKE_MATCH_1}")
-        fastcached_block_row("${candidate}" existingRow)
+        pace_block_row("${candidate}" existingRow)
         if(existingRow STREQUAL "")
             set(currentBlock "${candidate}")
             set(currentSignalled FALSE)
@@ -262,10 +262,10 @@ foreach(line IN LISTS lines)
         # it recognises, because two of them are wanted.
         set(currentWillFail TRUE)
     elseif(NOT currentBlock STREQUAL "" AND line MATCHES "^[ \t]*\\)[ \t]*$")
-        fastcached_close_block()
+        pace_close_block()
     endif()
 endforeach()
-fastcached_close_block()
+pace_close_block()
 
 # A walk that stops recognising blocks is LOUD either way -- every registration then
 # looks unsignalled -- so this control is not about silence, and saying it was would
@@ -293,20 +293,20 @@ endif()
 # The property is matched by NAME rather than by its value, so a check that
 # spells the pattern some other way still counts as having answered the
 # question -- the point is that somebody decided, not that they decided this.
-# `FASTCACHED_SCRIPT_CHECK_FAILED` exists so nobody has to.
+# `PACE_SCRIPT_CHECK_FAILED` exists so nobody has to.
 #
 # The finding names the ONE check it belongs to, which is the way a map gets this
 # wrong: a lookup that blurred two registrations together would report a violation
 # against a check that has nothing wrong with it, and nothing about the message
 # would say so.
 foreach(registration IN LISTS scriptRegistrations)
-    fastcached_row_fields("${registration}" check scriptPath)
-    fastcached_block_row("${check}" blockRow)
+    pace_row_fields("${registration}" check scriptPath)
+    pace_block_row("${check}" blockRow)
 
     set(signalled FALSE)
     set(willFail FALSE)
     if(NOT blockRow STREQUAL "")
-        fastcached_row_fields("${blockRow}" blockName signalled willFail)
+        pace_row_fields("${blockRow}" blockName signalled willFail)
     endif()
 
     if(willFail)
@@ -329,7 +329,7 @@ endforeach()
 # Anchored at line start, so the COMMENT explaining an absence is not read as a
 # presence, and `LIMIT_COUNT 1` bounds MATCHES rather than `LIMIT_INPUT`, which
 # bounds BYTES -- a declaration below a byte bound would be scored as absent.
-macro(fastcached_require_cmake_minimum resolvedPath shownPath runBy)
+macro(pace_require_cmake_minimum resolvedPath shownPath runBy)
     file(STRINGS "${resolvedPath}" _declaration
          REGEX "^cmake_minimum_required\\(" LIMIT_COUNT 1)
     if(NOT _declaration)
@@ -368,7 +368,7 @@ endmacro()
 # one: it would be registered here like every other check and covered by this very
 # pass.
 foreach(registration IN LISTS scriptRegistrations)
-    fastcached_row_fields("${registration}" check scriptPath)
+    pace_row_fields("${registration}" check scriptPath)
 
     # Resolving the `-P` value happens HERE, beside the `EXISTS` it feeds,
     # rather than in pass 1 where nothing consumes it yet. Every registration
@@ -384,7 +384,7 @@ foreach(registration IN LISTS scriptRegistrations)
         continue()
     endif()
 
-    set(resolved "${FASTCACHED_SOURCE_DIR}/${scriptPath}")
+    set(resolved "${PACE_SOURCE_DIR}/${scriptPath}")
     if(NOT EXISTS "${resolved}")
         list(APPEND violations
              "`${check}` is registered to run `${scriptPath}`, which is not there")
@@ -403,7 +403,7 @@ foreach(registration IN LISTS scriptRegistrations)
     # compliant file stops reading at its declaration and only a violating one
     # is read to the end. Correctness is why this line reads as it does, not
     # the 10 ms.
-    fastcached_require_cmake_minimum("${resolved}" "${scriptPath}" "run by `${check}`")
+    pace_require_cmake_minimum("${resolved}" "${scriptPath}" "run by `${check}`")
 
     # -----------------------------------------------------------------------
     # Pass 4, folded into pass 3 because it needs the same resolved path: a
@@ -469,7 +469,7 @@ endforeach()
 # that every `cmake -P` script in the repository is covered. It is stated because
 # #497 counted them and left them out deliberately, and a reader who finds them
 # later would otherwise conclude this scan had missed them silently.
-set(packagingFile "${FASTCACHED_SOURCE_DIR}/cmake/Packaging.cmake")
+set(packagingFile "${PACE_SOURCE_DIR}/cmake/Packaging.cmake")
 set(cpackHookCount 0)
 
 # ONE finding for one cause. Without the `else()` the loop below still runs, each
@@ -519,7 +519,7 @@ foreach(hookVar IN LISTS cpackHookVars)
     set(hookPath "${CMAKE_MATCH_1}")
     string(REGEX REPLACE "^\\$\\{[A-Za-z_0-9]+\\}/" "" hookPath "${hookPath}")
 
-    set(resolvedHook "${FASTCACHED_SOURCE_DIR}/${hookPath}")
+    set(resolvedHook "${PACE_SOURCE_DIR}/${hookPath}")
     if(NOT EXISTS "${resolvedHook}")
         string(REPLACE ";" "\\;" shownHookPath "${hookPath}")
         list(APPEND violations
@@ -528,13 +528,13 @@ foreach(hookVar IN LISTS cpackHookVars)
     endif()
 
     math(EXPR cpackHookCount "${cpackHookCount} + 1")
-    fastcached_require_cmake_minimum("${resolvedHook}" "${hookPath}" "run by CPack as ${hookVar}")
+    pace_require_cmake_minimum("${resolvedHook}" "${hookPath}" "run by CPack as ${hookVar}")
 endforeach()
 
 # ---------------------------------------------------------------------------
 # Pass 5: everything that READS the signal must read ALL of it (#672).
 #
-# The signal is two words. `FASTCACHED_SCRIPT_CHECK_FAILED` is
+# The signal is two words. `PACE_SCRIPT_CHECK_FAILED` is
 # `CMake Error|CMake Warning` and both halves are canaried -- `script-check-canary`
 # for the first, `script-check-warning-canary` for the second -- because
 # `message(WARNING)` exits 0 on every CMake while changing meaning, and an unset
@@ -592,13 +592,13 @@ set(verdictExceptions 0)
 # would read every file that exists today and none of the ones a subdirectory
 # acquires, which is the shape a list has -- exact about what it knows and silent
 # about what it does not.
-file(GLOB_RECURSE checkScripts "${FASTCACHED_SOURCE_DIR}/scripts/*.cmake")
+file(GLOB_RECURSE checkScripts "${PACE_SOURCE_DIR}/scripts/*.cmake")
 
 # A glob that matched nothing would report success having read no file at all,
 # which is the vacuous shape this whole file argues against.
 if(NOT checkScripts)
     message(FATAL_ERROR
-        "no scripts/*.cmake was found under ${FASTCACHED_SOURCE_DIR} at all; pass 5 would "
+        "no scripts/*.cmake was found under ${PACE_SOURCE_DIR} at all; pass 5 would "
         "vouch for every verdict reader in this tree while reading none of them")
 endif()
 
@@ -610,7 +610,7 @@ foreach(scriptFile IN LISTS checkScripts)
     if(NOT scriptText MATCHES "CMake Error")
         continue()
     endif()
-    file(RELATIVE_PATH shownScript "${FASTCACHED_SOURCE_DIR}" "${scriptFile}")
+    file(RELATIVE_PATH shownScript "${PACE_SOURCE_DIR}" "${scriptFile}")
 
     set(rest "${scriptText}")
     set(scriptLine 0)
@@ -704,7 +704,7 @@ if(violations)
     message("the pattern must also hear a check that merely WARNS, and a warning")
     message("exits 0 on every CMake. Add")
     message("")
-    message("    FAIL_REGULAR_EXPRESSION \"\${FASTCACHED_SCRIPT_CHECK_FAILED}\"")
+    message("    FAIL_REGULAR_EXPRESSION \"\${PACE_SCRIPT_CHECK_FAILED}\"")
     message("")
     message("to the set_tests_properties() block, alongside LABELS and TIMEOUT.")
     message("")

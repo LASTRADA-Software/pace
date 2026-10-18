@@ -122,7 +122,7 @@ MUTATIONS = [
 
 def cases_failing(harness_path):
     """Run the self-test against a harness copy; return the set of red cases."""
-    env = dict(os.environ, FASTCACHED_MUT_HARNESS=harness_path)
+    env = dict(os.environ, PACE_MUT_HARNESS=harness_path)
     p = subprocess.run([sys.executable, S], capture_output=True, text=True,
                        errors="replace", env=env)
     out = (p.stdout or "") + (p.stderr or "")

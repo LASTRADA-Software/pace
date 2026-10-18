@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Assert that cmake/portable/CompileCache.cmake's FASTCACHE_AUTO_START can
-# stage a fastcached daemon binary out of the same release archive
-# FASTCACHE_AUTO_INSTALL already fetches for the launcher (issue #90) — one
+# Assert that cmake/portable/CompileCache.cmake's PACE_AUTO_START can
+# stage a pace-kv daemon binary out of the same release archive
+# PACE_AUTO_INSTALL already fetches for the launcher (issue #90) — one
 # download serving two members, not two downloads.
 #
 # This is the mirror half of that story, the counterpart to
@@ -12,7 +12,7 @@
 # shared rather than downloading the archive a second time, and
 # _fc_auto_install_stage_member placing the result under the right
 # version/platform directory) rather than whether a real daemon can bind a
-# real port — that needs a real fastcached and a real fastcache-cc, which is
+# real port — that needs a real pace-kv and a real pace-cc, which is
 # what the smoke-labelled check-compile-cache-daemon-start test covers
 # instead, with the two split for the same reason described there.
 #
@@ -21,9 +21,9 @@
 # and staying clear of GitHub's unauthenticated rate limit.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<scratch>
-#         -DFASTCACHED_CXX_COMPILER=<c++> [-DFASTCACHED_MAKE_PROGRAM=<make>]
-#         [-DFASTCACHED_GENERATOR=<gen>]
+#   cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<scratch>
+#         -DPACE_CXX_COMPILER=<c++> [-DPACE_MAKE_PROGRAM=<make>]
+#         [-DPACE_GENERATOR=<gen>]
 #         -P scripts/check-compile-cache-daemon-staging.cmake
 #
 # Exit codes: 0 = staged as specified, or skipped. 1 = it did not.
@@ -35,23 +35,23 @@ cmake_minimum_required(VERSION 3.28)
 # be caught, not agreed to by both sides at once.
 #
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
-set(FastCachedInstallOracle
-    "Linux|x86_64|Linux-x86_64|usr/bin/fastcache-cc|usr/bin/fastcached"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/fastcache-cc|opt/fastcached/bin/fastcached"
+set(PaceInstallOracle
+    "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
+    "Darwin|arm64|Darwin-arm64|opt/pace/bin/pace-cc|opt/pace/bin/pace-kv"
 )
 
 # Deliberately not a version that exists, so a bug that reached the real
 # GitHub anyway could not accidentally succeed.
 set(mirrorVersion "9.8.7")
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
 
-set(fixtureDir "${FASTCACHED_SOURCE_DIR}/src/tests/compile-cache-fixture")
-set(moduleDir "${FASTCACHED_SOURCE_DIR}/cmake/portable")
+set(fixtureDir "${PACE_SOURCE_DIR}/src/tests/compile-cache-fixture")
+set(moduleDir "${PACE_SOURCE_DIR}/cmake/portable")
 if(NOT IS_DIRECTORY "${fixtureDir}")
     message(FATAL_ERROR "no fixture project at ${fixtureDir}")
 endif()
@@ -61,8 +61,8 @@ if(CMAKE_HOST_WIN32)
             "(see check-compile-cache-autoinstall.cmake's header)")
     return()
 endif()
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    message("SKIP: no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    message("SKIP: no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     return()
 endif()
 find_program(hostUname NAMES uname)
@@ -74,7 +74,7 @@ endif()
 cmake_host_system_information(RESULT hostProcessor QUERY OS_PLATFORM)
 
 set(platform "")
-foreach(row IN LISTS FastCachedInstallOracle)
+foreach(row IN LISTS PaceInstallOracle)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 rowSystem)
     list(GET fields 1 rowProcessor)
@@ -86,22 +86,22 @@ foreach(row IN LISTS FastCachedInstallOracle)
     endif()
 endforeach()
 if(NOT platform)
-    message("SKIP: no published fastcached is expected for "
+    message("SKIP: no published pace-kv is expected for "
             "${CMAKE_HOST_SYSTEM_NAME}-${hostProcessor}, so there is nothing to stage")
     return()
 endif()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
-file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
+file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 
 # Build the archive the module will be asked to install from: same name, same
 # interior layout as a real release, holding both a launcher and a daemon that
 # each answer --version and nothing else — scripts rather than compiled
 # binaries, because what is under test is the staging plumbing, not the files.
-set(stem "fastcached-${mirrorVersion}-${platform}")
-set(payloadRoot "${FASTCACHED_SCRATCH_DIR}/payload")
+set(stem "pace-${mirrorVersion}-${platform}")
+set(payloadRoot "${PACE_SCRATCH_DIR}/payload")
 
-foreach(pair "launcher:${launcherMember}:fastcache-cc" "daemon:${daemonMember}:fastcached")
+foreach(pair "launcher:${launcherMember}:pace-cc" "daemon:${daemonMember}:pace-kv")
     string(REPLACE ":" ";" fields "${pair}")
     list(GET fields 1 relPath)
     list(GET fields 2 label)
@@ -113,7 +113,7 @@ foreach(pair "launcher:${launcherMember}:fastcache-cc" "daemon:${daemonMember}:f
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endforeach()
 
-set(mirrorDir "${FASTCACHED_SCRATCH_DIR}/mirror/fastcached-mirror/releases/download/v${mirrorVersion}")
+set(mirrorDir "${PACE_SCRATCH_DIR}/mirror/pace-mirror/releases/download/v${mirrorVersion}")
 file(MAKE_DIRECTORY "${mirrorDir}")
 # See check-compile-cache-install.cmake for why this is `cmake -E tar` rather
 # than `file(ARCHIVE_CREATE)`: the latter's WORKING_DIRECTORY option needs
@@ -127,33 +127,33 @@ if(NOT archiveResult EQUAL 0)
     message(FATAL_ERROR "could not build the mirror archive: ${archiveResult} ${archiveError}")
 endif()
 
-set(sandbox "${FASTCACHED_SCRATCH_DIR}/sandbox")
+set(sandbox "${PACE_SCRATCH_DIR}/sandbox")
 file(MAKE_DIRECTORY "${sandbox}/usr/bin")
 file(CREATE_LINK "${hostUname}" "${sandbox}/usr/bin/uname" COPY_ON_ERROR SYMBOLIC)
 
-set(stageDir "${FASTCACHED_SCRATCH_DIR}/stage")
-set(buildDir "${FASTCACHED_SCRATCH_DIR}/build")
-# FASTCACHE_ADDR names a port nothing on this host is listening on, so
+set(stageDir "${PACE_SCRATCH_DIR}/stage")
+set(buildDir "${PACE_SCRATCH_DIR}/build")
+# PACE_ADDR names a port nothing on this host is listening on, so
 # _fc_daemon_answering's pre-check finds nothing and the module proceeds to
 # stage — staging is all this test asserts; check-compile-cache-daemon-start
 # is what asserts the process actually gets spawned and answers.
 set(arguments
-    "-DFASTCACHED_MODULE_DIR=${moduleDir}"
-    "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}"
+    "-DPACE_MODULE_DIR=${moduleDir}"
+    "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}"
     "-DCMAKE_FIND_ROOT_PATH=${sandbox}"
     "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
-    "-DFASTCACHE_AUTO_INSTALL=ON"
-    "-DFASTCACHE_AUTO_INSTALL_DIR=${stageDir}"
-    "-DFASTCACHE_AUTO_INSTALL_REPO=fastcached-mirror"
-    "-DFASTCACHE_AUTO_INSTALL_VERSION=${mirrorVersion}"
-    "-DFASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE=file://${FASTCACHED_SCRATCH_DIR}/mirror"
-    "-DFASTCACHE_AUTO_START=ON"
-    "-DFASTCACHE_ADDR=127.0.0.1:18674")
-if(FASTCACHED_MAKE_PROGRAM)
-    list(APPEND arguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+    "-DPACE_AUTO_INSTALL=ON"
+    "-DPACE_AUTO_INSTALL_DIR=${stageDir}"
+    "-DPACE_AUTO_INSTALL_REPO=pace-mirror"
+    "-DPACE_AUTO_INSTALL_VERSION=${mirrorVersion}"
+    "-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=file://${PACE_SCRATCH_DIR}/mirror"
+    "-DPACE_AUTO_START=ON"
+    "-DPACE_ADDR=127.0.0.1:18674")
+if(PACE_MAKE_PROGRAM)
+    list(APPEND arguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
 endif()
-if(FASTCACHED_GENERATOR)
-    list(APPEND arguments -G "${FASTCACHED_GENERATOR}")
+if(PACE_GENERATOR)
+    list(APPEND arguments -G "${PACE_GENERATOR}")
 endif()
 
 execute_process(
@@ -169,18 +169,18 @@ if(NOT configureResult EQUAL 0)
     list(APPEND violations "configure failed (${configureResult})")
 endif()
 
-# The fake fastcached answers --version and nothing else, so the poll loop in
-# _fc_auto_start_fastcached never actually observes it listening — real
+# The fake pace-kv answers --version and nothing else, so the poll loop in
+# _fc_auto_start_pace_kv never actually observes it listening — real
 # connectivity needs a real daemon, which is check-compile-cache-daemon-start's
 # job. This configure is still expected to report having tried, and to have
 # fallen through cleanly rather than failing.
-string(FIND "${output}" "fastcached" mentionedFastcached)
-if(mentionedFastcached EQUAL -1)
+string(FIND "${output}" "pace-kv" mentionedPaceKv)
+if(mentionedPaceKv EQUAL -1)
     list(APPEND violations "the configure never mentioned starting a daemon at all")
 endif()
 
-set(expectedLauncher "${stageDir}/${mirrorVersion}/${platform}/fastcache-cc")
-set(expectedDaemon "${stageDir}/${mirrorVersion}/${platform}/fastcached")
+set(expectedLauncher "${stageDir}/${mirrorVersion}/${platform}/pace-cc")
+set(expectedDaemon "${stageDir}/${mirrorVersion}/${platform}/pace-kv")
 
 if(NOT EXISTS "${expectedLauncher}")
     file(GLOB_RECURSE staged "${stageDir}/*")
@@ -199,7 +199,7 @@ else()
     string(STRIP "${stagedOutput}" stagedOutput)
     if(NOT stagedResult EQUAL 0)
         list(APPEND violations "the staged daemon does not run (${stagedResult})")
-    elseif(NOT stagedOutput STREQUAL "fastcached ${mirrorVersion}")
+    elseif(NOT stagedOutput STREQUAL "pace-kv ${mirrorVersion}")
         list(APPEND violations "the staged daemon answered '${stagedOutput}'")
     endif()
 endif()
@@ -211,7 +211,7 @@ endif()
 # counting HTTP requests, which file:// has none of) is what this mirror can
 # actually observe: exactly one archive of this name under the module's
 # per-build-tree download directory.
-file(GLOB_RECURSE downloadedArchives "${buildDir}/CMakeFiles/fastcache-download/*.tar.gz")
+file(GLOB_RECURSE downloadedArchives "${buildDir}/CMakeFiles/pace-download/*.tar.gz")
 list(LENGTH downloadedArchives archiveCount)
 if(archiveCount GREATER 1)
     list(APPEND violations "expected one downloaded archive, found ${archiveCount}: [${downloadedArchives}]")

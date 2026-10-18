@@ -1,6 +1,6 @@
 # The compile cache key
 
-Rules for `src/apps/fastcache-cc/` and `src/FastCache/CompileCache/`: what goes
+Rules for `src/apps/pace-cc/` and `src/Pace/CompileCache/`: what goes
 into a cache key, how paths are canonicalized so two machines derive the same one,
 what a direct-mode manifest may record, and what a hit is allowed to replay.
 
@@ -17,7 +17,7 @@ rule below has already been at least one of the two.
 
 <!-- agent-tripwire: Preprocess with line markers suppressed -->
 
-`fastcached` and `fastcache-cc` are both installed. Three things the launcher's
+`pace-kv` and `pace-cc` are both installed. Three things the launcher's
 cache key depends on, each of which has already caused a silent hit-rate
 collapse or a mis-serve and is now covered by regression tests:
 
@@ -30,7 +30,7 @@ collapse or a mis-serve and is now covered by regression tests:
   an edited file was answered with the object built from the previous revision.
   That is a wrong build rather than a cold cache, and direct mode hid it, since
   its manifest hashes the source's own bytes — hence the e2e case that edits a
-  source with `FASTCACHE_NO_DIRECT=1` and requires a MISS.
+  source with `PACE_NO_DIRECT=1` and requires a MISS.
 - **`/` introduces an option only on Windows.** On POSIX it starts an absolute
   path, and treating it as an option leaves absolute paths unrelativized.
 - **Only machine-independent dependency paths may be hashed.** The dependency set
@@ -100,7 +100,7 @@ collapse or a mis-serve and is now covered by regression tests:
   "no source file found" and was passed through *in silence*, which reads exactly
   like a broken cache; and the obvious "add .ixx so modules are supported" change
   would have turned that accident into a silent wrong build. The refusal now says
-  so under `FASTCACHE_VERBOSE`. **The flag half holds through clang-cl's pass-through
+  so under `PACE_VERBOSE`. **The flag half holds through clang-cl's pass-through
   too** (`/clang:-fmodule-output=x.pcm`, #1680): `ProducesSideArtefact` judges the
   argument a pass-through carries, by the driver it is handed to, where it used to read
   the whole spelling, match no row, and cache a compile whose hit came back without its BMI.
@@ -163,7 +163,7 @@ same on both — the same defect with no MSVC anywhere near it.
   `CompilerBanner` alone still feeds `CachedToolchainFingerprint`, and the compile
   node must keep computing it the same way or the two ends stop matching in silence.
   - **It DOES fold the driver's argument GRAMMAR, and that is a third question**
-    ([#226](https://github.com/LASTRADA-Software/fastcached/issues/226)). The target is
+    ([#226](https://github.com/LASTRADA-Software/pace/issues/226)). The target is
     code generation; the grammar is which spellings the driver can READ, and it decides
     whether a dispatched compile runs at all. `clang-cl`, `clang++` and `clang` from one
     LLVM install print the same banner — clang's does not name its own `argv[0]` the way
@@ -209,7 +209,7 @@ same on both — the same defect with no MSVC anywhere near it.
   rather than a failed one.
 - **`cl` has no target to ask for, so its BANNER has to carry one — which is why it
   must be a real banner**
-  ([#195](https://github.com/LASTRADA-Software/fastcached/issues/195)).
+  ([#195](https://github.com/LASTRADA-Software/pace/issues/195)).
   `TargetDiscovery::None` is right about MSVC: which code generator runs is decided
   by which `cl.exe` is invoked, and no command line restates it. So the whole of an
   MSVC identity is the banner — in `CacheCompilerId` *and* in
@@ -324,7 +324,7 @@ same on both — the same defect with no MSVC anywhere near it.
   driver, beside the `--version` one already paid there.
   - **This is the canonical instance of *expense is not the criterion*, and it is
     expensive**: `DiscoverTargetTriple` has been recorded at **~40 ms per translation
-    unit** ([#188](https://github.com/LASTRADA-Software/fastcached/issues/188)), which
+    unit** ([#188](https://github.com/LASTRADA-Software/pace/issues/188)), which
     on a whole build is the kind of number that argues for a memo on its own. It is
     deliberately not memoized anyway, because the triple goes into `compilerId` and a
     stale one is a **wrong hit, not a miss**. What decides is what a stale answer
@@ -354,7 +354,7 @@ same on both — the same defect with no MSVC anywhere near it.
   because the compiler has already opened every one of those files. A move is a different
   key by construction, so the *pre-move* entry survives the move rather than being
   overwritten — which is the property `check_header_move` asserts by moving the header
-  back and requiring a HIT. Anchored as `fastcache-cc: HIT`: the launcher prints
+  back and requiring a HIT. Anchored as `pace-cc: HIT`: the launcher prints
   `STALE HIT (...); recompiling` on its way to a MISS, so a bare `grep HIT` is satisfied by
   exactly the collapse the case exists to reject. `ComputeManifestKey`'s `manifest-v*` tag moves
   in lock-step with `objkey-v*` for a related reason — a manifest stores the object key
@@ -388,7 +388,7 @@ same on both — the same defect with no MSVC anywhere near it.
       then hands the path to — has always required the boundary, so under a source root
       `/home/dev/proj` the sibling `/home/dev/project-x/a.hpp` was project content to the
       classifier and under no root to the canonicalizer
-      ([#562](https://github.com/LASTRADA-Software/fastcached/issues/562)). It failed SAFE
+      ([#562](https://github.com/LASTRADA-Software/pace/issues/562)). It failed SAFE
       — `starts_with` only ever classifies *more* paths as project content, so such a header
       was hashed and revalidated rather than dropped, and the unsafe direction (a project
       header called toolchain, which revalidates forever) could not be produced by it. What
@@ -441,7 +441,7 @@ same on both — the same defect with no MSVC anywhere near it.
         TAIL rather than a bool. Different question, stated at the site; not a copy.
     - **The compiler identity that "covers" them is a string a compiler had to say, so
       every driver is asked the one way it answers**
-      ([#195](https://github.com/LASTRADA-Software/fastcached/issues/195)). Dropping 476
+      ([#195](https://github.com/LASTRADA-Software/pace/issues/195)). Dropping 476
       of 635 headers rests entirely on the clause above, and the identity doing the
       covering is `CompilerBanner` — `main.cpp`'s `toolchainStamp`, which is what
       `ComputeKey`, `ComputeManifestKey` and `ValidateManifest` all fold in. `cl` has no
@@ -548,7 +548,7 @@ same on both — the same defect with no MSVC anywhere near it.
       naming a file that is gone, under a zero exit code. Covering it is not available — it
       would mean recording the producing machine's per-drive cwd in the value, which is exactly
       the machine-specific state the key exists to keep out — so the compile is refused
-      instead, the way a module interface unit is, and says so under `FASTCACHE_VERBOSE`. Six
+      instead, the way a module interface unit is, and says so under `PACE_VERBOSE`. Six
       things about its shape are load-bearing:
       - **It is a ROOT test that begins with an anchor test, and both halves cut opposite
         ways.** Refusing on the anchor alone would take a drive-relative *root* (`C:src\proj`)
@@ -657,7 +657,7 @@ same on both — the same defect with no MSVC anywhere near it.
   - **A stream driver's notes must not reach the hashed text, and which stream carries them
     is not the driver table's answer to give.** No field encodes it -- `DriverSpec` carries
     no `includeStream`, and the claim lives only in `Flavor`'s doc comments and the driver
-    table in `docs/tools/fastcache-cc.md`, both of which describe the *compile* run; the probe is a different command line and clang moves the notes off
+    table in `docs/tools/pace-cc.md`, both of which describe the *compile* run; the probe is a different command line and clang moves the notes off
     whichever stream the preprocessed text is using — measured, `clang-cl /c /showIncludes`
     reports on **stdout** while `clang-cl /EP /showIncludes` reports on **stderr** (LLVM
     D46394). Routing the probe by that table therefore read an empty set on clang-cl and
@@ -672,7 +672,7 @@ same on both — the same defect with no MSVC anywhere near it.
     the reading: `clang-cl /c /showIncludes` reports on **stdout**, `clang-cl /EP
     /showIncludes` on **stderr** (LLVM D46394). **NOT MEASURED: `cl`.** Three sites assert it
     writes on stderr -- `Flavor::Cl`'s doc comment, the driver table in
-    `docs/tools/fastcache-cc.md`, and the stored-region comment in `fastcache-cc/main.cpp`
+    `docs/tools/pace-cc.md`, and the stored-region comment in `pace-cc/main.cpp`
     -- while the analysis on #700 and the review of #821 both say stdout. Nobody on this team
     has a Windows host, so **no reading has been taken either way**. The measurement is
     committed as `scripts/probes/msvc-showincludes-channel.ps1`, unrun -- it identifies a
@@ -687,7 +687,7 @@ same on both — the same defect with no MSVC anywhere near it.
     **MEASURED** on `Windows-cl-debug` (`windows-2025`, MSVC toolset 14.44) by
     `scripts/probes/msvc-showincludes-channel.ps1`, and the answer is neither of the
     two the tree was arguing about
-    ([#825](https://github.com/LASTRADA-Software/fastcached/issues/825)):
+    ([#825](https://github.com/LASTRADA-Software/pace/issues/825)):
 
     <!-- table-total: none -->
     | driver | flag | channel |
@@ -726,7 +726,7 @@ same on both — the same defect with no MSVC anywhere near it.
     first's object. Both shapes are reachable rather than hypothetical — a mid-line rule is
     tripped by this repository's own sources, which contain the literal, and a leading-blank
     rule by any indented raw string literal whose continuation line begins with the marker,
-    which is what a C++ line inside a function looks like ([#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270)).
+    which is what a C++ line inside a function looks like ([#1270](https://github.com/LASTRADA-Software/pace/issues/1270)).
     Inclusion depth is not a reason to loosen it: `cl` puts the depth AFTER the marker, and the
     measurement is two sections down.
   - **A manifest that names no dependency is refused, not recorded.** A direct hit
@@ -957,7 +957,7 @@ same on both — the same defect with no MSVC anywhere near it.
       `CanonicalSourceToken` first and returned in **complete** silence when it declined,
       before `BuildManifest` ran — so a TU under neither root, which is an ordinary
       `add_subdirectory(../shared shared)` layout, produced no line even under
-      `FASTCACHE_VERBOSE`. Giving `BuildManifest`'s error a path while leaving that guard
+      `PACE_VERBOSE`. Giving `BuildManifest`'s error a path while leaving that guard
       alone would have fixed the case an operator almost never reaches. Issue #57 closed
       pointing straight at it.
     - **Five faults, not the two the refusal paths happen to have.** `Unanchored` is a
@@ -993,7 +993,7 @@ same on both — the same defect with no MSVC anywhere near it.
     reached through a symlink stored `.../link/build/a.o:` and replayed
     `.../real/build/a.o:`, which Ninja rejects outright (`expected depfile ... to mention
     ...`) while make matches no rule at all and silently drops every header dependency.
-    `RootReconciler` (`apps/fastcache-cc/RootReconciler.cpp`) holds both layouts and is the only
+    `RootReconciler` (`apps/pace-cc/RootReconciler.cpp`) holds both layouts and is the only
     thing that sees the resolved one: it canonicalizes an emitted path against the
     resolved roots and localizes the token into the as-given roots. Everything downstream
     — the roots on the wire, the key, the manifest, the replay guard, the localized
@@ -1004,7 +1004,7 @@ same on both — the same defect with no MSVC anywhere near it.
       records.** `main.cpp` is in no test target, so logic that lives there has no unit
       coverage at all — the mistake this list notes having been made once with the wire
       framing. `RootReconciler.cpp` is compiled into both the launcher and
-      `fastcache-cc-tests`, and its tests drive it through a table-backed fake
+      `pace-cc-tests`, and its tests drive it through a table-backed fake
       `IPathResolver`: the conditions it exists for (an 8.3 short component, a `subst`
       drive, a junction) cannot be created on the host running the tests, and two of the
       three cannot be created on any host that is not Windows, so a fake stating the
@@ -1018,7 +1018,7 @@ same on both — the same defect with no MSVC anywhere near it.
       single grammar carrying both, so `Cc::RootReconciler::Region` takes the object path and
       returns that span verbatim wherever it appears. Respelling it hands the build system
       back an output it never asked for, and a build whose `-o` does not share a spelling
-      with `FASTCACHE_BINARY_DIR` then gets a depfile Ninja rejects outright and make
+      with `PACE_BINARY_DIR` then gets a depfile Ninja rejects outright and make
       matches against no rule at all. **By value and not by position**, because position
       does not say what a path is: `-MP` emits a phony rule per header whose TARGET is a
       path the compiler reported, and exempting every target would leave those unreconciled
@@ -1029,7 +1029,7 @@ same on both — the same defect with no MSVC anywhere near it.
     - **Symmetry is the property, and it is why this is a seam rather than a call at
       each comparison.** Expanding only the emitted paths breaks clang-cl exactly as
       spelling only the root long breaks `cl`. `Cc::IPathResolver`
-      (`apps/fastcache-cc/PathResolve.hpp`) is where the filesystem lives, and it lives
+      (`apps/pace-cc/PathResolve.hpp`) is where the filesystem lives, and it lives
       in the launcher because `PathCanon` also runs on the **daemon**, over a producing
       machine's roots that do not exist there (`CompileCacheHandler::HandleStore`), so it
       may never touch a filesystem. Hence `PathCanon::RewritePaths` taking the transform
@@ -1117,7 +1117,7 @@ same on both — the same defect with no MSVC anywhere near it.
       spelling while the source and include paths are the real one, which is what `cl`
       actually does — a build system spells everything one way and the compiler reports its
       dependencies resolved the other way. Spelling the outputs the same way as the roots is
-      what a real build does (`-o` and `FASTCACHE_BINARY_DIR` come from one generator) and
+      what a real build does (`-o` and `PACE_BINARY_DIR` come from one generator) and
       it is what makes the second property testable at all: the replayed depfile's rule
       target must be byte-identical to the one the compiler wrote. A third leg repeats it
       with roots carrying a trailing separator. Both assertions were verified by
@@ -1131,7 +1131,7 @@ same on both — the same defect with no MSVC anywhere near it.
       up. Every other case keeps its roots unambiguous,
       so a regression in the reconciliation cannot present as a failure of something else.
 - **A dependency cache outside the checkout is a ROOT of its own** (`<DEPROOT>`,
-  `PathCanon::Layout::dependencyRoot`, `FASTCACHE_DEPS_DIR`, which the module sets from
+  `PathCanon::Layout::dependencyRoot`, `PACE_DEPS_DIR`, which the module sets from
   `CPM_SOURCE_CACHE`). CPM files each dependency under the commit it pinned, so the bytes are
   machine-independent while the location (`~/.cache/...`) is per user. Measured on this repo,
   two Docker machines with different homes: 10 of 1155 hits; the same two with the cache at
@@ -1285,7 +1285,7 @@ same on both — the same defect with no MSVC anywhere near it.
 - **A cache that can fail a build is not optional, and a refusal nobody can read
   is not a refusal.** The launcher STOREs an object by streaming one frame, and the
   daemon refused an over-cap frame by replying and then closing — while the sender
-  was still writing. Two independent defects met there. Nothing in `fastcache-cc`
+  was still writing. Two independent defects met there. Nothing in `pace-cc`
   suppressed SIGPIPE (the daemon does, in `Net/BlockingSocket`, but the launcher
   deliberately does not link the library), so the write that met the closed peer
   **killed the launcher with signal 13**; the build system saw a compile die of a
@@ -1317,7 +1317,7 @@ same on both — the same defect with no MSVC anywhere near it.
     of the cap rather than by a knob of its own, because the cap is already the
     operator's statement of the largest thing this server will handle.
   - **The launcher declines the store before connecting**, at
-    `FASTCACHE_MAX_STORE_BYTES` (256 MiB by default, `0` disables). Surviving the
+    `PACE_MAX_STORE_BYTES` (256 MiB by default, `0` disables). Surviving the
     refusal is not enough: without a ceiling every rebuild of that translation
     unit pays the full transfer to be told no, and one 356 MB entry would dominate
     a cache sized for thousands of ordinary objects. The default matching the
@@ -1391,7 +1391,7 @@ same on both — the same defect with no MSVC anywhere near it.
   reader of them in a language the launcher does not read: the cache key lost its
   dependency set and no manifest was ever recorded, on every translation unit,
   forever, behind a cache that still hits on preprocessed keys and therefore looks
-  healthy ([#692](https://github.com/LASTRADA-Software/fastcached/issues/692)). The
+  healthy ([#692](https://github.com/LASTRADA-Software/pace/issues/692)). The
   fix is to ask the compiler to speak English — but only where **the output is
   parsed and dropped**, which is `Preprocess`. The real compile's streams are read
   by a human, and forcing English there trades a silent performance loss for
@@ -1433,11 +1433,11 @@ same on both — the same defect with no MSVC anywhere near it.
   recorded **no dependencies** for a dispatched compile and stopped rebuilding it — a
   wrong build under a zero exit code, reached through the build graph rather than the
   cache, which is the opposite direction from #692 and worse
-  ([#700](https://github.com/LASTRADA-Software/fastcached/issues/700)). `VSLANG` cannot
+  ([#700](https://github.com/LASTRADA-Software/pace/issues/700)). `VSLANG` cannot
   fix it: you cannot produce a localized prefix by forcing English, and forcing it on
   the real compile anglicizes every diagnostic a developer reads.
   - The marker is now a **required, undefaulted parameter** of `RenderShowIncludes`,
-    fed from `FASTCACHE_MSVC_DEPS_PREFIX` at the one place the launcher reads its
+    fed from `PACE_MSVC_DEPS_PREFIX` at the one place the launcher reads its
     environment. That is *stronger* than the invariant it replaces: the producer spells
     no literal at all, so it cannot drift from its parser — there is nothing to drift
     with. A default argument would let the next call site omit the build's prefix and
@@ -1454,7 +1454,7 @@ same on both — the same defect with no MSVC anywhere near it.
     right prefix and watching the dependency come back proves the FIX is observable,
     and without that this ticket stalls again on "how would we know".
   - That asymmetry is why **discovery** was split out rather than chosen
-    ([#878](https://github.com/LASTRADA-Software/fastcached/issues/878)): the escape
+    ([#878](https://github.com/LASTRADA-Software/pace/issues/878)): the escape
     hatch's input IS the prefix string, so a test supplies it, while discovery's input
     is the compiler's output language — on an English `cl` you discover English and
     prove nothing, and a stub asserts its own premise. Unexercisable here by
@@ -1466,12 +1466,12 @@ same on both — the same defect with no MSVC anywhere near it.
     (#825, the table above) and says that guard was worse than merely unproven: it read
     **stderr alone**, and a COMPILE puts the notes on stdout, so it could not fire for
     the case it was written for and would have fired only on a `/EP` run. #700's own floor is *discovered, never
-    inferred from a failed parse*. What ships instead is a `FASTCACHE_VERBOSE` line on
+    inferred from a failed parse*. What ships instead is a `PACE_VERBOSE` line on
     every dispatched compile that synthesises notes, naming the prefix and its
     provenance, because that is the one line answering *why did my build stop rebuilding
     this file*.
   - The **stored-region** half is untouched and is
-    [#879](https://github.com/LASTRADA-Software/fastcached/issues/879), not a residual:
+    [#879](https://github.com/LASTRADA-Software/pace/issues/879), not a residual:
     `Grammar::ShowIncludes` taking a run-time prefix would make two nodes canonicalize
     one value differently under one `CompileValueVersion`, which is a fleet-wide
     generation bump plus a corpus row and must not hide inside a build-correctness fix.
@@ -1507,7 +1507,7 @@ same on both — the same defect with no MSVC anywhere near it.
   as a re-separated spelling that gained nothing.
 
 - **The ingest side followed with value generation 6, which is what it was waiting
-  for** ([#1593](https://github.com/LASTRADA-Software/fastcached/issues/1593)). Collapsing
+  for** ([#1593](https://github.com/LASTRADA-Software/pace/issues/1593)). Collapsing
   on the way IN changes what a stored region looks like, so it was held back until a
   `CompileValueVersion` bump came along to pay for it once, as #879 and #891 were
   batched. It is two places, each doing it once. The probe's dependency list crosses
@@ -1549,23 +1549,23 @@ same on both — the same defect with no MSVC anywhere near it.
   rule can change that. The remedy there is a shorter build root, and it belongs in
   the tool's `## Known limitations` rather than in a fix.
 
-## An object file is not a byte string, and `FASTCACHE_VERIFY` is where that bites
+## An object file is not a byte string, and `PACE_VERIFY` is where that bites
 
 <!-- agent-tripwire: An object file is not a byte string. Every MSVC driver stamps the clock into the COFF `TimeDateStamp` -->
 
-`FASTCACHE_VERIFY` compiles a sampled hit again and compares the two objects. It
+`PACE_VERIFY` compiles a sampled hit again and compares the two objects. It
 compared them with `memcmp`, and on Windows that **can never succeed**: every
 MSVC-family driver stamps the wall clock into the COFF header, and a cached object
 was produced earlier than the fresh compile it is checked against *by construction*.
 So the one instrument that turns a wrong object from invisible into loud reported a
 wrong object on **every** hit, on the platform where
-[#368](https://github.com/LASTRADA-Software/fastcached/issues/368) — a wrong object
+[#368](https://github.com/LASTRADA-Software/pace/issues/368) — a wrong object
 served under a correct key — was actually observed
-([#493](https://github.com/LASTRADA-Software/fastcached/issues/493)).
+([#493](https://github.com/LASTRADA-Software/pace/issues/493)).
 
 The fact was already written down three times, in
 [`distributed-compilation.md`](distributed-compilation.md), in
-`scripts/dist-compile-e2e.ps1` and in `docs/tools/fastcache-compile-node.md` — and
+`scripts/dist-compile-e2e.ps1` and in `docs/tools/pace-node.md` — and
 none of those is a file anyone editing `HitVerification.cpp` opens. **That is why it
 is repeated here**, in the launcher's own rule file, rather than linked.
 
@@ -1588,7 +1588,7 @@ Five rules follow, and the second is the one an obvious fix gets wrong:
   compiles to the *same* output path, so a hit this machine produced differs in the
   clock alone and there is nothing to overlook. Excusing them anyway would buy
   nothing and would go silent on
-  [#489](https://github.com/LASTRADA-Software/fastcached/issues/489): a hit served
+  [#489](https://github.com/LASTRADA-Software/pace/issues/489): a hit served
   from another checkout, whose entire difference lives in `.debug$S`. That is the
   case an operator turns verification on to catch, and excusing it is #493 cured by
   no longer looking — which passes every test written for #493 itself.
@@ -1683,7 +1683,7 @@ stops being one — the same confound that cost #493 a re-run.
   below, is what closes both.
 - **The flag names the producing checkout by construction, so the KEY has to
   relativize it.** Measured before the row existed: `RelativizeArgs` returned
-  `-fdebug-prefix-map=/home/ci/checkout-aaa=/fastcache/src` byte-for-byte, so
+  `-fdebug-prefix-map=/home/ci/checkout-aaa=/pace/src` byte-for-byte, so
   appending the flag alone would have produced correct objects and turned every
   cross-checkout hit into a **miss** — silently, since a miss is what a cold cache
   looks like too. `PathValueRole::PrefixMap` splits the value at the last `=`,
@@ -1718,7 +1718,7 @@ stops being one — the same confound that cost #493 a re-run.
   differ. That is the #203 symptom reappearing inside the fix for it, and the only
   instrument that sees it is reading `comp_dir` directly.
 - **The table KEYS all three spellings; the module ADDS the debug one always and
-  `-fmacro-prefix-map` under `fastcache-cc` alone.**
+  `-fmacro-prefix-map` under `pace-cc` alone.**
   `-fmacro-prefix-map` and `-ffile-prefix-map` rewrite `__FILE__`, which lands in the
   preprocessed text the key hashes — measured on both drivers with the source named
   absolutely, where `-fdebug-prefix-map` leaves that text byte-identical and the other
@@ -1737,7 +1737,7 @@ stops being one — the same confound that cost #493 a re-run.
     worker maps by its own `-fdebug-prefix-map` rules.
   - **The module maps `__FILE__` for the checkout (`<src>/=`) and the dependency cache
     (`<cache>/=deps/`, LAST)** — `_fc_source_prefix_map_rules`, checked by
-    `ctest -R debug-prefix-map-rules` — and only when `fastcache-cc` is the launcher, the
+    `ctest -R debug-prefix-map-rules` — and only when `pace-cc` is the launcher, the
     one that keys the rule portably. Measured on this repo before it: every Catch2 test
     object (358 of 1017) named its checkout and was stored per checkout.
   - **And the build tree's PLACE under the source root is keyed** whenever one is
@@ -1764,7 +1764,7 @@ stops being one — the same confound that cost #493 a re-run.
   mapped root itself contains a separator, and it costs a MISS rather than a
   mis-serve — the head the launcher isolates lies under no root either way.
 - **A dispatched compile carries the DIRECTORY AND ITS REPLACEMENT, never the rule**
-  ([#506](https://github.com/LASTRADA-Software/fastcached/issues/506)). A worker needs
+  ([#506](https://github.com/LASTRADA-Software/pace/issues/506)). A worker needs
   a rule whose left-hand side is a path on the WORKER, which the client has never
   seen — so `RemoteCompileArgs` dropping the flag is right and stays, and
   `CompileRequest::compileDir` plus `compileDirReplacement` travel instead. That makes
@@ -1854,11 +1854,11 @@ stops being one — the same confound that cost #493 a re-run.
     fully mapped and only clang on such a node keeps the pre-#506 state, where refusing
     would cost every dispatched compile on every node installed from the shipped unit.
   - **`/` was the PRODUCTION value, and the repair was packaging.** The shipped
-    `fastcache-compile-node.service` set no `WorkingDirectory=`, so systemd started the
+    `pace-node.service` set no `WorkingDirectory=`, so systemd started the
     worker in `/` and the case above was not a corner but the ordinary Linux install
-    ([#674](https://github.com/LASTRADA-Software/fastcached/issues/674)). It now names
-    one, and names one the unit itself CREATES — `RuntimeDirectory=fastcache-node`,
-    `WorkingDirectory=/run/fastcache-node` — because a `WorkingDirectory=` pointing at a
+    ([#674](https://github.com/LASTRADA-Software/pace/issues/674)). It now names
+    one, and names one the unit itself CREATES — `RuntimeDirectory=pace-node`,
+    `WorkingDirectory=/run/pace-node` — because a `WorkingDirectory=` pointing at a
     path nothing creates fails the service at every boot under `ProtectSystem=strict`,
     which is a worse outcome than the defect. `/run` rather than `/tmp`: a worker
     directory that CONTAINS a client's build directory drops the rule exactly as `/`
@@ -1871,7 +1871,7 @@ stops being one — the same confound that cost #493 a re-run.
     fixture substitutes, since every one of them starts the node from the FIXTURE's
     directory. That is precisely how #674 reached master with a dispatch e2e green.
   - **The daemonize route was the other half, and it is a PARAMETER now, not a
-    constant** ([#784](https://github.com/LASTRADA-Software/fastcached/issues/784)).
+    constant** ([#784](https://github.com/LASTRADA-Software/pace/issues/784)).
     `PosixDaemonHost` chdir'd to `/` unconditionally, so `--daemon` landed a worker
     there whatever its unit said — a `WorkingDirectory=` does not survive the double
     fork, because the chdir happens after it. `MakePosixDaemonHost` therefore takes the
@@ -1917,7 +1917,7 @@ stops being one — the same confound that cost #493 a re-run.
     local compile's, because gcc takes the unit's `DW_AT_name` from the marker — on
     **clang it comes from the INPUT FILE PATH**, so a dispatched object recorded the
     worker's `<scratch>/job-N/<name>` until
-    [#660](https://github.com/LASTRADA-Software/fastcached/issues/660).
+    [#660](https://github.com/LASTRADA-Software/pace/issues/660).
   - **`DW_AT_name` is `comp_dir`'s sibling and needed its own rule** (#660). Two
     consequences, and the second is the one that matters: the debug path named a
     directory on no developer's machine, AND the job counter advances, so two
@@ -1956,7 +1956,7 @@ stops being one — the same confound that cost #493 a re-run.
       `<from>=<to>` at the last separator and clang at the first, so such a rule records
       a name NEITHER machine has, which is worse than recording the worker's.
     - **But the WORKER's half of that same skip is a startup property, and is said at
-      startup** ([#810](https://github.com/LASTRADA-Software/fastcached/issues/810)).
+      startup** ([#810](https://github.com/LASTRADA-Software/pace/issues/810)).
       `scratchSourcePath` lies under a root the process chose ONCE, so a root carrying a
       space (`/Users/john doe/...`, an ordinary macOS home) or an `=` makes EVERY rule on
       that worker unspellable and every dispatched object goes back to `job-N` — nothing
@@ -1975,7 +1975,7 @@ stops being one — the same confound that cost #493 a re-run.
         builder is happy is noise, silence where it skips is the defect, and either
         assertion alone passes under a predicate that answers constantly.
     - **The client sends what its own compile would RECORD, not what the build system
-      wrote** ([#800](https://github.com/LASTRADA-Software/fastcached/issues/800)). An
+      wrote** ([#800](https://github.com/LASTRADA-Software/pace/issues/800)). An
       ABSOLUTE source argument matched by a rule on the line records the MAPPED spelling
       locally, so `sourceName` carries the source put through
       `MappedByPrefixMapRules` — the computation `MappedCompileDirectory` was already
@@ -1988,7 +1988,7 @@ stops being one — the same confound that cost #493 a re-run.
         the worker builds matches it and both spellings give the raw absolute path
         (measured, gcc 16.2.1). Closed by a SECOND pair, `sourceRoot` /
         `sourceRootReplacement`, carrying the raw spelling beside the mapped one
-        ([#883](https://github.com/LASTRADA-Software/fastcached/issues/883)) — a rewrite
+        ([#883](https://github.com/LASTRADA-Software/pace/issues/883)) — a rewrite
         rule needs two operands and `sourceName` is already the mapped half, so the raw
         half has to travel too. It cannot ride `compileDir`, whose halves are the
         compilation DIRECTORY and are what `comp_dir` rules are built from.
@@ -2076,7 +2076,7 @@ anticipated all reach the same bytes. Folding the absolute roots into every key 
 source is spelled absolutely is correct, and ends cross-checkout sharing for every CMake
 compile -- the rejected alternative.
 
-**The mechanism is `apps/fastcache-cc/RootBinding.hpp`, and the header carries the whole
+**The mechanism is `apps/pace-cc/RootBinding.hpp`, and the header carries the whole
 argument.** At STORE time the launcher scans the object's program-visible sections for
 the parts of its own checkout -- source root, build tree, working directory, each in the
 build's spelling and the resolved one. An object naming none keeps today's key and
@@ -2119,7 +2119,7 @@ path HITs across the two checkouts in every spelling.
 - **`objkey-v7` and `manifest-v7` moved together**, and the manifest half is required on
   its own: a `v6` manifest is shared between checkouts and points straight at the
   producer's object. The object half retires every entry stored before the scan existed.
-- **A hit `FASTCACHE_VERIFY` rejects is `VERIFY-MISMATCH`, never `HIT`**, in
+- **A hit `PACE_VERIFY` rejects is `VERIFY-MISMATCH`, never `HIT`**, in
   `invocations.log`, on the trace line and in `--show-stats` (`Outcome::VerifyMismatch`).
   The verifier compiles to the same path, so the build links the fresh object; logging
   it as a hit counted every wrong object the verifier caught as a success. Note what it
@@ -2138,10 +2138,10 @@ path HITs across the two checkouts in every spelling.
 regions identically, through the one `CanonicalStoredValue`. That rule was written
 about a *moment* — the moment #229 made a compile node a second server and it turned
 out to have no copy of the recipe. But a fleet is permanently mid-upgrade
-([#173](https://github.com/LASTRADA-Software/fastcached/issues/173)), so the servers
+([#173](https://github.com/LASTRADA-Software/pace/issues/173)), so the servers
 on the wire are at several builds at once and the property has to hold **across
 generations or it does not hold at all**
-([#483](https://github.com/LASTRADA-Software/fastcached/issues/483)). Two routes
+([#483](https://github.com/LASTRADA-Software/pace/issues/483)). Two routes
 were open to breaking it, and neither needed anybody's install to be stale.
 
 - **The version byte named nothing.** `PathCanon` deliberately carries no version of
@@ -2173,7 +2173,7 @@ were open to breaking it, and neither needed anybody's install to be stale.
     IS the version, so two generations are unequal by construction and that check
     could not fail. And a retired digest is a dated record besides — it describes the
     corpus as that generation met it, which the next corpus row invalidates
-    ([#583](https://github.com/LASTRADA-Software/fastcached/issues/583)).
+    ([#583](https://github.com/LASTRADA-Software/pace/issues/583)).
   - **A bump's claim is checkable from generation 4 forward, and the aggregate digest
     could never have carried it** (#583). The digest is a FOLD, so it answers *the
     behaviour moved* and cannot answer WHICH rows moved — which is the only claim a
@@ -2202,7 +2202,7 @@ were open to breaking it, and neither needed anybody's install to be stale.
     under, and it moves. The first cut of the corpus refused it nowhere at all, because
     it exercised bare roots only as a PRODUCER; a rewrite and its inverse are one spec,
     so both ends of every shape reach the digest. That miss generalises past this
-    file and is [#547](https://github.com/LASTRADA-Software/fastcached/issues/547):
+    file and is [#547](https://github.com/LASTRADA-Software/pace/issues/547):
     **a corpus that varies one side of a transformation and fixes the other cannot
     see a defect on the fixed side, and looks complete while doing it** — everything
     passes, which is exactly what a corpus with a hole looks like.
@@ -2239,7 +2239,7 @@ were open to breaking it, and neither needed anybody's install to be stale.
     instead, and everything still passed. `RegionEffect` is the assertion the digest
     structurally cannot make: each row declares `Rewrites` or `Preserves` per side and
     is checked against what actually happened
-    ([#547](https://github.com/LASTRADA-Software/fastcached/issues/547)).
+    ([#547](https://github.com/LASTRADA-Software/pace/issues/547)).
     - **A declaration, not "every row must change something."** Two rows here are
       deliberately inert and always will be — canonicalizing a region that already
       carries tokens must be a no-op or canonicalizing twice would be a second
@@ -2274,11 +2274,11 @@ were open to breaking it, and neither needed anybody's install to be stale.
   canonicalizer could see and was stored with the producing checkout's absolute paths in
   it. Every server agreed perfectly, about nothing, and a replayed region becomes the
   object's dependency record, so it never invalidates. Generation 3 closes it
-  ([#879](https://github.com/LASTRADA-Software/fastcached/issues/879)).
-  [#891](https://github.com/LASTRADA-Software/fastcached/issues/891) rode along on a
+  ([#879](https://github.com/LASTRADA-Software/pace/issues/879)).
+  [#891](https://github.com/LASTRADA-Software/pace/issues/891) rode along on a
   reading of `cl`'s inclusion-depth indentation as preceding the marker, and generation 5
   reverses it: see **The anchor is the load-bearing half** below, and the measurement in
-  the entry that closed [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270).
+  the entry that closed [#1270](https://github.com/LASTRADA-Software/pace/issues/1270).
   - **The MARKER is a canonical form, exactly as `<SRCROOT>` is.** The launcher
     normalizes its own prefix to `PathCanon::IncludeNoteMarker` before a value is
     stored and restores this build's prefix after a hit is localized, so the stored
@@ -2302,7 +2302,7 @@ were open to breaking it, and neither needed anybody's install to be stale.
     never fail for a value produced in German and replayed in English.
   - **What it does not close**: a localized toolchain that has named no prefix. An
     unmatched marker rewrites nothing, so such a machine is where it was rather than
-    worse, and [#878](https://github.com/LASTRADA-Software/fastcached/issues/878) is
+    worse, and [#878](https://github.com/LASTRADA-Software/pace/issues/878) is
     the remaining door. It needs **no further generation** — the stored form is
     already locale-free, so #878 only supplies a better value to normalize with.
   - **The anchor is the load-bearing half of the recognition rule, and #891 gave half
@@ -2324,7 +2324,7 @@ were open to breaking it, and neither needed anybody's install to be stale.
     over two revisions of a file differing only inside an indented raw string literal
     emits `  Note: including file: A` / `  Note: including file: B`, which the widened
     rule deleted, keying the two identically
-    ([#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270), generation 5).
+    ([#1270](https://github.com/LASTRADA-Software/pace/issues/1270), generation 5).
 
     **The general lesson is where the two facts live.** `<indent><marker>` and
     `<marker><indent>` are one sentence apart in English and opposite rules in code, and
@@ -2396,7 +2396,7 @@ were open to breaking it, and neither needed anybody's install to be stale.
     The reason is the FRAMING, not the generation byte: this route needs a bump that
     moves the layout, and no bump has. Saying instead that "`CompileValueVersion` has
     never moved" was a weaker claim wearing the same words, and it expired at
-    [#547](https://github.com/LASTRADA-Software/fastcached/issues/547) — generation 2
+    [#547](https://github.com/LASTRADA-Software/pace/issues/547) — generation 2
     exists, generation-1 values are in the field, and the `ForeignGeneration` refusal
     above is doing work today while this residual is still empty. Two conditions that
     happened to hold together are not one condition.
@@ -2466,7 +2466,7 @@ misses the rest in silence.
 
 The launcher reads its inputs three times: the key's preprocess (T1), the compile (T2, and a
 dispatched compile's second preprocess), and the manifest. Before
-[#1650](https://github.com/LASTRADA-Software/fastcached/issues/1650) the manifest hashed the
+[#1650](https://github.com/LASTRADA-Software/pace/issues/1650) the manifest hashed the
 files AFTER the compile, so a save during it paired the new content with the old object; every
 later build of the new content was a direct HIT on the old object, exit 0, in every checkout and
 on every machine whose files matched -- and the manifest key is portable, so it spread.
@@ -2515,7 +2515,7 @@ four were each wrong in a draft of #1650 before they were right:
 - **An input that cannot be observed is `UNCACHEABLE`, never `INPUTS-MOVED`**, whose text
   promises the next build caches; an unreadable input usually stays unreadable. The statistics
   `detail` is the row's FIXED sentence, so `--show-stats` ranks one row per cause, and the path
-  is on the `FASTCACHE_VERBOSE` line -- which, for a save during the compile in direct mode, is
+  is on the `PACE_VERBOSE` line -- which, for a save during the compile in direct mode, is
   written AFTER the manifest was recorded and says whether it was.
 - **Nothing the witness holds travels.** No identity, instant or verdict reaches a key, a
   manifest, a `CompileValue` or the wire, or two checkouts stop sharing;
@@ -2523,18 +2523,18 @@ four were each wrong in a draft of #1650 before they were right:
   recorded before the fix, and `objkey-v*` deliberately did not move.
 
 **Known limits.** Every one of them is a place where only the clock answers, or nothing does
-([#1654](https://github.com/LASTRADA-Software/fastcached/issues/1654)). The first five fail
+([#1654](https://github.com/LASTRADA-Software/pace/issues/1654)). The first five fail
 OPEN -- a wrong object can be stored -- and the last fails CLOSED:
 
 - A header REPLACED during the key's preprocess (T0 to T1′) by a copy that keeps an older change
   time (`CopyFileW` on NTFS) reads as older than T0, and nothing earlier snapshots it, because the
   header set is unknown until the preprocess has run. For a snapshotted header, a copy after T1′
   changes the identity and is caught; for an `-MF`-only path, which has no T1′ identity, the
-  window runs until its manifest entry is hashed (after the STORE on a miss; at the backfill on a hit). [#1653](https://github.com/LASTRADA-Software/fastcached/issues/1653).
+  window runs until its manifest entry is hashed (after the STORE on a miss; at the backfill on a hit). [#1653](https://github.com/LASTRADA-Software/pace/issues/1653).
 - A header CREATED at any point of the invocation, the compile included, in an include
   directory searched before the one the preprocess resolved is in no snapshot and checked by
   nothing: at T2 the late paths are the probe's own set, all already entries (ccache has the
-  same gap). [#1654](https://github.com/LASTRADA-Software/fastcached/issues/1654).
+  same gap). [#1654](https://github.com/LASTRADA-Software/pace/issues/1654).
 - A stamp from ANOTHER machine's clock that lags this one (a network share, a WSL `/mnt/<drive>`
   the Windows host stamps), and a stamp grid that is neither 2 s nor a decimal unit. The TU's
   own T0/T1′ comparison still holds there; a header's T0 comparison does not, and for an
@@ -2548,7 +2548,7 @@ OPEN -- a wrong object can be stored -- and the last fails CLOSED:
   measured on Linux; macOS's stamping lag behind `CLOCK_REALTIME` is INFERRED, and one over 10 ms
   lets a change made just after the fence read as made before it. The evidence is green CI runs
   alone (the on-disk fence case on `macOS-clang-release`), an absence of an observed failure, not
-  a bound. [#1659](https://github.com/LASTRADA-Software/fastcached/issues/1659).
+  a bound. [#1659](https://github.com/LASTRADA-Software/pace/issues/1659).
 - **The fail-CLOSED direction of the same clock limits.** A filesystem whose clock LEADS this
   machine's (an SMB or NFS share, or `/mnt/<drive>` under a WSL clock that lags the Windows
   host) stamps a fresh file at or above T0, and so does a coarse-grid filesystem (FAT, HFS+,
@@ -2571,7 +2571,7 @@ without reopening the argument:
   `entries.empty()`, and a TU-only manifest is not empty — so a hollow manifest
   reaching the validator would revalidate on the TU hash alone and serve its
   recorded object into any checkout that computes the key, which is
-  [#368](https://github.com/LASTRADA-Software/fastcached/issues/368).
+  [#368](https://github.com/LASTRADA-Software/pace/issues/368).
   It cannot currently be built. Three producer-side guards refuse it, and two of the
   three now live at the seam rather than one translation unit away:
   `DepsNotObserved` when no dependency record was observed at all, `NoProjectDeps`
@@ -2579,7 +2579,7 @@ without reopening the argument:
   `BuildManifest` — and `UnreadablePaths` in `RecordManifest` when a reported path is
   not readable as text (`47ee5e5`).
   The first of those was `RecordManifest`'s own `includes.empty()` early return until
-  [#512](https://github.com/LASTRADA-Software/fastcached/issues/512), and moving it is
+  [#512](https://github.com/LASTRADA-Software/pace/issues/512), and moving it is
   what that issue was for. **"No dependencies" and "dependencies not observed" are
   different states that an empty `std::vector<std::string>` renders identically**, and
   `BuildManifest` used to tell them apart by inferring honesty from
@@ -2596,7 +2596,7 @@ without reopening the argument:
   `RecordManifest` cannot separate "there is nothing to read" from "I could not read
   it", because `IncludeNoteMarker` is the literal English `"Note: including file:"`
   and a localized `cl` prints notes it does not match
-  ([#692](https://github.com/LASTRADA-Software/fastcached/issues/692)). It therefore
+  ([#692](https://github.com/LASTRADA-Software/pace/issues/692)). It therefore
   answers `NotObserved()`. The type puts the judgement where the knowledge is.
   **So the accepted cost is the asymmetry, not a live hole**: the defence is
   entirely on the produce side, and the validator would accept a hollow manifest
@@ -2616,7 +2616,7 @@ without reopening the argument:
   compiler's identity, and `cl` localizes it, so one MSVC toolset under two Visual
   Studio UI languages was two identities that shared no cache entry and matched
   nothing in the fleet. Asking the probe for English
-  ([#200](https://github.com/LASTRADA-Software/fastcached/issues/200)) collapses that
+  ([#200](https://github.com/LASTRADA-Software/pace/issues/200)) collapses that
   — which is the commoner split, between whole machines, and the trade is a good one.
   **What it costs is an estate whose machines differ only in WHICH PACKS ARE
   INSTALLED**: German UI throughout, `en-US` present on some. Those machines matched
@@ -2630,7 +2630,7 @@ without reopening the argument:
   second probe spawn per compile to compare against. So this case is silent by
   construction, and that is the half most likely to be rediscovered as a bug and
   "fixed". It is not a bug; it is this row. The argument is on `CompilerBanner` in
-  `apps/fastcache-cc/ToolchainProbe.cpp`, which points here.
+  `apps/pace-cc/ToolchainProbe.cpp`, which points here.
 - MurmurHash3 is not collision-resistant against an adversary. Accepted because
   the key is not a security boundary: anyone who can STORE can already write a
   wrong object under a correct key. Closing it needs a keyed hash *and* a trust
@@ -2728,13 +2728,13 @@ Four in one session, all through a handoff, none of them a mistake about the sub
 
 - a mechanism reported by one session and published by another **as established**,
   when it was a reconstruction that the subject itself contradicted
-  ([#517](https://github.com/LASTRADA-Software/fastcached/issues/517));
+  ([#517](https://github.com/LASTRADA-Software/pace/issues/517));
 - a `36/36` correspondence **verified by hand** and relayed as though a guard
   enforced it;
 - a **pull request number** that was an issue number, handed over as checkable;
 - *"thirty lines up"*, written in a comment that quoted **both line numbers** and
   never subtracted them -- the real distances being 117 and 212
-  ([#172](https://github.com/LASTRADA-Software/fastcached/issues/172)).
+  ([#172](https://github.com/LASTRADA-Software/pace/issues/172)).
 
 That last one shows the correction usually strengthens the point rather than denting
 it. *Thirty lines* invites "somebody glanced past the helper"; **117 and 212** means a
@@ -2755,7 +2755,7 @@ somewhere to go other than the line that agrees.
 
 Two errors an hour apart made the same claim about the same function, and **the
 standard remedy for the first is the action that produced the second**
-([#536](https://github.com/LASTRADA-Software/fastcached/issues/536)). One reader
+([#536](https://github.com/LASTRADA-Software/pace/issues/536)). One reader
 inferred `RunLaunchctl`'s implementation from its caller's error message and reported a
 defect; the fix for that is *go and read the source*. The second reader **read the
 source** and wrote the defect down anyway.
@@ -2818,7 +2818,7 @@ at it. That is the rule the section above makes.
 A *measurement's conditions* are the state of the world at one INSTANT and must **NOT**
 track their source. They are restated deliberately, and marked as of the measurement.
 
-Measured 2026-09-09 ([#1151](https://github.com/LASTRADA-Software/fastcached/issues/1151)):
+Measured 2026-09-09 ([#1151](https://github.com/LASTRADA-Software/pace/issues/1151)):
 a registration comment recorded a hosted scan at **2.11 s** under `four cores at
 CTEST_PARALLEL_LEVEL: 4`. The tidy that suggests itself is to delete the numbers and
 point at `build.yml`. Do that, and the day somebody sets four to eight the 2.11 s figure
@@ -2846,7 +2846,7 @@ returned **none of them**, and its caller re-derived all three at an extra drive
 per toolchain per survey -- on warm starts too, because a cache HIT said nothing about
 the roots it covered. That was not a caching problem, and a cache would have been the
 wrong fix for it. The fix was `ToolchainIdentity` handing back the `ToolchainEvidence` it
-had already folded ([#259](https://github.com/LASTRADA-Software/fastcached/issues/259)).
+had already folded ([#259](https://github.com/LASTRADA-Software/pace/issues/259)).
 
 **A wider return value is the STRONGER answer, not merely the cheaper one.** Two
 derivations a few milliseconds apart can disagree, and the caller was recording evidence
@@ -2901,7 +2901,7 @@ shapes and they are not a spectrum:
   expensive the probe. `DiscoverTargetTriple` is the instance, above: ~40 ms per
   translation unit and deliberately not memoized, because the triple reaches `compilerId`
   and a stale one is a wrong hit rather than a miss
-  ([#188](https://github.com/LASTRADA-Software/fastcached/issues/188)).
+  ([#188](https://github.com/LASTRADA-Software/pace/issues/188)).
 
 **Expense is not the criterion; what a stale answer DOES is.** The two shapes are told
 apart by asking what the caller sees when the answer is one interval old -- not by asking
@@ -2914,7 +2914,7 @@ nobody can account for.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1653](https://github.com/LASTRADA-Software/fastcached/issues/1653)** — a header
+- **[#1653](https://github.com/LASTRADA-Software/pace/issues/1653)** — a header
   replaced during the key's preprocess by a copy that keeps an older change time is not seen by
   the input witness. On NTFS `CopyFileW` copies the SOURCE's change time onto the destination
   (measured on two volumes while implementing #1650), so such a header reads as older than T0
@@ -2925,14 +2925,14 @@ nobody can account for.
   until its manifest entry is hashed (after the STORE on a miss; at the backfill on a hit).
   Not reproduced end to end: derived from the measurement and the witness's construction. See *The key, the object and the manifest describe ONE moment*.
 
-- **[#1654](https://github.com/LASTRADA-Software/fastcached/issues/1654)** — a header CREATED
+- **[#1654](https://github.com/LASTRADA-Software/pace/issues/1654)** — a header CREATED
   at any point of the invocation, the compile included, in an include directory searched EARLIER than the one the key's preprocess
   resolved, is in no input witness: the witness snapshots what the preprocess REPORTED, so a
   compile that reads the new header stores its object under a key taken from the shadowed one.
   ccache has the same gap. Not reproduced: derived from the witness's construction (#1650's
   design, Known limits).
 
-- **[#1659](https://github.com/LASTRADA-Software/fastcached/issues/1659)** — the input fence's
+- **[#1659](https://github.com/LASTRADA-Software/pace/issues/1659)** — the input fence's
   10 ms margin on a platform with no coarse clock (macOS in practice) is inferred, not measured,
   and fails OPEN beyond it. `FineClockSafetyTick` covers about two ticks at 200 Hz -- the
   coarse-clock lag measured on the Linux timekeeper (7.45 ms on WSL's 4 ms tick) -- but on macOS,
@@ -2942,7 +2942,7 @@ nobody can account for.
   `macOS-clang-release`, which bound nothing. See *The key, the object and the manifest describe
   ONE moment*, Known limits.
 
-- **[#1567](https://github.com/LASTRADA-Software/fastcached/issues/1567)** — `## The digest` has no `AGENT.md`
+- **[#1567](https://github.com/LASTRADA-Software/pace/issues/1567)** — `## The digest` has no `AGENT.md`
   tripwire, so the object key being MurmurHash3 x64_128 rather than four CRC32C lanes
   — the 32-bit key that served an unrelated TU's object under a zero exit code —
   fires in no session that does not open this file. Its marker says `untriaged:` and
@@ -2953,7 +2953,7 @@ nobody can account for.
   guard passes correctly, since its stated blind spot is that it does not judge
   whether a phrase is the RIGHT tripwire. The issue lists them.
 
-- **[#1568](https://github.com/LASTRADA-Software/fastcached/issues/1568)** — a
+- **[#1568](https://github.com/LASTRADA-Software/pace/issues/1568)** — a
   `GenerationBump`'s `changedRows` cannot name the behavioural subset of a bump, and the
   first real bump is where that became visible. `AppendCoveredStages` digests
   `trace.storedBytes`, whose LEADING BYTE is `CompileValueVersion`, so every row the two
@@ -2968,14 +2968,14 @@ nobody can account for.
   implements. Once generation 5 ships, gen 4's rows are a DATED RECORD that no tree can
   reproduce — the same reason generations 1 to 3 keep only an aggregate digest.
 
-- **[#878](https://github.com/LASTRADA-Software/fastcached/issues/878)** — **the
+- **[#878](https://github.com/LASTRADA-Software/pace/issues/878)** — **the
   mechanism now exists and its localized leg is still unexercised, which is what keeps
   this entry open.** `Cc::ResolveIncludeNoteMarker` asks `MarkerSource`'s rows in
   enumerator order, which IS the precedence —
   operator, then a probe that ASKS the compiler, then the English default. Three sources
   but **FOUR** provenances, because *asked and declined* and *never asked* carry the same
   marker and differ only in the remedy: telling an operator to set
-  `FASTCACHE_MSVC_DEPS_PREFIX` is advice already taken by whoever wrote `auto`, so
+  `PACE_MSVC_DEPS_PREFIX` is advice already taken by whoever wrote `auto`, so
   collapsing the pair gives the one operator who opted in a confident wrong answer.
   `MarkerSource::DiscoveryDeclined` is that fourth state, and a `static_assert` holds its
   label distinct from `Default`'s — the two are equal in every other observable, so a
@@ -2999,7 +2999,7 @@ nobody can account for.
       spawn per FILE, paid on CACHE HITS too — where not running a compiler is the entire
       value of the hit — to rediscover the English default on almost every machine. **A cost
       that cannot be amortised cannot be a default.** So the operator asks, with
-      `FASTCACHE_MSVC_DEPS_PREFIX=auto` (`Cc::MarkerDiscoveryRequest`, read by the RESOLVER
+      `PACE_MSVC_DEPS_PREFIX=auto` (`Cc::MarkerDiscoveryRequest`, read by the RESOLVER
       so the one value that means *ask, do not tell* has one reading), and `WantsMarkerProbe`
       adds only the three facts the resolver cannot know: a parsed compile, `/showIncludes`
       in play, and an MSVC-family driver read off `DriverSpec::family` rather than by naming

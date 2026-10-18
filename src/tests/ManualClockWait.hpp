@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/StopAwareWait.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -15,7 +15,7 @@
 /// A stop-aware wait whose interval passes on a `ManualClock`: a thread that paces itself through it
 /// moves exactly when a case advances the clock, and never on the wall's time.
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// `IStopAwareWait` over a `ManualClock` it OWNS. A wait ends once the clock reads its deadline, which
@@ -72,4 +72,4 @@ class ManualClockWait final: public IStopAwareWait
     mutable std::size_t _waits { 0 };          ///< See `Waits`.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

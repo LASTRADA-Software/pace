@@ -61,7 +61,7 @@
 # architecture -- is still a failure.
 #
 # Usage:
-#   dist-compile-e2e.ps1 -Fastcached <path> -Node <path> -Launcher <path> [-Cli <path>]
+#   dist-compile-e2e.ps1 -PaceKv <path> -Node <path> -Launcher <path> [-Cli <path>]
 #                        [-EditStub <mid-compile-edit-stub>]
 #   dist-compile-e2e.ps1 -SelfTest        # the object comparison only, no build
 #
@@ -69,9 +69,9 @@
 # was missing (skip).
 
 param(
-    [string]$Fastcached = "$PSScriptRoot/../out/build/clangcl-debug/target/fastcached.exe",
-    [string]$Node       = "$PSScriptRoot/../out/build/clangcl-debug/target/fastcache-compile-node.exe",
-    [string]$Launcher   = "$PSScriptRoot/../out/build/clangcl-debug/target/fastcache-cc.exe",
+    [string]$PaceKv = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-kv.exe",
+    [string]$Node       = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-node.exe",
+    [string]$Launcher   = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-cc.exe",
     # Asked for the scheduler's own record of a worker when a dispatch comes back
     # withdrawn; see `Assert-NotWithdrawn`. Without it a withdrawal still fails, and
     # cannot say which limit took the slots.
@@ -110,14 +110,14 @@ catch { Write-Host "dist-compile E2E FAILED: $($_.Exception.Message)"; exit 1 }
 # three binaries there would make the one check that needs no build the one check
 # that cannot run without one.
 if (-not $SelfTest) {
-    if (-not (Test-Path $Fastcached)) { Write-Host "fastcached not found: $Fastcached; skipping"; exit $SKIP }
-    if (-not (Test-Path $Node))       { Write-Host "fastcache-compile-node not found: $Node; skipping"; exit $SKIP }
-    if (-not (Test-Path $Launcher))   { Write-Host "fastcache-cc not found: $Launcher; skipping"; exit $SKIP }
+    if (-not (Test-Path $PaceKv)) { Write-Host "pace-kv not found: $PaceKv; skipping"; exit $SKIP }
+    if (-not (Test-Path $Node))       { Write-Host "pace-node not found: $Node; skipping"; exit $SKIP }
+    if (-not (Test-Path $Launcher))   { Write-Host "pace-cc not found: $Launcher; skipping"; exit $SKIP }
 
     # Start-Process resolves a relative -FilePath against the PROCESS working
     # directory rather than PowerShell's, so a caller passing "out/build/..." would
     # get a spurious "file not found".
-    $Fastcached = (Resolve-Path $Fastcached).Path
+    $PaceKv = (Resolve-Path $PaceKv).Path
     $Node       = (Resolve-Path $Node).Path
 
 # Every node started below is SOLITARY: a fleet of its own, serving the scheduler its own
@@ -129,7 +129,7 @@ if (-not $SelfTest) {
 # other fixture on this machine.
 #
 # Every node started below turns its own cache tier OFF. `--listen-node` defaults
-# to 0.0.0.0:6674 -- 6674 being where `fastcache-cc` looks -- which is right for the one node
+# to 0.0.0.0:6674 -- 6674 being where `pace-cc` looks -- which is right for the one node
 # per machine a real deployment runs and wrong here, where several share a host and
 # would race for it. Said explicitly rather than left to the default's
 # warn-and-continue, so a node that failed to bind for some OTHER reason still shows
@@ -194,14 +194,14 @@ $PortsNeeded = 9
 # It replaces a fixed base of 21730, which was defended on the grounds that a
 # fixed port keeps the failure mode legible. It does the opposite, and what makes
 # it worse here than for an ordinary fixture is WHAT holds the port: another
-# `fastcached` -- leaked from an earlier run, or left by a sibling worktree. A
+# `pace-kv` -- leaked from an earlier run, or left by a sibling worktree. A
 # daemon of the same kind does not refuse the connection; it answers. So the run
 # proceeds against a cache that is not empty, the launcher's lookup returns a HIT
 # for an object this run has not stored, the compile is served instead of
 # dispatched, and the fixture reports "the compile was not dispatched to a
 # worker" -- a message about distribution, produced by a port collision, with
 # nothing anywhere naming a port. Observed exactly that way, twice, with
-# `fastcache-cc: HIT` in the transcript on a run whose own daemon had just
+# `pace-cc: HIT` in the transcript on a run whose own daemon had just
 # started.
 function Get-FreePortBlock([int]$count) {
     foreach ($attempt in 1..200) {
@@ -746,7 +746,7 @@ function Test-EquivalentObject([string]$reference, [string]$produced, [hashtable
 # The cache port is a PARAMETER, not read from the enclosing scope.
 #
 # It was the latter, and the isolation case below tried to override
-# $env:FASTCACHE_ADDR around the call -- which this function then clobbered on its
+# $env:PACE_ADDR around the call -- which this function then clobbered on its
 # own first line, so that case silently used the MAIN cache while talking to the
 # isolation scheduler. It would still have passed, for the wrong reason, which is
 # the failure mode every fixture here is written to avoid.
@@ -778,12 +778,12 @@ int Probe() { return static_cast<int>(std::string("x").size()); }
 function Invoke-Dispatching([string]$compiler, [string]$root, [string]$obj,
                             [string]$scheduler, [int]$cache, [string]$sourceName = "u.cpp",
                             [string[]]$extra = @()) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$cache"
-    $env:FASTCACHE_SOURCE_DIR = $root
-    $env:FASTCACHE_BINARY_DIR = (Join-Path $root "build")
-    $env:FASTCACHE_VERBOSE    = "1"
-    if ($scheduler) { $env:FASTCACHE_SCHEDULER = $scheduler }
-    else            { Remove-Item -Path "env:FASTCACHE_SCHEDULER" -ErrorAction SilentlyContinue }
+    $env:PACE_ADDR       = "127.0.0.1:$cache"
+    $env:PACE_SOURCE_DIR = $root
+    $env:PACE_BINARY_DIR = (Join-Path $root "build")
+    $env:PACE_VERBOSE    = "1"
+    if ($scheduler) { $env:PACE_SCHEDULER = $scheduler }
+    else            { Remove-Item -Path "env:PACE_SCHEDULER" -ErrorAction SilentlyContinue }
 
     $source  = Join-Path $root $sourceName
     $outFile = New-TemporaryFile
@@ -862,7 +862,7 @@ function Test-WithdrawnRefusal([string]$stderr) {
 }
 
 # The scheduler's `limited-by` for one worker, out of `fleet workers` as JSON.
-# @param json        What `fastcache-cli --format=json fleet workers` printed.
+# @param json        What `pacectl --format=json fleet workers` printed.
 # @param endpoint    The worker's advertised endpoint.
 # @param fingerprint The toolchain the lease asked for.
 # @return The `limited-by` text, or $null when no such worker is in the record.
@@ -890,7 +890,7 @@ function Read-WorkerLimit([string]$scheduler, [string]$endpoint, [string]$finger
     try {
         if (-not $asked.WaitForExit($CliReadSeconds * 1000)) {
             try { $asked.Kill() } catch { $null = $_ }
-            Write-Host "the scheduler's record was not read: fastcache-cli fleet workers against $scheduler did not answer within $CliReadSeconds s"
+            Write-Host "the scheduler's record was not read: pacectl fleet workers against $scheduler did not answer within $CliReadSeconds s"
             return $null
         }
         if ($asked.ExitCode -ne 0) { return $null }
@@ -1006,13 +1006,13 @@ function Invoke-SelfTest {
         Assert-That ($sections[0].Size -eq $code.Length) "with their sizes"
 
         # ---- Test-WithdrawnRefusal ---------------------------------------
-        $withdrawn = "fastcache-cc: not dispatched (rejected (withdrawn): every matching worker has withdrawn its capacity); compiling locally"
-        $noWorker  = "fastcache-cc: not dispatched (rejected (no-worker): no worker serves this toolchain); compiling locally"
+        $withdrawn = "pace-cc: not dispatched (rejected (withdrawn): every matching worker has withdrawn its capacity); compiling locally"
+        $noWorker  = "pace-cc: not dispatched (rejected (no-worker): no worker serves this toolchain); compiling locally"
         Assert-That (Test-WithdrawnRefusal $withdrawn) "a withdrawn refusal is recognised"
         Assert-That (-not (Test-WithdrawnRefusal $noWorker)) "a different refusal is not a withdrawal"
         Assert-That (-not (Test-WithdrawnRefusal "")) "nor is a compile that said nothing"
 
-        # The scheduler's record as `fastcache-cli --format=json fleet workers`
+        # The scheduler's record as `pacectl --format=json fleet workers`
         # prints it -- captured from a real run, with a second row added -- so
         # the reader is asked which worker it is looking at, not just whether a
         # `limited-by` exists.
@@ -1109,9 +1109,9 @@ function Invoke-SelfTest {
 
 if ($SelfTest) { exit (Invoke-SelfTest) }
 
-# The launcher reads its whole configuration from FASTCACHE_* variables, and the calls
-# below set only the ones they mean -- so an inherited FASTCACHE_VERIFY, FASTCACHE_TOKEN
-# or FASTCACHE_NO_DIRECT would decide what a case measures. Importing the shared module
+# The launcher reads its whole configuration from PACE_* variables, and the calls
+# below set only the ones they mean -- so an inherited PACE_VERIFY, PACE_TOKEN
+# or PACE_NO_DIRECT would decide what a case measures. Importing the shared module
 # clears every one of them; this fixture draws no port through `E2EPorts.psm1`, which
 # would otherwise have imported it.
 Import-Module (Join-Path $PSScriptRoot "lib/E2EEnvironment.psm1") -Force
@@ -1191,13 +1191,13 @@ try {
         $ranAnyCompiler = $true
         Write-Host "== driver: $cc (ports $BasePort..$($BasePort + $PortsNeeded - 1), scratch $scratch)"
 
-        # One listener now, and only the cache. `fastcached` used to carry the
+        # One listener now, and only the cache. `pace-kv` used to carry the
         # scheduler too, on a second `--listen-dispatch` endpoint; that flag is gone.
         # Handing out capacity is a decision only ONE node may make at a time, and
         # nothing in the cache daemon can establish which node that is -- so the
         # scheduler moved to where cluster leadership lives, which is the node.
         $daemonLog = Join-Path $scratch "daemon.log"
-        $daemon = Start-Background $Fastcached @(
+        $daemon = Start-Background $PaceKv @(
             "--listen=127.0.0.1:$cachePort",
             "--storage-max-value=64M", "--log-level=info") $daemonLog
         $procs += $daemon
@@ -1372,7 +1372,7 @@ try {
         Remove-Item $obj -Force
         $r = Invoke-Dispatching $cc $root $obj "127.0.0.1:$dispatchPort" $cachePort
         if ($r.code -ne 0) { Write-Host $r.stderr; throw "the second compile failed" }
-        if ($r.stderr -notmatch "fastcache-cc: HIT") {
+        if ($r.stderr -notmatch "pace-cc: HIT") {
             Write-Host $r.stderr
             throw "a dispatched result was not served from the cache afterwards"
         }
@@ -1498,7 +1498,7 @@ try {
                 throw "case 2b: the worker's object of the saved content was stored under the original content's key"
             }
             if ($logged -cne "INPUTS-MOVED") { throw "case 2b: recorded '$logged', not INPUTS-MOVED" }
-            $racedKey = [regex]::Match($r.stderr, 'fastcache-cc: MISS key=(\S+)').Groups[1].Value
+            $racedKey = [regex]::Match($r.stderr, 'pace-cc: MISS key=(\S+)').Groups[1].Value
 
             # The original content again, written in place: its key is the one the raced
             # compile was keyed on, and nothing may stand behind it.
@@ -1507,11 +1507,11 @@ try {
             $r = Invoke-Dispatching $movedStub $mroot $mobj "127.0.0.1:$dispatchPort" $cachePort
             Write-Host $r.stderr
             if ($r.code -ne 0) { throw "case 2b: the rebuild of the original content failed (exit $($r.code))" }
-            if ($r.stderr -cnotmatch "fastcache-cc: MISS") {
+            if ($r.stderr -cnotmatch "pace-cc: MISS") {
                 throw "case 2b: the original content was served from the cache -- the worker's object of the saved content under the original key (the #1650 defect)"
             }
             # The SAME key the raced compile was taken on, or this MISS says nothing about that key.
-            $rebuiltKey = [regex]::Match($r.stderr, 'fastcache-cc: MISS key=(\S+)').Groups[1].Value
+            $rebuiltKey = [regex]::Match($r.stderr, 'pace-cc: MISS key=(\S+)').Groups[1].Value
             if (-not $racedKey -or $racedKey -cne $rebuiltKey) {
                 throw "case 2b: the rebuild missed on key '$rebuiltKey', not on the raced compile's key '$racedKey'"
             }
@@ -1592,7 +1592,7 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
         # the builtin `std::source_location` is made of resolves to the client's
         # checkout on the worker -- and no key sees it, because it is filled in after
         # preprocessing. The dispatched object is stored by the same code as a local
-        # one, scanned against the client's roots (apps/fastcache-cc/RootBinding.hpp),
+        # one, scanned against the client's roots (apps/pace-cc/RootBinding.hpp),
         # so a second checkout must MISS through the first one's marker and dispatch
         # its own, and the first must still HIT its own copy without dispatching.
         # Before root binding the second checkout was served the first one's object.
@@ -1616,9 +1616,9 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
         $bNamesA = (Test-Path $objB) -and [System.Text.Encoding]::Latin1.GetString(
             [System.IO.File]::ReadAllBytes($objB)).Contains($boundRoots['checkout-a'])
         $okA = $rA.code -eq 0 -and $rA.stderr -match "DISPATCHED to " -and $rA.stderr -match "root-bound object"
-        $okB = $rB.code -eq 0 -and $rB.stderr -match "fastcache-cc: MISS key=\S+ \(root-bound:" `
+        $okB = $rB.code -eq 0 -and $rB.stderr -match "pace-cc: MISS key=\S+ \(root-bound:" `
                -and $rB.stderr -match "DISPATCHED to " -and (Test-Path $objB) -and -not $bNamesA
-        $okA2 = $rA2.code -eq 0 -and $rA2.stderr -match "fastcache-cc: HIT key=\S+ \(root-bound:" `
+        $okA2 = $rA2.code -eq 0 -and $rA2.stderr -match "pace-cc: HIT key=\S+ \(root-bound:" `
                 -and $rA2.stderr -notmatch "DISPATCHED to "
         if (-not ($okA -and $okB -and $okA2)) {
             foreach ($leg in @(@{n="a"; r=$rA}, @{n="b"; r=$rB}, @{n="a again"; r=$rA2})) {
@@ -1668,7 +1668,7 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
         $isoDispatch = $BasePort + 4
 
         $isoDaemonLog = Join-Path $scratch "iso-daemon.log"
-        $isoDaemon = Start-Background $Fastcached @(
+        $isoDaemon = Start-Background $PaceKv @(
             "--listen=127.0.0.1:$isoCache",
             "--log-level=info") $isoDaemonLog
         $procs += $isoDaemon
@@ -1760,7 +1760,7 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
         }
         # And not as a miss, which would clear that reason and make a broken cache
         # read as a cold one.
-        if ($r.stderr -match "fastcache-cc: MISS") {
+        if ($r.stderr -match "pace-cc: MISS") {
             Write-Host $r.stderr
             throw "a cache that never answered was traced as a miss"
         }

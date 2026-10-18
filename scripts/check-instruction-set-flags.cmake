@@ -77,10 +77,10 @@
 # `parse: whole-document (fallback: <reason>)`, so a fast path that stopped engaging is visible rather than slow.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<tree> -DFASTCACHED_COMPILE_DATABASE=<compile_commands.json>
-#         [-DFASTCACHED_PLANT_UNIT=src/<unit>] -P scripts/check-instruction-set-flags.cmake
+#   cmake -DPACE_SOURCE_DIR=<tree> -DPACE_COMPILE_DATABASE=<compile_commands.json>
+#         [-DPACE_PLANT_UNIT=src/<unit>] -P scripts/check-instruction-set-flags.cmake
 #
-# With FASTCACHED_PLANT_UNIT, each of that unit's real commands also gets its grammar's PlantRows flag,
+# With PACE_PLANT_UNIT, each of that unit's real commands also gets its grammar's PlantRows flag,
 # and the run passes only when every planted flag is refused -- proof, on a real database, that the
 # reading still sees a flag on a real first-party unit. The planted flag goes into the command text, so
 # the extraction is exercised and not only the rows.
@@ -91,7 +91,7 @@ cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-foreach(required IN ITEMS FASTCACHED_SOURCE_DIR FASTCACHED_COMPILE_DATABASE)
+foreach(required IN ITEMS PACE_SOURCE_DIR PACE_COMPILE_DATABASE)
     if("${${required}}" STREQUAL "")
         message(FATAL_ERROR "instruction-set-flags: ${required} must be set")
     endif()
@@ -154,7 +154,7 @@ set(CandidateAlternatives "@${tokenEnd}+")
 set(rowIndex -1)
 foreach(row IN LISTS SpellingRows)
     math(EXPR rowIndex "${rowIndex} + 1")
-    fastcached_row_fields("${row}" family verdict kind reason spelling)
+    pace_row_fields("${row}" family verdict kind reason spelling)
     if(NOT spelling MATCHES "^[-/:=_A-Za-z0-9]+( [-_A-Za-z0-9]+)?$")
         message(FATAL_ERROR "instruction-set-flags: SpellingRows spelling `${spelling}` holds a character the derived pattern would read as regex syntax")
     endif()
@@ -203,7 +203,7 @@ set(CandidatePattern "(^|[ \t\r\n\"])(${CandidateAlternatives})")
 # @p path with forward slashes and no `..`, lower-cased on a host whose paths are case-insensitive. The key decides;
 # the optional third argument receives the same path in its own case, for a name shown to a reader. Lower-casing
 # ASCII keeps the length, so one offset cuts both.
-function(fastcached_path_key path out)
+function(pace_path_key path out)
     cmake_path(CONVERT "${path}" TO_CMAKE_PATH_LIST path NORMALIZE)
     if(ARGC GREATER 2)
         set(${ARGV2} "${path}" PARENT_SCOPE)
@@ -215,7 +215,7 @@ function(fastcached_path_key path out)
 endfunction()
 
 # The families (a CMake list) the driver of @p command reads, or "" when no row names it.
-function(fastcached_driver_families command familiesOut driverOut)
+function(pace_driver_families command familiesOut driverOut)
     string(REGEX MATCH "^[ \t]*(\"[^\"]*\"|[^ \t]+)" driver "${command}")
     string(STRIP "${driver}" driver)
     string(REPLACE "\"" "" driver "${driver}")
@@ -224,7 +224,7 @@ function(fastcached_driver_families command familiesOut driverOut)
     string(REGEX REPLACE "\\.exe$" "" name "${name}")
     set(families "")
     foreach(row IN LISTS DriverRows)
-        fastcached_row_fields("${row}" rowFamilies rowReason rowPattern)
+        pace_row_fields("${row}" rowFamilies rowReason rowPattern)
         if(name MATCHES "${rowPattern}")
             string(REPLACE "," ";" families "${rowFamilies}")
             break()
@@ -236,7 +236,7 @@ endfunction()
 
 # The candidate tokens in @p text. Brackets and semicolons are blanked first -- no spelling holds one -- so an
 # unbalanced bracket in a neighbouring argument cannot fuse two candidates in the returned list.
-function(fastcached_candidates text out)
+function(pace_candidates text out)
     string(REGEX REPLACE "[][;]" " " text "${text}")
     string(REGEX MATCHALL "${CandidatePattern}" found "${text}")
     set(candidates "")
@@ -250,12 +250,12 @@ function(fastcached_candidates text out)
 endfunction()
 
 # The reason the first SpellingRow matching @p token under @p families refuses it, or "" when none does.
-function(fastcached_refusal token families out)
+function(pace_refusal token families out)
     set(refusal "")
     set(rowIndex -1)
     foreach(row IN LISTS SpellingRows)
         math(EXPR rowIndex "${rowIndex} + 1")
-        fastcached_row_fields("${row}" family verdict kind reason spelling)
+        pace_row_fields("${row}" family verdict kind reason spelling)
         list(FIND families "${family}" applies)
         if(applies EQUAL -1 OR NOT token MATCHES "${SpellingMatcher${rowIndex}}")
             continue()
@@ -265,7 +265,7 @@ function(fastcached_refusal token families out)
         elseif(verdict STREQUAL "unwrap")
             string(LENGTH "${spelling}" skip)
             string(SUBSTRING "${token}" ${skip} -1 inner)
-            fastcached_refusal("${inner}" "Gnu" refusal)
+            pace_refusal("${inner}" "Gnu" refusal)
         endif()
         break()
     endforeach()
@@ -278,14 +278,14 @@ endfunction()
 # A function and not a macro: a macro substitutes its arguments textually and re-parses them, so a
 # backslash in a Windows command would be eaten twice before a row ever saw it.
 # @p depth is 0 for a command and 1 inside a response file, which may not name another.
-function(fastcached_judge_text text families unit directory depth problemsVar refusedVar modmapsVar)
+function(pace_judge_text text families unit directory depth problemsVar refusedVar modmapsVar)
     set(found "${${problemsVar}}")
     set(refused "${${refusedVar}}")
     set(modmaps "${${modmapsVar}}")
-    fastcached_candidates("${text}" candidates)
+    pace_candidates("${text}" candidates)
     foreach(token IN LISTS candidates)
         if(NOT token MATCHES "^@")
-            fastcached_refusal("${token}" "${families}" refusal)
+            pace_refusal("${token}" "${families}" refusal)
             if(NOT refusal STREQUAL "")
                 list(APPEND found "${unit}: `${token}`, because ${refusal}")
                 list(APPEND refused "${unit}|${token}")
@@ -296,7 +296,7 @@ function(fastcached_judge_text text families unit directory depth problemsVar re
         cmake_path(GET response EXTENSION LAST_ONLY extension)
         set(responseDeclined FALSE)
         foreach(row IN LISTS DeclinedResponseFiles)
-            fastcached_row_fields("${row}" rowReason rowExtension)
+            pace_row_fields("${row}" rowReason rowExtension)
             if(extension STREQUAL rowExtension)
                 set(responseDeclined TRUE)
                 break()
@@ -312,7 +312,7 @@ function(fastcached_judge_text text families unit directory depth problemsVar re
                 list(APPEND found "${unit}: cannot read response file `${token}` (${responsePath}), so not every flag it is compiled with can be seen")
             else()
                 file(READ "${responsePath}" responseText)
-                fastcached_judge_text("${responseText}" "${families}" "${unit}" "${directory}" 1 found refused modmaps)
+                pace_judge_text("${responseText}" "${families}" "${unit}" "${directory}" 1 found refused modmaps)
             endif()
         endif()
     endforeach()
@@ -321,16 +321,16 @@ function(fastcached_judge_text text families unit directory depth problemsVar re
     set(${modmapsVar} "${modmaps}" PARENT_SCOPE)
 endfunction()
 
-if(NOT EXISTS "${FASTCACHED_COMPILE_DATABASE}" OR IS_DIRECTORY "${FASTCACHED_COMPILE_DATABASE}")
-    message(FATAL_ERROR "instruction-set-flags: the compile database `${FASTCACHED_COMPILE_DATABASE}` does not exist, so no flag has been judged")
+if(NOT EXISTS "${PACE_COMPILE_DATABASE}" OR IS_DIRECTORY "${PACE_COMPILE_DATABASE}")
+    message(FATAL_ERROR "instruction-set-flags: the compile database `${PACE_COMPILE_DATABASE}` does not exist, so no flag has been judged")
 endif()
-file(READ "${FASTCACHED_COMPILE_DATABASE}" database)
+file(READ "${PACE_COMPILE_DATABASE}" database)
 string(JSON entryCount ERROR_VARIABLE jsonError LENGTH "${database}")
 if(NOT jsonError STREQUAL "NOTFOUND")
-    message(FATAL_ERROR "instruction-set-flags: `${FASTCACHED_COMPILE_DATABASE}` cannot be parsed as a compile database (${jsonError}), so no flag has been judged")
+    message(FATAL_ERROR "instruction-set-flags: `${PACE_COMPILE_DATABASE}` cannot be parsed as a compile database (${jsonError}), so no flag has been judged")
 endif()
 if(entryCount EQUAL 0)
-    message(FATAL_ERROR "instruction-set-flags: `${FASTCACHED_COMPILE_DATABASE}` has no entries, so no flag has been judged")
+    message(FATAL_ERROR "instruction-set-flags: `${PACE_COMPILE_DATABASE}` has no entries, so no flag has been judged")
 endif()
 
 # Batches, as "Reading the database in batches" above describes. `batch<N>` is a JSON array of whole entries and
@@ -388,12 +388,12 @@ else()
     message(STATUS "instruction-set-flags: parse: whole-document (fallback: ${parseFallback})")
 endif()
 
-fastcached_path_key("${FASTCACHED_SOURCE_DIR}/src/" sourceRootKey)
+pace_path_key("${PACE_SOURCE_DIR}/src/" sourceRootKey)
 string(LENGTH "${sourceRootKey}" sourceRootLength)
-set(plantUnit "${FASTCACHED_PLANT_UNIT}")
+set(plantUnit "${PACE_PLANT_UNIT}")
 set(plantUnitKey "")
 if(NOT plantUnit STREQUAL "")
-    fastcached_path_key("${FASTCACHED_SOURCE_DIR}/${plantUnit}" plantUnitKey)
+    pace_path_key("${PACE_SOURCE_DIR}/${plantUnit}" plantUnitKey)
 endif()
 
 set(problems "")
@@ -421,7 +421,7 @@ foreach(batch RANGE 1 ${batchCount})
             continue()
         endif()
         cmake_path(ABSOLUTE_PATH unitFile BASE_DIRECTORY "${directory}" NORMALIZE OUTPUT_VARIABLE unitPath)
-        fastcached_path_key("${unitPath}" unitKey unitPath)
+        pace_path_key("${unitPath}" unitKey unitPath)
         string(FIND "${unitKey}" "${sourceRootKey}" underSource)
         if(NOT underSource EQUAL 0)
             math(EXPR declined "${declined} + 1")
@@ -440,7 +440,7 @@ foreach(batch RANGE 1 ${batchCount})
         if(NOT commandError STREQUAL "NOTFOUND")
             set(unreadable "its entry has no `command`, so the flags it is compiled with cannot be read")
         else()
-            fastcached_driver_families("${command}" families driver)
+            pace_driver_families("${command}" families driver)
             if(families STREQUAL "")
                 set(unreadable "compiled by `${driver}`, a driver DriverRows does not name, so which flags enable instructions is unknown -- add a row saying which grammar it reads")
             endif()
@@ -457,7 +457,7 @@ foreach(batch RANGE 1 ${batchCount})
             set(plantedUnit "${unit}")
             math(EXPR plantedEntries "${plantedEntries} + 1")
             foreach(plantRow IN LISTS PlantRows)
-                fastcached_row_fields("${plantRow}" plantFamily plantFlag)
+                pace_row_fields("${plantRow}" plantFamily plantFlag)
                 list(FIND families "${plantFamily}" plantApplies)
                 if(NOT plantApplies EQUAL -1)
                     string(APPEND command " ${plantFlag}")
@@ -466,12 +466,12 @@ foreach(batch RANGE 1 ${batchCount})
             endforeach()
         endif()
 
-        fastcached_judge_text("${command}" "${families}" "${unit}" "${directory}" 0 problems refusedTokens modmapsDeclined)
+        pace_judge_text("${command}" "${families}" "${unit}" "${directory}" 0 problems refusedTokens modmapsDeclined)
     endforeach()
 endforeach()
 
 if(firstParty EQUAL 0)
-    list(APPEND problems "no entry compiles a unit under `${FASTCACHED_SOURCE_DIR}/src/` (${declined} declined), so no first-party flag has been judged")
+    list(APPEND problems "no entry compiles a unit under `${PACE_SOURCE_DIR}/src/` (${declined} declined), so no first-party flag has been judged")
 endif()
 
 set(summary "${firstParty} first-party unit(s) judged, none carries a global instruction-set flag; ${declined} unit(s) outside src/ declined")
@@ -528,10 +528,10 @@ else()
         string(CONCAT remedy
             "The plant is a flag this check places itself and must refuse, so nothing in the tree needs changing: a plant "
             "ACCEPTED is a defect in this check's reading (the extraction pattern derived from SpellingRows, or a row), and "
-            "a plant never judged means FASTCACHED_PLANT_UNIT names no first-party unit this database compiles, its entries "
+            "a plant never judged means PACE_PLANT_UNIT names no first-party unit this database compiles, its entries "
             "cannot be read, or no PlantRows flag fits its driver. A real flag in the tree is the unplanted run's to report.")
     endif()
     message(FATAL_ERROR
-        "instruction-set-flags: ${problemCount} problem(s) in `${FASTCACHED_COMPILE_DATABASE}`:\n  ${problemText}\n"
+        "instruction-set-flags: ${problemCount} problem(s) in `${PACE_COMPILE_DATABASE}`:\n  ${problemText}\n"
         "${remedy}")
 endif()

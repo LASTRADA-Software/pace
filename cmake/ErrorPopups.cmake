@@ -18,12 +18,12 @@
 # ## Two policies, and the environment variable that joins them
 #
 # A TEST executable suppresses always. A PRODUCT binary -- the target named for its own
-# `src/apps/<name>` directory, or one carrying `FASTCACHED_ERROR_POPUPS_POLICY on-request`
-# -- suppresses only when `FASTCACHED_ERROR_DIALOG_VARIABLE` is present in its environment.
-# A developer running a Debug `fastcached` by hand keeps the dialog and the chance to attach
+# `src/apps/<name>` directory, or one carrying `PACE_ERROR_POPUPS_POLICY on-request`
+# -- suppresses only when `PACE_ERROR_DIALOG_VARIABLE` is present in its environment.
+# A developer running a Debug `pace-kv` by hand keeps the dialog and the chance to attach
 # a debugger at the assert; a product binary an e2e fixture spawns does not, because every
-# registered test carries the variable (`_fastcached_mark_tests_for_error_dialogs` below, and
-# `FASTCACHED_ERROR_DIALOG_ENVIRONMENT` on each `catch_discover_tests`) and a child inherits
+# registered test carries the variable (`_pace_mark_tests_for_error_dialogs` below, and
+# `PACE_ERROR_DIALOG_ENVIRONMENT` on each `catch_discover_tests`) and a child inherits
 # it. This is the mechanism `endo` proved; a Debug-only policy was the first draft here and
 # took the debugger away from exactly the build that exists to use one.
 #
@@ -32,7 +32,7 @@
 # and the environment of every registered test.
 #
 # An executable that must NOT get the object states a reason on itself --
-# `set_target_properties(<t> PROPERTIES FASTCACHED_ERROR_POPUPS "<why>")` -- which the walk
+# `set_target_properties(<t> PROPERTIES PACE_ERROR_POPUPS "<why>")` -- which the walk
 # skips and the check prints. Nothing does today.
 
 include(ProjectTargets)
@@ -40,33 +40,33 @@ include(ProjectTargets)
 # The variable's NAME, spelled once: the walk hands it to the startup object as a compile
 # definition, the registrations set it, and the check and the product canary's gate are
 # told it on their command lines.
-set(FASTCACHED_ERROR_DIALOG_VARIABLE "FASTCACHED_SUPPRESS_ERROR_DIALOGS")
+set(PACE_ERROR_DIALOG_VARIABLE "PACE_SUPPRESS_ERROR_DIALOGS")
 # The value an `ENVIRONMENT_MODIFICATION` takes to set it. For `catch_discover_tests`,
 # whose generated registrations no walk at configure time can reach.
-set(FASTCACHED_ERROR_DIALOG_ENVIRONMENT "${FASTCACHED_ERROR_DIALOG_VARIABLE}=set:1")
+set(PACE_ERROR_DIALOG_ENVIRONMENT "${PACE_ERROR_DIALOG_VARIABLE}=set:1")
 
 # Attach the suppression to every executable under src/.
 #
 # Call once, after every add_subdirectory() -- the walk reads the build system as it
 # stands, so a target added later is a target left out. That is not left to this
 # comment: the manifest the check reads is NOT taken by this walk.
-function(fastcached_suppress_error_popups)
-    fastcached_collect_executables("${CMAKE_SOURCE_DIR}" executables src)
+function(pace_suppress_error_popups)
+    pace_collect_executables("${CMAKE_SOURCE_DIR}" executables src)
     set(source "${CMAKE_SOURCE_DIR}/src/tests/ErrorPopupsAtStartup.cpp")
 
     set(attached 0)
     foreach(executable IN LISTS executables)
-        get_target_property(reason ${executable} FASTCACHED_ERROR_POPUPS)
+        get_target_property(reason ${executable} PACE_ERROR_POPUPS)
         if(reason)
             continue()
         endif()
         target_sources(${executable} PRIVATE "${source}")
         math(EXPR attached "${attached} + 1")
         get_target_property(directory ${executable} SOURCE_DIR)
-        get_target_property(policy ${executable} FASTCACHED_ERROR_POPUPS_POLICY)
+        get_target_property(policy ${executable} PACE_ERROR_POPUPS_POLICY)
         if(directory STREQUAL "${CMAKE_SOURCE_DIR}/src/apps/${executable}" OR policy STREQUAL "on-request")
             target_compile_definitions(${executable} PRIVATE
-                "FASTCACHED_ERROR_POPUPS_ON_REQUEST=\"${FASTCACHED_ERROR_DIALOG_VARIABLE}\"")
+                "PACE_ERROR_POPUPS_ON_REQUEST=\"${PACE_ERROR_DIALOG_VARIABLE}\"")
         endif()
     endforeach()
     list(LENGTH executables count)
@@ -81,40 +81,40 @@ function(fastcached_suppress_error_popups)
     #
     # No argument is passed: a deferred call's arguments are evaluated when it RUNS, in the
     # top-level scope, where this function's `source` does not exist.
-    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _fastcached_write_error_popup_manifest)
-    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _fastcached_mark_tests_for_error_dialogs "${CMAKE_SOURCE_DIR}")
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pace_write_error_popup_manifest)
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pace_mark_tests_for_error_dialogs "${CMAKE_SOURCE_DIR}")
 endfunction()
 
 # Set the variable on every test `add_test` registered in DIR and below.
 #
 # Deferred to the end of the top-level directory, so a registration added after the call
 # is covered too. `catch_discover_tests` registrations do not exist yet at configure time,
-# which is why each of those calls names `FASTCACHED_ERROR_DIALOG_ENVIRONMENT` itself, and
+# which is why each of those calls names `PACE_ERROR_DIALOG_ENVIRONMENT` itself, and
 # why the check reads the generated files rather than trusting either half.
 # @param dir a directory of the source tree
-function(_fastcached_mark_tests_for_error_dialogs dir)
+function(_pace_mark_tests_for_error_dialogs dir)
     get_property(tests DIRECTORY "${dir}" PROPERTY TESTS)
     foreach(test IN LISTS tests)
         set_property(TEST "${test}" DIRECTORY "${dir}" APPEND PROPERTY ENVIRONMENT_MODIFICATION
-            "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+            "${PACE_ERROR_DIALOG_ENVIRONMENT}")
     endforeach()
     get_property(subdirectories DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
     foreach(subdirectory IN LISTS subdirectories)
         string(FIND "${subdirectory}" "${CMAKE_SOURCE_DIR}/" position)
         if(position EQUAL 0)
-            _fastcached_mark_tests_for_error_dialogs("${subdirectory}")
+            _pace_mark_tests_for_error_dialogs("${subdirectory}")
         endif()
     endforeach()
 endfunction()
 
 # Write the manifest `scripts/check-error-popups.cmake` reads: every executable in the
 # source tree, whether the walk reached it or not.
-function(_fastcached_write_error_popup_manifest)
+function(_pace_write_error_popup_manifest)
     set(source "${CMAKE_SOURCE_DIR}/src/tests/ErrorPopupsAtStartup.cpp")
-    fastcached_collect_executables("${CMAKE_SOURCE_DIR}" executables "*")
+    pace_collect_executables("${CMAKE_SOURCE_DIR}" executables "*")
     set(manifest "")
     foreach(executable IN LISTS executables)
-        get_target_property(reason ${executable} FASTCACHED_ERROR_POPUPS)
+        get_target_property(reason ${executable} PACE_ERROR_POPUPS)
         get_target_property(sources ${executable} SOURCES)
         get_target_property(definitions ${executable} COMPILE_DEFINITIONS)
         if(reason)
@@ -123,7 +123,7 @@ function(_fastcached_write_error_popup_manifest)
             set(reason "")
             set(policy "always")
             foreach(definition IN LISTS definitions)
-                if(definition MATCHES "^FASTCACHED_ERROR_POPUPS_ON_REQUEST=")
+                if(definition MATCHES "^PACE_ERROR_POPUPS_ON_REQUEST=")
                     set(policy "on-request")
                 endif()
             endforeach()

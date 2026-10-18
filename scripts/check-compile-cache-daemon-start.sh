@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end test of FASTCACHE_AUTO_START (POSIX) — the other half of issue
+# End-to-end test of PACE_AUTO_START (POSIX) — the other half of issue
 # #90 from scripts/check-compile-cache-daemon-staging.cmake, which proves the
-# module can STAGE a fastcached daemon out of a mirrored release archive with
+# module can STAGE a pace-kv daemon out of a mirrored release archive with
 # fake, --version-only stand-ins. What that mirror test cannot reach is
-# whether _fc_auto_start_fastcached actually spawns a REAL daemon that
+# whether _fc_auto_start_pace_kv actually spawns a REAL daemon that
 # answers real connections — a fake shell script has no socket to accept on
-# — so this drives the real, freshly built fastcached and fastcache-cc
+# — so this drives the real, freshly built pace-kv and pace-cc
 # through a real configure instead.
 #
 # What is asserted:
-#   1. Daemon appears     — with FASTCACHE_AUTO_START=ON, FASTCACHE_CC already
-#                           pointed at the real launcher, and FASTCACHE_ADDR
+#   1. Daemon appears     — with PACE_AUTO_START=ON, PACE_CC already
+#                           pointed at the real launcher, and PACE_ADDR
 #                           naming a port nothing is listening on, the
-#                           configure leaves a fastcached process listening
+#                           configure leaves a pace-kv process listening
 #                           on that port when it exits — not merely staged,
 #                           actually running.
 #   2. Cache actually works — a real translation unit compiled through the
@@ -32,8 +32,8 @@
 #                           not a failure, mirroring the module's own
 #                           constraint.
 #
-# This does NOT go through FASTCACHE_AUTO_INSTALL's download path at all —
-# the real fastcached built by this project's own build is placed exactly
+# This does NOT go through PACE_AUTO_INSTALL's download path at all —
+# the real pace-kv built by this project's own build is placed exactly
 # where the module would have staged one, so the test exercises the SPAWN and
 # PROBE logic without needing network access or a published release, which
 # check-compile-cache-daemon-staging.cmake already covers separately with a
@@ -46,21 +46,21 @@
 # already use for their own sandboxes.
 #
 # Usage:
-#   check-compile-cache-daemon-start.sh --fastcached <path> --launcher <path>
+#   check-compile-cache-daemon-start.sh --pace-kv <path> --launcher <path>
 #                                        --compiler <cxx> --source-dir <repo>
 #
 # Exit codes: 0 = every assertion held; 1 = a failure; 77 = a runtime
 # prerequisite was missing (skip).
 set -euo pipefail
 
-fastcached=""
+pace_kv=""
 launcher=""
 compiler="${CXX:-c++}"
 sourceDir=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached) fastcached="$2"; shift 2 ;;
+        --pace-kv) pace_kv="$2"; shift 2 ;;
         --launcher)   launcher="$2";   shift 2 ;;
         --compiler)   compiler="$2";   shift 2 ;;
         --source-dir) sourceDir="$2";  shift 2 ;;
@@ -70,7 +70,7 @@ done
 
 readonly SKIP=77
 
-[[ -n "$fastcached" && -x "$fastcached" ]] || { echo "fastcached not found: '$fastcached'; skipping"; exit "$SKIP"; }
+[[ -n "$pace_kv" && -x "$pace_kv" ]] || { echo "pace-kv not found: '$pace_kv'; skipping"; exit "$SKIP"; }
 [[ -n "$sourceDir"  && -d "$sourceDir"  ]] || { echo "source dir not found: '$sourceDir'; skipping"; exit "$SKIP"; }
 command -v "$compiler" >/dev/null 2>&1 || { echo "compiler not found: '$compiler'; skipping"; exit "$SKIP"; }
 command -v cmake >/dev/null 2>&1 || { echo "cmake not found; skipping"; exit "$SKIP"; }
@@ -124,7 +124,7 @@ e2e_begin "compile-cache daemon-start" "$workdir"
 
 # After `e2e_begin`, whose snapshot of the caller's statistics must precede every use of
 # the launcher variable -- `launcher-state-isolation` refuses one above it.
-[[ -n "$launcher"   && -x "$launcher"   ]] || { echo "fastcache-cc not found: '$launcher'; skipping"; exit "$SKIP"; }
+[[ -n "$launcher"   && -x "$launcher"   ]] || { echo "pace-cc not found: '$launcher'; skipping"; exit "$SKIP"; }
 
 # Before the launcher is staged, so what the configure finds and runs is the shim.
 # Every launcher this fixture runs records into a state directory of the run's own,
@@ -138,14 +138,14 @@ stageDir="${workdir}/stage"
 storageDir="${stageDir}/daemon-storage"
 buildDir1="${workdir}/build1"
 buildDir2="${workdir}/build2"
-daemonPidfile="${storageDir}/fastcached.pid"
+daemonPidfile="${storageDir}/pace-kv.pid"
 
 # Stage the real, freshly built binaries exactly where the module would have
 # put them after auto-installing from a real release — same directory shape
-# (<dir>/<version>/<platform>/<exe>) — so FASTCACHE_AUTO_INSTALL never has
+# (<dir>/<version>/<platform>/<exe>) — so PACE_AUTO_INSTALL never has
 # anything to do and this test needs no network access. The platform token
 # MUST match the asset-table row the module itself resolves for this host
-# (_fc_asset_<row>_platform in CompileCache.cmake) — _fc_auto_start_fastcached
+# (_fc_asset_<row>_platform in CompileCache.cmake) — _fc_auto_start_pace_kv
 # builds its staging path from that row, not from anything this script
 # invents, so a made-up label here would make the module look in a directory
 # this script never populated and fall through to "no binary staged". This
@@ -167,27 +167,27 @@ esac
 version="0.0.0"
 binDir="${stageDir}/${version}/${platform}"
 mkdir -p "$binDir"
-cp "$fastcached" "${binDir}/fastcached"
-cp "$launcher" "${binDir}/fastcache-cc"
-chmod +x "${binDir}/fastcached" "${binDir}/fastcache-cc"
+cp "$pace_kv" "${binDir}/pace-kv"
+cp "$launcher" "${binDir}/pace-cc"
+chmod +x "${binDir}/pace-kv" "${binDir}/pace-cc"
 
 commonArgs=(
     -S "$fixtureDir"
-    "-DFASTCACHED_MODULE_DIR=${sourceDir}/cmake/portable"
+    "-DPACE_MODULE_DIR=${sourceDir}/cmake/portable"
     "-DCMAKE_CXX_COMPILER=${compiler}"
-    "-DFASTCACHE_CC=${binDir}/fastcache-cc"
-    "-DFASTCACHE_ADDR=${addr}"
-    "-DFASTCACHE_AUTO_START=ON"
-    "-DFASTCACHE_AUTO_START_STORAGE_DIR=${storageDir}"
-    # AUTO_INSTALL stays OFF: FASTCACHE_CC is already supplied above, so the
+    "-DPACE_CC=${binDir}/pace-cc"
+    "-DPACE_ADDR=${addr}"
+    "-DPACE_AUTO_START=ON"
+    "-DPACE_AUTO_START_STORAGE_DIR=${storageDir}"
+    # AUTO_INSTALL stays OFF: PACE_CC is already supplied above, so the
     # only thing left for auto-start to do is find/stage/spawn the DAEMON,
-    # which _fc_auto_start_fastcached still needs a resolvable release row
+    # which _fc_auto_start_pace_kv still needs a resolvable release row
     # for. Pinning AUTO_INSTALL_DIR at the same stage directory and a version
     # this test controls means it finds the daemon already sitting there
-    # (see the EXISTS check ahead of any fetch in _fc_auto_start_fastcached)
+    # (see the EXISTS check ahead of any fetch in _fc_auto_start_pace_kv)
     # and never reaches the network.
-    "-DFASTCACHE_AUTO_INSTALL_DIR=${stageDir}"
-    "-DFASTCACHE_AUTO_INSTALL_VERSION=${version}"
+    "-DPACE_AUTO_INSTALL_DIR=${stageDir}"
+    "-DPACE_AUTO_INSTALL_VERSION=${version}"
 )
 
 echo "--- first configure: expect a daemon to be spawned ---"
@@ -195,7 +195,7 @@ cmake "${commonArgs[@]}" -B "$buildDir1" >"${workdir}/configure1.log" 2>&1 \
     || { cat "${workdir}/configure1.log" >&2; fail "first configure failed"; }
 cat "${workdir}/configure1.log"
 
-grep -q "Auto-started fastcached" "${workdir}/configure1.log" \
+grep -q "Auto-started pace-kv" "${workdir}/configure1.log" \
     || fail "first configure never reported starting a daemon"
 
 # The daemon is double-forked and detached by the configure, so this script never
@@ -204,7 +204,7 @@ grep -q "Auto-started fastcached" "${workdir}/configure1.log" \
 # says INCONCLUSIVE on expiry rather than implying it watched something.
 daemonPid="-"
 [[ -f "$daemonPidfile" ]] && daemonPid="$(cat "$daemonPidfile" 2>/dev/null || echo -)"
-wait_for_port 127.0.0.1 "$port" "$daemonPid" "fastcached" "${workdir}/configure1.log"
+wait_for_port 127.0.0.1 "$port" "$daemonPid" "pace-kv" "${workdir}/configure1.log"
 
 [[ -f "$daemonPidfile" ]] || fail "no pidfile at ${daemonPidfile} after the daemon was reported started"
 firstPid="$(cat "$daemonPidfile")"
@@ -218,17 +218,17 @@ int daemonStartProbe() { return 42; }
 EOF
 
 compile_once() {
-    FASTCACHE_ADDR="$addr" \
-    FASTCACHE_SOURCE_DIR="$sourceDir" \
-    FASTCACHE_BINARY_DIR="$buildDir1" \
-    FASTCACHE_VERBOSE=1 \
-    FASTCACHE_NO_STATS=1 \
-    "${binDir}/fastcache-cc" "$compiler" -c "$src" -o "${workdir}/probe.o" 2>&1
+    PACE_ADDR="$addr" \
+    PACE_SOURCE_DIR="$sourceDir" \
+    PACE_BINARY_DIR="$buildDir1" \
+    PACE_VERBOSE=1 \
+    PACE_NO_STATS=1 \
+    "${binDir}/pace-cc" "$compiler" -c "$src" -o "${workdir}/probe.o" 2>&1
 }
 
 # Same output path both times, deliberately: the object path is one of the
 # arguments the key is computed over (relativized when it falls under
-# FASTCACHE_SOURCE_DIR/FASTCACHE_BINARY_DIR, left absolute and hashed verbatim
+# PACE_SOURCE_DIR/PACE_BINARY_DIR, left absolute and hashed verbatim
 # otherwise — which is exactly this probe's situation, compiling out of a
 # mktemp workdir outside both roots). Two different output filenames would
 # therefore key two different entries and the second compile would MISS
@@ -236,11 +236,11 @@ compile_once() {
 # calls were never asking for the same cache entry.
 firstOutput="$(compile_once)"
 echo "$firstOutput"
-grep -q "fastcache-cc: MISS key=" <<< "$firstOutput" || fail "first compile against the auto-started daemon was not a MISS"
+grep -q "pace-cc: MISS key=" <<< "$firstOutput" || fail "first compile against the auto-started daemon was not a MISS"
 
 secondOutput="$(compile_once)"
 echo "$secondOutput"
-grep -q "fastcache-cc: HIT key=" <<< "$secondOutput" || fail "second compile against the auto-started daemon was not a HIT"
+grep -q "pace-cc: HIT key=" <<< "$secondOutput" || fail "second compile against the auto-started daemon was not a HIT"
 
 # --- assertion 3: a second configure must not start a second daemon ---------
 echo "--- second configure: expect the SAME daemon to be found, not a new one ---"
@@ -248,14 +248,14 @@ cmake "${commonArgs[@]}" -B "$buildDir2" >"${workdir}/configure2.log" 2>&1 \
     || { cat "${workdir}/configure2.log" >&2; fail "second configure failed"; }
 cat "${workdir}/configure2.log"
 
-grep -q "Auto-started fastcached" "${workdir}/configure2.log" \
+grep -q "Auto-started pace-kv" "${workdir}/configure2.log" \
     && fail "second configure started ANOTHER daemon instead of finding the first"
 
 secondPid="$(cat "$daemonPidfile")"
 [[ "$firstPid" == "$secondPid" ]] || fail "pidfile changed from ${firstPid} to ${secondPid}; a second daemon replaced the first"
 kill -0 "$secondPid" 2>/dev/null || fail "the original daemon (PID ${secondPid}) is no longer running"
 
-# Every launcher run here opts out of statistics -- `compile_once` sets FASTCACHE_NO_STATS=1,
+# Every launcher run here opts out of statistics -- `compile_once` sets PACE_NO_STATS=1,
 # and so do CompileCache.cmake's configure probes -- and none dispatches, so today none of
 # them writes to a state directory at all. The seam is kept anyway: dropping one of those
 # opt-outs would otherwise put this run's records in the developer's log, silently.

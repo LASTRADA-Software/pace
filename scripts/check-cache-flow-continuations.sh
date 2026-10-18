@@ -39,7 +39,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 selftest=0
 [ "${1:-}" = "--self-test" ] && selftest=1
 
-Subject="src/apps/fastcache-cc/main.cpp"
+Subject="src/apps/pace-cc/main.cpp"
 
 # One row per classified call site: <reason-substring>|<expected spelling>|<why>.
 # The reason string is the anchor because it is what the operator sees and what
@@ -56,7 +56,7 @@ Subject="src/apps/fastcache-cc/main.cpp"
 #
 # cache-flow-scan: data-begin
 Table='
-missing FASTCACHE_ADDR|Warn|cache not configured: nothing was reached, so nothing to replace
+missing PACE_ADDR|Warn|cache not configured: nothing was reached, so nothing to replace
 preprocess failed|Warn|no preprocessed text means no key, so nothing to replace
 FetchObservation::HitObjectUnwritable|Warn|the STORED entry is good; the local write failed
 RecordedReason|WarnAndCarryOn|the daemon refused: carry on so a MISS can store
@@ -280,7 +280,7 @@ if [ "$selftest" -eq 1 ]; then
     # added to the table above fails these cases until it is staged here too.
     baseline() {
         cat <<'SRC'
-return Warn(record, "missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR");
+return Warn(record, "missing PACE_ADDR/SOURCE_DIR/BINARY_DIR");
 return Warn(record, "preprocess failed");
 return Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable));
 WarnAndCarryOn(record, Cc::RecordedReason(outcome, presented.missing));

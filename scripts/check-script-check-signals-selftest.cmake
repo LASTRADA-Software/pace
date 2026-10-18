@@ -18,7 +18,7 @@
 #
 # One control that must PASS, then four defects that must each be refused with
 # ONE finding attributed to the right file, then the control AGAIN over the same
-# tree -- see `fastcached_stage_tree` for why there is one tree and what the
+# tree -- see `pace_stage_tree` for why there is one tree and what the
 # closing control is for:
 #
 #   strip       a hook loses its `cmake_minimum_required` -- the rule itself
@@ -58,7 +58,7 @@
 # that actually applies.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-script-check-signals-selftest.cmake
 
 cmake_minimum_required(VERSION 3.28)
@@ -66,7 +66,7 @@ cmake_minimum_required(VERSION 3.28)
 # CMP0219 -- "macro invocations preserve backslashes in arguments" -- exists only
 # on newer CMake than this file's declared minimum, so it is set behind
 # `if(POLICY ...)`. Unset, a macro called with an argument containing a backslash
-# emits a POLICY WARNING, and `FASTCACHED_SCRIPT_CHECK_FAILED` matches
+# emits a POLICY WARNING, and `PACE_SCRIPT_CHECK_FAILED` matches
 # `CMake Warning` deliberately (#517: a check that warns is a check nobody reads).
 # So the warning alone takes this test red on the platform whose CMake has the
 # policy -- measured on `macOS-clang-release`, where all five cases reported
@@ -80,13 +80,13 @@ if(POLICY CMP0219)
     cmake_policy(SET CMP0219 NEW)
 endif()
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(checkScript "${FASTCACHED_SOURCE_DIR}/scripts/check-script-check-signals.cmake")
+set(checkScript "${PACE_SOURCE_DIR}/scripts/check-script-check-signals.cmake")
 if(NOT EXISTS "${checkScript}")
     message(FATAL_ERROR "the check under test is missing: ${checkScript}")
 endif()
@@ -99,7 +99,7 @@ endif()
 set(failureCount 0)
 set(caseCount 0)
 
-macro(fastcached_selftest_failed label detail)
+macro(pace_selftest_failed label detail)
     math(EXPR failureCount "${failureCount} + 1")
     message("")
     message("  FAIL  ${label}")
@@ -133,22 +133,22 @@ endmacro()
 # the control is run AGAIN at the end over the same tree -- which is strictly
 # more than the per-copy arrangement could say, since that one never checked that
 # an injection had been undone at all.
-function(fastcached_stage_tree name outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_tree name outVar)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src/tests")
-    file(COPY "${FASTCACHED_SOURCE_DIR}/scripts" DESTINATION "${tree}")
-    file(COPY "${FASTCACHED_SOURCE_DIR}/cmake" DESTINATION "${tree}")
-    file(COPY "${FASTCACHED_SOURCE_DIR}/src/tests/CMakeLists.txt"
+    file(COPY "${PACE_SOURCE_DIR}/scripts" DESTINATION "${tree}")
+    file(COPY "${PACE_SOURCE_DIR}/cmake" DESTINATION "${tree}")
+    file(COPY "${PACE_SOURCE_DIR}/src/tests/CMakeLists.txt"
          DESTINATION "${tree}/src/tests")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
 
 # Run the REAL check against a staged tree. Its verdict is in its output, not its
 # status, for the reason this whole area exists.
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${checkScript}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${checkScript}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErr
         RESULT_VARIABLE ignored
@@ -180,30 +180,30 @@ endfunction()
 # @param ARGN `no-count` when the expected refusal is a positive CONTROL firing rather
 #        than a finding. A control reports no findings at all, so asserting `1 finding(s)`
 #        on one would fail it for being exactly what it is.
-macro(fastcached_case label tree wantFinding)
+macro(pace_case label tree wantFinding)
     set(_wantCount TRUE)
     if("${ARGN}" STREQUAL "no-count")
         set(_wantCount FALSE)
     endif()
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_run_check("${tree}" _objected _output)
+    pace_run_check("${tree}" _objected _output)
 
     if("${wantFinding}" STREQUAL "")
         if(_objected)
-            fastcached_selftest_failed("${label}" "expected a PASS and the check objected")
+            pace_selftest_failed("${label}" "expected a PASS and the check objected")
             message("${_output}")
         else()
             message(STATUS "  ok    (want-pass) ${label}")
         endif()
     elseif(NOT _objected)
-        fastcached_selftest_failed("${label}" "expected a refusal and the check passed")
+        pace_selftest_failed("${label}" "expected a refusal and the check passed")
     elseif(NOT _output MATCHES "${wantFinding}")
-        fastcached_selftest_failed("${label}" "the refusal never says '${wantFinding}'")
+        pace_selftest_failed("${label}" "the refusal never says '${wantFinding}'")
         message("${_output}")
     elseif(_wantCount AND NOT _output MATCHES "1 finding\\(s\\)")
         # A defect that reports as several findings is the check miscounting its
         # own output, which is how the semicolon defect was noticed at all.
-        fastcached_selftest_failed("${label}" "refused, but not with exactly one finding")
+        pace_selftest_failed("${label}" "refused, but not with exactly one finding")
         message("${_output}")
     else()
         set(_shape "one finding, attributed")
@@ -237,11 +237,11 @@ endmacro()
 # list, which is what keeps a file's contents out of a macro call and out of
 # CMP0219's way.
 
-# ONE tree, for the reason `fastcached_stage_tree` gives.
-fastcached_stage_tree("tree" tree)
+# ONE tree, for the reason `pace_stage_tree` gives.
+pace_stage_tree("tree" tree)
 
 # The control. Every negative case below is evidence only if this passes.
-fastcached_case("the real tree, copied unmodified" "${tree}" "")
+pace_case("the real tree, copied unmodified" "${tree}" "")
 
 # The rule itself: a CPack hook that declares no CMake minimum.
 set(hook "${tree}/cmake/MacOSSignBinaries.cmake")
@@ -249,14 +249,14 @@ file(READ "${hook}" before)
 string(REPLACE "cmake_minimum_required(VERSION 3.28)\n" "" after "${before}")
 file(WRITE "${hook}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("strip" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("strip" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a CPack hook declaring no cmake_minimum_required is refused, and named"
+pace_case("a CPack hook declaring no cmake_minimum_required is refused, and named"
                 "${tree}" "MacOSSignBinaries.cmake.*declares no cmake_minimum_required")
 file(WRITE "${hook}" "${before}")
 file(READ "${hook}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("strip" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("strip" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # The arm that fails CLOSED: the scan matches nothing.
@@ -265,14 +265,14 @@ file(READ "${packaging}" before)
 string(REPLACE "set(CPACK_POST_BUILD_SCRIPTS" "set(CPACK_POSTBUILD_SCRIPTS" after "${before}")
 file(WRITE "${packaging}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("rename" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("rename" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a renamed hook variable is REFUSED, not read as 'nothing to check'"
+pace_case("a renamed hook variable is REFUSED, not read as 'nothing to check'"
                 "${tree}" "no .set.CPACK_POST_BUILD_SCRIPTS")
 file(WRITE "${packaging}" "${before}")
 file(READ "${packaging}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("rename" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("rename" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # A hook variable naming a script that is not there.
@@ -280,14 +280,14 @@ file(READ "${packaging}" before)
 string(REPLACE "cmake/MacOSNotarizePkg.cmake" "cmake/MacOSGoneAway.cmake" after "${before}")
 file(WRITE "${packaging}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("repoint" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("repoint" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a hook variable naming a missing script is refused"
+pace_case("a hook variable naming a missing script is refused"
                 "${tree}" "MacOSGoneAway.cmake., which is not there")
 file(WRITE "${packaging}" "${before}")
 file(READ "${packaging}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("repoint" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("repoint" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # And a `;` in the value, which is this check's own defect turned into a case.
@@ -295,14 +295,14 @@ file(READ "${packaging}" before)
 string(REPLACE "cmake/MacOSNotarizePkg.cmake" "cmake/Gone;Away.cmake" after "${before}")
 file(WRITE "${packaging}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("semicolon" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("semicolon" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a `;` in a hook path stays ONE finding rather than splitting into two"
+pace_case("a `;` in a hook path stays ONE finding rather than splitting into two"
                 "${tree}" "Gone.;Away.cmake")
 file(WRITE "${packaging}" "${before}")
 file(READ "${packaging}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("semicolon" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("semicolon" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -319,20 +319,20 @@ file(READ "${harness}" before)
 string(REPLACE "MATCHES \"CMake Error|CMake Warning\"" "MATCHES \"CMake Error\"" after "${before}")
 file(WRITE "${harness}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("half-read" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("half-read" "the injection changed nothing, so the case stages no defect")
 endif()
 # The label spells the word as `CMake` + `Error` deliberately. It is printed on the
 # SUCCESS path, and this test is registered with
-# FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}" -- so a label carrying
+# FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}" -- so a label carrying
 # the literal would take the test red on a tree with nothing wrong, on ctest only,
 # which is not where this file is usually run from. Same family as a checker
 # reporting its own remediation example.
-fastcached_case("a harness reading only the error half of the signal is refused, and named"
+pace_case("a harness reading only the error half of the signal is refused, and named"
                 "${tree}" "check-glob-traversals-selftest.cmake:.*not for .CMake Warning")
 file(WRITE "${harness}" "${before}")
 file(READ "${harness}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("half-read" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("half-read" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # An exception marker carrying no reason. That is how "forgot" would come to be spelled
@@ -344,14 +344,14 @@ string(REPLACE
        "# verdict-error-only:" after "${before}")
 file(WRITE "${marked}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("bare-marker" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("bare-marker" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a `verdict-error-only:` marker with no reason is refused"
+pace_case("a `verdict-error-only:` marker with no reason is refused"
                 "${tree}" "check-fatal-error-exit.cmake:.*no reason after it")
 file(WRITE "${marked}" "${before}")
 file(READ "${marked}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("bare-marker" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("bare-marker" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # And the positive control, which is the arm nobody would think to stage: a tree the
@@ -363,7 +363,7 @@ endif()
 # real copy means rewriting every file under scripts/ that carries the word, and this
 # fixture already measures its staging as the thing it costs on DrvFs. Six small files
 # satisfy passes 1 through 4 and carry the word nowhere.
-set(blind "${FASTCACHED_SCRATCH_DIR}/no-verdict-readers")
+set(blind "${PACE_SCRATCH_DIR}/no-verdict-readers")
 file(REMOVE_RECURSE "${blind}")
 file(MAKE_DIRECTORY "${blind}/scripts")
 file(MAKE_DIRECTORY "${blind}/src/tests")
@@ -378,10 +378,10 @@ file(WRITE "${blind}/cmake/Packaging.cmake"
      "set(CPACK_POST_BUILD_SCRIPTS \"\${CMAKE_SOURCE_DIR}/cmake/post.cmake\")\n")
 file(WRITE "${blind}/src/tests/CMakeLists.txt"
      "add_test(\n    NAME \"subject\"\n    COMMAND \${CMAKE_COMMAND} -P \"\${CMAKE_SOURCE_DIR}/scripts/subject.cmake\"\n)\n"
-     "set_tests_properties(\"subject\" PROPERTIES\n    FAIL_REGULAR_EXPRESSION \"\${FASTCACHED_SCRIPT_CHECK_FAILED}\"\n)\n"
+     "set_tests_properties(\"subject\" PROPERTIES\n    FAIL_REGULAR_EXPRESSION \"\${PACE_SCRIPT_CHECK_FAILED}\"\n)\n"
      "add_test(\n    NAME \"canary\"\n    COMMAND \${CMAKE_COMMAND} -P \"\${CMAKE_SOURCE_DIR}/scripts/canary.cmake\"\n)\n"
-     "set_tests_properties(\"canary\" PROPERTIES\n    FAIL_REGULAR_EXPRESSION \"\${FASTCACHED_SCRIPT_CHECK_FAILED}\"\n    WILL_FAIL TRUE\n)\n")
-fastcached_case("a tree the scan reads to the end with no verdict reader in it fires the control"
+     "set_tests_properties(\"canary\" PROPERTIES\n    FAIL_REGULAR_EXPRESSION \"\${PACE_SCRIPT_CHECK_FAILED}\"\n    WILL_FAIL TRUE\n)\n")
+pace_case("a tree the scan reads to the end with no verdict reader in it fires the control"
                 "${blind}" "no compliant verdict reader" no-count)
 
 # ---------------------------------------------------------------------------
@@ -400,18 +400,18 @@ fastcached_case("a tree the scan reads to the end with no verdict reader in it f
 set(registrations "${tree}/src/tests/CMakeLists.txt")
 file(READ "${registrations}" before)
 string(REPLACE
-       "set_tests_properties(\"glob-traversals-selftest\" PROPERTIES\n    FAIL_REGULAR_EXPRESSION \"\${FASTCACHED_SCRIPT_CHECK_FAILED}\"\n"
+       "set_tests_properties(\"glob-traversals-selftest\" PROPERTIES\n    FAIL_REGULAR_EXPRESSION \"\${PACE_SCRIPT_CHECK_FAILED}\"\n"
        "set_tests_properties(\"glob-traversals-selftest\" PROPERTIES\n" after "${before}")
 file(WRITE "${registrations}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("unsignalled" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("unsignalled" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a registration with no FAIL_REGULAR_EXPRESSION is refused, and named"
+pace_case("a registration with no FAIL_REGULAR_EXPRESSION is refused, and named"
                 "${tree}" ".glob-traversals-selftest. runs a .cmake -P. script but has no FAIL_REGULAR_EXPRESSION")
 file(WRITE "${registrations}" "${before}")
 file(READ "${registrations}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("unsignalled" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("unsignalled" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # And the walk itself losing the shape it reads. The finding has to name the WALK: a
@@ -421,14 +421,14 @@ file(READ "${registrations}" before)
 string(REPLACE "set_tests_properties(" "set_test_properties(" after "${before}")
 file(WRITE "${registrations}" "${after}")
 if(before STREQUAL after)
-    fastcached_selftest_failed("blocks-unreadable" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("blocks-unreadable" "the injection changed nothing, so the case stages no defect")
 endif()
-fastcached_case("a walk that stops recognising property blocks names ITSELF, not 71 innocent checks"
+pace_case("a walk that stops recognising property blocks names ITSELF, not 71 innocent checks"
                 "${tree}" "has stopped recognising the shape" no-count)
 file(WRITE "${registrations}" "${before}")
 file(READ "${registrations}" restored)
 if(NOT restored STREQUAL before)
-    fastcached_selftest_failed("blocks-unreadable" "the tree was not restored, so every later case reads an undescribed tree")
+    pace_selftest_failed("blocks-unreadable" "the tree was not restored, so every later case reads an undescribed tree")
 endif()
 
 # The control AGAIN, over the tree every case above has now written to. The
@@ -438,7 +438,7 @@ endif()
 # mutated against itself and agree. It is also the half the one-copy-per-case
 # arrangement could not have: five pristine trees can say nothing about whether
 # an injection was undone.
-fastcached_case("the same tree, after every injection was reverted" "${tree}" "")
+pace_case("the same tree, after every injection was reverted" "${tree}" "")
 
 # ---------------------------------------------------------------------------
 if(failureCount GREATER 0)

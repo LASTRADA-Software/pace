@@ -56,8 +56,8 @@
 # vehicle. It stages nothing executable, so it cannot trip its own rule.
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "check-staged-stub-spawns: FASTCACHED_SOURCE_DIR is required")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "check-staged-stub-spawns: PACE_SOURCE_DIR is required")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
@@ -111,12 +111,12 @@ set(PortabilityOnly
 )
 
 # --- the derived population ----------------------------------------------------
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "*.sh" "*.py" "*.cmake" "*.cpp" "*.hpp" "*.ps1"
     GLOBS "*.sh" "*.py" "*.cmake" "*.cpp" "*.hpp" "*.ps1"
     FILES_OUT allFiles
     MODE_OUT scanMode)
-fastcached_decline_third_party("${FASTCACHED_SOURCE_DIR}" allFiles declined)
+pace_decline_third_party("${PACE_SOURCE_DIR}" allFiles declined)
 
 list(LENGTH allFiles fileCount)
 message(STATUS "staged-stub-spawns: reading ${fileCount} first-party file(s) (${scanMode})")
@@ -126,7 +126,7 @@ endif()
 
 set(candidates "")
 foreach(relative IN LISTS allFiles)
-    set(absolute "${FASTCACHED_SOURCE_DIR}/${relative}")
+    set(absolute "${PACE_SOURCE_DIR}/${relative}")
     if(NOT EXISTS "${absolute}")
         continue()
     endif()
@@ -195,7 +195,7 @@ foreach(row IN LISTS StagedStubSpawns)
         # The BEST outcome and the one the refusal below points at: the fixture
         # stages a form the spawner can start, so it runs on every platform
         # instead of skipping. Its guard token selects that form.
-        file(READ "${FASTCACHED_SOURCE_DIR}/${rowPath}" adaptedText)
+        file(READ "${PACE_SOURCE_DIR}/${rowPath}" adaptedText)
         string(FIND "${adaptedText}" "${rowGuard}" adaptedAt)
         if(adaptedAt EQUAL -1)
             Refuse("`${rowPath}` is classed `adapted` and its row names `${rowGuard}` as the token selecting the executable form -- and that token does not appear in the file. Either the adaptation was removed, in which case the fixture now fails ENOEXEC where the spawner is not a shell, or the row names the wrong token.")
@@ -210,7 +210,7 @@ foreach(row IN LISTS StagedStubSpawns)
     endif()
 
     # An `executed` row must actually carry its guard.
-    file(READ "${FASTCACHED_SOURCE_DIR}/${rowPath}" guardText)
+    file(READ "${PACE_SOURCE_DIR}/${rowPath}" guardText)
     string(FIND "${guardText}" "${rowGuard}" guardAt)
     if(guardAt EQUAL -1)
         Refuse("`${rowPath}` is classed `guarded` and its row names `${rowGuard}` as the guard that keeps it off the platforms that cannot start a shebang -- and that token does not appear in the file. Either the guard was removed, in which case the fixture now fails ENOEXEC there, or the row is naming the wrong token.")

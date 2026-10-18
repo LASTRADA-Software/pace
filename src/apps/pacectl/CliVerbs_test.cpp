@@ -1,0 +1,653 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "CliVerbs.hpp"
+#include "LiveSession.hpp"
+#include "ScriptedExchange.hpp"
+
+#include <Pace/Distributed/FleetView.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+#include <tests/Unwrap.hpp>
+
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
+
+namespace
+{
+/// Run a verb against a scripted exchange.
+/// @param name The verb.
+/// @param operands Its positional arguments.
+/// @param exchange What the server will say.
+/// @param options The modifiers.
+/// @return The answer.
+[[nodiscard]] Answer Run(std::string_view name,
+                         std::vector<std::string> operands,
+                         ScriptedExchange& exchange,
+                         VerbOptions const& options = {})
+{
+    auto const* const verb = FindVerb(name);
+    REQUIRE(verb != nullptr);
+    return RunVerb(*verb, VerbContext { .operands = operands, .options = options, .resp = &exchange, .stats = nullptr });
+}
+
+/// Whether any advisory contains @p needle.
+/// @param answer The answer.
+/// @param needle What to look for.
+/// @return True when some advisory contains it.
+[[nodiscard]] bool Mentions(Answer const& answer, std::string_view needle)
+{
+    return std::ranges::any_of(answer.advisories,
+                               [needle](std::string const& advisory) { return advisory.contains(needle); });
+}
+
+} // namespace
+
+TEST_CASE("the verb table is internally consistent", "[cli][verbs]")
+{
+    CHECK_FALSE(Verbs().empty());
+    for (auto const& verb: Verbs())
+    {
+        CHECK_FALSE(verb.name.empty());
+        CHECK_FALSE(verb.summary.empty());
+        CHECK(verb.handler != nullptr);
+        // A verb reachable by name is the only kind the parser can dispatch.
+        CHECK(FindVerb(verb.name) == &verb);
+        // Bounds that cannot be satisfied would make a verb permanently unusable.
+        CHECK((verb.maxOperands == VariadicOperands || verb.minOperands <= verb.maxOperands));
+        // A RESP verb needs something to send; the stats verb deliberately does not.
+        if (verb.wire == Wire::Resp)
+            CHECK_FALSE(verb.protocolCommand.empty());
+    }
+    CHECK(FindVerb("no-such-verb") == nullptr);
+}
+
+TEST_CASE("the one verb that watches is live-stats, and it runs its session on its own column", "[cli][verbs][live]")
+{
+    // `main` asks `session` before `handler`, so a watching verb with no session would answer
+    // its admission once and exit, and a second session on some other row would be dispatched
+    // there silently. Both directions, by name.
+    for (auto const& verb: Verbs())
+    {
+        INFO("verb: " << verb.name);
+        CHECK((verb.session != nullptr) == (verb.name == "live-stats"));
+    }
+    auto const* const live = FindVerb("live-stats");
+    REQUIRE(live != nullptr);
+    CHECK(live->session == &RunLiveStatsSession);
+}
+
+TEST_CASE("no two verbs claim the same name", "[cli][verbs]")
+{
+    for (auto const& verb: Verbs())
+    {
+        auto const matches =
+            std::ranges::count_if(Verbs(), [&verb](VerbSpec const& other) { return other.name == verb.name; });
+        CHECK(matches == 1);
+    }
+}
+
+TEST_CASE("operand bounds are enforced and described from the row", "[cli][verbs]")
+{
+    auto const* const get = FindVerb("get");
+    REQUIRE(get != nullptr);
+    CHECK_FALSE(OperandCountAccepted(*get, 0));
+    CHECK(OperandCountAccepted(*get, 1));
+    CHECK_FALSE(OperandCountAccepted(*get, 2));
+    CHECK(DescribeOperandArity(*get) == "exactly 1 operand");
+
+    auto const* const mget = FindVerb("mget");
+    REQUIRE(mget != nullptr);
+    CHECK_FALSE(OperandCountAccepted(*mget, 0));
+    CHECK(OperandCountAccepted(*mget, 1));
+    CHECK(OperandCountAccepted(*mget, 50));
+    CHECK(DescribeOperandArity(*mget) == "at least 1 operand");
+
+    auto const* const ping = FindVerb("ping");
+    REQUIRE(ping != nullptr);
+    CHECK(OperandCountAccepted(*ping, 0));
+    CHECK_FALSE(OperandCountAccepted(*ping, 1));
+    CHECK(DescribeOperandArity(*ping) == "exactly 0 operands");
+}
+
+TEST_CASE("a verb whose wire was not opened is refused rather than crashing", "[cli][verbs]")
+{
+    auto const* const get = FindVerb("get");
+    REQUIRE(get != nullptr);
+    auto const operands = std::vector<std::string> { "k" };
+
+    auto const answer = RunVerb(*get, VerbContext { .operands = operands, .resp = nullptr, .stats = nullptr });
+    CHECK(answer.outcome == Outcome::Unreachable);
+    CHECK(Mentions(answer, "no connection to the cache"));
+}
+
+TEST_CASE("get sends GET and reports the value", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Bulk("hello") }) };
+    auto const answer = Run("get", { "k" }, exchange);
+
+    // The request is asserted, not just the answer: a handler that sent the wrong
+    // command would still produce a plausible-looking result.
+    REQUIRE(exchange.Sent().size() == 1);
+    CHECK(SentFrame(exchange) == std::vector<std::string> { "GET", "k" });
+
+    CHECK(answer.outcome == Outcome::Affirmative);
+    REQUIRE(answer.value.shape == Shape::Scalar);
+    CHECK(answer.value.scalar.lexical == "hello");
+    CHECK_FALSE(answer.rawPayload.has_value());
+}
+
+TEST_CASE("a get miss is a negative answer and not a failure", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Nil() }) };
+    auto const answer = Run("get", { "k" }, exchange);
+
+    // The discrimination the exit-code table exists for: a miss and a dead daemon must
+    // not share a code. Here it is Negative, and the value is absent rather than an
+    // empty string -- an empty string is a value somebody could have stored.
+    CHECK(answer.outcome == Outcome::Negative);
+    REQUIRE(answer.value.shape == Shape::Scalar);
+    CHECK(answer.value.scalar.kind == CellKind::Absent);
+    CHECK(Mentions(answer, "no such key"));
+}
+
+TEST_CASE("get of a stored empty string is affirmative, not a miss", "[cli][verbs]")
+{
+    // The positive control for the case above: a handler that treated an empty payload
+    // as a miss would pass that test and fail this one.
+    ScriptedExchange exchange { Answers({ Bulk("") }) };
+    auto const answer = Run("get", { "k" }, exchange);
+
+    CHECK(answer.outcome == Outcome::Affirmative);
+    CHECK(answer.value.scalar.kind == CellKind::Text);
+    CHECK(answer.value.scalar.lexical.empty());
+}
+
+TEST_CASE("a value that is not UTF-8 is shown base64 and said to be", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Bulk(std::string { 'a', '\x80', 'b' }) }) };
+    auto const answer = Run("get", { "k" }, exchange);
+
+    CHECK(answer.outcome == Outcome::Affirmative);
+    CHECK(answer.value.scalar.kind == CellKind::Binary);
+    CHECK(answer.value.scalar.lexical == "YYBi");
+    // Told, rather than left to guess. A silent repair is the failure that is quiet.
+    CHECK(Mentions(answer, "base64"));
+}
+
+TEST_CASE("get --raw hands over the bytes and renders nothing", "[cli][verbs]")
+{
+    auto const bytes = std::string { 'a', '\x80', 'b' };
+    ScriptedExchange exchange { Answers({ Bulk(bytes) }) };
+    auto const answer = Run("get", { "k" }, exchange, VerbOptions { .raw = true });
+
+    REQUIRE(answer.rawPayload.has_value());
+    // Untouched: the one escape from the text/base64 classification.
+    CHECK(Pace::Testing::Unwrap(answer.rawPayload) == bytes);
+    CHECK(answer.value.shape == Shape::Empty);
+}
+
+TEST_CASE("mget pairs every key with its value and marks the misses absent", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Array({ Bulk("1"), Nil(), Bulk("3") }) }) };
+    auto const answer = Run("mget", { "a", "b", "c" }, exchange);
+
+    REQUIRE(exchange.Sent().size() == 1);
+    CHECK(SentFrame(exchange) == std::vector<std::string> { "MGET", "a", "b", "c" });
+
+    REQUIRE(answer.value.shape == Shape::Table);
+    CHECK(answer.value.columns == std::vector<std::string> { "key", "value" });
+    REQUIRE(answer.value.rows.size() == 3);
+    CHECK(answer.value.rows[0][0].lexical == "a");
+    CHECK(answer.value.rows[0][1].lexical == "1");
+    // The miss is absent, so JSON renders null and the human format a dash -- never a
+    // zero or an empty string, either of which is a value.
+    CHECK(answer.value.rows[1][1].kind == CellKind::Absent);
+    CHECK(answer.value.rows[2][1].lexical == "3");
+    CHECK(answer.outcome == Outcome::Affirmative);
+    CHECK(Mentions(answer, "2 of 3 keys exist"));
+    CHECK(WellFormed(answer.value));
+}
+
+TEST_CASE("mget where nothing exists is negative", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Array({ Nil(), Nil() }) }) };
+    auto const answer = Run("mget", { "a", "b" }, exchange);
+    CHECK(answer.outcome == Outcome::Negative);
+    CHECK(Mentions(answer, "none of the keys exist"));
+}
+
+TEST_CASE("mget refuses a reply that answers about the wrong number of keys", "[cli][verbs]")
+{
+    // A crossed or truncated reply. The server answered, and what it said cannot be
+    // matched to the request -- so it is Protocol, not Refused.
+    ScriptedExchange exchange { Answers({ Array({ Bulk("1") }) }) };
+    auto const answer = Run("mget", { "a", "b" }, exchange);
+    CHECK(answer.outcome == Outcome::Protocol);
+    CHECK(Mentions(answer, "answered about 1"));
+}
+
+TEST_CASE("set sends the modifiers it was given and nothing it was not", "[cli][verbs]")
+{
+    SECTION("plain")
+    {
+        ScriptedExchange exchange { Answers({ Simple("OK") }) };
+        auto const answer = Run("set", { "k", "v" }, exchange);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "SET", "k", "v" });
+        CHECK(answer.outcome == Outcome::Affirmative);
+        CHECK(answer.value.shape == Shape::Empty);
+    }
+    SECTION("with a ttl")
+    {
+        ScriptedExchange exchange { Answers({ Simple("OK") }) };
+        (void) Run("set", { "k", "v" }, exchange, VerbOptions { .ttl = std::chrono::seconds { 30 } });
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "SET", "k", "v", "EX", "30" });
+    }
+    SECTION("with a ttl past memcached's bound, which RESP carries as a length")
+    {
+        // The control for the memcached refusal: the bound is that WIRE's, so a check written
+        // against the verb or the value would refuse this too.
+        ScriptedExchange exchange { Answers({ Simple("OK") }) };
+        auto const answer = Run("set", { "k", "v" }, exchange, VerbOptions { .ttl = std::chrono::days { 31 } });
+        CHECK(answer.outcome == Outcome::Affirmative);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "SET", "k", "v", "EX", "2678400" });
+    }
+    SECTION("only if absent")
+    {
+        ScriptedExchange exchange { Answers({ Simple("OK") }) };
+        (void) Run("set", { "k", "v" }, exchange, VerbOptions { .onlyIfAbsent = true });
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "SET", "k", "v", "NX" });
+    }
+}
+
+TEST_CASE("a set the server declined on nx is negative and says which condition", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Nil() }) };
+    auto const answer = Run("set", { "k", "v" }, exchange, VerbOptions { .onlyIfAbsent = true });
+
+    // An answer, and it is `no`. Not a failure -- the server did exactly what it was
+    // asked.
+    CHECK(answer.outcome == Outcome::Negative);
+    CHECK(Mentions(answer, "already exists"));
+}
+
+TEST_CASE("del reports the count and calls zero a negative answer", "[cli][verbs]")
+{
+    SECTION("some deleted")
+    {
+        ScriptedExchange exchange { Answers({ Integer(2) }) };
+        auto const answer = Run("del", { "a", "b" }, exchange);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "DEL", "a", "b" });
+        CHECK(answer.outcome == Outcome::Affirmative);
+        CHECK(answer.value.scalar.lexical == "2");
+    }
+    SECTION("none deleted")
+    {
+        ScriptedExchange exchange { Answers({ Integer(0) }) };
+        auto const answer = Run("del", { "a" }, exchange);
+        CHECK(answer.outcome == Outcome::Negative);
+        // The number is still reported, so a script does not have to infer it.
+        CHECK(answer.value.scalar.lexical == "0");
+    }
+}
+
+TEST_CASE("an incr that lands on zero is not a negative answer", "[cli][verbs]")
+{
+    // The row's own name decides whether zero means `no`. An `incr` reaching zero has
+    // succeeded; a `del` of nothing has not deleted anything. One handler serves both,
+    // so this is the case that keeps them apart.
+    ScriptedExchange exchange { Answers({ Integer(0) }) };
+    auto const answer = Run("incr", { "k" }, exchange);
+    CHECK(SentFrame(exchange) == std::vector<std::string> { "INCR", "k" });
+    CHECK(answer.outcome == Outcome::Affirmative);
+    CHECK(answer.value.scalar.lexical == "0");
+}
+
+TEST_CASE("the arithmetic family each send their own command", "[cli][verbs]")
+{
+    // The `protocolCommand` column is what lets one handler serve six rows; if a row
+    // carried the wrong word, every one of them would still answer plausibly.
+    struct Expectation
+    {
+        std::string_view verb;
+        std::vector<std::string> operands;
+        std::vector<std::string> sent;
+    };
+    auto const expectations = std::vector<Expectation> {
+        { .verb = "incr", .operands = { "k" }, .sent = { "INCR", "k" } },
+        { .verb = "decr", .operands = { "k" }, .sent = { "DECR", "k" } },
+        { .verb = "incrby", .operands = { "k", "5" }, .sent = { "INCRBY", "k", "5" } },
+        { .verb = "decrby", .operands = { "k", "5" }, .sent = { "DECRBY", "k", "5" } },
+        { .verb = "exists", .operands = { "k" }, .sent = { "EXISTS", "k" } },
+    };
+
+    for (auto const& expectation: expectations)
+    {
+        ScriptedExchange exchange { Answers({ Integer(1) }) };
+        (void) Run(expectation.verb, expectation.operands, exchange);
+        REQUIRE(exchange.Sent().size() == 1);
+        CHECK(SentFrame(exchange) == expectation.sent);
+    }
+}
+
+TEST_CASE("ttl reports its three states distinguishably on stdout", "[cli][verbs]")
+{
+    // The whole reason `ttl` is a record. Rendered as a bare scalar, *no such key* and
+    // *exists with no expiry* both come out as an absent cell and are separable only
+    // by the exit code -- a state collapse in the one verb whose job is that
+    // distinction.
+    SECTION("a live ttl")
+    {
+        ScriptedExchange exchange { Answers({ Integer(45) }) };
+        auto const answer = Run("ttl", { "k" }, exchange);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "TTL", "k" });
+        CHECK(answer.outcome == Outcome::Affirmative);
+        REQUIRE(FindField(answer.value, "exists") != nullptr);
+        CHECK(FindField(answer.value, "exists")->value.lexical == "true");
+        REQUIRE(FindField(answer.value, "ttl") != nullptr);
+        CHECK(FindField(answer.value, "ttl")->value.lexical == "45");
+    }
+    SECTION("exists with no expiry")
+    {
+        ScriptedExchange exchange { Answers({ Integer(-1) }) };
+        auto const answer = Run("ttl", { "k" }, exchange);
+        CHECK(answer.outcome == Outcome::Affirmative);
+        CHECK(FindField(answer.value, "exists")->value.lexical == "true");
+        CHECK(FindField(answer.value, "ttl")->value.kind == CellKind::Absent);
+        CHECK(Mentions(answer, "no expiry"));
+    }
+    SECTION("no such key")
+    {
+        ScriptedExchange exchange { Answers({ Integer(-2) }) };
+        auto const answer = Run("ttl", { "k" }, exchange);
+        CHECK(answer.outcome == Outcome::Negative);
+        // `exists` is what separates this from the section above. Both have an absent
+        // `ttl`.
+        CHECK(FindField(answer.value, "exists")->value.lexical == "false");
+        CHECK(FindField(answer.value, "ttl")->value.kind == CellKind::Absent);
+    }
+}
+
+TEST_CASE("expire and persist report whether they changed anything", "[cli][verbs]")
+{
+    SECTION("it did")
+    {
+        ScriptedExchange exchange { Answers({ Integer(1) }) };
+        auto const answer = Run("expire", { "k", "30" }, exchange);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "EXPIRE", "k", "30" });
+        CHECK(answer.outcome == Outcome::Affirmative);
+    }
+    SECTION("it did not")
+    {
+        ScriptedExchange exchange { Answers({ Integer(0) }) };
+        auto const answer = Run("persist", { "k" }, exchange);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "PERSIST", "k" });
+        CHECK(answer.outcome == Outcome::Negative);
+    }
+}
+
+TEST_CASE("flush picks its command from --all", "[cli][verbs]")
+{
+    SECTION("this database")
+    {
+        ScriptedExchange exchange { Answers({ Simple("OK") }) };
+        auto const answer = Run("flush", {}, exchange);
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "FLUSHDB" });
+        CHECK(answer.outcome == Outcome::Affirmative);
+    }
+    SECTION("every database")
+    {
+        ScriptedExchange exchange { Answers({ Simple("OK") }) };
+        (void) Run("flush", {}, exchange, VerbOptions { .everything = true });
+        CHECK(SentFrame(exchange) == std::vector<std::string> { "FLUSHALL" });
+    }
+}
+
+TEST_CASE("ping and echo report what came back", "[cli][verbs]")
+{
+    ScriptedExchange ping { Answers({ Simple("PONG") }) };
+    auto const pinged = Run("ping", {}, ping);
+    CHECK(SentFrame(ping) == std::vector<std::string> { "PING" });
+    CHECK(pinged.value.scalar.lexical == "PONG");
+
+    ScriptedExchange echo { Answers({ Bulk("shout") }) };
+    auto const echoed = Run("echo", { "shout" }, echo);
+    CHECK(SentFrame(echo) == std::vector<std::string> { "ECHO", "shout" });
+    CHECK(echoed.value.scalar.lexical == "shout");
+}
+
+TEST_CASE("info parses the payload into a record", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Bulk("# Server\r\npace_version:1.2.3\r\nused_memory:9\r\n") }) };
+    auto const answer = Run("info", {}, exchange);
+
+    CHECK(SentFrame(exchange) == std::vector<std::string> { "INFO" });
+    CHECK(answer.outcome == Outcome::Affirmative);
+    REQUIRE(FindField(answer.value, "pace_version") != nullptr);
+    CHECK(FindField(answer.value, "pace_version")->value.lexical == "1.2.3");
+}
+
+TEST_CASE("info accepts a verbatim payload as well as a bulk one", "[cli][verbs]")
+{
+    // A verbatim string is what INFO answers under RESP3. Accepting both costs one
+    // comparison and means this does not break the day the client sends HELLO 3.
+    ScriptedExchange exchange { Answers({ Verbatim("txt:pace_version:1.2.3\r\n") }) };
+    auto const answer = Run("info", {}, exchange);
+    CHECK(answer.outcome == Outcome::Affirmative);
+}
+
+TEST_CASE("version reports both ends", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Bulk("pace_version:9.9.9\r\nredis_version:6.0.0-pace\r\n") }) };
+    auto const answer = Run("version", {}, exchange);
+
+    CHECK(answer.outcome == Outcome::Affirmative);
+    REQUIRE(FindField(answer.value, "client") != nullptr);
+    // Compiled in, so it cannot have drifted from the build.
+    CHECK(FindField(answer.value, "client")->value.lexical == PACE_CLI_VERSION);
+    REQUIRE(FindField(answer.value, "server") != nullptr);
+    CHECK(FindField(answer.value, "server")->value.lexical == "9.9.9");
+    CHECK(FindField(answer.value, "resp_dialect")->value.lexical == "6.0.0-pace");
+}
+
+TEST_CASE("version still reports the client half when the server cannot be reached", "[cli][verbs]")
+{
+    // The half that is knowable without a server is still reported. Answering with
+    // nothing but the failure would throw away a fact this process already had.
+    ScriptedExchange exchange { Failure(ExchangeFailure::Unreachable, "connection refused") };
+    auto const answer = Run("version", {}, exchange);
+
+    CHECK(answer.outcome == Outcome::Unreachable);
+    REQUIRE(FindField(answer.value, "client") != nullptr);
+    CHECK(FindField(answer.value, "client")->value.lexical == PACE_CLI_VERSION);
+    // And the server half is absent rather than blank or zero.
+    REQUIRE(FindField(answer.value, "server") != nullptr);
+    CHECK(FindField(answer.value, "server")->value.kind == CellKind::Absent);
+    CHECK(Mentions(answer, "connection refused"));
+}
+
+TEST_CASE("a server error is a refusal and carries what the server said", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Error("ERR unknown command 'GET'") }) };
+    auto const answer = Run("get", { "k" }, exchange);
+
+    // Refused, not Protocol: the server answered and declined. Those are fixed by
+    // different people.
+    CHECK(answer.outcome == Outcome::Refused);
+    CHECK(Mentions(answer, "unknown command"));
+}
+
+TEST_CASE("NOAUTH is a refusal that names how to supply a credential", "[cli][verbs]")
+{
+    ScriptedExchange exchange { Answers({ Error("NOAUTH Authentication required.") }) };
+    auto const answer = Run("get", { "k" }, exchange);
+
+    CHECK(answer.outcome == Outcome::Refused);
+    // The bare server sentence does not say how to supply one, and this is the most
+    // likely first-run failure.
+    CHECK(Mentions(answer, "PACE_TOKEN"));
+}
+
+TEST_CASE("each exchange failure maps to its own outcome", "[cli][verbs]")
+{
+    SECTION("unreachable")
+    {
+        ScriptedExchange exchange { Failure(ExchangeFailure::Unreachable, "refused") };
+        CHECK(Run("get", { "k" }, exchange).outcome == Outcome::Unreachable);
+    }
+    SECTION("transport")
+    {
+        ScriptedExchange exchange { Failure(ExchangeFailure::Transport, "reset") };
+        CHECK(Run("get", { "k" }, exchange).outcome == Outcome::Unreachable);
+    }
+    SECTION("malformed")
+    {
+        // A reply this client cannot read is NOT the same as not getting one, and it
+        // must not share an exit code with it.
+        ScriptedExchange exchange { Failure(ExchangeFailure::Malformed, "nonsense") };
+        CHECK(Run("get", { "k" }, exchange).outcome == Outcome::Protocol);
+    }
+}
+
+TEST_CASE("an unexpected reply shape is a protocol error naming both shapes", "[cli][verbs]")
+{
+    // The outcome that suggests a version mismatch rather than a misconfiguration.
+    ScriptedExchange exchange { Answers({ Integer(7) }) };
+    auto const answer = Run("get", { "k" }, exchange);
+    CHECK(answer.outcome == Outcome::Protocol);
+    CHECK(Mentions(answer, "integer"));
+    CHECK(Mentions(answer, "a value"));
+}
+
+TEST_CASE("stats goes through the gatherer and is refused without one", "[cli][verbs]")
+{
+    auto const* const stats = FindVerb("stats");
+    REQUIRE(stats != nullptr);
+    CHECK(stats->wire == Wire::Stats);
+
+    SECTION("with a gatherer")
+    {
+        auto gatherer = ScriptedGatherer { std::vector<StatsAttempt> { StatsAttempt {
+            .origin = StatsOrigin::Metrics,
+            .asked = true,
+            .record = RecordValue({ Field { .name = "pace_items", .value = NumberCell(std::uint64_t { 3 }) } }) } } };
+        auto const answer = RunVerb(*stats, VerbContext { .resp = nullptr, .stats = &gatherer });
+        CHECK(gatherer.Calls() == 1);
+        CHECK(answer.outcome == Outcome::Affirmative);
+        REQUIRE(FindField(answer.value, "source") != nullptr);
+        CHECK(FindField(answer.value, "source")->value.lexical == "metrics");
+    }
+    SECTION("without one")
+    {
+        auto const answer = RunVerb(*stats, VerbContext { .resp = nullptr, .stats = nullptr });
+        CHECK(answer.outcome == Outcome::Unreachable);
+        CHECK(Mentions(answer, "no stats source"));
+    }
+}
+
+TEST_CASE("every wire has a row explaining its absence", "[cli][verbs]")
+{
+    for (auto const& row: WireTable)
+    {
+        CHECK_FALSE(row.name.empty());
+        // The sentence an operator reads when the wire could not be opened. An empty
+        // one would make the refusal unactionable.
+        CHECK_FALSE(row.unavailable.empty());
+    }
+}
+
+TEST_CASE("the fleet verb offers every section the server serves", "[cli][verbs]")
+{
+    // `fleet`'s operand list is a literal, because `VerbTable` is `constexpr` and
+    // joining `FleetSectionTable` into it would be a compile-time string built into a
+    // buffer -- more machinery than a display-only field is worth. This is what keeps
+    // it from going stale instead: the guard is a walk over the server's own table, so
+    // a section added there and not spelled in the help reddens HERE rather than
+    // presenting as a key an operator is never told about.
+    auto const* const fleet = FindVerb("fleet");
+    REQUIRE(fleet != nullptr);
+    REQUIRE_FALSE(Distributed::FleetSectionTable.empty());
+
+    for (auto const& row: Distributed::FleetSectionTable)
+    {
+        INFO("section " << row.key);
+        CHECK(fleet->operands.contains(row.key));
+    }
+
+    // The other direction, or the case passes for a list that names every section AND
+    // six that do not exist. Counted by separators rather than by parsing, which is
+    // all the shape needs: `<a|b|c>` has one fewer `|` than it has keys.
+    CHECK(std::ranges::count(fleet->operands, '|') + 1
+          == static_cast<std::ptrdiff_t>(Distributed::FleetSectionTable.size()));
+}
+
+TEST_CASE("the base64 reassurance is the WIRE's, not every wire's", "[cli][verbs]")
+{
+    // `NoteBinaryCells` runs from `RunVerb` for EVERY verb, so its sentence -- *a
+    // memcached key is a byte string, so this is ordinary rather than a fault* --
+    // was told to operators of the RESP and node wires as well, about answers that
+    // have no memcached keys in them. The claim is true of exactly one wire, so it
+    // is that wire's row.
+    //
+    // WHAT DISTINGUISHES: the general sentence is on BOTH sides, so asserting it
+    // proves nothing. What separates them is the memcached clause -- present on the
+    // memcached wire and absent here -- so this case asserts its ABSENCE beside the
+    // general sentence's presence. Either assertion alone passes under the defect.
+    //
+    // And the KEY carries the bytes while the value is ordinary text, which is not a
+    // stylistic choice: `ValueCell` explains a binary VALUE itself, and
+    // `NoteBinaryCells` returns early when that advisory is already there -- so an
+    // answer whose only binary cell is a value never reaches the wire note at all,
+    // and a case built on one passes under its own mutant. Measured, not reasoned:
+    // the first draft of this case did exactly that and survived the neutering.
+    auto exchange = ScriptedExchange { { Array({ Bulk("plain") }) } };
+    auto const answer = Run("mget", { "k\x80y" }, exchange);
+
+    REQUIRE(answer.value.shape == Shape::Table);
+    REQUIRE(answer.value.rows.size() == 1);
+    CHECK(answer.value.rows[0][0].kind == CellKind::Binary); // the key
+    CHECK(answer.value.rows[0][1].kind == CellKind::Text);   // the value
+    CHECK(Mentions(answer, "base64"));
+    CHECK(!Mentions(answer, "memcached"));
+
+    // The control on the other half: a wire with a note still says the general
+    // sentence, so an empty column is not what makes the assertion above pass. The
+    // memcached side of it is asserted where a memcached exchange can be scripted,
+    // in "a key shown base64 is explained, as a value already was".
+    CHECK(WireTable[static_cast<std::size_t>(Wire::Memcached)].binaryNote.contains("memcached"));
+    CHECK(WireTable[static_cast<std::size_t>(Wire::Resp)].binaryNote.empty());
+}
+
+TEST_CASE("one answer says the value was base64-encoded once", "[cli][verbs]")
+{
+    // `ValueCell` appended the advisory per VALUE while `NoteBinaryCells`, two
+    // functions below it, already de-duplicated by exact comparison -- so `mget` over
+    // three binary values printed the identical stderr line three times. The
+    // asymmetry was live in one file.
+    //
+    // WHAT DISTINGUISHES: the COUNT. Every assertion about the sentence's content
+    // passes with three copies of it, which is why this one counts rather than
+    // matching, and why three keys are needed -- two binary values out of two is a
+    // count a one-key answer cannot tell apart from one.
+    auto exchange = ScriptedExchange { { Array({ Bulk("a\x80"), Bulk("b\x80"), Bulk("c\x80") }) } };
+    auto const answer = Run("mget", { "k1", "k2", "k3" }, exchange);
+
+    REQUIRE(answer.value.shape == Shape::Table);
+    REQUIRE(answer.value.rows.size() == 3);
+    for (auto const& row: answer.value.rows)
+        CHECK(row[1].kind == CellKind::Binary);
+
+    CHECK(std::ranges::count_if(answer.advisories, [](std::string const& advisory) { return advisory.contains("base64"); })
+          == 1);
+
+    // The control, so "the advisory is never appended" would fail here rather than
+    // pass: three ordinary values say nothing at all.
+    auto plain = ScriptedExchange { { Array({ Bulk("a"), Bulk("b"), Bulk("c") }) } };
+    auto const quiet = Run("mget", { "k1", "k2", "k3" }, plain);
+    CHECK(!Mentions(quiet, "base64"));
+}

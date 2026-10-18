@@ -9,22 +9,22 @@
 # refusal carries: every refusal prints `CMake Error`, so asserting that alone would pass
 # with the arms exchanged.
 #
-# Usage: cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<dir> -P <this>
+# Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-error-popups.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-error-popups.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
 set(failures "")
 set(cases 0)
 set(variable "FC_SELFTEST_SUPPRESS")
@@ -53,7 +53,7 @@ endfunction()
 # @param edges the build.ninja body, or `<none>` for no file
 # @param outVar receives the tree's path
 function(fc_stage name manifest registrations nested catchTests edges outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(MAKE_DIRECTORY "${tree}/src/apps/x")
     file(WRITE "${tree}/error-popups-Debug.manifest" "${manifest}")
     string(REPLACE "@TREE@" "${tree}" registrations "${registrations}")
@@ -81,7 +81,7 @@ function(fc_case label tree want phrase)
     math(EXPR count "${cases} + 1")
     set(cases ${count} PARENT_SCOPE)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" -DCONFIG=Debug -DANCHOR=FastCacheTest
+        COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" -DCONFIG=Debug -DANCHOR=PaceTest
                 "-DVARIABLE=${variable}" -P "${check}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE status)
     set(output "${out}${err}")
@@ -103,23 +103,23 @@ function(fc_case label tree want phrase)
 endfunction()
 
 set(t "D:/b/target")
-set(anchorRow "FastCacheTest|${t}/FastCacheTest.exe|always|\n")
-fc_registration(anchorTest "a case" "${t}/FastCacheTest.exe [=[a case]=]" TRUE)
-set(anchorEdge "build target\\FastCacheTest.exe: CXX_EXECUTABLE_LINKER__FastCacheTest_Debug src\\tests\\CMakeFiles\\FastCacheTest.dir\\a.cpp.obj src\\tests\\CMakeFiles\\FastCacheTest.dir\\ErrorPopupsAtStartup.cpp.obj\n")
+set(anchorRow "PaceTest|${t}/PaceTest.exe|always|\n")
+fc_registration(anchorTest "a case" "${t}/PaceTest.exe [=[a case]=]" TRUE)
+set(anchorEdge "build target\\PaceTest.exe: CXX_EXECUTABLE_LINKER__PaceTest_Debug src\\tests\\CMakeFiles\\PaceTest.dir\\a.cpp.obj src\\tests\\CMakeFiles\\PaceTest.dir\\ErrorPopupsAtStartup.cpp.obj\n")
 set(catchInclude "include(\"@TREE@/src/apps/x/cli-tests-b12d07c_include.cmake\")\n")
 set(catchTestsMarked "add_test( [==[the table is well formed]==] ${t}/cli-tests.exe [==[the table is well formed]==]  )\nset_tests_properties( [==[the table is well formed]==] PROPERTIES WORKING_DIRECTORY D:/b SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION ${variable}=set:1)\n")
 set(catchEdge "build target\\cli-tests.exe: CXX_EXECUTABLE_LINKER__cli-tests_Debug x.obj ErrorPopupsAtStartup.cpp.obj\n")
 
 # ---- the passing direction --------------------------------------------------------------
 
-fc_registration(ccE2e "cc-e2e" "\"bash\" \"e2e.sh\" \"--launcher\" \"${t}/fastcache-cc\"" TRUE)
+fc_registration(ccE2e "cc-e2e" "\"bash\" \"e2e.sh\" \"--launcher\" \"${t}/pace-cc\"" TRUE)
 fc_registration(canary "canary" "\"cmake\" \"-DCANARY=${t}/canary.exe\" \"-P\" \"gate.cmake\"" TRUE)
 fc_stage(clean
-    "${anchorRow}cli-tests|${t}/cli-tests.exe|always|\nfastcache-cc|${t}/fastcache-cc|on-request|\ncanary|${t}/canary.exe|always|\nunlaunched|${t}/unlaunched.exe|always|\n"
+    "${anchorRow}cli-tests|${t}/cli-tests.exe|always|\npace-cc|${t}/pace-cc|on-request|\ncanary|${t}/canary.exe|always|\nunlaunched|${t}/unlaunched.exe|always|\n"
     "${anchorTest}${ccE2e}${canary}"
     "${catchInclude}"
     "${catchTestsMarked}"
-    "${anchorEdge}${catchEdge}build target/fastcache-cc: CXX_EXECUTABLE_LINKER__fastcache-cc_Debug y.o ErrorPopupsAtStartup.cpp.o\nbuild target\\canary.exe: CXX_EXECUTABLE_LINKER__canary_Debug ErrorPopupsAtStartup.cpp.obj\nbuild target\\unlaunched.exe: CXX_EXECUTABLE_LINKER__unlaunched_Debug z.obj\n"
+    "${anchorEdge}${catchEdge}build target/pace-cc: CXX_EXECUTABLE_LINKER__pace-cc_Debug y.o ErrorPopupsAtStartup.cpp.o\nbuild target\\canary.exe: CXX_EXECUTABLE_LINKER__canary_Debug ErrorPopupsAtStartup.cpp.obj\nbuild target\\unlaunched.exe: CXX_EXECUTABLE_LINKER__unlaunched_Debug z.obj\n"
     tree)
 fc_case("a command, a catch_discover_tests include and a script argument all count as launched and covered" "${tree}" pass "4 of 5 executable(s) are launched by a test; 4 carry the suppression")
 fc_case("every registered test, catch-discovered ones included, is read and sets the variable" "${tree}" pass "4 registered test(s) read, 0 without ${variable}")
@@ -134,11 +134,11 @@ fc_case("a launched executable stating a reason passes and prints the reason" "$
 
 # POSIX spells no `.exe`, so the launcher's path is a PREFIX of its test binary's. The
 # uncovered launcher is not launched; its test binary is.
-fc_registration(prefixTest "t" "/b/target/fastcache-cc-tests" TRUE)
+fc_registration(prefixTest "t" "/b/target/pace-cc-tests" TRUE)
 fc_stage(prefix
-    "${anchorRow}fastcache-cc|/b/target/fastcache-cc|on-request|\nfastcache-cc-tests|/b/target/fastcache-cc-tests|always|\n"
+    "${anchorRow}pace-cc|/b/target/pace-cc|on-request|\npace-cc-tests|/b/target/pace-cc-tests|always|\n"
     "${anchorTest}${prefixTest}" "" "<none>"
-    "${anchorEdge}build target/fastcache-cc: CXX_EXECUTABLE_LINKER__fastcache-cc_Debug a.o\nbuild target/fastcache-cc-tests: CXX_EXECUTABLE_LINKER__fastcache-cc-tests_Debug ErrorPopupsAtStartup.cpp.o\n"
+    "${anchorEdge}build target/pace-cc: CXX_EXECUTABLE_LINKER__pace-cc_Debug a.o\nbuild target/pace-cc-tests: CXX_EXECUTABLE_LINKER__pace-cc-tests_Debug ErrorPopupsAtStartup.cpp.o\n"
     tree)
 fc_case("a path that is only a PREFIX of a launched one is not launched" "${tree}" pass "2 of 3 executable(s) are launched")
 
@@ -152,13 +152,13 @@ fc_stage(command
     tree)
 fc_case("an uncovered test COMMAND is refused by name" "${tree}" refuse "bare is launched by a test and its 'Debug' link line carries no")
 
-fc_registration(e2e "e2e" "\"bash\" \"e2e.sh\" \"--fastcached\" \"${t}/fastcached.exe\"" TRUE)
+fc_registration(e2e "e2e" "\"bash\" \"e2e.sh\" \"--pace-kv\" \"${t}/pace-kv.exe\"" TRUE)
 fc_stage(argument
-    "${anchorRow}fastcached|${t}/fastcached.exe|on-request|\n"
+    "${anchorRow}pace-kv|${t}/pace-kv.exe|on-request|\n"
     "${anchorTest}${e2e}" "" "<none>"
-    "${anchorEdge}build target\\fastcached.exe: CXX_EXECUTABLE_LINKER__fastcached_Debug main.obj\n"
+    "${anchorEdge}build target\\pace-kv.exe: CXX_EXECUTABLE_LINKER__pace-kv_Debug main.obj\n"
     tree)
-fc_case("an uncovered binary handed to a script as an ARGUMENT is refused" "${tree}" refuse "fastcached is launched by a test")
+fc_case("an uncovered binary handed to a script as an ARGUMENT is refused" "${tree}" refuse "pace-kv is launched by a test")
 
 fc_stage(catch
     "${anchorRow}cli-tests|${t}/cli-tests.exe|always|\n"
@@ -193,7 +193,7 @@ fc_case("an empty manifest is refused as vacuous" "${tree}" refuse "names no exe
 
 fc_registration(other "other" "D:/b/target/other.exe" TRUE)
 fc_stage(noanchor "${anchorRow}" "${other}" "" "<none>" "${anchorEdge}" tree)
-fc_case("an anchor that is not launched is refused" "${tree}" refuse "the anchor 'FastCacheTest' was not found launched AND covered")
+fc_case("an anchor that is not launched is refused" "${tree}" refuse "the anchor 'PaceTest' was not found launched AND covered")
 
 fc_stage(nomanifest "" "${anchorTest}" "" "<none>" "${anchorEdge}" tree)
 file(REMOVE "${tree}/error-popups-Debug.manifest")

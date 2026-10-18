@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every `fastcache-compile-node` flag that `fastcache-cli --help` sends an operator to
+# Every `pace-node` flag that `pacectl --help` sends an operator to
 # is an option that binary actually has.
 #
 # ## Why this exists
 #
-# `fastcache-cli --help` carries a NOTES paragraph naming the operator actions that live
+# `pacectl --help` carries a NOTES paragraph naming the operator actions that live
 # only in the other binary -- enrollment and `--print-surfaces` -- because an operator
 # who has learned one tool cannot otherwise discover the other half of the surface
 # (#1307). That paragraph is prose in one executable about another executable's flag
@@ -20,8 +20,8 @@
 #
 # ## What it checks, precisely
 #
-#   * Only NOTES paragraphs that name `fastcache-compile-node`. A flag cited anywhere
-#     else in `fastcache-cli --help` is `fastcache-cli`'s own and is not this check's.
+#   * Only NOTES paragraphs that name `pace-node`. A flag cited anywhere
+#     else in `pacectl --help` is `pacectl`'s own and is not this check's.
 #   * A cited flag must be an option ROW of the node's help: a line that starts with that
 #     flag at the row indent. A flag mentioned only inside another row's description
 #     (`--scheduler` appears in a dozen, some of them opening a wrapped line) is not an
@@ -60,7 +60,7 @@ while [ $# -gt 0 ]; do
             node="$2"; shift 2
             ;;
         -h|--help)
-            echo "usage: ${self} --cli <fastcache-cli> --node <fastcache-compile-node>"
+            echo "usage: ${self} --cli <pacectl> --node <pace-node>"
             echo "       ${self} --self-test"
             exit 0
             ;;
@@ -75,18 +75,18 @@ refuse() {
     failures=$(( failures + 1 ))
 }
 
-# The flags cited by NOTES paragraphs that name `fastcache-compile-node`, one per line.
+# The flags cited by NOTES paragraphs that name `pace-node`, one per line.
 #
 # The NOTES section runs from a line that is exactly `NOTES` to the next line that
 # starts in column one; paragraphs inside it are separated by blank lines. A flag is
 # `--` then lower-case words joined by single hyphens, so `cluster-*` in prose is not
 # one and a trailing hyphen is not part of one.
 #
-# @param 1 a file holding `fastcache-cli --help`
+# @param 1 a file holding `pacectl --help`
 CitedNodeFlags() {
     tr -d '\r' < "$1" | awk '
         function flush() {
-            if (paragraph ~ /fastcache-compile-node/) {
+            if (paragraph ~ /pace-node/) {
                 text = paragraph
                 while (match(text, /--[a-z][a-z0-9]*(-[a-z0-9]+)*/)) {
                     print substr(text, RSTART, RLENGTH)
@@ -110,7 +110,7 @@ CitedNodeFlags() {
     ' | LC_ALL=C sort -u
 }
 
-# The flags a `fastcache-compile-node --help` lists as option rows, one per line.
+# The flags a `pace-node --help` lists as option rows, one per line.
 #
 # **A row is a flag at the ROW indent, not any line that starts with a flag.** A wrapped
 # description continues in the description column, and in the real help a dozen of those
@@ -121,7 +121,7 @@ CitedNodeFlags() {
 # measured rather than written down, so a renderer that changes its indent does not turn
 # every row into a non-row.
 #
-# @param 1 a file holding `fastcache-compile-node --help`
+# @param 1 a file holding `pace-node --help`
 NodeOptionRows() {
     tr -d '\r' < "$1" | awk '
         match($0, /^[ ]+--[a-z][a-z0-9]*(-[a-z0-9]+)*/) {
@@ -144,8 +144,8 @@ NodeOptionRows() {
 # Judge two help texts. The DECISION, separate from running any binary, so the self-test
 # drives it over staged texts and the registered run reaches it through the real ones.
 #
-# @param 1 a file holding `fastcache-cli --help`
-# @param 2 a file holding `fastcache-compile-node --help`
+# @param 1 a file holding `pacectl --help`
+# @param 2 a file holding `pace-node --help`
 Judge() {
     local cliHelp="$1" nodeHelp="$2"
     local citedFile rowsFile flag citedCount rowCount
@@ -159,19 +159,19 @@ Judge() {
     # node passes perfectly, and that is exactly what a moved or renamed NOTES heading
     # would otherwise report forever.
     if ! grep -Fxq "#cited" "$citedFile"; then
-        refuse "no NOTES paragraph of fastcache-cli --help names fastcache-compile-node, so there is nothing to check"
+        refuse "no NOTES paragraph of pacectl --help names pace-node, so there is nothing to check"
         rm -f "$citedFile" "$rowsFile"
         return
     fi
     citedCount="$(grep -cv '^#cited$' "$citedFile" | tr -d ' ')"
     rowCount="$(grep -c . "$rowsFile" | tr -d ' ')"
     if [ "$citedCount" -lt 1 ]; then
-        refuse "the NOTES paragraph naming fastcache-compile-node cites no flag"
+        refuse "the NOTES paragraph naming pace-node cites no flag"
         rm -f "$citedFile" "$rowsFile"
         return
     fi
     if [ "$rowCount" -lt 1 ]; then
-        refuse "fastcache-compile-node --help lists no option rows, so no citation can be judged"
+        refuse "pace-node --help lists no option rows, so no citation can be judged"
         rm -f "$citedFile" "$rowsFile"
         return
     fi
@@ -182,7 +182,7 @@ Judge() {
         if grep -Fxq -- "$flag" "$rowsFile"; then
             note "  ok   ${flag}"
         else
-            refuse "fastcache-cli --help sends operators to fastcache-compile-node ${flag}, which is not an option row of its --help"
+            refuse "pacectl --help sends operators to pace-node ${flag}, which is not an option row of its --help"
         fi
     done < "$citedFile"
 
@@ -219,7 +219,7 @@ Capture() {
 StageCli() {
     local file="$1" paragraph="$2"
     {
-        echo "fastcache-cli - operate a fastcached cache and a compile fleet from a terminal."
+        echo "pacectl - operate a pace-kv cache and a compile fleet from a terminal."
         echo ""
         echo "OPTIONS"
         echo "  --quiet        no remarks"
@@ -234,7 +234,7 @@ StageCli() {
 StageNode() {
     local file="$1" rows="$2" row
     {
-        echo "fastcache-compile-node - a compile worker for fastcached distributed builds."
+        echo "pace-node - a compile worker for Pace distributed builds."
         echo ""
         echo "OPTIONS"
         for row in $rows; do
@@ -273,7 +273,7 @@ SelfTest() {
     tmp="$selfTestTmp"
     trap CleanSelfTest EXIT
 
-    local cited="  Some actions are fastcache-compile-node flags: --enroll-open and
+    local cited="  Some actions are pace-node flags: --enroll-open and
   --print-surfaces, which dials nothing."
 
     StageCli "${tmp}/cli-agree" "$cited"
@@ -286,17 +286,17 @@ SelfTest() {
     ran=$(( ran + 1 ))
 
     # `--scheduler` is in every staged row's DESCRIPTION and in no row's first column.
-    StageCli "${tmp}/cli-prose" "  A fastcache-compile-node flag: --scheduler."
+    StageCli "${tmp}/cli-prose" "  A pace-node flag: --scheduler."
     StageNode "${tmp}/node-prose" "--enroll-open"
     RunCase "a flag named only inside another row's description is not an option" fail "${tmp}/cli-prose" "${tmp}/node-prose" || bad=1
     ran=$(( ran + 1 ))
 
     # `--wrapped-only` opens a continuation line under every staged row and is no row.
-    StageCli "${tmp}/cli-wrapped" "  A fastcache-compile-node flag: --wrapped-only."
+    StageCli "${tmp}/cli-wrapped" "  A pace-node flag: --wrapped-only."
     RunCase "a flag opening a wrapped description line is not an option" fail "${tmp}/cli-wrapped" "${tmp}/node-agree" || bad=1
     ran=$(( ran + 1 ))
 
-    StageCli "${tmp}/cli-prefix" "  A fastcache-compile-node flag: --enroll."
+    StageCli "${tmp}/cli-prefix" "  A pace-node flag: --enroll."
     RunCase "a prefix of a real flag is not that flag" fail "${tmp}/cli-prefix" "${tmp}/node-agree" || bad=1
     ran=$(( ran + 1 ))
 
@@ -310,11 +310,11 @@ SelfTest() {
     RunCase "no paragraph naming the node refuses rather than passing" fail "${tmp}/cli-absent" "${tmp}/node-agree" || bad=1
     ran=$(( ran + 1 ))
 
-    StageCli "${tmp}/cli-noflags" "  See fastcache-compile-node for enrollment."
+    StageCli "${tmp}/cli-noflags" "  See pace-node for enrollment."
     RunCase "a paragraph naming the node and citing nothing refuses" fail "${tmp}/cli-noflags" "${tmp}/node-agree" || bad=1
     ran=$(( ran + 1 ))
 
-    printf 'fastcache-compile-node\n\nno options here\n' > "${tmp}/node-empty"
+    printf 'pace-node\n\nno options here\n' > "${tmp}/node-empty"
     RunCase "a node help with no option rows refuses" fail "${tmp}/cli-agree" "${tmp}/node-empty" || bad=1
     ran=$(( ran + 1 ))
 

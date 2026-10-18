@@ -9,19 +9,19 @@
 # arms exchanged. And the output is flattened before it is searched, because CMake wraps
 # its diagnostics and a phrase can straddle a line break.
 #
-# Usage: cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<dir> -P <this>
+# Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-off-thread-assertion-guard.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-off-thread-assertion-guard.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
 
 set(failures "")
 set(cases 0)
@@ -43,13 +43,13 @@ endfunction()
 function(fc_case label ninja wantPass phrase)
     math(EXPR next "${cases} + 1")
     set(cases ${next} PARENT_SCOPE)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/case-${next}")
+    set(tree "${PACE_SCRATCH_DIR}/case-${next}")
     file(MAKE_DIRECTORY "${tree}")
     if(NOT ninja STREQUAL "<none>")
         file(WRITE "${tree}/build.ninja" "${ninja}")
     endif()
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" -DCONFIG=Debug -DANCHOR=FastCacheTest -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" -DCONFIG=Debug -DANCHOR=PaceTest -P "${check}"
         OUTPUT_VARIABLE out
         ERROR_VARIABLE err
         RESULT_VARIABLE status
@@ -77,13 +77,13 @@ function(fc_case label ninja wantPass phrase)
     endif()
 endfunction()
 
-set(guard "src/tests/CMakeFiles/FastCacheTest.dir/__/tests/OffThreadAssertionGuard.cpp.o")
+set(guard "src/tests/CMakeFiles/PaceTest.dir/__/tests/OffThreadAssertionGuard.cpp.o")
 set(catch2 "_deps/catch2-build/src/libCatch2d.a")
 
 # 1. The ordinary tree: the anchor links Catch2 and carries the guard, and a product binary
 #    that links no Catch2 is not asked about at all.
-fc_edge(anchor FastCacheTest Debug "src/tests/CMakeFiles/FastCacheTest.dir/a.cpp.o ${guard} | ${catch2}")
-fc_edge(product fastcached Debug "src/apps/fastcached/CMakeFiles/fastcached.dir/main.cpp.o | libFastCache.a")
+fc_edge(anchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${catch2}")
+fc_edge(product pace-kv Debug "src/apps/pace-kv/CMakeFiles/pace-kv.dir/main.cpp.o | libPace.a")
 fc_case("covered anchor, product binary ignored" "${anchor}${product}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 2. A second test binary links Catch2 and lacks the guard: refused, by name.
@@ -95,10 +95,10 @@ fc_case("no Catch2 edge" "${product}" FALSE "links Catch2, so this derivation fo
 
 # 4. The anchor is absent while another binary is covered.
 fc_edge(other cli-tests Debug "src/apps/cli/CMakeFiles/cli-tests.dir/OffThreadAssertionGuard.cpp.o | ${catch2}")
-fc_case("anchor not proven" "${other}" FALSE "FastCacheTest, the one test executable certain to exist")
+fc_case("anchor not proven" "${other}" FALSE "PaceTest, the one test executable certain to exist")
 
 # 5. Windows spellings: backslashes, `.obj`, `Catch2d.lib`.
-set(windows "build target\\FastCacheTest.exe: CXX_EXECUTABLE_LINKER__FastCacheTest_Debug src\\tests\\CMakeFiles\\FastCacheTest.dir\\__\\tests\\OffThreadAssertionGuard.cpp.obj | _deps\\catch2-build\\src\\Catch2d.lib\n")
+set(windows "build target\\PaceTest.exe: CXX_EXECUTABLE_LINKER__PaceTest_Debug src\\tests\\CMakeFiles\\PaceTest.dir\\__\\tests\\OffThreadAssertionGuard.cpp.obj | _deps\\catch2-build\\src\\Catch2d.lib\n")
 fc_case("Windows spellings" "${windows}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 6. `libCatch2Maind.a` alone is not Catch2: a boundary, not a substring.
@@ -124,11 +124,11 @@ fc_edge(systemBare node-tests Debug "src/apps/node/CMakeFiles/node-tests.dir/b.c
 fc_case("versioned .so, uncovered" "${anchor}${systemBare}" FALSE "node-tests links Catch2 and its 'Debug' link line carries no OffThreadAssertionGuard")
 
 # 11. ...and a tree that reaches Catch2 ONLY that way is checked rather than refused as empty.
-fc_edge(systemAnchor FastCacheTest Debug "src/tests/CMakeFiles/FastCacheTest.dir/a.cpp.o ${guard} | ${systemCatch2}")
+fc_edge(systemAnchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${systemCatch2}")
 fc_case("versioned .so only" "${systemAnchor}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 12. The macOS spelling puts the version BEFORE the suffix.
-fc_edge(dylibAnchor FastCacheTest Debug "a.cpp.o ${guard} | /opt/homebrew/lib/libCatch2.3.16.1.dylib")
+fc_edge(dylibAnchor PaceTest Debug "a.cpp.o ${guard} | /opt/homebrew/lib/libCatch2.3.16.1.dylib")
 fc_case("versioned .dylib" "${dylibAnchor}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 13. A versioned `libCatch2Main` is still not Catch2: the boundary holds through a version.

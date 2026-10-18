@@ -140,9 +140,9 @@ FindQueueBaseEnvName() {
 # A missing awk program is refused BY NAME: a reader that ran over no program is
 # not a clean tree, and awk's own complaint names a file rather than the check
 # whose verdict just became meaningless.
-FastCachedWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
-FastCachedScopeAwk="$(dirname "${BASH_SOURCE[0]}")/check-tidy-sweep-scope.awk"
-for awkProgram in "$FastCachedWalkAwk" "$FastCachedScopeAwk"; do
+PaceWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
+PaceScopeAwk="$(dirname "${BASH_SOURCE[0]}")/check-tidy-sweep-scope.awk"
+for awkProgram in "$PaceWalkAwk" "$PaceScopeAwk"; do
     if [ ! -f "$awkProgram" ]; then
         echo "check-tidy-sweep-scope: missing awk program ${awkProgram}; no workflow was read, so" >&2
         echo "  this is a refusal and not a clean run. It is expected beside this script." >&2
@@ -153,7 +153,7 @@ done
 # @param 1 the workflow  @param 2 which records  @param 3 a step id  @param 4 a job key
 WorkflowRead() {
     awk -v want="$2" -v sweepId="${3:-}" -v sweepJob="${4:-}" \
-        -f "$FastCachedWalkAwk" -f "$FastCachedScopeAwk" "$1" "$1" | cut -f2-
+        -f "$PaceWalkAwk" -f "$PaceScopeAwk" "$1" "$1" | cut -f2-
 }
 
 FindSweep() {
@@ -534,7 +534,7 @@ SelfTest() {
     # The verdict must come from the SHARED walk, which is a different claim from
     # "the check refuses". Every case above would pass just as well if this script
     # had kept a private reader beside the shared one. So the library is copied,
-    # one line disabled, and `FastCachedWalkAwk` pointed at the copy for one case.
+    # one line disabled, and `PaceWalkAwk` pointed at the copy for one case.
     #
     # @param 1 what the line holds up  @param 2 a sed expression disabling it
     # @param 3 want-pass|want-fail  @param 4 which generator stages the workflow
@@ -544,16 +544,16 @@ SelfTest() {
         Reset
         "$stage" > "$file"
         neutered="${scratch}/neutered-walk.awk"
-        sed "$expr" "$FastCachedWalkAwk" > "$neutered"
-        if cmp -s "$neutered" "$FastCachedWalkAwk"; then
+        sed "$expr" "$PaceWalkAwk" > "$neutered"
+        if cmp -s "$neutered" "$PaceWalkAwk"; then
             echo "  FAIL ${what}: the sed expression neutered no line, so the case stages nothing"
             status=1
             return
         fi
-        realWalk="$FastCachedWalkAwk"
-        FastCachedWalkAwk="$neutered"
+        realWalk="$PaceWalkAwk"
+        PaceWalkAwk="$neutered"
         if CheckWorkflow "$file" >/dev/null 2>&1; then got=want-pass; else got=want-fail; fi
-        FastCachedWalkAwk="$realWalk"
+        PaceWalkAwk="$realWalk"
         if [[ "$got" == "$want" ]]; then
             echo "  ok   ${what}"
         else

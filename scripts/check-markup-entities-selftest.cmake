@@ -45,25 +45,25 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-markup-entities-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-markup-entities.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-markup-entities.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -76,7 +76,7 @@ endif()
 # and `&gt;` contain `;`, which splits the CMake list, and `|` is the field separator.
 # That is the same hazard the check itself had, which is why the rows below spell the
 # entities through here rather than directly.
-function(fastcached_expand var)
+function(pace_expand var)
     set(text "${${var}}")
     string(REPLACE "~n~" "\n" text "${text}")
     string(REPLACE "~lb~" "[" text "${text}")
@@ -102,7 +102,7 @@ endfunction()
 set(baseHome
 "// SPDX-License-Identifier: Apache-2.0
 #pragma once
-namespace FastCache
+namespace Pace
 {
 namespace Detail
 {
@@ -115,25 +115,25 @@ namespace Detail
     };
 } // namespace Detail
 inline std::string EscapeMarkup(std::string_view text) { return std::string { text }; }
-} // namespace FastCache
+} // namespace Pace
 ")
 
 set(baseConsumer
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Markup.hpp>
-namespace FastCache::Distributed
+#include <Pace/Core/Markup.hpp>
+namespace Pace::Distributed
 {
 // An ampersand becomes ~AMP~, so a label a peer chose cannot break the document.
 std::string Row(std::string_view label)
 {
     return EscapeMarkup(label);
 }
-} // namespace FastCache::Distributed
+} // namespace Pace::Distributed
 ")
 
 set(baseTest
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Markup.hpp>
+#include <Pace/Core/Markup.hpp>
 TEST_CASE(\"markup escapes what it must\")
 {
     CHECK(EscapeMarkup(\"a&b\") == \"a~AMP~b\");
@@ -144,22 +144,22 @@ TEST_CASE(\"markup escapes what it must\")
 set(baseProse
 "// SPDX-License-Identifier: Apache-2.0
 #include \"AdminEndpoint.hpp\"
-namespace FastCache::Node
+namespace Pace::Node
 {
 void Help(std::string& out)
 {
     out += \"<code>Authorization: Bearer ~LT~token~GT~</code>\"~sc~
 }
-} // namespace FastCache::Node
+} // namespace Pace::Node
 ")
 
 # ---------------------------------------------------------------------------
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
-    fastcached_expand(from)
-    fastcached_expand(to)
+    pace_expand(from)
+    pace_expand(to)
 
     set(useGit FALSE)
     if(target MATCHES "^(.*)-git$")
@@ -172,7 +172,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     set(testText "${baseTest}")
     set(proseText "${baseProse}")
     foreach(v homeText consumerText testText proseText)
-        fastcached_expand(${v})
+        pace_expand(${v})
     endforeach()
 
     set(extraPath "")
@@ -210,15 +210,15 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     if(writeSources)
-        file(WRITE "${tree}/src/FastCache/Core/Markup.hpp" "${homeText}")
-        file(WRITE "${tree}/src/FastCache/Distributed/FleetView.cpp" "${consumerText}")
-        file(WRITE "${tree}/src/FastCache/Distributed/FleetText_test.cpp" "${testText}")
+        file(WRITE "${tree}/src/Pace/Core/Markup.hpp" "${homeText}")
+        file(WRITE "${tree}/src/Pace/Distributed/FleetView.cpp" "${consumerText}")
+        file(WRITE "${tree}/src/Pace/Distributed/FleetText_test.cpp" "${testText}")
     else()
         file(MAKE_DIRECTORY "${tree}/src")
         file(WRITE "${tree}/README.md" "not a source\n")
     endif()
     if(writeProse)
-        file(WRITE "${tree}/src/apps/fastcache-compile-node/AdminEndpoint.cpp" "${proseText}")
+        file(WRITE "${tree}/src/apps/pace-node/AdminEndpoint.cpp" "${proseText}")
     endif()
 
     if(NOT extraPath STREQUAL "")
@@ -231,7 +231,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
                 "case `${name}` asks for the git enumeration path and no git was found. "
                 "Skipping it silently would leave the mode CI actually takes untested.")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -244,7 +244,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -260,38 +260,38 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 #   <name>|<target>|<from>|<to>|<must ALL appear>|<must NONE appear>
-set(FastCachedMarkupCases
+set(PaceMarkupCases
     # THE ACCEPTING ARM, both enumeration modes.
     "baseline via walk|none|-|-|no duplicate escaper across && directory walk|CMake Error"
     "baseline via git|none-git|-|-|no duplicate escaper across && git ls-files|CMake Error"
 
     # THE RED ARM: a second escaper, named by file and line.
-    "hand-rolled escaper|newfile|src/FastCache/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    std::string o~sc~~n~    for (char c : t) { if (c == '&') o += \"~AMP~\"~sc~ }~n~    return o~sc~~n~}~n~|src/FastCache/Platform/ServiceControl.cpp:4|-"
-    "hand-rolled escaper via git|newfile-git|src/FastCache/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    return t == \"<\" ? \"~LT~\" : \"\"~sc~~n~}~n~|src/FastCache/Platform/ServiceControl.cpp:3 && git ls-files|-"
+    "hand-rolled escaper|newfile|src/Pace/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    std::string o~sc~~n~    for (char c : t) { if (c == '&') o += \"~AMP~\"~sc~ }~n~    return o~sc~~n~}~n~|src/Pace/Platform/ServiceControl.cpp:4|-"
+    "hand-rolled escaper via git|newfile-git|src/Pace/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    return t == \"<\" ? \"~LT~\" : \"\"~sc~~n~}~n~|src/Pace/Platform/ServiceControl.cpp:3 && git ls-files|-"
 
     # THE RETIRED SPELLING, refused BY NAME rather than as an ordinary duplicate.
-    "the retired entity returns|newfile|src/FastCache/Platform/ServiceControl.cpp|std::string Q() { return \"~APOS~\"~sc~ }~n~|spell the retired && src/FastCache/Platform/ServiceControl.cpp:1|-"
+    "the retired entity returns|newfile|src/Pace/Platform/ServiceControl.cpp|std::string Q() { return \"~APOS~\"~sc~ }~n~|spell the retired && src/Pace/Platform/ServiceControl.cpp:1|-"
 
     # THE ACCEPTING ARM PROPER. Each of these is a real shape from the tree, and each
     # differs from a violation only by context.
-    "a comment is not a use|newfile|src/FastCache/Distributed/FleetChart.cpp|// The label is escaped, so ~AMP~ and ~LT~ cannot break the SVG.~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
-    "a block comment is not a use|newfile|src/FastCache/Distributed/FleetChart.cpp|/*~n~ A paragraph naming ~AMP~ and ~QUOT~ with no leading stars.~n~*/~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
+    "a comment is not a use|newfile|src/Pace/Distributed/FleetChart.cpp|// The label is escaped, so ~AMP~ and ~LT~ cannot break the SVG.~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
+    "a block comment is not a use|newfile|src/Pace/Distributed/FleetChart.cpp|/*~n~ A paragraph naming ~AMP~ and ~QUOT~ with no leading stars.~n~*/~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
 
     # COMMENT ORDERING, the same false green this check carried: a line comment
     # NAMING a block opener opened one that never closed, and the rest of the file
     # went unread behind a clean count.
-    "a line comment naming a block opener does not open one|newfile|src/FastCache/Platform/Order.cpp|// Call EscapeMarkup rather than ~AMP~, and not inside a /* block either.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Order.cpp:2|-"
+    "a line comment naming a block opener does not open one|newfile|src/Pace/Platform/Order.cpp|// Call EscapeMarkup rather than ~AMP~, and not inside a /* block either.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Order.cpp:2|-"
 
     # ...and the CONTROL: the `//` inside the open block stays inside it (line 2 is
     # never named) and the file RESUMES after `*/` (line 4 is).
-    "a block comment survives a line marker inside it|newfile|src/FastCache/Platform/Order.cpp|/*~n~ Prose with a // in it, naming ~AMP~ to argue against writing it.~n~*/~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Order.cpp:4|Order.cpp:2"
-    "a test may assert the output|newfile|src/FastCache/Distributed/FleetView_test.cpp|CHECK(EscapeMarkup(\"&\") == \"~AMP~\")~sc~~n~|no duplicate escaper across|CMake Error"
+    "a block comment survives a line marker inside it|newfile|src/Pace/Platform/Order.cpp|/*~n~ Prose with a // in it, naming ~AMP~ to argue against writing it.~n~*/~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Order.cpp:4|Order.cpp:2"
+    "a test may assert the output|newfile|src/Pace/Distributed/FleetView_test.cpp|CHECK(EscapeMarkup(\"&\") == \"~AMP~\")~sc~~n~|no duplicate escaper across|CMake Error"
 
     # THE PARTIAL-FIX SHAPE: a file that explains the rule AND breaks it.
-    "prose and a use in one file|newfile|src/FastCache/Platform/Both.cpp|// Always call EscapeMarkup rather than writing ~AMP~ by hand.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Both.cpp:2|-"
+    "prose and a use in one file|newfile|src/Pace/Platform/Both.cpp|// Always call EscapeMarkup rather than writing ~AMP~ by hand.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Both.cpp:2|-"
 
     # LINE NUMBERS, with the list structure that makes them drift planted above.
-    "line number survives brackets|newfile|src/FastCache/Platform/Drift.cpp|int a~lb~4~rb~ = {1,2,3,4}~sc~~n~auto b = a~lb~0~rb~~sc~~n~// a trailing backslash \\\\~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Drift.cpp:4|-"
+    "line number survives brackets|newfile|src/Pace/Platform/Drift.cpp|int a~lb~4~rb~ = {1,2,3,4}~sc~~n~auto b = a~lb~0~rb~~sc~~n~// a trailing backslash \\\\~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Drift.cpp:4|-"
 
     # --- fails CLOSED ---
 
@@ -316,7 +316,7 @@ set(FastCachedMarkupCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedMarkupCases)
+foreach(row IN LISTS PaceMarkupCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -332,7 +332,7 @@ foreach(row IN LISTS FastCachedMarkupCases)
     list(GET fields 5 caseMustNotAppear)
 
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
 
     if(NOT applied)
         list(APPEND failures

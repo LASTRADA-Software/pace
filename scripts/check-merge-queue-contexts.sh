@@ -29,9 +29,9 @@
 # `required_status_checks`, and nothing offline can verify a copy of a server-side
 # setting. Read the live list with:
 #
-#   gh api repos/LASTRADA-Software/fastcached/rulesets \
+#   gh api repos/LASTRADA-Software/pace/rulesets \
 #     --jq '.[] | select(.name == "default-master") | .id'
-#   gh api repos/LASTRADA-Software/fastcached/rulesets/<id> \
+#   gh api repos/LASTRADA-Software/pace/rulesets/<id> \
 #     --jq '.rules[] | select(.type == "required_status_checks")
 #           | .parameters.required_status_checks[].context'
 #
@@ -103,10 +103,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # A missing awk program is refused BY NAME. A reader that ran over no program is
 # not a clean tree, and awk's own complaint names a file rather than the check
 # whose verdict just became meaningless.
-FastCachedTab="$(printf '\t')"
-FastCachedWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
-FastCachedFactsAwk="$(dirname "${BASH_SOURCE[0]}")/check-merge-queue-contexts.awk"
-for awkProgram in "$FastCachedWalkAwk" "$FastCachedFactsAwk"; do
+PaceTab="$(printf '\t')"
+PaceWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
+PaceFactsAwk="$(dirname "${BASH_SOURCE[0]}")/check-merge-queue-contexts.awk"
+for awkProgram in "$PaceWalkAwk" "$PaceFactsAwk"; do
     if [ ! -f "$awkProgram" ]; then
         echo "check-merge-queue-contexts: missing awk program ${awkProgram}; no workflow was read," >&2
         echo "  so this is a refusal and not a clean run. It is expected beside this script, and a" >&2
@@ -118,7 +118,7 @@ done
 # Every record the walk yields for the workflow @p 1. The file is passed TWICE,
 # which is the walk's convention.
 WorkflowRecords() {
-    awk -f "$FastCachedWalkAwk" -f "$FastCachedFactsAwk" "$1" "$1"
+    awk -f "$PaceWalkAwk" -f "$PaceFactsAwk" "$1" "$1"
 }
 
 # The rows of kind @p 2 for the workflow @p 1, with the kind column dropped.
@@ -128,7 +128,7 @@ WorkflowRecords() {
 WorkflowFacts() {
     local records
     records="$(WorkflowRecords "$1")"
-    grep -F -- "$2${FastCachedTab}" <<< "$records" | cut -f2- || true
+    grep -F -- "$2${PaceTab}" <<< "$records" | cut -f2- || true
 }
 
 # Whether the workflow @p 1 carries the key at path @p 2. A HERESTRING, which is
@@ -136,7 +136,7 @@ WorkflowFacts() {
 WorkflowHasKey() {
     local records
     records="$(WorkflowRecords "$1")"
-    grep -Fq -- "ON${FastCachedTab}$2${FastCachedTab}" <<< "$records"
+    grep -Fq -- "ON${PaceTab}$2${PaceTab}" <<< "$records"
 }
 
 # Which same-SHA re-trigger types this workflow's `on:` block names, if any.
@@ -191,8 +191,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
         cp "$me" "$scratch/tree/scripts/"
         # The awk programs as well, or the copy refuses by name. That refusal is
         # the point: without it the staged check would read no program at all.
-        cp "$FastCachedWalkAwk" "$scratch/tree/scripts/lib/"
-        cp "$FastCachedFactsAwk" "$scratch/tree/scripts/"
+        cp "$PaceWalkAwk" "$scratch/tree/scripts/lib/"
+        cp "$PaceFactsAwk" "$scratch/tree/scripts/"
         cp .github/workflows/*.yml "$scratch/tree/.github/workflows/"
     }
 
@@ -692,7 +692,7 @@ NonBindingContexts=(
     "Code coverage|Undecided|#829"
     "compile-cache E2E (Linux)|Undecided|#829"
     "compile-cache E2E (Windows)|Undecided|#829"
-    "fastcache-cc smoke (compile-cache 0xFC)|Undecided|#829"
+    "pace-cc smoke (compile-cache 0xFC)|Undecided|#829"
     "Docker image|Undecided|#829"
 )
 

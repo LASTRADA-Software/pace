@@ -64,7 +64,7 @@ judge() {
 # @param 1 case name  @param 2 expect pass|refuse  @param 3 substring the output must carry
 run_case() {
     cases=$((cases + 1))
-    out="$(NM="$work/nm" FASTCACHED_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
+    out="$(NM="$work/nm" PACE_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
     rc=$?
     judge "$1" "$2" "$3" "" "$rc" "$out"
 }
@@ -77,7 +77,7 @@ run_case() {
 #          carry  @param 4 substring it must NOT carry, or empty
 run_table_case() {
     cases=$((cases + 1))
-    out="$(FASTCACHED_SOURCE_DIR="$work" bash "$check" --table-only 2>&1)"
+    out="$(PACE_SOURCE_DIR="$work" bash "$check" --table-only 2>&1)"
     rc=$?
     judge "$1" "$2" "$3" "${4:-}" "$rc" "$out"
 }
@@ -130,15 +130,15 @@ stage() {
     printf '[%s]' "$entries" > "$work/build/compile_commands.json"
 }
 
-ctrl="src/FastCache/Server/Server.cpp"
+ctrl="src/Pace/Server/Server.cpp"
 
 # Everything blind is listed, and the control is analysed: the only passing shape.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case accounted pass "1 translation unit(s) contribute nothing in this configuration, all accounted for"
 
 # A TU goes blind with no row. The hole this check exists to find.
-stage "$(printf '# empty\n')" "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf '# empty\n')" "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case unlisted refuse "is analysed by nothing and is not in scripts/tidy-blind-spots.txt"
 
 # The comparison's own `comm` failing is the CHECK failing, and is said: a comm that failed
@@ -150,48 +150,48 @@ commFailingFor() { # case name, the comm flag that fails, wanted refusal, the fi
     cases=$((cases + 1))
     out="$(failingFlag="$2"; comm() { [[ "$1" != "$failingFlag" ]] || return 2; command comm "$@"; }
            export -f comm; export failingFlag
-           NM="$work/nm" FASTCACHED_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
+           NM="$work/nm" PACE_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
     rc=$?
     judge "$1" refuse "$3" "$4" "$rc" "$out"
 }
 commFailingFor unanalysed_comm_fails -13 "comm exited 2 listing the measured units the table does not name" \
     "is analysed by nothing and is not in"
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 40
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 40
 commFailingFor stale_comm_fails -23 "comm exited 2 listing the table rows the measurement does not name" \
     "but it is analysed now"
 
 # A row that is no longer true. A stale exemption hides the next real one.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 40
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 40
 run_case stale refuse "is listed as analysed by nothing, but it is analysed now"
 
 # A SWAP: one unit leaves the blind set, another joins, and the COUNT is unchanged.
 # The reason this case exists is that a check reporting only a number would read 1 -> 1
 # and call it unchanged, while the set it describes is a different set. Both halves
 # must be named.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 40 "src/FastCache/Net/KqueueSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 40 "src/Pace/Net/KqueueSocket.cpp" 2
 run_case swap refuse "KqueueSocket.cpp' is analysed by nothing and is not in"
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 40 "src/FastCache/Net/KqueueSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 40 "src/Pace/Net/KqueueSocket.cpp" 2
 run_case swap_names_both refuse "IocpSocket.cpp' is listed as analysed by nothing, but it is analysed now"
 
 # A row naming a file that is gone. Distinguished from `stale`, because the fix is
 # different: one is a deletion, the other is a file that grew an analyser.
-stage "$(printf 'src/FastCache/Net/Vanished.cpp\tnone\tguarded\n')" "$ctrl" 50
+stage "$(printf 'src/Pace/Net/Vanished.cpp\tnone\tguarded\n')" "$ctrl" 50
 run_case vanished refuse "which does not exist"
 
 # The instrument itself broken: `nm` answers nothing, so EVERY TU reads as blind.
 # Without the positive control this reports the whole tree as a discovery.
-stage "$(printf '# empty\n')" "$ctrl" 0 "src/FastCache/Net/IocpSocket.cpp" 0
+stage "$(printf '# empty\n')" "$ctrl" 0 "src/Pace/Net/IocpSocket.cpp" 0
 run_case broken_instrument refuse "positive control"
 
 # The precondition itself, which is otherwise unwatched: without ASan the two-symbol
 # signature is not the sanitizer's and an empty unit is indistinguishable from one
 # defining only inline entities. Measured on the real tree as 11 against 26.
 sanflag=""
-stage "$(printf '# empty\n')" "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf '# empty\n')" "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case no_sanitizer refuse "no AddressSanitizer"
 sanflag="-fsanitize=address"
 
@@ -219,17 +219,17 @@ unsanitizedFlags=""
 # The reached-by column. A row may name a leg that EXISTS, or `none`; naming one
 # that does not is a claim of coverage nothing provides, and it fails silently --
 # the unit stays listed and the table stays plausible while nobody analyses it.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tclang-tidy-windows\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tclang-tidy-windows\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case reached_by_real_leg pass "contribute nothing in this configuration"
 
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tclang-tidy-solaris\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tclang-tidy-solaris\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case reached_by_absent_leg refuse "which is not a clang-tidy leg"
 
 # And the number #858 is about is reported on every run, not only on a refusal.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case reports_unreached_count pass "reached by NO analyser leg"
 
 # WHICH SPELLINGS COUNT AS A LEG. The staged workflow above already exercises the
@@ -240,10 +240,10 @@ stageWorkflow() {
     rm -rf "$work/build" "$work/src" "$work/scripts" "$work/.github"
     mkdir -p "$work/build" "$work/scripts" "$work/.github/workflows"
     printf '%b' "$1" > "$work/.github/workflows/build.yml"
-    printf 'src/FastCache/Net/IocpSocket.cpp\tclang-tidy-windows\tguarded\n' \
+    printf 'src/Pace/Net/IocpSocket.cpp\tclang-tidy-windows\tguarded\n' \
         > "$work/scripts/tidy-blind-spots.txt"
     entries=""
-    for pair in "$ctrl:50" "src/FastCache/Net/IocpSocket.cpp:2"; do
+    for pair in "$ctrl:50" "src/Pace/Net/IocpSocket.cpp:2"; do
         rel="${pair%:*}"; count="${pair##*:}"
         mkdir -p "$work/$(dirname "$rel")" "$work/build/obj/$(dirname "$rel")"
         : > "$work/$rel"
@@ -285,21 +285,21 @@ run_case leg_sweeping_with_only pass "contribute nothing in this configuration"
 # because on a row that names a leg the leg is itself an account and on a `none` row
 # there is none: the third column is the whole explanation of why nothing reads the
 # unit, and blanking it turns an exemption into a bare fact.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\t\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\t\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_case reason_missing_with_build refuse "carries no reason in its third column"
 run_table_case reason_missing_table_only refuse "the only account of why no analyser reads this unit"
 
 # Whitespace is not a reason. A column holding a space satisfies `-n` and says nothing,
 # so the rule tests for a non-blank character -- the shape that survives a tidy-up.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\t   \n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\t   \n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_table_case reason_is_whitespace refuse "carries no reason in its third column"
 
 # A row that NAMES a leg still needs one: the format says three columns, and the leg
 # explains which analyser reads it, never what makes it empty on the ones that do not.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tclang-tidy-windows\t\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tclang-tidy-windows\t\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_table_case leg_row_without_reason refuse "carries no reason in its third column"
 
 # The passing direction, which is the half a refusal-only fixture never establishes.
@@ -308,8 +308,8 @@ run_table_case leg_row_without_reason refuse "carries no reason in its third col
 # OBJECTS, and a run that opened none may not borrow it -- absence of the negative is
 # not the positive, and a mode that names its set may not report clean over the half it
 # could not cover.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tnone\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tnone\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_table_case table_only_accepts pass "[table only, no build]" "all accounted for"
 
 # The OTHER half of that control: the measuring mode must not start borrowing the
@@ -319,8 +319,8 @@ run_case table_only_wording_is_not_borrowed pass "all accounted for"
 # `--table-only` still runs the legs scan, so a row naming a leg that does not exist is
 # refused with no build. Without this the mode could be checking the reason column and
 # nothing else while reading as the full table check.
-stage "$(printf 'src/FastCache/Net/IocpSocket.cpp\tclang-tidy-solaris\tguarded\n')" \
-    "$ctrl" 50 "src/FastCache/Net/IocpSocket.cpp" 2
+stage "$(printf 'src/Pace/Net/IocpSocket.cpp\tclang-tidy-solaris\tguarded\n')" \
+    "$ctrl" 50 "src/Pace/Net/IocpSocket.cpp" 2
 run_table_case table_only_absent_leg refuse "which is not a clang-tidy leg"
 
 # EITHER SCAN MATCHING NOTHING IS A REFUSAL. Both arms, because a scan that matches

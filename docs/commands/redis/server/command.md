@@ -2,7 +2,7 @@
 
 **Protocols:** Redis RESP2 / RESP3
 
-Real introspection over fastcached's own dispatch table, in the format
+Real introspection over pace-kv's own dispatch table, in the format
 Redis clients use: one descriptor per supported command, carrying the
 name, arity and key positions the server actually enforces.
 
@@ -25,7 +25,7 @@ COMMAND DOCS [<name>...]
 | `COMMAND DOCS` | An empty array -- the human-readable metadata is not carried |
 
 A descriptor is `[name, arity, flags, first-key, last-key, key-step]`,
-with `flags` always an empty array: fastcached enforces arity and key
+with `flags` always an empty array: pace-kv enforces arity and key
 positions but publishes no flag set.
 
 The row count is whatever `CommandTable` holds, so it moves when the

@@ -1,7 +1,7 @@
 # CowTree
 
 A copy-on-write, persistent B+tree library. Standalone — no dependency
-on FastCache. Pick it up by `add_subdirectory(src/CowTree)` and link
+on Pace. Pick it up by `add_subdirectory(src/CowTree)` and link
 the `CowTree` target.
 
 ## What it provides
@@ -71,7 +71,7 @@ tree.Open().value();
   default. Larger values rejected with `ValueTooLarge`.
 - Held read snapshots may be invalidated by a subsequent commit that
   reuses pages from the snapshot's chain. The library's primary
-  consumer (FastCache) never holds a snapshot across a writer call.
+  consumer (Pace) never holds a snapshot across a writer call.
 - The on-disk free list is not yet persisted across restarts; freed
   pages remain in the file until a future compaction phase removes
   them.

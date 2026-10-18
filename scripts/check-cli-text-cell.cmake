@@ -2,7 +2,7 @@
 #
 # Nothing but `TextCell` itself may build a `CellKind::Text` cell.
 #
-# `fastcache-cli`'s `Cell` model carries a kind beside its text, and `CellKind::Text`
+# `pacectl`'s `Cell` model carries a kind beside its text, and `CellKind::Text`
 # means *these bytes are valid UTF-8* -- an invariant every renderer relies on, since
 # `--format=json` interpolates `lexical` into a document that must be UTF-8 end to end.
 # `TextCell` is where that is established: it asks `IsValidUtf8` and answers with a
@@ -21,7 +21,7 @@
 # key from a GET reply, `ME`'s key, a meta flag value -- where no caller can assert
 # anything about the encoding. A non-UTF-8 KEY therefore rendered as raw bytes and
 # `--format=json` produced a document that was not UTF-8
-# ([#1356](https://github.com/LASTRADA-Software/fastcached/issues/1356)).
+# ([#1356](https://github.com/LASTRADA-Software/pace/issues/1356)).
 #
 # The fix folded the question into `TextCell`, which is the stronger half of this
 # tree's rule: **a guard folded INTO the operation is self-enforcing; a guard called
@@ -62,7 +62,7 @@
 #
 # A hand-kept allowlist would be exact about the files it knows and silent about the
 # ones it does not, and silence reads identically to complete coverage
-# ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)). Worse for this
+# ([#492](https://github.com/LASTRADA-Software/pace/issues/492)). Worse for this
 # check specifically: a listed path survives the file being MOVED, so the rename that
 # relocated the factory would leave the check happily excusing a path that no longer
 # exists while refusing the factory's new home -- and the fix a hurried reader reaches
@@ -81,14 +81,14 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-cli-text-cell.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-cli-text-cell.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # Spelled once each: these are what is matched, what the matched-nothing guards count,
@@ -106,20 +106,20 @@ set(factoryShape "a line beginning `Cell TextCell(` at namespace scope")
 # Walk a file line by line WITHOUT ever building a CMake list of lines.
 #
 # `;`, `\`, `[` and `]` are all CMake list structure and C++ is full of all four; the
-# house `fastcached_read_lines` splitting idiom escapes them one at a time and still
+# house `pace_read_lines` splitting idiom escapes them one at a time and still
 # merges a line ending in a backslash with the next one, which hides the following
 # line and drifts every line number below it -- a FALSE GREEN, measured and recorded
-# on `fastcached_scan_code_lines` in `scripts/lib/CheckCommon.cmake`. This walks with
+# on `pace_scan_code_lines` in `scripts/lib/CheckCommon.cmake`. This walks with
 # `FIND`/`SUBSTRING` instead: immune to all four by construction rather than by
 # escaping them.
 #
 # Consolidating the copies of that idiom is
-# [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) and is not this
+# [#495](https://github.com/LASTRADA-Software/pace/issues/495) and is not this
 # ticket -- absorbing it here would close one ticket by swallowing another.
 #
 # The walk is O(n^2) in the file's length, which is why the caller applies a whole-file
 # test first.
-function(fastcached_scan_text_cells content outWrites outReads)
+function(pace_scan_text_cells content outWrites outReads)
     set(writes "")
     set(reads "")
     set(rest "${content}")
@@ -228,7 +228,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # has THREE values since the consolidation: a walk now says whether there was no index at all
 # or whether the index named no file matching this question.
 
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/*.cpp" "src/*.hpp"
     GLOBS "src/*.cpp" "src/*.hpp"
     FILES_OUT sourceFiles
@@ -239,7 +239,7 @@ if(NOT sourceFiles)
     message("  No C++ source was found under src/ in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "cli-text-cell: the scan matched no C++ sources and cannot conclude")
 endif()
 
@@ -268,11 +268,11 @@ foreach(relative IN LISTS sourceFiles)
     # staged is still named here. Reading it emits `CMake Error ... failed to open for
     # reading`, which the registration scores as THIS check failing for a reason with
     # nothing to do with cells.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
 
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
     string(FIND "${wholeFile}" "${factorySignature}" factoryPosition)
     string(FIND "${wholeFile}" "${textEnumerator}" enumeratorPosition)
 
@@ -288,7 +288,7 @@ foreach(relative IN LISTS sourceFiles)
         continue()
     endif()
 
-    fastcached_scan_text_cells("${wholeFile}" writes reads)
+    pace_scan_text_cells("${wholeFile}" writes reads)
 
     if(NOT factoryPosition EQUAL -1)
         list(LENGTH writes writeCount)

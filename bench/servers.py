@@ -2,7 +2,7 @@
 """Real redis / memcached baselines for head-to-head benchmarking.
 
 These wrap a real ``redis-server`` and a real ``memcached`` (both native
-binaries) so the suite can chart fastcached against the actual competitors.
+binaries) so the suite can chart pace-kv against the actual competitors.
 Both are optional: if the binary is unavailable, discovery returns None and the
 caller skips that baseline.
 
@@ -57,7 +57,7 @@ class RedisServer(RealServer):
     """A native ``redis-server`` with persistence disabled (pure in-memory)."""
 
     # redis-server speaks both RESP2 and (since 6.0) RESP3, so it can serve as a
-    # baseline for either fastcached protocol client in --vs mode.
+    # baseline for either pace-kv protocol client in --vs mode.
     protocols = frozenset({"redis", "redis-resp3"})
 
     def __init__(self, binary: str, host: str, port: int) -> None:
@@ -69,7 +69,7 @@ class RedisServer(RealServer):
 
     def start(self) -> None:
         # --save "" and --appendonly no keep it a pure in-memory cache, matching
-        # how fastcached's in-memory mode is measured.
+        # how pace-kv's in-memory mode is measured.
         self._process = subprocess.Popen(
             [self._binary, "--port", str(self.port), "--save", "", "--appendonly", "no"],
             stdout=subprocess.DEVNULL,
@@ -94,7 +94,7 @@ class MemcachedServer(RealServer):
 
     Running the native binary (rather than a Docker container) keeps the
     comparison fair: Docker's userland port-forwarding adds latency that would
-    penalise memcached relative to the natively-run fastcached and redis.
+    penalise memcached relative to the natively-run pace-kv and redis.
     """
 
     protocols = frozenset({"memcached-text", "memcached-binary"})

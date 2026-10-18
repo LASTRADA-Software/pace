@@ -45,7 +45,7 @@ set -u
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cmake_command="cmake"
 # A first-party unit every shipping configuration compiles, as the `instruction-set-flags-plant` ctest plants.
-plant_unit="src/FastCache/Core/Sha256.cpp"
+plant_unit="src/Pace/Core/Sha256.cpp"
 
 # A path as the native cmake reads it. Git Bash hands POSIX spellings (`/d/a/...`) to a Windows program only through
 # its argument conversion, which the call below switches off, so the conversion is done here, explicitly.
@@ -95,8 +95,8 @@ RunOnce() {
     local label="$1" summaryHead="$2" summaryTail="$3" database="$4" output status
     shift 4
     output="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$cmake_command" \
-        "-DFASTCACHED_SOURCE_DIR=${native_root}" \
-        "-DFASTCACHED_COMPILE_DATABASE=$(NativePath "$database")" \
+        "-DPACE_SOURCE_DIR=${native_root}" \
+        "-DPACE_COMPILE_DATABASE=$(NativePath "$database")" \
         ${1+"$@"} \
         -P "${native_root}/scripts/check-instruction-set-flags.cmake" 2>&1)"
     status=$?
@@ -111,7 +111,7 @@ RunAndJudge() {
     local database="$1" unplanted
     RunOnce unplanted "" " first-party unit(s) judged, none carries a global instruction-set flag" "$database"
     unplanted="$outcome"
-    RunOnce plant "plant: " " refused as it must; " "$database" "-DFASTCACHED_PLANT_UNIT=${plant_unit}"
+    RunOnce plant "plant: " " refused as it must; " "$database" "-DPACE_PLANT_UNIT=${plant_unit}"
     if [ "$unplanted" = "refused" ]; then
         echo "check-instruction-set-flags: REFUSED -- ${database} carries a global instruction-set flag, or cannot be judged; the unplanted run's own words are above"
         return 1
@@ -157,7 +157,7 @@ SelfTest() {
     cat > "$tmp/warns" <<'EOF'
 #!/bin/bash
 case "$*" in
-    *FASTCACHED_PLANT_UNIT*) echo '-- instruction-set-flags: plant: `-msha` planted into src/FastCache/Core/Sha256.cpp (1 entr(y/ies)) refused as it must; 1 first-party unit(s) judged; 0 unplanted problem(s) left to the unplanted run' ;;
+    *PACE_PLANT_UNIT*) echo '-- instruction-set-flags: plant: `-msha` planted into src/Pace/Core/Sha256.cpp (1 entr(y/ies)) refused as it must; 1 first-party unit(s) judged; 0 unplanted problem(s) left to the unplanted run' ;;
     *) echo '-- instruction-set-flags: 1 first-party unit(s) judged, none carries a global instruction-set flag; 0 unit(s) outside src/ declined' ;;
 esac
 echo 'CMake Warning at x.cmake:1 (message):'
@@ -179,10 +179,10 @@ EOF
     cat > "$tmp/plant-accepted" <<'EOF'
 #!/bin/bash
 case "$*" in
-    *FASTCACHED_PLANT_UNIT*)
+    *PACE_PLANT_UNIT*)
         echo 'CMake Error at /r/scripts/check-instruction-set-flags.cmake:419 (message):'
         echo '  instruction-set-flags: 1 problem(s) in `db`:'
-        echo '    plant: `-msha` planted into `src/FastCache/Core/Sha256.cpp` was ACCEPTED -- the check cannot see the flag it exists to refuse'
+        echo '    plant: `-msha` planted into `src/Pace/Core/Sha256.cpp` was ACCEPTED -- the check cannot see the flag it exists to refuse'
         exit 1
         ;;
 esac

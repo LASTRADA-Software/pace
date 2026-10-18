@@ -24,7 +24,7 @@
     #include <aclapi.h>
     #include <sddl.h>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Frees what a security API allocated with `LocalAlloc`.
@@ -138,6 +138,6 @@ inline constexpr DWORD CommandLineBoundMilliseconds = 60'000;
     return exitCode;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing
 
 #endif

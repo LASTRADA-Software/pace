@@ -2,7 +2,7 @@
 
 **Protocols:** memcached text · **Status:** Synthetic stub
 
-fastcached does not implement a separate LRU crawler thread; expired
+pace-kv does not implement a separate LRU crawler thread; expired
 entries are purged on access and on demand via the engine's
 `PurgeExpired` call. Recognises `lru_crawler enable / disable / sleep
 / tocrawl / crawl / metadump / mgdump` and replies `OK` so capability

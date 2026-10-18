@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # No first-party C++ walks an enum's enumerators by hand now that
-# `src/FastCache/Core/EnumTable.hpp` offers `Enumerators<Enum>()`.
+# `src/Pace/Core/EnumTable.hpp` offers `Enumerators<Enum>()`.
 #
 # ## Why the seam exists
 #
@@ -37,7 +37,7 @@
 # **A `static_cast<...>(x)` near an `EnumeratorCount<` is NOT refused, and that was measured
 # rather than assumed.** The obvious third pattern matches six sites in this tree and every
 # one of them is legitimate -- `static_cast<std::size_t>(raw) >= EnumeratorCount<E>` in
-# `Consensus/RaftTypes.hpp` and `apps/fastcache-cc/Stats.cpp`, which are BOUNDS CHECKS on a
+# `Consensus/RaftTypes.hpp` and `apps/pace-cc/Stats.cpp`, which are BOUNDS CHECKS on a
 # value arriving off a wire, not walks. A check on that pattern would refuse correct code,
 # which is why shape 2 requires `for`/`while` on the line: `>=` is a range test and `<` in an
 # `if` may be one too.
@@ -65,18 +65,18 @@ cmake_minimum_required(VERSION 3.20)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR OR FASTCACHED_SOURCE_DIR STREQUAL "")
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR OR PACE_SOURCE_DIR STREQUAL "")
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(seamHeader "src/FastCache/Core/EnumTable.hpp")
-set(seamTest "src/FastCache/Core/EnumTable_test.cpp")
+set(seamHeader "src/Pace/Core/EnumTable.hpp")
+set(seamTest "src/Pace/Core/EnumTable_test.cpp")
 
 # --------------------------------------------------------------------------
 # The anchor: the seam this check exists to enforce must still be there.
 # --------------------------------------------------------------------------
 
-set(seamPath "${FASTCACHED_SOURCE_DIR}/${seamHeader}")
+set(seamPath "${PACE_SOURCE_DIR}/${seamHeader}")
 if(NOT EXISTS "${seamPath}")
     message(FATAL_ERROR
         "enumerator-walks: the seam header ${seamHeader} is missing, so this check would be "
@@ -98,11 +98,11 @@ endif()
 # What to scan: first-party C++, derived.
 # --------------------------------------------------------------------------
 
-# One answer, from `fastcached_first_party_cxx`, which nine other checks each had their own
+# One answer, from `pace_first_party_cxx`, which nine other checks each had their own
 # copy of before it was extracted. The MODE comes back with the files because there are two
 # of them, they cover different sets, and CI takes the git one -- so every verdict this check
 # prints names it, and a self-test case asserts it.
-fastcached_first_party_cxx("${FASTCACHED_SOURCE_DIR}" sourceFiles declinedFiles scanSource)
+pace_first_party_cxx("${PACE_SOURCE_DIR}" sourceFiles declinedFiles scanSource)
 list(LENGTH declinedFiles declinedCount)
 
 if(NOT sourceFiles)
@@ -110,7 +110,7 @@ if(NOT sourceFiles)
     message("  No first-party C++ source was found in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved source")
-    message("root, a FASTCACHED_SOURCE_DIR pointing somewhere else, or a third-party root")
+    message("root, a PACE_SOURCE_DIR pointing somewhere else, or a third-party root")
     message("that swallowed the whole tree.")
     message(FATAL_ERROR "enumerator-walks: the scan matched no first-party C++ and cannot conclude")
 endif()
@@ -145,7 +145,7 @@ foreach(relative IN LISTS sourceFiles)
     if(relative STREQUAL "${seamHeader}" OR relative STREQUAL "${seamTest}")
         continue()
     endif()
-    set(absolute "${FASTCACHED_SOURCE_DIR}/${relative}")
+    set(absolute "${PACE_SOURCE_DIR}/${relative}")
     if(NOT EXISTS "${absolute}")
         continue()
     endif()
@@ -156,14 +156,14 @@ foreach(relative IN LISTS sourceFiles)
     endif()
     math(EXPR walkedCount "${walkedCount} + 1")
 
-    fastcached_scan_code_lines("${content}" "${iotaPattern}" iotaHits)
+    pace_scan_code_lines("${content}" "${iotaPattern}" iotaHits)
     foreach(hit IN LISTS iotaHits)
         if(hit MATCHES "^use:(.+)$")
             list(APPEND violations "${relative}:${CMAKE_MATCH_1}: views::iota over EnumeratorCount")
         endif()
     endforeach()
 
-    fastcached_scan_code_lines("${content}" "${loopPattern}" loopHits)
+    pace_scan_code_lines("${content}" "${loopPattern}" loopHits)
     foreach(hit IN LISTS loopHits)
         if(hit MATCHES "^use:(.+)$")
             list(APPEND violations "${relative}:${CMAKE_MATCH_1}: a loop bounded by EnumeratorCount")
@@ -183,7 +183,7 @@ if(violations)
     message("    for (auto const value: Enumerators<Enum>())        // all of them")
     message("    for (auto const value: Enumerators(Enum::Third))   // from one onwards")
     message("")
-    message("both from FastCache/Core/EnumTable.hpp, and drop the static_cast the index")
+    message("both from Pace/Core/EnumTable.hpp, and drop the static_cast the index")
     message("forced on the body. Enumerators(from) | std::views::reverse walks backwards.")
     message("")
     message("This does NOT say every EnumeratorCount use is wrong. A bounds check on a value")

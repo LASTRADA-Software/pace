@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""In-process cache benchmark: fastcached's storage stack vs jitbit/FastCache.
+"""In-process cache benchmark: pace-kv's storage stack vs jitbit/FastCache.
 
 The rest of ``bench/`` measures the *daemon* — a TCP round trip per operation,
 where a single request costs microseconds and the network dominates. That is the
@@ -11,7 +11,7 @@ that say nothing about either implementation.
 This script measures the one layer where the comparison is meaningful — the
 in-process cache map — by running both sides on the same machine:
 
-* ``fastcache-bench``, a Catch2 benchmark over our storage stack, decomposed so
+* ``pace-bench``, a Catch2 benchmark over our storage stack, decomposed so
   each production concern (byte budget, sharding, the CacheEngine facade) shows
   up as its own row;
 * jitbit/FastCache's own BenchmarkDotNet suite, unmodified, cloned and run
@@ -57,7 +57,7 @@ import termviz
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Lookups performed per benchmark body, on both sides. Must match
-#: ``LookupsPerIteration`` in ``src/apps/fastcache-bench/StorageBench.cpp`` and
+#: ``LookupsPerIteration`` in ``src/apps/pace-bench/StorageBench.cpp`` and
 #: the four ``TryGet`` calls in jitbit's ``FastCache.Benchmarks/Program.cs``.
 LOOKUPS_PER_ITERATION = 4
 
@@ -65,7 +65,7 @@ JITBIT_REPO = "https://github.com/jitbit/FastCache"
 
 #: Rows whose bodies are a single operation rather than LOOKUPS_PER_ITERATION,
 #: so the normalizer must not divide them.
-SINGLE_OP_ROWS = frozenset({"FastCacheAddRemove", "MemoryCacheAddRemove"})
+SINGLE_OP_ROWS = frozenset({"PaceAddRemove", "MemoryCacheAddRemove"})
 
 #: How to describe each of our benchmark rows in the report. Adding a row to the
 #: C++ table means adding a line here; nothing else in this script changes.
@@ -88,7 +88,7 @@ def default_preset() -> str:
 
 def bench_binary(preset: str) -> Path:
     """Return the path the benchmark executable is built to for ``preset``."""
-    name = "fastcache-bench.exe" if platform.system() == "Windows" else "fastcache-bench"
+    name = "pace-bench.exe" if platform.system() == "Windows" else "pace-bench"
     return REPO_ROOT / "out" / "build" / preset / "target" / name
 
 
@@ -97,16 +97,16 @@ def bench_binary(preset: str) -> Path:
 def build_bench(preset: str) -> None:
     """Configure with benchmarks enabled and build the benchmark target."""
     subprocess.run(
-        ["cmake", "--preset", preset, "-DFASTCACHED_BUILD_BENCHMARKS=ON"],
+        ["cmake", "--preset", preset, "-DPACE_BUILD_BENCHMARKS=ON"],
         cwd=REPO_ROOT, check=True,
     )
     subprocess.run(
-        ["cmake", "--build", "--preset", preset, "--target", "fastcache-bench"],
+        ["cmake", "--build", "--preset", preset, "--target", "pace-bench"],
         cwd=REPO_ROOT, check=True,
     )
 
 
-#: One banner FACT, as ``RenderBuildBanner`` in ``src/apps/fastcache-bench/BuildBanner.cpp``
+#: One banner FACT, as ``RenderBuildBanner`` in ``src/apps/pace-bench/BuildBanner.cpp``
 #: writes it: two spaces, a label, ``: ``, the value.
 #:
 #: The indent is the contract, and it is the reason this pattern needs no list of labels to
@@ -124,7 +124,7 @@ BANNER_VERDICT = re.compile(r"^[-!?]{3} these figures are (.+?) -- (.+)$", re.MU
 def parse_build_banner(stderr: str) -> dict[str, str]:
     """Return what the binary said about its own build, from the banner on its stderr.
 
-    ``fastcache-bench`` prints this before any case runs (#1439). Reading it back is the
+    ``pace-bench`` prints this before any case runs (#1439). Reading it back is the
     only way this report can state what the binary IS: ``--preset`` says what was asked
     for, and a preset and a binary can disagree in every way that matters -- a stale build
     directory, a hand-set flag, a cache entry that never reached a compile line.
@@ -138,15 +138,15 @@ def parse_build_banner(stderr: str) -> dict[str, str]:
     verdict = BANNER_VERDICT.search(stderr)
     if not facts or verdict is None:
         raise RuntimeError(
-            "fastcache-bench printed no build banner on stderr; this report cannot state what build "
+            "pace-bench printed no build banner on stderr; this report cannot state what build "
             "produced its figures. Expected the block RenderBuildBanner writes in "
-            "src/apps/fastcache-bench/BuildBanner.cpp"
+            "src/apps/pace-bench/BuildBanner.cpp"
         )
     facts["figures"] = f"{verdict.group(1)} -- {verdict.group(2)}"
     return facts
 
 
-def run_fastcached(binary: Path, samples: int) -> tuple[dict[str, float], str]:
+def run_pace_kv(binary: Path, samples: int) -> tuple[dict[str, float], str]:
     """Run the Catch2 benchmarks and return ({row name: nanoseconds per body}, stderr).
 
     Catch2's XML reporter emits one ``<BenchmarkResults>`` per row with a
@@ -168,7 +168,7 @@ def run_fastcached(binary: Path, samples: int) -> tuple[dict[str, float], str]:
         if mean is not None and mean.get("value"):
             results[node.get("name", "?")] = float(mean.get("value", "0"))
     if not results:
-        raise RuntimeError("no benchmark results parsed from fastcache-bench XML output")
+        raise RuntimeError("no benchmark results parsed from pace-bench XML output")
     return results, completed.stderr
 
 
@@ -182,7 +182,7 @@ SCALING_LINE = re.compile(r"^SCALING threads=(\d+) ops_per_sec=(\d+)", re.MULTIL
 def run_scaling(binary: Path) -> dict[int, float]:
     """Run the thread-scaling benchmark and return {thread count: ops/sec}.
 
-    A separate invocation from :func:`run_fastcached` because this tier reports
+    A separate invocation from :func:`run_pace_kv` because this tier reports
     in its own lines rather than through Catch2's timing harness: it measures aggregate
     throughput over a fixed wall-clock window across N threads, which is not a
     per-iteration mean and so has no ``<BenchmarkResults>`` to parse. Single
@@ -197,7 +197,7 @@ def run_scaling(binary: Path) -> dict[int, float]:
     # refusing a document whose `<StdOut>` carries text.
     results = {int(threads): float(ops) for threads, ops in SCALING_LINE.findall(completed.stderr)}
     if not results:
-        raise RuntimeError("no SCALING lines found in fastcache-bench output")
+        raise RuntimeError("no SCALING lines found in pace-bench output")
     return results
 
 
@@ -313,9 +313,9 @@ def write_report(outdir: Path, environment: dict, ours: dict, theirs: dict, scal
             {
                 "environment": environment,
                 "lookups_per_iteration": LOOKUPS_PER_ITERATION,
-                "fastcached_ns_per_op": {k: per_operation(k, v) for k, v in ours.items()},
+                "pace_ns_per_op": {k: per_operation(k, v) for k, v in ours.items()},
                 "jitbit_ns_per_op": {k: per_operation(k, v) for k, v in theirs.items()},
-                "fastcached_scaling_ops_per_sec": {str(k): v for k, v in sorted(scaling.items())},
+                "pace_scaling_ops_per_sec": {str(k): v for k, v in sorted(scaling.items())},
             },
             indent=2,
         ),
@@ -323,7 +323,7 @@ def write_report(outdir: Path, environment: dict, ours: dict, theirs: dict, scal
     )
 
     lines = [
-        "# In-process cache comparison: fastcached vs jitbit/FastCache",
+        "# In-process cache comparison: pace-kv vs jitbit/FastCache",
         "",
         "Both sides measured on this machine. Times are nanoseconds per single",
         "cache operation; each benchmark body performs "
@@ -336,9 +336,9 @@ def write_report(outdir: Path, environment: dict, ours: dict, theirs: dict, scal
     ]
     lines += [f"| {key} | {value} |" for key, value in environment.items()]
 
-    reference = per_operation("FastCacheLookup", theirs["FastCacheLookup"]) if "FastCacheLookup" in theirs else None
+    reference = per_operation("PaceLookup", theirs["PaceLookup"]) if "PaceLookup" in theirs else None
 
-    lines += ["", "## fastcached storage stack", "", "| Row | ns/op | vs jitbit | What it adds |", "| --- | ---: | ---: | --- |"]
+    lines += ["", "## pace-kv storage stack", "", "| Row | ns/op | vs jitbit | What it adds |", "| --- | ---: | ---: | --- |"]
     for name, body_ns in ours.items():
         nanoseconds = per_operation(name, body_ns)
         ratio = "-" if not reference else f"{nanoseconds / reference:.2f}x"
@@ -387,7 +387,7 @@ def main() -> int:
         print(f"benchmark binary not found: {binary}", file=sys.stderr)
         return 1
 
-    ours, bench_stderr = run_fastcached(binary, args.samples)
+    ours, bench_stderr = run_pace_kv(binary, args.samples)
     scaling = {} if args.no_scaling else run_scaling(binary)
 
     theirs: dict[str, float] = {}
@@ -400,7 +400,7 @@ def main() -> int:
     environment = collect_environment(args.preset, parse_build_banner(bench_stderr))
     termviz.print_environment(environment)
 
-    reference = per_operation("FastCacheLookup", theirs["FastCacheLookup"]) if "FastCacheLookup" in theirs else None
+    reference = per_operation("PaceLookup", theirs["PaceLookup"]) if "PaceLookup" in theirs else None
     if reference:
         print(f"jitbit FastCache lookup: {reference:.2f} ns/op (this machine)\n")
 

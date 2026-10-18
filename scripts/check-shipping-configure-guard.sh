@@ -21,12 +21,12 @@
 # ## The selector is DATA, not three job names
 #
 # A shipping configure is a step whose `run:` invokes `cmake` with
-# `-DFASTCACHED_BUILD_TESTS=OFF` -- the one property separating what a customer
+# `-DPACE_BUILD_TESTS=OFF` -- the one property separating what a customer
 # receives from what `ctest` measures. A fourth packaging job is then something
 # the selector FINDS rather than something somebody remembered to add.
 #
 # The step's body is JOINED before it is tested, and that is load-bearing: the
-# macOS configure spells `-DFASTCACHED_BUILD_TESTS=OFF \` on a continuation line
+# macOS configure spells `-DPACE_BUILD_TESTS=OFF \` on a continuation line
 # of its own, so a line-wise selector finds two of the three and reports clean.
 # The joining is the shared walk's (`scripts/lib/workflow-walk.awk`, #1456), which
 # is also why this check knows a step's ORDER in its job without counting columns.
@@ -55,15 +55,15 @@
 # steps the walk placed, and refuses on zero of either.
 set -uo pipefail
 
-FastCachedRoot="${FASTCACHED_SHIPPING_GUARD_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-FastCachedWorkflows="${FASTCACHED_SHIPPING_GUARD_WORKFLOWS:-${FastCachedRoot}/.github/workflows}"
-FastCachedExemptions="${FASTCACHED_SHIPPING_GUARD_EXEMPTIONS:-${FastCachedRoot}/scripts/check-shipping-configure-guard-exemptions.txt}"
-FastCachedWalkAwk="${FastCachedRoot}/scripts/lib/workflow-walk.awk"
-FastCachedGuardAwk="${FastCachedRoot}/scripts/check-shipping-configure-guard.awk"
+PaceRoot="${PACE_SHIPPING_GUARD_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PaceWorkflows="${PACE_SHIPPING_GUARD_WORKFLOWS:-${PaceRoot}/.github/workflows}"
+PaceExemptions="${PACE_SHIPPING_GUARD_EXEMPTIONS:-${PaceRoot}/scripts/check-shipping-configure-guard-exemptions.txt}"
+PaceWalkAwk="${PaceRoot}/scripts/lib/workflow-walk.awk"
+PaceGuardAwk="${PaceRoot}/scripts/check-shipping-configure-guard.awk"
 
 # What makes a configure a SHIPPING one, and which script must follow it. Both are
 # data rather than literals spread through the code below, so a rename is one edit.
-ShippingFlag="-DFASTCACHED_BUILD_TESTS=OFF"
+ShippingFlag="-DPACE_BUILD_TESTS=OFF"
 GuardScript="scripts/check-instruction-set-flags.sh"
 # Files other than a workflow that carry a shipping configure. `Dockerfile` is the
 # one, and it is a plain text scan: the rule is about every shipping configure in
@@ -71,7 +71,7 @@ GuardScript="scripts/check-instruction-set-flags.sh"
 # exactly the file the exemption exists for.
 OtherSubjects="Dockerfile"
 
-for awkProgram in "${FastCachedWalkAwk}" "${FastCachedGuardAwk}"; do
+for awkProgram in "${PaceWalkAwk}" "${PaceGuardAwk}"; do
     if [ ! -f "${awkProgram}" ]; then
         echo "check-shipping-configure-guard: missing awk program ${awkProgram}; no workflow was" >&2
         echo "  read, so this is a refusal and not a clean run." >&2
@@ -88,7 +88,7 @@ Fail() { echo "  FAIL: $*" >&2; Problems=$((Problems + 1)); }
 Records() {
     local out
     out="$(awk -v guard="${GuardScript}" -v shipping="${ShippingFlag}" \
-        -f "${FastCachedWalkAwk}" -f "${FastCachedGuardAwk}" "$1" "$1")"
+        -f "${PaceWalkAwk}" -f "${PaceGuardAwk}" "$1" "$1")"
     grep -F -- "$2	" <<< "${out}" | cut -f2- || true
 }
 
@@ -121,9 +121,9 @@ if [ "${1:-}" = "--self-test" ]; then
     Case() {
         local what="$1" want="$2" out got=0
         selfTestCases=$((selfTestCases + 1))
-        out="$(FASTCACHED_SHIPPING_GUARD_WORKFLOWS="$scratch/wf" \
-               FASTCACHED_SHIPPING_GUARD_EXEMPTIONS="$scratch/exemptions.txt" \
-               FASTCACHED_SHIPPING_GUARD_OTHER="" \
+        out="$(PACE_SHIPPING_GUARD_WORKFLOWS="$scratch/wf" \
+               PACE_SHIPPING_GUARD_EXEMPTIONS="$scratch/exemptions.txt" \
+               PACE_SHIPPING_GUARD_OTHER="" \
                bash "$me" 2>&1)" || got=$?
         case "$want" in
             want-pass)   [ "$got" -eq 0 ] && { echo "  ok    ($want) $what"; return; } ;;
@@ -139,9 +139,9 @@ if [ "${1:-}" = "--self-test" ]; then
     CaseNaming() {
         local what="$1" want="$2" needle="$3" out got=0
         selfTestCases=$((selfTestCases + 1))
-        out="$(FASTCACHED_SHIPPING_GUARD_WORKFLOWS="$scratch/wf" \
-               FASTCACHED_SHIPPING_GUARD_EXEMPTIONS="$scratch/exemptions.txt" \
-               FASTCACHED_SHIPPING_GUARD_OTHER="" \
+        out="$(PACE_SHIPPING_GUARD_WORKFLOWS="$scratch/wf" \
+               PACE_SHIPPING_GUARD_EXEMPTIONS="$scratch/exemptions.txt" \
+               PACE_SHIPPING_GUARD_OTHER="" \
                bash "$me" 2>&1)" || got=$?
         if [ "$want" = want-fail ] && [ "$got" -ne 1 ]; then
             echo "  FAIL  ($want, exit $got) $what" >&2
@@ -168,11 +168,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: "Configure"
-        run: cmake --preset gcc-release @SHIP@ -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON
+        run: cmake --preset gcc-release @SHIP@ -DPACE_PACKAGE_ROOT_PREFIX=ON
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
 
     Stage; Workflow "$Correct"
     Case "a shipping configure with the guard before its build passes" want-pass
@@ -193,7 +193,7 @@ jobs:
       - name: "Configure"
         run: cmake --preset gcc-release @SHIP@
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached
+        run: cmake --build out/build/gcc-release --target pace-kv
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json'
     Case "a guard step AFTER the build is REFUSED" want-fail
@@ -212,7 +212,7 @@ jobs:
         if: ${{ github.event_name == '"'"'push'"'"' }}
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
     Case "a guard step carrying an if: is REFUSED" want-fail
 
     # Gating without failing, which is a different mechanism and its own refusal.
@@ -229,7 +229,7 @@ jobs:
         continue-on-error: true
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
     Case "a guard step carrying continue-on-error is REFUSED" want-fail
 
     # The guard in ANOTHER job says nothing: the database it reads is that job's
@@ -244,7 +244,7 @@ jobs:
       - name: "Configure"
         run: cmake --preset gcc-release @SHIP@
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached
+        run: cmake --build out/build/gcc-release --target pace-kv
   elsewhere:
     runs-on: ubuntu-24.04
     steps:
@@ -266,7 +266,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/somewhere-else/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "a guard naming another configure's database is REFUSED" want-fail
 
     # A multi-line configure, which the three real ones include: the macOS package
@@ -284,11 +284,11 @@ jobs:
           cmake -S . -B out/build/thing -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             @SHIP@ \
-            -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON
+            -DPACE_PACKAGE_ROOT_PREFIX=ON
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/thing/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "a configure whose flag sits on a continuation line is FOUND and passes" want-pass
 
     # And the same shape with the guard removed, so the case above is not passing
@@ -306,9 +306,9 @@ jobs:
           cmake -S . -B out/build/thing -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             @SHIP@ \
-            -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON
+            -DPACE_PACKAGE_ROOT_PREFIX=ON
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "the same continuation-line configure with no guard is REFUSED, so the case above found it" want-fail
 
     # A configure that is NOT a shipping one must not be required to have a guard.
@@ -331,7 +331,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
     Case "a configure without the shipping flag needs no guard and passes" want-pass
 
     # A configure this cannot resolve to a directory is REFUSED rather than
@@ -349,7 +349,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/thing/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "a shipping configure whose build directory cannot be resolved is REFUSED" want-fail
 
     # Zero shipping configures. Every verdict above is about something missing, so
@@ -381,7 +381,7 @@ jobs:
     # the file they were written for. The CONTROL first: the tree as it stands must
     # pass through the same staging, or the neuter below says only that a copied
     # tree behaves differently.
-    realWorkflows="${FastCachedRoot}/.github/workflows"
+    realWorkflows="${PaceRoot}/.github/workflows"
     if [ -d "$realWorkflows" ]; then
         Stage
         cp "$realWorkflows"/*.yml "$scratch/wf/"
@@ -419,9 +419,9 @@ jobs:
             # The shipping count must be UNCHANGED, or the neuter deleted a configure
             # and the refusal above is about the wrong thing entirely.
             selfTestCases=$((selfTestCases + 1))
-            neuteredOut="$(FASTCACHED_SHIPPING_GUARD_WORKFLOWS="$scratch/wf" \
-                FASTCACHED_SHIPPING_GUARD_EXEMPTIONS="$scratch/exemptions.txt" \
-                FASTCACHED_SHIPPING_GUARD_OTHER="" bash "$me" 2>&1)" || true
+            neuteredOut="$(PACE_SHIPPING_GUARD_WORKFLOWS="$scratch/wf" \
+                PACE_SHIPPING_GUARD_EXEMPTIONS="$scratch/exemptions.txt" \
+                PACE_SHIPPING_GUARD_OTHER="" bash "$me" 2>&1)" || true
             if grep -Fq -- "3 shipping configure(s)" <<< "$neuteredOut"; then
                 echo "  ok    (want-fail) the neuter left all 3 shipping configures in place, so it deleted a GUARD"
             else
@@ -445,16 +445,16 @@ jobs:
 fi
 
 # ---------------------------------------------------------------------------
-Workflows="$(find "${FastCachedWorkflows}" -maxdepth 1 -name '*.yml' 2>/dev/null | LC_ALL=C sort)"
+Workflows="$(find "${PaceWorkflows}" -maxdepth 1 -name '*.yml' 2>/dev/null | LC_ALL=C sort)"
 if [ -z "${Workflows}" ]; then
-    echo "check-shipping-configure-guard: ${FastCachedWorkflows} holds no *.yml, so no configure was" >&2
+    echo "check-shipping-configure-guard: ${PaceWorkflows} holds no *.yml, so no configure was" >&2
     echo "  read. Refused rather than reported as 'every shipping configure is guarded'." >&2
     exit 2
 fi
 
 ExemptPaths=""
-if [ -r "${FastCachedExemptions}" ]; then
-    ExemptPaths="$(sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "${FastCachedExemptions}" | cut -f1)"
+if [ -r "${PaceExemptions}" ]; then
+    ExemptPaths="$(sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "${PaceExemptions}" | cut -f1)"
 fi
 
 ShippingCount=0
@@ -518,9 +518,9 @@ done <<< "${Workflows}"
 # the step, so it is exempt by row -- and the scan looks for it anyway, because a
 # check that only read workflows would be silent about exactly the file the
 # exemption exists for.
-for other in ${FASTCACHED_SHIPPING_GUARD_OTHER-${OtherSubjects}}; do
+for other in ${PACE_SHIPPING_GUARD_OTHER-${OtherSubjects}}; do
     [ -n "${other}" ] || continue
-    path="${FastCachedRoot}/${other}"
+    path="${PaceRoot}/${other}"
     [ -r "${path}" ] || continue
     grep -Fq -- "${ShippingFlag}" "${path}" || continue
     ShippingCount=$((ShippingCount + 1))

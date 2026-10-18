@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Ed25519.hpp>
+#include <Pace/Core/Ed25519.hpp>
 
 #include <span>
 
 #include <tests/RaftPeerKeyFakes.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The identity key a test WORKER signs its COMPILE replies under (`SealCompileReply`, W-4),
@@ -29,4 +29,4 @@ namespace FastCache::Testing
     return std::span<std::byte const> { TestWorkerKey().PublicKey() };
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

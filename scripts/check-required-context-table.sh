@@ -192,9 +192,9 @@ ScanFiles() {
         # never the whole file: excused entirely, this script would stop being scanned
         # for every other rule too, including in its own production half.
         {
-            if (match($0, /FASTCACHED_REQUIRED_CONTEXTS_FILE:-[^}"'"'"']*/)) {
+            if (match($0, /PACE_REQUIRED_CONTEXTS_FILE:-[^}"'"'"']*/)) {
                 d = substr($0, RSTART, RLENGTH)
-                sub(/^FASTCACHED_REQUIRED_CONTEXTS_FILE:-/, "", d)
+                sub(/^PACE_REQUIRED_CONTEXTS_FILE:-/, "", d)
         # required-context-scan: data-end
                 printf "READER %s %d %s\n", FNAME, FNR, d
             }
@@ -530,7 +530,7 @@ EOF
         rdCount=$(( rdCount + 1 ))
         [ -n "$liveFile" ] || continue
         if [ "$rdPath" != "$liveFile" ]; then
-            Fail "$rdFile:$rdLine defaults \`FASTCACHED_REQUIRED_CONTEXTS_FILE\` to
+            Fail "$rdFile:$rdLine defaults \`PACE_REQUIRED_CONTEXTS_FILE\` to
      \`$rdPath\`, and the declaration marked \`live\` is in \`$liveFile\`. A reader
      pointed at a fixture reports a true statement about a set nobody asked about, and
      every row it checks is real, so nothing looks wrong (#1360)."
@@ -605,7 +605,7 @@ REQ
 }
 FIX
         Put "$tmp/$1/scripts/reader.sh" <<'RD'
-Table="${FASTCACHED_REQUIRED_CONTEXTS_FILE:-scripts/live.sh}"
+Table="${PACE_REQUIRED_CONTEXTS_FILE:-scripts/live.sh}"
 RD
     }
 
@@ -712,7 +712,7 @@ SY
     # Rule 5: a reader pointed at the fixture -- the defect that opened #1360.
     Mk misread
     Put "$tmp/misread/scripts/reader.sh" <<'MR'
-Table="${FASTCACHED_REQUIRED_CONTEXTS_FILE:-scripts/fixture.sh}"
+Table="${PACE_REQUIRED_CONTEXTS_FILE:-scripts/fixture.sh}"
 MR
     Case "a reader defaulting to the fixture is refused" \
         "$tmp/misread" 1 "and the declaration marked"
@@ -856,7 +856,7 @@ if [ "$rc" -ne 0 ]; then
     printf '        reader that lands on the 11-row subset reports 11 of 11 and every row it\n' >&2
     printf '        checked is real, so nothing looks wrong (#1360).\n' >&2
     printf '        This rule covers the DECLARATIONS and the readers that default through\n' >&2
-    printf '        `FASTCACHED_REQUIRED_CONTEXTS_FILE`. It does NOT stop a reader that spells\n' >&2
+    printf '        `PACE_REQUIRED_CONTEXTS_FILE`. It does NOT stop a reader that spells\n' >&2
     printf '        a path some other way -- do not read it as proof that no such reader exists.\n' >&2
     exit "$rc"
 fi

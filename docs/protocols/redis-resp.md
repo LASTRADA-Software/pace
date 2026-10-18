@@ -1,10 +1,10 @@
 # Redis RESP
 
-fastcached implements a subset of the Redis command set over both RESP2
+pace-kv implements a subset of the Redis command set over both RESP2
 and RESP3. A connection starts in RESP2; `HELLO 3` upgrades it.
 
 The authoritative list is `CommandTable` in
-`src/FastCache/Protocol/RedisResp.cpp` (**66 CommandTable rows**) plus `AUTH`,
+`src/Pace/Protocol/RedisResp.cpp` (**66 CommandTable rows**) plus `AUTH`,
 `QUIT` and `RESET`, which `Dispatch` handles ahead of the table because they
 carry side-effects beyond a plain reply. The tables below are checked against that
 table by `ctest -R resp-command-docs`, so a verb added to one and not the
@@ -152,7 +152,7 @@ commands](../commands/redis/unsupported.md).
 
 ## Why a subset?
 
-fastcached's storage engine is a key-value cache, and the surface grew
+pace-kv's storage engine is a key-value cache, and the surface grew
 outward from what `sccache` and similar clients need. Sets and streams are
 stored as tagged value blobs over that same engine, which is why those
 families are partial rather than absent: a verb lands when its semantics

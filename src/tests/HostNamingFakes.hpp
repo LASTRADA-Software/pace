@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Config/DefaultConfigPath.hpp>
-#include <FastCache/Platform/HostNaming.hpp>
-#include <FastCache/Platform/SrvResolver.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Platform/HostNaming.hpp>
+#include <Pace/Platform/SrvResolver.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,7 +25,7 @@
 /// Shared rather than written per file: every case that reaches for these asserts what a node
 /// DOES with a name or a lookup's answer, and a second copy that answered an unknown name
 /// differently would make those cases pass for the wrong reason.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// An `IHostNaming` that answers the names it was built with.
@@ -112,7 +112,7 @@ class ScriptedConfigPathProbe final: public IConfigPathProbe
 
 /// The probe a service registration is built with in a case: an elevated installer whose
 /// environment names the Windows machine-wide base, so the machine-wide state directory resolves
-/// alike on every platform -- `C:\ProgramData\fastcache-node` or the POSIX row's own path --
+/// alike on every platform -- `C:\ProgramData\pace-node` or the POSIX row's own path --
 /// and never from the real environment of the machine running the test.
 /// @return The probe.
 [[nodiscard]] inline ScriptedConfigPathProbe InstallerPathProbe()
@@ -161,4 +161,4 @@ class ScriptedSrvResolver final: public ISrvResolver
     std::map<std::string, std::expected<std::vector<SrvTarget>, SrvLookupFailure>> _answers;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

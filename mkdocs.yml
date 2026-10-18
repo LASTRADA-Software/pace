@@ -1,4 +1,4 @@
-# fastcached — MkDocs site configuration.
+# pace-kv — MkDocs site configuration.
 #
 # Build:   pip install -r docs/requirements.txt && mkdocs build --strict
 # Preview: mkdocs serve
@@ -35,11 +35,11 @@ validation:
 not_in_nav: |
   snippets/*
 
-site_name: fastcached
+site_name: Pace
 site_description: A memcached- and Redis-compatible cache daemon, and a portable compile cache
-site_author: fastcached contributors
-site_url: https://lastrada-software.github.io/fastcached/
-repo_url: https://github.com/LASTRADA-Software/fastcached
+site_author: Pace contributors
+site_url: https://lastrada-software.github.io/pace/
+repo_url: https://github.com/LASTRADA-Software/pace
 edit_uri: edit/master/docs/
 copyright: Apache-2.0 licensed. Memcached and Redis are registered trademarks of their respective owners.
 
@@ -104,15 +104,16 @@ nav:
   - How it works: how-it-works.md
   - Getting started:
     - Install: getting-started/install.md
+    - Upgrading from fastcached: upgrading-to-pace.md
     - Quickstart: getting-started/quickstart.md
     - Configuration: getting-started/configuration.md
     - Distributed compilation: getting-started/distributed-compilation.md
     - Cluster discovery: getting-started/cluster-discovery.md
   - Tools:
     - Overview: tools/index.md
-    - fastcache-cc (compiler launcher): tools/fastcache-cc.md
-    - fastcache-compile-node (compile worker): tools/fastcache-compile-node.md
-    - fastcache-cli (operator client): tools/fastcache-cli.md
+    - pace-cc (compiler launcher): tools/pace-cc.md
+    - pace-node (compile worker): tools/pace-node.md
+    - pacectl (operator client): tools/pacectl.md
   - Protocols:
     - Overview: protocols/overview.md
     - Coverage matrix: protocols/coverage-matrix.md

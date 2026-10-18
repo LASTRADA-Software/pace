@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "TestClientCli.hpp"
 
-#include <FastCache/Config/CliParser.hpp>
+#include <Pace/Config/CliParser.hpp>
 
 #include <array>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::TestClient
+namespace Pace::TestClient
 {
 
 namespace
@@ -196,4 +196,4 @@ std::string HelpText(UsageColor color)
     return RenderUsage({ .sections = sections }, color);
 }
 
-} // namespace FastCache::TestClient
+} // namespace Pace::TestClient

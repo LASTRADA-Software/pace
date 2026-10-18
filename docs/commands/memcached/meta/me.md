@@ -23,7 +23,7 @@ Where:
 - `exp` — seconds until expiry (`-1` = never)
 - `la` — seconds since last access
 - `cas` — current CAS token
-- `cls` — synthetic slab class (always `1` in fastcached)
+- `cls` — synthetic slab class (always `1` in pace-kv)
 - `size` — value size in bytes
 
 ## Example

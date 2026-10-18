@@ -13,7 +13,7 @@
 #
 # ## The prefilter, and why it is not the word `pragma`
 #
-# `fastcached_scan_code_lines` is quadratic in a file's length, and every header here carries
+# `pace_scan_code_lines` is quadratic in a file's length, and every header here carries
 # `#pragma once`, so a file is walked only when ONE line holds every literal word the pattern needs, in
 # order. That cannot miss a use: comment stripping only removes text (or puts a space where a `/*...*/`
 # was), so a line that is a use after stripping still holds those words before it. The run reports how
@@ -23,7 +23,7 @@
 # literal -- the reader is a line reader.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<tree> -P scripts/check-target-pragmas.cmake
+#   cmake -DPACE_SOURCE_DIR=<tree> -P scripts/check-target-pragmas.cmake
 #
 # The verdict is `CMake Error` in the output, never the exit code.
 
@@ -31,27 +31,27 @@ cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if("${FASTCACHED_SOURCE_DIR}" STREQUAL "")
-    message(FATAL_ERROR "target-pragmas: FASTCACHED_SOURCE_DIR must be set")
+if("${PACE_SOURCE_DIR}" STREQUAL "")
+    message(FATAL_ERROR "target-pragmas: PACE_SOURCE_DIR must be set")
 endif()
 
 set(Pattern "#[ \t]*pragma[ \t]+(GCC[ \t]+target|clang[ \t]+attribute.*target)")
 set(Prefilter "pragma[^\n]*(GCC[^\n]*target|clang[^\n]*attribute[^\n]*target)")
 
-# Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its files,
+# Through `pace_tracked_files`, this tree's one answer to HOW a check finds its files,
 # rather than a traversal of `src/` of its own: on DrvFs -- where every local gate tree takes
 # its sources from -- the traversal and a read of every file cost this check seconds against
 # a third of a second natively. CONTAINING asks git once which files hold `target`: every line
 # the pattern can match contains it, and `pragma` would not do -- every header says `#pragma
 # once`. Only those are read, and the prefilter below still runs on them, so `walked` counts
 # what it always counted.
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/"
     GLOBS "src/*"
     CONTAINING "target" CONTAINING_OUT sourcesHolding
     FILES_OUT sourceFiles MODE_OUT sourcesMode)
-list(TRANSFORM sourceFiles PREPEND "${FASTCACHED_SOURCE_DIR}/")
-list(TRANSFORM sourcesHolding PREPEND "${FASTCACHED_SOURCE_DIR}/")
+list(TRANSFORM sourceFiles PREPEND "${PACE_SOURCE_DIR}/")
+list(TRANSFORM sourcesHolding PREPEND "${PACE_SOURCE_DIR}/")
 set(problems "")
 set(scanned 0)
 set(walked 0)
@@ -69,17 +69,17 @@ foreach(path IN LISTS sourceFiles)
         continue()
     endif()
     math(EXPR walked "${walked} + 1")
-    fastcached_scan_code_lines("${content}" "${Pattern}" hits)
+    pace_scan_code_lines("${content}" "${Pattern}" hits)
     foreach(hit IN LISTS hits)
         if(hit MATCHES "^use:([0-9]+)$")
-            cmake_path(RELATIVE_PATH path BASE_DIRECTORY "${FASTCACHED_SOURCE_DIR}" OUTPUT_VARIABLE shown)
+            cmake_path(RELATIVE_PATH path BASE_DIRECTORY "${PACE_SOURCE_DIR}" OUTPUT_VARIABLE shown)
             list(APPEND problems "${shown}:${CMAKE_MATCH_1}: a target pragma enables an instruction set for every function after it in the unit")
         endif()
     endforeach()
 endforeach()
 
 if(scanned EQUAL 0)
-    message(FATAL_ERROR "target-pragmas: no C or C++ source under `${FASTCACHED_SOURCE_DIR}/src/`, so nothing has been judged")
+    message(FATAL_ERROR "target-pragmas: no C or C++ source under `${PACE_SOURCE_DIR}/src/`, so nothing has been judged")
 endif()
 if(NOT problems STREQUAL "")
     list(LENGTH problems problemCount)

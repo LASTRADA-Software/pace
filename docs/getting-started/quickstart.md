@@ -1,31 +1,31 @@
 # Quickstart
 
-Start fastcached and round-trip a value with the client that ships beside it.
+Start pace-kv and round-trip a value with the client that ships beside it.
 
 ## 1. Run the daemon
 
 ```sh
-./fastcached
+./pace-kv
 ```
 
-It listens on `127.0.0.1:6674` — fastcached's own port. The number selects no
+It listens on `127.0.0.1:6674` — pace-kv's own port. The number selects no
 protocol: everything below reaches the same daemon on the same port, because
 the wire format is detected per connection.
 
 ## 2. Store and fetch a value
 
-`fastcache-cli` is the first-party client — see
-[fastcache-cli](../tools/fastcache-cli.md) for the full reference:
+`pacectl` is the first-party client — see
+[pacectl](../tools/pacectl.md) for the full reference:
 
 ```sh
-$ fastcache-cli set greeting hello --ttl 60s
-$ fastcache-cli get greeting
+$ pacectl set greeting hello --ttl 60s
+$ pacectl get greeting
 hello
-$ fastcache-cli ttl greeting
+$ pacectl ttl greeting
 key     greeting
 exists  true
 ttl     59
-$ fastcache-cli del greeting
+$ pacectl del greeting
 1
 ```
 
@@ -37,7 +37,7 @@ A miss exits `1`, a daemon that cannot be reached exits `3`, and a usage
 mistake exits `2` — so a shell script can tell those three apart:
 
 ```sh
-$ fastcache-cli get nothing-here; echo "exit=$?"
+$ pacectl get nothing-here; echo "exit=$?"
 exit=1
 ```
 
@@ -46,16 +46,16 @@ exit=1
 Human-readable by default, machine-readable on request:
 
 ```sh
-$ fastcache-cli stats
+$ pacectl stats
 source                    info
-fastcached_version        fastcached-0.2.0
+pace_version        pace-0.2.0
 used_memory               94
 maxmemory                 8589934592
 total_commands_processed  6
 ...
-$ fastcache-cli stats --format=json
-{"source":"info","fastcached_version":"fastcached-0.2.0","used_memory":94,...}
-$ fastcache-cli stats --format=tsv
+$ pacectl stats --format=json
+{"source":"info","pace_version":"pace-0.2.0","used_memory":94,...}
+$ pacectl stats --format=tsv
 ```
 
 The first field is the **source**, because the sources differ enormously in

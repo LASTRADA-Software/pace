@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # CowTree — standalone copy-on-write B+tree library.
 #
-# Sibling of src/FastCache/ with no dependency on FastCache. Other
+# Sibling of src/Pace/ with no dependency on Pace. Other
 # projects can pick this up by add_subdirectory()'ing it and linking
 # the `CowTree` target.
 
@@ -49,7 +49,7 @@ target_sources(CowTree
 
 # ---------------------------------------------------------------------------
 # Tests
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     file(GLOB COWTREE_TEST_SOURCES
         CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp"
@@ -85,7 +85,7 @@ if(FASTCACHED_BUILD_TESTS)
     # count. On 3.6.0 the exit code was the failure count, and a case failing four
     # assertions was scored *skipped* (#1128). `catch-skip-return-code` requires the
     # property, and `catch-skip-exit-contract` that it still means what it says.
-    catch_discover_tests(CowTreeTests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+    catch_discover_tests(CowTreeTests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
 
     # -----------------------------------------------------------------------
     # A per-case TIMEOUT for the two cases whose guard, if removed, HANGS.
@@ -147,7 +147,7 @@ if(FASTCACHED_BUILD_TESTS)
     # walk into a named failure rather than to police their cost. It is a variable
     # beside the paragraph that justifies it rather than a literal in the generated
     # line, which is twenty lines from anything explaining it.
-    set(FASTCACHED_COWTREE_HANG_GUARDED_CASES
+    set(PACE_COWTREE_HANG_GUARDED_CASES
         "A free-list chain that loops refuses the store at Open"
         "ForEach refuses a tree whose child pointer loops back on itself"
     )
@@ -159,7 +159,7 @@ if(FASTCACHED_BUILD_TESTS)
     set(_cowtreeHangSources "")
     foreach(testSource IN LISTS COWTREE_TEST_SOURCES)
         file(READ "${testSource}" _testText)
-        foreach(hangGuardedCase IN LISTS FASTCACHED_COWTREE_HANG_GUARDED_CASES)
+        foreach(hangGuardedCase IN LISTS PACE_COWTREE_HANG_GUARDED_CASES)
             string(FIND "${_testText}" "TEST_CASE(\"${hangGuardedCase}\"" _caseAt)
             if(NOT _caseAt EQUAL -1)
                 list(APPEND _cowtreeHangFound "${hangGuardedCase}")
@@ -173,7 +173,7 @@ if(FASTCACHED_BUILD_TESTS)
     # the first and hide the rest, so a reader who renamed both would fix one, wait out
     # a reconfigure, and meet the second.
     set(_cowtreeHangMissing "")
-    foreach(hangGuardedCase IN LISTS FASTCACHED_COWTREE_HANG_GUARDED_CASES)
+    foreach(hangGuardedCase IN LISTS PACE_COWTREE_HANG_GUARDED_CASES)
         if(NOT "${hangGuardedCase}" IN_LIST _cowtreeHangFound)
             list(APPEND _cowtreeHangMissing "${hangGuardedCase}")
         endif()
@@ -188,7 +188,7 @@ if(FASTCACHED_BUILD_TESTS)
             "unapplied silently, because ctest ignores a property set on a test it does not "
             "know. If the case was renamed or moved, update the name here; if it was deleted, "
             "delete its entry. Either way the edit is to "
-            "FASTCACHED_COWTREE_HANG_GUARDED_CASES in ${CMAKE_CURRENT_LIST_FILE} (#638).")
+            "PACE_COWTREE_HANG_GUARDED_CASES in ${CMAKE_CURRENT_LIST_FILE} (#638).")
     endif()
 
     set(_cowtreeHangBounds "${CMAKE_CURRENT_BINARY_DIR}/CowTreeTests_hang_bounds.cmake")
@@ -200,7 +200,7 @@ if(FASTCACHED_BUILD_TESTS)
 "# script interpreter whatever exists, and `set_tests_properties` on a name ctest does\n"
 "# not know is silently ignored. The guard is the configure-time assertion in\n"
 "# src/CowTree/CMakeLists.txt, which is the one place that can answer.\n")
-    foreach(hangGuardedCase IN LISTS FASTCACHED_COWTREE_HANG_GUARDED_CASES)
+    foreach(hangGuardedCase IN LISTS PACE_COWTREE_HANG_GUARDED_CASES)
         file(APPEND "${_cowtreeHangBounds}"
 "set_tests_properties(\"${hangGuardedCase}\" PROPERTIES TIMEOUT ${_cowtreeHangTimeout})\n")
     endforeach()

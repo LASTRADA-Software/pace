@@ -1,0 +1,1276 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/CompileCache/PathCanon.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <tests/Unwrap.hpp>
+
+using namespace Pace;
+using namespace Pace::Testing;
+using PathCanon::Grammar;
+using PathCanon::Layout;
+
+// ---------------------------------------------------------------------------
+// Task 1: single-path canonicalize/localize round-trip (canon spec v1 vectors).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Canonicalize rewrites a source-root path to a SRCROOT token")
+{
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\runner\src)", .buildTree = R"(C:\ci\deep\runner\build)" };
+    auto const token = PathCanon::Canonicalize(R"(C:\ci\deep\runner\src\include\foo.h)", layout);
+    CHECK(token == "<SRCROOT>/include/foo.h");
+}
+
+TEST_CASE("Canonicalize prefers the longest (build-tree) root when nested under source root")
+{
+    Layout const layout { .sourceRoot = R"(C:\src)", .buildTree = R"(C:\src\build)" };
+    auto const token = PathCanon::Canonicalize(R"(C:\src\build\gen\config.h)", layout);
+    CHECK(token == "<BUILDTREE>/gen/config.h");
+}
+
+TEST_CASE("A dependency root is a third token, localized on another machine's own root")
+{
+    // The fixture's homes are spelled so no machine running this suite has them: a real
+    // dependency root in an object's strings binds that object to the machine, so test data
+    // naming one is measured as a miss on exactly the machine it names.
+    //
+    // CPM files a dependency under the commit it pinned, in a cache under the user's home:
+    // the bytes are the same everywhere, the location is not. Without a root of its own a
+    // header there kept the producing user's home in every key and every replayed depfile.
+    Layout const alice { .sourceRoot = "/fixture/user-a/work/fc",
+                         .buildTree = "/fixture/user-a/work/fc/out/build/r",
+                         .dependencyRoot = "/fixture/user-a/.cache/pace/cpm" };
+    Layout const bob { .sourceRoot = "/srv/bob/fc",
+                       .buildTree = "/srv/bob/fc/out/build/r",
+                       .dependencyRoot = "/fixture/user-b/.cache/pace/cpm" };
+
+    auto const token = PathCanon::Canonicalize("/fixture/user-a/.cache/pace/cpm/core-cpp/22c6/src/core/Log.hpp", alice);
+    CHECK(token == "<DEPROOT>/core-cpp/22c6/src/core/Log.hpp");
+    CHECK(PathCanon::Localize(token, bob) == "/fixture/user-b/.cache/pace/cpm/core-cpp/22c6/src/core/Log.hpp");
+
+    // The two roots it sits beside keep their tokens, and their order with each other.
+    CHECK(PathCanon::Canonicalize("/fixture/user-a/work/fc/src/a.cpp", alice) == "<SRCROOT>/src/a.cpp");
+    CHECK(PathCanon::Canonicalize("/fixture/user-a/work/fc/out/build/r/gen.hpp", alice) == "<BUILDTREE>/gen.hpp");
+
+    // The deepest root wins wherever it sits: a dependency cache kept INSIDE the checkout
+    // still names its dependencies by the machine-independent token, and the checkout's own
+    // files outside it keep theirs.
+    Layout const nested { .sourceRoot = "/w/fc", .buildTree = "/w/fc/build", .dependencyRoot = "/w/fc/.cpm" };
+    CHECK(PathCanon::Canonicalize("/w/fc/.cpm/zstd/1a2b/lib/zstd.h", nested) == "<DEPROOT>/zstd/1a2b/lib/zstd.h");
+    CHECK(PathCanon::Canonicalize("/w/fc/src/b.cpp", nested) == "<SRCROOT>/src/b.cpp");
+
+    // It relates as a root does, so the launcher's classifier counts its headers as content.
+    CHECK(PathCanon::RelateToLayout("/fixture/user-a/.cache/pace/cpm/x/1/a.h", alice) == PathCanon::RootRelation::Under);
+
+    // A layout naming no dependency root is the layout every server builds from a STORE
+    // frame, and it canonicalizes exactly as it did -- the token is unreachable from it, and
+    // a span the launcher already tokenized lies under no root it knows.
+    Layout const server { .sourceRoot = alice.sourceRoot, .buildTree = alice.buildTree };
+    CHECK(PathCanon::Canonicalize("/fixture/user-a/.cache/pace/cpm/x/1/a.h", server)
+          == "/fixture/user-a/.cache/pace/cpm/x/1/a.h");
+    CHECK(PathCanon::Canonicalize("<DEPROOT>/x/1/a.h", server) == "<DEPROOT>/x/1/a.h");
+    // And a consumer with no dependency root leaves the token standing rather than joining
+    // it onto nothing, which `MissingReplayedDependency` then refuses.
+    CHECK(PathCanon::Localize("<DEPROOT>/x/1/a.h", server) == "<DEPROOT>/x/1/a.h");
+}
+
+TEST_CASE("A layout naming only the dependency root rewrites only its spans")
+{
+    // The launcher's pre-pass before a STORE: it tokenizes the root no server knows and
+    // leaves the checkout's paths for the server's own canonicalization.
+    Layout const dependencyOnly { .sourceRoot = {}, .buildTree = {}, .dependencyRoot = "/fixture/user-a/.cache/cpm" };
+    std::string const depfile = "out.o: /fixture/user-a/work/fc/src/a.cpp \\\n"
+                                " /fixture/user-a/.cache/cpm/core-cpp/22c6/src/core/Log.hpp \\\n"
+                                " /usr/include/c++/16/vector\n";
+    std::string const expected = "out.o: /fixture/user-a/work/fc/src/a.cpp \\\n"
+                                 " <DEPROOT>/core-cpp/22c6/src/core/Log.hpp \\\n"
+                                 " /usr/include/c++/16/vector\n";
+    CHECK(PathCanon::CanonicalizeRegion(depfile, Grammar::GccDepfile, dependencyOnly) == expected);
+}
+
+TEST_CASE("CanonicalToken reports a rewrite as a value and a non-rewrite as nullopt")
+{
+    // BOTH directions in one case, because they are only meaningful against each
+    // other: a function returning a value always passes the first, and one returning
+    // nullopt always passes the second. What is being pinned is that it
+    // DISCRIMINATES, which is the whole reason the two call sites can share it.
+    Layout const layout { .sourceRoot = R"(C:\ci\src)", .buildTree = R"(C:\ci\build)" };
+
+    auto const under = PathCanon::CanonicalToken(R"(C:\ci\src\include\foo.h)", layout);
+    REQUIRE(under.has_value());
+    CHECK(Unwrap(under) == "<SRCROOT>/include/foo.h");
+
+    // Under no root, so `Canonicalize` hands the input back and there is no token.
+    CHECK_FALSE(PathCanon::CanonicalToken(R"(C:\elsewhere\foo.h)", layout).has_value());
+
+    // A path that is ALREADY a token is not rewritten either, and must not read as a
+    // token this layout produced -- the same nullopt, for a different reason, which
+    // is the caller's business rather than this function's.
+    CHECK_FALSE(PathCanon::CanonicalToken("<SRCROOT>/include/foo.h", layout).has_value());
+}
+
+TEST_CASE("CanonicalToken is exactly Canonicalize's own signal, not a second rule")
+{
+    // #122 folded two file-local copies into this one. The property that makes that
+    // safe is that it adds NOTHING: for every path, having a value must be identical
+    // to `Canonicalize` returning something other than its input. Asserted over a set
+    // that reaches all three branches -- under a root, under neither, and a near miss
+    // on a segment boundary -- so agreement is not a coincidence of one input.
+    Layout const layout { .sourceRoot = R"(C:\ci\src)", .buildTree = R"(C:\ci\src\build)" };
+    for (auto const* path: { R"(C:\ci\src\a.h)",
+                             R"(C:\ci\src\build\gen.h)",
+                             R"(C:\ci\srcx\a.h)",
+                             R"(C:\other\a.h)",
+                             "<SRCROOT>/a.h",
+                             "relative/a.h" })
+    {
+        INFO("path " << path);
+        auto const rewritten = PathCanon::Canonicalize(path, layout);
+        auto const token = PathCanon::CanonicalToken(path, layout);
+        CHECK(token.has_value() == (rewritten != std::string { path }));
+        if (token.has_value())
+            CHECK(Unwrap(token) == rewritten);
+    }
+}
+
+TEST_CASE("Localize is the inverse of Canonicalize under a different layout")
+{
+    Layout const producer { .sourceRoot = R"(C:\ci\deep\runner\src)", .buildTree = R"(C:\ci\deep\runner\build)" };
+    Layout const consumer { .sourceRoot = R"(D:\project)", .buildTree = R"(D:\project\build)" };
+    auto const token = PathCanon::Canonicalize(R"(C:\ci\deep\runner\src\include\foo.h)", producer);
+    auto const local = PathCanon::Localize(token, consumer);
+    CHECK(local == R"(D:\project\include\foo.h)");
+}
+
+TEST_CASE("A path under neither root round-trips verbatim")
+{
+    Layout const layout { .sourceRoot = R"(C:\src)", .buildTree = R"(C:\build)" };
+    auto const token = PathCanon::Canonicalize(R"(C:\Windows\Kits\10\um\windows.h)", layout);
+    CHECK(token == R"(C:\Windows\Kits\10\um\windows.h)");
+    auto const local = PathCanon::Localize(token, layout);
+    CHECK(local == R"(C:\Windows\Kits\10\um\windows.h)");
+}
+
+TEST_CASE("Root match is on a segment boundary, not a bare prefix")
+{
+    // sourceRoot C:\srclib must NOT match a path under C:\src\...
+    Layout const layout { .sourceRoot = R"(C:\srclib)", .buildTree = R"(C:\build)" };
+    auto const token = PathCanon::Canonicalize(R"(C:\src\other\x.h)", layout);
+    CHECK(token == R"(C:\src\other\x.h)");
+}
+
+TEST_CASE("RelateToLayout is the segment-boundary test Canonicalize applies")
+{
+    // The exported form of the rule the case above pins through Canonicalize, and
+    // the reason it is exported: the launcher's path classifier used to answer
+    // this question with a bare `starts_with` and no boundary check, so the two
+    // disagreed about a sibling directory whose name merely extends the root's last
+    // segment (issue #562). Every assertion here is written twice on purpose --
+    // once against `RelateToLayout`, once against `Canonicalize` -- because what
+    // failed was not either answer but the two being DIFFERENT, and a case that
+    // checks only one of them passes under the bug.
+    //
+    // `singleRoot` isolates one root's answer, the other being empty and therefore
+    // `Outside` of everything; the layout with two live roots is the case below.
+    std::string const root = "/home/dev/proj";
+    Layout const singleRoot { .sourceRoot = root, .buildTree = "" };
+    Layout const layout { .sourceRoot = root, .buildTree = "/home/dev/proj/build" };
+
+    auto const canonicalizes = [&layout](std::string_view path) {
+        return PathCanon::Canonicalize(path, layout) != path;
+    };
+
+    SECTION("a sibling whose name extends the root's last segment is outside it")
+    {
+        std::string const sibling = "/home/dev/project-x/a.hpp";
+        CHECK(PathCanon::RelateToLayout(sibling, singleRoot) == PathCanon::RootRelation::NearMiss);
+        CHECK_FALSE(canonicalizes(sibling));
+    }
+
+    SECTION("an ordinary path under the root is inside it")
+    {
+        std::string const inside = "/home/dev/proj/src/a.hpp";
+        CHECK(PathCanon::RelateToLayout(inside, singleRoot) == PathCanon::RootRelation::Under);
+        CHECK(canonicalizes(inside));
+    }
+
+    SECTION("the root itself is under itself")
+    {
+        CHECK(PathCanon::RelateToLayout(root, singleRoot) == PathCanon::RootRelation::Under);
+    }
+
+    SECTION("a path sharing no prefix is outside, not a near miss")
+    {
+        // The third state, and the one whose remedy differs: this file is somewhere
+        // else entirely, rather than named by a root that is nearly right.
+        CHECK(PathCanon::RelateToLayout("/usr/include/vector", singleRoot) == PathCanon::RootRelation::Outside);
+        CHECK_FALSE(canonicalizes("/usr/include/vector"));
+    }
+
+    SECTION("empty roots relate to nothing")
+    {
+        // Not a technicality: an empty root prefixes every path character-wise, so
+        // without this a layout naming no build tree would make every path in the
+        // world a near miss of it.
+        Layout const unset {};
+        CHECK(PathCanon::RelateToLayout("/home/dev/proj/a.hpp", unset) == PathCanon::RootRelation::Outside);
+    }
+
+    SECTION("separators and case are folded on both sides")
+    {
+        // The two spellings a real build mixes: CMake exports forward slashes while
+        // `cl` emits backslashes.
+        Layout const slashed { .sourceRoot = "D:/Project", .buildTree = "" };
+        Layout const backslashed { .sourceRoot = R"(D:\Project)", .buildTree = "" };
+        CHECK(PathCanon::RelateToLayout(R"(D:\Project\src\a.hpp)", slashed) == PathCanon::RootRelation::Under);
+        CHECK(PathCanon::RelateToLayout("d:/project/src/a.hpp", backslashed) == PathCanon::RootRelation::Under);
+        CHECK(PathCanon::RelateToLayout(R"(D:\Project-x\src\a.hpp)", slashed) == PathCanon::RootRelation::NearMiss);
+    }
+}
+
+TEST_CASE("RelateToLayout answers Under before NearMiss across the two roots")
+{
+    // The ordering is the whole content of the layout-wide form: a build tree
+    // spelled as the source root's sibling makes a path a near miss of one root and
+    // correctly under the other, and that path is project content rather than a
+    // misspelling. Taking the first root's answer would report a healthy layout as
+    // broken.
+    Layout const sideBySide { .sourceRoot = "/w/src", .buildTree = "/w/src-other" };
+    CHECK(PathCanon::RelateToLayout("/w/src-other/a.hpp", sideBySide) == PathCanon::RootRelation::Under);
+    CHECK(PathCanon::RelateToLayout("/w/src/a.hpp", sideBySide) == PathCanon::RootRelation::Under);
+
+    // With no such overlap the near miss survives, which is what makes the case
+    // above a statement about ORDER rather than about near misses being unreachable.
+    Layout const ordinary { .sourceRoot = "/w/src", .buildTree = "/w/build" };
+    CHECK(PathCanon::RelateToLayout("/w/src-other/a.hpp", ordinary) == PathCanon::RootRelation::NearMiss);
+    CHECK(PathCanon::RelateToLayout("/w/build-other/a.hpp", ordinary) == PathCanon::RootRelation::NearMiss);
+    CHECK(PathCanon::RelateToLayout("/elsewhere/a.hpp", ordinary) == PathCanon::RootRelation::Outside);
+}
+
+TEST_CASE("Matching is case-insensitive on Windows drive and path")
+{
+    Layout const layout { .sourceRoot = R"(C:\Ci\Deep\Src)", .buildTree = R"(C:\Ci\Deep\Build)" };
+    auto const token = PathCanon::Canonicalize(R"(c:\ci\deep\src\A.H)", layout);
+    // Tail preserves the ORIGINAL bytes' case; only separators normalize.
+    CHECK(token == "<SRCROOT>/A.H");
+}
+
+// ---------------------------------------------------------------------------
+// Task 2: region grammar (showIncludes / diagnostics / depfile).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CanonicalizeRegion rewrites only the path in a /showIncludes line")
+{
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\build)" };
+    std::string const in = "Note: including file: "
+                           R"(C:\ci\deep\src\include\foo.h)"
+                           "\r\n";
+    auto const out = PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout);
+    CHECK(out == "Note: including file: <SRCROOT>/include/foo.h\r\n");
+}
+
+TEST_CASE("CanonicalizeRegion agrees with Canonicalize on every span of a multi-span region")
+{
+    // #575 hoisted the roots' comparison forms out of the per-span path and into the
+    // caller, so the region walker now folds them ONCE and hands the same value to
+    // every span. The hazard that introduces is a region whose later spans are judged
+    // against something other than what a standalone `Canonicalize` would use -- which
+    // a single-span test cannot see, because with one span "once" and "per span" are
+    // the same thing.
+    //
+    // So the region has to be long enough for a stale or mismatched fold to show, and
+    // it deliberately mixes the three outcomes: under the source root, under the build
+    // tree nested inside it, and under neither.
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\src\build)" };
+
+    std::vector<std::string> const paths {
+        R"(C:\ci\deep\src\a.h)",           // under the source root
+        R"(C:\ci\deep\src\build\gen\b.h)", // under the nested build tree: longest root wins
+        R"(C:\Program Files\MSVC\c.h)",    // under neither: passes through verbatim
+        R"(C:\ci\deep\src\d.h)",           R"(C:\ci\deep\src\build\e.h)", R"(C:\elsewhere\f.h)",
+    };
+
+    std::string region;
+    std::string expected;
+    for (auto const& path: paths)
+    {
+        region += "Note: including file: " + path + "\r\n";
+        expected += "Note: including file: " + PathCanon::Canonicalize(path, layout) + "\r\n";
+    }
+
+    CHECK(PathCanon::CanonicalizeRegion(region, Grammar::ShowIncludes, layout) == expected);
+}
+
+TEST_CASE("LocalizeRegion round-trips a showIncludes block across layouts")
+{
+    Layout const producer { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\build)" };
+    Layout const consumer { .sourceRoot = R"(D:\project)", .buildTree = R"(D:\project\build)" };
+    std::string const in = "Note: including file:  "
+                           R"(C:\ci\deep\src\a.h)"
+                           "\r\n"
+                           "Note: including file: "
+                           R"(C:\ci\deep\src\b.h)"
+                           "\r\n";
+    auto const canon = PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, producer);
+    auto const local = PathCanon::LocalizeRegion(canon, Grammar::ShowIncludes, consumer);
+    CHECK(local.contains(R"(D:\project\a.h)"));
+    CHECK(local.contains(R"(D:\project\b.h)"));
+    CHECK_FALSE(local.contains(R"(ci\deep)"));
+}
+
+TEST_CASE("A non-path showIncludes line is preserved verbatim")
+{
+    Layout const layout { .sourceRoot = R"(C:\src)", .buildTree = R"(C:\build)" };
+    std::string const in = "some unrelated compiler note\r\n";
+    auto const out = PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout);
+    CHECK(out == in);
+}
+
+TEST_CASE("CanonicalizeRegion leaves a final line without newline intact")
+{
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\build)" };
+    // no trailing CRLF
+    std::string const in = "Note: including file: "
+                           R"(C:\ci\deep\src\z.h)";
+    auto const out = PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout);
+    CHECK(out == "Note: including file: <SRCROOT>/z.h");
+}
+
+// --- RewriteIncludeNoteMarker ----------------------------------------------
+//
+// The marker half of the stored-value contract (#879). Each case below asserts what
+// DISTINGUISHES the fixed build from the broken one: the old build had no such
+// function, so "it compiles" proves nothing and every case here names a byte that
+// differs.
+
+TEST_CASE("A localized note's marker normalizes, and its path then canonicalizes")
+{
+    // The two halves in one case on purpose: normalizing a marker nothing goes on to
+    // canonicalize would be a rewrite for its own sake, and canonicalization is the
+    // whole reason the marker has to move first.
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\build)" };
+    constexpr std::string_view localized = "Hinweis: Einlesen der Datei:";
+    std::string const in = "Hinweis: Einlesen der Datei: "
+                           R"(C:\ci\deep\src\include\foo.h)"
+                           "\r\n";
+
+    // Control: without the marker step the grammar finds nothing, which IS the
+    // defect. Asserted rather than assumed, so this case fails if the grammar ever
+    // starts matching a localized prefix by some other route and the normalization
+    // silently stops being what makes this work.
+    CHECK(PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout) == in);
+
+    auto const normalized = PathCanon::RewriteIncludeNoteMarker(in, localized, PathCanon::IncludeNoteMarker);
+    CHECK(normalized
+          == "Note: including file: "
+             R"(C:\ci\deep\src\include\foo.h)"
+             "\r\n");
+    CHECK(PathCanon::CanonicalizeRegion(normalized, Grammar::ShowIncludes, layout)
+          == "Note: including file: <SRCROOT>/include/foo.h\r\n");
+}
+
+TEST_CASE("Restoring a consumer's marker is the exact inverse of normalizing")
+{
+    constexpr std::string_view localized = "Hinweis: Einlesen der Datei:";
+    std::string const original = "Hinweis: Einlesen der Datei:   /a/b.h\r\n"
+                                 "unrelated compiler output\n"
+                                 "Hinweis: Einlesen der Datei: /c/d.h";
+    auto const normalized = PathCanon::RewriteIncludeNoteMarker(original, localized, PathCanon::IncludeNoteMarker);
+    CHECK(normalized != original);
+    // Byte-for-byte, which is what "everything but the marker survives" means: the
+    // three-space run, the mixed line endings, the unrelated line, and the final line
+    // with no terminator at all.
+    CHECK(PathCanon::RewriteIncludeNoteMarker(normalized, PathCanon::IncludeNoteMarker, localized) == original);
+}
+
+TEST_CASE("The marker rewrite is anchored, so a quoted marker mid-line is untouched")
+{
+    // The rule `IncludeNotePath` states one layer up, asserted here because both
+    // regions a launcher stores are tagged ShowIncludes and one of them carries
+    // DIAGNOSTICS. A marker matched anywhere would rewrite a path a compiler quoted.
+    std::string const in = R"(a.cpp(3): warning: "Note: including file: /x/y.h" is unused)"
+                           "\n";
+    CHECK(PathCanon::RewriteIncludeNoteMarker(in, PathCanon::IncludeNoteMarker, "OTHER:") == in);
+}
+
+TEST_CASE("An empty or unchanged marker rewrites nothing")
+{
+    std::string const in = "Note: including file: /a/b.h\r\nplain line\r\n";
+    // Equal markers: the common case, and it must be byte-exact rather than merely
+    // equivalent.
+    CHECK(PathCanon::RewriteIncludeNoteMarker(in, PathCanon::IncludeNoteMarker, PathCanon::IncludeNoteMarker) == in);
+    // Empty `from` must not match at the head of every line. A build that does not
+    // know its own prefix rewrites nothing; the alternative is rewriting everything.
+    CHECK(PathCanon::RewriteIncludeNoteMarker(in, "", "X") == in);
+    CHECK(PathCanon::RewriteIncludeNoteMarker("", PathCanon::IncludeNoteMarker, "X").empty());
+}
+
+// --- Inclusion depth, and the anchor it does not license (#891, #1270) -------
+
+TEST_CASE("A depth-indented /showIncludes note canonicalizes, and keeps its depth")
+{
+    // What `cl` emits, measured on MSVC 14.44.35207 and 14.51.36231 plus clang-cl,
+    // under /c and /EP, at depths one to six: the marker is at COLUMN ZERO on every
+    // note and the depth is a run of blanks BETWEEN marker and path, one per level.
+    // So the depth rides inside the blank run the path grammar already skips.
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\build)" };
+    std::string const in = "Note: including file: "
+                           R"(C:\ci\deep\src\a.h)"
+                           "\r\n"
+                           "Note: including file:    "
+                           R"(C:\ci\deep\src\b.h)"
+                           "\r\n";
+    auto const out = PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout);
+
+    // The path is rewritten AND the depth survives byte-for-byte, because the depth
+    // is what a human reads the note for and no defect asked for it to move.
+    CHECK(out
+          == "Note: including file: <SRCROOT>/a.h\r\n"
+             "Note: including file:    <SRCROOT>/b.h\r\n");
+}
+
+TEST_CASE("A line with blanks in front of the marker is not a note")
+{
+    // #891 read `cl`'s indentation as preceding the marker and widened the anchor to
+    // skip leading blanks. No driver emits that shape, and the widening was not free:
+    // one layer up, `SplitIncludeNotes` applies the same rule to a stream that also
+    // carries preprocessed SOURCE, where an indented line is the ordinary case.
+    //
+    // Distinguishing rather than merely shaped: the path lies UNDER the source root,
+    // so a rule that matched would produce `<SRCROOT>/a.h` here. Asserting the input
+    // comes back is asserting the refusal.
+    Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    std::string const in = "  Note: including file: /home/dev/proj/a.h\r\n"
+                           "\tNote: including file: /home/dev/proj/b.h\n";
+    CHECK(PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout) == in);
+}
+
+// The raw-string shape `cl /EP` actually emits -- two revisions differing only inside
+// an indented raw string literal, which the widened rule deleted from the hashed bytes
+// -- is pinned in `DependencyProbe_test.cpp`, at `SplitIncludeNotes`, and deliberately
+// NOT here. A first draft of it lived in this file and could not fail: the raw string's
+// contents lie under no root, so the canonicalizer echoes the line verbatim whether it
+// calls it a note or not, and the case was green with the anchor neutered. The defect
+// is the launcher DELETING the line, which is one layer up. The case above carries this
+// file's half, with a path UNDER the source root so a matching rule rewrites it.
+
+TEST_CASE("A depth-zero note canonicalizes, which it did before and must still do")
+{
+    // The control the two cases above need. It passes in BOTH states -- that is the
+    // point of it: without it, "refuse a line with blanks in front" and "recognise no
+    // note at all" are one passing test, and a change that broke column zero while
+    // tightening the anchor would look identical. Deliberately not a distinguishing
+    // assertion.
+    Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    std::string const in = "Note: including file: /home/dev/proj/a.h\n";
+    CHECK(PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout) == "Note: including file: <SRCROOT>/a.h\n");
+}
+
+TEST_CASE("The marker rewrite answers the anchor exactly as the grammar does")
+{
+    // The marker half of the same recognition rule. Both callers share
+    // `IncludeNoteMarkerEnd`, so a grammar that recognised a line while the marker
+    // rewrite did not would store a canonical `<SRCROOT>` token under a prefix no
+    // consumer can find, and the reverse would re-spell the prefix of a line whose
+    // path was never canonicalized. Both directions are asserted, or one of them is
+    // an assumption.
+    constexpr std::string_view localized = "Hinweis: Einlesen der Datei:";
+    // Column zero, depth in the blanks after the marker: rewrites, depth untouched.
+    CHECK(PathCanon::RewriteIncludeNoteMarker(
+              "Hinweis: Einlesen der Datei:   /a/b.h\r\n", localized, PathCanon::IncludeNoteMarker)
+          == "Note: including file:   /a/b.h\r\n");
+    // Blanks in FRONT of the marker: not a note, so not re-spelled (#1270).
+    std::string const indented = "  Hinweis: Einlesen der Datei: /a/b.h\r\n";
+    CHECK(PathCanon::RewriteIncludeNoteMarker(indented, localized, PathCanon::IncludeNoteMarker) == indented);
+}
+
+TEST_CASE("A blank-only line is not a note")
+{
+    // A line that is ENTIRELY blanks must not match against an empty remainder; the
+    // path grammar would then see an empty span where there is no note at all. Under
+    // column-zero anchoring it cannot, which makes this a control rather than a live
+    // guard -- kept because it is the case a re-widened anchor breaks first.
+    Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    std::string const in = "   \r\n\t\n";
+    CHECK(PathCanon::CanonicalizeRegion(in, Grammar::ShowIncludes, layout) == in);
+    CHECK(PathCanon::RewriteIncludeNoteMarker(in, PathCanon::IncludeNoteMarker, "X:") == in);
+}
+
+TEST_CASE("MsvcDiagnostics rewrites the leading path of a diagnostic line")
+{
+    Layout const layout { .sourceRoot = R"(C:\ci\deep\src)", .buildTree = R"(C:\ci\deep\build)" };
+    std::string const in = R"(C:\ci\deep\src\a.cpp(42): warning C4100: unreferenced)"
+                           "\r\n";
+    auto const out = PathCanon::CanonicalizeRegion(in, Grammar::MsvcDiagnostics, layout);
+    CHECK(out == "<SRCROOT>/a.cpp(42): warning C4100: unreferenced\r\n");
+}
+
+// ---------------------------------------------------------------------------
+// MsvcStream: one tag for every line language an MSVC-family console stream carries.
+// The lines are real `cl` and `clang-cl` output (VS 18 Community, MSVC 14.51, its clang-cl)
+// with the capture's root replaced, so the SHAPES are measured rather than recalled.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// The checkout that stored the stream.
+[[nodiscard]] Layout MsvcProducer()
+{
+    return Layout { .sourceRoot = R"(C:\work\aaa\src)", .buildTree = R"(C:\work\aaa\build)" };
+}
+
+/// The checkout that replays it.
+[[nodiscard]] Layout MsvcConsumer()
+{
+    return Layout { .sourceRoot = R"(D:\ci\bbb\src)", .buildTree = R"(D:\ci\bbb\build)" };
+}
+
+/// One stream as `cl /showIncludes /diagnostics:caret` wrote it: the echoed source name, a note,
+/// a header warning, a TU-level warning, an error, its `note:` continuations, the caret echo of
+/// each, a toolchain warning outside both roots, and a command-line warning with no location.
+constexpr std::string_view ClStream =
+    "a.cpp\r\n"
+    "Note: including file: C:\\work\\aaa\\src\\inc/probe.h\r\n"
+    "C:\\work\\aaa\\src\\inc\\probe.h(3,29): warning C4100: 'x': unreferenced parameter\r\n"
+    "inline int unused_param(int x) { return 0; }\r\n"
+    "                            ^\r\n"
+    "C:\\work\\aaa\\src\\a.cpp(3,17): warning C4101: 'z': unreferenced local variable\r\n"
+    "C:\\work\\aaa\\src\\a.cpp(2): error C2660: 'f': function does not take 2 arguments\r\n"
+    "C:\\work\\aaa\\src\\a.cpp(1): note: see declaration of 'f'\r\n"
+    "C:\\work\\aaa\\build\\gen\\cfg.h(7): note: while trying to match the argument list\r\n"
+    "C:\\Program Files (x86)\\MSVC\\include\\vector(10): warning C4996: 'q'\r\n"
+    "cl : Command line warning D9002 : ignoring unknown option '/foo'\r\n";
+
+/// The same stream as `clang-cl` writes it: no code, a GCC-style include chain in front of a
+/// header's diagnostic, and an indented `N | source` echo.
+constexpr std::string_view ClangClStream = "Note: including file: C:\\work\\aaa\\src\\inc/probe.h\r\n"
+                                           "In file included from C:\\work\\aaa\\src\\a.cpp:1:\r\n"
+                                           "C:\\work\\aaa\\src\\inc/probe.h(3,29): warning: unused parameter 'x'\r\n"
+                                           "    3 | inline int unused_param(int x) { return 0; }\r\n"
+                                           "      |                             ^\r\n"
+                                           "C:\\work\\aaa\\src\\a.cpp(2,3): note: 'old' has been explicitly marked here\r\n"
+                                           "C:\\work\\aaa\\src\\a.cpp(4,20): error: use of undeclared identifier 'y'\r\n";
+
+/// Whether `text` names `root` anywhere, in either separator and either case -- the question a
+/// replayed stream must answer NO to for the producer's root.
+[[nodiscard]] bool NamesRoot(std::string_view text, std::string_view root)
+{
+    auto const fold = [](std::string_view s) {
+        std::string out;
+        for (char const c: s)
+            out.push_back(PathCanon::AsciiLower(c == '\\' ? '/' : c));
+        return out;
+    };
+    return fold(text).contains(fold(root));
+}
+
+} // namespace
+
+TEST_CASE("MsvcStream rewrites every note and diagnostic head cl writes, and nothing else", "[msvc-stream]")
+{
+    auto const canonical = PathCanon::CanonicalizeRegion(ClStream, Grammar::MsvcStream, MsvcProducer());
+    CHECK(canonical
+          == "a.cpp\r\n"
+             "Note: including file: <SRCROOT>/inc/probe.h\r\n"
+             "<SRCROOT>/inc/probe.h(3,29): warning C4100: 'x': unreferenced parameter\r\n"
+             "inline int unused_param(int x) { return 0; }\r\n"
+             "                            ^\r\n"
+             "<SRCROOT>/a.cpp(3,17): warning C4101: 'z': unreferenced local variable\r\n"
+             "<SRCROOT>/a.cpp(2): error C2660: 'f': function does not take 2 arguments\r\n"
+             "<SRCROOT>/a.cpp(1): note: see declaration of 'f'\r\n"
+             "<BUILDTREE>/gen/cfg.h(7): note: while trying to match the argument list\r\n"
+             "C:\\Program Files (x86)\\MSVC\\include\\vector(10): warning C4996: 'q'\r\n"
+             "cl : Command line warning D9002 : ignoring unknown option '/foo'\r\n");
+}
+
+TEST_CASE("MsvcStream rewrites clang-cl's include chain and diagnostic heads", "[msvc-stream]")
+{
+    auto const canonical = PathCanon::CanonicalizeRegion(ClangClStream, Grammar::MsvcStream, MsvcProducer());
+    CHECK(canonical
+          == "Note: including file: <SRCROOT>/inc/probe.h\r\n"
+             "In file included from <SRCROOT>/a.cpp:1:\r\n"
+             "<SRCROOT>/inc/probe.h(3,29): warning: unused parameter 'x'\r\n"
+             "    3 | inline int unused_param(int x) { return 0; }\r\n"
+             "      |                             ^\r\n"
+             "<SRCROOT>/a.cpp(2,3): note: 'old' has been explicitly marked here\r\n"
+             "<SRCROOT>/a.cpp(4,20): error: use of undeclared identifier 'y'\r\n");
+}
+
+TEST_CASE("An MSVC stream round-trips into another checkout with no trace of the producer", "[msvc-stream]")
+{
+    for (auto const stream: { ClStream, ClangClStream })
+    {
+        auto const replayed = PathCanon::LocalizeRegion(
+            PathCanon::CanonicalizeRegion(stream, Grammar::MsvcStream, MsvcProducer()), Grammar::MsvcStream, MsvcConsumer());
+        INFO(replayed);
+        CHECK_FALSE(NamesRoot(replayed, MsvcProducer().sourceRoot));
+        CHECK_FALSE(NamesRoot(replayed, MsvcProducer().buildTree));
+        CHECK(replayed.contains(R"(D:\ci\bbb\src\inc\probe.h()"));
+        CHECK(replayed.contains(R"(D:\ci\bbb\src\a.cpp()"));
+        // CRLF survives on every line, which is a line count of terminators left unchanged.
+        CHECK(std::ranges::count(replayed, '\r') == std::ranges::count(stream, '\r'));
+    }
+}
+
+TEST_CASE("ShowIncludes alone leaves every diagnostic head naming the producer", "[msvc-stream]")
+{
+    // The generation-5 behaviour, kept as the contrast that makes the case above mean something:
+    // tagged ShowIncludes, the notes travel and every diagnostic keeps the producer's root.
+    auto const replayed =
+        PathCanon::LocalizeRegion(PathCanon::CanonicalizeRegion(ClStream, Grammar::ShowIncludes, MsvcProducer()),
+                                  Grammar::ShowIncludes,
+                                  MsvcConsumer());
+    CHECK(NamesRoot(replayed, MsvcProducer().sourceRoot));
+    CHECK(replayed.contains(R"(Note: including file: D:\ci\bbb\src\inc\probe.h)"));
+}
+
+TEST_CASE("A caret source echo quoting an in-root path is left alone", "[msvc-stream]")
+{
+    // An indented echo quoting a path and a location, and a column-zero one -- a comment
+    // continuation -- whose parenthesis opens no location. The looser generation-5 head took the
+    // first `(` before any later `): ` and rewrote the second; the anchored head steps over it.
+    std::string const echo = "    Log(\"C:\\work\\aaa\\src\\a.h(3): \");\r\n"
+                             "C:\\work\\aaa\\src\\a.h(see Frob()): the header this reads\r\n";
+    CHECK(PathCanon::CanonicalizeRegion(echo, Grammar::MsvcStream, MsvcProducer()) == echo);
+    CHECK(PathCanon::CanonicalizeRegion(echo, Grammar::MsvcDiagnostics, MsvcProducer()) == echo);
+}
+
+TEST_CASE("The MSVC diagnostic head is exactly a column-zero path and a numeric location", "[msvc-stream]")
+{
+    struct Row
+    {
+        std::string_view line;
+        std::string_view expected;
+    };
+    constexpr auto Rows = std::to_array<Row>({
+        // Taken: a line, a line and a column, and a parenthesis inside the path stepped over.
+        { .line = R"(C:\work\aaa\src\a.cpp(3): warning C1)", .expected = R"(<SRCROOT>/a.cpp(3): warning C1)" },
+        { .line = R"(C:\work\aaa\src\a.cpp(3,9): error C2)", .expected = R"(<SRCROOT>/a.cpp(3,9): error C2)" },
+        { .line = R"(C:\work\aaa\src\x (y)\a.cpp(3): note: n)", .expected = R"(<SRCROOT>/x (y)/a.cpp(3): note: n)" },
+        // Taken: the `#pragma message(__FILE__ "(" STR(__LINE__) ") : warning: ...")` idiom, whose
+        // blank before the colon is how MSVC's own documentation spells it (Job 2 review, I2).
+        { .line = R"(C:\work\aaa\src\a.cpp(12) : warning: TODO fix this)",
+          .expected = R"(<SRCROOT>/a.cpp(12) : warning: TODO fix this)" },
+        { .line = R"(C:\work\aaa\src\a.cpp(3,9) : error C2)", .expected = R"(<SRCROOT>/a.cpp(3,9) : error C2)" },
+        // Refused: indented, a non-numeric location, an empty column, no blank after the colon.
+        { .line = R"(  C:\work\aaa\src\a.cpp(3): warning C1)", .expected = R"(  C:\work\aaa\src\a.cpp(3): warning C1)" },
+        { .line = R"(C:\work\aaa\src\a.cpp(x): warning C1)", .expected = R"(C:\work\aaa\src\a.cpp(x): warning C1)" },
+        { .line = R"(C:\work\aaa\src\a.cpp(3,): warning C1)", .expected = R"(C:\work\aaa\src\a.cpp(3,): warning C1)" },
+        { .line = R"(C:\work\aaa\src\a.cpp(3):warning C1)", .expected = R"(C:\work\aaa\src\a.cpp(3):warning C1)" },
+        // ... and the spaced form no looser: two blanks, or none after the colon, is no head.
+        { .line = R"(C:\work\aaa\src\a.cpp(3)  : warning C1)", .expected = R"(C:\work\aaa\src\a.cpp(3)  : warning C1)" },
+        { .line = R"(C:\work\aaa\src\a.cpp(3) :warning C1)", .expected = R"(C:\work\aaa\src\a.cpp(3) :warning C1)" },
+    });
+    for (auto const& row: Rows)
+    {
+        INFO(row.line);
+        CHECK(PathCanon::CanonicalizeRegion(row.line, Grammar::MsvcStream, MsvcProducer()) == row.expected);
+    }
+}
+
+TEST_CASE("A dot-dot span canonicalizes under the root its collapsed form lies under", "[collapse]")
+{
+    // #1593: matched as spelled, the first is `<BUILDTREE>/../inc/a.hpp` -- a token naming a file
+    // the path does not name, which a consumer whose build tree sits elsewhere localizes into a path
+    // to nothing. Every grammar's spans go through the one rewrite, so one of each walker is here.
+    Layout const layout { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\out)" };
+    CHECK(PathCanon::CanonicalizeRegion("Note: including file: C:\\src\\proj\\out\\..\\inc\\a.hpp\r\n"
+                                        "C:\\src\\proj\\a\\..\\b.cpp(3): warning C4100: 'x'\r\n",
+                                        Grammar::MsvcStream,
+                                        layout)
+          == "Note: including file: <SRCROOT>/inc/a.hpp\r\n"
+             "<SRCROOT>/b.cpp(3): warning C4100: 'x'\r\n");
+
+    Layout const posix { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    CHECK(PathCanon::CanonicalizeRegion(
+              "/home/dev/proj/build/u.o: /home/dev/proj/build/../inc/a.hpp\n", Grammar::GccDepfile, posix)
+          == "<BUILDTREE>/u.o: <SRCROOT>/inc/a.hpp\n");
+}
+
+TEST_CASE("A dot-dot span that leaves every root is stored collapsed and absolute", "[collapse]")
+{
+    // Matched as it is spelled, `C:\src\proj\..\third\x.h` became `<SRCROOT>/../third/x.h`: a token
+    // that resolves against the CONSUMER's source-root depth, so a consumer at `E:\ci\proj`
+    // localized it to `E:\ci\third\x.h`, which is not the file the producer read (Job 2 review, I1).
+    // Collapsed, it lies under no root, and it is stored as the file the compiler read.
+    Layout const layout { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\out)" };
+    CHECK(PathCanon::CanonicalizeRegion(
+              "Note: including file: C:\\src\\proj\\..\\third\\x.h\r\n", Grammar::ShowIncludes, layout)
+          == "Note: including file: C:\\src\\third\\x.h\r\n");
+    CHECK(PathCanon::CanonicalizeRegion("Note: including file: C:\\elsewhere\\a\\..\\x.h\r\n", Grammar::ShowIncludes, layout)
+          == "Note: including file: C:\\elsewhere\\x.h\r\n");
+    // The review's own measurement: a diagnostic head climbing out of the build tree.
+    CHECK(PathCanon::CanonicalizeRegion(
+              "C:\\src\\proj\\out\\..\\..\\other\\x.h(3): warning C4100: 'x'\r\n", Grammar::MsvcStream, layout)
+          == "C:\\src\\other\\x.h(3): warning C4100: 'x'\r\n");
+    // And no escaping span leaves a root token behind in any grammar's output.
+    CHECK_FALSE(PathCanon::CanonicalizeRegion("/home/dev/proj/build/u.o: /home/dev/proj/build/../../x.h\n",
+                                              Grammar::GccDepfile,
+                                              Layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" })
+                    .contains("/../"));
+}
+
+TEST_CASE("clang-cl's GCC-format head on the MSVC stream is rewritten", "[msvc-stream]")
+{
+    // `clang-cl -fdiagnostics-format=clang` writes `<path>:<line>:<col>: ` on the stream MSVC's
+    // own heads use (Job 2 review, M4). A toolchain header stays as spelled, as everywhere.
+    std::string const stream = "C:\\work\\aaa\\src\\inc\\probe.h:3:29: warning: unused parameter 'x'\r\n"
+                               "    3 | inline int unused_param(int x) { return 0; }\r\n"
+                               "C:\\Program Files\\LLVM\\lib\\clang\\22\\include\\x.h:1:1: note: here\r\n";
+    CHECK(PathCanon::CanonicalizeRegion(stream, Grammar::MsvcStream, MsvcProducer())
+          == "<SRCROOT>/inc/probe.h:3:29: warning: unused parameter 'x'\r\n"
+             "    3 | inline int unused_param(int x) { return 0; }\r\n"
+             "C:\\Program Files\\LLVM\\lib\\clang\\22\\include\\x.h:1:1: note: here\r\n");
+}
+
+TEST_CASE("Only ShowIncludes and MsvcStream carry include notes", "[msvc-stream]")
+{
+    CHECK(PathCanon::CarriesIncludeNotes(Grammar::ShowIncludes));
+    CHECK(PathCanon::CarriesIncludeNotes(Grammar::MsvcStream));
+    CHECK_FALSE(PathCanon::CarriesIncludeNotes(Grammar::MsvcDiagnostics));
+    CHECK_FALSE(PathCanon::CarriesIncludeNotes(Grammar::GccDepfile));
+    CHECK_FALSE(PathCanon::CarriesIncludeNotes(Grammar::GccDiagnostics));
+}
+
+// ---------------------------------------------------------------------------
+// GccDepfile: the multi-token grammar. A depfile line names a target AND a whole
+// dependency list, so every token on it is a path that must travel.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GccDepfile canonicalizes both the target and every dependency")
+{
+    Layout const layout { .sourceRoot = "/home/ci/src", .buildTree = "/home/ci/build" };
+    constexpr std::string_view depFile = "/home/ci/build/a.o: /home/ci/src/a.cpp /home/ci/src/a.hpp\n";
+
+    auto const canonical = PathCanon::CanonicalizeRegion(depFile, Grammar::GccDepfile, layout);
+    // Every checkout-rooted path becomes a token; nothing machine-specific left.
+    CHECK_FALSE(canonical.contains("/home/ci"));
+    CHECK(canonical.contains("<BUILDTREE>"));
+    CHECK(canonical.contains("<SRCROOT>"));
+    // The rule syntax itself is untouched.
+    CHECK(canonical.contains(": "));
+    CHECK(canonical.ends_with("\n"));
+}
+
+TEST_CASE("GccDepfile round-trips a depfile into a different checkout")
+{
+    // The property the cache depends on: a depfile stored from one checkout must
+    // come back naming the CONSUMER's paths. Replaying it verbatim would point
+    // the build system at another tree — or at nothing at all.
+    Layout const producer { .sourceRoot = "/build/deep/a/b/c/src", .buildTree = "/build/deep/a/b/c/out" };
+    Layout const consumer { .sourceRoot = "/s", .buildTree = "/s/out" };
+
+    constexpr std::string_view depFile = "/build/deep/a/b/c/out/t.o: /build/deep/a/b/c/src/t.cpp \\\n"
+                                         "  /usr/include/stdc-predef.h \\\n"
+                                         "  /build/deep/a/b/c/src/hdr.hpp\n";
+
+    auto const canonical = PathCanon::CanonicalizeRegion(depFile, Grammar::GccDepfile, producer);
+    auto const localized = PathCanon::LocalizeRegion(canonical, Grammar::GccDepfile, consumer);
+
+    CHECK(localized.contains("/s/out/t.o"));
+    CHECK(localized.contains("/s/t.cpp"));
+    CHECK(localized.contains("/s/hdr.hpp"));
+    // The producer's layout must be entirely gone.
+    CHECK_FALSE(localized.contains("/build/deep"));
+    // A path under neither root (a system header) is not ours to rewrite.
+    CHECK(localized.contains("/usr/include/stdc-predef.h"));
+    // Continuations survive: a depfile whose line structure changed could stop
+    // parsing as a rule at all.
+    CHECK(localized.contains("\\\n"));
+}
+
+TEST_CASE("GccDepfile preserves escaped spaces inside a path")
+{
+    // A checkout under a directory with a space in its name is ordinary; make
+    // escapes the space, and losing the escape splits one path into two.
+    Layout const layout { .sourceRoot = "/home/My Code", .buildTree = "/home/My Build" };
+    constexpr std::string_view depFile = R"(/home/My\ Build/a.o: /home/My\ Code/a.cpp)"
+                                         "\n";
+
+    auto const canonical = PathCanon::CanonicalizeRegion(depFile, Grammar::GccDepfile, layout);
+    auto const localized = PathCanon::LocalizeRegion(canonical, Grammar::GccDepfile, layout);
+    // Byte-identical round-trip through the same layout.
+    CHECK(localized == depFile);
+}
+
+TEST_CASE("GccDepfile keeps a Windows drive letter out of the rule separator")
+{
+    // "D:" must not read as the target/dependency separator, or every absolute
+    // Windows path in the file would be cut down to its drive letter.
+    Layout const layout { .sourceRoot = R"(D:\src)", .buildTree = R"(D:\build)" };
+    constexpr std::string_view depFile = R"(D:\build\a.obj: D:\src\a.cpp D:\src\a.hpp)"
+                                         "\n";
+
+    auto const canonical = PathCanon::CanonicalizeRegion(depFile, Grammar::GccDepfile, layout);
+    CHECK(canonical.contains("<BUILDTREE>"));
+    CHECK(canonical.contains("<SRCROOT>"));
+
+    auto const localized = PathCanon::LocalizeRegion(canonical, Grammar::GccDepfile, layout);
+    CHECK(localized == depFile);
+}
+
+TEST_CASE("GccDepfile leaves a depfile with no in-tree paths untouched")
+{
+    Layout const layout { .sourceRoot = "/home/ci/src", .buildTree = "/home/ci/build" };
+    constexpr std::string_view depFile = "/other/a.o: /other/a.cpp /usr/include/stdio.h\n";
+
+    auto const canonical = PathCanon::CanonicalizeRegion(depFile, Grammar::GccDepfile, layout);
+    CHECK(canonical == depFile);
+}
+
+TEST_CASE("GccDepfile preserves the phony rules -MP emits")
+{
+    Layout const layout { .sourceRoot = "/s", .buildTree = "/b" };
+    constexpr std::string_view depFile = "/b/a.o: /s/a.cpp /s/a.hpp\n"
+                                         "\n"
+                                         "/s/a.hpp:\n";
+
+    auto const canonical = PathCanon::CanonicalizeRegion(depFile, Grammar::GccDepfile, layout);
+    auto const localized = PathCanon::LocalizeRegion(canonical, Grammar::GccDepfile, layout);
+    CHECK(localized == depFile);
+}
+
+// ---------------------------------------------------------------------------
+// Task 3: AnchorForLayout — what a compiler-emitted path is anchored to.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+Layout WindowsLayout()
+{
+    return { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\build)" };
+}
+
+Layout PosixLayout()
+{
+    return { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+}
+} // namespace
+
+TEST_CASE("A rooted drive path is absolute, in either separator style")
+{
+    CHECK(PathCanon::AnchorForLayout(R"(C:\src\proj\a.hpp)", WindowsLayout()) == PathCanon::Anchor::Absolute);
+    CHECK(PathCanon::AnchorForLayout("C:/src/proj/a.hpp", WindowsLayout()) == PathCanon::Anchor::Absolute);
+    // Case and drive are irrelevant to the shape question.
+    CHECK(PathCanon::AnchorForLayout(R"(d:\other\x.h)", WindowsLayout()) == PathCanon::Anchor::Absolute);
+}
+
+TEST_CASE("A drive-relative path is neither absolute nor working-directory-relative")
+{
+    // The defect issue #65 records: this used to report absolute, because the
+    // drive test stopped at the colon. `C:foo` resolves against drive C's own
+    // current directory, so it is portable to nothing and checkable by nobody.
+    CHECK(PathCanon::AnchorForLayout(R"(C:foo\bar.hpp)", WindowsLayout()) == PathCanon::Anchor::DriveRelative);
+    CHECK(PathCanon::AnchorForLayout("C:foo/bar.hpp", WindowsLayout()) == PathCanon::Anchor::DriveRelative);
+    // A bare specifier has no tail at all, and *is* "the current directory of
+    // drive C" — the same state, spelled with nothing after it.
+    CHECK(PathCanon::AnchorForLayout("C:", WindowsLayout()) == PathCanon::Anchor::DriveRelative);
+}
+
+TEST_CASE("A root-relative path and a UNC share are both absolute on Windows")
+{
+    // Neither may be resolved against a working directory: both name a fixed
+    // location, and a UNC share opens with the same byte as a root-relative path.
+    CHECK(PathCanon::AnchorForLayout(R"(\Windows\x.h)", WindowsLayout()) == PathCanon::Anchor::Absolute);
+    CHECK(PathCanon::AnchorForLayout(R"(\\host\share\x.h)", WindowsLayout()) == PathCanon::Anchor::Absolute);
+}
+
+TEST_CASE("A Windows path with no anchor at all resolves against the working directory")
+{
+    CHECK(PathCanon::AnchorForLayout(R"(inc\a.hpp)", WindowsLayout()) == PathCanon::Anchor::WorkingDirectory);
+    CHECK(PathCanon::AnchorForLayout("inc/a.hpp", WindowsLayout()) == PathCanon::Anchor::WorkingDirectory);
+}
+
+TEST_CASE("A POSIX layout asks only about the leading separator")
+{
+    CHECK(PathCanon::AnchorForLayout("/usr/include/x.h", PosixLayout()) == PathCanon::Anchor::Absolute);
+    CHECK(PathCanon::AnchorForLayout("inc/a.hpp", PosixLayout()) == PathCanon::Anchor::WorkingDirectory);
+    // A POSIX file may legitimately be named `C:foo`. There are no drives here, so
+    // the drive rule must not fire — the same mistake IsWindowsRoot's own letter
+    // and separator tests exist to prevent for a root like `a:b/proj`.
+    CHECK(PathCanon::AnchorForLayout("C:foo", PosixLayout()) == PathCanon::Anchor::WorkingDirectory);
+    CHECK(PathCanon::AnchorForLayout(R"(C:\foo)", PosixLayout()) == PathCanon::Anchor::WorkingDirectory);
+}
+
+TEST_CASE("An empty path is classified without reading past its end")
+{
+    CHECK(PathCanon::AnchorForLayout("", WindowsLayout()) == PathCanon::Anchor::WorkingDirectory);
+    CHECK(PathCanon::AnchorForLayout("", PosixLayout()) == PathCanon::Anchor::WorkingDirectory);
+}
+
+TEST_CASE("A bare drive specifier is a Windows root, though it is a drive-relative path")
+{
+    // AnchorForLayout and IsWindowsRoot share their drive rule but ask different
+    // questions of it, and `C:` is where they part: as a ROOT it is the degenerate
+    // spelling of the drive root, while as a PATH it names the drive's current
+    // directory. Both halves are asserted against the SAME layout, because it is
+    // their disagreement that is the property: merge the two and one of these two
+    // lines must break, whichever direction the merge went.
+    Layout const layout { .sourceRoot = "C:", .buildTree = "C:" };
+    // Root half: were `C:` rejected as a root, this layout would read as POSIX and
+    // the backslash path would come back WorkingDirectory.
+    CHECK(PathCanon::AnchorForLayout(R"(C:\a.hpp)", layout) == PathCanon::Anchor::Absolute);
+    // Path half: the same two bytes, asked about as a path.
+    CHECK(PathCanon::AnchorForLayout("C:", layout) == PathCanon::Anchor::DriveRelative);
+}
+
+TEST_CASE("A drive-relative root still makes a Windows layout, and still canonicalizes")
+{
+    // `C:src\proj` is drive-relative AND backslash-separated, so IsWindowsRoot
+    // accepts it on its separator branch. Paths under such a root are themselves
+    // drive-relative — which is what the callers' DriveRelative arms turn on, so
+    // it is pinned here rather than left to be inferred.
+    Layout const layout { .sourceRoot = R"(C:src\proj)", .buildTree = R"(C:src\build)" };
+    CHECK(PathCanon::AnchorForLayout(R"(C:src\proj\a.hpp)", layout) == PathCanon::Anchor::DriveRelative);
+
+    // And it canonicalizes anyway: a token is portable because the CONSUMER
+    // substitutes its own root, whatever shape the producer's root had. This is
+    // why the key filter leaves such a path to the root tests instead of dropping
+    // it on the anchor alone.
+    auto const token = PathCanon::Canonicalize(R"(C:src\proj\a.hpp)", layout);
+    CHECK(token == "<SRCROOT>/a.hpp");
+}
+
+TEST_CASE("An empty consuming root leaves the token standing rather than guessing a path")
+{
+    // Both directions of one root, because the pair is the property: the producing
+    // side has always answered "under no root" for an empty one, and until #547 the
+    // consuming side answered it by prefixing a separator -- inventing an absolute
+    // path out of no root at all. Fixing the separator alone would have replaced that
+    // with a RELATIVE path, which is worse: it resolves against whatever directory
+    // the process is in and can name a different real file, silently, where a
+    // surviving token is refused by `Cc::MissingReplayedDependency` before anything
+    // is written.
+    //
+    // Not reachable from the launcher, which refuses an empty root before a layout
+    // exists. It is asserted because `Localize` takes a `Layout` from whoever hands
+    // it one, and because a rule with one end implemented is not a rule.
+    Layout const none { .sourceRoot = "", .buildTree = "" };
+
+    CHECK(PathCanon::Canonicalize("/home/dev/proj/inc/a.hpp", none) == "/home/dev/proj/inc/a.hpp");
+    CHECK(PathCanon::Localize("<SRCROOT>/inc/a.hpp", none) == "<SRCROOT>/inc/a.hpp");
+    CHECK(PathCanon::Localize("<BUILDTREE>/gen/cfg.hpp", none) == "<BUILDTREE>/gen/cfg.hpp");
+
+    // One empty root does not disturb the other: the source root still localizes.
+    Layout const halfEmpty { .sourceRoot = "/srv/ci/checkout", .buildTree = "" };
+    CHECK(PathCanon::Localize("<SRCROOT>/inc/a.hpp", halfEmpty) == "/srv/ci/checkout/inc/a.hpp");
+    CHECK(PathCanon::Localize("<BUILDTREE>/gen/cfg.hpp", halfEmpty) == "<BUILDTREE>/gen/cfg.hpp");
+}
+
+TEST_CASE("A trailing separator on a root adds no depth, so it cannot win the tie-break")
+{
+    // `/x/proj` and `/x/proj/` name one directory. Comparing raw sizes let the second
+    // beat the first by that byte alone, so a layout spelling its two roots
+    // differently sent every path to <BUILDTREE> -- and a consumer with a real
+    // out-of-source layout then replayed a path that does not exist.
+    Layout const sameDirectory { .sourceRoot = "/x/proj", .buildTree = "/x/proj/" };
+    CHECK(PathCanon::Canonicalize("/x/proj/a.cpp", sameDirectory) == "<BUILDTREE>/a.cpp");
+
+    Layout const swapped { .sourceRoot = "/x/proj/", .buildTree = "/x/proj" };
+    CHECK(PathCanon::Canonicalize("/x/proj/a.cpp", swapped) == "<BUILDTREE>/a.cpp");
+
+    // Which is the tie-break's own documented answer for two roots of equal depth,
+    // and now the SAME answer whichever way the two are spelled -- the point being
+    // that spelling stopped deciding it, not that the winner changed.
+
+    // And a genuinely nested build tree still wins on depth, untrimmed or not.
+    Layout const nested { .sourceRoot = "/x/proj/", .buildTree = "/x/proj/build/" };
+    CHECK(PathCanon::Canonicalize("/x/proj/inc/a.hpp", nested) == "<SRCROOT>/inc/a.hpp");
+    CHECK(PathCanon::Canonicalize("/x/proj/build/gen/cfg.hpp", nested) == "<BUILDTREE>/gen/cfg.hpp");
+}
+
+// ---------------------------------------------------------------------------
+// RewritePaths: the same grammars, driven by a caller's own transform. The
+// launcher needs this to reconcile a driver's spelling of a path (an 8.3 short
+// component, a `subst` drive) with the roots a STORE is canonicalized against —
+// issue #66. Asking the filesystem is the caller's job; finding the spans is
+// this file's.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+/// A stand-in for the launcher's path resolver: maps one aliased spelling of a
+/// directory onto its real one, and leaves everything else alone.
+[[nodiscard]] std::string DealiasShortName(std::string_view path)
+{
+    constexpr std::string_view Aliased = R"(C:\Users\RUNNER~1\src)";
+    constexpr std::string_view Real = R"(C:\Users\runneradmin\src)";
+    if (!path.starts_with(Aliased))
+        return std::string { path };
+    return std::string { Real } + std::string { path.substr(Aliased.size()) };
+}
+} // namespace
+
+TEST_CASE("RewritePaths reconciles a showIncludes path so the roots can then match it")
+{
+    // The measured Windows shape: the root is spelled long and `clang-cl` echoes
+    // the short spelling it was handed, so canonicalization finds nothing under
+    // either root and the value keeps this machine's absolute paths.
+    Layout const layout { .sourceRoot = R"(C:\Users\runneradmin\src)", .buildTree = R"(C:\Users\runneradmin\build)" };
+    constexpr std::string_view region = "Note: including file:  C:\\Users\\RUNNER~1\\src\\inc\\h1.h\r\n";
+
+    auto const unreconciled = PathCanon::CanonicalizeRegion(region, Grammar::ShowIncludes, layout);
+    CHECK(unreconciled == region); // nothing matched: the defect this exists to end
+
+    auto const reconciled = PathCanon::RewritePaths(region, Grammar::ShowIncludes, DealiasShortName);
+    auto const canonical = PathCanon::CanonicalizeRegion(reconciled, Grammar::ShowIncludes, layout);
+    CHECK(canonical == "Note: including file:  <SRCROOT>/inc/h1.h\r\n");
+}
+
+TEST_CASE("RewritePaths leaves the non-path parts of every grammar byte-for-byte")
+{
+    // The transform sees only what the grammar identifies as a path, so a line that
+    // merely quotes the marker and a diagnostic's location suffix both survive.
+    constexpr std::string_view notes = "char const* s = \"Note: including file: x\";\n"
+                                       "Note: including file: C:\\Users\\RUNNER~1\\src\\a.h\n";
+    auto const rewritten = PathCanon::RewritePaths(notes, Grammar::ShowIncludes, DealiasShortName);
+    CHECK(rewritten
+          == "char const* s = \"Note: including file: x\";\n"
+             "Note: including file: C:\\Users\\runneradmin\\src\\a.h\n");
+
+    constexpr std::string_view diagnostic = "C:\\Users\\RUNNER~1\\src\\a.cpp(12,3): warning C4100: unused\n";
+    auto const diag = PathCanon::RewritePaths(diagnostic, Grammar::MsvcDiagnostics, DealiasShortName);
+    CHECK(diag == "C:\\Users\\runneradmin\\src\\a.cpp(12,3): warning C4100: unused\n");
+}
+
+TEST_CASE("RewritePaths reaches every token of a depfile, target included")
+{
+    // The depfile grammar carries many spans per line, so it takes the other
+    // walker; both must be reachable through this entry point or a GNU build's
+    // stored depfile keeps the producing machine's spelling.
+    constexpr std::string_view depFile = "C:\\Users\\RUNNER~1\\src\\a.o: C:\\Users\\RUNNER~1\\src\\a.cpp\\\n"
+                                         "  C:\\Users\\RUNNER~1\\src\\inc\\h1.h\n";
+    auto const rewritten = PathCanon::RewritePaths(depFile, Grammar::GccDepfile, DealiasShortName);
+    CHECK(rewritten
+          == "C:\\Users\\runneradmin\\src\\a.o: C:\\Users\\runneradmin\\src\\a.cpp\\\n"
+             "  C:\\Users\\runneradmin\\src\\inc\\h1.h\n");
+}
+
+TEST_CASE("RewritePaths hands a depfile's transform each token with every escape consumed exactly once")
+{
+    // The walker consumes the character after an escaping backslash with an advance of its
+    // own. Dropped, a path loses a character; read twice, an escaped space splits one path
+    // into two and an escaped colon ends a rule early -- each a wrong cache key. So the spans
+    // are asserted, and the identity transform must give back every byte, escapes included.
+    constexpr std::string_view depFile = "a\\ b\\:c.o: C:\\s\\x.cpp d\\\\e.h \\\r\n"
+                                         "  f\\:g.h C:h.h\n";
+    std::vector<std::string> spans;
+    auto const record = [&spans](std::string_view span) {
+        spans.emplace_back(span);
+        return std::string { span };
+    };
+
+    auto const rewritten = PathCanon::RewritePaths(depFile, Grammar::GccDepfile, record);
+    CHECK(rewritten == depFile);
+    CHECK(spans == std::vector<std::string> { "a b:c.o", R"(C:\s\x.cpp)", R"(d\e.h)", "f:g.h", "C:h.h" });
+}
+
+TEST_CASE("RewritePaths lets a transform preserve one span and rewrite its neighbours")
+{
+    // The per-span decision is the mechanism the launcher builds its depfile rule
+    // on: it preserves the object path — the `-o` value, which the BUILD SYSTEM
+    // named — while reconciling every dependency the compiler reported around it.
+    // Decided by VALUE and not by position, because position does not say what a
+    // path is: `-MP` emits a phony rule whose target is a HEADER, and that one
+    // must be rewritten like any other or a consumer's depfile names a file that
+    // does not exist there.
+    constexpr std::string_view objectPath = R"(C:\Users\RUNNER~1\src\a.o)";
+    auto const preserveObject = [objectPath](std::string_view span) {
+        return span == objectPath ? std::string { span } : DealiasShortName(span);
+    };
+
+    constexpr std::string_view depFile = "C:\\Users\\RUNNER~1\\src\\a.o: C:\\Users\\RUNNER~1\\src\\a.cpp\\\n"
+                                         "  C:\\Users\\RUNNER~1\\src\\inc\\h1.h\n"
+                                         "\n"
+                                         "C:\\Users\\RUNNER~1\\src\\inc\\h1.h:\n";
+
+    auto const rewritten = PathCanon::RewritePaths(depFile, Grammar::GccDepfile, preserveObject);
+    CHECK(rewritten
+          == "C:\\Users\\RUNNER~1\\src\\a.o: C:\\Users\\runneradmin\\src\\a.cpp\\\n"
+             "  C:\\Users\\runneradmin\\src\\inc\\h1.h\n"
+             "\n"
+             "C:\\Users\\runneradmin\\src\\inc\\h1.h:\n");
+
+    // The dependency on the `\`-continued line is reached too. gcc wraps at ~76
+    // columns, so a walker that stopped at the first line would exempt most of a
+    // real depfile rather than none of it.
+    CHECK(rewritten.contains(R"(  C:\Users\runneradmin\src\inc\h1.h)"));
+}
+
+TEST_CASE("RewritePaths with an identity transform is a byte-exact no-op")
+{
+    // What makes reconciling twice safe: RecordManifest re-reconciles inputs its
+    // caller already did, and a correctly-spelled build reconciles nothing at all.
+    auto const identity = [](std::string_view path) {
+        return std::string { path };
+    };
+    constexpr std::string_view depFile = "/b/a.o: /s/a.cpp /s/a\\ b.hpp\n"
+                                         "\n"
+                                         "/s/a.hpp:\n";
+    auto const rewritten = PathCanon::RewritePaths(depFile, Grammar::GccDepfile, identity);
+    CHECK(rewritten == depFile);
+
+    constexpr std::string_view notes = "Note: including file: /s/inc/h1.h\r\nunrelated\n";
+    auto const notesOut = PathCanon::RewritePaths(notes, Grammar::ShowIncludes, identity);
+    CHECK(notesOut == notes);
+}
+
+// ---------------------------------------------------------------------------
+// GccDiagnostics: anchored, because a diagnostic quotes the offending SOURCE LINE
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GccDiagnostics rewrites the diagnostic's own path and the include chain")
+{
+    Layout const producer { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    Layout const consumer { .sourceRoot = "/srv/ci/co", .buildTree = "/srv/ci/co/out" };
+
+    auto const text = std::string { "In file included from /home/dev/proj/inc/a.hpp:3,\n"
+                                    "                 from /home/dev/proj/src/a.cpp:1:\n"
+                                    "/home/dev/proj/src/a.cpp:12:5: warning: unused variable 'x'\n" };
+
+    auto const canonical = PathCanon::CanonicalizeRegion(text, Grammar::GccDiagnostics, producer);
+    CHECK_FALSE(canonical.contains("/home/dev/proj"));
+
+    auto const local = PathCanon::LocalizeRegion(canonical, Grammar::GccDiagnostics, consumer);
+    CHECK(local
+          == "In file included from /srv/ci/co/inc/a.hpp:3,\n"
+             "                 from /srv/ci/co/src/a.cpp:1:\n"
+             "/srv/ci/co/src/a.cpp:12:5: warning: unused variable 'x'\n");
+}
+
+TEST_CASE("GccDiagnostics leaves a path QUOTED inside the offending source line alone")
+{
+    // The anchoring guarantee, and the reason the grammar is not a scan for
+    // path-shaped spans. A GCC diagnostic embeds the source line and a caret, and
+    // this repository's own tests carry path literals -- rewriting one would turn
+    // a correct diagnostic into a wrong one, and it would look like a fix.
+    Layout const producer { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+
+    auto const text = std::string { "/home/dev/proj/src/a.cpp:12:5: warning: unused variable 'p'\n"
+                                    "   12 |     auto p = \"/home/dev/proj/keep/me.txt\";\n"
+                                    "      |          ^\n" };
+
+    auto const canonical = PathCanon::CanonicalizeRegion(text, Grammar::GccDiagnostics, producer);
+
+    // The anchored path went; the quoted one did not.
+    CHECK(canonical.starts_with("<SRCROOT>/src/a.cpp:12:5:"));
+    CHECK(canonical.contains("\"/home/dev/proj/keep/me.txt\""));
+    CHECK(canonical.contains("      |          ^\n"));
+}
+
+TEST_CASE("GccDiagnostics leaves a line that is not a diagnostic alone")
+{
+    Layout const producer { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    // No `:<line>:<col>:` anchor, so nothing here is a path span this grammar owns.
+    auto const text = std::string { "ld: cannot find -lfoo in /home/dev/proj/lib\n" };
+    CHECK(PathCanon::CanonicalizeRegion(text, Grammar::GccDiagnostics, producer) == text);
+}
+
+namespace
+{
+
+// The shape and the magnitude of the report, rebuilt from generic names: a chain of nested
+// relative includes where each hop appends `../..` to the TEXTUAL path of its includer, ending in
+// a run that climbs out of the module. Mixed separators are deliberate -- the `-I` roots arrive
+// spelled with backslash and the `#include` bodies with forward slash, and a driver echoes both
+// halves as it found them. The prefix is 60 bytes, so the whole is 299 and the collapse is 88:
+// the figures measured on the build that prompted this.
+constexpr std::string_view MeasuredPrefix = R"(D:\build-agent\workspace-00007\a1b2c3d4e5\3\example\project\)";
+
+constexpr std::string_view MeasuredTail =
+    R"(src\Graphics\Shared\Common\../../Sampling/View\../../Rendering/Raster/Core\../..)"
+    R"(/Core\../../Geometry/Core\../../Shared/Core\../../Blending/Core\../../Shading/Pa)"
+    R"(lette/Core\../../Sample/Common\../../../../Platform\../Graphics/GlyphRaster.hpp)";
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// CollapseRelativeSegments -- the one lexical `..` collapse (#1592, #1593)
+
+TEST_CASE("The measured 299-byte note path collapses under Ninja's limit", "[collapse]")
+{
+    auto const input = std::string { MeasuredPrefix } + std::string { MeasuredTail };
+    auto const collapsed = PathCanon::CollapseRelativeSegments(input);
+
+    // Pinned as their own checks: a fixture that drifts under 260 stops testing the thing it
+    // exists for, and would keep passing while doing it.
+    CHECK(input.size() == 299);
+    CHECK(collapsed.size() == 88);
+    CHECK(collapsed == std::string { MeasuredPrefix } + R"(src\Graphics\GlyphRaster.hpp)");
+}
+
+TEST_CASE("A path with nothing to collapse comes back byte-identical", "[collapse]")
+{
+    // Mixed separators are the shape a driver really emits, and they must not be re-spelled just
+    // because the path passed through here.
+    constexpr std::string_view mixed = R"(D:\ci\src\inc/h1.h)";
+    CHECK(PathCanon::CollapseRelativeSegments(mixed) == mixed);
+
+    // `..` that is not a SEGMENT. A `contains("..")` test would take the slow path and hand back a
+    // uniformly re-separated spelling for no reason at all.
+    constexpr std::string_view dotsInName = R"(D:\ci\src\a..b\inc/h1.h)";
+    CHECK(PathCanon::CollapseRelativeSegments(dotsInName) == dotsInName);
+}
+
+TEST_CASE("Dots inside a name do not block a real collapse elsewhere in the path", "[collapse]")
+{
+    // This is what pins `..` being tested as a SEGMENT rather than as a substring, and it is the
+    // only shape that can: a path with nothing to collapse survives a substring test unharmed,
+    // because the step-6 bail then returns the input and the output is right for the wrong reason.
+    // Here the two shapes sit in one path, so a substring test bails on `a..b` and silently leaves
+    // the genuine `tmp\..` uncollapsed.
+    CHECK(PathCanon::CollapseRelativeSegments(R"(D:\ci\src\a..b\tmp\..\x.hpp)") == R"(D:\ci\src\a..b\x.hpp)");
+}
+
+TEST_CASE("A drive root cannot be ascended past on either host", "[collapse]")
+{
+    // This is the POSIX-host case. On Windows `lexically_normal` already refuses to walk above a
+    // drive root, so a Windows-only run cannot see the anchor split being removed; on POSIX `D:` is
+    // an ordinary filename and `D:/../x.hpp` would otherwise normalize to a bare `x.hpp`.
+    CHECK(PathCanon::CollapseRelativeSegments(R"(D:\..\x.hpp)") == R"(D:\x.hpp)");
+    CHECK(PathCanon::CollapseRelativeSegments(R"(D:\ci\..\x.hpp)") == R"(D:\x.hpp)");
+}
+
+TEST_CASE("A UNC root keeps both of its leading separators", "[collapse]")
+{
+    // `lexically_normal` collapses a leading `//` on POSIX and keeps it on Windows, so the prefix is
+    // held aside rather than trusted to the pass.
+    CHECK(PathCanon::CollapseRelativeSegments(R"(\\build\share\a\..\b\x.hpp)") == R"(\\build\share\b\x.hpp)");
+}
+
+TEST_CASE("A UNC share cannot be ascended past", "[collapse]")
+{
+    // `\\host\share` is ONE root, and Windows resolves both of these to `\\host\share\x.h`. Held
+    // aside as the host alone, the share was an ordinary segment and `..` climbed to `\\host\x.h`
+    // -- a different file, which looks right (Job 2 review, M3).
+    CHECK(PathCanon::CollapseRelativeSegments(R"(\\host\share\a\..\..\x.h)") == R"(\\host\share\x.h)");
+    CHECK(PathCanon::CollapseRelativeSegments(R"(\\host\share\..\x.h)") == R"(\\host\share\x.h)");
+    CHECK(PathCanon::CollapseRelativeSegments("//host/share/../x.h") == "//host/share/x.h");
+    // A bare share has nothing to collapse, and comes back as written.
+    CHECK(PathCanon::CollapseRelativeSegments(R"(\\host\..)") == R"(\\host\..)");
+}
+
+TEST_CASE("A leading dot-dot that nothing lexical can resolve is left alone", "[collapse]")
+{
+    // Returning the rewrite here would re-spell the separators of a path whose `..` is still there,
+    // which is a change with no benefit attached.
+    //
+    // The separators are deliberately MIXED. An all-backslash fixture cannot see this rule at all:
+    // the rewrite would fold to `/`, fail to collapse anything, and then restore every separator to
+    // `\`, arriving back at bytes identical to the input. The case would pass with the bail removed
+    // and would be testing nothing.
+    constexpr std::string_view relative = R"(..\../inc/a.hpp)";
+    CHECK(PathCanon::CollapseRelativeSegments(relative) == relative);
+}
+
+TEST_CASE("A forward-slash path stays forward-slash", "[collapse]")
+{
+    CHECK(PathCanon::CollapseRelativeSegments("/home/dev/proj/src/a/../b/x.hpp") == "/home/dev/proj/src/b/x.hpp");
+}

@@ -13,5 +13,5 @@ version\r\n
 ## Response
 
 ```text
-VERSION fastcached-<version>\r\n
+VERSION pace-<version>\r\n
 ```

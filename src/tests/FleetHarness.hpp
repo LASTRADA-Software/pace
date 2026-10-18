@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Consensus/RaftConfig.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Distributed/LeaseSigner.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/MachineTicket.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Distributed/StateLeaseRoster.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/CompileReplySeal.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Protocol/ProvenIdentity.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Consensus/RaftConfig.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Distributed/LeaseSigner.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Distributed/StateLeaseRoster.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileReplySeal.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -44,27 +44,27 @@
 #include <CompileCorrelation.hpp>
 #include <Dispatch.hpp>
 #include <WorkerProtocol.hpp>
-#include <apps/fastcache-compile-node/ConsensusStanding.hpp>
-#include <apps/fastcache-compile-node/DiscoveryTier.hpp>
-#include <apps/fastcache-compile-node/EndpointDialer.hpp>
-#include <apps/fastcache-compile-node/FleetSummaryResponder.hpp>
-#include <apps/fastcache-compile-node/FleetTextResponder.hpp>
-#include <apps/fastcache-compile-node/FrameEndpoint.hpp>
-#include <apps/fastcache-compile-node/LiveStatsResponder.hpp>
-#include <apps/fastcache-compile-node/MachineStandingTestUtils.hpp>
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
-#include <apps/fastcache-compile-node/NodeFormation.hpp>
-#include <apps/fastcache-compile-node/NodeFrameSurface.hpp>
-#include <apps/fastcache-compile-node/NodeMembership.hpp>
-#include <apps/fastcache-compile-node/NodePresenceTier.hpp>
-#include <apps/fastcache-compile-node/NodeProofResponder.hpp>
-#include <apps/fastcache-compile-node/NodeRoster.hpp>
-#include <apps/fastcache-compile-node/NodeStatusResponder.hpp>
-#include <apps/fastcache-compile-node/Responders.hpp>
-#include <apps/fastcache-compile-node/SchedulerLink.hpp>
-#include <apps/fastcache-compile-node/SchedulingRedirect.hpp>
-#include <apps/fastcache-compile-node/SessionResponder.hpp>
-#include <apps/fastcache-compile-node/SharedCacheResponder.hpp>
+#include <apps/pace-node/ConsensusStanding.hpp>
+#include <apps/pace-node/DiscoveryTier.hpp>
+#include <apps/pace-node/EndpointDialer.hpp>
+#include <apps/pace-node/FleetSummaryResponder.hpp>
+#include <apps/pace-node/FleetTextResponder.hpp>
+#include <apps/pace-node/FrameEndpoint.hpp>
+#include <apps/pace-node/LiveStatsResponder.hpp>
+#include <apps/pace-node/MachineStandingTestUtils.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
+#include <apps/pace-node/NodeFormation.hpp>
+#include <apps/pace-node/NodeFrameSurface.hpp>
+#include <apps/pace-node/NodeMembership.hpp>
+#include <apps/pace-node/NodePresenceTier.hpp>
+#include <apps/pace-node/NodeProofResponder.hpp>
+#include <apps/pace-node/NodeRoster.hpp>
+#include <apps/pace-node/NodeStatusResponder.hpp>
+#include <apps/pace-node/Responders.hpp>
+#include <apps/pace-node/SchedulerLink.hpp>
+#include <apps/pace-node/SchedulingRedirect.hpp>
+#include <apps/pace-node/SessionResponder.hpp>
+#include <apps/pace-node/SharedCacheResponder.hpp>
 #include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/testing/TestLoop.hpp>
@@ -93,13 +93,13 @@
 /// `inline` rather than `static`: the comment above says the notice is SHARED on purpose, and
 /// internal linkage would give each translation unit its own. Harmless for a sink-less notice
 /// today, and a silent divergence from the stated intent the moment one records anything.
-[[nodiscard]] inline FastCache::Cc::CredentialNotice& Unwatched()
+[[nodiscard]] inline Pace::Cc::CredentialNotice& Unwatched()
 {
-    static FastCache::Cc::CredentialNotice notice = FastCache::Cc::CredentialNotice::Silent();
+    static Pace::Cc::CredentialNotice notice = Pace::Cc::CredentialNotice::Silent();
     return notice;
 }
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A compile fleet running deterministically in one process.
@@ -125,7 +125,7 @@ namespace FastCache::Testing
 /// By shape it belongs beside `RaftClusterHarness`. It does not go there.
 /// `RaftClusterHarness` sits in `Consensus/` because everything it touches sits
 /// in `Consensus/`; a fleet spans `Distributed/`, the node and the launcher's
-/// client sources, so putting it under `src/FastCache/` would make a library
+/// client sources, so putting it under `src/Pace/` would make a library
 /// directory include an app header. This tree already enforces that `Net/` must
 /// not depend on `Core/` with a ctest; library-depending-on-app is the worse
 /// version of the same thing and has no gate to catch it.
@@ -167,10 +167,10 @@ namespace FastCache::Testing
 /// `SetClusterStateAt`: an ex-leader that has not heard a change is a node holding an older
 /// one. A node's presence round dials a scheduler through this harness (`Dial`, `SetUnreachable`), so
 /// `SchedulerLink`'s redirects and fallbacks run as production runs them. A `LearnerWorker` is a
-/// machine admitted as a LEARNER: a production `FastCache::Node::NodeRoster` fed the state of the
+/// machine admitted as a LEARNER: a production `Pace::Node::NodeRoster` fed the state of the
 /// scheduler it learns from -- re-applied at every `Step` and at `Apply`, as a learner applies what its
 /// leader replicates -- with the production lease validator and ticket verifier over it.
-class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::IEndpointDialer
+class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndpointDialer
 {
   public:
     /// What one exchange did, in the order it happened.
@@ -425,7 +425,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
     /// `RegisterWorker` rather than folded into it: a machine with `--slots=0` sends this and
     /// never registers anything, and a harness that could only express a registration could
     /// not build the fleet
-    /// [#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440) is about -- a
+    /// [#1440](https://github.com/LASTRADA-Software/pace/issues/1440) is about -- a
     /// scheduler-only leader whose own row and own history the page has to carry.
     /// @param scheduler Which scheduler to tell.
     /// @param machineEndpoint The machine announcing itself.
@@ -631,7 +631,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
     /// advertises.
     /// @param address The endpoint as the client dials it; `AddWorkerAddress` it as well.
     /// @param audience What that worker answers to; borrowed, and must outlive the harness's use.
-    ///        Production's `FastCache::Node::NodeAudience` for a case about which endpoints a ticket
+    ///        Production's `Pace::Node::NodeAudience` for a case about which endpoints a ticket
     ///        may name.
     /// @param stateOf The scheduler whose applied state the worker's roster holds.
     void VerifyTicketsAtWorker(std::string address, Distributed::IAudience const& audience, std::string_view stateOf)
@@ -777,7 +777,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
     /// cluster state now and again at every `AdmitMachine` and `ForgetMachine`.
     /// @param endpoint Which node; must have been added.
     /// @param membership The node's admission policy; borrowed, and must outlive the harness's use.
-    void PublishMembershipAt(std::string_view endpoint, FastCache::Node::NodeMembership& membership)
+    void PublishMembershipAt(std::string_view endpoint, Pace::Node::NodeMembership& membership)
     {
         auto& node = NodeAt(endpoint);
         node.published = &membership;
@@ -881,7 +881,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         return std::string { CompileCacheWire::AsStringView(grant->leaseToken) };
     }
 
-    /// A machine admitted as a LEARNER of this fleet (#178): a production `FastCache::Node::NodeRoster`,
+    /// A machine admitted as a LEARNER of this fleet (#178): a production `Pace::Node::NodeRoster`,
     /// built for a learner's configuration and fed what that learner APPLIED -- `NodeRoster::Applied`,
     /// which the consensus tier's apply callback calls with every committed state -- with the
     /// production lease validator over it for the grants its compile port is shown, and the
@@ -984,13 +984,13 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         /// The production roster for a learner of @p leader's fleet: a node that runs consensus,
         /// so its roster is the state it applies and nothing it was handed -- stamping leader
         /// contact on @p clock, the harness's own.
-        [[nodiscard]] static std::unique_ptr<FastCache::Node::NodeRoster> BuildRoster(std::string const& endpoint,
-                                                                                      std::string const& leader,
-                                                                                      core::platform::IClock const& clock)
+        [[nodiscard]] static std::unique_ptr<Pace::Node::NodeRoster> BuildRoster(std::string const& endpoint,
+                                                                                 std::string const& leader,
+                                                                                 core::platform::IClock const& clock)
         {
-            auto cfg = FastCache::Node::NodeConfig {};
+            auto cfg = Pace::Node::NodeConfig {};
             cfg.nodeId = endpoint;
-            cfg.formation = FastCache::Node::NodeFormationView {
+            cfg.formation = Pace::Node::NodeFormationView {
                 .mode = Cluster::NodeMode::Learner,
                 .clusterId = std::string { ClusterId },
                 .createdAtUnixSeconds = 0,
@@ -1004,9 +1004,9 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
                                                            .publicKey = TestKeyPair(leader).PublicKey() } },
                 .fleetSchedulers = { leader },
             };
-            if (!FastCache::Node::RunsConsensus(cfg))
+            if (!Pace::Node::RunsConsensus(cfg))
                 throw std::runtime_error { "FleetHarness: a learner's configuration runs no consensus" };
-            auto built = FastCache::Node::NodeRoster::Build(cfg, clock, nullptr);
+            auto built = Pace::Node::NodeRoster::Build(cfg, clock, nullptr);
             if (!built.has_value())
                 throw std::runtime_error { "FleetHarness: a learner's roster could not be built: " + built.error().reason };
             return *std::move(built);
@@ -1016,7 +1016,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         Advertised _advertised;
         std::string _endpoint;
         std::string _leader;
-        std::unique_ptr<FastCache::Node::NodeRoster> _roster; ///< Declared before `_validator`, which borrows it.
+        std::unique_ptr<Pace::Node::NodeRoster> _roster; ///< Declared before `_validator`, which borrows it.
         Distributed::WorkerLeaseState _lease;
         Cc::LeaseValidator _validator;
         ExactAudience _audience { _endpoint };
@@ -1158,7 +1158,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         Distributed::IMembershipOracle const* membership { &fold };
         /// The production policy `membership` is, when `PublishMembershipAt` set one; republished
         /// whenever this node's state changes.
-        FastCache::Node::NodeMembership* published { nullptr };
+        Pace::Node::NodeMembership* published { nullptr };
         /// What this node verifies a machine ticket against: its own applied state, adopted at
         /// every COMMIT and kept current by every consensus pass (`Step`), as production's
         /// consensus tier feeds it -- on the harness's clock, which a case advances; a spent set of
@@ -1222,17 +1222,17 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
             identity { TestKeyPair(endpoint) },
             loop { clock },
             liveStats { liveSources, fold, AdminCredential {}, loop, metrics },
-            session { verifier, FastCache::Node::SessionKeys {}, random, wallClock, metrics },
-            sharedCache { cfg, fold, clock, metrics, logger, nullptr, FastCache::Node::ReconcileOn::Caller },
+            session { verifier, Pace::Node::SessionKeys {}, random, wallClock, metrics },
+            sharedCache { cfg, fold, clock, metrics, logger, nullptr, Pace::Node::ReconcileOn::Caller },
             nodeProof { cfg.nodeId, identity, fold, consensusStanding, random, metrics, logger },
-            surface { FastCache::Node::ComposeSurfaceComponents(
+            surface { Pace::Node::ComposeSurfaceComponents(
                 nullptr,
                 nullptr,
                 &redirect,
                 nullptr,
                 nodeStatus,
-                std::unexpected { FastCache::Node::EnrollmentAbsenceOf(cfg, false)
-                                      .value_or(FastCache::Node::EnrollmentAbsence::NoIdentityKey) },
+                std::unexpected {
+                    Pace::Node::EnrollmentAbsenceOf(cfg, false).value_or(Pace::Node::EnrollmentAbsence::NoIdentityKey) },
                 liveStats,
                 fleetText,
                 &nodeProof,
@@ -1247,11 +1247,11 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         /// @param nodeId Its id.
         /// @return The configuration.
         /// @throws std::runtime_error when the configuration would not redirect the scheduling verbs.
-        [[nodiscard]] static FastCache::Node::NodeConfig LearnerConfig(std::string const& nodeId)
+        [[nodiscard]] static Pace::Node::NodeConfig LearnerConfig(std::string const& nodeId)
         {
-            auto cfg = FastCache::Node::NodeConfig {};
+            auto cfg = Pace::Node::NodeConfig {};
             cfg.nodeId = nodeId;
-            cfg.formation = FastCache::Node::NodeFormationView {
+            cfg.formation = Pace::Node::NodeFormationView {
                 .mode = Cluster::NodeMode::Learner,
                 .clusterId = std::string { ClusterId },
                 .createdAtUnixSeconds = 0,
@@ -1259,14 +1259,14 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
                 .fleetMembers = {},
                 .fleetSchedulers = {},
             };
-            if (!FastCache::Node::RedirectsScheduling(cfg))
+            if (!Pace::Node::RedirectsScheduling(cfg))
                 throw std::runtime_error { "FleetHarness: a learner's configuration does not redirect scheduling" };
             return cfg;
         }
 
         std::string endpoint;
-        FastCache::Node::NodeConfig cfg; ///< What `main` would have built it from.
-        Ed25519KeyPair identity;         ///< Its identity key: what its node-proof and formation answers sign.
+        Pace::Node::NodeConfig cfg; ///< What `main` would have built it from.
+        Ed25519KeyPair identity;    ///< Its identity key: what its node-proof and formation answers sign.
         /// Its own sink, standing for the one sink `main` hands every component on a node's surface.
         ///
         /// **Every component on this surface that holds a sink is handed THIS one** -- the redirect
@@ -1281,37 +1281,37 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         Distributed::KeyRosterMembership keys;
         Distributed::AnyOfMembership fold { { &loopback, &keys } };
         /// What the redirect names, written only through `publisher`.
-        FastCache::Node::KnownSchedulingLeader knownLeader;
-        FastCache::Node::SchedulingLeaderPublisher publisher { knownLeader };
-        FastCache::Node::SchedulingRedirectResponder redirect { fold, knownLeader };
+        Pace::Node::KnownSchedulingLeader knownLeader;
+        Pace::Node::SchedulingLeaderPublisher publisher { knownLeader };
+        Pace::Node::SchedulingRedirectResponder redirect { fold, knownLeader };
         /// The every-node owners, built as `main` builds them over a source slot nothing attaches --
         /// each answers that it has nothing to read. Built for their place on the surface, whose
         /// request cap is their fold.
         LiveStatsSourceSlot liveSources;
         SilentNodeStatus describe;
         FixedStanding const standing {};
-        FastCache::Node::NodeStatusResponder nodeStatus { describe, liveSources, fold, standing, metrics };
+        Pace::Node::NodeStatusResponder nodeStatus { describe, liveSources, fold, standing, metrics };
         /// What the live-stats owner is bound to; never turned, since no case here subscribes.
         core::net::testing::TestLoop loop;
-        FastCache::Node::LiveStatsResponder liveStats;
-        FastCache::Node::FleetTextResponder fleetText { liveSources, fold, AdminCredential {}, metrics };
+        Pace::Node::LiveStatsResponder liveStats;
+        Pace::Node::FleetTextResponder fleetText { liveSources, fold, AdminCredential {}, metrics };
         /// The session owner, over no roster: every ticket it is shown is refused -- counted, on `metrics`.
         ExactAudience audience { endpoint };
         Distributed::SpentTickets spent;
         Distributed::TicketVerifier verifier { nullptr, audience, spent };
         ScriptedSecureRandom random;
-        FastCache::Node::SessionResponder session;
+        Pace::Node::SessionResponder session;
         /// The fleet's shared cache every node builds, dormant: nothing names this machine.
-        FastCache::Node::SharedCacheService sharedCache;
+        Pace::Node::SharedCacheService sharedCache;
         /// The identity prover a node running consensus serves, over a standing slot nothing attaches.
-        FastCache::Node::ConsensusStandingSlot consensusStanding;
-        FastCache::Node::NodeProofResponder nodeProof;
+        Pace::Node::ConsensusStandingSlot consensusStanding;
+        Pace::Node::NodeProofResponder nodeProof;
         /// What it answers `FLEET-SUMMARY` with, signed under `identity`.
-        FastCache::Node::FixedFleetSummary const summary { CompileCacheWire::FleetSummary {
+        Pace::Node::FixedFleetSummary const summary { CompileCacheWire::FleetSummary {
             .clusterId = std::string { ClusterId }, .nodeId = endpoint } };
-        FastCache::Node::FleetSummaryResponder formation { summary, identity };
+        Pace::Node::FleetSummaryResponder formation { summary, identity };
         /// Production's composition of all of the above, routed by production's router.
-        FastCache::Node::MergedResponder surface;
+        Pace::Node::MergedResponder surface;
     };
 
     /// What @p learner's consensus tier tells it at a pass: who leads -- the harness's leader, whose
@@ -1370,8 +1370,8 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
         if (!header.has_value())
             return {};
         auto const peer = ConnectionFacts { .host = _callerHost, .proven = _callerIdentity };
-        auto refusal = FastCache::Node::DecideHeaderRefusal(
-            FastCache::Node::HeaderGate { .responder = learner.surface, .what = "node port", .inFlightBytes = 0 },
+        auto refusal = Pace::Node::DecideHeaderRefusal(
+            Pace::Node::HeaderGate { .responder = learner.surface, .what = "node port", .inFlightBytes = 0 },
             peer,
             *header,
             learner.surface.MaxRequestBytes());
@@ -1701,4 +1701,4 @@ class FleetHarness final: public Cc::IEndpointExchange, public FastCache::Node::
     std::function<void()> _onCompile;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

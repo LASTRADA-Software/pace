@@ -10,13 +10,13 @@
 #
 # ## What a SHIPPING configure is, as a selector rather than a list
 #
-# A step whose joined `run:` body invokes `cmake` with `-DFASTCACHED_BUILD_TESTS=OFF`. That is the
+# A step whose joined `run:` body invokes `cmake` with `-DPACE_BUILD_TESTS=OFF`. That is the
 # one property that distinguishes what a customer receives from what `ctest` measures, and it is
 # DATA -- `shipping` is passed in -- rather than the three job names that happen to have it today.
 # A fourth packaging job is then a row the selector finds, not a row somebody remembered to add.
 #
 # The body must be JOINED before it is tested, and that is not a nicety: the macOS configure spells
-# `-DFASTCACHED_BUILD_TESTS=OFF \` on a continuation line of its own, so a line-wise selector finds
+# `-DPACE_BUILD_TESTS=OFF \` on a continuation line of its own, so a line-wise selector finds
 # two of the three and reports a clean tree.
 #
 # ## The four things asked of the guard step, and why each is its own answer

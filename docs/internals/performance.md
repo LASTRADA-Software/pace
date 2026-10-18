@@ -5,8 +5,8 @@ easiest way to reach a wrong conclusion:
 
 | Suite | Driver | What it measures | What limits it |
 | --- | --- | --- | --- |
-| `bench/inproc_bench.py` | `fastcache-bench` (Catch2) | one cache operation inside the process, decomposed layer by layer | the storage stack itself |
-| `bench/fastcached_bench.py` | Python clients over TCP | the whole daemon: syscalls, parsing, dispatch, storage | the network path, and the load generator |
+| `bench/inproc_bench.py` | `pace-bench` (Catch2) | one cache operation inside the process, decomposed layer by layer | the storage stack itself |
+| `bench/pace_kv_bench.py` | Python clients over TCP | the whole daemon: syscalls, parsing, dispatch, storage | the network path, and the load generator |
 
 A cached `GET` costs tens of *nanoseconds* inside the process and roughly two
 *microseconds* of server CPU once a socket is involved. The wire suite
@@ -20,7 +20,7 @@ L3 domains), Fedora Linux 44, clang 21 `-O3` (the `clang-release` preset),
 `powersave` governor. Absolute numbers move with the machine; the shape does
 not.
 
-## Reading a `fastcache-bench` run
+## Reading a `pace-bench` run
 
 Two things have to be right before a number off that binary means anything, and
 both have been got wrong here.
@@ -39,7 +39,7 @@ than scraping the console table, for exactly that reason.
 before any case runs, and marks every figure with what that build makes of it:
 
 ```
-fastcache-bench: the build these figures come from
+pace-bench: the build these figures come from
   build type (as configured -- a LABEL, never evidence): Debug
   compiler (as it identifies itself): clang 22.1.2
   asserts: LIVE -- NDEBUG is not defined, so assert() runs inside every measured body
@@ -64,12 +64,12 @@ stdout carries the Catch2 reporter and nothing else, which is what keeps
 `--reporter xml` parseable. So capture the two streams separately, and keep the banner
 with any figure you quote.
 
-`src/apps/fastcache-bench/BuildBanner.hpp` carries the rest of the reasoning, and
+`src/apps/pace-bench/BuildBanner.hpp` carries the rest of the reasoning, and
 `ctest -R bench-build-banner` runs it.
 
 ## The storage stack, layer by layer
 
-`fastcache-bench` builds the same stack the daemon builds and adds one
+`pace-bench` builds the same stack the daemon builds and adds one
 production concern per row, so a nanosecond lands on a feature instead of on
 guesswork. The workload is a deliberate replica of
 [jitbit/FastCache](https://github.com/jitbit/FastCache)'s BenchmarkDotNet
@@ -175,15 +175,15 @@ generator happened to share. Pin both before comparing anything.
 
 ## Against real servers
 
-The wire suite runs fastcached, native `redis-server` and native `memcached`
+The wire suite runs pace-kv, native `redis-server` and native `memcached`
 through identical scenarios on one host. The headline lives in the
-[README](https://github.com/LASTRADA-Software/fastcached#benchmarks): a tie at
+[README](https://github.com/LASTRADA-Software/pace#benchmarks): a tie at
 one connection, ~3× redis and ~1.07× memcached at 16 connections, ~4.4× redis
 and ~1.6× memcached at 64–256. The multi-core reactor architecture is what wins
 there — not per-operation cost.
 
 ```sh
-python bench/fastcached_bench.py --vs redis,memcached
+python bench/pace_kv_bench.py --vs redis,memcached
 ```
 
 ## Where the time actually goes

@@ -26,20 +26,20 @@
 # And a second property, read from the same registrations and the `_tests.cmake` files
 # `catch_discover_tests` generates: EVERY registered test sets VARIABLE. A product binary
 # suppresses only when that variable is in its environment, so a test that does not set it
-# is a test whose spawned `fastcached` still waits on the dialog -- and the object being
+# is a test whose spawned `pace-kv` still waits on the dialog -- and the object being
 # linked says nothing about that.
 #
 # ## Outcomes
 #
 # A launched executable that is neither covered nor exempt is REFUSED, by name. So is
 # every way of not being able to ask: no manifest, an empty one, a reason this reader
-# cannot carry, and an anchor (`FastCacheTest`) that is not launched-and-covered, since a
+# cannot carry, and an anchor (`PaceTest`) that is not launched-and-covered, since a
 # derivation that proves nothing about the one executable certain to be there proves
 # nothing at all. A generator that writes no `build.ninja` is a SKIP, naming it -- the
 # presets all use Ninja, and a reader claiming to parse a format it does not is worse.
 #
 # A path is matched with a BOUNDARY after it, never as a bare substring: on POSIX
-# `target/fastcache-cc` is a prefix of `target/fastcache-cc-tests`.
+# `target/pace-cc` is a prefix of `target/pace-cc-tests`.
 #
 # Usage: cmake -DBUILD_DIR=<dir> -DCONFIG=<config> -DANCHOR=<target> -DVARIABLE=<name>
 #          -P check-error-popups.cmake
@@ -197,7 +197,7 @@ foreach(row IN LISTS rows)
                   "executable it walks: a target defined after that call, or outside the roots it "
                   "walks, is missed. Move the target or the call so the walk reaches it; only if "
                   "it must never be suppressed, state why with "
-                  "set_target_properties(${name} PROPERTIES FASTCACHED_ERROR_POPUPS \"<reason>\").")
+                  "set_target_properties(${name} PROPERTIES PACE_ERROR_POPUPS \"<reason>\").")
     endif()
 endforeach()
 
@@ -303,7 +303,7 @@ elseif(unsetCount GREATER 0)
     fc_refuse("${unsetCount} of ${testCount} registered test(s) do not set ${VARIABLE}, so a product binary "
               "any of them spawns still opens an assert dialog. cmake/ErrorPopups.cmake sets it on every "
               "add_test by a deferred walk, and a catch_discover_tests call must name "
-              "ENVIRONMENT_MODIFICATION \"\${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}\" itself. The first of them:${unset}")
+              "ENVIRONMENT_MODIFICATION \"\${PACE_ERROR_DIALOG_ENVIRONMENT}\" itself. The first of them:${unset}")
 endif()
 message("error-popups: ${testCount} registered test(s) read, ${unsetCount} without ${VARIABLE}")
 

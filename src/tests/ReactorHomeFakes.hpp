@@ -5,12 +5,12 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/ReactorHome.hpp>
+#include <apps/pace-node/ReactorHome.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/TestLoop.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file ReactorHomeFakes.hpp
@@ -47,4 +47,4 @@ class UnturnedLoopHome final: public Node::IReactorHome
     std::vector<std::shared_ptr<void>> _retired; ///< Declared after `_loop`: freed while it still exists.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

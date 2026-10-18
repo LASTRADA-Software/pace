@@ -21,51 +21,51 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-node-working-directory-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-node-working-directory.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-node-working-directory.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}/node-working-directory-selftest")
+set(root "${PACE_SCRATCH_DIR}/node-working-directory-selftest")
 file(REMOVE_RECURSE "${root}")
 
 set(failures "")
 set(caseCount 0)
 
-# The three units the check's table names, in their good form. A case then
+# The four units the check's tables name, in their good form. A case then
 # overwrites exactly one of them, so every failure is attributable to the thing
 # the case changed rather than to the tree being incomplete.
 set(GoodWorker
 "[Service]
 Type=simple
-ExecStart=/usr/bin/fastcache-compile-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-node
-CacheDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
 ")
 set(GoodNodeDefaults
-"inline constexpr std::string_view NodeStateDirectoryName = \"fastcache-node\";
+"inline constexpr std::string_view NodeStateDirectoryName = \"pace-node\";
 ")
 set(GoodDaemon
 "[Service]
 Type=simple
-ExecStart=/usr/bin/fastcached
-StateDirectory=fastcached
+ExecStart=/usr/bin/pace-kv
+StateDirectory=pace-kv
 ")
 # The reference configuration and a page, each citing the directory the good worker unit
 # creates -- the reference in prose ending a sentence, the page as a flag -- so a case can
@@ -73,11 +73,11 @@ StateDirectory=fastcached
 set(GoodReference
 "# back the local cache tier with disk at this path.
 #
-# Under the packaged Linux service, cache_dir: /var/cache/fastcache-node. The unit creates it.
+# Under the packaged Linux service, cache_dir: /var/cache/pace-node. The unit creates it.
 #cache_dir:
 ")
 set(GoodPage
-"| `--cache-dir=/var/cache/fastcache-node` | Both halves. |
+"| `--cache-dir=/var/cache/pace-node` | Both halves. |
 ")
 
 # Build a good tree, then replace one file's text.
@@ -86,19 +86,20 @@ set(GoodPage
 # @param file The file to overwrite, relative to the tree root, or "" for none.
 # @param body The replacement text.
 # @param outVar Set to the tree root.
-function(fastcached_make_tree name file body outVar)
+function(pace_make_tree name file body outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/packaging/linux")
     file(MAKE_DIRECTORY "${tree}/packaging/config")
     file(MAKE_DIRECTORY "${tree}/docs/tools")
-    file(MAKE_DIRECTORY "${tree}/src/apps/fastcache-compile-node")
-    file(WRITE "${tree}/packaging/linux/fastcache-compile-node.service" "${GoodWorker}")
-    file(WRITE "${tree}/packaging/linux/fastcached.service" "${GoodDaemon}")
-    file(WRITE "${tree}/packaging/linux/fastcached-user.service" "${GoodDaemon}")
-    file(WRITE "${tree}/packaging/config/fastcache-compile-node.yaml" "${GoodReference}")
-    file(WRITE "${tree}/docs/tools/fastcache-compile-node.md" "${GoodPage}")
-    file(WRITE "${tree}/src/apps/fastcache-compile-node/NodeDefaults.hpp" "${GoodNodeDefaults}")
+    file(MAKE_DIRECTORY "${tree}/src/apps/pace-node")
+    file(WRITE "${tree}/packaging/linux/pace-node.service" "${GoodWorker}")
+    file(WRITE "${tree}/packaging/linux/pace-kv.service" "${GoodDaemon}")
+    file(WRITE "${tree}/packaging/linux/pace-kv-user.service" "${GoodDaemon}")
+    file(WRITE "${tree}/packaging/linux/pace-node-user.service" "${GoodWorker}")
+    file(WRITE "${tree}/packaging/config/pace-node.yaml" "${GoodReference}")
+    file(WRITE "${tree}/docs/tools/pace-node.md" "${GoodPage}")
+    file(WRITE "${tree}/src/apps/pace-node/NodeDefaults.hpp" "${GoodNodeDefaults}")
     if(NOT file STREQUAL "")
         file(WRITE "${tree}/${file}" "${body}")
     endif()
@@ -108,9 +109,9 @@ endfunction()
 # @param tree The tree to run the check against.
 # @param outObjected Set to TRUE when the check reported a violation.
 # @param outOutput Set to the check's combined stdout and stderr.
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE ignored)
     set(combined "${captured}${capturedErrors}")
     # `CMake Error|CMake Warning`, never `CMake Error` alone: a sub-run that merely WARNS
@@ -135,9 +136,9 @@ endfunction()
 # @param expected REFUSE or PASS.
 # @param mustSay A substring the refusal must contain, or "".
 # @param because What this case is claiming, printed when it does not hold.
-function(fastcached_file_case name file body expected mustSay because)
-    fastcached_make_tree("${name}" "${file}" "${body}" tree)
-    fastcached_run_check("${tree}" objected output)
+function(pace_file_case name file body expected mustSay because)
+    pace_make_tree("${name}" "${file}" "${body}" tree)
+    pace_run_check("${tree}" objected output)
     math(EXPR next "${caseCount} + 1")
     set(caseCount "${next}" PARENT_SCOPE)
     if(expected STREQUAL "REFUSE")
@@ -171,34 +172,34 @@ endfunction()
 # @param expected REFUSE or PASS.
 # @param mustSay A substring the refusal must contain, or "".
 # @param because What this case is claiming, printed when it does not hold.
-function(fastcached_case name unit body expected mustSay because)
+function(pace_case name unit body expected mustSay because)
     set(file "")
     if(NOT unit STREQUAL "")
         set(file "packaging/linux/${unit}")
     endif()
-    fastcached_file_case("${name}" "${file}" "${body}" "${expected}" "${mustSay}" "${because}")
+    pace_file_case("${name}" "${file}" "${body}" "${expected}" "${mustSay}" "${because}")
     set(caseCount "${caseCount}" PARENT_SCOPE)
     set(failures "${failures}" PARENT_SCOPE)
 endfunction()
 
 # --- the shape that must PASS, or every refusal below means nothing ----------
-fastcached_case("clean" "" "" "PASS" ""
+pace_case("clean" "" "" "PASS" ""
     "the worker names a WorkingDirectory it creates through RuntimeDirectory, which is exactly what #674 asks for")
 
 # --- #674 itself -------------------------------------------------------------
-fastcached_case("missing" "fastcache-compile-node.service"
+pace_case("missing" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
 " "REFUSE" "names no WorkingDirectory"
     "a worker unit with no WorkingDirectory= starts in / -- this IS #674, and a check that misses it has no reason to exist")
 
-fastcached_case("root" "fastcache-compile-node.service"
+pace_case("root" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
 WorkingDirectory=/
 " "REFUSE" "the defect spelled out"
     "/ is the value the defect produces, and writing it explicitly must not be a way to satisfy the check")
@@ -207,93 +208,93 @@ WorkingDirectory=/
 # A comment is not a directive. The fix for #674 puts a long paragraph directly
 # above the directive, so a pattern matching anywhere on the line would report the
 # defective file as fixed the moment somebody documented it (#723).
-fastcached_case("comment-only" "fastcache-compile-node.service"
+pace_case("comment-only" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-# WorkingDirectory=/run/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+# WorkingDirectory=/run/pace-node
 " "REFUSE" "names no WorkingDirectory"
     "a commented-out directive configures nothing, and a check that counted it would pass the very file that caused #674")
 
 # systemd overrides rather than accumulates, and an empty assignment resets to the
 # default. A reader that answers 'is one present' passes this.
-fastcached_case("reset" "fastcache-compile-node.service"
+pace_case("reset" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
 WorkingDirectory=
 " "REFUSE" "RESETS"
     "a later empty assignment undoes the earlier one and puts the service back in /")
 
 # The mirror of the case above, and the one that stops 'take the last' being read
 # as 'take any': an override that FIXES an earlier bad value must pass.
-fastcached_case("last-wins" "fastcache-compile-node.service"
+pace_case("last-wins" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-StateDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+StateDirectory=pace-node
 WorkingDirectory=/
-WorkingDirectory=/run/fastcache-node
+WorkingDirectory=/run/pace-node
 " "PASS" ""
     "the last assignment is the one in force, so an earlier / is overridden and harmless")
 
 # --- values that look like a fix and are not ---------------------------------
-fastcached_case("dash-prefix" "fastcache-compile-node.service"
+pace_case("dash-prefix" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=-/run/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=-/run/pace-node
 " "REFUSE" "starts the service anyway"
     "the '-' prefix means start even if the chdir fails, and where it fails the service starts in / with a directive present to hide it")
 
-fastcached_case("home" "fastcache-compile-node.service"
+pace_case("home" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
 WorkingDirectory=~
 " "REFUSE" "not an absolute path"
     "~ is the service account's home, which this project's sysusers gives as / -- the bug by another spelling")
 
-fastcached_case("unresolved-specifier" "fastcache-compile-node.service"
+pace_case("unresolved-specifier" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=%h/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=%h/pace-node
 " "REFUSE" "cannot resolve"
     "a specifier this check does not resolve is a value it cannot judge, and %h is the account home again")
 
-fastcached_case("resolvable-specifier" "fastcache-compile-node.service"
+pace_case("resolvable-specifier" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-StateDirectory=fastcache-node
-WorkingDirectory=%t/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+StateDirectory=pace-node
+WorkingDirectory=%t/pace-node
 " "PASS" ""
-    "%t is the runtime root for a system unit, so %t/fastcache-node is the RuntimeDirectory above and must be accepted rather than refused as unresolvable")
+    "%t is the runtime root for a system unit, so %t/pace-node is the RuntimeDirectory above and must be accepted rather than refused as unresolvable")
 
 # --- a directory nothing creates ---------------------------------------------
-fastcached_case("uncreated" "fastcache-compile-node.service"
+pace_case("uncreated" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-WorkingDirectory=/opt/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+WorkingDirectory=/opt/pace-node
 " "REFUSE" "does not create"
     "under ProtectSystem=strict a directory the unit does not declare is read-only or absent, and a service whose chdir fails does not start at all -- a worse outcome than the one being fixed")
 
-fastcached_case("state-directory" "fastcache-compile-node.service"
+pace_case("state-directory" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-StateDirectory=fastcache-node
-WorkingDirectory=/var/lib/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+StateDirectory=pace-node
+WorkingDirectory=/var/lib/pace-node
 " "PASS" ""
     "StateDirectory= creates a directory just as RuntimeDirectory= does, so a unit using it is not a violation")
 
@@ -301,156 +302,156 @@ WorkingDirectory=/var/lib/fastcache-node
 # The exemption, and the reason the middle column of the table exists. Without
 # this case a check that demanded a directive everywhere would pass every case
 # above.
-fastcached_case("daemon-needs-none" "fastcached.service"
+pace_case("daemon-needs-none" "pace-kv.service"
 "[Service]
-ExecStart=/usr/bin/fastcached
+ExecStart=/usr/bin/pace-kv
 " "PASS" ""
     "the cache daemon executes nothing, so no prefix-map rule is ever derived from its directory and it is exempt by table")
 
 # And the half of the rule that is NOT about compilers: a broken directive breaks
 # the service whatever the program does.
-fastcached_case("daemon-uncreated" "fastcached.service"
+pace_case("daemon-uncreated" "pace-kv.service"
 "[Service]
-ExecStart=/usr/bin/fastcached
+ExecStart=/usr/bin/pace-kv
 WorkingDirectory=/opt/nowhere
 " "REFUSE" "does not create"
     "a WorkingDirectory nothing creates stops the service starting regardless of whether it spawns a compiler, so the exemption is from NEEDING one, not from being checked")
 
 # --- the failure mode a consistency check must not have ----------------------
-fastcached_case("state-directory-missing" "fastcache-compile-node.service"
+pace_case("state-directory-missing" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
 " "REFUSE" "declares no StateDirectory="
     "a worker unit that hands over no state directory leaves the unprivileged service keeping the machine's identity in its account's home")
 
-fastcached_case("state-directory-other-name" "fastcache-compile-node.service"
+pace_case("state-directory-other-name" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-worker
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-worker
 " "REFUSE" "the node declines it"
     "systemd hands over a directory the node does not take, since it takes only one named NodeStateDirectoryName")
 
-fastcached_case("state-directory-reset" "fastcache-compile-node.service"
+pace_case("state-directory-reset" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
 StateDirectory=
 " "REFUSE" "in force"
     "a later empty assignment resets the list, so nothing is handed over")
 
-fastcached_case("state-directory-list" "fastcache-compile-node.service"
+pace_case("state-directory-list" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-CacheDirectory=fastcache-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-cache fastcache-node
+ExecStart=/usr/bin/pace-node
+CacheDirectory=pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-cache pace-node
 " "PASS" ""
     "one assignment may name several directories, and the node's is among them")
 
 # --- the directory a node's disk tier lives in -------------------------------
 # The shipped defect: a unit with no CacheDirectory= while the docs cite
-# /var/cache/fastcache-node, so the one path an operator is told to write is read-only
+# /var/cache/pace-node, so the one path an operator is told to write is read-only
 # to the service.
-fastcached_case("cache-directory-missing" "fastcache-compile-node.service"
+pace_case("cache-directory-missing" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
 " "REFUSE" "declares no CacheDirectory="
     "without CacheDirectory= nothing persistent is writable under ProtectSystem=strict but the state directory, which the node refuses as a cache_dir")
 
-fastcached_case("cache-directory-comment-only" "fastcache-compile-node.service"
+pace_case("cache-directory-comment-only" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-node
-# CacheDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+# CacheDirectory=pace-node
 " "REFUSE" "declares no CacheDirectory="
     "a commented-out directive creates nothing, and the line that fixes this sits under a paragraph explaining it")
 
-fastcached_case("cache-directory-reset" "fastcache-compile-node.service"
+pace_case("cache-directory-reset" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-node
-CacheDirectory=fastcache-node
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
 CacheDirectory=
 " "REFUSE" "RESETS"
     "a later empty assignment resets the list, so nothing is created")
 
-fastcached_case("cache-directory-list" "fastcache-compile-node.service"
+pace_case("cache-directory-list" "pace-node.service"
 "[Service]
-ExecStart=/usr/bin/fastcache-compile-node
-RuntimeDirectory=fastcache-node
-WorkingDirectory=/run/fastcache-node
-StateDirectory=fastcache-node
-CacheDirectory=fastcache-other fastcache-node
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-other pace-node
 " "PASS" ""
     "one assignment may name several directories, and the cited one is among them")
 
 # The workaround the defect invited, and what it cost: a cache_dir inside the state
 # directory, which the node refuses to start beside.
-fastcached_file_case("cited-state-directory" "docs/tools/fastcache-compile-node.md"
-"Under the service, `cache_dir: /var/lib/fastcache-node/cache` keeps objects.
-" "REFUSE" "cites cache_dir /var/lib/fastcache-node/cache"
+pace_file_case("cited-state-directory" "docs/tools/pace-node.md"
+"Under the service, `cache_dir: /var/lib/pace-node/cache` keeps objects.
+" "REFUSE" "cites cache_dir /var/lib/pace-node/cache"
     "a cache_dir inside the state directory is writable and stops the node starting, so a page citing one must be refused")
 
-fastcached_file_case("cited-other-name" "docs/tools/fastcache-compile-node.md"
-"| `--cache-dir=/var/cache/fastcache-worker` | Both halves. |
-" "REFUSE" "cites cache_dir /var/cache/fastcache-worker"
+pace_file_case("cited-other-name" "docs/tools/pace-node.md"
+"| `--cache-dir=/var/cache/pace-worker` | Both halves. |
+" "REFUSE" "cites cache_dir /var/cache/pace-worker"
     "a /var/cache directory the unit does not declare is read-only to it, whatever its name says")
 
-fastcached_file_case("cited-space-spelling" "docs/tools/fastcache-compile-node.md"
-"    fastcache-compile-node --migrate-cache --cache-dir /var/lib/elsewhere
+pace_file_case("cited-space-spelling" "docs/tools/pace-node.md"
+"    pace-node --migrate-cache --cache-dir /var/lib/elsewhere
 " "REFUSE" "cites cache_dir /var/lib/elsewhere"
     "`--cache-dir <path>` is a citation as much as `--cache-dir=<path>`, and the docs spell both")
 
-fastcached_file_case("cited-below" "docs/tools/fastcache-compile-node.md"
-"    fastcache-compile-node --cache-dir /var/cache/fastcache-node/objects
+pace_file_case("cited-below" "docs/tools/pace-node.md"
+"    pace-node --cache-dir /var/cache/pace-node/objects
 " "PASS" ""
     "a path inside the directory the unit creates is just as writable as the directory itself")
 
-fastcached_file_case("cited-not-a-citation" "docs/tools/fastcache-compile-node.md"
+pace_file_case("cited-not-a-citation" "docs/tools/pace-node.md"
 "    --cache-dir cannot open /var/lib/elsewhere/objects.cow: refusing to start
 " "PASS" ""
     "a quoted diagnostic NAMES the flag and a path; it tells nobody what to write, and refusing it would make every quoted error a violation")
 
 # The stated blind spot, pinned in its stated direction: only /var/ is judged.
-fastcached_file_case("cited-outside-var" "docs/tools/fastcache-compile-node.md"
-"    fastcache-compile-node --cache-dir=/srv/fastcache
+pace_file_case("cited-outside-var" "docs/tools/pace-node.md"
+"    pace-node --cache-dir=/srv/pace
 " "PASS" ""
     "the check reads only /var/, since the same text is right for a node started by hand -- the blind spot fails OPEN and says so")
 
-fastcached_file_case("reference-cites-nothing" "packaging/config/fastcache-compile-node.yaml"
+pace_file_case("reference-cites-nothing" "packaging/config/pace-node.yaml"
 "# back the local cache tier with disk at this path.
 #cache_dir:
 " "REFUSE" "cites no cache_dir"
     "the reference is where an operator learns the path, and a scan finding nothing there is no verdict")
 
-fastcached_file_case("reference-cites-state-directory" "packaging/config/fastcache-compile-node.yaml"
-"# Under the packaged Linux service, cache_dir: /var/lib/fastcache-node/cache. Do it.
+pace_file_case("reference-cites-state-directory" "packaging/config/pace-node.yaml"
+"# Under the packaged Linux service, cache_dir: /var/lib/pace-node/cache. Do it.
 #cache_dir:
-" "REFUSE" "cites cache_dir /var/lib/fastcache-node/cache, which"
+" "REFUSE" "cites cache_dir /var/lib/pace-node/cache, which"
     "a wrong path in the reference is refused like one in a page, and reported without the full stop that ended its sentence -- the trim the clean tree's reference also needs to pass")
 
 # Which way the citing files were found is part of the verdict: this synthetic tree has no
 # git index of its own, so the walk answered here while git answers in CI, and a pass that
 # does not say which is a pass about an unnamed path.
-fastcached_make_tree("citation-mode-stated" "" "" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("citation-mode-stated" "" "" tree)
+pace_run_check("${tree}" objected output)
 math(EXPR caseCount "${caseCount} + 1")
 if(objected)
     list(APPEND failures "citation-mode-stated: the good tree was refused, so its verdict line was never printed")
@@ -461,9 +462,9 @@ else()
     endif()
 endif()
 
-fastcached_make_tree("state-name-unreadable" "" "" tree)
-file(WRITE "${tree}/src/apps/fastcache-compile-node/NodeDefaults.hpp" "// renamed\n")
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("state-name-unreadable" "" "" tree)
+file(WRITE "${tree}/src/apps/pace-node/NodeDefaults.hpp" "// renamed\n")
+pace_run_check("${tree}" objected output)
 math(EXPR caseCount "${caseCount} + 1")
 if(NOT objected)
     list(APPEND failures "state-name-unreadable: a header spelling no NodeStateDirectoryName was not refused -- the unit would be judged against nothing")
@@ -474,9 +475,9 @@ else()
     endif()
 endif()
 
-fastcached_make_tree("absent" "" "" tree)
-file(REMOVE "${tree}/packaging/linux/fastcache-compile-node.service")
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("absent" "" "" tree)
+file(REMOVE "${tree}/packaging/linux/pace-node.service")
+pace_run_check("${tree}" objected output)
 math(EXPR caseCount "${caseCount} + 1")
 if(NOT objected)
     list(APPEND failures "absent: a unit named by the table and missing from the tree was not refused -- a scan that finds nothing would report every remaining row as agreeing")

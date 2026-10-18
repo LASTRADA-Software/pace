@@ -1,0 +1,808 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/StorageTestUtils.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <format>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <tuple>
+#include <vector>
+
+#include <core/platform/Clock.hpp>
+
+using namespace std::chrono_literals;
+using Pace::Testing::Decode;
+using Pace::Testing::MakeBytes;
+using Pace::Testing::ValueOf;
+
+TEST_CASE("InMemoryLruStorage Get miss returns found=false", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const result = storage.Get("missing", clock.now());
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result->found);
+}
+
+TEST_CASE("InMemoryLruStorage Set + Get round-trips", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+
+    auto const cas = storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(cas.has_value());
+
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "v");
+    REQUIRE(got->entry.cas == *cas);
+}
+
+TEST_CASE("InMemoryLruStorage a held GET value survives a concurrent overwrite (copy-on-write)", "[cache]")
+{
+    // Models the zero-copy GET lifetime invariant: a reader holds the value's
+    // reference-counted handle (as a suspended socket write would) while a
+    // writer overwrites the same key. Because mutation rebinds to a fresh
+    // buffer rather than editing in place, the reader's bytes must stay intact.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+
+    REQUIRE(storage.Set("k", MakeBytes("original"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    auto reader = storage.Get("k", clock.now());
+    REQUIRE(reader.has_value());
+    REQUIRE(reader->found);
+    auto const heldHandle = reader->entry.value; // refcounted handle to the original buffer
+    auto const heldView = reader->entry.ValueBytes();
+    REQUIRE(Decode(heldView) == "original");
+
+    // Writer replaces the value (and a second write to force the old node out
+    // of any internal reuse). The reader's handle keeps the old buffer alive.
+    REQUIRE(storage.Set("k", MakeBytes("rewritten-and-longer"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    REQUIRE(storage.Set("k", MakeBytes("third"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    // The bytes the reader is still "streaming" are unchanged and valid.
+    REQUIRE(Decode(heldView) == "original");
+    REQUIRE(static_cast<bool>(heldHandle));
+    REQUIRE(Decode(heldHandle.Bytes()) == "original");
+
+    // A fresh GET observes the latest value.
+    auto const latest = storage.Get("k", clock.now());
+    REQUIRE(latest.has_value());
+    REQUIRE(Decode(latest->entry.ValueBytes()) == "third");
+}
+
+TEST_CASE("Add fails when the key already exists", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("k", MakeBytes("first"), 0, core::platform::SteadyTimePoint::max());
+    auto const result = storage.Add("k", MakeBytes("second"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code == Pace::StorageErrorCode::KeyExists);
+}
+
+TEST_CASE("Replace fails when the key is absent", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const result = storage.Replace("k", MakeBytes("nope"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code == Pace::StorageErrorCode::KeyNotFound);
+}
+
+TEST_CASE("CompareAndSwap matches the CAS token", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const setCas = storage.Set("k", MakeBytes("one"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+
+    auto const wrongResult =
+        storage.CompareAndSwap("k", 9999, MakeBytes("two"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(wrongResult.has_value());
+    REQUIRE(wrongResult.error().code == Pace::StorageErrorCode::CasMismatch);
+
+    auto const rightResult =
+        storage.CompareAndSwap("k", *setCas, MakeBytes("two"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE(rightResult.has_value());
+
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "two");
+}
+
+TEST_CASE("Increment treats numeric values and saturates", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("counter", MakeBytes("10"), 0, core::platform::SteadyTimePoint::max());
+
+    auto const up = storage.IncrementOrInitialize("counter", 5, /*decrement=*/false, clock.now());
+    REQUIRE(up.has_value());
+    REQUIRE(up->value == 15);
+
+    auto const down = storage.IncrementOrInitialize("counter", 100, /*decrement=*/true, clock.now());
+    REQUIRE(down.has_value());
+    REQUIRE(down->value == 0);
+}
+
+TEST_CASE("TTL expiry hides entries past their deadline", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const expiry = clock.now() + 100ms;
+    std::ignore = storage.Set("k", MakeBytes("v"), 0, expiry);
+
+    auto const before = storage.Get("k", clock.now());
+    REQUIRE(before->found);
+
+    clock.advance(200ms);
+    auto const after = storage.Get("k", clock.now());
+    REQUIRE_FALSE(after->found);
+}
+
+TEST_CASE("LRU eviction kicks in when byte budget exceeded", "[cache]")
+{
+    Pace::InMemoryLruStorage storage { 4 }; // 4 bytes total
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("a", MakeBytes("xx"), 0, core::platform::SteadyTimePoint::max());
+    std::ignore = storage.Set("b", MakeBytes("yy"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(storage.Snapshot().bytesUsed == 4);
+
+    // Inserting one more byte should evict the LRU tail ("a").
+    std::ignore = storage.Set("c", MakeBytes("z"), 0, core::platform::SteadyTimePoint::max());
+    auto const a = storage.Get("a", clock.now());
+    REQUIRE_FALSE(a->found);
+    REQUIRE(storage.Snapshot().evictions == 1);
+}
+
+TEST_CASE("InMemoryLruStorage an overwrite larger than the whole budget evicts itself and still answers", "[cache]")
+{
+    // The rewritten entry is at the FRONT, but the eviction runs until the budget fits, so a value larger than the
+    // whole budget evicts the very node it was written into. Its CAS is the answer to the SET, and reading it from
+    // the node after the eviction read freed memory: an orphaned-iterator abort under MSVC's debug runtime, a
+    // heap-use-after-free under ASan. A fresh key of the same size takes the insert path, which never did.
+    Pace::InMemoryLruStorage storage { 4 }; // 4 bytes total
+    core::platform::ManualClock clock;
+    REQUIRE(storage.Set("k", MakeBytes("xx"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    auto const cas = storage.Set("k", MakeBytes("too large"), 0, core::platform::SteadyTimePoint::max());
+
+    REQUIRE(cas.has_value());
+    CHECK_FALSE(storage.Get("k", clock.now())->found);
+    auto const stats = storage.Snapshot();
+    CHECK(stats.bytesUsed == 0);
+    CHECK(stats.evictions == 1);
+}
+
+TEST_CASE("FlushWithGeneration hides existing entries immediately", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+
+    storage.FlushWithGeneration(clock.now());
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE_FALSE(got->found);
+}
+
+TEST_CASE("Append concatenates and bumps CAS", "[cache]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const setCas = storage.Set("k", MakeBytes("foo"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+
+    auto const bar = MakeBytes("bar");
+    auto const appendCas = storage.Append("k", std::span<std::byte const> { bar.data(), bar.size() }, 0, clock.now());
+    REQUIRE(appendCas.has_value());
+    REQUIRE(*appendCas != *setCas);
+
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(Decode(got->entry.ValueBytes()) == "foobar");
+}
+
+TEST_CASE("Touch on miss returns KeyNotFound and bumps touchMisses", "[cache][touch]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const r = storage.Touch("nope", core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::KeyNotFound);
+    REQUIRE(storage.Snapshot().touchMisses == 1U);
+    REQUIRE(storage.Snapshot().touchHits == 0U);
+    REQUIRE(storage.Snapshot().cmdTouch == 1U);
+}
+
+TEST_CASE("Touch on hit refreshes expiry without rewriting the value, bumps CAS", "[cache][touch]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const startExpiry = clock.now() + 1s;
+    auto const setCas = storage.Set("k", MakeBytes("payload"), 0xCAFE, startExpiry);
+    REQUIRE(setCas.has_value());
+
+    auto const newExpiry = clock.now() + 60s;
+    auto const touchCas = storage.Touch("k", newExpiry, clock.now());
+    REQUIRE(touchCas.has_value());
+    REQUIRE(*touchCas != *setCas);
+
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "payload");
+    REQUIRE(got->entry.flags == 0xCAFE);
+    REQUIRE(got->entry.expiry == newExpiry);
+    REQUIRE(got->entry.cas == *touchCas);
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.touchHits == 1U);
+    REQUIRE(stats.touchMisses == 0U);
+}
+
+TEST_CASE("Touch on expired entry treats it as a miss", "[cache][touch]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const expiry = clock.now() + 1s;
+    std::ignore = storage.Set("k", MakeBytes("v"), 0, expiry);
+
+    clock.advance(2s);
+    auto const r = storage.Touch("k", clock.now() + 60s, clock.now());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::KeyNotFound);
+    REQUIRE(storage.Snapshot().touchMisses == 1U);
+}
+
+TEST_CASE("Get reports the previous lastAccess and advances the stored one", "[cache][last-access]")
+{
+    // The returned entry carries the access *before* this read so the meta
+    // `l` flag reports seconds since the prior access (never a constant 0),
+    // while the stored lastAccess advances for the next reader. This advance-
+    // on-read behaviour is the Strict policy; Approximate defers it.
+    Pace::InMemoryLruStorage storage { 0, 0, Pace::LruMode::Strict };
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+
+    clock.advance(5s);
+    auto const firstReadAt = clock.now();
+    auto const first = storage.Get("k", clock.now());
+    REQUIRE(first.has_value());
+    REQUIRE(first->found);
+    // Never read since insertion -> the sentinel, not `now`.
+    REQUIRE(first->entry.lastAccess == core::platform::SteadyTimePoint::min());
+
+    clock.advance(10s);
+    auto const second = storage.Get("k", clock.now());
+    REQUIRE(second.has_value());
+    // Reports the first read's timestamp (10s ago), not 0.
+    REQUIRE(second->entry.lastAccess == firstReadAt);
+}
+
+TEST_CASE("Delete hits and misses are counted separately", "[cache][stats]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+
+    auto const hit = storage.Delete("k", clock.now());
+    REQUIRE(hit.has_value());
+    auto const miss = storage.Delete("nope", clock.now());
+    REQUIRE_FALSE(miss.has_value());
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.deleteHits == 1U);
+    REQUIRE(stats.deleteMisses == 1U);
+}
+
+TEST_CASE("Incr and decr maintain their own hit/miss counters", "[cache][stats]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("k", MakeBytes("10"), 0, core::platform::SteadyTimePoint::max());
+
+    std::ignore = storage.IncrementOrInitialize("k", 5, /*decrement=*/false, clock.now());
+    std::ignore = storage.IncrementOrInitialize("nope", 5, /*decrement=*/false, clock.now());
+    std::ignore = storage.IncrementOrInitialize("k", 3, /*decrement=*/true, clock.now());
+    std::ignore = storage.IncrementOrInitialize("nope", 3, /*decrement=*/true, clock.now());
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.incrHits == 1U);
+    REQUIRE(stats.incrMisses == 1U);
+    REQUIRE(stats.decrHits == 1U);
+    REQUIRE(stats.decrMisses == 1U);
+}
+
+TEST_CASE("CAS hits, misses, and badval are counted distinctly", "[cache][stats]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const setCas = storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+
+    auto const badval =
+        storage.CompareAndSwap("k", 9999, MakeBytes("x"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(badval.has_value());
+    auto const hit =
+        storage.CompareAndSwap("k", *setCas, MakeBytes("y"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE(hit.has_value());
+    auto const miss =
+        storage.CompareAndSwap("nope", 1, MakeBytes("z"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(miss.has_value());
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.casHits == 1U);
+    REQUIRE(stats.casMisses == 1U);
+    REQUIRE(stats.casBadval == 1U);
+}
+
+TEST_CASE("InMemoryLruStorage counts evicted_unfetched only for never-read victims", "[cache][stats][unfetched]")
+{
+    // Budget fits exactly one 100-byte value, so each insert evicts the
+    // prior one. Strict mode so a read marks the entry fetched (Approximate
+    // defers that, which would change the unfetched accounting under test).
+    Pace::InMemoryLruStorage storage { 150, 0, Pace::LruMode::Strict };
+    core::platform::ManualClock clock;
+    auto const big = MakeBytes(std::string(100, 'x'));
+
+    REQUIRE(storage.Set("k1", big, 0, core::platform::SteadyTimePoint::max()).has_value());
+    REQUIRE(storage.Set("k2", big, 0, core::platform::SteadyTimePoint::max()).has_value()); // evicts unread k1
+    REQUIRE(storage.Get("k2", clock.now())->found);                                         // k2 is now fetched
+    REQUIRE(storage.Set("k3", big, 0, core::platform::SteadyTimePoint::max()).has_value()); // evicts fetched k2
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.evictions == 2U);
+    REQUIRE(stats.evictedUnfetched == 1U); // only k1 was discarded before any read
+}
+
+TEST_CASE("InMemoryLruStorage counts expired_unfetched only for never-read victims", "[cache][stats][unfetched]")
+{
+    // Strict mode: a read marks the entry fetched and lazy read-time expiry is
+    // accounted on Get. Approximate defers both to PurgeExpired / promotion.
+    Pace::InMemoryLruStorage storage { 0, 0, Pace::LruMode::Strict };
+    core::platform::ManualClock clock;
+    auto const expiry = clock.now() + 1s;
+    REQUIRE(storage.Set("k1", MakeBytes("a"), 0, expiry).has_value());
+    REQUIRE(storage.Set("k2", MakeBytes("b"), 0, expiry).has_value());
+    REQUIRE(storage.Get("k1", clock.now())->found); // k1 fetched before it expires
+
+    clock.advance(2s);
+    auto const purged = storage.PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged;
+    REQUIRE(purged == 2U);
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.expiredUnfetched == 1U); // only the unread k2
+}
+
+TEST_CASE("InMemoryLruStorage counts every expiry, whichever path removed it, and no flush", "[cache][stats][expiry]")
+{
+    // WHAT DISTINGUISHES: one expiry per path -- a lookup meeting a lapsed entry, and the sweep -- each counted
+    // once whether or not it was read, while `expiredUnfetched` counts only the unread one; and a generation
+    // flush, which also makes entries unreachable, counts nothing.
+    Pace::InMemoryLruStorage storage { 0, 0, Pace::LruMode::Strict };
+    core::platform::ManualClock clock;
+    auto const expiry = clock.now() + 1s;
+    REQUIRE(storage.Set("read", MakeBytes("a"), 0, expiry).has_value());
+    REQUIRE(storage.Set("unread", MakeBytes("b"), 0, expiry).has_value());
+    REQUIRE(storage.Get("read", clock.now())->found);
+
+    clock.advance(2s);
+    REQUIRE_FALSE(storage.Get("read", clock.now())->found); // the lookup removes it
+    REQUIRE(storage.Snapshot().expirations == 1U);
+    REQUIRE(storage.PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 1U);
+
+    auto const stats = storage.Snapshot();
+    CHECK(stats.expirations == 2U);
+    CHECK(stats.expiredUnfetched == 1U);
+
+    REQUIRE(storage.Set("flushed", MakeBytes("c"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    storage.FlushWithGeneration(clock.now());
+    REQUIRE(storage.PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 1U);
+    CHECK(storage.Snapshot().expirations == 2U);
+}
+
+TEST_CASE("InMemoryLruStorage: a bounded sweep resumes instead of restarting", "[cache][purge]")
+{
+    // Live entries at the FRONT of the LRU (written last), lapsed ones behind
+    // them. A sweep that restarted at the front every cycle would spend its
+    // whole budget on the live entries and never reach the lapsed ones -- which
+    // on any cache bigger than one budget means the far end never expires at
+    // all. That is the bug the cursor exists to prevent, so the fixture is
+    // built to fail without it rather than merely to pass with it.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+
+    constexpr std::size_t Lapsed = 3;
+    constexpr std::size_t Live = 4;
+    for (auto const i: std::views::iota(std::size_t { 0 }, Lapsed))
+        REQUIRE(storage.Set(std::format("lapsed-{}", i), MakeBytes("v"), 0, clock.now() + 1s).has_value());
+    for (auto const i: std::views::iota(std::size_t { 0 }, Live))
+        REQUIRE(
+            storage.Set(std::format("live-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    clock.advance(2s);
+
+    auto const first = storage.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = Live });
+    CHECK(first.scanned == Live);
+    CHECK(first.purged == 0U); // Every entry in reach is still alive.
+    CHECK_FALSE(first.completedPass);
+
+    auto const second = storage.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = Lapsed });
+    CHECK(second.purged == Lapsed); // Reached only because the cursor persisted.
+    CHECK(storage.Snapshot().itemCount == Live);
+}
+
+TEST_CASE("InMemoryLruStorage: completing a pass is reported apart from the counts", "[cache][purge]")
+{
+    // "Nothing left to expire" and "I ran out of budget" both purge zero, and a
+    // caller that pauses on the first must not pause on the second.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, 4))
+        REQUIRE(storage.Set(std::format("k-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    CHECK(storage.PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).completedPass);
+    CHECK_FALSE(storage.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 2 }).completedPass);
+
+    // An empty tier completes trivially rather than reporting itself unfinished.
+    Pace::InMemoryLruStorage const empty;
+    CHECK(Pace::InMemoryLruStorage {}.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 8 }).completedPass);
+}
+
+TEST_CASE("InMemoryLruStorage: the reclaim ceiling leaves the victim for the next sweep", "[cache][purge]")
+{
+    // The reclaim ceiling is what keeps a sweep from reclaiming more keys than
+    // the notification buffer can hold. Stopping has to LEAVE the entry it
+    // stopped on: counting it as scanned would let a later pass report itself
+    // complete having walked past a key it never dealt with.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, 3))
+        REQUIRE(storage.Set(std::format("k-{}", i), MakeBytes("v"), 0, clock.now() + 1s).has_value());
+    clock.advance(2s);
+
+    auto const first = storage.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxPurged = 1 });
+    CHECK(first.purged == 1U);
+    CHECK(first.scanned == 1U);
+    CHECK_FALSE(first.completedPass);
+    CHECK(storage.Snapshot().itemCount == 2U);
+
+    CHECK(storage.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxPurged = 1 }).purged == 1U);
+    CHECK(storage.PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 1U);
+    CHECK(storage.Snapshot().itemCount == 0U);
+}
+
+TEST_CASE("InMemoryLruStorage: erasing the entry the sweep is parked on does not dangle it", "[cache][purge]")
+{
+    // The cursor outlives the call that produced it, so an erase arriving from
+    // anywhere else -- a client DELETE, an eviction, a lazy read-time purge --
+    // can be an erase of the exact node it holds. `EraseAt` is the one place
+    // that can happen and the one place that fixes it up; this is the case that
+    // is a use-after-free without it, which a sanitizer build reports directly
+    // and this assertion catches either way.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, 6))
+        REQUIRE(storage.Set(std::format("k-{}", i), MakeBytes("v"), 0, clock.now() + 1s).has_value());
+
+    // Park the cursor: one scanned entry, nothing purged (all still alive). The
+    // LRU is newest-first, so the cursor now sits on `k-4`.
+    CHECK(storage.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 1 }).purged == 0U);
+    REQUIRE(storage.Delete("k-4", clock.now()).has_value());
+
+    clock.advance(2s);
+    CHECK(storage.PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 5U);
+    CHECK(storage.Snapshot().itemCount == 0U);
+}
+
+TEST_CASE("InMemoryLruStorage Peek is non-mutating", "[cache][peek]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    REQUIRE(storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    auto const peeked = storage.Peek("k", clock.now());
+    REQUIRE(peeked.has_value());
+    REQUIRE(peeked->found);
+    REQUIRE(Decode(peeked->entry.ValueBytes()) == "v");
+
+    // Peek must not register a get hit, and must not mark the entry fetched
+    // (so a later eviction still counts it unfetched).
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.cmdGet == 0U);
+    REQUIRE(stats.getHits == 0U);
+
+    // A miss / expired key reads as not-found without erasing.
+    REQUIRE_FALSE(storage.Peek("absent", clock.now())->found);
+}
+
+TEST_CASE("InMemoryLruStorage MarkStale flags the entry and optionally refreshes TTL", "[cache][stale]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const setCas = storage.Set("k", MakeBytes("v"), 0, clock.now() + 5s);
+    REQUIRE(setCas.has_value());
+
+    auto const staled = storage.MarkStale("k", std::nullopt, clock.now());
+    REQUIRE(staled.has_value());
+    REQUIRE(*staled != *setCas); // CAS bumped
+
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(got->found);
+    REQUIRE(got->entry.stale);
+
+    // Missing key is a miss.
+    REQUIRE_FALSE(storage.MarkStale("absent", std::nullopt, clock.now()).has_value());
+
+    // A value-rewriting Set clears the stale flag again.
+    REQUIRE(storage.Set("k", MakeBytes("w"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    REQUIRE_FALSE(storage.Get("k", clock.now())->entry.stale);
+}
+
+TEST_CASE("Increment by a delta >= 2^63 adds rather than aliasing to a decrement", "[cache][incr][overflow]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("c", MakeBytes("0"), 0, core::platform::SteadyTimePoint::max());
+
+    constexpr std::uint64_t Huge = 1ULL << 63; // 9223372036854775808
+    auto const r = storage.IncrementOrInitialize("c", Huge, /*decrement=*/false, clock.now());
+    REQUIRE(r.has_value());
+    REQUIRE(r->value == Huge); // 0 + 2^63, NOT a saturating decrement to 0
+}
+
+TEST_CASE("Decrement by 2^63 saturates to zero without signed-overflow UB", "[cache][decr][overflow]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("c", MakeBytes("5"), 0, core::platform::SteadyTimePoint::max());
+
+    constexpr std::uint64_t Huge = 1ULL << 63;
+    auto const r = storage.IncrementOrInitialize("c", Huge, /*decrement=*/true, clock.now());
+    REQUIRE(r.has_value());
+    REQUIRE(r->value == 0);
+}
+
+TEST_CASE("Set/Add/Replace/CAS at the value cap roundtrip; one byte over returns ValueTooLarge",
+          "[cache][max-value][boundary]")
+{
+    // maxBytes == 0 -> no eviction so the byte budget never masks the
+    // per-value check; maxValueBytes == 16 is the per-value cap.
+    Pace::InMemoryLruStorage storage { 0, 16 };
+    core::platform::ManualClock clock;
+
+    auto const fits = MakeBytes(std::string(16, 'x'));
+    auto const oversized = MakeBytes(std::string(17, 'x'));
+
+    REQUIRE(storage.Set("k", fits, 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    auto const setOver = storage.Set("over", oversized, 0, core::platform::SteadyTimePoint::max());
+    REQUIRE_FALSE(setOver.has_value());
+    REQUIRE(setOver.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    auto const addOver = storage.Add("over", oversized, 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(addOver.has_value());
+    REQUIRE(addOver.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    auto const replaceOver = storage.Replace("k", oversized, 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(replaceOver.has_value());
+    REQUIRE(replaceOver.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    auto const setCas = storage.Set("k", fits, 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+    auto const casOver =
+        storage.CompareAndSwap("k", *setCas, oversized, 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(casOver.has_value());
+    REQUIRE(casOver.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    // The oversized rejections never mutated the stored value.
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(got->found);
+    REQUIRE(ValueOf(got->entry) == fits);
+}
+
+TEST_CASE("Append/Prepend that push the combined value over the cap return ValueTooLarge", "[cache][max-value][boundary]")
+{
+    Pace::InMemoryLruStorage storage { 0, 8 };
+    core::platform::ManualClock clock;
+    REQUIRE(storage.Set("k", MakeBytes("12345"), 0, core::platform::SteadyTimePoint::max()).has_value()); // 5 bytes, fits
+
+    auto const suffix = MakeBytes("six!"); // 5 + 4 = 9 > 8
+    auto const appended = storage.Append("k", std::span<std::byte const> { suffix.data(), suffix.size() }, 0, clock.now());
+    REQUIRE_FALSE(appended.has_value());
+    REQUIRE(appended.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    auto const prefix = MakeBytes("pre!"); // 5 + 4 = 9 > 8
+    auto const prepended = storage.Prepend("k", std::span<std::byte const> { prefix.data(), prefix.size() }, 0, clock.now());
+    REQUIRE_FALSE(prepended.has_value());
+    REQUIRE(prepended.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    // A growth that still fits the cap succeeds (5 + 3 = 8 == cap).
+    auto const fitting = MakeBytes("678");
+    REQUIRE(storage.Append("k", std::span<std::byte const> { fitting.data(), fitting.size() }, 0, clock.now()).has_value());
+    REQUIRE(Decode(storage.Get("k", clock.now())->entry.ValueBytes()) == "12345678");
+}
+
+TEST_CASE("maxValueBytes == 0 disables the per-value cap entirely", "[cache][max-value]")
+{
+    Pace::InMemoryLruStorage storage { 0, 0 };             // no budget cap, no value cap
+    auto const big = MakeBytes(std::string(1 << 20, 'x')); // 1 MiB
+    REQUIRE(storage.Set("k", big, 0, core::platform::SteadyTimePoint::max()).has_value());
+}
+
+TEST_CASE("Decrement by zero is booked under decr stats, not incr", "[cache][decr][stats]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("c", MakeBytes("7"), 0, core::platform::SteadyTimePoint::max());
+
+    auto const r = storage.IncrementOrInitialize("c", 0, /*decrement=*/true, clock.now());
+    REQUIRE(r.has_value());
+    REQUIRE(r->value == 7);
+
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.decrHits == 1U);
+    REQUIRE(stats.incrHits == 0U);
+}
+
+TEST_CASE("Increment on a non-numeric value errors without booking a hit", "[cache][incr][stats]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    std::ignore = storage.Set("k", MakeBytes("abc"), 0, core::platform::SteadyTimePoint::max());
+
+    auto const r = storage.IncrementOrInitialize("k", 1, /*decrement=*/false, clock.now());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::InvalidArgument);
+
+    // The failed incr must not be booked as a hit (it performed no increment) —
+    // matching CowTreeStorage, which only counts the hit after a successful Set.
+    auto const stats = storage.Snapshot();
+    REQUIRE(stats.incrHits == 0U);
+    REQUIRE(stats.incrMisses == 0U);
+}
+
+TEST_CASE("Append honours an optional CAS precondition", "[cache][append][cas]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const setCas = storage.Set("k", MakeBytes("foo"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+
+    auto const bar = MakeBytes("bar");
+    auto const span = std::span<std::byte const> { bar.data(), bar.size() };
+
+    // Wrong CAS -> mismatch, value untouched.
+    auto const wrong = storage.Append("k", span, *setCas + 999, clock.now());
+    REQUIRE_FALSE(wrong.has_value());
+    REQUIRE(wrong.error().code == Pace::StorageErrorCode::CasMismatch);
+    REQUIRE(Decode(storage.Get("k", clock.now())->entry.ValueBytes()) == "foo");
+
+    // Right CAS -> appends.
+    auto const right = storage.Append("k", span, *setCas, clock.now());
+    REQUIRE(right.has_value());
+    REQUIRE(Decode(storage.Get("k", clock.now())->entry.ValueBytes()) == "foobar");
+
+    // expected == 0 means unconditional.
+    auto const baz = MakeBytes("baz");
+    REQUIRE(storage.Append("k", std::span<std::byte const> { baz.data(), baz.size() }, 0, clock.now()).has_value());
+    REQUIRE(Decode(storage.Get("k", clock.now())->entry.ValueBytes()) == "foobarbaz");
+}
+
+TEST_CASE("Prepend honours an optional CAS precondition", "[cache][prepend][cas]")
+{
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const setCas = storage.Set("k", MakeBytes("bar"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+
+    auto const foo = MakeBytes("foo");
+    auto const span = std::span<std::byte const> { foo.data(), foo.size() };
+
+    // Wrong CAS -> mismatch, value untouched.
+    auto const wrong = storage.Prepend("k", span, *setCas + 7, clock.now());
+    REQUIRE_FALSE(wrong.has_value());
+    REQUIRE(wrong.error().code == Pace::StorageErrorCode::CasMismatch);
+    REQUIRE(Decode(storage.Get("k", clock.now())->entry.ValueBytes()) == "bar");
+
+    // Right CAS -> prepends.
+    auto const right = storage.Prepend("k", span, *setCas, clock.now());
+    REQUIRE(right.has_value());
+    REQUIRE(Decode(storage.Get("k", clock.now())->entry.ValueBytes()) == "foobar");
+}
+
+TEST_CASE("IStorage::Update default preserves prior expiry on Store", "[cache][update][ttl]")
+{
+    // Direct-storage test pinning the Phase 1 contract: when an Update
+    // callback returns Store without an explicit newExpiry, the prior
+    // entry's expiry is preserved. The pre-fix default wrote
+    // TimePoint::max(), silently wiping any EXPIRE'd TTL.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const deadline = clock.now() + 60s;
+
+    REQUIRE(storage.Set("k", MakeBytes("0"), 0, deadline).has_value());
+
+    auto const upd = storage.Update(
+        "k",
+        [](Pace::GetResult const& current) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+            REQUIRE(current.found);
+            return Pace::IStorage::UpdateOutcome {
+                .value = MakeBytes("1"),
+                .flags = 0,
+                .action = Pace::IStorage::UpdateAction::Store,
+                // .newExpiry left at default nullopt -> preserve prior expiry
+            };
+        },
+        clock.now());
+    REQUIRE(upd.has_value());
+
+    auto const after = storage.Peek("k", clock.now());
+    REQUIRE(after.has_value());
+    REQUIRE(after->found);
+    REQUIRE(after->entry.expiry == deadline);
+}
+
+TEST_CASE("IStorage::Update honours an explicit newExpiry override", "[cache][update][ttl]")
+{
+    // Callbacks that DO want to change the TTL (a SETEX-like compound op)
+    // set outcome.newExpiry explicitly; the storage applies it verbatim.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+    auto const oldExpiry = clock.now() + 60s;
+    auto const newExpiry = clock.now() + 30s;
+
+    REQUIRE(storage.Set("k", MakeBytes("0"), 0, oldExpiry).has_value());
+
+    auto const upd = storage.Update(
+        "k",
+        [newExpiry](Pace::GetResult const&) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+            return Pace::IStorage::UpdateOutcome {
+                .value = MakeBytes("1"),
+                .flags = 0,
+                .action = Pace::IStorage::UpdateAction::Store,
+                .newExpiry = newExpiry,
+            };
+        },
+        clock.now());
+    REQUIRE(upd.has_value());
+
+    auto const after = storage.Peek("k", clock.now());
+    REQUIRE(after.has_value());
+    REQUIRE(after->found);
+    REQUIRE(after->entry.expiry == newExpiry);
+}
+
+TEST_CASE("IStorage::Update on absent key without override uses TimePoint::max()", "[cache][update][ttl]")
+{
+    // A fresh insert (key absent) with no explicit newExpiry produces
+    // a key with no TTL — the same as Set without an expiry word.
+    Pace::InMemoryLruStorage storage;
+    core::platform::ManualClock clock;
+
+    auto const upd = storage.Update(
+        "fresh",
+        [](Pace::GetResult const& current) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+            REQUIRE_FALSE(current.found);
+            return Pace::IStorage::UpdateOutcome {
+                .value = MakeBytes("new"),
+                .flags = 0,
+                .action = Pace::IStorage::UpdateAction::Store,
+            };
+        },
+        clock.now());
+    REQUIRE(upd.has_value());
+
+    auto const after = storage.Peek("fresh", clock.now());
+    REQUIRE(after.has_value());
+    REQUIRE(after->found);
+    REQUIRE(after->entry.expiry == core::platform::SteadyTimePoint::max());
+}

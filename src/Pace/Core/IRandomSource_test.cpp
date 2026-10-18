@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Core/IRandomSource.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <ranges>
+#include <set>
+#include <vector>
+
+using namespace Pace;
+
+TEST_CASE("A scripted source serves its draws in order and then cycles", "[core][random]")
+{
+    ScriptedRandomSource source { { 10, 20, 30 } };
+
+    CHECK(source.UniformInRange(0, 100) == 10);
+    CHECK(source.UniformInRange(0, 100) == 20);
+    CHECK(source.UniformInRange(0, 100) == 30);
+    CHECK(source.UniformInRange(0, 100) == 10);
+    CHECK(source.DrawCount() == 4);
+}
+
+TEST_CASE("A scripted draw is clamped into the requested range", "[core][random]")
+{
+    // Clamping is what makes the two cases a test actually wants expressible
+    // without knowing the range where the script is written.
+    ScriptedRandomSource source { { 0, ScriptedRandomSource::Highest(), 55 } };
+
+    CHECK(source.UniformInRange(10, 90) == 10); // 0 clamps to the low bound
+    CHECK(source.UniformInRange(10, 90) == 90); // Highest() clamps to the high bound
+    CHECK(source.UniformInRange(10, 90) == 55); // in range, passed through
+}
+
+TEST_CASE("An empty script always draws the low bound", "[core][random]")
+{
+    ScriptedRandomSource source;
+
+    CHECK(source.UniformInRange(7, 9) == 7);
+    CHECK(source.UniformInRange(0, 1000) == 0);
+    CHECK(source.DrawCount() == 2);
+}
+
+TEST_CASE("An inverted range collapses to the low bound rather than misbehaving", "[core][random]")
+{
+    // `assert` is compiled out in every shipped preset, so without this the
+    // inverted range would reach std::uniform_int_distribution and std::clamp,
+    // both of which are undefined when the bounds cross -- libstdc++ underflows
+    // `high - low` to nearly 2^64 and returns a value outside the requested range.
+    // Reached from configuration (a Raft election-timeout minimum above its
+    // maximum), so it is a caller bug that arrives from a file.
+    ScriptedRandomSource scripted { { 500 } };
+    SystemRandomSource system { 4242 };
+
+    CHECK(scripted.UniformInRange(90, 10) == 90);
+
+    for ([[maybe_unused]] auto const i: std::views::iota(0, 100))
+        CHECK(system.UniformInRange(90, 10) == 90);
+}
+
+TEST_CASE("Equal bounds yield that one value", "[core][random]")
+{
+    ScriptedRandomSource scripted { { 4 } };
+    SystemRandomSource system { 12345 };
+
+    CHECK(scripted.UniformInRange(42, 42) == 42);
+    CHECK(system.UniformInRange(42, 42) == 42);
+}
+
+TEST_CASE("The system source stays inside the requested range", "[core][random]")
+{
+    SystemRandomSource source { 0xC0FFEE };
+
+    for ([[maybe_unused]] auto const i: std::views::iota(0, 500))
+    {
+        auto const drawn = source.UniformInRange(100, 110);
+        CHECK(drawn >= 100);
+        CHECK(drawn <= 110);
+    }
+}
+
+TEST_CASE("The system source is reproducible from a seed", "[core][random]")
+{
+    // Which is what lets a failure that depended on a particular draw sequence be
+    // replayed outside the scripted double.
+    SystemRandomSource first { 99 };
+    SystemRandomSource second { 99 };
+
+    auto const drawsOf = [](SystemRandomSource& source) {
+        auto values = std::vector<std::uint64_t> {};
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 16))
+            values.push_back(source.UniformInRange(0, 1'000'000));
+        return values;
+    };
+
+    CHECK(drawsOf(first) == drawsOf(second));
+}
+
+TEST_CASE("The system source actually varies across a range", "[core][random]")
+{
+    // A source that always returned the low bound would satisfy every bound check
+    // above while making Raft's randomized election timeouts useless -- split
+    // votes would then repeat indefinitely rather than resolving.
+    SystemRandomSource source { 7 };
+    auto seen = std::set<std::uint64_t> {};
+
+    for ([[maybe_unused]] auto const i: std::views::iota(0, 200))
+        seen.insert(source.UniformInRange(0, 99));
+
+    CHECK(seen.size() > 50);
+}
+
+TEST_CASE("A seeded draw sequence is the same on every platform", "[core][random]")
+{
+    // `std::mt19937_64` is specified bit-for-bit; `std::uniform_int_distribution`
+    // is not, and libstdc++ and libc++ reduce to a range differently. Sourcing the
+    // range reduction from the library therefore made the fixed-seed constructor —
+    // whose entire purpose is replaying a failure — a promise that held only within
+    // one standard library, and `RaftClusterHarness` ran a different adversarial
+    // schedule on macOS than on Linux and Windows because of it.
+    //
+    // A golden vector is the only thing that can hold that property: it fails on
+    // the machine whose answer differs, which is exactly the machine that would
+    // otherwise report someone else's passing branch as a regression.
+    SystemRandomSource source { 12345 };
+
+    auto drawn = std::vector<std::uint64_t> {};
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 8))
+        drawn.push_back(source.UniformInRange(150, 300));
+
+    CHECK(drawn == std::vector<std::uint64_t> { 241, 252, 293, 297, 203, 157, 270, 203 });
+}
+
+TEST_CASE("A draw covers its whole range and never leaves it", "[core][random]")
+{
+    // Rejection sampling has two ways to be wrong that a golden vector cannot see:
+    // a bound that is never returned, and one that is returned when it should not
+    // be. Both are silent — a jitter range short by one at either end still looks
+    // random.
+    SystemRandomSource source { 99 };
+
+    auto low = false;
+    auto high = false;
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 20000))
+    {
+        auto const value = source.UniformInRange(7, 11);
+        REQUIRE(value >= 7);
+        REQUIRE(value <= 11);
+        low = low || value == 7;
+        high = high || value == 11;
+    }
+
+    CHECK(low);
+    CHECK(high);
+}
+
+TEST_CASE("Adjacent seeds do not draw in lockstep", "[core][random]")
+{
+    // `RaftClusterHarness` gives each node `base + index` so every node has its own
+    // stream, and election jitter exists to decorrelate those streams. Mersenne
+    // Twister's *low* bits are correlated across neighbouring seeds, so reducing a
+    // range by masking them made five nodes draw near-identical first timeouts,
+    // campaign together, and split the vote round after round.
+    auto first = std::vector<std::uint64_t> {};
+    for (auto const seed: std::views::iota(std::uint64_t { 3000 }, std::uint64_t { 3005 }))
+    {
+        SystemRandomSource source { seed };
+        first.push_back(source.UniformInRange(150, 300));
+    }
+
+    // Not a statistical claim, just the one that failed: five neighbouring seeds
+    // must not all open with the same value.
+    auto const same = static_cast<std::size_t>(std::ranges::count(first, first.front()));
+    CHECK(same < first.size());
+}

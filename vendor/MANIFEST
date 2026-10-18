@@ -10,11 +10,11 @@
 # VENDOR.md's "Local changes" table, and regenerating never marks a file upstream's, so a
 # regeneration cannot silence an undeclared edit:
 #
-#     cmake -DFASTCACHED_SOURCE_DIR=<root> -DFASTCACHED_VENDOR_WRITE_MANIFEST=ON \
+#     cmake -DPACE_SOURCE_DIR=<root> -DPACE_VENDOR_WRITE_MANIFEST=ON \
 #           -P scripts/check-vendor-verbatim.cmake
 #
 # After a re-sync of ONE root from upstream, and only then, =RESYNC with
-# -DFASTCACHED_VENDOR_RESYNC_ROOT=<root> marks that root's files upstream's.
+# -DPACE_VENDOR_RESYNC_ROOT=<root> marks that root's files upstream's.
 #
 75a4d04559754a1016006f2c0e194cc7b459583cf9b1e2ce4ec10c74cb3de578  vendor/monocypher/AUTHORS.md
 5f8360e4c06ddcc584bdb4b210c6af824c4bb301e6a9a521869b6d90795ca4b3  vendor/monocypher/LICENCE.md

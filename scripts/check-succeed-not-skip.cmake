@@ -5,9 +5,9 @@
 # `SUCCEED("...")` records a passing assertion. Where a case bails out because its
 # environment could not be arranged -- no loopback listener, no IPv6 stack, no symlink
 # privilege, running as root -- that is a green result for a property nothing
-# established ([#685](https://github.com/LASTRADA-Software/fastcached/issues/685)).
+# established ([#685](https://github.com/LASTRADA-Software/pace/issues/685)).
 #
-# It is the converse of [#499](https://github.com/LASTRADA-Software/fastcached/issues/499),
+# It is the converse of [#499](https://github.com/LASTRADA-Software/pace/issues/499),
 # and the insidious direction. A false RED gets investigated; a false GREEN is believed,
 # and it fires exactly where coverage is already thinnest -- a constrained runner, a
 # host without IPv6, a Windows agent without the symlink privilege. Those are the runs
@@ -15,7 +15,7 @@
 #
 # ## Why this is a check and not a comment
 #
-# The idiom spread by IMITATION. `src/apps/fastcache-cc/DirectManifest_test.cpp` carried
+# The idiom spread by IMITATION. `src/apps/pace-cc/DirectManifest_test.cpp` carried
 # it under a comment that explained, correctly, that the rule being demonstrated is
 # unconditional -- and the next test written was copied from it, comment and all. A
 # comment that was already right did not stop the copy, so a comment is not the fix.
@@ -54,7 +54,7 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-succeed-not-skip.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-succeed-not-skip.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -62,8 +62,8 @@
 # version so the whole set of checks moves together.
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # The skip vocabulary, as data. `<regex>|<reading>` -- the regex is matched against the
@@ -119,7 +119,7 @@ set(vocabulary
 # anything, so this is now purely about what the check SEES -- and changing that is a
 # different decision from repairing the reader, taken separately or not at all.
 # Consolidating the copies of this idiom is #495, not this ticket.
-macro(fastcached_take_line contentVar lineVar doneVar)
+macro(pace_take_line contentVar lineVar doneVar)
     string(FIND "${${contentVar}}" "\n" _ftl_newline)
     if(_ftl_newline EQUAL -1)
         set(${lineVar} "${${contentVar}}")
@@ -135,7 +135,7 @@ macro(fastcached_take_line contentVar lineVar doneVar)
 endmacro()
 
 # The file, read once, ready to be walked a line at a time.
-function(fastcached_read_content path outVar)
+function(pace_read_content path outVar)
     file(READ "${path}" content)
     string(REPLACE "[" " " content "${content}")
     string(REPLACE "]" " " content "${content}")
@@ -172,7 +172,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # has THREE values since the consolidation: a walk now says whether there was no index at all
 # or whether the index named no file matching this question.
 
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/*_test.cpp" "src/tests/*.cpp" "src/tests/*.hpp"
     GLOBS "src/*_test.cpp" "src/tests/*.cpp" "src/tests/*.hpp"
     FILES_OUT testFiles
@@ -183,7 +183,7 @@ if(NOT testFiles)
     message("  No test source was found in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "succeed-not-skip: the scan matched no test sources and cannot conclude")
 endif()
 
@@ -195,17 +195,17 @@ foreach(relative IN LISTS testFiles)
     # yet staged is still named here. Reading it emits `CMake Error ... failed to open
     # for reading`, which the registration's FAIL_REGULAR_EXPRESSION scores as THIS check
     # failing -- for a reason with nothing to do with `SUCCEED`.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
 
-    fastcached_read_content("${FASTCACHED_SOURCE_DIR}/${relative}" rest)
+    pace_read_content("${PACE_SOURCE_DIR}/${relative}" rest)
 
     set(lineNumber 0)
     set(inBlockComment FALSE)
     set(atEnd FALSE)
     while(NOT atEnd)
-        fastcached_take_line(rest rawLine atEnd)
+        pace_take_line(rest rawLine atEnd)
         math(EXPR lineNumber "${lineNumber} + 1")
 
         # Prose, not a call. This rule is written out in `.agent/rules/testing.md` and
@@ -296,7 +296,7 @@ foreach(relative IN LISTS testFiles)
             set(ahead "${rest}")
             set(aheadDone FALSE)
             while(NOT aheadDone)
-                fastcached_take_line(ahead following aheadDone)
+                pace_take_line(ahead following aheadDone)
                 string(STRIP "${following}" following)
                 if(following STREQUAL "" OR following MATCHES "^(//|\\*|/\\*)")
                     continue()

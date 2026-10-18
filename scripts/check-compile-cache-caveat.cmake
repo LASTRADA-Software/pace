@@ -16,10 +16,10 @@
 # GCC and Clang are NOT exposed -- their preprocessed output carries the paths, so
 # two checkouts do not share entries at all (measured: 0 hits, 2 misses) -- and
 # the module carries the caveat on exactly that condition. Which half this run
-# asserts therefore comes in as FASTCACHED_MSVC_LIKE, resolved by the caller that
+# asserts therefore comes in as PACE_MSVC_LIKE, resolved by the caller that
 # already knows the compiler rather than re-derived here.
 #
-# The module cannot fix that — it is sccache's replay, and fastcache-cc exists
+# The module cannot fix that — it is sccache's replay, and pace-cc exists
 # because it does not have it — so what it owes a developer is a word about it.
 # This checks that the word is there.
 #
@@ -50,9 +50,9 @@
 # cl.exe that exists and cannot compile.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<scratch>
-#         -DFASTCACHED_CXX_COMPILER=<c++> [-DFASTCACHED_MSVC_LIKE=ON|OFF]
-#         [-DFASTCACHED_MAKE_PROGRAM=<make>] [-DFASTCACHED_GENERATOR=<gen>]
+#   cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<scratch>
+#         -DPACE_CXX_COMPILER=<c++> [-DPACE_MSVC_LIKE=ON|OFF]
+#         [-DPACE_MAKE_PROGRAM=<make>] [-DPACE_GENERATOR=<gen>]
 #         -P scripts/check-compile-cache-caveat.cmake
 #
 # Exit codes: 0 = every row behaved, or skipped. 1 = at least one did not.
@@ -62,23 +62,23 @@ cmake_minimum_required(VERSION 3.28)
 # The fragment every "must warn" row looks for. One place, because it appears in
 # the module and in the rows below, and a caveat reworded in only one of the two
 # is a test that passes while saying nothing.
-set(FastCachedCaveatMarker "sccache replays a cache hit")
+set(PaceCaveatMarker "sccache replays a cache hit")
 
 # ...and what the caveat must still SAY, beyond opening with that fragment.
 #
 #   <element>|<accepted spellings, ' / ' separated>
 #
 # The marker above pins how the warning starts, which is not the same as pinning
-# that it remains useful: the text could lose `fastcache-cc` entirely, or stop
+# that it remains useful: the text could lose `pace-cc` entirely, or stop
 # naming which compilers are exposed, and every assertion here would still pass.
 # The same three elements are required of every prose surface that recommends
-# pointing sccache at fastcached (`ctest -R sccache-backend-caveat`, issue #170),
+# pointing sccache at pace-kv (`ctest -R sccache-backend-caveat`, issue #170),
 # and this is the caveat that reaches a developer at the moment of the mistake
 # rather than hours later, so it is held to them too. Wording is free.
-set(FastCachedCaveatElements
+set(PaceCaveatElements
     "the exposed compilers|MSVC / clang-cl"
     "the mechanism|/showIncludes / /EP"
-    "the remedy|fastcache-cc"
+    "the remedy|pace-cc"
 )
 
 # One row per selection outcome, pipe-delimited:
@@ -105,7 +105,7 @@ set(FastCachedCaveatElements
 # <stand-in launcher> is one of sccache, ccache, sccache-and-ccache or none, and
 # names which of the module's launcher variables are pointed at a real program; the
 # others are forced empty so the outcome does not depend on what the host happens
-# to have installed. fastcache-cc is always forced empty — its own row is
+# to have installed. pace-cc is always forced empty — its own row is
 # conditional on a daemon answering, which is a different property with its own
 # test.
 #
@@ -128,36 +128,36 @@ set(FastCachedCaveatElements
 # the module carries the caveat on exactly that condition. So this asserts
 # whichever half applies to the compiler this build was configured with -- the
 # noise on Windows, the silence elsewhere -- and CI covering both covers both.
-if(FASTCACHED_MSVC_LIKE)
+if(PACE_MSVC_LIKE)
     set(sccacheForbidden "")
     set(sccacheSeverity "warning")
 else()
-    set(sccacheForbidden "${FastCachedCaveatMarker}")
+    set(sccacheForbidden "${PaceCaveatMarker}")
     set(sccacheSeverity "")
 endif()
 
-set(FastCachedCaveatRows
+set(PaceCaveatRows
     "sccache-row|Enabling sccache|${sccacheForbidden}|sccache|${sccacheSeverity}|-DALLOW_SCCACHE_FALLBACK=ON|sccache"
     "sccache-not-auto|Not using sccache|Enabling sccache|sccache|||none"
     "sccache-not-preferred|Enabling ccache|Enabling sccache|sccache-and-ccache|||ccache"
-    "ccache-is-silent|Enabling ccache|${FastCachedCaveatMarker}|ccache|||ccache"
-    "disabled-is-silent|disabled by USE_COMPILER_CACHE=OFF|${FastCachedCaveatMarker}|sccache||-DUSE_COMPILER_CACHE=OFF|none"
-    "nothing-installed|No compiler-cache launcher found|${FastCachedCaveatMarker}|none|||none"
+    "ccache-is-silent|Enabling ccache|${PaceCaveatMarker}|ccache|||ccache"
+    "disabled-is-silent|disabled by USE_COMPILER_CACHE=OFF|${PaceCaveatMarker}|sccache||-DUSE_COMPILER_CACHE=OFF|none"
+    "nothing-installed|No compiler-cache launcher found|${PaceCaveatMarker}|none|||none"
 )
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
 
-set(fixtureDir "${FASTCACHED_SOURCE_DIR}/src/tests/compile-cache-fixture")
-set(moduleDir "${FASTCACHED_SOURCE_DIR}/cmake/portable")
+set(fixtureDir "${PACE_SOURCE_DIR}/src/tests/compile-cache-fixture")
+set(moduleDir "${PACE_SOURCE_DIR}/cmake/portable")
 if(NOT IS_DIRECTORY "${fixtureDir}")
     message(FATAL_ERROR "no fixture project at ${fixtureDir}")
 endif()
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    message("SKIP: no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    message("SKIP: no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     return()
 endif()
 
@@ -202,7 +202,7 @@ endif()
 #
 # @param raw The value as the buildsystem spells it.
 # @param outVar Receives the comparable form.
-function(FastCachedNormalisePath raw outVar)
+function(PaceNormalisePath raw outVar)
     set(value "${raw}")
     string(STRIP "${value}" value)
     # Only a MATCHED pair: stripping an unmatched quote would silently accept a
@@ -231,7 +231,7 @@ endfunction()
 # @param readableVar Receives `yes` when this generator's buildsystem could be
 #        read at all, and `no` when it could not -- which is a THIRD state and is
 #        reported as one, never folded into "no launcher was wired".
-function(FastCachedWiredLaunchers binaryDir launchersVar readableVar)
+function(PaceWiredLaunchers binaryDir launchersVar readableVar)
     set(found "")
     set(readable "no")
 
@@ -240,7 +240,7 @@ function(FastCachedWiredLaunchers binaryDir launchersVar readableVar)
         file(STRINGS "${binaryDir}/build.ninja" launcherLines REGEX "^ *LAUNCHER *= *.+$")
         foreach(line IN LISTS launcherLines)
             string(REGEX REPLACE "^ *LAUNCHER *= *" "" value "${line}")
-            FastCachedNormalisePath("${value}" value)
+            PaceNormalisePath("${value}" value)
             if(NOT value STREQUAL "")
                 list(APPEND found "${value}")
             endif()
@@ -253,7 +253,7 @@ function(FastCachedWiredLaunchers binaryDir launchersVar readableVar)
                 file(STRINGS "${makeFile}" compileLines REGEX "CXX_COMPILER_LAUNCHER|\$\(CXX_DEFINES\)")
                 foreach(line IN LISTS compileLines)
                     if(line MATCHES "^[ 	]*[^ 	]*(cmake|ctest)[^ 	]*[ 	]+[^ 	]*(c\+\+|clang|gcc|cl)")
-                        FastCachedNormalisePath("${CMAKE_MATCH_0}" makeValue)
+                        PaceNormalisePath("${CMAKE_MATCH_0}" makeValue)
                         list(APPEND found "${makeValue}")
                     endif()
                 endforeach()
@@ -267,13 +267,13 @@ function(FastCachedWiredLaunchers binaryDir launchersVar readableVar)
 endfunction()
 
 set(commonArguments
-    "-DFASTCACHED_MODULE_DIR=${moduleDir}"
-    "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}")
-if(FASTCACHED_MAKE_PROGRAM)
-    list(APPEND commonArguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+    "-DPACE_MODULE_DIR=${moduleDir}"
+    "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}")
+if(PACE_MAKE_PROGRAM)
+    list(APPEND commonArguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
 endif()
-if(FASTCACHED_GENERATOR)
-    list(APPEND commonArguments -G "${FASTCACHED_GENERATOR}")
+if(PACE_GENERATOR)
+    list(APPEND commonArguments -G "${PACE_GENERATOR}")
 endif()
 
 # Canary. This is the first of these fixture-configuring checks that runs on
@@ -288,12 +288,12 @@ endif()
 # a toolchain that has since moved would fail the canary rather than the rows, and
 # `SKIP_REGULAR_EXPRESSION` would then retire this check on that build tree
 # permanently and quietly.
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}/canary")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}/canary")
 execute_process(
     COMMAND "${CMAKE_COMMAND}"
-            -S "${fixtureDir}" -B "${FASTCACHED_SCRATCH_DIR}/canary"
+            -S "${fixtureDir}" -B "${PACE_SCRATCH_DIR}/canary"
             ${commonArguments}
-            "-DFASTCACHE_CC=" "-DSCCACHE=" "-DCCACHE="
+            "-DPACE_CC=" "-DSCCACHE=" "-DCCACHE="
     RESULT_VARIABLE canaryResult
     OUTPUT_VARIABLE canaryOutput
     ERROR_VARIABLE canaryError
@@ -313,7 +313,7 @@ set(violations "")
 set(wiringRowsRead 0)
 set(wiringGenerators "")
 
-foreach(row IN LISTS FastCachedCaveatRows)
+foreach(row IN LISTS PaceCaveatRows)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 name)
     list(GET fields 1 expected)
@@ -349,10 +349,10 @@ foreach(row IN LISTS FastCachedCaveatRows)
             message(FATAL_ERROR "row ${name}: unknown stand-in launcher '${standInName}'")
         endif()
     endforeach()
-    set(launcherArguments "-DFASTCACHE_CC=" "-DSCCACHE=${sccachePath}" "-DCCACHE=${ccachePath}")
+    set(launcherArguments "-DPACE_CC=" "-DSCCACHE=${sccachePath}" "-DCCACHE=${ccachePath}")
 
-    set(rowBinaryDir "${FASTCACHED_SCRATCH_DIR}/${name}/build")
-    file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}/${name}")
+    set(rowBinaryDir "${PACE_SCRATCH_DIR}/${name}/build")
+    file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}/${name}")
 
     execute_process(
         COMMAND "${CMAKE_COMMAND}"
@@ -396,7 +396,7 @@ foreach(row IN LISTS FastCachedCaveatRows)
     # property it exists for: the symptom shows up hours later and somewhere else,
     # so the line naming it has to still be findable in the log.
     string(FIND "${output}" "CMake Warning" warnedAt)
-    string(FIND "${output}" "${FastCachedCaveatMarker}" markerAt)
+    string(FIND "${output}" "${PaceCaveatMarker}" markerAt)
     if(severity STREQUAL "warning")
         if(warnedAt EQUAL -1)
             list(APPEND violations "${name}: the caveat must be a CMake Warning, not a status line\n${output}")
@@ -405,7 +405,7 @@ foreach(row IN LISTS FastCachedCaveatRows)
             list(APPEND violations "${name}: expected the caveat itself, not merely some warning\n${output}")
         else()
             # It is the caveat. Is it still a useful one?
-            foreach(elementRow IN LISTS FastCachedCaveatElements)
+            foreach(elementRow IN LISTS PaceCaveatElements)
                 string(FIND "${elementRow}" "|" elementSeparator)
                 string(SUBSTRING "${elementRow}" 0 ${elementSeparator} elementName)
                 math(EXPR elementSpellingStart "${elementSeparator} + 1")
@@ -433,15 +433,15 @@ foreach(row IN LISTS FastCachedCaveatRows)
     # And what it WIRED (#187). Everything above reads the configure output, which
     # is the module's claim about itself; this reads the generated buildsystem,
     # which is the artefact a compile runs through.
-    FastCachedWiredLaunchers("${rowBinaryDir}" rowLaunchers rowReadable)
+    PaceWiredLaunchers("${rowBinaryDir}" rowLaunchers rowReadable)
     if(rowReadable STREQUAL "yes")
         math(EXPR wiringRowsRead "${wiringRowsRead} + 1")
 
         set(wantedLauncher "")
         if(wired STREQUAL "sccache")
-            FastCachedNormalisePath("${sccacheStandIn}" wantedLauncher)
+            PaceNormalisePath("${sccacheStandIn}" wantedLauncher)
         elseif(wired STREQUAL "ccache")
-            FastCachedNormalisePath("${ccacheStandIn}" wantedLauncher)
+            PaceNormalisePath("${ccacheStandIn}" wantedLauncher)
         elseif(NOT wired STREQUAL "none")
             # Refused rather than treated as `none`, which would be a row that
             # configures, asserts and proves nothing -- the same reason the
@@ -485,18 +485,18 @@ endforeach()
 if(NOT wiringGenerators STREQUAL "")
     message("compile-cache caveat: the generated buildsystem could not be read for "
             "${wiringGenerators}, so what those rows WIRED was not asserted "
-            "(generator: ${FASTCACHED_GENERATOR})")
+            "(generator: ${PACE_GENERATOR})")
 endif()
 if(wiringRowsRead EQUAL 0)
-    if(FASTCACHED_GENERATOR MATCHES "Ninja|Makefiles")
+    if(PACE_GENERATOR MATCHES "Ninja|Makefiles")
         # A generator this reader claims to handle, and it read nothing: the reader
         # has stopped matching. A violation rather than a note, because every row's
         # wiring assertion is then vacuous and the check reports clean.
         list(APPEND violations
-             "the wiring reader matched no row on a ${FASTCACHED_GENERATOR} tree, so nothing asserted what any row WIRED; that is the defect this rule exists to remove")
+             "the wiring reader matched no row on a ${PACE_GENERATOR} tree, so nothing asserted what any row WIRED; that is the defect this rule exists to remove")
     else()
         message("compile-cache caveat: no row's wiring was read on this generator "
-                "(${FASTCACHED_GENERATOR}); the output rules above still ran")
+                "(${PACE_GENERATOR}); the output rules above still ran")
     endif()
 else()
     message("compile-cache caveat: read the wired launcher for ${wiringRowsRead} row(s)")
@@ -511,5 +511,5 @@ if(violations)
         "rebuilding on a header change. The module cannot fix that; it has to say it.")
 endif()
 
-list(LENGTH FastCachedCaveatRows rowCount)
+list(LENGTH PaceCaveatRows rowCount)
 message(STATUS "compile-cache caveat reporting is correct (${rowCount} selection outcomes)")

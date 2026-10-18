@@ -21,7 +21,7 @@
 # ## Outcomes
 #
 # A judged edge that breaks the rule is REFUSED, by target. So is every way of not being
-# able to ask: no judged edge at all, and an anchor (`FastCacheTest`) whose edge was not
+# able to ask: no judged edge at all, and an anchor (`PaceTest`) whose edge was not
 # found and passed. A toolchain that is not MSVC-style, a configuration that carries no debug
 # information by default, and a generator that writes no `build.ninja` are each a SKIP naming
 # which -- none of them has an `/INCREMENTAL` to judge.

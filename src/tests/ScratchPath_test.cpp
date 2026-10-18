@@ -27,9 +27,9 @@
     #include <unistd.h>
 #endif
 
-using FastCache::Testing::ClearScratch;
-using FastCache::Testing::ReleaseScratch;
-using FastCache::Testing::UniqueScratchPath;
+using Pace::Testing::ClearScratch;
+using Pace::Testing::ReleaseScratch;
+using Pace::Testing::UniqueScratchPath;
 
 namespace
 {
@@ -206,7 +206,7 @@ namespace
 /// @return The path the next call for the same prefix is expected to return.
 [[nodiscard]] std::filesystem::path PredictNextScratchPath(std::string_view prefix)
 {
-    auto const baseline = FastCache::Testing::UniqueScratchPath(prefix);
+    auto const baseline = Pace::Testing::UniqueScratchPath(prefix);
     auto const baselineName = baseline.filename().string();
 
     // The name is "<prefix>-<pid>-<N>"; the next call increments N.
@@ -259,7 +259,7 @@ TEST_CASE("UniqueScratchPath clears a leftover at the name it is about to hand o
     }
     REQUIRE(std::filesystem::exists(nextPath / "stale.txt"));
 
-    auto const returned = FastCache::Testing::UniqueScratchPath("scratchpath-selftest");
+    auto const returned = Pace::Testing::UniqueScratchPath("scratchpath-selftest");
     REQUIRE(returned == nextPath);
     CHECK_FALSE(std::filesystem::exists(returned));
 }
@@ -273,7 +273,7 @@ TEST_CASE("UniqueScratchPath throws naming the path when the leftover at its nex
     if (!leftover.Pinned())
         SKIP("nothing refuses a removal here (root on POSIX ignores permission bits)");
 
-    CHECK_THROWS_WITH(FastCache::Testing::UniqueScratchPath("scratchpath-throws"), ContainsSubstring(nextPath.string()));
+    CHECK_THROWS_WITH(Pace::Testing::UniqueScratchPath("scratchpath-throws"), ContainsSubstring(nextPath.string()));
 }
 
 TEST_CASE("UniqueScratchPath never hands two threads drawing at once the same name", "[tests][scratch]")

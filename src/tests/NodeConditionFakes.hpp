@@ -3,15 +3,15 @@
 
 #include <string>
 
-#include <apps/fastcache-compile-node/NodeConditions.hpp>
+#include <apps/pace-node/NodeConditions.hpp>
 #include <core/Ranges.hpp>
 
 /// @file NodeConditionFakes.hpp
 /// Reading a node's condition rows the way every surface reads them.
 ///
 /// Apart from `FormationFakes.hpp` because this one reaches an app header, and that one is
-/// included by `src/FastCache` tests, which must not.
-namespace FastCache::Testing
+/// included by `src/Pace` tests, which must not.
+namespace Pace::Testing
 {
 
 /// The detail a condition row carries right now, read through the snapshot every surface renders.
@@ -26,4 +26,4 @@ namespace FastCache::Testing
     return row == nullptr ? std::string {} : row->detail;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

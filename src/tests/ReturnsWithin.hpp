@@ -8,7 +8,7 @@
 #include <thread>
 #include <utility>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Run @p call on a thread of its own, and say whether it returned within @p bound -- leaving the
@@ -42,4 +42,4 @@ namespace FastCache::Testing
     return true;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

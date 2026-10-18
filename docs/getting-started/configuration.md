@@ -1,21 +1,21 @@
 # Configuration
 
-fastcached takes its settings from a YAML file, from command-line flags, or
-from both. `fastcached --help` prints the complete, always-current flag list;
+pace-kv takes its settings from a YAML file, from command-line flags, or
+from both. `pace-kv --help` prints the complete, always-current flag list;
 this page covers where the file lives, which source wins, and what happens when
 a setting cannot be applied.
 
 ## Where the config file lives
 
-You do not have to tell fastcached where its configuration is. Started with no
+You do not have to tell pace-kv where its configuration is. Started with no
 `--config`, it reads the **first of these that exists and it can read** — which
 is exactly where each installer puts it:
 
 | Platform | Per-user | Machine-wide |
 |---|---|---|
-| Linux | `$XDG_CONFIG_HOME/fastcached/fastcached.yaml`, then `~/.config/fastcached/fastcached.yaml` | `/etc/fastcached/fastcached.yaml` |
-| macOS | `$XDG_CONFIG_HOME/fastcached/fastcached.yaml`, then `~/.config/fastcached/fastcached.yaml` | `/opt/fastcached/etc/fastcached.yaml` |
-| Windows | `%APPDATA%\fastcached\fastcached.yaml` | `%ProgramData%\fastcached\fastcached.yaml` |
+| Linux | `$XDG_CONFIG_HOME/pace/pace-kv.yaml`, then `~/.config/pace/pace-kv.yaml` | `/etc/pace/pace-kv.yaml` |
+| macOS | `$XDG_CONFIG_HOME/pace/pace-kv.yaml`, then `~/.config/pace/pace-kv.yaml` | `/opt/pace/etc/pace-kv.yaml` |
+| Windows | `%APPDATA%\pace\pace-kv.yaml` | `%ProgramData%\pace\pace-kv.yaml` |
 
 The per-user file wins, so you can shadow a machine-wide configuration without
 touching it and without root.
@@ -24,20 +24,20 @@ touching it and without root.
 the *system service* — its cache lives where only the service account can write
 — so only a process that could be that service reads it: root, an elevated
 administrator, or a Windows service logon (the service's own account, or
-`LocalSystem`). Run fastcached as yourself and the machine-wide
+`LocalSystem`). Run pace-kv as yourself and the machine-wide
 row is passed over entirely, whatever its permissions; you get your own config,
 or the built-in defaults.
 
-That is deliberate, and it is why `systemctl --user start fastcached` works out
-of the box on a host whose `/etc/fastcached/fastcached.yaml` points the system
-daemon at `/var/lib/fastcached/cache`: your instance never sees that file, so it
+That is deliberate, and it is why `systemctl --user start pace-kv` works out
+of the box on a host whose `/etc/pace/pace-kv.yaml` points the system
+daemon at `/var/lib/pace-kv/cache`: your instance never sees that file, so it
 never tries to open a directory it has no access to. Name it with `--config` if
 you genuinely want it.
 
 **then**, not *else*: setting `$XDG_CONFIG_HOME` does not take `~/.config` out
 of the search, it only puts another location ahead of it. The basedir
 specification treats `~/.config` as what `$XDG_CONFIG_HOME` *means* when unset,
-so under a strict reading it would drop out entirely; fastcached probes both, on
+so under a strict reading it would drop out entirely; pace-kv probes both, on
 the grounds that a half-migrated setup is better served by finding the file than
 by ignoring it. If you have moved your config and left the old copy behind, the
 banner below is where you will notice.
@@ -45,26 +45,26 @@ banner below is where you will notice.
 The startup banner reports which file was chosen:
 
 ```
-[INFO] fastcached 0.0.1 starting; bind=127.0.0.1:6674 ... config=/etc/fastcached/fastcached.yaml ...
+[INFO] pace-kv 0.0.1 starting; bind=127.0.0.1:6674 ... config=/etc/pace/pace-kv.yaml ...
 ```
 
 `config=<none>` there means no file was found and the built-in defaults are in
-effect — which is a perfectly good way to run fastcached.
+effect — which is a perfectly good way to run pace-kv.
 
 !!! note "The compile worker has its own file, with its own name"
 
-    `fastcache-compile-node` reads `fastcache-compile-node.yaml` from the same
+    `pace-node` reads `pace-node.yaml` from the same
     locations under its own name, by the same rule: named is strict, discovered
     is skipped when absent, unreadable or untrusted. Everything on this page
     about *where* applies to it unchanged.
 
     What differs is the mapping. Every key there is one flag of
-    `fastcache-compile-node --help`, spelled with underscores instead of dashes,
+    `pace-node --help`, spelled with underscores instead of dashes,
     and the file and the command line reach each setting through the same
     applier — so precedence is simply that the command line is applied second.
     The daemon's keys below are a *mapping* rather than a rule (`--storage` is
     `storage_path`), which is why they are listed out. The worker's are on
-    [its own page](../tools/fastcache-compile-node.md#running-it-as-a-service).
+    [its own page](../tools/pace-node.md#running-it-as-a-service).
 
 !!! note "Named files are strict, discovered ones are not"
 
@@ -80,7 +80,7 @@ effect — which is a perfectly good way to run fastcached.
 
 !!! warning "A privileged daemon only obeys a config an administrator could have written"
 
-    When fastcached runs as `root` or `LocalSystem`, `storage_path:` decides
+    When pace-kv runs as `root` or `LocalSystem`, `storage_path:` decides
     where a fully privileged process creates directories and writes files. So a
     privileged run uses a *discovered* config only when its directory is one no
     ordinary account can add or replace a file in — owned by
@@ -88,22 +88,22 @@ effect — which is a perfectly good way to run fastcached.
 
     This applies to **every** discovered location, per-user ones included. `$HOME`
     and `$XDG_CONFIG_HOME` are inputs an unprivileged account often controls, and
-    `sudo -E fastcached` would otherwise take root's configuration from a file
+    `sudo -E pace-kv` would otherwise take root's configuration from a file
     that account wrote. An unprivileged run is offered only its own files, so
     there is nothing there to vouch for and no check is applied.
 
     It matters most on Windows, where `C:\ProgramData` lets every standard
     account create files in a new subdirectory. The installer creates
-    `C:\ProgramData\fastcached` with an access list of its own, so a packaged
+    `C:\ProgramData\pace` with an access list of its own, so a packaged
     install already satisfies this; a directory somebody else made first does
-    not. When a config is skipped for this reason fastcached says so — on stderr,
+    not. When a config is skipped for this reason pace-kv says so — on stderr,
     and in the log once the daemon has one — with the exact command that repairs
     it:
 
     ```
-    fastcached: C:\ProgramData\fastcached\fastcached.yaml: ignored: C:\ProgramData\fastcached
+    pace-kv: C:\ProgramData\pace\pace-kv.yaml: ignored: C:\ProgramData\pace
     can be written by accounts other than the administrative ones, ...
-    Secure it with `icacls "C:\ProgramData\fastcached" /setowner *S-1-5-32-544 /inheritance:r ...`,
+    Secure it with `icacls "C:\ProgramData\pace" /setowner *S-1-5-32-544 /inheritance:r ...`,
     or name a config explicitly with --config.
     ```
 
@@ -113,14 +113,14 @@ effect — which is a perfectly good way to run fastcached.
 ## What the file looks like
 
 Every installed copy ships fully commented, with each setting shown at its
-built-in default, so an untouched file behaves exactly like running fastcached
+built-in default, so an untouched file behaves exactly like running pace-kv
 with no flags. Uncomment only what you want to change:
 
 ```yaml
 # bind: 127.0.0.1
 # port: 6674
 max_memory: 4g
-storage_path: /var/lib/fastcached/cache
+storage_path: /var/lib/pace-kv/cache
 ```
 
 Every key is a command-line flag spelled with underscores, and it takes exactly
@@ -137,7 +137,7 @@ thrown away — see [Upgrading a store](../operations/upgrading-a-store.md).
 
 Path-valued settings (`storage_path`, `tls_cert`, `tls_key`) understand `$VAR`
 and `${VAR}` environment references in the file; write `$$` for a literal dollar.
-On the command line your shell has already expanded them, so fastcached does not
+On the command line your shell has already expanded them, so pace-kv does not
 expand them again. A
 reference to a variable that is not set is an error rather than an empty
 string, so a typo fails loudly instead of quietly relocating the cache. Windows
@@ -149,7 +149,7 @@ From strongest to weakest:
 
 1. **Command-line flags** — `--port=7000` beats everything.
 2. **The config file** — whether named with `--config` or discovered.
-3. **Environment** — only `FASTCACHED_METRICS_PORT`, so a container's daemon
+3. **Environment** — only `PACE_METRICS_PORT`, so a container's daemon
    and its `--healthcheck` probe can agree on a port with one `-e`.
 4. **Built-in defaults.**
 
@@ -161,7 +161,7 @@ installation.
 
 ## Reloading
 
-`systemctl reload fastcached` (or `SIGHUP` directly, or the service manager's
+`systemctl reload pace-kv` (or `SIGHUP` directly, or the service manager's
 `PARAMCHANGE` on Windows) re-reads the file in place, without dropping
 connections. Only part of the configuration is reloadable:
 
@@ -181,14 +181,14 @@ reason.
 
 On **Linux and macOS**, give the file mode `0640` and make it readable by the
 account the service runs as — which is what the macOS installer does to
-`/opt/fastcached/etc/fastcached.yaml`.
+`/opt/pace/etc/pace-kv.yaml`.
 
 On **Windows** the installer does it for you, and the directory and the file are
-deliberately different. `C:\ProgramData\fastcached` is locked so that only
+deliberately different. `C:\ProgramData\pace` is locked so that only
 `SYSTEM` and `Administrators` can *write* it — which is what the daemon's own
 trust check requires — while `Users` may still read it, the convention for
 `%ProgramData%`. The **file** does not inherit that: seeding gives
-`fastcached.yaml` an access list of its own, granting `SYSTEM` and
+`pace-kv.yaml` an access list of its own, granting `SYSTEM` and
 `Administrators` full control and `NT AUTHORITY\SERVICE` read, and nothing else.
 The service reads it through that last entry.
 
@@ -198,8 +198,8 @@ left alone. Your edits are never touched either way. To check, or to repair a
 file you have re-created by hand:
 
 ```powershell
-icacls C:\ProgramData\fastcached\fastcached.yaml
-icacls C:\ProgramData\fastcached\fastcached.yaml /inheritance:r `
+icacls C:\ProgramData\pace\pace-kv.yaml
+icacls C:\ProgramData\pace\pace-kv.yaml /inheritance:r `
        /grant *S-1-5-18:F /grant *S-1-5-32-544:F /grant *S-1-5-6:R
 ```
 
@@ -214,8 +214,8 @@ rather than failing.
 === "Linux"
 
     ```sh
-    sudoedit /etc/fastcached/fastcached.yaml
-    sudo systemctl reload fastcached     # or restart, for the non-reloadable keys
+    sudoedit /etc/pace/pace-kv.yaml
+    sudo systemctl reload pace-kv     # or restart, for the non-reloadable keys
     ```
 
     The file is a package config file (dpkg conffile / rpm
@@ -224,21 +224,21 @@ rather than failing.
 === "macOS"
 
     ```sh
-    sudo vi /opt/fastcached/etc/fastcached.yaml
-    sudo launchctl kickstart -k system/software.lastrada.fastcached
+    sudo vi /opt/pace/etc/pace-kv.yaml
+    sudo launchctl kickstart -k system/software.lastrada.pace-kv
     ```
 
-    Only the `fastcached.yaml.default` beside it is package payload; the live
+    Only the `pace-kv.yaml.default` beside it is package payload; the live
     file is seeded from it once, when absent, and never replaced.
 
 === "Windows"
 
     ```powershell
-    notepad C:\ProgramData\fastcached\fastcached.yaml   # elevated
-    sc.exe stop FastCached; sc.exe start FastCached
+    notepad C:\ProgramData\pace\pace-kv.yaml   # elevated
+    sc.exe stop pace-kv; sc.exe start pace-kv
     ```
 
-    The MSI installs a `fastcached.yaml.default` template under the install
+    The MSI installs a `pace-kv.yaml.default` template under the install
     directory and seeds `%ProgramData%` from it only when nothing is there yet,
     so a later upgrade does not discard your edits. The live file is deliberately
     not part of the installer payload, and uninstalling leaves it behind.
@@ -246,10 +246,10 @@ rather than failing.
 ## Per-user daemons
 
 A personal cache needs no root and no packaged file at all — drop one in your
-own config directory and fastcached will find it:
+own config directory and pace-kv will find it:
 
 ```sh
-mkdir -p ~/.config/fastcached
-cp /etc/fastcached/fastcached.yaml ~/.config/fastcached/fastcached.yaml
-systemctl --user restart fastcached
+mkdir -p ~/.config/pace
+cp /etc/pace/pace-kv.yaml ~/.config/pace/pace-kv.yaml
+systemctl --user restart pace-kv
 ```

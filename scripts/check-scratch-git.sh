@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Every git WRITE a script or test fixture runs goes through the scrub: `scratch_git`
-# (`scripts/lib/git-scrub.sh`) in bash, `fastcached_scratch_git` (`scripts/lib/CheckCommon.cmake`)
+# (`scripts/lib/git-scrub.sh`) in bash, `pace_scratch_git` (`scripts/lib/CheckCommon.cmake`)
 # in a `cmake -P` script.
 #
 # ## Why this exists
@@ -22,7 +22,7 @@
 # ## What it looks for, stated as a pattern
 #
 # A git invocation at COMMAND position, spelled `git`, `"${GIT_EXECUTABLE}"` or
-# `"${FASTCACHED_GIT}"`, after any number of `-C <dir>` / `-c <key=value>` options, whose
+# `"${PACE_GIT}"`, after any number of `-C <dir>` / `-c <key=value>` options, whose
 # subcommand is one of `WriteSubcommands` below. Command position is the start of a line or a
 # `;`, `&`, `|`, `(`, `{` or `!` before it, or the words `if`, `then`, `do`, `else`, `elif`,
 # `while`, `until`, `exec`, `command`, `env` or CMake's `COMMAND`, optionally followed by
@@ -68,10 +68,10 @@
 # scratch victim that must come back untouched.
 set -uo pipefail
 
-FastCachedRoot="${FASTCACHED_SCRATCH_GIT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-FastCachedExemptions="${FASTCACHED_SCRATCH_GIT_EXEMPTIONS:-${FastCachedRoot}/scripts/check-scratch-git-exemptions.txt}"
+PaceRoot="${PACE_SCRATCH_GIT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PaceExemptions="${PACE_SCRATCH_GIT_EXEMPTIONS:-${PaceRoot}/scripts/check-scratch-git-exemptions.txt}"
 # shellcheck source=scripts/lib/third-party-roots.sh
-. "${FastCachedRoot}/scripts/lib/third-party-roots.sh"
+. "${PaceRoot}/scripts/lib/third-party-roots.sh"
 
 # The subcommands that write a repository, its index, its refs or its configuration. Reads
 # (`ls-files`, `rev-parse`, `diff`, `log`, `show`, `cat-file`) are not here: under a hijacked
@@ -84,7 +84,7 @@ CommandPosition='(^|[;&|({!]|(^|[^[:alnum:]_])(if|then|do|else|elif|while|until|
 # assignment (`GIT_DIR=x git init`) or `env`'s `-u NAME`. Without it a hand-pasted
 # `env -u GIT_DIR git init` would read as no command at all.
 CommandPrefix='([[:space:]]*(-u[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*))*[[:space:]]*'
-GitSpelling='(git|"?\$\{(GIT_EXECUTABLE|FASTCACHED_GIT)\}"?)'
+GitSpelling='(git|"?\$\{(GIT_EXECUTABLE|PACE_GIT)\}"?)'
 GitOptions='([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)*'
 WritePattern="${CommandPosition}${CommandPrefix}${GitSpelling}${GitOptions}[[:space:]]+(${WriteSubcommands})([[:space:]]|\$|\))"
 
@@ -93,8 +93,8 @@ if [ "${1:-}" = "--self-test" ]; then
     shift
     # Both overridable so a registration can hand over the build's own; `cmake -P` resolves a
     # bare `git` through PATH, so the default works wherever a shell does.
-    SelfTestCmake="${FASTCACHED_CMAKE:-cmake}"
-    SelfTestGit="${FASTCACHED_GIT_EXECUTABLE:-git}"
+    SelfTestCmake="${PACE_CMAKE:-cmake}"
+    SelfTestGit="${PACE_GIT_EXECUTABLE:-git}"
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --cmake) SelfTestCmake="$2"; shift 2 ;;
@@ -146,8 +146,8 @@ if [ "${1:-}" = "--self-test" ]; then
         local what="$1" want="$2" out got=0
         selfTestCases=$((selfTestCases + 1))
         scratch_git -C "$scratch/tree" add -A -f >/dev/null 2>&1
-        out="$(FASTCACHED_SCRATCH_GIT_ROOT="$scratch/tree" \
-               FASTCACHED_SCRATCH_GIT_EXEMPTIONS="$scratch/tree/exemptions.txt" \
+        out="$(PACE_SCRATCH_GIT_ROOT="$scratch/tree" \
+               PACE_SCRATCH_GIT_EXEMPTIONS="$scratch/tree/exemptions.txt" \
                bash "$me" 2>&1)" || got=$?
         case "$want" in
             want-pass)   [ "$got" -eq 0 ] && { Pass "($want) $what"; return; } ;;
@@ -187,8 +187,8 @@ if [ "${1:-}" = "--self-test" ]; then
     Case "a cmake 'execute_process(COMMAND \"\${GIT_EXECUTABLE}\" ... add' is REFUSED" want-fail
 
     Stage
-    Plant src/tests/CMakeLists.txt 'execute_process(COMMAND "%s" init -q "${tree}")' '${FASTCACHED_GIT}'
-    Case "the \${FASTCACHED_GIT} spelling in src/tests/CMakeLists.txt is REFUSED" want-fail
+    Plant src/tests/CMakeLists.txt 'execute_process(COMMAND "%s" init -q "${tree}")' '${PACE_GIT}'
+    Case "the \${PACE_GIT} spelling in src/tests/CMakeLists.txt is REFUSED" want-fail
 
     Stage
     Plant scripts/pasted.sh 'if env -u GIT_DIR %s -C "$tp" init -q; then :; fi' git
@@ -324,10 +324,10 @@ if [ "${1:-}" = "--self-test" ]; then
     else
         mkdir -p "$scratch/crypto-seam"
         drivenOut="$( export GIT_DIR="$victim/.git" GIT_WORK_TREE="$elsewhere"
-                      "$SelfTestCmake" "-DFASTCACHED_SOURCE_DIR=${realRoot}" "-DGIT_EXECUTABLE=${SelfTestGit}" \
-                          "-DFASTCACHED_SCRATCH_DIR=$scratch/crypto-seam" \
+                      "$SelfTestCmake" "-DPACE_SOURCE_DIR=${realRoot}" "-DGIT_EXECUTABLE=${SelfTestGit}" \
+                          "-DPACE_SCRATCH_DIR=$scratch/crypto-seam" \
                           -P "${realRoot}/scripts/check-crypto-seam-selftest.cmake" 2>&1 )"
-        DrivenUntouched "check-crypto-seam-selftest.cmake (cmake -P, fastcached_scratch_git)" \
+        DrivenUntouched "check-crypto-seam-selftest.cmake (cmake -P, pace_scratch_git)" \
             "crypto-seam-selftest: " "$drivenOut"
     fi
 
@@ -429,7 +429,7 @@ if [ "${1:-}" = "--self-test" ]; then
     # three passes, and the whole took longer than its TIMEOUT on the ARM64 leg. Each is started
     # as `env ... bash`, a process from the first instruction, so no subshell of this one exists
     # to inherit its EXIT trap -- which is the scratch tree's removal.
-    if [ -z "${FASTCACHED_SCRATCH_GIT_SELFTEST_NESTED:-}" ]; then
+    if [ -z "${PACE_SCRATCH_GIT_SELFTEST_NESTED:-}" ]; then
         # @param 1 what is exported, as NAME  @param 2 the victim  @param 3 the value, under it
         # Sets `nestedPid`, in THIS shell: a pid printed through `$( )` would name a child of
         # that subshell, which this shell cannot `wait` for.
@@ -438,7 +438,7 @@ if [ "${1:-}" = "--self-test" ]; then
             mkdir -p "$victim"
             scratch_git init -q "$victim"
             cat "$victim/.git/config" > "$victim.config-before"
-            env "${name}=${victim}/${value}" FASTCACHED_SCRATCH_GIT_SELFTEST_NESTED=1 \
+            env "${name}=${victim}/${value}" PACE_SCRATCH_GIT_SELFTEST_NESTED=1 \
                 bash "$me" --self-test --cmake "$SelfTestCmake" --git "$SelfTestGit" > "$victim.out" 2>&1 &
             nestedPid="$!"
         }
@@ -491,20 +491,20 @@ Fail() { echo "  FAIL: $*" >&2; Problems=$((Problems + 1)); }
 # -- the one answer to which files are this project's.
 Subjects() {
     local tracked firstParty declined
-    tracked="$(git -C "${FastCachedRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.ps1' 'scripts/*.cmake' \
+    tracked="$(git -C "${PaceRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.ps1' 'scripts/*.cmake' \
         'src/tests/*.sh' 'src/tests/*.ps1' 'src/tests/*.cmake' 'src/tests/CMakeLists.txt')" || return 2
     if [ -z "${tracked}" ]; then
         echo "check-scratch-git: git ls-files named no script under scripts/ or src/tests/, which cannot be" >&2
         echo "  true. Refused rather than read as 'no fixture writes git unscrubbed'." >&2
         return 2
     fi
-    if ! firstParty="$(first_party_paths "${FastCachedRoot}" "${tracked}")"; then
+    if ! firstParty="$(first_party_paths "${PaceRoot}" "${tracked}")"; then
         echo "check-scratch-git: the third-party roots could not be read, so which files are this" >&2
         echo "  project's own is unknown. Refused." >&2
         return 2
     fi
-    declined="$(third_party_paths "${FastCachedRoot}" "${tracked}")" || return 2
-    FastCachedDeclined="$(third_party_declined_summary 'file(s)' "${declined}")"
+    declined="$(third_party_paths "${PaceRoot}" "${tracked}")" || return 2
+    PaceDeclined="$(third_party_declined_summary 'file(s)' "${declined}")"
     printf '%s\n' "${firstParty}"
 }
 
@@ -516,8 +516,8 @@ UnscrubbedWrites() {
 SubjectList="$(Subjects)" || exit 2
 
 ExemptPaths=""
-if [ -r "${FastCachedExemptions}" ]; then
-    ExemptPaths="$(sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "${FastCachedExemptions}" | cut -f1)"
+if [ -r "${PaceExemptions}" ]; then
+    ExemptPaths="$(sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "${PaceExemptions}" | cut -f1)"
 fi
 
 Scanned=0
@@ -526,7 +526,7 @@ Sites=0
 ExemptUsed=""
 while IFS= read -r subject; do
     [ -n "${subject}" ] || continue
-    path="${FastCachedRoot}/${subject}"
+    path="${PaceRoot}/${subject}"
     [ -r "${path}" ] || continue
     Scanned=$((Scanned + 1))
     hits="$(UnscrubbedWrites "${path}")"
@@ -537,7 +537,7 @@ while IFS= read -r subject; do
     fi
     Flagged=$((Flagged + 1))
     Sites=$((Sites + $(grep -c . <<< "${hits}")))
-    Fail "${subject} runs a git WRITE that inherits the caller's GIT_DIR, GIT_WORK_TREE and the rest of scripts/lib/git-scrub-variables.txt -- under an exported GIT_DIR it writes THAT repository, not the scratch one. Spell it scratch_git (source scripts/lib/git-scrub.sh) or, in cmake -P, through fastcached_scratch_git (scripts/lib/CheckCommon.cmake). If this script writes the repository it was ASKED to rather than one it created, add a row to scripts/check-scratch-git-exemptions.txt saying so."
+    Fail "${subject} runs a git WRITE that inherits the caller's GIT_DIR, GIT_WORK_TREE and the rest of scripts/lib/git-scrub-variables.txt -- under an exported GIT_DIR it writes THAT repository, not the scratch one. Spell it scratch_git (source scripts/lib/git-scrub.sh) or, in cmake -P, through pace_scratch_git (scripts/lib/CheckCommon.cmake). If this script writes the repository it was ASKED to rather than one it created, add a row to scripts/check-scratch-git-exemptions.txt saying so."
     printf '%s\n' "${hits}" | sed 's/^/        /' >&2
 done <<< "${SubjectList}"
 
@@ -555,7 +555,7 @@ if [ "${Scanned}" -eq 0 ]; then
 fi
 
 echo "check-scratch-git: enumerated via git ls-files"
-[ -z "${FastCachedDeclined:-}" ] || echo "check-scratch-git: ${FastCachedDeclined}"
+[ -z "${PaceDeclined:-}" ] || echo "check-scratch-git: ${PaceDeclined}"
 exemptCount="$(grep -c . <<< "${ExemptPaths}" || true)"
 echo "check-scratch-git: ${Scanned} file(s) scanned, ${Sites} unscrubbed git write(s) in ${Flagged} file(s), ${exemptCount:-0} file(s) exempt by row"
 if [ "${Problems}" -ne 0 ]; then

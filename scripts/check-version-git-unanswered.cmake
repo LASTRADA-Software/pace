@@ -5,7 +5,7 @@
 # The version comes from three git queries -- the nearest tag (the triple), the distance
 # from it (the string) and the dirty check (the string's suffix). A dirty check that timed
 # out once read as "clean" and a distance that timed out as "on the tag", each reported under
-# the Exact severity, so `FASTCACHED_REQUIRE_EXACT_VERSION` could not catch either. Now the
+# the Exact severity, so `PACE_REQUIRE_EXACT_VERSION` could not catch either. Now the
 # row a missing answer belongs to fails or says `-dirty-unknown`, every unanswered query
 # makes the result Provisional, and each warning names what ITS query lost.
 #
@@ -21,7 +21,7 @@
 # the end is the cross-version guard: it hands every measured spelling, 3.28.3's capitalised
 # ones included, straight to Version.cmake's classifier, so each is judged on every CMake.
 #
-# Usage: cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<dir> -P <this>
+# Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
 #   (internally re-entered as the driver with -DFC_ROLE=driver, and as the stub with
 #   -DFC_ROLE=stub)
 
@@ -108,24 +108,24 @@ endif()
 
 # ---- the driver: one version resolution ----------------------------------------------------
 if(FC_ROLE STREQUAL "driver")
-    set(FastCachedGitTimeoutSeconds ${timeoutSeconds})
-    include("${FASTCACHED_SOURCE_DIR}/cmake/Version.cmake")
-    GetVersionInformation(FASTCACHED_VERSION FASTCACHED_VERSION_STRING)
-    message("RESOLVED triple=${FASTCACHED_VERSION} string=${FASTCACHED_VERSION_STRING}")
+    set(PaceGitTimeoutSeconds ${timeoutSeconds})
+    include("${PACE_SOURCE_DIR}/cmake/Version.cmake")
+    GetVersionInformation(PACE_VERSION PACE_VERSION_STRING)
+    message("RESOLVED triple=${PACE_VERSION} string=${PACE_VERSION_STRING}")
     return()
 endif()
 
 # ---- the check -----------------------------------------------------------------------------
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
-file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
+file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 set(self "${CMAKE_CURRENT_LIST_FILE}")
-set(log "${FASTCACHED_SCRATCH_DIR}/queries.log")
+set(log "${PACE_SCRATCH_DIR}/queries.log")
 
 # The stub executable. A `.cmd` on Windows, because execute_process starts a file, not a
 # script, and a shell script elsewhere; both hand every argument to this file as the stub,
@@ -134,7 +134,7 @@ set(log "${FASTCACHED_SCRATCH_DIR}/queries.log")
 # ("Access violation", "Segmentation fault") rather than as a status.
 set(dieMarker "${log}.die")
 if(CMAKE_HOST_WIN32)
-    set(stub "${FASTCACHED_SCRATCH_DIR}/git.cmd")
+    set(stub "${PACE_SCRATCH_DIR}/git.cmd")
     file(TO_NATIVE_PATH "${CMAKE_COMMAND}" nativeCmake)
     file(TO_NATIVE_PATH "${dieMarker}" nativeDieMarker)
     file(WRITE "${stub}"
@@ -143,7 +143,7 @@ if(CMAKE_HOST_WIN32)
         "@exit /b %ERRORLEVEL%\r\n")
     set(deathWords "Access violation")
 else()
-    set(stub "${FASTCACHED_SCRATCH_DIR}/git")
+    set(stub "${PACE_SCRATCH_DIR}/git")
     file(WRITE "${stub}"
         "#!/bin/sh\n\"${CMAKE_COMMAND}\" -DFC_ROLE=stub \"-DLOG=${log}\" -P \"${self}\" -- \"$@\"\n"
         "status=$?\n"
@@ -159,8 +159,8 @@ set(cases 0)
 # A second tree whose path carries a space and a `(`, as `Program Files (x86)` does: the
 # severity is read out of `CMake Warning at <path>:<line> (message):`, and a reader that
 # stopped at the first `(` read every such path as no severity at all.
-set(parenthesisedTree "${FASTCACHED_SCRATCH_DIR}/tree (x86)")
-file(COPY "${FASTCACHED_SOURCE_DIR}/cmake/Version.cmake" DESTINATION "${parenthesisedTree}/cmake")
+set(parenthesisedTree "${PACE_SCRATCH_DIR}/tree (x86)")
+file(COPY "${PACE_SOURCE_DIR}/cmake/Version.cmake" DESTINATION "${parenthesisedTree}/cmake")
 
 # Resolve once and assert what came out.
 # @param label what the case establishes
@@ -178,7 +178,7 @@ function(fc_case label hold environment exact wantTriple wantString wantSeverity
     cmake_parse_arguments(PARSE_ARGV 9 case "" "SOURCE;GIT" "")
     math(EXPR count "${cases} + 1")
     set(cases ${count} PARENT_SCOPE)
-    set(sourceDir "${FASTCACHED_SOURCE_DIR}")
+    set(sourceDir "${PACE_SOURCE_DIR}")
     if(case_SOURCE)
         set(sourceDir "${case_SOURCE}")
     endif()
@@ -193,9 +193,9 @@ function(fc_case label hold environment exact wantTriple wantString wantSeverity
     endif()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env ${stubEnvironment}
-                "${CMAKE_COMMAND}" -DFC_ROLE=driver "-DFASTCACHED_SOURCE_DIR=${sourceDir}"
-                "-DGIT_EXECUTABLE=${git}" "-DFASTCACHED_REQUIRE_EXACT_VERSION=${exact}" -P "${self}"
-        WORKING_DIRECTORY "${FASTCACHED_SCRATCH_DIR}"
+                "${CMAKE_COMMAND}" -DFC_ROLE=driver "-DPACE_SOURCE_DIR=${sourceDir}"
+                "-DGIT_EXECUTABLE=${git}" "-DPACE_REQUIRE_EXACT_VERSION=${exact}" -P "${self}"
+        WORKING_DIRECTORY "${PACE_SCRATCH_DIR}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE status)
     set(output "${out}${err}")
     string(REPLACE "\n" " " flat "${output}")
@@ -282,20 +282,20 @@ endfunction()
 # ---- every query answers: the positive control ---------------------------------------------
 # Each also asserts that no git warning was printed at all.
 fc_case("every query answers, clean: the tag row is Exact" none none OFF
-    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "fastcached: git")
+    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "pace-kv: git")
 fc_case("every query answers, dirty: the string says so" none FC_STUB_DIRTY=1 OFF
-    1.2.3 1.2.3-4-gabc1234-dirty STATUS "from git tag (v1.2.3)" "fastcached: git")
+    1.2.3 1.2.3-4-gabc1234-dirty STATUS "from git tag (v1.2.3)" "pace-kv: git")
 fc_case("every query answers under REQUIRE_EXACT: nothing to refuse" none none ON
-    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "fastcached: git")
+    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "pace-kv: git")
 
 # ---- git answers "no", which is an answer ----------------------------------------------------
 # An untagged checkout, a shallow clone without tags, a tarball built where git is installed:
 # the most common Provisional paths. A non-zero exit there IS the answer, so no query may be
 # reported as unanswered, and nothing may blame the index or git itself.
 fc_case("no tag and everything else answers: the commit row, with no git warning" none FC_STUB_NO_TAG=1 OFF
-    0.0.0 0.0.0-0-gabc1234 WARNING "from git commit without a matching tag" "fastcached: git")
+    0.0.0 0.0.0-0-gabc1234 WARNING "from git commit without a matching tag" "pace-kv: git")
 fc_case("not a git repository: the declared fallback, with no git warning" none FC_STUB_NOT_REPO=1 OFF
-    0.0.0 0.0.0-unknown WARNING "from declared fallback" "fastcached: git")
+    0.0.0 0.0.0-unknown WARNING "from declared fallback" "pace-kv: git")
 
 # ---- one query does not answer -------------------------------------------------------------
 fc_case("the dirty check does not answer: -dirty-unknown, never clean, and Provisional" dirty none OFF
@@ -312,7 +312,7 @@ fc_case("no tag, and the commit does not answer: the declared fallback" commit F
 # but its words name the binary, and nothing blames the Windows/WSL index re-hash.
 fc_case("git cannot be run: the declared fallback, worded as git being unavailable" none none OFF
     0.0.0 0.0.0-unknown WARNING "git could not run `git describe --tags --abbrev=0 --match v[0-9]*`" "re-hashes"
-    GIT "${FASTCACHED_SCRATCH_DIR}/no-such-git/git")
+    GIT "${PACE_SCRATCH_DIR}/no-such-git/git")
 
 # ---- git dies: neither an exit status nor a way of not starting ------------------------------
 # A crash or a signal lands in the catch-all row, worded with CMake's own words for the death.
@@ -340,7 +340,7 @@ fc_case("a source path with `(`: FATAL_ERROR is still read as FATAL_ERROR" dirty
 # spelling only another CMake chooses is never seen: CMake 3.28.3 writes "No such file or
 # directory" where 4.x writes it in lower case, and the case-sensitive `unrunnable` row missed
 # it on 3.28 alone (#1642). Each row hands those words straight to the classifier
-# FastCachedRunGit uses, so every measured spelling is judged on every CMake.
+# PaceRunGit uses, so every measured spelling is judged on every CMake.
 #   <RESULT_VARIABLE> | <the row it belongs to> | <where it was measured>
 set(classifications
     "128 | failed | git exiting non-zero"
@@ -353,14 +353,14 @@ set(classifications
     "Segmentation fault | died | CMake 4.2 on Linux"
     "Access violation | died | CMake 4.3.1 on Windows"
     "Exit code 0xc0000409 | died | CMake 4.3.1 on Windows")
-include("${FASTCACHED_SOURCE_DIR}/cmake/Version.cmake")
+include("${PACE_SOURCE_DIR}/cmake/Version.cmake")
 foreach(classification IN LISTS classifications)
     string(REPLACE " | " ";" fields "${classification}")
     list(GET fields 0 result)
     list(GET fields 1 wantKind)
     list(GET fields 2 measuredOn)
     math(EXPR cases "${cases} + 1")
-    FastCachedGitNonAnswerOf("${result}" got)
+    PaceGitNonAnswerOf("${result}" got)
     if(gotKind STREQUAL wantKind)
         message("  ok   `${result}` (${measuredOn}) is ${wantKind}")
     else()

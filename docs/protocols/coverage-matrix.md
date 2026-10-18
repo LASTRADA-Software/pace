@@ -67,10 +67,10 @@ column shows how that operation is expressed in a given protocol.
 
 ## Reading the matrix
 
-- A row marked **no** in every column is an operation fastcached does
+- A row marked **no** in every column is an operation pace-kv does
   not support in any protocol.
 - A cell marked – means the protocol doesn't have a way to express the
-  operation, so the absence is not a fastcached limitation.
+  operation, so the absence is not a pace-kv limitation.
 - "stub" cells return well-shaped responses (`OK`) so capability-probing
   clients don't error out, but no underlying state is changed. See the
   linked command page for each stub's exact behavior.

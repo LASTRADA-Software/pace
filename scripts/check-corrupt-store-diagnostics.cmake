@@ -26,7 +26,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # The sentences are composed in `src/apps/`, and the daemon's `StorageOpenFailure`
 # sits in an ANONYMOUS NAMESPACE in `main.cpp` behind
-# `add_executable(fastcached main.cpp)` with no test target anywhere -- so it is
+# `add_executable(pace-kv main.cpp)` with no test target anywhere -- so it is
 # unreachable by unit test without restructuring the app. A check that READS BOTH
 # SIDES needs no linkage at all, dodges the anonymous namespace, and covers the
 # node's half too, which lives in a different binary again.
@@ -67,15 +67,15 @@ cmake_minimum_required(VERSION 3.28)
 # silent gap this check exists to close.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-corrupt-store-diagnostics.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-corrupt-store-diagnostics.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(FastCachedCorruptStorePage "docs/operations/corrupt-store.md")
+set(PaceCorruptStorePage "docs/operations/corrupt-store.md")
 
 # ---------------------------------------------------------------------------
 # Which source composes which fragment of a quoted diagnostic.
@@ -84,14 +84,14 @@ set(FastCachedCorruptStorePage "docs/operations/corrupt-store.md")
 #
 # No row may contain a `;` -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
-set(FastCachedDiagnosticFragments
-    "StorageError(code=|src/FastCache/Core/Errors/StorageError.hpp|StorageError(code={} system={} context={})|The rendering the page quotes character for character. The whole format string is pinned deliberately: this IS the verbatim quote, so a change-detector is what it needs."
-    "context=FilePageStore::Open|src/FastCache/Cache/CowTreeStorage.cpp|\"FilePageStore::Open\"|The context token an operator matches against. Nothing else in this tree produces it, so a rename would leave the page naming a context that no longer exists."
-    "failed to open storage '|src/apps/fastcached/main.cpp|failed to open {} '{}'|The daemon's one composer. The quoted `'{}'` is the field that matters -- it carries the path the operator needs to act on."
-    "failed to open shard '|src/apps/fastcached/main.cpp|failed to open {} '{}'|The --storage-shards variant, which names the ONE damaged file. Same composer, different `what` argument."
-    "--cache-dir |src/apps/fastcache-compile-node/CacheTier.cpp|--cache-dir {}|The node prefixes its tier's refusal with the flag the operator actually typed."
-    "cannot open |src/apps/fastcache-compile-node/CacheTier.cpp|cannot open {}|The node's own open failure -- a different binary and a different sentence from the daemon's."
-    "refusing to start|src/apps/fastcache-compile-node/main.cpp|refusing to start|The suffix the node's main adds. Composed in a THIRD place, so a check reading only the tier would miss it."
+set(PaceDiagnosticFragments
+    "StorageError(code=|src/Pace/Core/Errors/StorageError.hpp|StorageError(code={} system={} context={})|The rendering the page quotes character for character. The whole format string is pinned deliberately: this IS the verbatim quote, so a change-detector is what it needs."
+    "context=FilePageStore::Open|src/Pace/Cache/CowTreeStorage.cpp|\"FilePageStore::Open\"|The context token an operator matches against. Nothing else in this tree produces it, so a rename would leave the page naming a context that no longer exists."
+    "failed to open storage '|src/apps/pace-kv/main.cpp|failed to open {} '{}'|The daemon's one composer. The quoted `'{}'` is the field that matters -- it carries the path the operator needs to act on."
+    "failed to open shard '|src/apps/pace-kv/main.cpp|failed to open {} '{}'|The --storage-shards variant, which names the ONE damaged file. Same composer, different `what` argument."
+    "--cache-dir |src/apps/pace-node/CacheTier.cpp|--cache-dir {}|The node prefixes its tier's refusal with the flag the operator actually typed."
+    "cannot open |src/apps/pace-node/CacheTier.cpp|cannot open {}|The node's own open failure -- a different binary and a different sentence from the daemon's."
+    "refusing to start|src/apps/pace-node/main.cpp|refusing to start|The suffix the node's main adds. Composed in a THIRD place, so a check reading only the tier would miss it."
 )
 
 # The `what` arguments the daemon's single composer is called with. Separate from
@@ -99,7 +99,7 @@ set(FastCachedDiagnosticFragments
 # page quotes both variants.
 #
 #   <fragment as it appears ON THE PAGE>|<literal argument>|<why>
-set(FastCachedDaemonWhatLiterals
+set(PaceDaemonWhatLiterals
     "failed to open storage '|\"storage\"|The plain --storage path."
     "failed to open shard '|\"shard\"|The per-shard variant, which is the only one that names a single file."
 )
@@ -116,8 +116,8 @@ set(FastCachedDaemonWhatLiterals
 # Not neutralising the brackets either: the fragments matched here contain `'`,
 # `{}` and brackets in ordinary use, and blanking brackets is exactly what broke
 # `check-tsan-scope` when that remedy was applied where the brackets were data.
-function(fastcached_read_whole relative outContent outFound)
-    set(path "${FASTCACHED_SOURCE_DIR}/${relative}")
+function(pace_read_whole relative outContent outFound)
+    set(path "${PACE_SOURCE_DIR}/${relative}")
     if(NOT EXISTS "${path}")
         set(${outFound} FALSE PARENT_SCOPE)
         set(${outContent} "" PARENT_SCOPE)
@@ -130,10 +130,10 @@ endfunction()
 
 set(problems "")
 
-fastcached_read_whole("${FastCachedCorruptStorePage}" pageContent pageFound)
+pace_read_whole("${PaceCorruptStorePage}" pageContent pageFound)
 if(NOT pageFound)
     message(FATAL_ERROR
-        "check-corrupt-store-diagnostics: ${FastCachedCorruptStorePage} does not exist. This check "
+        "check-corrupt-store-diagnostics: ${PaceCorruptStorePage} does not exist. This check "
         "reads the page and the sources that compose what it quotes. Without the page there is "
         "nothing to check, and reporting success would be the vacuous pass it exists to prevent.")
 endif()
@@ -177,7 +177,7 @@ endwhile()
 if(quotedCount EQUAL 0)
     message(FATAL_ERROR
         "check-corrupt-store-diagnostics: found NO quoted diagnostic in "
-        "${FastCachedCorruptStorePage}. Either the page stopped quoting console output -- in which "
+        "${PaceCorruptStorePage}. Either the page stopped quoting console output -- in which "
         "case this check has nothing to enforce and should be removed deliberately -- or the "
         "extraction stopped matching. It is not treated as a clean pass.")
 endif()
@@ -188,7 +188,7 @@ endif()
 set(checkedFragments 0)
 foreach(diagnostic IN LISTS quoted)
     set(covered FALSE)
-    foreach(row IN LISTS FastCachedDiagnosticFragments)
+    foreach(row IN LISTS PaceDiagnosticFragments)
         string(REPLACE "|" ";" fields "${row}")
         list(GET fields 0 fragment)
         list(GET fields 1 sourceFile)
@@ -202,7 +202,7 @@ foreach(diagnostic IN LISTS quoted)
         set(covered TRUE)
         math(EXPR checkedFragments "${checkedFragments} + 1")
 
-        fastcached_read_whole("${sourceFile}" sourceContent sourceFound)
+        pace_read_whole("${sourceFile}" sourceContent sourceFound)
         if(NOT sourceFound)
             list(APPEND problems
                  "  ${sourceFile}\n      is named as composing `${fragment}` and does not exist")
@@ -223,7 +223,7 @@ endforeach()
 
 # ---------------------------------------------------------------------------
 # The `what` arguments, which are literals rather than format strings.
-foreach(row IN LISTS FastCachedDaemonWhatLiterals)
+foreach(row IN LISTS PaceDaemonWhatLiterals)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 fragment)
     list(GET fields 1 literal)
@@ -240,15 +240,15 @@ foreach(row IN LISTS FastCachedDaemonWhatLiterals)
         continue()
     endif()
 
-    fastcached_read_whole("src/apps/fastcached/main.cpp" daemonContent daemonFound)
+    pace_read_whole("src/apps/pace-kv/main.cpp" daemonContent daemonFound)
     if(NOT daemonFound)
-        list(APPEND problems "  src/apps/fastcached/main.cpp does not exist")
+        list(APPEND problems "  src/apps/pace-kv/main.cpp does not exist")
         continue()
     endif()
     string(FIND "${daemonContent}" "${literal}" literalAt)
     if(literalAt EQUAL -1)
         list(APPEND problems
-             "  the page quotes `${fragment}`\n      but src/apps/fastcached/main.cpp no longer passes ${literal} as the `what`\n      ${reason}")
+             "  the page quotes `${fragment}`\n      but src/apps/pace-kv/main.cpp no longer passes ${literal} as the `what`\n      ${reason}")
     endif()
     math(EXPR checkedFragments "${checkedFragments} + 1")
 endforeach()
@@ -267,4 +267,4 @@ endif()
 
 message(STATUS
         "corrupt-store diagnostics: ${quotedCount} quoted diagnostic(s) in "
-        "${FastCachedCorruptStorePage}, ${checkedFragments} fragment(s) still composable by their source")
+        "${PaceCorruptStorePage}, ${checkedFragments} fragment(s) still composable by their source")

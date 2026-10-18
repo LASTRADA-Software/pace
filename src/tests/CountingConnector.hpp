@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Consensus/IRaftInboundLinks.hpp>
-#include <FastCache/Consensus/RaftSessionLink.hpp>
-#include <FastCache/Consensus/RaftTypes.hpp>
-#include <FastCache/Core/Ed25519.hpp>
+#include <Pace/Consensus/IRaftInboundLinks.hpp>
+#include <Pace/Consensus/RaftSessionLink.hpp>
+#include <Pace/Consensus/RaftTypes.hpp>
+#include <Pace/Core/Ed25519.hpp>
 
 #include <atomic>
 #include <cstddef>
@@ -20,7 +20,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/NetError.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file CountingConnector.hpp
@@ -117,4 +117,4 @@ class NoInboundLinks final: public Consensus::IRaftInboundLinks
     std::atomic<std::size_t> _detaches { 0 };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

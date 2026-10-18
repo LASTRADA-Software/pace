@@ -10,7 +10,7 @@
 #if !defined(_WIN32)
     #include <sys/stat.h>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The umask for a scope.
@@ -37,5 +37,5 @@ class ScopedUmask
     ::mode_t _previous; ///< What the umask was before the scope.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing
 #endif

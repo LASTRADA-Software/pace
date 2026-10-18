@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/AnnouncedEndpoints.hpp>
-#include <FastCache/Cluster/BeaconDestinations.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/DiscoveryService.hpp>
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/MembershipPolicy.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/PeerDirectory.hpp>
-#include <FastCache/Cluster/RosterKeys.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/AnnouncedEndpoints.hpp>
+#include <Pace/Cluster/BeaconDestinations.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/DiscoveryService.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/MembershipPolicy.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/PeerDirectory.hpp>
+#include <Pace/Cluster/RosterKeys.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -39,29 +39,29 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/EndpointDialer.hpp>
-#include <apps/fastcache-compile-node/EnrollChannel.hpp>
-#include <apps/fastcache-compile-node/EnrollmentResponder.hpp>
-#include <apps/fastcache-compile-node/EnrollmentWindow.hpp>
-#include <apps/fastcache-compile-node/FleetProbe.hpp>
-#include <apps/fastcache-compile-node/FleetSummaryResponder.hpp>
-#include <apps/fastcache-compile-node/FleetTextResponder.hpp>
-#include <apps/fastcache-compile-node/ForeignFleetWatch.hpp>
-#include <apps/fastcache-compile-node/FormationController.hpp>
-#include <apps/fastcache-compile-node/FormationLoop.hpp>
-#include <apps/fastcache-compile-node/FormationRuntime.hpp>
-#include <apps/fastcache-compile-node/LiveStatsResponder.hpp>
-#include <apps/fastcache-compile-node/MachineStandingTestUtils.hpp>
-#include <apps/fastcache-compile-node/NodeAnnounce.hpp>
-#include <apps/fastcache-compile-node/NodeConditions.hpp>
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
-#include <apps/fastcache-compile-node/NodeFormation.hpp>
-#include <apps/fastcache-compile-node/NodeFrameSurface.hpp>
-#include <apps/fastcache-compile-node/NodeStatusResponder.hpp>
-#include <apps/fastcache-compile-node/PeerIdentity.hpp>
-#include <apps/fastcache-compile-node/Responders.hpp>
-#include <apps/fastcache-compile-node/SessionResponder.hpp>
-#include <apps/fastcache-compile-node/SharedCacheResponder.hpp>
+#include <apps/pace-node/EndpointDialer.hpp>
+#include <apps/pace-node/EnrollChannel.hpp>
+#include <apps/pace-node/EnrollmentResponder.hpp>
+#include <apps/pace-node/EnrollmentWindow.hpp>
+#include <apps/pace-node/FleetProbe.hpp>
+#include <apps/pace-node/FleetSummaryResponder.hpp>
+#include <apps/pace-node/FleetTextResponder.hpp>
+#include <apps/pace-node/ForeignFleetWatch.hpp>
+#include <apps/pace-node/FormationController.hpp>
+#include <apps/pace-node/FormationLoop.hpp>
+#include <apps/pace-node/FormationRuntime.hpp>
+#include <apps/pace-node/LiveStatsResponder.hpp>
+#include <apps/pace-node/MachineStandingTestUtils.hpp>
+#include <apps/pace-node/NodeAnnounce.hpp>
+#include <apps/pace-node/NodeConditions.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
+#include <apps/pace-node/NodeFormation.hpp>
+#include <apps/pace-node/NodeFrameSurface.hpp>
+#include <apps/pace-node/NodeStatusResponder.hpp>
+#include <apps/pace-node/PeerIdentity.hpp>
+#include <apps/pace-node/Responders.hpp>
+#include <apps/pace-node/SessionResponder.hpp>
+#include <apps/pace-node/SharedCacheResponder.hpp>
 #include <core/async/SyncRun.hpp>
 #include <core/net/IDatagramSocket.hpp>
 #include <core/net/ISocket.hpp>
@@ -96,7 +96,7 @@
 /// rather than this one's. A start is judged as `main` judges one, and a reform goes through
 /// production's own `AdoptForReform` -- adopted again, judged by the startup rules, published -- paced
 /// by `NextReformPace`, then a fresh body.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A deterministic random source that never repeats a draw: a counter run through SplitMix64,
@@ -223,7 +223,7 @@ class FormationHarness
     static constexpr std::chrono::seconds MeetWithin = BeaconEvery + 2 * TickEvery;
 
     /// The address an operator's verbs come from. Admitted by nothing on its own: the operator
-    /// presents its machine's ticket (`OperatorMachine`), as `fastcache-compile-node` does.
+    /// presents its machine's ticket (`OperatorMachine`), as `pace-node` does.
     static constexpr std::string_view OperatorAddress = "10.9.9.9";
 
     /// The machine the operator's node is, whose test key every machine's roster holds live.
@@ -1306,4 +1306,4 @@ class FormationHarness
     std::map<std::string, std::unique_ptr<Machine>> _machines;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

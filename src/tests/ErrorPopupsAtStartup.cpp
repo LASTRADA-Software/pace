@@ -24,15 +24,15 @@
 // ## Two policies
 //
 // A test executable suppresses always. A PRODUCT binary is compiled with
-// `FASTCACHED_ERROR_POPUPS_ON_REQUEST` naming an environment variable, and suppresses only
-// when that variable is present: a developer running a Debug `fastcached` by hand keeps
+// `PACE_ERROR_POPUPS_ON_REQUEST` naming an environment variable, and suppresses only
+// when that variable is present: a developer running a Debug `pace-kv` by hand keeps
 // the dialog and the chance to attach a debugger at the assert, while one a test fixture
 // spawns inherits the variable every registered test carries.
 //
 // The variable is read with `GetEnvironmentVariableA` rather than through
 // `Platform/Environment`, which is where this tree reads the environment, for two reasons
 // that are both about WHEN and WHERE this runs: during static initialisation, ahead of
-// every object that seam could be constructed in, and in binaries -- `fastcache-cc` -- that
+// every object that seam could be constructed in, and in binaries -- `pace-cc` -- that
 // do not link the library it lives in. It decides one process-wide setting, once, and
 // reaches nothing else.
 
@@ -50,10 +50,10 @@ namespace
 /// @return True when the suppression should be installed.
 [[nodiscard]] bool SuppressionRequested() noexcept
 {
-    #if defined(FASTCACHED_ERROR_POPUPS_ON_REQUEST)
+    #if defined(PACE_ERROR_POPUPS_ON_REQUEST)
     // A size query: a present variable answers its length plus the terminator, even when
     // empty, and an absent one answers 0.
-    return ::GetEnvironmentVariableA(FASTCACHED_ERROR_POPUPS_ON_REQUEST, nullptr, 0) != 0;
+    return ::GetEnvironmentVariableA(PACE_ERROR_POPUPS_ON_REQUEST, nullptr, 0) != 0;
     #else
     return true;
     #endif
@@ -65,7 +65,7 @@ struct SuppressBeforeUserInitializers
     SuppressBeforeUserInitializers() noexcept
     {
         if (SuppressionRequested())
-            FastCache::Testing::SuppressWindowsErrorPopups();
+            Pace::Testing::SuppressWindowsErrorPopups();
     }
 };
 

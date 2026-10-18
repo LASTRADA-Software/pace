@@ -61,7 +61,7 @@
 # nothing is refused by name, since the whole tree being non-empty says nothing about one copy.
 #
 # A re-sync is of ONE upstream, so `RESYNC` takes the root it is about in
-# `FASTCACHED_VENDOR_RESYNC_ROOT` and marks only that root's files upstream's; every other root
+# `PACE_VENDOR_RESYNC_ROOT` and marks only that root's files upstream's; every other root
 # is carried forward exactly as `ON` carries it. A bare RESYNC that blessed every root would
 # silence each OTHER copy's local changes -- the regeneration defect above, reached through the
 # one word that is allowed to bless. The first import of a root is a re-sync of it.
@@ -70,27 +70,27 @@
 # deletion regenerates away with no declaration. The vendor build's partition assertion
 # refuses a missing source, so this is covered for translation units and not for headers.
 #
-# Regenerate with -DFASTCACHED_VENDOR_WRITE_MANIFEST=ON, or with =RESYNC plus
-# -DFASTCACHED_VENDOR_RESYNC_ROOT=<root> after a re-sync or the first import of that root.
+# Regenerate with -DPACE_VENDOR_WRITE_MANIFEST=ON, or with =RESYNC plus
+# -DPACE_VENDOR_RESYNC_ROOT=<root> after a re-sync or the first import of that root.
 #
-# @param FASTCACHED_SOURCE_DIR Repository root.
+# @param PACE_SOURCE_DIR Repository root.
 
 cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(vendorDir "${FASTCACHED_SOURCE_DIR}/vendor")
+set(vendorDir "${PACE_SOURCE_DIR}/vendor")
 set(manifestPath "${vendorDir}/MANIFEST")
 set(vendorDocPath "${vendorDir}/VENDOR.md")
 
 # The roots, from the one answer to "which directories are third-party" rather than a path
 # written here: every root is a verbatim copy, and a copy this check was never told about is a
 # copy an in-place edit reaches silently.
-fastcached_third_party_roots("${FASTCACHED_SOURCE_DIR}" thirdPartyRoots)
+pace_third_party_roots("${PACE_SOURCE_DIR}" thirdPartyRoots)
 
 # The tree, walked rather than read from git: a source export has no index, and the
 # question -- do these bytes match what was imported -- is the same either way. Each ROOT
@@ -102,11 +102,11 @@ fastcached_third_party_roots("${FASTCACHED_SOURCE_DIR}" thirdPartyRoots)
 # make the total look healthy.
 set(vendorFiles "")
 foreach(root IN LISTS thirdPartyRoots)
-    file(GLOB_RECURSE rootFiles RELATIVE "${FASTCACHED_SOURCE_DIR}" "${FASTCACHED_SOURCE_DIR}/${root}/*")
+    file(GLOB_RECURSE rootFiles RELATIVE "${PACE_SOURCE_DIR}" "${PACE_SOURCE_DIR}/${root}/*")
     list(LENGTH rootFiles rootFileCount)
     if(rootFileCount EQUAL 0)
         message(FATAL_ERROR
-            "check-vendor-verbatim: no files were found under ${FASTCACHED_SOURCE_DIR}/${root}, a root "
+            "check-vendor-verbatim: no files were found under ${PACE_SOURCE_DIR}/${root}, a root "
             "scripts/lib/third-party-roots.txt names, so nothing of it was compared and this run says "
             "nothing about that copy. That is the CHECK failing, not a clean result -- restore the "
             "copy, or remove its row if the import is gone.")
@@ -122,7 +122,7 @@ list(LENGTH thirdPartyRoots rootCount)
 #
 # @param path A repository-relative path.
 # @param outVar Set to the root, or to empty.
-function(fastcached_root_of path outVar)
+function(pace_root_of path outVar)
     set(found "")
     foreach(candidate IN LISTS thirdPartyRoots)
         string(FIND "${path}/" "${candidate}/" position)
@@ -138,7 +138,7 @@ endfunction()
 # checking, so the two can never disagree about what a line looks like.
 set(current "")
 foreach(rel IN LISTS vendorFiles)
-    file(SHA256 "${FASTCACHED_SOURCE_DIR}/${rel}" hash)
+    file(SHA256 "${PACE_SOURCE_DIR}/${rel}" hash)
     string(APPEND current "${hash}  ${rel}\n")
     string(MD5 key "${rel}")
     set("currentHash_${key}" "${hash}")
@@ -157,7 +157,7 @@ endforeach()
 # Sets in the caller: `expected`, `manifestPaths`, `localPaths`, `malformedLines`, and for each
 # path `upstream_<md5 of path>` = `verbatim`, `new` or the upstream hash, and
 # `manifestHash_<md5 of path>` = the hash the manifest records for it.
-function(fastcached_read_manifest raw)
+function(pace_read_manifest raw)
     set(expected "")
     set(manifestPaths "")
     set(localPaths "")
@@ -195,35 +195,35 @@ function(fastcached_read_manifest raw)
     set(malformedLines "${malformedLines}" PARENT_SCOPE)
 endfunction()
 
-if(FASTCACHED_VENDOR_WRITE_MANIFEST)
+if(PACE_VENDOR_WRITE_MANIFEST)
     set(resyncRoot "")
-    if("${FASTCACHED_VENDOR_WRITE_MANIFEST}" STREQUAL "RESYNC")
+    if("${PACE_VENDOR_WRITE_MANIFEST}" STREQUAL "RESYNC")
         string(REPLACE ";" ", " rootsText "${thirdPartyRoots}")
-        if("${FASTCACHED_VENDOR_RESYNC_ROOT}" STREQUAL "")
+        if("${PACE_VENDOR_RESYNC_ROOT}" STREQUAL "")
             message(FATAL_ERROR
                 "check-vendor-verbatim: RESYNC names no root. A re-sync is of ONE upstream copy, so say "
-                "which with -DFASTCACHED_VENDOR_RESYNC_ROOT=<root>, one of: ${rootsText}. Blessing every "
+                "which with -DPACE_VENDOR_RESYNC_ROOT=<root>, one of: ${rootsText}. Blessing every "
                 "root at once would mark each OTHER copy's local changes upstream's, silently.")
         endif()
-        if(NOT "${FASTCACHED_VENDOR_RESYNC_ROOT}" IN_LIST thirdPartyRoots)
+        if(NOT "${PACE_VENDOR_RESYNC_ROOT}" IN_LIST thirdPartyRoots)
             message(FATAL_ERROR
-                "check-vendor-verbatim: FASTCACHED_VENDOR_RESYNC_ROOT is `${FASTCACHED_VENDOR_RESYNC_ROOT}`, "
+                "check-vendor-verbatim: PACE_VENDOR_RESYNC_ROOT is `${PACE_VENDOR_RESYNC_ROOT}`, "
                 "which scripts/lib/third-party-roots.txt does not name. The roots are: ${rootsText}. A new "
                 "copy is a row there first, then a RESYNC of it.")
         endif()
-        set(resyncRoot "${FASTCACHED_VENDOR_RESYNC_ROOT}")
+        set(resyncRoot "${PACE_VENDOR_RESYNC_ROOT}")
     elseif(NOT EXISTS "${manifestPath}")
         message(FATAL_ERROR
             "check-vendor-verbatim: there is no ${manifestPath} to carry upstream hashes forward "
             "from, so a regeneration cannot tell a local change from an upstream file. A first "
-            "import, whose files are all upstream's, is -DFASTCACHED_VENDOR_WRITE_MANIFEST=RESYNC "
-            "with -DFASTCACHED_VENDOR_RESYNC_ROOT=<root>.")
+            "import, whose files are all upstream's, is -DPACE_VENDOR_WRITE_MANIFEST=RESYNC "
+            "with -DPACE_VENDOR_RESYNC_ROOT=<root>.")
     endif()
     # Carried forward in BOTH modes: a RESYNC of one root still carries every other root's
     # upstream hashes, which is the point of naming the root.
     if(EXISTS "${manifestPath}")
         file(READ "${manifestPath}" previousRaw)
-        fastcached_read_manifest("${previousRaw}")
+        pace_read_manifest("${previousRaw}")
         if(NOT "${malformedLines}" STREQUAL "")
             message(FATAL_ERROR
                 "check-vendor-verbatim: the manifest being replaced has line(s) this script cannot "
@@ -236,7 +236,7 @@ if(FASTCACHED_VENDOR_WRITE_MANIFEST)
     foreach(rel IN LISTS vendorFiles)
         string(MD5 key "${rel}")
         set(hash "${currentHash_${key}}")
-        fastcached_root_of("${rel}" relRoot)
+        pace_root_of("${rel}" relRoot)
         if(NOT "${resyncRoot}" STREQUAL "" AND "${relRoot}" STREQUAL "${resyncRoot}")
             set(upstream "${hash}")
         elseif(NOT DEFINED "upstream_${key}")
@@ -273,11 +273,11 @@ if(FASTCACHED_VENDOR_WRITE_MANIFEST)
 # VENDOR.md's \"Local changes\" table, and regenerating never marks a file upstream's, so a
 # regeneration cannot silence an undeclared edit:
 #
-#     cmake -DFASTCACHED_SOURCE_DIR=<root> -DFASTCACHED_VENDOR_WRITE_MANIFEST=ON \\
+#     cmake -DPACE_SOURCE_DIR=<root> -DPACE_VENDOR_WRITE_MANIFEST=ON \\
 #           -P scripts/check-vendor-verbatim.cmake
 #
 # After a re-sync of ONE root from upstream, and only then, =RESYNC with
-# -DFASTCACHED_VENDOR_RESYNC_ROOT=<root> marks that root's files upstream's.
+# -DPACE_VENDOR_RESYNC_ROOT=<root> marks that root's files upstream's.
 #
 ${lines}")
     set(resyncText "")
@@ -293,7 +293,7 @@ if(NOT EXISTS "${manifestPath}")
     message(FATAL_ERROR
         "check-vendor-verbatim: ${manifestPath} does not exist, so the ${fileCount} vendored "
         "files could not be checked against anything. Regenerate it with "
-        "-DFASTCACHED_VENDOR_WRITE_MANIFEST=ON and commit it -- deleting the manifest is not "
+        "-DPACE_VENDOR_WRITE_MANIFEST=ON and commit it -- deleting the manifest is not "
         "how a deliberate local change is recorded -- VENDOR.md's \"Local changes\" section is.")
 endif()
 
@@ -304,7 +304,7 @@ file(READ "${manifestPath}" manifestRaw)
 # stores it as LF. Without it the check passes for whoever regenerated and fails for everyone
 # who then checks it out -- or the reverse, depending on which machine ran last.
 #
-# NOT `fastcached_split_lines_verbatim` from scripts/lib/CheckCommon.cmake, and this
+# NOT `pace_split_lines_verbatim` from scripts/lib/CheckCommon.cmake, and this
 # is a deliberate non-reuse rather than an oversight. That helper BLANKS `[` and `]`
 # and escapes `;`, which is right for its job -- scanning source text for a pattern,
 # where a bracket is noise. Here the lines are round-tripped and compared for BYTE
@@ -313,14 +313,14 @@ file(READ "${manifestPath}" manifestRaw)
 # fail loudly rather than silently, but it would fail, and the refusal would name the
 # wrong cause. CheckCommon's own header records that a reader whose lines must stay
 # verbatim is the case it does not serve.
-fastcached_read_manifest("${manifestRaw}")
+pace_read_manifest("${manifestRaw}")
 if(NOT "${malformedLines}" STREQUAL "")
     list(JOIN malformedLines "\n    " malformedText)
     message(FATAL_ERROR
         "check-vendor-verbatim: vendor/MANIFEST has line(s) that are neither a hash and a path "
         "nor one of the two local-change forms, so the files they name were not checked:\n"
         "    ${malformedText}\n"
-        "Regenerate the manifest with -DFASTCACHED_VENDOR_WRITE_MANIFEST=ON rather than editing it.")
+        "Regenerate the manifest with -DPACE_VENDOR_WRITE_MANIFEST=ON rather than editing it.")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -341,10 +341,10 @@ if(NOT current STREQUAL expected)
         endif()
         if(NOT current MATCHES "(^|\n)${line}\n")
             string(REGEX REPLACE "^[0-9a-fA-F]+  " "" path "${line}")
-            fastcached_root_of("${path}" pathRoot)
+            pace_root_of("${path}" pathRoot)
             if("${pathRoot}" STREQUAL "")
                 list(APPEND outside "${path}")
-            elseif(EXISTS "${FASTCACHED_SOURCE_DIR}/${path}")
+            elseif(EXISTS "${PACE_SOURCE_DIR}/${path}")
                 list(APPEND changed "${path}")
             else()
                 list(APPEND missing "${path}")
@@ -419,7 +419,7 @@ if(EXISTS "${vendorDocPath}")
         string(REGEX MATCHALL "`[^`]+`" rowPaths "${line}")
         foreach(rowPath IN LISTS rowPaths)
             string(REPLACE "`" "" rowPath "${rowPath}")
-            fastcached_root_of("${rowPath}" rowRoot)
+            pace_root_of("${rowPath}" rowRoot)
             if(NOT "${rowRoot}" STREQUAL "")
                 list(APPEND declaredPaths "${rowPath}")
             endif()
@@ -484,7 +484,7 @@ message(FATAL_ERROR
     "was regenerated over the edit.\n\n"
     "If the change is DELIBERATE, it is made UPSTREAM first and re-vendored (VENDOR.md, \"How "
     "to send a change back\"), then needs both halves in the SAME commit: regenerate the "
-    "manifest with -DFASTCACHED_VENDOR_WRITE_MANIFEST=ON, which records each changed file's "
+    "manifest with -DPACE_VENDOR_WRITE_MANIFEST=ON, which records each changed file's "
     "upstream hash, and add a row to VENDOR.md's \"Local changes\" table naming every such "
     "file in backticks, saying what and why and which upstream it goes to. Regenerating "
     "alone does not silence this check, and that is the point of it.\n\n"

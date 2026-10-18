@@ -11,13 +11,13 @@ installer pane, the version derivation, or the release job's asset list.
 <!-- agent-tripwire: The payload is rooted at `/`, not `/usr`; third-party `install()` rules are excluded -->
 
 - **The package payload is rooted at `/`, not `/usr`.** `/etc` cannot sit under
-  a `/usr` prefix, so `FASTCACHED_INSTALL_BINDIR`/`DOCDIR` spell their own
-  `usr/` (and `opt/fastcached/` on macOS). A relative destination for the units
+  a `/usr` prefix, so `PACE_INSTALL_BINDIR`/`DOCDIR` spell their own
+  `usr/` (and `opt/pace/` on macOS). A relative destination for the units
   would put them where systemd never looks — and on macOS an *absolute*
   `install(DESTINATION)` escapes CPack's staging tree and writes to the build
   host's real filesystem.
 - **Neither a macOS `.pkg` nor an MSI has a conffile mechanism.** Both overwrite
-  their payload on every install, so on both the live `fastcached.yaml` is
+  their payload on every install, so on both the live `pace-kv.yaml` is
   deliberately not payload: only a `.default` template ships, and it is copied to
   the real location exactly once, when nothing is there. macOS does this in the
   Runtime postinstall (`seed-config.sh.inc`), Windows in a custom action running
@@ -51,7 +51,7 @@ installer pane, the version derivation, or the release job's asset list.
   at build time, on every platform at once:
 
   ```
-  file INSTALL cannot find ".../target/fastcache-cli": No such file or directory
+  file INSTALL cannot find ".../target/pacectl": No such file or directory
   ```
 
   Measured (PR #1198): all three `Package (...)` jobs failed identically, and the
@@ -60,9 +60,9 @@ installer pane, the version derivation, or the release job's asset list.
   like when one platform is red for a second reason. Add the target to all three
   `cmake --build ... --target ...` lines in `build.yml`, to the macOS *redistributable*
   loop -- a separate list, because that one asks which binaries are in the PAYLOAD
-  while `FASTCACHED_MACOS_LINKED_TOOLS` asks which get a `/usr/local/bin` symlink,
+  while `PACE_MACOS_LINKED_TOOLS` asks which get a `/usr/local/bin` symlink,
   and the two coincide today without having to -- and to
-  `FASTCACHED_MACOS_LINKED_TOOLS` itself.
+  `PACE_MACOS_LINKED_TOOLS` itself.
 
   `macos-package-e2e.sh` used to keep two more copies of that symlink list, and
   the new binary reached the variable and neither copy: its symlink was asserted
@@ -75,12 +75,12 @@ installer pane, the version derivation, or the release job's asset list.
   merge -- `check-release-gate` stops a red packaging job shipping, which means the
   cost lands at release time on whoever is cutting it. A guard deriving each
   packaging job's target list from the installed set is
-  [#1202](https://github.com/LASTRADA-Software/fastcached/issues/1202); until it
+  [#1202](https://github.com/LASTRADA-Software/pace/issues/1202); until it
   exists, the list above is the whole of it.
 - **One install component per application on Windows, one payload everywhere else.** The app
   table in `src/apps/CMakeLists.txt` carries each app's COMPONENT; on Windows it is an MSI
-  feature (`CM_C_<component>`, declared from `FASTCACHED_WINDOWS_FEATURES`), and the shared
-  payload (docs, licence, VC++ runtime -- `FASTCACHED_SHARED_COMPONENT`) rides the REQUIRED Cli
+  feature (`CM_C_<component>`, declared from `PACE_WINDOWS_FEATURES`), and the shared
+  payload (docs, licence, VC++ runtime -- `PACE_SHARED_COMPONENT`) rides the REQUIRED Cli
   feature, as does `PATH`, which attached to a deselectable feature left every binary
   unreachable by name once it was deselected. Off Windows every app installs under Runtime, so
   the .deb, .rpm and .pkg payloads are meant to be unchanged; a listing diff of each package
@@ -104,7 +104,7 @@ installer pane, the version derivation, or the release job's asset list.
   again. The test asks the git **index**, not the filesystem, so it fails at
   `git add` time rather than after a commit, and an untracked local `version.txt`
   stays legitimate (it is in `.gitignore` and is read by nothing). A build that
-  cannot reach a tag states its version with `-DFASTCACHED_VERSION=1.2.3`.
+  cannot reach a tag states its version with `-DPACE_VERSION=1.2.3`.
 - **The resolved version triple must stay a bare numeric `X.Y.Z`, and the fallback
   with it.** `CMakeLists.txt` feeds it to `project(VERSION ...)`, which rejects
   anything else, and CPack carries it into the MSI `ProductVersion` (major/minor
@@ -148,7 +148,7 @@ installer pane, the version derivation, or the release job's asset list.
 The version is the git tag, so cutting a release is pushing one:
 
 ```sh
-git tag -a v0.1.0 -m "fastcached 0.1.0"
+git tag -a v0.1.0 -m "Pace 0.1.0"
 git push origin v0.1.0
 ```
 

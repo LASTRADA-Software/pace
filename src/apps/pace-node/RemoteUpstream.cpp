@@ -1,0 +1,240 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "RemoteUpstream.hpp"
+
+#include <Pace/Core/HostPort.hpp>
+
+#include <format>
+#include <memory>
+#include <utility>
+
+#include <EndpointDial.hpp>
+#include <core/net/SocketAddress.hpp>
+#include <core/net/SocketDeadline.hpp>
+
+namespace Pace::Node
+{
+
+UpstreamReachability::UpstreamReachability(core::platform::IClock const& clock,
+                                           std::chrono::milliseconds retryInterval) noexcept:
+    _clock { clock },
+    _retryInterval { retryInterval }
+{
+}
+
+bool UpstreamReachability::ShouldDial()
+{
+    if (!_nextProbeAt.has_value())
+        return true;
+
+    auto const now = _clock.now();
+    if (now < *_nextProbeAt)
+        return false;
+
+    // Stamped as the probe is GRANTED, not when it fails: see the class comment.
+    _nextProbeAt = now + _retryInterval;
+    return true;
+}
+
+void UpstreamReachability::Answered() noexcept
+{
+    _nextProbeAt.reset();
+}
+
+void UpstreamReachability::Unanswered()
+{
+    _nextProbeAt = _clock.now() + _retryInterval;
+}
+
+RemoteUpstream::RemoteUpstream(std::string endpoint,
+                               ICredentialSource const& credential,
+                               Cc::CredentialNotice::Sink noticeSink,
+                               core::net::IConnector& connector,
+                               core::net::EventLoop* reactor,
+                               core::net::IAsyncAddressResolver& resolver,
+                               core::platform::IClock& clock,
+                               UpstreamTimings timings):
+    _endpoint { std::move(endpoint) },
+    _credential { credential },
+    _notice { std::move(noticeSink) },
+    _connector { connector },
+    _reactor { reactor },
+    _resolver { resolver },
+    _clock { clock },
+    _connectTimeout { timings.connectTimeout },
+    _ioTimeout { timings.ioTimeout },
+    _addressRefreshInterval { timings.addressRefreshInterval },
+    _reachability { clock, timings.unreachableRetryInterval }
+{
+    // Split ONCE. `_endpoint` is fixed for this object's life, so re-parsing it per
+    // operation would be the same shape of waste the resolution itself was.
+    // `ParseDialEndpoint`, which is the predicate `--upstream` is already validated
+    // with -- not `SplitHostPort`, whose port is text and which deliberately keeps an
+    // unsplittable value whole for the membership matching it serves instead.
+    if (auto const split = ParseDialEndpoint(_endpoint); split.has_value())
+    {
+        _host = split->first;
+        _port = split->second;
+    }
+}
+
+core::async::Task<std::string> RemoteUpstream::DialTarget()
+{
+    // Nothing to hold an address FOR: an endpoint that did not parse is handed to
+    // `DialEndpoint` exactly as before, so its failure stays where it was.
+    //
+    // No "is it already a literal" branch. A literal resolves for free, so the branch
+    // would buy nothing and would be a second thing to be wrong about -- the resolver
+    // hands a literal straight back and the interval simply never matters for one.
+    if (_host.empty())
+        co_return _endpoint;
+
+    // INTERVAL, never miss-triggered. This is the whole guard: a refresh driven by a
+    // failed dial or a cache miss lets a remote peer force one lookup per request
+    // just by asking for keys this cache does not hold.
+    auto const now = _clock.now();
+    if (_lastLookupAt.has_value() && now - *_lastLookupAt < _addressRefreshInterval)
+        co_return _resolved.value_or(_endpoint);
+
+    // Stamped BEFORE the lookup and regardless of how it goes, so a failing resolver
+    // is retried once per interval rather than once per operation.
+    _lastLookupAt = now;
+
+    auto resolved = co_await _resolver.resolve(_host, _port, _reactor);
+    if (!resolved.has_value() || resolved->empty())
+    {
+        // A failed lookup does NOT reset the timer, so a resolver that is down is
+        // retried once per interval rather than once per operation. Keep serving the
+        // previous address if there is one -- it worked more recently than this
+        // attempt did -- and otherwise fall back to the name, which is exactly what
+        // this class did before it held anything.
+        co_return _resolved.value_or(_endpoint);
+    }
+
+    // **Only a UNIQUE candidate is held**, and this is a correctness bound rather than
+    // caution. `core::net::detail::runConnectFlow` tries EVERY candidate a name resolves to, and
+    // its own comment names the case: an AAAA on a machine with no IPv6 route, which
+    // is exactly what trying every candidate exists for. Pinning the first would hand
+    // the connector one address and destroy that fallback for a whole interval -- and
+    // silently, because an unreachable upstream is reported as a cache miss by design.
+    //
+    // So a multi-answer name keeps dialling by NAME, which costs what it always cost
+    // and behaves exactly as it always did. The saving applies to the single-answer
+    // case, which is what an `--upstream` naming one cache host normally is.
+    if (resolved->size() != 1)
+        co_return _endpoint;
+
+    auto const host = core::net::formatPeerAddress(resolved->front());
+
+    // `core::net::formatPeerAddress` renders no `sin6_scope_id`, so a link-local answer would
+    // come back as a zone-less `fe80::...` that cannot be dialled at all. The name
+    // carries the zone through the resolver, so hand the name back instead.
+    if (host.empty() || host.starts_with("fe80:"))
+        co_return _endpoint;
+
+    // `FormatHostPort` rather than a fourth author of the bracket-a-v6-host rule --
+    // its own header exists so that rule cannot drift between call sites.
+    _resolved = FormatHostPort(host, _port);
+    co_return *_resolved;
+}
+
+void RemoteUpstream::RecordExchange(Cc::CacheOutcomeKind kind)
+{
+    if (kind == Cc::CacheOutcomeKind::Transport)
+        _reachability.Unanswered();
+    else
+        _reachability.Answered();
+}
+
+core::async::Task<std::optional<std::vector<std::byte>>> RemoteUpstream::Fetch(std::string_view key)
+{
+    // Believed unreachable: a miss, without a lookup or a dial. See `UpstreamReachability` for why
+    // a stale answer here is safe in both directions.
+    if (!_reachability.ShouldDial())
+        co_return std::nullopt;
+
+    auto const dialTarget = co_await DialTarget();
+    auto client =
+        co_await Cc::DialEndpoint(&_connector, dialTarget, core::net::DialOptions { .connectTimeout = _connectTimeout });
+    if (client == nullptr)
+    {
+        // Unreachable is a miss. `LocalCache` documents why: the caller compiles
+        // either way, and a build that could FAIL because a cache was down is the
+        // one outcome this subsystem must never produce. Remembered, so the next
+        // miss does not pay this dial again.
+        _reachability.Unanswered();
+        co_return std::nullopt;
+    }
+
+    // Bounds the WHOLE exchange by closing the socket. Closing completes whatever
+    // the exchange is parked on, so it reports a transport failure and this
+    // reports a miss, which is what a caller of a best-effort upstream wants.
+    //
+    // Only with a reactor: over a blocking connector the socket's own
+    // `SO_RCVTIMEO` is already the bound, and a second mechanism for one job is
+    // how the two come to disagree.
+    core::net::SocketDeadlineTarget target { .socket = client.get() };
+    auto const bound = core::net::armSocketDeadline(_reactor, _ioTimeout, &target);
+
+    auto outcome = co_await Cc::CacheFetch(client.get(), &_notice, key, _credential.Current());
+    // Only now is reachability known: a connection whose exchange never completed -- the deadline
+    // closed a stalled peer, or the peer went away -- is remembered exactly as a failed dial is.
+    RecordExchange(outcome.kind);
+    if (!outcome.IsHit())
+        co_return std::nullopt;
+    co_return std::move(outcome.value);
+}
+
+core::async::Task<UpstreamStore> RemoteUpstream::Store(std::string_view key, std::span<std::byte const> value)
+{
+    // Believed unreachable: declined without a dial, and counted as a declined store is -- the
+    // fleet did not get this object either way.
+    if (!_reachability.ShouldDial())
+        co_return UpstreamStore::Declined;
+
+    auto const dialTarget = co_await DialTarget();
+    auto client =
+        co_await Cc::DialEndpoint(&_connector, dialTarget, core::net::DialOptions { .connectTimeout = _connectTimeout });
+    if (client == nullptr)
+    {
+        // `Declined`, not `NotConfigured`: there IS a shared cache and this node
+        // could not reach it, which is exactly the condition an operator wants the
+        // failure counter to be counting.
+        _reachability.Unanswered();
+        co_return UpstreamStore::Declined;
+    }
+
+    core::net::SocketDeadlineTarget target { .socket = client.get() };
+    auto const bound = core::net::armSocketDeadline(_reactor, _ioTimeout, &target);
+
+    // The roots travel empty, and what makes that correct is NOT what this comment
+    // used to say. It claimed "the launcher rewrote its own layout out of the value
+    // before it ever reached this node", which is false: a launcher sends its roots
+    // and lets the server canonicalize. While that premise stood, a node forwarded a
+    // value carrying the producer's absolute paths under empty roots -- so the
+    // daemon's own canonicalization matched nothing and the poison reached the shared
+    // cache intact (#319).
+    //
+    // It is correct now because `CacheProxy` canonicalizes at the STORE that reaches
+    // this node, so what is forwarded is already tokens, and empty roots ask the
+    // daemon to rewrite nothing rather than to rewrite against the wrong layout. That
+    // is the invariant this seam depends on and it is one call away, so state it
+    // here: anything else that reaches `LocalCache::Store` must have gone through
+    // `CanonicalStoredValue` first, or this forward relays the same defect again.
+    //
+    // The request is a LOCAL rather than a temporary in the call expression:
+    // `CacheStore` takes it by reference and its frame outlives the expression, so
+    // a temporary would dangle at the first suspend.
+    CompileCacheWire::StoreRequest const request {
+        .key = key, .prefetchGroup = {}, .srcRoot = {}, .buildTree = {}, .value = value
+    };
+    auto const outcome = co_await Cc::CacheStore(client.get(), &_notice, request, _credential.Current());
+    RecordExchange(outcome.kind);
+
+    // A STORE that succeeded comes back as `Hit`: the wire answers `Ok`, and
+    // `CacheOutcomeKind` names the STATUS rather than the verb. Anything else --
+    // a refusal, a transport failure -- is the fleet declining the object, which
+    // `LocalCache` has already been told costs this machine nothing.
+    co_return outcome.kind == Cc::CacheOutcomeKind::Hit ? UpstreamStore::Stored : UpstreamStore::Declined;
+}
+
+} // namespace Pace::Node

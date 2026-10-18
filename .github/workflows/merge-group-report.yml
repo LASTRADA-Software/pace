@@ -182,7 +182,7 @@ jobs:
           # objection to reporting pushes at all. A merge-group failure repeating
           # IS a new fact, so it keeps commenting.
           if [[ "$EVENT" == "push" ]]; then
-            export FASTCACHED_REPORT_ONLY_IF_NEW=1
+            export PACE_REPORT_ONLY_IF_NEW=1
           fi
           while IFS=$'\t' read -r context conclusion jobUrl; do
             [[ -n "$context" ]] || continue

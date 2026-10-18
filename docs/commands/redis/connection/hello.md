@@ -2,7 +2,7 @@
 
 **Protocols:** Redis RESP2 / RESP3
 
-Negotiates protocol version. fastcached accepts version 2 and version 3.
+Negotiates protocol version. pace-kv accepts version 2 and version 3.
 A connection starts in RESP2; `HELLO 3` upgrades it, and every later
 reply on that connection uses RESP3 types.
 

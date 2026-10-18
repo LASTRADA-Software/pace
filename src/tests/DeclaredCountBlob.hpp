@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/WireFields.hpp>
+#include <Pace/Core/WireFields.hpp>
 
 #include <array>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A wire blob assembled field by field, so a case can declare a count the blob
@@ -143,4 +143,4 @@ class DeclaredCountBlob
 /// defect class was reported with.
 inline constexpr std::uint32_t ImpossibleCount = 0xFFFFFFFFU;
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

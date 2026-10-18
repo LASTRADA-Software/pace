@@ -8,18 +8,18 @@
 # postinstall-runtime.sh.in for why).
 set -u
 
-PREFIX="/@FASTCACHED_MACOS_PREFIX@"
-LABEL="@FASTCACHED_MACOS_BUNDLE_ID@"
-ACCOUNT="@FASTCACHED_MACOS_SERVICE_ACCOUNT@"
+PREFIX="/@PACE_MACOS_PREFIX@"
+LABEL="@PACE_MACOS_BUNDLE_ID@"
+ACCOUNT="@PACE_MACOS_SERVICE_ACCOUNT@"
 
-@FASTCACHED_MACOS_SEED_CONFIG@
+@PACE_MACOS_SEED_CONFIG@
 
-@FASTCACHED_MACOS_CREATE_ACCOUNT@
+@PACE_MACOS_CREATE_ACCOUNT@
 
-# macOS has no sysusers.d, so the account that packaging/linux/fastcached.sysusers
+# macOS has no sysusers.d, so the account that packaging/linux/pace-kv.sysusers
 # declares in one line has to be built by hand -- see the shared fragment above,
 # which is also what creates the worker's account from the Runtime component.
-fastcached_create_account "$ACCOUNT" "fastcached daemon"
+pace_create_account "$ACCOUNT" "pace-kv daemon"
 
 # The daemon's cache, and ONLY that. This used to be `chown -R ${PREFIX}/var`,
 # which also swept up ${PREFIX}/var/log -- where every system-scope service now
@@ -36,8 +36,8 @@ fastcached_create_account "$ACCOUNT" "fastcached daemon"
 # packaged registration passes only --config: storage_path lives in the YAML, so
 # the spec has no ownedDirectories to hand over.
 mkdir -p "${PREFIX}/var" "${PREFIX}/var/log" "${PREFIX}/var/cache" || true
-if [ -n "${FASTCACHED_ACCOUNT_UID:-}" ] && [ -n "${FASTCACHED_ACCOUNT_GID:-}" ]; then
-    /usr/sbin/chown -R "${FASTCACHED_ACCOUNT_UID}:${FASTCACHED_ACCOUNT_GID}" "${PREFIX}/var/cache" || true
+if [ -n "${PACE_ACCOUNT_UID:-}" ] && [ -n "${PACE_ACCOUNT_GID:-}" ]; then
+    /usr/sbin/chown -R "${PACE_ACCOUNT_UID}:${PACE_ACCOUNT_GID}" "${PREFIX}/var/cache" || true
 fi
 
 # The daemon drops to ${ACCOUNT} before it opens its config, so the file has to
@@ -54,10 +54,10 @@ fi
 # state --install-service refuses -- mode 0640, group wheel, unreadable by the
 # daemon. Leaving the mode alone degrades to the status quo ante, which is
 # merely too permissive rather than broken, and says so.
-if [ -n "${FASTCACHED_ACCOUNT_GID:-}" ] && /usr/sbin/chown "0:${FASTCACHED_ACCOUNT_GID}" "$CONFIG" 2>/dev/null; then
+if [ -n "${PACE_ACCOUNT_GID:-}" ] && /usr/sbin/chown "0:${PACE_ACCOUNT_GID}" "$CONFIG" 2>/dev/null; then
     /bin/chmod 0640 "$CONFIG" 2>/dev/null || true
 else
-    echo "fastcached: could not give '${ACCOUNT}' ownership of ${CONFIG};" \
+    echo "pace-kv: could not give '${ACCOUNT}' ownership of ${CONFIG};" \
         "leaving its mode alone. Put no secrets in it until you have run:" \
         "chown root:${ACCOUNT} ${CONFIG} && chmod 0640 ${CONFIG}" >&2
 fi
@@ -75,7 +75,7 @@ case "${CONSOLE_USER:-}" in
         UID_OF_USER=$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null) || UID_OF_USER=""
         if [ -n "$UID_OF_USER" ]; then
             /bin/launchctl asuser "$UID_OF_USER" /usr/bin/sudo -u "$CONSOLE_USER" \
-                "${PREFIX}/bin/fastcached" --uninstall-service --service-scope=user \
+                "${PREFIX}/bin/pace-kv" --uninstall-service --service-scope=user \
                 >/dev/null 2>&1 || true
         fi
         ;;
@@ -83,7 +83,7 @@ esac
 
 # Registration goes through the daemon's own --install-service rather than a
 # plist shipped in the payload, so there is exactly one implementation of "how
-# fastcached describes itself to a supervisor" — the same reason the WiX
+# pace-kv describes itself to a supervisor" — the same reason the WiX
 # fragment drives --install-service instead of using a ServiceInstall element.
 #
 # Only --config is passed. A --storage here would land in ProgramArguments, and
@@ -96,17 +96,17 @@ esac
 # must exit 0 whatever happens, so the only trace of a refusal to register is
 # whatever it wrote — and `|| true` on its own turns a precise diagnostic into
 # a service that is simply absent, which is what happened here once already.
-REGISTER_LOG="/var/log/fastcached-install.log"
+REGISTER_LOG="/var/log/pace-install.log"
 {
     echo "--- $(date -u '+%Y-%m-%dT%H:%M:%SZ') registering the system daemon"
-    "${PREFIX}/bin/fastcached" --install-service --service-scope=system \
-        --config="${PREFIX}/etc/fastcached.yaml" 2>&1
+    "${PREFIX}/bin/pace-kv" --install-service --service-scope=system \
+        --config="${PREFIX}/etc/pace-kv.yaml" 2>&1
     echo "--- exit=$?"
 } >>"$REGISTER_LOG" 2>&1 || true
 
 # Belt and braces: the label must be the one the uninstaller looks for.
 if ! /bin/launchctl print "system/${LABEL}" >/dev/null 2>&1; then
-    echo "fastcached: launchd job ${LABEL} did not register; see ${REGISTER_LOG}" >&2
+    echo "pace-kv: launchd job ${LABEL} did not register; see ${REGISTER_LOG}" >&2
 fi
 
 exit 0

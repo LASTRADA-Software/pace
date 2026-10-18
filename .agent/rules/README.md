@@ -32,8 +32,8 @@ the build or the test suite already says it.
 <!-- table-total: none -->
 | File | Governs |
 |---|---|
-| [`compile-cache.md`](compile-cache.md) | `apps/fastcache-cc/`, `CompileCache/` — the cache key, path canonicalization, manifests, replay |
-| [`distributed-compilation.md`](distributed-compilation.md) | `Distributed/`, `apps/fastcache-compile-node/` — dispatch, workers, the scheduler, node tiers |
+| [`compile-cache.md`](compile-cache.md) | `apps/pace-cc/`, `CompileCache/` — the cache key, path canonicalization, manifests, replay |
+| [`distributed-compilation.md`](distributed-compilation.md) | `Distributed/`, `apps/pace-node/` — dispatch, workers, the scheduler, node tiers |
 | [`consensus-and-cluster.md`](consensus-and-cluster.md) | `Consensus/`, `Cluster/` — Raft, discovery, the identity-key handshakes, membership |
 | [`wire-and-protocol.md`](wire-and-protocol.md) | `Protocol/`, `Net/` — framing, the auth gate, sockets |
 | [`platform-service-and-config.md`](platform-service-and-config.md) | `Platform/`, `Config/` — service registration, config lookup and trust, the CLI table |
@@ -65,7 +65,7 @@ diffs. An *accepted trade-off* is different and does belong here, under
 An entry there is a top-level bullet whose **leading** reference is the issue:
 
 ```
-- **[#123](https://github.com/LASTRADA-Software/fastcached/issues/123)** — what is left.
+- **[#123](https://github.com/LASTRADA-Software/pace/issues/123)** — what is left.
     - a sub-point, indented FOUR spaces.
 ```
 
@@ -202,7 +202,7 @@ the split. Link them as plain markdown.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1572](https://github.com/LASTRADA-Software/fastcached/issues/1572)** — the
+- **[#1572](https://github.com/LASTRADA-Software/pace/issues/1572)** — the
   tripwire markers are required per `##` heading, and a rule arrives as a BULLET
   under existing prose, so a rule added to an already-marked section is invisible
   to `ctest -R rulebook-tripwires`. Measured: 137 sections watched against 391

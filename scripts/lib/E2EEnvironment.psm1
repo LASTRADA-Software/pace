@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The environment a PowerShell e2e fixture starts from -- the PowerShell half of
-# `e2e_scrub_fastcache_environment` in `e2e-common.sh`.
+# `e2e_scrub_pace_environment` in `e2e-common.sh`.
 #
-# The launcher, fastcached and the node read their whole configuration from FASTCACHE_*
+# The launcher, pace-kv and the node read their whole configuration from PACE_*
 # variables, so one this process inherited decides what a fixture measures: an operator's
-# FASTCACHE_SCHEDULER dispatches each "local" compile to their fleet, whose objects name a
-# worker's scratch directory instead of the fixture's checkout, and FASTCACHE_VERIFY or
-# FASTCACHE_NO_DIRECT changes the outcome a case asserts. A fixture sets what it means and
+# PACE_SCHEDULER dispatches each "local" compile to their fleet, whose objects name a
+# worker's scratch directory instead of the fixture's checkout, and PACE_VERIFY or
+# PACE_NO_DIRECT changes the outcome a case asserts. A fixture sets what it means and
 # inherits nothing.
 #
 # IMPORTING this module clears them, so a fixture gets that by construction rather than by
 # remembering a loop: two fixtures carried their own copy, one of them wedged into the
 # middle of an unrelated comment, and the rest carried none. `E2EPorts.psm1` imports it, so
 # every fixture that draws a port is covered too. Import it BEFORE the fixture's own first
-# `$env:FASTCACHE_*` assignment -- which is what "the fixture sets what it means" requires.
+# `$env:PACE_*` assignment -- which is what "the fixture sets what it means" requires.
 
 # A variable the HARNESS reads and no server or launcher does, which an operator sets on
 # purpose and which a fixture must therefore see. None on this side today; the POSIX list
@@ -24,22 +24,22 @@ $script:InheritedKnobs = @()
 
 <#
 .SYNOPSIS
-    Remove every FASTCACHE_* variable from this process's environment, except the
+    Remove every PACE_* variable from this process's environment, except the
     harness knobs in `$InheritedKnobs`.
 #>
-function Clear-FastcacheEnvironment {
+function Clear-PaceEnvironment {
     Get-ChildItem Env: |
-        Where-Object { $_.Name -like 'FASTCACHE_*' -and $script:InheritedKnobs -notcontains $_.Name } |
+        Where-Object { $_.Name -like 'PACE_*' -and $script:InheritedKnobs -notcontains $_.Name } |
         ForEach-Object { Remove-Item -Path "Env:\$($_.Name)" -ErrorAction SilentlyContinue }
 }
 
-Clear-FastcacheEnvironment
+Clear-PaceEnvironment
 
 # ---------------------------------------------------------------------------
 # A fixture's launcher records into a state directory of the run's own
 # ---------------------------------------------------------------------------
 #
-# The launcher keeps its statistics in `<state>/fastcache-cc/invocations.log`, and `-z`
+# The launcher keeps its statistics in `<state>/pace-cc/invocations.log`, and `-z`
 # DELETES that file. A fixture that runs `-z` against the developer's state directory
 # deletes their statistics; one that merely compiles appends its records to them. Both
 # happened: the Windows launcher e2e did the first, and three fixtures the second.
@@ -59,12 +59,12 @@ Clear-FastcacheEnvironment
 
 # Where the launcher decides its state directory. Read, never restated: a base the
 # launcher learns to honour later is redirected without anybody remembering this file.
-$script:LauncherStateSource = Join-Path $PSScriptRoot "../../src/apps/fastcache-cc/Stats.cpp"
+$script:LauncherStateSource = Join-Path $PSScriptRoot "../../src/apps/pace-cc/Stats.cpp"
 
 # Where under a state base the launcher keeps its log. RESTATED, because the caller's logs
 # are snapshotted at the fixture's startup, before any launcher may be asked;
 # `Enter-E2ELauncherState` refuses when the launcher's own answer disagrees.
-$script:LauncherStateLogRelative = 'fastcache-cc/invocations.log'
+$script:LauncherStateLogRelative = 'pace-cc/invocations.log'
 
 # How many trailing bytes of a present log a snapshot hashes. The launcher only appends and
 # deletes, so a smaller size or a changed tail is every way a record can be lost.
@@ -212,7 +212,7 @@ function Get-E2ELauncherStateRows([string]$Path = $script:LauncherStateSource, [
     }
     if ($branch) { throw $shape }
     $source = $kept -join "`n"
-    $reads = [regex]::Matches($source, '(\w+) = FastCache::ReadEnvironmentVariable\("([A-Z_]+)"\)')
+    $reads = [regex]::Matches($source, '(\w+) = Pace::ReadEnvironmentVariable\("([A-Z_]+)"\)')
     $bases = [regex]::Matches($source, 'base = \*(\w+)(?:\s*\+\s*"([^"]*)")?\s*;')
     $rows = @()
     foreach ($read in $reads) {
@@ -404,7 +404,7 @@ function Test-E2ELauncherJobBinding([System.Management.Automation.Language.Comma
         `$MyInvocation.BoundParameters.Launcher` (`Test-E2ELauncherBoundParameter`);
       * a path an exempt command derives from `$Launcher` and the fixture STORES in another
         variable, then runs through that variable (`$d = Split-Path $Launcher` and later
-        `& (Join-Path $d fastcache-cc.exe)`): an assignment is the one sink accepted without
+        `& (Join-Path $d pace-cc.exe)`): an assignment is the one sink accepted without
         following what the variable is used for next.
 .OUTPUTS
     References (how many were judged) and Violations (one line each).
@@ -468,13 +468,13 @@ $script:LauncherScanControls = @(
     @{ Text = 'Start-Process -FilePath $Launcher'; References = 1; Refused = 1 }
     @{ Text = '& (Resolve-Path $Launcher).Path -z'; References = 1; Refused = 1 }
     @{ Text = 'Start-Process -FilePath (Resolve-Path $Launcher) -ArgumentList "-z" -Wait'; References = 1; Refused = 1 }
-    @{ Text = '& (Join-Path (Split-Path $Launcher) "fastcache-cc.exe") -z'; References = 1; Refused = 1 }
+    @{ Text = '& (Join-Path (Split-Path $Launcher) "pace-cc.exe") -z'; References = 1; Refused = 1 }
     @{ Text = 'Start-Job -ScriptBlock { param($l) & $l -z } -ArgumentList $Launcher'; References = 1; Refused = 1 }
     @{ Text = '& $script:Launcher -z'; References = 1; Refused = 1 }
     @{ Text = '& $global:Launcher -z'; References = 1; Refused = 1 }
     @{ Text = 'Start-Job -ScriptBlock { & $using:Launcher -z }'; References = 1; Refused = 1 }
     @{ Text = '. (Resolve-Path $Launcher) -z'; References = 1; Refused = 1 }
-    @{ Text = '& "$(Split-Path $Launcher)\fastcache-cc.exe" -z'; References = 1; Refused = 1 }
+    @{ Text = '& "$(Split-Path $Launcher)\pace-cc.exe" -z'; References = 1; Refused = 1 }
     @{ Text = 'Invoke-Command -ScriptBlock { param($p) & $p } -ArgumentList (Resolve-Path $Launcher)'; References = 1; Refused = 1 }
     @{ Text = 'Resolve-Path $Launcher | ForEach-Object { & $_ -z }'; References = 1; Refused = 1 }
     @{ Text = '& (Get-Item (Resolve-Path $Launcher)) -z'; References = 1; Refused = 1 }
@@ -611,7 +611,7 @@ function Enter-E2ELauncherState([Parameter(Mandatory)][string]$Launcher, [Parame
 
     $rows = @(Get-E2ELauncherStateRows)
     $script:LauncherStateEntries++
-    $root = Join-Path ([IO.Path]::GetTempPath()) "fastcache-cc-e2e-state-$PID-$($script:LauncherStateEntries)"
+    $root = Join-Path ([IO.Path]::GetTempPath()) "pace-cc-e2e-state-$PID-$($script:LauncherStateEntries)"
     # Safe to clear ONLY because the name carries this process's id: what it can reach is
     # this process's own leftover, or a dead one's -- `src/tests/ScratchPath.hpp`'s argument.
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
@@ -768,7 +768,7 @@ function Exit-E2ELauncherState($Handle, [string[]]$RunTrees = @()) {
 function Test-E2ELauncherStateSeam {
     $failures = @()
     $cases = 0
-    $work = Join-Path ([IO.Path]::GetTempPath()) "fastcache-cc-seam-selftest-$PID"
+    $work = Join-Path ([IO.Path]::GetTempPath()) "pace-cc-seam-selftest-$PID"
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $work | Out-Null
     $rows = @(Get-E2ELauncherStateRows)
@@ -781,12 +781,12 @@ function Test-E2ELauncherStateSeam {
     Set-Content -LiteralPath $fake -Value @"
 `$base = `$null
 $pick
-`$state = Join-Path `$base 'fastcache-cc'
+`$state = Join-Path `$base 'pace-cc'
 `$log = Join-Path `$state 'invocations.log'
 switch (`$args[0]) {
-    '--show-stats' { if ((Test-Path -LiteralPath `$log) -and (Get-Item -LiteralPath `$log).Length -gt 0) { "fastcache-cc statistics (`$log)" } else { "fastcache-cc: no statistics recorded yet (`$log)." } }
+    '--show-stats' { if ((Test-Path -LiteralPath `$log) -and (Get-Item -LiteralPath `$log).Length -gt 0) { "pace-cc statistics (`$log)" } else { "pace-cc: no statistics recorded yet (`$log)." } }
     '-z' { Remove-Item -LiteralPath `$log -ErrorAction SilentlyContinue }
-    default { if (-not `$env:FASTCACHE_NO_STATS) { New-Item -ItemType Directory -Force `$state | Out-Null; Add-Content -LiteralPath `$log ('$logLine'.Replace('@SOURCE@', `$args[-1])) } }
+    default { if (-not `$env:PACE_NO_STATS) { New-Item -ItemType Directory -Force `$state | Out-Null; Add-Content -LiteralPath `$log ('$logLine'.Replace('@SOURCE@', `$args[-1])) } }
 }
 "@
     $fixture = Join-Path $work 'fixture.ps1'
@@ -910,7 +910,7 @@ Use-E2ELauncherState $h { & $Launcher -z }'
     return $failures
 }
 
-Export-ModuleMember -Function Clear-FastcacheEnvironment, Get-E2ELauncherStatePlatform, Get-E2ELauncherStateRows,
+Export-ModuleMember -Function Clear-PaceEnvironment, Get-E2ELauncherStatePlatform, Get-E2ELauncherStateRows,
     Get-E2EUnwrappedLauncherUse, Test-E2EUnwrappedLauncherScan, Assert-E2ELauncherFixture, Enter-E2ELauncherState,
     Use-E2ELauncherState, Get-E2ELauncherStateRecordCount, Get-E2ELauncherCallerSnapshot, Get-E2ELauncherCallerDamage,
     Exit-E2ELauncherState, Test-E2ELauncherStateSeam, Get-E2ELauncherLogLayout, Get-E2ELauncherLogField,

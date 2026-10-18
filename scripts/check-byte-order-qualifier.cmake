@@ -59,7 +59,7 @@
 # present.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-byte-order-qualifier.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-byte-order-qualifier.cmake
 #
 # Exit codes: whatever CMake gives it. The verdict is the presence of `CMake Error`
 # in the output, which is what the FAIL_REGULAR_EXPRESSION on the registration
@@ -85,7 +85,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # No row may contain a ';' -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
-set(FastCachedByteOrderNames
+set(PaceByteOrderNames
     "htonl|32-bit host to network."
     "htons|16-bit host to network."
     "ntohl|32-bit network to host."
@@ -97,26 +97,26 @@ set(FastCachedByteOrderNames
 # Where to look.
 #
 #   <path relative to the source root>|<why this root is scanned>
-set(FastCachedByteOrderScanRoots
+set(PaceByteOrderScanRoots
     "src|Every first-party translation unit. The three occurrences so far were all under here -- two in Net/, one in an app test."
 )
 
 # Which files are judged. Wider than the extensions this tree uses today, because
 # a file this does not scan is a hole that reports green.
-set(FastCachedByteOrderScanGlobs
+set(PaceByteOrderScanGlobs
     "*.cpp" "*.cc" "*.cxx" "*.hpp" "*.h" "*.hh" "*.inl" "*.ipp"
 )
 
 # ---------------------------------------------------------------------------
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
+if(NOT DEFINED PACE_SOURCE_DIR)
     message(FATAL_ERROR
-        "FASTCACHED_SOURCE_DIR is not set. Invoke this script as: cmake "
-        "-DFASTCACHED_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
+        "PACE_SOURCE_DIR is not set. Invoke this script as: cmake "
+        "-DPACE_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
 endif()
 
-if(NOT IS_DIRECTORY "${FASTCACHED_SOURCE_DIR}")
-    message(FATAL_ERROR "'${FASTCACHED_SOURCE_DIR}' is not a directory. Is it the source root?")
+if(NOT IS_DIRECTORY "${PACE_SOURCE_DIR}")
+    message(FATAL_ERROR "'${PACE_SOURCE_DIR}' is not a directory. Is it the source root?")
 endif()
 
 # The `"value|reason"` row convention, defined once (#513). What it does with a
@@ -136,7 +136,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # into a shared module is #495, deliberately not pre-empted here.
 # @param globs The shell globs, each like `*.hpp` or `*.hpp.in`.
 # @param outVar Set to an anchored alternation regex.
-function(fastcached_globs_to_regex globs outVar)
+function(pace_globs_to_regex globs outVar)
     set(parts "")
     foreach(glob IN LISTS globs)
         string(REPLACE "." "PLACEHOLDERDOT" one "${glob}")
@@ -148,13 +148,13 @@ function(fastcached_globs_to_regex globs outVar)
     set(${outVar} "(${joined})$" PARENT_SCOPE)
 endfunction()
 
-fastcached_globs_to_regex("${FastCachedByteOrderScanGlobs}" scanRegex)
+pace_globs_to_regex("${PaceByteOrderScanGlobs}" scanRegex)
 
 # ---------------------------------------------------------------------------
 # Collect the files to judge.
 set(byteOrderNames "")
-foreach(row IN LISTS FastCachedByteOrderNames)
-    fastcached_row_fields("${row}" byteOrderName byteOrderReason)
+foreach(row IN LISTS PaceByteOrderNames)
+    pace_row_fields("${row}" byteOrderName byteOrderReason)
     list(APPEND byteOrderNames "${byteOrderName}")
 endforeach()
 
@@ -186,26 +186,26 @@ list(JOIN byteOrderNames "/" byteOrderDisplay)
 set(scanFiles "")
 set(scanHolding "")
 set(missingRoots "")
-foreach(row IN LISTS FastCachedByteOrderScanRoots)
-    fastcached_row_fields("${row}" scanRoot scanRootReason)
-    set(rootPath "${FASTCACHED_SOURCE_DIR}/${scanRoot}")
+foreach(row IN LISTS PaceByteOrderScanRoots)
+    pace_row_fields("${row}" scanRoot scanRootReason)
+    set(rootPath "${PACE_SOURCE_DIR}/${scanRoot}")
     if(IS_DIRECTORY "${rootPath}")
-        # Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its
+        # Through `pace_tracked_files`, this tree's one answer to HOW a check finds its
         # files, rather than a `GLOB_RECURSE` of the root. On a DrvFs checkout -- where every
         # gate tree takes its sources from -- walking `src/` cost more than reading every file
         # it found, and several lanes gating at once took this check past its budget. One
         # walk pattern, so the fallback traverses the root once; the globs are the FILTER.
-        fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+        pace_tracked_files("${PACE_SOURCE_DIR}"
             PATHSPECS "${scanRoot}/"
             GLOBS "${scanRoot}/*"
             FILTER "^${scanRoot}/.*${scanRegex}"
             CONTAINING ${byteOrderNames} CONTAINING_OUT rootHolding
             FILES_OUT rootFiles MODE_OUT rootMode)
-        list(TRANSFORM rootFiles PREPEND "${FASTCACHED_SOURCE_DIR}/")
+        list(TRANSFORM rootFiles PREPEND "${PACE_SOURCE_DIR}/")
         list(APPEND scanFiles ${rootFiles})
         # Only these can hold a call: the rule fires on a line naming one of the functions,
         # and the seam asked git which files name any -- so only these are READ.
-        list(TRANSFORM rootHolding PREPEND "${FASTCACHED_SOURCE_DIR}/")
+        list(TRANSFORM rootHolding PREPEND "${PACE_SOURCE_DIR}/")
         list(APPEND scanHolding ${rootHolding})
     else()
         # A renamed or mistyped root would otherwise take a whole surface out of
@@ -238,7 +238,7 @@ set(violations "")
 set(bareUses 0)
 
 foreach(scanFile IN LISTS scanHolding)
-    file(RELATIVE_PATH relativeFile "${FASTCACHED_SOURCE_DIR}" "${scanFile}")
+    file(RELATIVE_PATH relativeFile "${PACE_SOURCE_DIR}" "${scanFile}")
     file(READ "${scanFile}" content)
 
     # Cheap whole-file test first: almost no file names any of them, and
@@ -249,7 +249,7 @@ foreach(scanFile IN LISTS scanHolding)
         continue()
     endif()
 
-    fastcached_split_lines_tokenised("${content}" fileLines MAP_TABS)
+    pace_split_lines_tokenised("${content}" fileLines MAP_TABS)
     list(LENGTH fileLines lineCount)
 
     # A split that merged lines does not report a missing line, it reports the
@@ -263,7 +263,7 @@ foreach(scanFile IN LISTS scanHolding)
             "Splitting ${relativeFile} into lines produced ${lineCount} where the file has "
             "${newlineCount} newline(s), so this check cannot trust its own line numbers. "
             "A character CMake's list syntax reserves has reached the split unneutralised; "
-            "fastcached_split_lines in ${CMAKE_CURRENT_LIST_FILE} says which those are.")
+            "pace_split_lines in ${CMAKE_CURRENT_LIST_FILE} says which those are.")
     endif()
 
     set(lineIndex -1)
@@ -321,7 +321,7 @@ set(byteOrderReportSections
 
 set(report "")
 foreach(row IN LISTS byteOrderReportSections)
-    fastcached_row_fields("${row}" sectionVariable sectionHeading)
+    pace_row_fields("${row}" sectionVariable sectionHeading)
     if(NOT "${${sectionVariable}}" STREQUAL "")
         list(JOIN ${sectionVariable} "\n" sectionBody)
         string(APPEND report "${sectionHeading}:\n${sectionBody}\n")

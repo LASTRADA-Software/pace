@@ -3,7 +3,7 @@
 # Every Catch2 case in a wholly-wire test file carries `[wire]` (#1285).
 #
 # WHY A SCAN AND NOT JUST THE TAG RUN. `wire-tag-reach-count` runs
-# `FastCacheTest "[wire]"` and pins how many cases RAN, which catches a tag being
+# `PaceTest "[wire]"` and pins how many cases RAN, which catches a tag being
 # deleted, a case being removed, or the binary losing a translation unit. It cannot
 # catch the thing that actually happened: a case ADDED without the tag leaves the
 # pinned count untouched and the run green. That is how `[wire]` came to reach 69 of
@@ -51,10 +51,10 @@ Ran=0
 # TOTAL: 4 rows. Derived from nothing -- this is a decision, so the figure is the
 # table's own length and is asserted against it below rather than restated in prose.
 WireFiles=(
-    "src/FastCache/Protocol/CompileCacheWire_test.cpp|the 0xFC framing and its field grammars; the file is nothing but the wire"
-    "src/FastCache/Consensus/RaftWire_test.cpp|the Raft peer wire: handshake, framing, tag trailer"
-    "src/FastCache/Cluster/DiscoveryWire_test.cpp|the LAN discovery datagram grammar: beacon, challenge and signed proof"
-    "src/FastCache/Consensus/RaftTypes_test.cpp|the one case here pins a transmitted enumerator's byte"
+    "src/Pace/Protocol/CompileCacheWire_test.cpp|the 0xFC framing and its field grammars; the file is nothing but the wire"
+    "src/Pace/Consensus/RaftWire_test.cpp|the Raft peer wire: handshake, framing, tag trailer"
+    "src/Pace/Cluster/DiscoveryWire_test.cpp|the LAN discovery datagram grammar: beacon, challenge and signed proof"
+    "src/Pace/Consensus/RaftTypes_test.cpp|the one case here pins a transmitted enumerator's byte"
 )
 
 Fail() {

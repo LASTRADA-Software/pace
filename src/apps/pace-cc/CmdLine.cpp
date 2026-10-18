@@ -1,0 +1,2048 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "ArgumentDenials.hpp"
+#include "CmdLine.hpp"
+
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/NarrowText.hpp>
+
+#include <algorithm>
+#include <array>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <optional>
+#include <ranges>
+#include <utility>
+
+namespace Pace::Cc
+{
+namespace
+{
+
+    /// The last path component of `path` (after the final `/` or `\`).
+    [[nodiscard]] std::string_view Basename(std::string_view path)
+    {
+        auto const slash = path.find_last_of("/\\");
+        return slash == std::string_view::npos ? path : path.substr(slash + 1);
+    }
+
+    /// True if `lowerName` ends with one of the recognised C/C++ source suffixes.
+    [[nodiscard]] bool IsSourceSuffix(std::string_view lowerName)
+    {
+        // The module-interface spellings are here to be RECOGNISED, not supported:
+        // a line naming one is then refused by `UncacheableBecause` with its reason
+        // stated, where before it fell through as "no source file found" and was
+        // passed through in silence -- indistinguishable, from outside, from the
+        // cache being broken. See SourceExtensions for why they can never be cached.
+        constexpr std::array<std::string_view, 12> Suffixes { ".cpp", ".cc",   ".cxx", ".c++",  ".c",    ".m",
+                                                              ".ixx", ".cppm", ".ccm", ".cxxm", ".c++m", ".mxx" };
+        return std::ranges::any_of(Suffixes, [&](std::string_view s) { return lowerName.ends_with(s); });
+    }
+
+    // --- driver descriptors -------------------------------------------------
+    //
+    // The single source of truth for how each compiler driver spells the things
+    // the launcher cares about. A new driver is a new row here plus a name
+    // pattern below; the parsing logic itself never grows a branch.
+
+    // Both spellings must suppress line markers. `#line` / `# 1 "file"` markers
+    // embed the ABSOLUTE source path, which would make the preprocessed text —
+    // and therefore the cache key — differ between two checkouts of the same
+    // content at different paths, defeating cross-machine sharing entirely.
+    // MSVC: /EP writes to stdout without #line. GNU: -P suppresses markers.
+    //
+    // `/EP` ALONE, and the absence of `/P` here is the whole point. The two are
+    // not additive: `/EP` preprocesses to stdout, `/P` preprocesses to a FILE, and
+    // MSVC documents the pair as "write the file without #line directives". So
+    // passing both sent the preprocessed text to `<base>.i` and left the launcher
+    // hashing an essentially empty stdout — a key with no content in it at all,
+    // under which an edited source re-fetches the object built from the OLD text.
+    // Direct mode hides it (its manifest hashes the source's bytes), so it showed
+    // up only with PACE_NO_DIRECT=1, and it dropped a stray `.i` in the
+    // working directory on every probe besides.
+    constexpr std::array<std::string_view, 1> MsvcPreprocess { "/EP" };
+    constexpr std::array<std::string_view, 2> GnuPreprocess { "-E", "-P" };
+
+    /// Preprocess flags for text that is going to be COMPILED elsewhere, which
+    /// keep the `#line` markers the key's own probe suppresses.
+    ///
+    /// The markers are what tell the compiler which text came from a system header,
+    /// and `#pragma GCC system_header` suppression rides on that. Without them every
+    /// warning inside libc++ or the CRT resurfaces in the remote compile -- and under
+    /// this project's own `-pedantic -Werror` they are not noise, they are errors, so
+    /// every dispatched translation unit would fail and be retried locally. Measured:
+    /// a trivial TU including <string> produced two, and a real one produces many.
+    ///
+    /// They carry absolute paths, which is exactly why the KEY's probe suppresses
+    /// them and why this text must never reach `ComputeKey`. The two runs answer two
+    /// questions and only one of them has to be portable.
+    /// The argument after which a driver reads everything as an input file.
+    constexpr std::string_view EndOfOptions = "--";
+
+    constexpr std::array<std::string_view, 1> MsvcDispatchPreprocess { "/E" };
+    constexpr std::array<std::string_view, 1> GnuDispatchPreprocess { "-E" };
+
+    /// Tell a driver its input is already preprocessed, per language. See
+    /// `DriverSpec::preprocessedInput`: without this, `-pedantic` reports the
+    /// `#line` markers themselves as a GNU extension and `-Werror` fails the
+    /// compile -- and nothing states the LANGUAGE, which the worker's scratch file
+    /// name would otherwise decide.
+    constexpr std::array<std::string_view, 2> GnuPreprocessedC { "-x", "cpp-output" };
+    constexpr std::array<std::string_view, 2> GnuPreprocessedCxx { "-x", "c++-cpp-output" };
+    constexpr std::array<std::string_view, 2> GnuPreprocessedObjC { "-x", "objective-c-cpp-output" };
+    constexpr std::array<std::string_view, 2> GnuPreprocessedObjCxx { "-x", "objective-c++-cpp-output" };
+
+    /// MSVC's own spelling of the same thing. `/TC` and `/TP` say "treat every
+    /// input as C / as C++" and are documented as overriding the extension, which
+    /// is exactly what is needed for a file the worker had to name itself.
+    ///
+    /// There is deliberately no Objective-C row: the MSVC drivers compile no such
+    /// language, so a job in it is refused before it is sent rather than being
+    /// handed over with its language unstated.
+    constexpr std::array<std::string_view, 1> MsvcPreprocessedC { "/TC" };
+    constexpr std::array<std::string_view, 1> MsvcPreprocessedCxx { "/TP" };
+
+    constexpr std::array<PreprocessedInputSpelling, 4> GnuPreprocessedInput { {
+        { .language = SourceLanguage::C, .flags = GnuPreprocessedC },
+        { .language = SourceLanguage::Cxx, .flags = GnuPreprocessedCxx },
+        { .language = SourceLanguage::ObjectiveC, .flags = GnuPreprocessedObjC },
+        { .language = SourceLanguage::ObjectiveCxx, .flags = GnuPreprocessedObjCxx },
+    } };
+
+    constexpr std::array<PreprocessedInputSpelling, 2> MsvcPreprocessedInput { {
+        { .language = SourceLanguage::C, .flags = MsvcPreprocessedC },
+        { .language = SourceLanguage::Cxx, .flags = MsvcPreprocessedCxx },
+    } };
+
+    /// Which extension names which language.
+    ///
+    /// Matched case-insensitively so a `.CPP` on Windows still dispatches, with the
+    /// two genuinely ambiguous spellings excluded below rather than guessed at.
+    ///
+    /// The module-interface rows carry every extension the two toolchains that have
+    /// a convention for one use -- `.ixx` is MSVC's, the `*m` family is clang's --
+    /// and they are here to be REFUSED rather than to be supported. A module
+    /// interface unit writes a BMI beside its object, which is a second artefact
+    /// neither a cache hit nor a dispatched compile can carry (the same rule
+    /// `cmake/portable/CompileCache.cmake` applies when it turns module scanning off
+    /// while a launcher is active). Naming them is what makes that a stated rule
+    /// instead of the accident it was: they simply were not in `IsSourceSuffix`, so
+    /// nothing recognised them, and adding one there would have quietly started
+    /// replaying objects whose BMI nobody reproduced.
+    constexpr std::array<std::pair<std::string_view, SourceLanguage>, 14> SourceExtensions { {
+        { ".c", SourceLanguage::C },
+        { ".cc", SourceLanguage::Cxx },
+        { ".cp", SourceLanguage::Cxx },
+        { ".cpp", SourceLanguage::Cxx },
+        { ".cxx", SourceLanguage::Cxx },
+        { ".c++", SourceLanguage::Cxx },
+        { ".m", SourceLanguage::ObjectiveC },
+        { ".mm", SourceLanguage::ObjectiveCxx },
+        { ".ixx", SourceLanguage::CxxModuleInterface },
+        { ".cppm", SourceLanguage::CxxModuleInterface },
+        { ".ccm", SourceLanguage::CxxModuleInterface },
+        { ".cxxm", SourceLanguage::CxxModuleInterface },
+        { ".c++m", SourceLanguage::CxxModuleInterface },
+        { ".mxx", SourceLanguage::CxxModuleInterface },
+    } };
+
+    /// Extensions whose language depends on the DRIVER and not on the extension:
+    /// a GNU driver reads `.C` as C++ and `.M` as Objective-C++, while an MSVC one
+    /// reads both case-insensitively and so calls them C and Objective-C. Compared
+    /// case-SENSITIVELY, which is the whole point of the row.
+    constexpr std::array<std::string_view, 2> AmbiguousSourceExtensions { ".C", ".M" };
+
+    /// What each language is called, and whether it may be dispatched at all.
+    ///
+    /// `refused` is a REASON rather than a flag, because the two ways a job is
+    /// turned away are not the same fact and must not read as though they were: a
+    /// driver with no spelling for a language (Objective-C on MSVC) is a property of
+    /// that driver, while a module interface unit is refused on every driver, by
+    /// both gates, for a reason no spelling could fix.
+    struct LanguageSpec
+    {
+        SourceLanguage language;
+        std::string_view name;
+        /// Why a translation unit in this language is neither cached nor dispatched.
+        /// Empty when it may be.
+        std::string_view refused;
+    };
+
+    constexpr std::array<LanguageSpec, 5> LanguageSpecs { {
+        { .language = SourceLanguage::C, .name = "C", .refused = {} },
+        { .language = SourceLanguage::Cxx, .name = "C++", .refused = {} },
+        { .language = SourceLanguage::ObjectiveC, .name = "Objective-C", .refused = {} },
+        { .language = SourceLanguage::ObjectiveCxx, .name = "Objective-C++", .refused = {} },
+        { .language = SourceLanguage::CxxModuleInterface,
+          .name = "C++ module interface",
+          .refused = "it writes a BMI beside the object, and neither a cache hit nor a dispatched compile "
+                     "reproduces anything but the object" },
+    } };
+
+    /// Flags dropped when preprocessing that carry no path value of their own:
+    /// the compile-only marker (we want text on stdout, not an object) and the
+    /// dependency-reporting switches, which would otherwise make the probe
+    /// overwrite the build's real depfile.
+    ///
+    /// The object-output and depfile flags are NOT here. They are dropped by
+    /// role, off PathValueFlags(), so `/Fo` and `-MF` are spelled once for the
+    /// whole launcher rather than once per table — see DroppedFromPreprocess.
+    ///
+    /// Every spelling of `/showIncludes` the drivers accept has to be here, not
+    /// just the one the parser looks for: the probe appends its own, the drivers
+    /// resolve repeats last-wins, and `/showIncludes:user` suppresses the system
+    /// headers. A surviving one would therefore make the key's dependency set
+    /// depend on which spelling the build happened to use — the exact invariant
+    /// MsvcDependencyProbe exists to establish.
+    ///
+    /// `-c` is here beside `/c` for the same reason: clang-cl is an MSVC-family
+    /// driver that also accepts the GNU spelling, and CMake's Ninja generator
+    /// emits exactly that spelling for CMAKE_CXX_COMPILER=clang-cl. A build
+    /// spelling it `-c` left the marker on the /EP probe line, where clang-cl
+    /// reports it as an unused argument (-Wunused-command-line-argument) --
+    /// silent under an ordinary build, and a hard preprocess failure under one
+    /// that also builds with /WX, which takes the cache out of every compile
+    /// with no build failure to notice it by (#688).
+    ///
+    /// And the GNU dependency switches in clang-cl's pass-through spelling, for the
+    /// reason GnuDrop names its own: CMake's Ninja generator asks clang-cl for a GNU
+    /// depfile (`deps = gcc`) as `-clang:-MD -clang:-MT<obj> -clang:-MF<dep>` rather
+    /// than for `/showIncludes` (#1531), and a probe line that kept `-clang:-MD` would
+    /// write, and so overwrite, the build's real depfile. The `-MT`/`-MF` halves are
+    /// dropped by role, as PathValues rows.
+    constexpr std::array<std::string_view, 12> MsvcDrop {
+        "/c",         "-c",         "/showIncludes", "/showIncludes:user", "-showIncludes", "-showIncludes:user",
+        "/clang:-MD", "-clang:-MD", "/clang:-MMD",   "-clang:-MMD",        "/clang:-MP",    "-clang:-MP",
+    };
+    constexpr std::array<std::string_view, 4> GnuDrop { "-c", "-MD", "-MMD", "-MP" };
+
+    /// Warnings-as-errors, dropped from the KEY PROBE only.
+    ///
+    /// The probe exists to produce text to hash. Whether a warning is fatal is a
+    /// property of the real compile and has no bearing on that text -- measured:
+    /// the `/EP` output is byte-identical with `/WX` present, absent, or replaced
+    /// by `/wd<n>`. What `/WX` does on the probe line is turn any diagnostic at
+    /// all into a hard failure, and a probe that fails takes the cache out of
+    /// every compile of that file with no build failure to notice it by.
+    ///
+    /// #688 was one route to that: a stray `-c` the driver warned about. Dropping
+    /// the flag it warned about fixed that instance and left the mechanism intact.
+    /// The second route needs no stray flag — a source-level
+    /// `#pragma warning(disable: 4005)` is honoured by the compiler but NOT by the
+    /// preprocess-only pass, so the warning fires on the probe, `/WX` promotes it
+    /// to `error C2220`, and four translation units of one MFC codebase were
+    /// permanently uncacheable on every machine. There is no third thing to drop:
+    /// the general fix is that the probe does not treat warnings as errors.
+    ///
+    /// This is deliberately NOT a row in MsvcDrop/GnuDrop. Those are consulted
+    /// through the shared MatchDroppedFlag, which DispatchPreprocessCommand and
+    /// RemoteCompileArgs also use -- and `/WX` must keep reaching a dispatched
+    /// compile, or a remote build stops failing on warnings the local one fails
+    /// on. Only PreprocessCommand reads this table.
+    ///
+    /// `/WX-` is the documented opt-out and must survive: matching is exact or
+    /// joined-with-a-value (MatchesFlag), never a prefix, so it does.
+    constexpr std::array<std::string_view, 2> MsvcProbeDrop { "/WX", "-WX" };
+    constexpr std::array<std::string_view, 1> GnuProbeDrop { "-Werror" };
+
+    /// How each driver is asked to report dependencies during the preprocess
+    /// probe. `-MD` rather than `-MMD` on purpose: the key's dependency set must
+    /// not depend on which of the two the build happened to ask for, or on whether
+    /// it asked at all. The GNU spelling is followed by the probe's depfile path.
+    constexpr std::array<std::string_view, 1> MsvcDependencyProbe { "/showIncludes" };
+    constexpr std::array<std::string_view, 2> GnuDependencyProbe { "-MD", "-MF" };
+
+    /// Asks a GNU driver to print its include search list.
+    ///
+    /// `-E -v` over an empty C++ input: `-v` is what makes it print the list, `-E`
+    /// stops it before it tries to assemble anything, and `-x c++` names the
+    /// language because the search list DIFFERS between C and C++ — the C++ one
+    /// carries the standard library headers, which are most of what a fingerprint
+    /// is trying to identify. The input path is appended by the caller.
+    constexpr std::array<std::string_view, 4> GnuIncludeProbe { "-E", "-v", "-x", "c++" };
+
+    /// `-###` over an empty input: print the frontend invocation, run nothing.
+    ///
+    /// The language is named explicitly (`/TP`, `-x c++`) because the input has no
+    /// extension to read it from -- `NUL` and `/dev/null` alike -- and a driver that
+    /// cannot tell which language it is being handed prints NO frontend invocation at
+    /// all. That failure is silent and looks exactly like "this driver has no target
+    /// to report", so the flag that prevents it belongs in the table beside the probe
+    /// rather than in a comment at the call site.
+    ///
+    /// `/c` and `-c` keep it to a compile step: without them the driver also prints a
+    /// link line, which carries no `-triple` and only makes the output longer -- and
+    /// on a driver read through the `Target:` header, a link line is all there is.
+    constexpr std::array<std::string_view, 3> MsvcTargetProbe { "-###", "/TP", "/c" };
+    constexpr std::array<std::string_view, 4> GnuTargetProbe { "-###", "-x", "c++", "-c" };
+
+    /// What every clang vendor's version line carries and no GCC's does.
+    ///
+    /// The marker, not a prefix match: a distribution puts its own name first
+    /// (`Ubuntu clang version 20.1.2`, `Apple clang version 17.0.0`), which is the
+    /// same vendor-prefixing that makes a banner comparison across two distributions
+    /// fail. Here only the presence of the product name matters.
+    constexpr std::string_view ClangBannerMarker = "clang version";
+
+    /// Asks a driver that HAS a version option to state its version.
+    ///
+    /// Every driver but `cl` accepts this and exits 0, `clang-cl` included — it is
+    /// clang's own option, not a GNU-family one, so this is not `GnuVersion`.
+    /// MSVC's row is empty; see `DriverSpec::versionFlags`.
+    ///
+    /// No input path is appended, unlike `MsvcTargetProbe` and `GnuIncludeProbe`:
+    /// those ask a driver a question ABOUT a compile and need something to pretend
+    /// to compile, while this one asks who the driver is. Giving `cl` a `NUL` to go
+    /// with an empty flag list would be handing it a source file.
+    constexpr std::array<std::string_view, 1> VersionProbe { "--version" };
+
+    constexpr std::array<DriverSpec, 5> Drivers { {
+        { .flavor = Flavor::Unknown,
+          .family = DriverFamily::None,
+          .preprocessFlags = {},
+          .dispatchPreprocessFlags = {},
+          .preprocessedInput = {},
+          .preprocessDropFlags = {},
+          .probeDropFlags = {},
+          .dependencyProbeFlags = {},
+          .usesDepfile = false,
+          .includeDiscovery = IncludeDiscovery::None,
+          .targetDiscovery = TargetDiscovery::None,
+          .fingerprintTree = FingerprintTree::DiscoveredRoots,
+          .includeProbeFlags = {},
+          .targetProbeFlags = {},
+          // `--version` even here. An unrecognised driver is not cached, so this
+          // value reaches nothing but a diagnostic -- and asking the one option
+          // almost every tool answers beats asking nothing.
+          .versionFlags = VersionProbe },
+        { .flavor = Flavor::Cl,
+          .family = DriverFamily::Msvc,
+          .preprocessFlags = MsvcPreprocess,
+          .dispatchPreprocessFlags = MsvcDispatchPreprocess,
+          .preprocessedInput = MsvcPreprocessedInput,
+          .preprocessDropFlags = MsvcDrop,
+          .probeDropFlags = MsvcProbeDrop,
+          .dependencyProbeFlags = MsvcDependencyProbe,
+          .usesDepfile = false,
+          // Layout rather than environment, because a Windows SERVICE inherits no
+          // `INCLUDE`. The roots feed the fingerprint cache's stamp and the node's
+          // re-survey, never the fingerprint (`fingerprintTree` below). See the
+          // enumerator.
+          .includeDiscovery = IncludeDiscovery::MsvcLayout,
+          // Nothing to ask and nothing to state: `cl` has no `-###` and no
+          // `--target`. Which code generator runs is decided by WHICH `cl.exe` is
+          // invoked, and a launcher cannot restate that on a command line.
+          .targetDiscovery = TargetDiscovery::None,
+          // Banner and grammar only (#1656). The roots above are the toolset `cl`
+          // lives in and the newest SDK, a worker opens neither for a preprocessed
+          // compile, and an installed VS language pack's IntelliSense XML in the
+          // toolset's `include` split two otherwise identical machines.
+          .fingerprintTree = FingerprintTree::None,
+          .includeProbeFlags = {},
+          .targetProbeFlags = {},
+          // EMPTY, and that is the probe: `cl` prints its banner on every
+          // invocation, so it needs no option to be asked -- and it has none, so
+          // asking `--version` made it exit 2 and identify as the string `cl` on
+          // every MSVC toolset alike. See `DriverSpec::versionFlags`.
+          .versionFlags = {} },
+        { .flavor = Flavor::ClangCl,
+          .family = DriverFamily::Msvc,
+          .preprocessFlags = MsvcPreprocess,
+          .dispatchPreprocessFlags = MsvcDispatchPreprocess,
+          .preprocessedInput = MsvcPreprocessedInput,
+          .preprocessDropFlags = MsvcDrop,
+          .probeDropFlags = MsvcProbeDrop,
+          .dependencyProbeFlags = MsvcDependencyProbe,
+          .usesDepfile = false,
+          // Asked for its OWN resource directory, not handed `INCLUDE` and not
+          // modelled off the VC layout: a service inherits no `INCLUDE` either, and
+          // clang-cl lives outside the toolset it borrows. See the enumerator.
+          .includeDiscovery = IncludeDiscovery::ClangResourceLayout,
+          // The other half of what `ClangResourceLayout` left out. Dropping the VC
+          // toolset and the SDK from the digest was right -- a worker opens neither,
+          // compiling text the client already preprocessed -- but it also left the
+          // fingerprint blind to `-fms-compatibility-version`, which clang derives
+          // from that same borrowed install and DOES bake into code generation.
+          // Stated on the dispatch line instead of digested into an identity.
+          .targetDiscovery = TargetDiscovery::ClangDriverLine,
+          // Its discovery already names only its own resource directory.
+          .fingerprintTree = FingerprintTree::DiscoveredRoots,
+          .includeProbeFlags = {},
+          .targetProbeFlags = MsvcTargetProbe,
+          .versionFlags = VersionProbe },
+        { .flavor = Flavor::Gcc,
+          .family = DriverFamily::Gnu,
+          .preprocessFlags = GnuPreprocess,
+          .dispatchPreprocessFlags = GnuDispatchPreprocess,
+          .preprocessedInput = GnuPreprocessedInput,
+          .preprocessDropFlags = GnuDrop,
+          .probeDropFlags = GnuProbeDrop,
+          .dependencyProbeFlags = GnuDependencyProbe,
+          .usesDepfile = true,
+          .includeDiscovery = IncludeDiscovery::GnuVerbose,
+          // Asked, but never told. GCC prints no `-cc1` line -- its frontend takes no
+          // `-triple` -- so the `Target:` header is all there is, and for this driver
+          // that header is the whole answer rather than the unversioned half one.
+          // It cannot be pinned (no `--target=`), so it identifies the code generator
+          // for the KEY and states nothing on a dispatched line. Without it one g++
+          // version string covers x86_64 and aarch64 alike, and an arch-independent
+          // translation unit keys the same on both.
+          .targetDiscovery = TargetDiscovery::GnuTargetLine,
+          // No gcc targets MSVC, so this keeps every root for gcc itself. It is the
+          // Clang row's answer because a `cc`/`c++` that IS an MSVC-targeting clang
+          // reaches this row by its stem, and must fingerprint as the Clang row does.
+          .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
+          .includeProbeFlags = GnuIncludeProbe,
+          .targetProbeFlags = GnuTargetProbe,
+          .versionFlags = VersionProbe },
+        { .flavor = Flavor::Clang,
+          .family = DriverFamily::Gnu,
+          .preprocessFlags = GnuPreprocess,
+          .dispatchPreprocessFlags = GnuDispatchPreprocess,
+          .preprocessedInput = GnuPreprocessedInput,
+          .preprocessDropFlags = GnuDrop,
+          .probeDropFlags = GnuProbeDrop,
+          .dependencyProbeFlags = GnuDependencyProbe,
+          .usesDepfile = true,
+          .includeDiscovery = IncludeDiscovery::GnuVerbose,
+          .targetDiscovery = TargetDiscovery::ClangDriverLine,
+          // On Windows its `-v` list is clang's resource directory plus the VC
+          // toolset and the SDK it borrows, which it is identified without, as
+          // `clang-cl` is; anywhere else the list is libstdc++ or an SDK it reads,
+          // and stays folded (#1656).
+          .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
+          .includeProbeFlags = GnuIncludeProbe,
+          .targetProbeFlags = GnuTargetProbe,
+          .versionFlags = VersionProbe },
+    } };
+
+    // --- path-valued flags --------------------------------------------------
+    //
+    // The one table behind three consumers: the parser (which captures the
+    // object output and the depfile), the preprocess line (which drops every
+    // role but IncludeDir), and the cache key (which rewrites every value it can
+    // to a canonical token). See PathValueFlags() in the header for why they must
+    // not be three tables — while they were, the object output was relativized in
+    // its separated spelling and not in its fused one, so a `/Fo<abs>` build baked
+    // the producing machine's object path into every Windows key and two checkouts
+    // at different roots could never share an entry.
+
+    constexpr std::array<PathValueFlag, 31> PathValues { {
+        // The prefix-map rows first, being the longest spellings. GNU-only: `cl` has
+        // no path-map switch at all, and clang-cl accepts `-ffile-prefix-map`
+        // while ignoring it for the records that matter -- measured, an object
+        // built with it still differs cross-root by the same 23 bytes in
+        // `S_OBJNAME` and the embedded `-cc1` line.
+        //
+        // Two roles, because the three spellings differ in whether they reach the
+        // preprocessed text. Measured on gcc 14 and clang 20, source named
+        // absolutely, `-E -P`: `-fdebug-prefix-map` leaves the text byte-identical,
+        // while the other two rewrite `__FILE__` in it. So the debug spelling is
+        // `PrefixMap`, dropped from the preprocess line like every role but the
+        // include directory, and the other two are `SourcePrefixMap`, which stays
+        // there -- a row that dropped them would hash text the real compile does
+        // not produce. They were unrecognised until then, which reached the key
+        // verbatim and cost every checkout of a project passing one (Catch2 does)
+        // all of its sharing.
+        { .spelling = "-fdebug-prefix-map",
+          .role = PathValueRole::PrefixMap,
+          .families = DriverFamily::Gnu,
+          .valueTailSeparator = '=' },
+        { .spelling = "-fmacro-prefix-map",
+          .role = PathValueRole::SourcePrefixMap,
+          .families = DriverFamily::Gnu,
+          .valueTailSeparator = '=',
+          .remote = RemoteLine::Forwarded },
+        { .spelling = "-ffile-prefix-map",
+          .role = PathValueRole::SourcePrefixMap,
+          .families = DriverFamily::Gnu,
+          .valueTailSeparator = '=' },
+        { .spelling = "/external:I", .role = PathValueRole::IncludeDir, .families = DriverFamily::Msvc },
+        { .spelling = "-external:I", .role = PathValueRole::IncludeDir, .families = DriverFamily::Msvc },
+        // clang-cl's spelling of the same thing, and the one CMake writes for a `SYSTEM`
+        // include directory under clang-cl (`-imsvc<dir>`, measured with CMake 4.3.1 and
+        // clang-cl 22.1.3). Unrecognised, `CouldNameAFile` refused every such unit as not
+        // dispatchable. It needs no worker-side counterpart, which is why it is dropped
+        // like `/external:I`: clang-cl's `/E` marks each header found under it as a
+        // system header in the line markers (`# 1 "..." 3`), and the worker suppresses
+        // warnings on those lines by that flag -- measured, `/W4 /WX`, local exit 0 and
+        // the worker's `.i` exit 0 with the flag gone.
+        { .spelling = "-imsvc", .role = PathValueRole::IncludeDir, .families = DriverFamily::Msvc },
+        { .spelling = "/imsvc", .role = PathValueRole::IncludeDir, .families = DriverFamily::Msvc },
+        // clang-cl's pass-through spellings of the GNU dependency flags, which is how
+        // CMake's Ninja generator asks clang-cl for a depfile (#1531). Unrecognised,
+        // the launcher never learned the depfile's path: a miss wrote one as a side
+        // effect of the real compile, a HIT wrote none, and Ninja -- reading a
+        // `deps = gcc` depfile that is not there -- recorded NO dependencies and said
+        // nothing, so a later header edit left the object stale. `cl` never takes
+        // these, and the rows cost it nothing. Fused only: see `joinedOnly`.
+        { .spelling = "/clang:-MF", .role = PathValueRole::DepFile, .families = DriverFamily::Msvc, .joinedOnly = true },
+        { .spelling = "-clang:-MF", .role = PathValueRole::DepFile, .families = DriverFamily::Msvc, .joinedOnly = true },
+        { .spelling = "/clang:-MT", .role = PathValueRole::DepTarget, .families = DriverFamily::Msvc, .joinedOnly = true },
+        { .spelling = "-clang:-MT", .role = PathValueRole::DepTarget, .families = DriverFamily::Msvc, .joinedOnly = true },
+        { .spelling = "/clang:-MQ", .role = PathValueRole::DepTarget, .families = DriverFamily::Msvc, .joinedOnly = true },
+        { .spelling = "-clang:-MQ", .role = PathValueRole::DepTarget, .families = DriverFamily::Msvc, .joinedOnly = true },
+        { .spelling = "/Fo", .role = PathValueRole::ObjectOutput, .families = DriverFamily::Msvc },
+        { .spelling = "-Fo", .role = PathValueRole::ObjectOutput, .families = DriverFamily::Msvc },
+        { .spelling = "/Fd", .role = PathValueRole::DebugOutput, .families = DriverFamily::Msvc },
+        { .spelling = "-Fd", .role = PathValueRole::DebugOutput, .families = DriverFamily::Msvc },
+        { .spelling = "-MF", .role = PathValueRole::DepFile, .families = DriverFamily::Gnu },
+        { .spelling = "-MT", .role = PathValueRole::DepTarget, .families = DriverFamily::Gnu },
+        { .spelling = "-MQ", .role = PathValueRole::DepTarget, .families = DriverFamily::Gnu },
+        { .spelling = "/I", .role = PathValueRole::IncludeDir, .families = DriverFamily::Msvc },
+        { .spelling = "-I", .role = PathValueRole::IncludeDir, .families = DriverFamily::Any },
+        // The GNU header-search flags beside `-I` (#1661). CMake writes `-isystem <dir>` for
+        // every `SYSTEM` include directory, so every project with a fetched dependency
+        // carried one, and `CouldNameAFile` refused the whole line on the directory. They
+        // only decide where the PREPROCESSOR looks: the dispatch preprocess has inlined
+        // every header, and whether one was a system header travels in its line marker
+        // (`# 1 "<dir>/x.hpp" 1 3 4`), which is what silences its warnings on the worker --
+        // the argument that made `-imsvc` a row. The worker still DENIES each of them.
+        //
+        // `-isystem-after` (clang) BEFORE `-isystem`: the drivers resolve the longest
+        // spelling, and so must this table, or `-isystem-after` is read as `-isystem`
+        // with the value `-after`. The `static_assert` below the table holds the order.
+        { .spelling = "-isystem-after", .role = PathValueRole::IncludeDir, .families = DriverFamily::Gnu },
+        { .spelling = "-isystem", .role = PathValueRole::IncludeDir, .families = DriverFamily::Gnu },
+        { .spelling = "-iquote", .role = PathValueRole::IncludeDir, .families = DriverFamily::Gnu },
+        { .spelling = "-idirafter", .role = PathValueRole::IncludeDir, .families = DriverFamily::Gnu },
+        // Forced includes (#1666): the header is inlined by the dispatch preprocess like
+        // any other, so the worker's line loses the flag rather than the compile losing
+        // its distribution. `-include-pch` is the precompiled-header reader and is NOT a
+        // forced include; its row precedes `-include` for the longest-spelling reason
+        // above, and its role refuses the dispatch.
+        { .spelling = "-include-pch", .role = PathValueRole::PrecompiledHeaderInput, .families = DriverFamily::Gnu },
+        { .spelling = "-include", .role = PathValueRole::ForcedInclude, .families = DriverFamily::Gnu },
+        { .spelling = "/FI", .role = PathValueRole::ForcedInclude, .families = DriverFamily::Msvc },
+        { .spelling = "-FI", .role = PathValueRole::ForcedInclude, .families = DriverFamily::Msvc },
+        { .spelling = "-o", .role = PathValueRole::ObjectOutput, .families = DriverFamily::Any },
+    } };
+
+    /// Whether row @p later could be shadowed by row @p earlier: one spelling a prefix of
+    /// the other, for a family both accept.
+    /// @param earlier The row matched first.
+    /// @param later The row matched after it.
+    /// @return True when @p earlier would match an argument meant for @p later.
+    [[nodiscard]] consteval bool Shadows(PathValueFlag const& earlier, PathValueFlag const& later)
+    {
+        return Overlaps(earlier.families, later.families) && earlier.spelling.size() < later.spelling.size()
+               && later.spelling.starts_with(earlier.spelling);
+    }
+
+    /// No row is shadowed by one before it: the FIRST match wins in `MatchPathValueFlag`,
+    /// and the drivers resolve the LONGEST spelling, so a shorter row ahead of a longer
+    /// one it prefixes reads the longer option as the shorter with a fused value.
+    [[nodiscard]] consteval bool LongerSpellingsComeFirst()
+    {
+        for (auto const later: std::views::iota(std::size_t { 0 }, PathValues.size()))
+            for (auto const earlier: std::views::iota(std::size_t { 0 }, later))
+                if (Shadows(PathValues[earlier], PathValues[later]))
+                    return false;
+        return true;
+    }
+    static_assert(LongerSpellingsComeFirst(),
+                  "a PathValues row is shadowed by a shorter spelling ahead of it; put the longer one first");
+
+    // --- macro switches -----------------------------------------------------
+    //
+    // Dropped from the DISPATCHED command line and from nowhere else, which is why they
+    // are a table of their own rather than rows of `PathValues`. That table has three
+    // consumers and a macro must reach two of them untouched: the PREPROCESS line needs
+    // every definition (it is still expanding them), and the KEY hashes the text they
+    // produced -- so rewriting a macro value to a canonical token would be a key change
+    // with no cause behind it.
+    //
+    // Dropping them from the WORKER line changes no generated code, by the include
+    // directories own argument one step further along: dispatch sends PREPROCESSED text,
+    // so every macro a definition introduced has already been expanded on the client --
+    // including a `#include CONFIG_HEADER` resolved through one, whose file the worker
+    // never opens. `-D` is a preprocessor switch and the preprocessing is over. This is a
+    // NARROWING of what reaches the worker, not a permission.
+    //
+    // Before #1481 these were unrecognised, so `CouldNameAFile` refused a path-valued
+    // `-DFOO="/abs/path"` -- and with it the WHOLE command line, which is the only safe
+    // answer for an argument the walk does not know. That is this project own build
+    // (`PACE_SOURCE_DIR`) and any project passing a source root, a config directory
+    // or a version string with a slash in it: no dispatch at all, one stderr line per
+    // translation unit, and no counter anywhere.
+    //
+    // These are PREFIX-matched, so the `-c`-swallows-`-coverage` hazard applies and was
+    // MEASURED against both drivers rather than remembered. Asked of `g++ --help` over
+    // eight option groups (1401 options, with `-D<macro>` and `-U<macro>` as the positive
+    // control) and of `cl /?`: neither family has any other option beginning with an
+    // upper-case `D` or `U`. `/DEBUG` and `/DLL` are LINKER options and reach `link`, not
+    // `cl`.
+    //
+    // **Upper case is load-bearing, and the near-miss is one character away**: `cl` has
+    // `/u` (remove ALL predefined macros) and `/utf-8`, both LOWER case, so a matcher that
+    // folded case would swallow `/utf-8` -- which this repository passes to every MSVC
+    // compile. `MatchesFlag` compares case-sensitively through `starts_with`, so they
+    // cannot collide. The first census written for this comment folded case by accident
+    // and reported all three as collisions, which is how they came to be named here.
+
+    /// A macro switch, and which families spell it that way.
+    struct MacroFlag
+    {
+        /// The flag, bare. Its value may be fused on or given as the next argument.
+        std::string_view spelling;
+
+        /// Which driver families accept this spelling.
+        DriverFamily families;
+    };
+
+    /// The macro switches. A `/`-led row is Msvc-only for the reason `PathValues` gives:
+    /// under a POSIX layout `/D` is the head of an absolute path rather than an option.
+    constexpr std::array<MacroFlag, 4> MacroFlags { {
+        { .spelling = "-D", .families = DriverFamily::Any },
+        { .spelling = "-U", .families = DriverFamily::Any },
+        { .spelling = "/D", .families = DriverFamily::Msvc },
+        { .spelling = "/U", .families = DriverFamily::Msvc },
+    } };
+
+    /// One flag that makes a compile write a second artefact (or, for `cl /Yu`, tie its
+    /// object to one), and which drivers spell it that way.
+    struct SideArtefactFlag
+    {
+        std::string_view spelling;
+        DriverFamily families;
+        /// The one driver the row is about, when another driver of `families` accepts
+        /// the same spelling and means something a hit CAN reproduce by it. Disengaged:
+        /// every driver of `families`.
+        std::optional<Flavor> onlyFlavor {};
+    };
+
+    /// Flags that make a compile write something BESIDES its object file, and one flag,
+    /// `cl`'s `/Yu`, that makes the object depend on a build artefact the key cannot see.
+    ///
+    /// One row per spelling, exactly as PathValues does it and for the same reason:
+    /// an MSVC driver accepts `-` for every option, and a row matched on introducer
+    /// alone would let a GNU `-interface` through. See `ProducesSideArtefact` for
+    /// why a line carrying one of these is not cacheable.
+    ///
+    /// The residual, recorded deliberately: clang can be told to emit a module
+    /// interface through `-Xclang -emit-module-interface`, which is two arguments
+    /// and matches nothing here. It is left out rather than half-matched, because a
+    /// row that fires on `-Xclang` alone would un-cache every build that passes any
+    /// `-Xclang` flag at all.
+    constexpr std::array<SideArtefactFlag, 19> SideArtefacts { {
+        { .spelling = "/interface", .families = DriverFamily::Msvc },
+        { .spelling = "-interface", .families = DriverFamily::Msvc },
+        { .spelling = "/internalPartition", .families = DriverFamily::Msvc },
+        { .spelling = "-internalPartition", .families = DriverFamily::Msvc },
+        { .spelling = "/exportHeader", .families = DriverFamily::Msvc },
+        { .spelling = "-exportHeader", .families = DriverFamily::Msvc },
+        { .spelling = "/ifcOutput", .families = DriverFamily::Msvc },
+        { .spelling = "-ifcOutput", .families = DriverFamily::Msvc },
+        { .spelling = "/Yc", .families = DriverFamily::Msvc },
+        { .spelling = "-Yc", .families = DriverFamily::Msvc },
+        { .spelling = "-fmodule-output", .families = DriverFamily::Gnu },
+        { .spelling = "-fmodule-mapper", .families = DriverFamily::Gnu },
+        { .spelling = "--precompile", .families = DriverFamily::Gnu },
+        // `cl`'s shared-PDB debug formats. The object only REFERS to the PDB, which holds
+        // every translation unit's types, so a hit restores an object whose types were
+        // never written anywhere. clang-cl reads these spellings as `/Z7` -- its own option
+        // table says "Like /Z7" -- so they are `cl`'s rows alone.
+        { .spelling = "/Zi", .families = DriverFamily::Msvc, .onlyFlavor = Flavor::Cl },
+        { .spelling = "-Zi", .families = DriverFamily::Msvc, .onlyFlavor = Flavor::Cl },
+        { .spelling = "/ZI", .families = DriverFamily::Msvc, .onlyFlavor = Flavor::Cl },
+        { .spelling = "-ZI", .families = DriverFamily::Msvc, .onlyFlavor = Flavor::Cl },
+        // `cl`'s `/Yu` READS a precompiled header rather than writing one, and is here on
+        // measured evidence (cl 19.51): the object forces a `__@@_PchSym_` symbol whose
+        // name differs per checkout, and its types begin with an `LF_PRECOMP` record
+        // naming the absolute path of the pch.obj it was compiled against. The key hashes
+        // the header's text and neither of those, so a hit replayed into another checkout
+        // failed to link (LNK2011), and one replayed after a PCH rebuild linked without
+        // the translation unit's debug info (LNK4206). clang-cl 22's `/Yu` object carries
+        // neither and replayed clean, so these are `cl`'s rows alone.
+        { .spelling = "/Yu", .families = DriverFamily::Msvc, .onlyFlavor = Flavor::Cl },
+        { .spelling = "-Yu", .families = DriverFamily::Msvc, .onlyFlavor = Flavor::Cl },
+    } };
+
+    // The stated extent must equal the row count. A larger one pads the array with
+    // value-initialized rows, and an empty spelling would reach `.front()` in
+    // `ProducesSideArtefact` -- undefined behaviour rather than a row that matches
+    // nothing. An empty spelling is exactly what such a row has.
+    static_assert(std::ranges::none_of(SideArtefacts, [](SideArtefactFlag const& row) { return row.spelling.empty(); }),
+                  "SideArtefacts' stated extent must equal its row count -- an empty row is a padded one");
+
+    /// Which introducer characters each family's options start with.
+    constexpr std::array<std::pair<DriverFamily, std::string_view>, 4> FamilyIntroducers { {
+        { DriverFamily::None, "" },
+        { DriverFamily::Msvc, "/-" },
+        { DriverFamily::Gnu, "-" },
+        { DriverFamily::Any, "/-" },
+    } };
+
+    /// True when a path-valued flag of this role must not reach the preprocess
+    /// line. An object output would make the probe write an object instead of
+    /// text on stdout, and a dependency flag would overwrite the build's own
+    /// depfile with the probe's; what decides which headers the text is made of --
+    /// an include directory, a forced include, a precompiled header -- is exactly
+    /// what the preprocessor needs and stays, and so does a source prefix map, which
+    /// rewrites the `__FILE__` the key hashes.
+    /// @param role The role to test.
+    /// @return True when the flag (and its value) is dropped.
+    [[nodiscard]] constexpr bool DroppedFromPreprocess(PathValueRole role) noexcept
+    {
+        switch (role)
+        {
+            case PathValueRole::IncludeDir:
+            case PathValueRole::ForcedInclude:
+            case PathValueRole::PrecompiledHeaderInput:
+            case PathValueRole::SourcePrefixMap:
+                return false;
+            case PathValueRole::ObjectOutput:
+            case PathValueRole::DepFile:
+            case PathValueRole::DepTarget:
+            case PathValueRole::DebugOutput:
+            case PathValueRole::PrefixMap:
+                return true;
+        }
+        return true;
+    }
+
+    /// Why a path-valued flag of this role keeps the line from being dispatched at all,
+    /// or empty when it is merely dropped from the worker's line.
+    ///
+    /// Every other role names something the dispatch preprocess has already folded into
+    /// the text, or an output the worker writes under its own name. A precompiled header
+    /// is neither: it is compiler state, not text, so no preprocess inlines it, and the
+    /// file is on THIS machine.
+    /// @param role The role to test.
+    /// @return The reason, or empty.
+    [[nodiscard]] constexpr std::string_view UndispatchableBecause(PathValueRole role) noexcept
+    {
+        switch (role)
+        {
+            case PathValueRole::PrecompiledHeaderInput:
+                return "reads a precompiled header from this machine, which no preprocess can inline for a worker";
+            // The worker compiles text whose `#line` markers name the CLIENT's paths, so
+            // without the client's rule its `source_location` names them unmapped -- in an
+            // object stored under the key a locally mapped one uses.
+            case PathValueRole::SourcePrefixMap:
+                return "rewrites the source paths the object embeds, and a worker compiling this machine's text "
+                       "could not apply it";
+            case PathValueRole::IncludeDir:
+            case PathValueRole::ForcedInclude:
+            case PathValueRole::ObjectOutput:
+            case PathValueRole::DepFile:
+            case PathValueRole::DepTarget:
+            case PathValueRole::DebugOutput:
+            case PathValueRole::PrefixMap:
+                return {};
+        }
+        return {};
+    }
+
+    /// Whether a driver reads its input's language off the file name, or compiles
+    /// everything as C++ whatever the name says.
+    ///
+    /// The `++` drivers do the latter, in as many words: "g++ treats .c, .h and .i
+    /// files as C++ source files instead of C source files". It is not a detail --
+    /// the launcher has to state the language when it hands preprocessed text to a
+    /// worker, and taking that from the extension alone would tell a worker to
+    /// compile as C what this machine compiles as C++.
+    enum class LanguageDefault : std::uint8_t
+    {
+        FromExtension,
+        AlwaysCxx,
+    };
+
+    /// How a driver's basename is recognised. Order matters: the first match
+    /// wins, so longer, more specific stems precede their prefixes
+    /// ("clang-cl" before "clang", "c++" before "cc").
+    struct NamePattern
+    {
+        std::string_view stem;
+        Flavor flavor;
+        LanguageDefault languageDefault;
+    };
+
+    constexpr std::array<NamePattern, 8> NamePatterns { {
+        { .stem = "clang-cl", .flavor = Flavor::ClangCl, .languageDefault = LanguageDefault::FromExtension },
+        { .stem = "clang++", .flavor = Flavor::Clang, .languageDefault = LanguageDefault::AlwaysCxx },
+        { .stem = "clang", .flavor = Flavor::Clang, .languageDefault = LanguageDefault::FromExtension },
+        { .stem = "g++", .flavor = Flavor::Gcc, .languageDefault = LanguageDefault::AlwaysCxx },
+        { .stem = "gcc", .flavor = Flavor::Gcc, .languageDefault = LanguageDefault::FromExtension },
+        { .stem = "c++", .flavor = Flavor::Gcc, .languageDefault = LanguageDefault::AlwaysCxx },
+        { .stem = "cc", .flavor = Flavor::Gcc, .languageDefault = LanguageDefault::FromExtension },
+        { .stem = "cl", .flavor = Flavor::Cl, .languageDefault = LanguageDefault::FromExtension },
+    } };
+
+    /// Flags that state the input's language ON THE COMMAND LINE, overriding both
+    /// the driver's default and the file's extension.
+    ///
+    /// A build reaches these more often than it looks: CMake's
+    /// `set_source_files_properties(x.c PROPERTIES LANGUAGE CXX)` emits `/TP` or
+    /// `-x c++`. A dispatched compile appends its own spelling of "this input is
+    /// preprocessed <language>" LAST, so it would silently override the build's --
+    /// compiling as C what the build asked to be compiled as C++, and storing that
+    /// under the key. The command line is not re-derivable from anything the worker
+    /// sees, so such a compile is refused rather than guessed at.
+    ///
+    /// `/Tc` and `/Tp` are here for a second reason as well: they name a FILE, and
+    /// with a bare file name they carry no separator, so the path filter lets them
+    /// past.
+    ///
+    /// Each row carries the language it names, because refusing was only ever the
+    /// best answer available to a table that could not say WHICH language (#232).
+    /// The launcher appends its own "this text is preprocessed <language>" last, and
+    /// for `/TP` that appended flag is `/TP` -- the very argument being refused. A
+    /// row whose language is known is therefore dropped rather than refused: the
+    /// appended spelling states the same language and additionally states that the
+    /// text is preprocessed, which is strictly more than the build said.
+    ///
+    /// CMake emits `/TP` on every C++ source it compiles with MSVC, so this table
+    /// refusing it meant **no CMake + MSVC translation unit was ever dispatchable**.
+    /// The fleet cached normally and distributed nothing, with every scheduler
+    /// counter at zero because no lease was ever requested.
+    struct LanguageSelector
+    {
+        std::string_view spelling; ///< As it appears on the command line.
+        DriverFamily families;     ///< Which family's spellings may match.
+        /// The language this spelling names, or nullopt when the spelling does not
+        /// carry one by itself -- `-x` takes it in a value, and `/Tp` names a file.
+        std::optional<SourceLanguage> language;
+        /// Whether the spelling attaches a FILE. Those can never be dropped: the
+        /// path is the build's own source, which must not reach a worker, and the
+        /// worker compiles a scratch file of its own name regardless.
+        bool namesAFile { false };
+    };
+
+    constexpr std::array<LanguageSelector, 9> LanguageSelectors { {
+        { .spelling = "/TC", .families = DriverFamily::Msvc, .language = SourceLanguage::C },
+        { .spelling = "-TC", .families = DriverFamily::Msvc, .language = SourceLanguage::C },
+        { .spelling = "/TP", .families = DriverFamily::Msvc, .language = SourceLanguage::Cxx },
+        { .spelling = "-TP", .families = DriverFamily::Msvc, .language = SourceLanguage::Cxx },
+        { .spelling = "/Tc", .families = DriverFamily::Msvc, .language = std::nullopt, .namesAFile = true },
+        { .spelling = "-Tc", .families = DriverFamily::Msvc, .language = std::nullopt, .namesAFile = true },
+        { .spelling = "/Tp", .families = DriverFamily::Msvc, .language = std::nullopt, .namesAFile = true },
+        { .spelling = "-Tp", .families = DriverFamily::Msvc, .language = std::nullopt, .namesAFile = true },
+        { .spelling = "-x", .families = DriverFamily::Gnu, .language = std::nullopt },
+    } };
+
+    /// Debug-info flags that make MSVC write a PDB BESIDE the object.
+    ///
+    /// `/Fd` only says WHERE one would go; these decide whether one is written at
+    /// all. With `/Z7` the debug info lives in the object itself and a dispatched
+    /// compile carries back everything the build asked for -- so `/Fd` names a file
+    /// nothing produces and is dropped. With these, a worker would have to send back
+    /// a second artefact nothing on the wire carries.
+    ///
+    /// `cmake/portable/CompileCache.cmake` rewrites `/Zi` to `/Z7` whenever a
+    /// launcher is active, for this same reason, so this fires only for a build that
+    /// reached the launcher another way.
+    constexpr std::array<std::string_view, 4> MsvcSharedPdb { "/Zi", "-Zi", "/ZI", "-ZI" };
+
+    /// What a GNU `-x` value names. Only the four plain languages: anything else
+    /// (`assembler`, `c-header`, a `-cpp-output` form) has no exact `SourceLanguage`
+    /// and keeps being refused, because guessing at it is how a worker comes to
+    /// compile something other than what the build asked for.
+    constexpr std::array<std::pair<std::string_view, SourceLanguage>, 4> GnuLanguageNames { {
+        { "c", SourceLanguage::C },
+        { "c++", SourceLanguage::Cxx },
+        { "objective-c", SourceLanguage::ObjectiveC },
+        { "objective-c++", SourceLanguage::ObjectiveCxx },
+    } };
+
+    /// Classify the compiler flavor from its basename.
+    ///
+    /// Tolerates version suffixes (`g++-14`, `clang-18`) and the `.exe`
+    /// extension, both of which are ordinary on real build systems.
+    ///
+    /// @param compiler argv[0] as invoked.
+    /// @return The matching flavor, or Unknown.
+    [[nodiscard]] Flavor ClassifyCompilerImpl(std::string_view compiler)
+    {
+        std::string const base = NormalizedCompilerName(compiler);
+
+        // The match is consumed through a view rather than bound to a named
+        // iterator. An iterator variable cannot be spelled portably here:
+        // `auto const*` compiles only where std::array's iterator is a raw
+        // pointer (libstdc++, libc++) and fails on MSVC's class-type iterator,
+        // plain `auto const` trips readability-qualified-auto where it *is* a
+        // pointer, and naming the type trips modernize-use-auto.
+        for (NamePattern const& pattern: NamePatterns)
+        {
+            if (!base.starts_with(pattern.stem))
+                continue;
+            // Anything after the stem must be a version suffix ("-14", "-18"),
+            // never more name — so "clanger" does not read as clang.
+            auto const rest = std::string_view { base }.substr(pattern.stem.size());
+            if (rest.empty() || rest.front() == '-')
+                return pattern.flavor;
+        }
+        return Flavor::Unknown;
+    }
+
+    /// Whether this driver compiles every input as C++ regardless of its name.
+    ///
+    /// The same walk as ClassifyCompilerImpl over the same table, because it is the
+    /// same question asked of a different column -- `g++-14` and `clang++.exe` have
+    /// to be recognised here exactly as they are there, and a second spelling of
+    /// "which driver is this" is a second thing to keep in step.
+    /// @param compiler argv[0] as invoked.
+    /// @return True for a `++` driver.
+    [[nodiscard]] bool CompilesEverythingAsCxx(std::string_view compiler)
+    {
+        std::string const base = NormalizedCompilerName(compiler);
+
+        for (NamePattern const& pattern: NamePatterns)
+        {
+            if (!base.starts_with(pattern.stem))
+                continue;
+            auto const rest = std::string_view { base }.substr(pattern.stem.size());
+            if (rest.empty() || rest.front() == '-')
+                return pattern.languageDefault == LanguageDefault::AlwaysCxx;
+        }
+        return false;
+    }
+
+    /// True if `a` is an option (starts with one of the driver's introducers).
+    [[nodiscard]] bool IsOption(std::string_view a, DriverSpec const& driver)
+    {
+        return !a.empty() && IntroducersOf(driver.family).contains(a.front());
+    }
+
+    /// True if `flag`, given bare, consumes the following argument as its value.
+    ///
+    /// TWO tables, because there are two kinds. Every path-valued flag takes a value and
+    /// so does every macro switch; nothing else the launcher knows about does. This
+    /// consulted `PathValues` alone, above a comment stating that was the whole set --
+    /// true until #1481, whose rows are the first value-taking flags carrying no path.
+    ///
+    /// Still a LOOKUP rather than a list of its own, for the reason that comment gave: it
+    /// used to be a list, and the object output ended up relativized in the one spelling
+    /// that list happened to cover.
+    ///
+    /// @param flag The flag as it appeared on the command line.
+    /// @return True when the next argument belongs to it.
+    [[nodiscard]] bool TakesValue(std::string_view flag)
+    {
+        return std::ranges::any_of(PathValues, [flag](PathValueFlag const& row) { return row.spelling == flag; })
+               || std::ranges::any_of(MacroFlags, [flag](MacroFlag const& row) { return row.spelling == flag; });
+    }
+
+    /// Characters that may separate a flag from a value fused onto it.
+    ///
+    /// Only a value-taking flag may appear in joined form at all, and the join
+    /// must be a value — never more flag name. `-MFdep.d` and `-o=x.o` are the
+    /// joined forms; `-MP` merely starts with `-M`, and `-coverage` with `-c`.
+    constexpr std::string_view JoinSeparators = "=:";
+
+    /// True if `arg` is `flag` carrying a fused value, rather than a different
+    /// flag that merely begins with the same characters.
+    ///
+    /// Getting this wrong is expensive and silent: matching on `starts_with`
+    /// alone makes `-c` swallow `-coverage` and `/c` swallow `/clr`, dropping a
+    /// real flag from the preprocess line (and stranding its value as a stray
+    /// input file), so the probe fails and every such TU compiles uncached
+    /// forever while all unit tests still pass.
+    ///
+    /// A value-taking flag joins directly (`-MFdep.d`, `/Fox.obj`) or through a
+    /// separator (`-MF=dep.d`). A flag that takes no value has no joined form,
+    /// so anything longer than it is a different flag.
+    ///
+    /// @param arg  The argument as it appeared on the command line.
+    /// @param flag The candidate flag.
+    /// @return True when `arg` is `flag` with a value fused onto it.
+    [[nodiscard]] bool IsJoinedValue(std::string_view arg, std::string_view flag)
+    {
+        if (!arg.starts_with(flag) || arg.size() <= flag.size())
+            return false;
+        if (!TakesValue(flag))
+            return false;
+        auto const tail = arg.substr(flag.size());
+        // `/Fo` and `-o` fuse their value directly; a separator is also accepted
+        // so `-MF=dep.d` is not mistaken for an unrelated flag.
+        return !JoinSeparators.contains(tail.front()) || tail.size() > 1;
+    }
+
+    /// Drop a leading join separator from a fused value, so `-MF=dep.d` and
+    /// `-MFdep.d` both yield `dep.d`.
+    /// @param tail The text following the flag in its joined form.
+    /// @return The value proper.
+    [[nodiscard]] std::string_view StripJoinSeparator(std::string_view tail)
+    {
+        if (!tail.empty() && JoinSeparators.contains(tail.front()))
+            tail.remove_prefix(1);
+        return tail;
+    }
+
+    /// True if `arg` is `flag` exactly, or `flag` with a fused value.
+    /// @param arg  The argument as it appeared on the command line.
+    /// @param flag The candidate flag.
+    /// @return True on either the bare or the joined form.
+    [[nodiscard]] bool MatchesFlag(std::string_view arg, std::string_view flag)
+    {
+        return arg == flag || IsJoinedValue(arg, flag);
+    }
+
+    /// An option whose fused remainder is ONE argument for a different driver grammar.
+    ///
+    /// clang-cl's `/clang:<arg>` (and `-clang:<arg>`) hands `<arg>` to the clang driver
+    /// underneath it, which parses it with clang's OWN option table rather than clang-cl's.
+    /// CMake writes the C++ standard that way for clang-cl, which has no `/std:c++23`
+    /// (`-clang:-std=c++23`, on every unit of a C++23 build), so refusing the prefix by
+    /// absence made every such build distribute nothing (#1672).
+    ///
+    /// **The inner argument is judged as if it stood alone, under the grammar it is parsed
+    /// by** -- by the worker's side-artefact table, every `DeniedArguments` row and the
+    /// allowlist, in that order, and by the launcher's side-artefact, denial and macro-switch
+    /// checks (#1680) -- so the prefix admits nothing that argument standing alone would not:
+    /// `-clang:-fplugin=x` is refused by the `fplugin` row exactly as `-fplugin=x` is. The
+    /// grammar is the GNU clang driver's (`Flavor::Clang`) because that is the table clang
+    /// parses `<arg>` with: GNU spellings only, `-` the only introducer, so `-clang:/O2` names
+    /// a FILE to that driver and is refused, and an MSVC-only row never reaches an inner
+    /// argument. Every GNU-spelled allowlist row is `Any`, so `-clang:-std=c++23` is admitted
+    /// exactly when `-std=c++23` is.
+    ///
+    /// The row is scoped to the family that spells the prefix, as the `-clang:-MF` rows of
+    /// `PathValueFlags()` are. `DriverFamily` cannot tell `cl` from clang-cl; `cl` does not
+    /// implement the prefix, and a line it ignores is one the client's own `cl` ignored, by
+    /// the fingerprint argument the `Any` rows rest on.
+    struct PassThroughPrefix
+    {
+        std::string_view spelling;                    ///< The prefix, without its leading `-` or `/`.
+        DriverFamily families { DriverFamily::None }; ///< Which driver families spell it.
+        Flavor innerGrammar { Flavor::Unknown };      ///< The driver whose rules judge the inner argument.
+    };
+
+    /// Every pass-through prefix an argument classifier unwraps before judging an argument.
+    constexpr std::array PassThroughPrefixes {
+        PassThroughPrefix { .spelling = "clang:", .families = DriverFamily::Msvc, .innerGrammar = Flavor::Clang },
+    };
+
+    /// Is `arg` a macro switch this context spells, and where is its value?
+    ///
+    /// A pass-through carrying one (`-clang:-DFOO=2`) IS one, and leaves the dispatched line
+    /// the way `/D` does (#1680). A clang-cl worker compiles its text under `/TP`, which
+    /// preprocesses it AGAIN, so a definition reaching it re-expands identifiers the client's
+    /// source had `#undef`ed. Measured with clang-cl 22.1.8 at `/O2`: over `#undef x` and
+    /// `int f() { int x = 1; { int y = 5; return x; } }`, `-clang:-Dx=y` left on the line made
+    /// the worker's `f()` return 5 where the client's returns 1 -- with exit 0, so the object
+    /// was accepted and cached. That is #1481's defect, reopened through the pass-through
+    /// spelling once a worker admitted `-clang:<arg>`.
+    ///
+    /// A pass-through's value is NEVER said to be the next argument. clang-cl hands the clang
+    /// driver its pass-throughs IN ORDER, so a separated value is the next pass-through
+    /// ANYWHERE on the line: measured, `-clang:-D /O2 t.cpp -clang:FOO=3` defines `FOO=3`, and
+    /// eating the successor would have dropped `/O2`. `RemoteCompileArgs` refuses that shape
+    /// before asking this (`IsSeparatedPassThroughMacro`).
+    /// @param arg         The argument as it appeared on the command line.
+    /// @param introducers Which characters start an option here.
+    /// @param families    Which family spellings may match.
+    /// @return Nullopt when it is not a macro switch; true when its value is the NEXT
+    ///         argument, false when the value is fused on (or rides a pass-through).
+    [[nodiscard]] std::optional<bool> MatchMacroFlag(std::string_view arg,
+                                                     std::string_view introducers,
+                                                     DriverFamily families)
+    {
+        if (auto const passed = MatchPassThrough(arg, families); passed.has_value())
+        {
+            auto const into = DriverOf(passed->into).family;
+            if (!MatchMacroFlag(passed->inner, IntroducersOf(into), into).has_value())
+                return std::nullopt;
+            return false;
+        }
+
+        if (arg.empty() || !introducers.contains(arg.front()))
+            return std::nullopt;
+        for (MacroFlag const& row: MacroFlags)
+        {
+            if (!introducers.contains(row.spelling.front()) || !Overlaps(row.families, families))
+                continue;
+            if (!MatchesFlag(arg, row.spelling))
+                continue;
+            return arg.size() == row.spelling.size();
+        }
+        return std::nullopt;
+    }
+
+    /// Whether @p arg is a pass-through macro switch whose value is a SEPARATE pass-through
+    /// (`-clang:-D -clang:FOO`), which no position-based drop can take off a worker's line.
+    /// @param arg    The argument as it appeared on the command line.
+    /// @param family The family of the driver that receives it.
+    /// @return True for exactly that shape.
+    [[nodiscard]] bool IsSeparatedPassThroughMacro(std::string_view arg, DriverFamily family)
+    {
+        auto const passed = MatchPassThrough(arg, family);
+        if (!passed.has_value())
+            return false;
+        auto const into = DriverOf(passed->into).family;
+        auto const valueIsNext = MatchMacroFlag(passed->inner, IntroducersOf(into), into);
+        return valueIsNext.has_value() && *valueIsNext;
+    }
+
+    /// Whether `arg` states the input language explicitly.
+    /// @param arg    The argument as it appeared on the command line.
+    /// @param family Which family's spellings may match.
+    /// @return True when the build has named the language itself.
+    [[nodiscard]] LanguageSelector const* MatchLanguageSelector(std::string_view arg, DriverFamily family)
+    {
+        auto const introducers = IntroducersOf(family);
+        if (arg.empty() || introducers.empty() || !introducers.contains(arg.front()))
+            return nullptr;
+        // A plain prefix test, and NOT MatchesFlag: that one only recognises a fused
+        // value for a flag the path-value table knows takes one, so it reads
+        // `-xc++` and `/Tcother.c` as ordinary arguments -- which is exactly how
+        // they would have reached a worker.
+        // A loop rather than a named `find_if` iterator, for the reason
+        // `ClassifyCompilerImpl` records: `std::array`'s iterator is a raw pointer on
+        // libstdc++ and libc++ and a class type on MSVC, so no single spelling of the
+        // variable satisfies `readability-qualified-auto` everywhere.
+        for (LanguageSelector const& row: LanguageSelectors)
+            if (introducers.contains(row.spelling.front()) && Overlaps(row.families, family)
+                && arg.starts_with(row.spelling))
+                return &row;
+        return nullptr;
+    }
+
+    /// The language a matched selector names, given the rest of the command line.
+    ///
+    /// @param row The matched row.
+    /// @param arg The argument as it appeared, so a fused `-xc++` is readable.
+    /// @param next The following argument, for the separated `-x c++` form.
+    /// @return The language, or nullopt when this occurrence cannot be reduced to
+    ///         one -- which is a refusal rather than a guess.
+    [[nodiscard]] std::optional<SourceLanguage> LanguageNamedBy(LanguageSelector const& row,
+                                                                std::string_view arg,
+                                                                std::string_view next)
+    {
+        if (row.namesAFile)
+            return std::nullopt;
+        if (row.language.has_value())
+            return row.language;
+
+        // `-x`: the language is the value, fused (`-xc++`) or separate (`-x c++`).
+        auto const fused = arg.substr(row.spelling.size());
+        auto const value = fused.empty() ? next : fused;
+        for (auto const& [name, language]: GnuLanguageNames)
+            if (name == value)
+                return language;
+        return std::nullopt;
+    }
+
+    /// The ParsedCommand field a path-valued flag's value belongs in.
+    ///
+    /// A pointer-to-member rather than a branch per role, so the fused and
+    /// separated forms are unpacked once for every flag the parser captures.
+    /// @param role The matched flag's role.
+    /// @return The field to write, or nullptr for a role the parser does not capture.
+    [[nodiscard]] constexpr std::string ParsedCommand::* DestinationFor(PathValueRole role) noexcept
+    {
+        switch (role)
+        {
+            case PathValueRole::ObjectOutput:
+                return &ParsedCommand::objPath;
+            case PathValueRole::DepFile:
+                return &ParsedCommand::depPath;
+            case PathValueRole::IncludeDir:
+            case PathValueRole::ForcedInclude:
+            case PathValueRole::PrecompiledHeaderInput:
+            case PathValueRole::DepTarget:
+            // Nothing captures it: the launcher never reads or writes the PDB, it
+            // only has to keep the path out of the key and off a worker's line.
+            case PathValueRole::DebugOutput:
+            // Nor this: the compiler applies the rewrite itself, and the launcher
+            // only has to relativize the root it names so the key stays portable.
+            case PathValueRole::PrefixMap:
+            case PathValueRole::SourcePrefixMap:
+                break;
+        }
+        return nullptr;
+    }
+
+    /// Find the flag `arg` must be dropped as, if any: one of the driver's own
+    /// drop flags, or a path-valued flag whose role has no business on a
+    /// preprocess line.
+    /// @param arg    The argument as it appeared on the command line.
+    /// @param driver The driver whose line is being built.
+    /// @return The matched flag spelling, or nullopt to keep the argument.
+    [[nodiscard]] std::optional<std::string_view> MatchDroppedFlag(std::string_view arg, DriverSpec const& driver)
+    {
+        for (std::string_view const flag: driver.preprocessDropFlags)
+            if (MatchesFlag(arg, flag))
+                return flag;
+
+        if (auto const match = MatchPathValueFlag(arg, IntroducersOf(driver.family), driver.family);
+            match.has_value() && DroppedFromPreprocess(match->flag.role))
+            return match->flag.spelling;
+
+        return std::nullopt;
+    }
+
+} // namespace
+
+std::span<PathValueFlag const> PathValueFlags()
+{
+    return PathValues;
+}
+
+std::string_view TargetPinPrefixFor(TargetDiscovery discovery) noexcept
+{
+    // No `default:`, so a mechanism added to the table fails to compile here rather
+    // than silently pinning nothing -- which would present as a worker quietly going
+    // back to choosing its own target.
+    switch (discovery)
+    {
+        case TargetDiscovery::None:
+            return {};
+        case TargetDiscovery::ClangDriverLine:
+            return "--target=";
+        case TargetDiscovery::GnuTargetLine:
+            // Identified, never stated. `gcc` is a fixed-target driver: it has no
+            // `--target=`, so putting one on a dispatched line would fail the compile
+            // rather than direct it. Its target still belongs in the cache key.
+            return {};
+    }
+    return {};
+}
+
+std::string_view IntroducersOf(DriverFamily family) noexcept
+{
+    for (auto const& [candidate, introducers]: FamilyIntroducers)
+        if (candidate == family)
+            return introducers;
+    return {};
+}
+
+std::string_view DriverGrammarName(DriverFamily family) noexcept
+{
+    // No `default:`, so a family added to the enum fails to compile here rather than
+    // silently fingerprinting as something else -- which is the failure this exists to
+    // close, one level up.
+    switch (family)
+    {
+        case DriverFamily::None:
+            // Identifies nothing, and says so by being empty rather than by naming a
+            // grammar it does not have. An unknown driver's fingerprint is then exactly
+            // what it was before #226, which is the conservative direction: it cannot
+            // silently join either family's fleet.
+            return {};
+        case DriverFamily::Msvc:
+            return "grammar-msvc";
+        case DriverFamily::Gnu:
+            return "grammar-gnu";
+        case DriverFamily::Any:
+            // Not a driver -- it is the "every driver accepts this" marker a TABLE ROW
+            // carries, and `DriverSpec::family` never holds it. Named rather than left
+            // to the empty arm, so a value that did reach a fingerprint would be
+            // distinguishable from an unrecognised driver rather than merged with it.
+            return "grammar-any";
+    }
+    return {};
+}
+
+std::optional<PathValueMatch> MatchPathValueFlag(std::string_view arg, std::string_view introducers, DriverFamily families)
+{
+    if (arg.empty() || !introducers.contains(arg.front()))
+        return std::nullopt;
+
+    for (PathValueFlag const& row: PathValues)
+    {
+        // A row whose introducer this context does not recognise cannot match:
+        // under a POSIX layout `/I` is the head of an absolute path, not a flag.
+        if (!introducers.contains(row.spelling.front()) || !Overlaps(row.families, families))
+            continue;
+        if (!MatchesFlag(arg, row.spelling))
+            continue;
+
+        // A fused value is never empty — IsJoinedValue rejects a bare separator —
+        // so an empty `value` unambiguously means "the value is the next argument".
+        if (arg.size() == row.spelling.size())
+            return PathValueMatch { .flag = row, .prefix = {}, .value = {}, .valueTail = {} };
+
+        auto const tail = arg.substr(row.spelling.size());
+        auto const value = StripJoinSeparator(tail);
+        auto const prefix = arg.substr(0, arg.size() - value.size());
+
+        // A row that says its value carries a tail is split HERE, so no consumer
+        // re-derives where the path ends.
+        //
+        // At the LAST separator, which follows GCC. The two drivers in this row's
+        // family DISAGREE and there is no answer that satisfies both -- measured
+        // with a directory literally named `a=b`:
+        // `-fdebug-prefix-map=<dir>/a=b=ZZZ` remaps to `ZZZ` under gcc and to
+        // `b=ZZZ=b` under clang, so gcc cuts at the last separator and clang at
+        // the first. The disagreement is unreachable unless a mapped root
+        // CONTAINS a separator, and it costs a MISS rather than a mis-serve: the
+        // head the launcher isolates then lies under no root, so the argument
+        // comes back verbatim and the two checkouts key apart.
+        //
+        // A value with no separator at all is malformed and the driver will say
+        // so -- it is reported as a bare path rather than refused, because the
+        // diagnostic belongs to the compiler and relativizing a root it is about
+        // to reject changes nothing.
+        if (row.valueTailSeparator != '\0')
+            if (auto const at = value.rfind(row.valueTailSeparator); at != std::string_view::npos)
+                return PathValueMatch {
+                    .flag = row, .prefix = prefix, .value = value.substr(0, at), .valueTail = value.substr(at)
+                };
+
+        return PathValueMatch { .flag = row, .prefix = prefix, .value = value, .valueTail = {} };
+    }
+    return std::nullopt;
+}
+
+std::optional<PassThroughMatch> MatchPassThrough(std::string_view arg, DriverFamily family) noexcept
+{
+    auto const introducers = IntroducersOf(family);
+    if (arg.empty() || introducers.empty() || !introducers.contains(arg.front()))
+        return std::nullopt;
+    auto const body = arg.substr(1);
+    // A loop rather than a named `find_if` iterator, for the reason `FindDeniedArgument`
+    // gives: no single spelling of the iterator's type satisfies clang-tidy everywhere.
+    for (PassThroughPrefix const& row: PassThroughPrefixes)
+        if (Overlaps(row.families, family) && body.starts_with(row.spelling))
+            return PassThroughMatch { .inner = body.substr(row.spelling.size()), .into = row.innerGrammar };
+    return std::nullopt;
+}
+
+bool ProducesSideArtefact(std::string_view arg, DriverSpec const& driver)
+{
+    // Judged as what a pass-through carries, by the driver it is handed to (#1680): clang-cl
+    // hands `/clang:-fmodule-output=x.pcm` to the clang driver, which writes the module file,
+    // while the whole spelling matches no row -- so the compile was cached, and a hit restored
+    // the object without the BMI the build named.
+    if (auto const passed = MatchPassThrough(arg, driver.family); passed.has_value())
+        return ProducesSideArtefact(passed->inner, DriverOf(passed->into));
+
+    auto const introducers = IntroducersOf(driver.family);
+    if (arg.empty() || introducers.empty() || !introducers.contains(arg.front()))
+        return false;
+
+    // A prefix test, and NOT MatchesFlag, for the reason IsLanguageSelector gives:
+    // MatchesFlag only recognises a fused value for a flag the path-value table
+    // knows takes one, and every row here takes its value in the spelling a build
+    // actually writes -- `/Yc"pch.h"`, `-fmodule-output=x.pcm`. Matching only the
+    // bare form would have caught the shape nobody writes and missed the one
+    // everybody does.
+    return std::ranges::any_of(SideArtefacts, [&](SideArtefactFlag const& row) {
+        return introducers.contains(row.spelling.front()) && Overlaps(row.families, driver.family)
+               && (!row.onlyFlavor.has_value() || *row.onlyFlavor == driver.flavor) && arg.starts_with(row.spelling);
+    });
+}
+
+std::string_view ObjectOutputPrefixFor(DriverFamily family)
+{
+    // The MOST SPECIFIC row wins: `-o` is DriverFamily::Any and would match an
+    // MSVC driver too, so a plain "first row that overlaps" scan would hand `cl`
+    // the very flag it does not accept. Preferring a row whose families are not
+    // Any is what makes the table answer this question correctly.
+    std::string_view fallback;
+    for (auto const& row: PathValueFlags())
+    {
+        if (row.role != PathValueRole::ObjectOutput || !Overlaps(row.families, family))
+            continue;
+        if (row.families != DriverFamily::Any)
+            return row.spelling;
+        if (fallback.empty())
+            fallback = row.spelling;
+    }
+    return fallback.empty() ? std::string_view { "-o" } : fallback;
+}
+
+std::string NormalizedCompilerName(std::string_view compiler)
+{
+    std::string base = PathCanon::AsciiLower(Basename(compiler));
+    if (base.ends_with(".exe"))
+        base.resize(base.size() - 4);
+    return base;
+}
+
+Flavor ClassifyCompiler(std::string_view compiler)
+{
+    return ClassifyCompilerImpl(compiler);
+}
+
+Flavor ClassifyCompilerFromBanner(Flavor named, std::string_view banner) noexcept
+{
+    // The GNU-driver pair only. `clang-cl` prints `clang version ...` exactly as
+    // plain clang does, so the name is the only thing separating those two drivers
+    // and a banner test here would collapse them into one.
+    if (named != Flavor::Gcc && named != Flavor::Clang)
+        return named;
+
+    // ONE direction, on POSITIVE evidence only. Every vendor's spelling carries the
+    // marker -- `clang version 22.1.3`, `Apple clang version 17.0.0`,
+    // `Ubuntu clang version 20.1.2` -- so seeing it is proof. Not seeing it is not
+    // proof of the opposite: GCC has no equally reliable marker of its own (vanilla
+    // prints `(GCC)`, Ubuntu prints `(Ubuntu 14.2.0-...)`), and more to the point a
+    // driver that could not be RUN falls back to its own basename, so `clang++`
+    // whose `--version` failed would arrive here carrying the string `clang++` and
+    // be demoted into the gcc row -- unversioned target, no pin, on a driver whose
+    // name said exactly what it was.
+    //
+    // So an unrecognised banner leaves the name-based guess standing, which is both
+    // the safe direction and what this did before there was a correction at all.
+    return banner.contains(ClangBannerMarker) ? Flavor::Clang : named;
+}
+
+DriverSpec const& DriverOf(Flavor flavor)
+{
+    // Iterated rather than searched via a named iterator — see the note in
+    // ClassifyCompiler for why an iterator variable is not portable here.
+    for (DriverSpec const& spec: Drivers)
+        if (spec.flavor == flavor)
+            return spec;
+    return Drivers.front();
+}
+
+std::optional<SourceLanguage> LanguageOfSource(std::string_view path)
+{
+    // The final component first: a directory is free to carry a dot
+    // (`../build.release/src/a.cpp`), and the extension of a path is a property of
+    // its last component only.
+    auto const slash = path.find_last_of("/\\");
+    auto const name = slash == std::string_view::npos ? path : path.substr(slash + 1);
+    auto const dot = name.find_last_of('.');
+    if (dot == std::string_view::npos || dot + 1 == name.size())
+        return std::nullopt;
+    auto const extension = name.substr(dot);
+
+    // Asked BEFORE the case-insensitive lookup, because the ambiguity is exactly a
+    // difference of case: folding first is what would turn `.C` into the C row.
+    if (std::ranges::contains(AmbiguousSourceExtensions, extension))
+        return std::nullopt;
+
+    auto const folded = PathCanon::AsciiLower(extension);
+    for (auto const& [spelling, language]: SourceExtensions)
+        if (folded == spelling)
+            return language;
+    return std::nullopt;
+}
+
+std::string_view DescribeLanguage(SourceLanguage language) noexcept
+{
+    for (auto const& spec: LanguageSpecs)
+        if (spec.language == language)
+            return spec.name;
+    return "unknown";
+}
+
+std::string_view UncacheableBecause(SourceLanguage language) noexcept
+{
+    for (auto const& spec: LanguageSpecs)
+        if (spec.language == language)
+            return spec.refused;
+    return {};
+}
+
+std::optional<std::span<std::string_view const>> PreprocessedInputFlagsFor(DriverSpec const& driver, SourceLanguage language)
+{
+    for (auto const& spelling: driver.preprocessedInput)
+        if (spelling.language == language)
+            return spelling.flags;
+    return std::nullopt;
+}
+
+ParsedCommand ParseCommand(std::span<std::string const> argv)
+{
+    ParsedCommand out;
+    if (argv.empty())
+        return out;
+
+    out.compiler = argv.front();
+    out.flavor = ClassifyCompilerImpl(out.compiler);
+    auto const& driver = DriverOf(out.flavor);
+    if (out.flavor == Flavor::Unknown)
+        return out;
+
+    auto const args = argv.subspan(1);
+    bool sawCompileOnly = false;
+    bool preprocessOnly = false;
+    std::size_t skipUntil = 0; // index the next iteration must not re-process
+
+    for (auto const i: std::views::iota(std::size_t { 0 }, args.size()))
+    {
+        if (i < skipUntil)
+            continue;
+        std::string_view const a = args[i];
+
+        // Inline dependency reporting (MSVC drivers only).
+        if (a == "/showIncludes" || a == "-showIncludes")
+        {
+            out.wantShowIncludes = true;
+            continue;
+        }
+
+        // Compile-only / preprocess-only markers decide cacheability below.
+        if (a == "/c" || a == "-c")
+        {
+            sawCompileOnly = true;
+            continue;
+        }
+        if (a == "-E" || a == "/EP" || a == "/P")
+        {
+            preprocessOnly = true;
+            continue;
+        }
+
+        // Path-valued flags, in any spelling this driver accepts, joined
+        // (`/Fo<path>`, `-MFdep.d`) or separated (`/Fo <path>`, `-o <path>`).
+        // Which of them the parser captures is decided by the row's role, so a
+        // driver that spells the object output differently is a table row rather
+        // than a branch here — as `-o`, which every MSVC driver takes alongside
+        // `/Fo`, used to be.
+        if (auto const match = MatchPathValueFlag(a, IntroducersOf(driver.family), driver.family))
+        {
+            // A pass-through spelling with its value in the next argument: that value
+            // is wrapped in a pass-through of its own, so it is refused, not read.
+            if (match->flag.joinedOnly && match->value.empty())
+            {
+                out.separatedPassThrough = true;
+                continue;
+            }
+            auto const destination = DestinationFor(match->flag.role);
+            // An include directory or a dependency target goes nowhere, and its
+            // separated value is deliberately left to be scanned rather than
+            // consumed: it is not a source path, so nothing downstream reads it.
+            // What a stored depfile must not have respelled is read from the
+            // depfile itself, structurally — see ParseDepFileTargets.
+            if (destination == nullptr)
+                continue;
+
+            if (!match->value.empty())
+            {
+                out.*destination = std::string { match->value };
+                continue;
+            }
+            if (i + 1 < args.size())
+            {
+                out.*destination = args[i + 1];
+                skipUntil = i + 2; // consume the value argument
+            }
+            continue;
+        }
+
+        // Asked of every argument, and of the SOURCE too by way of its extension
+        // below: a compile that also writes a BMI, a precompiled header or `cl`'s
+        // shared `/Zi` PDB, or that reads a precompiled header under `cl` (`/Yu`),
+        // is not one a cache hit can reproduce.
+        if (ProducesSideArtefact(a, driver))
+        {
+            out.sideArtefact = true;
+            continue;
+        }
+
+        // A bare argument ending in a source suffix is the translation unit.
+        if (!IsOption(a, driver) && IsSourceSuffix(PathCanon::AsciiLower(a)))
+        {
+            // First source wins; a second source means a multi-TU line we do
+            // not cache (leave parsedOk false).
+            if (out.source.empty())
+                out.source = std::string { a };
+            else
+                out.source.clear(); // ambiguous — force fallback
+        }
+    }
+
+    // A cacheable line compiles exactly one TU to an object. A preprocess-only
+    // run produces text, not an object, so it is never cached; a line with no
+    // -c/​/c is a link (or a compile-and-link) and is likewise left alone.
+    //
+    // The object path must be known, too. `g++ -c a.cpp` (no -o) is a perfectly
+    // ordinary compile that defaults its output to ./a.o, but the launcher has
+    // no path to read the object back from or write it to — treating it as
+    // cacheable makes every such compile report a MISS and then fail to store,
+    // forever, and would hand an empty path to the file writer on a hit.
+    //
+    // A module interface unit reaches a compiler two ways -- as `foo.ixx`, and as
+    // `cl /interface foo.cpp` -- and both must be stepped over for one reason: what
+    // a hit reproduces is the object and the dependency record, so the BMI beside it
+    // would afterwards be missing (which fails loudly) or left from a previous build
+    // (which does not). The extension is asked of the LANGUAGE table so that the
+    // rule has one home, and the flag of `ProducesSideArtefact` above, which also
+    // covers a precompiled header.
+    if (auto const language = LanguageOfSource(out.source); language.has_value() && !UncacheableBecause(*language).empty())
+        out.sideArtefact = true;
+
+    out.parsedOk = !out.source.empty() && !out.objPath.empty() && sawCompileOnly && !preprocessOnly && !out.sideArtefact
+                   && !out.separatedPassThrough;
+    return out;
+}
+
+/// Whether `arg` could still make a compiler reach a file, after the path-valued
+/// flags this launcher knows about have already been removed.
+///
+/// A separator is the test, not a list of spellings, precisely because the list is
+/// what cannot be kept complete: `-isystem`, `--sysroot`, `-B`, `-specs=`,
+/// `-fplugin=` and `@file` all reach a file and none of them is a `PathValueFlags()`
+/// row. `@` is called out on its own because a response file names a path with no
+/// separator at all when it sits in the working directory.
+///
+/// The **introducer is skipped before the separator is looked for**, and which
+/// characters introduce is the driver's answer rather than this function's. `/`
+/// starts an option for an MSVC driver and an absolute path everywhere else -- the
+/// rule this launcher already lives by -- so testing the raw argument would refuse
+/// `/std:c++20` and `/O2`, i.e. every MSVC compile, while a `\` inside
+/// `/DCONFIG=C:\x` is still exactly the signal being looked for.
+/// @param arg One surviving argument.
+/// @param family The driver family whose spellings apply.
+/// @return True when the argument must not be sent to a worker.
+[[nodiscard]] bool CouldNameAFile(std::string_view arg, DriverFamily family)
+{
+    if (arg.starts_with('@'))
+        return true;
+    // One introducer only: a second `/` is a path separator even on Windows.
+    auto const body = !arg.empty() && IntroducersOf(family).contains(arg.front()) ? arg.substr(1) : arg;
+    return body.contains('/') || body.contains('\\');
+}
+
+namespace
+{
+    /// The language a dispatched compile states for its input, or why it can state none.
+    ///
+    /// The extension, overridden by a driver that compiles everything as C++, overridden in turn
+    /// by the build's own selector. Out of `RemoteCompileArgs` so that function reads as the
+    /// per-argument walk it is: the two changes that met in it (#1680's pass-through refusal,
+    /// #1686's forwarded prefix map) took it past the cognitive-complexity budget together.
+    /// @param cmd The parsed command.
+    /// @param argv The full command line.
+    /// @param driver The driver's spec.
+    /// @return The language, or the reason the job cannot be dispatched.
+    [[nodiscard]] std::expected<SourceLanguage, std::string> DispatchedLanguage(ParsedCommand const& cmd,
+                                                                                std::span<std::string const> argv,
+                                                                                DriverSpec const& driver)
+    {
+        // Asked FIRST, before a single argument is examined: what this decides is
+        // whether the job can be dispatched at all, and a refusal that costs nothing is
+        // worth reaching before one that costs a scan.
+        auto language = LanguageOfSource(cmd.source);
+        if (!language.has_value())
+            return std::unexpected(std::format("no language is named unambiguously by the extension of {}", cmd.source));
+        if (auto const because = UncacheableBecause(*language); !because.empty())
+            return std::unexpected(std::format("{} is never dispatched: {}", DescribeLanguage(*language), because));
+
+        // The DRIVER overrides the extension where it has a default of its own: `g++
+        // -c a.c` compiles C++, so telling a worker `-x cpp-output` would have it
+        // compile as C what this machine compiles as C++, and store that under the key.
+        // Only the C row moves -- a driver that always compiles C++ says nothing about
+        // an Objective-C source, whose own driver default is unchanged.
+        if (*language == SourceLanguage::C && CompilesEverythingAsCxx(cmd.compiler))
+            language = SourceLanguage::Cxx;
+
+        // And the BUILD's own selector outranks both, which is the order the comment on
+        // `LanguageSelectors` describes and nothing implemented: `/TP` on a `.c` file
+        // means C++, whatever the extension or the driver would have said. Resolved
+        // here, before the language is used, so the flags appended below state what the
+        // build asked for rather than overriding it.
+        //
+        // A selector that cannot be reduced to a language -- one naming a FILE, or an
+        // `-x` value with no exact `SourceLanguage` -- is still refused. Refusing costs
+        // one local compile; guessing hands back an object nobody asked for.
+        for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
+        {
+            auto const* row = MatchLanguageSelector(argv[i], driver.family);
+            if (row == nullptr)
+                continue;
+            auto const named = LanguageNamedBy(*row, argv[i], i + 1 < argv.size() ? argv[i + 1] : std::string_view {});
+            if (!named.has_value())
+                return std::unexpected(
+                    std::format("the command line names the input language itself ({}) in a form this launcher cannot "
+                                "restate to a worker",
+                                argv[i]));
+            language = named;
+        }
+        return *language;
+    }
+} // namespace
+
+std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCommand const& cmd,
+                                                                       std::span<std::string const> argv,
+                                                                       std::string_view targetTriple)
+{
+    auto const& driver = DriverOf(cmd.flavor);
+
+    // Asked FIRST, before a single argument is examined: whether the job can be dispatched at
+    // all, and in which language (`DispatchedLanguage`).
+    auto const language = DispatchedLanguage(cmd, argv, driver);
+    if (!language.has_value())
+        return std::unexpected(language.error());
+
+    // A shared PDB is a second artefact, and only the object comes back. Refused
+    // before anything is sent, on the same reasoning as a module interface unit.
+    if (driver.family == DriverFamily::Msvc)
+        for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
+            if (std::ranges::contains(MsvcSharedPdb, argv[i]))
+                return std::unexpected(
+                    std::format("{} writes debug info to a shared PDB, which a dispatched compile cannot bring back; "
+                                "build with /Z7 to distribute this",
+                                argv[i]));
+
+    auto const preprocessedInput = PreprocessedInputFlagsFor(driver, *language);
+    if (!preprocessedInput.has_value())
+        return std::unexpected(
+            std::format("this driver has no way to be handed preprocessed {}", DescribeLanguage(*language)));
+
+    std::vector<std::string> out;
+    out.reserve(argv.size() + 1);
+
+    // FIRST, before a single one of the build's own arguments. This states the
+    // default the client's driver would have used; the build's own `--target=` or
+    // `-m32` comes later and still wins, which is what happens locally and is why
+    // probing the ambient default is enough. The prefix comes from the mechanism
+    // that produced the triple, so a driver with nothing to state pins nothing even
+    // if a caller hands it a value.
+    if (auto const prefix = TargetPinPrefixFor(driver.targetDiscovery); !prefix.empty() && !targetTriple.empty())
+        out.emplace_back(std::format("{}{}", prefix, targetTriple));
+
+    std::size_t skipUntil = 1; // argv[0] is the compiler; the worker picks its own
+    for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
+    {
+        if (i < skipUntil)
+            continue;
+        std::string_view const a = argv[i];
+
+        // The source itself never travels: the worker compiles preprocessed text
+        // from a file of its own. Matched by value against the parsed source rather
+        // than by position, because a build system is free to put it anywhere.
+        if (a == cmd.source)
+            continue;
+
+        // The end-of-options marker, which CMake's clang-cl rule writes before every
+        // source (`-c -- $in`). It belongs to the SOURCE, which never travels, and
+        // forwarded it did harm twice over: the worker's allowlist has no row for it, so
+        // every CMake + clang-cl unit came back refused; and a worker that took it would
+        // read the language flags appended below as input files.
+        if (a == EndOfOptions)
+            continue;
+
+        // The compile-only marker and the dependency switches, off the driver's own
+        // list. Same rule PreprocessCommand applies, and the same reason for reading
+        // it here rather than restating it: a spelling added to that table has to be
+        // dropped by every consumer or the one that missed it silently diverges.
+        if (auto const dropped = MatchDroppedFlag(a, driver))
+        {
+            if (a == *dropped && TakesValue(*dropped) && i + 1 < argv.size())
+                skipUntil = i + 2;
+            continue;
+        }
+
+        // EVERY path-valued flag, not merely the ones the preprocess line drops.
+        // An include directory is the difference between the two lists: the probe
+        // needs it (it is still resolving headers), and the worker must not have it
+        // (the headers are already inlined, and the path names nothing there).
+        if (auto const match = MatchPathValueFlag(a, IntroducersOf(driver.family), driver.family))
+        {
+            // A source prefix map cannot be dropped: the worker compiles text whose `#line`
+            // markers name the CLIENT's paths, so without the client's rule its
+            // `source_location` would name them unmapped. `-fmacro-prefix-map` TRAVELS -- the
+            // worker applies it to those strings and opens nothing -- so its row is forwarded
+            // ahead of the role's refusal, which `-ffile-prefix-map` still meets: it also
+            // rewrites debug records the worker maps by its own rules.
+            if (match->flag.remote == RemoteLine::Forwarded)
+            {
+                // A separated value travels with its flag, as the build wrote both.
+                out.emplace_back(a);
+                if (match->value.empty() && i + 1 < argv.size())
+                {
+                    out.emplace_back(argv[i + 1]);
+                    skipUntil = i + 2;
+                }
+                continue;
+            }
+            if (auto const because = UndispatchableBecause(match->flag.role); !because.empty())
+                return std::unexpected(std::format("{} {}", match->flag.spelling, because));
+            // Only a bare occurrence consumes the next argument; a fused one already
+            // carries its value, and eating the successor would drop a real flag.
+            if (match->value.empty() && i + 1 < argv.size())
+                skipUntil = i + 2;
+            continue;
+        }
+
+        // A language the BUILD named itself, already folded into `language` above.
+        // Dropped rather than forwarded: the flags appended at the end of this
+        // function say the same thing and say more -- "this text is preprocessed
+        // <language>" rather than "this source is <language>" -- and forwarding both
+        // would leave two spellings of the input's language on one command line.
+        //
+        // The unreducible forms never reach here; the loop above refused them.
+        if (auto const* row = MatchLanguageSelector(a, driver.family))
+        {
+            // The separated `-x c++` form owns the next argument too, and leaving
+            // its value behind would hand the worker a bare `c++` to open as a file.
+            //
+            // ONLY a row whose language arrives as a VALUE. `/TP` carries its language
+            // in its own spelling, and this skip used to take the argument after it as
+            // well: `/TP /W4 /WX` reached a worker as `/WX` alone, compiled at the
+            // default warning level what the client compiled at `/W4`, and served the
+            // object of a compile that fails locally. CMake writes a `-D` after `/TP`,
+            // which is dropped here anyway, and that is how it hid.
+            if (!row->language.has_value() && a == row->spelling && i + 1 < argv.size())
+                skipUntil = i + 2;
+            continue;
+        }
+
+        // A pass-through macro switch whose value is a separate pass-through cannot be taken off
+        // this line by position: clang-cl pairs it with the next `-clang:` argument ANYWHERE
+        // (`MatchMacroFlag` measures it), and leaving either half here is a definition a worker
+        // re-preprocessing under `/TP` applies a second time (#1481). Not dispatched, then --
+        // the key and a local compile see the whole line, so it is still cached (#1680).
+        if (IsSeparatedPassThroughMacro(a, driver.family))
+            return std::unexpected(std::format("{} carries its value in a separate pass-through argument, which "
+                                               "this launcher cannot pair with it to keep off a worker's line",
+                                               a));
+
+        // Every macro definition, and only here -- the preprocess line and the key keep
+        // them (#1481). ABOVE the positive check below, which is what used to refuse a
+        // path-valued one and with it every other argument on the line. A pass-through
+        // carrying one is one (#1680), and `MatchMacroFlag` says so itself.
+        if (auto const valueIsNext = MatchMacroFlag(a, IntroducersOf(driver.family), driver.family))
+        {
+            // Only a bare occurrence owns the successor. Eating it after a fused form
+            // would drop a real flag -- and leaving it after a bare one would strand the
+            // definition as a stray input file for the worker to open.
+            if (*valueIsNext && i + 1 < argv.size())
+                skipUntil = i + 2;
+            continue;
+        }
+
+        // The positive check, and the last word. See the header: refusing the whole
+        // command line is the only safe answer, because stripping an argument this
+        // function does not recognise would change the generated code.
+        if (CouldNameAFile(a, driver.family))
+            return std::unexpected(std::format("argument {} could name a file this launcher cannot account for", a));
+
+        out.emplace_back(a);
+    }
+
+    // Appended last, so a build's own `-x` (if any) is overridden rather than
+    // overriding: the input genuinely IS preprocessed output whatever the build
+    // thought it was handing over.
+    for (auto const& flag: *preprocessedInput)
+        out.emplace_back(flag);
+    return out;
+}
+
+std::string CompilerWorkingDirectory(std::string_view physicalDirectory, std::string_view environmentPwd)
+{
+    if (environmentPwd.empty() || physicalDirectory.empty())
+        return std::string { physicalDirectory };
+
+    // Both sides through `PathFromNarrowText`: `PWD` is text some other process wrote,
+    // so on a host where a `char` is not UTF-8 it can be bytes `std::filesystem::path`'s
+    // narrow constructor throws on, before any `error_code` overload runs. A spelling
+    // this host cannot read is one no comparison can be made about, which is the
+    // fallback answer anyway.
+    auto const logical = PathFromNarrowText(environmentPwd);
+    auto const physical = PathFromNarrowText(physicalDirectory);
+    if (!logical.has_value() || !physical.has_value())
+        return std::string { physicalDirectory };
+
+    // POSIX-ROOTED first, and not merely as an optimisation: `equivalent` resolves a
+    // relative path against this process's own working directory, so `PWD=build` inside
+    // `.../build` compares EQUAL and would be returned as a compilation directory that
+    // is not absolute. Measured: `PWD=relative/bits` fell back on both drivers.
+    //
+    // A leading `/` and NOT `path::is_absolute()`, which is the same test on POSIX and
+    // strictly more permissive on a Windows layout -- it admits `D:/work` and
+    // `\\host\share`, and NEITHER Windows driver consults `PWD` for either. libiberty's
+    // `getpwd()`, which is where gcc's `DW_AT_comp_dir` comes from, gates on
+    // `*p == '/'` before it stats anything; LLVM does the `PWD` dance only in
+    // `Unix/Path.inc`, its Windows path being `GetCurrentDirectoryW` with no `PWD` in
+    // it. So modelling this as `is_absolute()` would make a MinGW client predict a
+    // spelling its own compiler never uses, send a mapping the local compile did not
+    // apply, and rebuild #506's asymmetry under a correct key.
+    //
+    // **Read rather than measured** -- the five-row table on the declaration is Linux,
+    // and no Windows GNU-layout driver was available to run it against. Stated
+    // separately because a reader cannot recover the difference and would otherwise
+    // inherit it as measurement. An MSYS-style `/d/work` still reaches the `stat` here
+    // and still falls back, because that spelling resolves for the shell and not for
+    // the driver -- so the two agree by the check below rather than by this one.
+    if (!logical->has_root_directory() || logical->has_root_name())
+        return std::string { physicalDirectory };
+
+    // `equivalent`, not a string compare: the question is whether `PWD` names the SAME
+    // directory, which is what the driver asks and what a symlink makes different from
+    // spelling the same. It returns false on error and it is the only filesystem call
+    // here; a directory that cannot be stat'd falls back like everything else.
+    std::error_code ec;
+    if (!std::filesystem::equivalent(*logical, *physical, ec) || ec)
+        return std::string { physicalDirectory };
+
+    // `PWD` VERBATIM rather than `logical->string()`, because the driver's comparison is
+    // over the bytes it was handed and `path` may re-spell separators on a Windows
+    // layout. What this returns is compared byte-for-byte one call later.
+    return std::string { environmentPwd };
+}
+
+std::string CompilerWorkingDirectory(std::string_view physicalDirectory)
+{
+    auto const pwd = ReadEnvironmentVariable("PWD");
+    return CompilerWorkingDirectory(physicalDirectory, pwd.has_value() ? std::string_view { *pwd } : std::string_view {});
+}
+
+std::optional<std::string> MappedByPrefixMapRules(std::span<std::string const> argv,
+                                                  DriverFamily family,
+                                                  std::string_view path)
+{
+    auto const introducers = IntroducersOf(family);
+
+    // The LAST match wins, so the loop records rather than returns. Measured on gcc
+    // 14 and clang 20, two rules over one directory: the second replacement is what
+    // `DW_AT_comp_dir` holds. It is also what `_fc_debug_prefix_map_rules` relies on
+    // -- it emits the source rule first and the build-tree rule last precisely so the
+    // build tree wins -- so a first-match model here would predict the source rule's
+    // replacement and disagree with every object this project builds.
+    std::optional<std::string> mapped;
+    for (auto const& arg: argv)
+    {
+        auto const match = MatchPathValueFlag(arg, introducers, family);
+        // A rule whose value carries no tail is `-fdebug-prefix-map=/abs` with no
+        // replacement, which the driver rejects; it maps nothing, so it is skipped
+        // here rather than treated as a mapping to the empty string.
+        if (!match.has_value() || match->flag.role != PathValueRole::PrefixMap || match->valueTail.empty())
+            continue;
+
+        // A BYTE prefix, deliberately, because that is what both drivers implement:
+        // `-fdebug-prefix-map=/tmp/work=X` rewrites a working directory of
+        // `/tmp/worker` to `Xer` on gcc and on clang alike. Requiring a separator
+        // boundary would read better and would make this client predict a replacement
+        // its own compiler does not write.
+        if (!path.starts_with(match->value))
+            continue;
+
+        // `valueTail` carries the separator, so the replacement is what follows it,
+        // plus whatever of the path the prefix did not cover.
+        mapped = std::string { match->valueTail.substr(1) } + std::string { path.substr(match->value.size()) };
+    }
+    return mapped;
+}
+
+std::optional<MappedCompileDir> MappedCompileDirectory(std::span<std::string const> argv,
+                                                       DriverFamily family,
+                                                       std::string_view workingDirectory)
+{
+    // The directory travels beside its replacement because a worker needs BOTH
+    // left-hand sides: gcc under `-g` puts this directory into the preprocessed text
+    // and the worker's object then adopts it, while clang leaves the worker's own
+    // showing. That pairing is the only thing this adds to the computation above --
+    // which is why the computation is its own function rather than this one's body
+    // (#800): the source spelling wants the same rules and none of the pairing.
+    return MappedByPrefixMapRules(argv, family, workingDirectory).transform([workingDirectory](std::string replacement) {
+        return MappedCompileDir { .directory = std::string { workingDirectory }, .replacement = std::move(replacement) };
+    });
+}
+
+std::vector<std::string> DispatchPreprocessCommand(ParsedCommand const& cmd, std::span<std::string const> argv)
+{
+    auto const& driver = DriverOf(cmd.flavor);
+
+    std::vector<std::string> out;
+    out.reserve(argv.size() + driver.dispatchPreprocessFlags.size() + 1);
+    out.emplace_back(cmd.compiler);
+    for (auto const& flag: driver.dispatchPreprocessFlags)
+        out.emplace_back(flag);
+
+    // No dependency probe: the key's run already reported them, and asking again
+    // would make this run write a depfile the caller has no use for.
+    std::size_t skipUntil = 1;
+    for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
+    {
+        if (i < skipUntil)
+            continue;
+        std::string_view const a = argv[i];
+        if (auto const dropped = MatchDroppedFlag(a, driver))
+        {
+            if (a == *dropped && TakesValue(*dropped) && i + 1 < argv.size())
+                skipUntil = i + 2;
+            continue;
+        }
+        out.emplace_back(a);
+    }
+    return out;
+}
+
+std::vector<std::string> PreprocessCommand(ParsedCommand const& cmd,
+                                           std::span<std::string const> argv,
+                                           std::string_view dependencyProbePath)
+{
+    auto const& driver = DriverOf(cmd.flavor);
+
+    std::vector<std::string> out;
+    out.reserve(argv.size() + driver.preprocessFlags.size() + driver.dependencyProbeFlags.size() + 1);
+    out.emplace_back(cmd.compiler);
+    for (auto const& flag: driver.preprocessFlags)
+        out.emplace_back(flag);
+
+    // The dependency probe rides on this same run, and the path is what requests
+    // it. A depfile driver needs the destination anyway: writing to the build's
+    // own `-MF` would leave a probe's depfile behind for a hit that is then
+    // discarded, and letting `-MD` default its name would drop a stray `.d` in
+    // the working directory. A stream driver reports inline and reads nothing but
+    // the request out of it.
+    if (!dependencyProbePath.empty())
+    {
+        for (auto const& flag: driver.dependencyProbeFlags)
+            out.emplace_back(flag);
+        if (driver.usesDepfile)
+            out.emplace_back(dependencyProbePath);
+    }
+
+    std::size_t skipUntil = 1; // argv[0] is the compiler, already emitted
+    for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
+    {
+        if (i < skipUntil)
+            continue;
+        std::string_view const a = argv[i];
+
+        // Drop a dropped flag together with its separated value, so a `-MF dep.d`
+        // pair never leaves a stray "dep.d" argument behind. Matching is exact or
+        // joined-with-a-value only — see IsJoinedValue: a prefix match would drop
+        // `-coverage` for `-c` and `/clr` for `/c`.
+        if (auto const dropped = MatchDroppedFlag(a, driver))
+        {
+            // Only the bare form takes the NEXT argument; a joined form already
+            // carries its value, so consuming the successor would eat a real flag.
+            if (a == *dropped && TakesValue(*dropped) && i + 1 < argv.size())
+                skipUntil = i + 2;
+            continue;
+        }
+        // Warnings-as-errors, dropped here and NOWHERE else -- see probeDropFlags.
+        // These carry no value, so there is no successor to consume.
+        if (std::ranges::contains(driver.probeDropFlags, a))
+            continue;
+        out.emplace_back(a);
+    }
+    return out;
+}
+
+namespace
+{
+    /// How the drivers spell a line that reports an ERROR, as opposed to a note, a
+    /// warning or `cl`'s echo of the source name: `a.cpp(3): error C2220`,
+    /// `a.cpp(3): fatal error C1083`, `a.cpp:3:1: error: ...`.
+    constexpr std::array<std::string_view, 3> ErrorLineMarkers { ": error ", ": fatal error ", " error: " };
+} // namespace
+
+std::string DescribeFailedPreprocess(int exitCode, std::string_view diagnostics)
+{
+    std::string_view chosen;
+    std::string_view firstNonEmpty;
+    for (auto const lineRange: std::views::split(diagnostics, '\n'))
+    {
+        auto line = std::string_view { lineRange.begin(), lineRange.end() };
+        if (line.ends_with('\r'))
+            line.remove_suffix(1);
+        if (line.empty())
+            continue;
+        if (firstNonEmpty.empty())
+            firstNonEmpty = line;
+        if (std::ranges::any_of(ErrorLineMarkers, [line](std::string_view marker) { return line.contains(marker); }))
+        {
+            chosen = line;
+            break;
+        }
+    }
+    if (chosen.empty())
+        chosen = firstNonEmpty;
+    if (chosen.empty())
+        return std::format("exit {}", exitCode);
+    return std::format("exit {}: {}", exitCode, PrintableArgument(chosen));
+}
+
+} // namespace Pace::Cc

@@ -10,14 +10,14 @@
 # one concern, so the four presets that inherit `PEDANTIC_COMPILER=ON` from `base`
 # without turning `WERROR` on -- `clang-coverage`, `clang-asan-ubsan`, `clang-tsan`,
 # `clang-tracy` -- got the warnings and none of the suppressions
-# ([#611](https://github.com/LASTRADA-Software/fastcached/issues/611)).
+# ([#611](https://github.com/LASTRADA-Software/pace/issues/611)).
 #
 # Measured on 0db96dc8 before the fix, each preset in its OWN fresh build directory
 # with `/usr/bin/clang++` pinned by absolute path and no compiler-cache launcher:
 # **7049 `-Wc2y-extensions` warnings across 195 translation units, identically in
 # all four**, every one of them `'__COUNTER__' is a C2y extension` from Catch2's
 # `TEST_CASE`. That is the diagnostic
-# [#454](https://github.com/LASTRADA-Software/fastcached/issues/454) reported and
+# [#454](https://github.com/LASTRADA-Software/pace/issues/454) reported and
 # could not explain.
 #
 # ## Why this is a check and not a comment
@@ -55,32 +55,32 @@
 #
 # It is also already this project's idiom for asking a `cmake/portable/` module
 # what it computes: `check-debug-prefix-map.cmake` and
-# `check-fastcache-addr-opt-out.cmake` both `include()` `CompileCache.cmake` and
+# `check-pace-addr-opt-out.cmake` both `include()` `CompileCache.cmake` and
 # drive it. The only thing new here is the stub, which those two do not need
 # because the functions they call spawn nothing.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # The subject. A parameter so `check-pedantic-suppressions-selftest.cmake` can drive
 # this same script against synthetic files -- a guard nobody has watched refuse is
 # not a guard, and the only way to watch this one refuse is to hand it a file that
 # violates the rule.
-if(NOT DEFINED FASTCACHED_PEDANTIC_FILE)
-    set(FASTCACHED_PEDANTIC_FILE "${FASTCACHED_SOURCE_DIR}/cmake/portable/PedanticCompiler.cmake")
+if(NOT DEFINED PACE_PEDANTIC_FILE)
+    set(PACE_PEDANTIC_FILE "${PACE_SOURCE_DIR}/cmake/portable/PedanticCompiler.cmake")
 endif()
 
-if(NOT DEFINED FASTCACHED_PEDANTIC_PROBE_DIR)
-    set(FASTCACHED_PEDANTIC_PROBE_DIR "${FASTCACHED_SOURCE_DIR}/scripts/pedantic-flag-probe")
+if(NOT DEFINED PACE_PEDANTIC_PROBE_DIR)
+    set(PACE_PEDANTIC_PROBE_DIR "${PACE_SOURCE_DIR}/scripts/pedantic-flag-probe")
 endif()
 
 # The project's MSVC suppression rows, exactly as the top-level CMakeLists.txt hands them to the
 # module: the check asks what the module does with THESE, never with a copy. A synthetic subject
 # does not read them, which costs it nothing.
-include("${FASTCACHED_SOURCE_DIR}/cmake/PedanticSuppressions.cmake")
+include("${PACE_SOURCE_DIR}/cmake/PedanticSuppressions.cmake")
 
 # Which compilers to ask as. `PedanticCompiler.cmake` branches on
 # `CMAKE_CXX_COMPILER_FRONTEND_VARIANT` first and on `CMAKE_CXX_COMPILER_ID` inside,
@@ -147,7 +147,7 @@ set(violations "")
 set(unconditional "")
 set(vacuous "")
 
-# `fastcached_row_fields` lets the LAST field hold a '|', which is right for a
+# `pace_row_fields` lets the LAST field hold a '|', which is right for a
 # prose reason and not sufficient here: the FIRST field of a fatality row is a
 # REGEX, and '|' is a regex metacharacter. `^-W(error|no-error=)|reason` -- the
 # natural way somebody would merge the two rows below -- splits into a pattern of
@@ -173,16 +173,16 @@ endforeach()
 # into the report below would print the whole #611 trailer about moving
 # suppressions and adding fatality rows at somebody whose file is simply not
 # there -- advice that is true and answers a question they did not ask.
-if(NOT EXISTS "${FASTCACHED_PEDANTIC_FILE}")
+if(NOT EXISTS "${PACE_PEDANTIC_FILE}")
     message(FATAL_ERROR
-        "${FASTCACHED_PEDANTIC_FILE}: the subject file is not there, so this check has nothing to "
+        "${PACE_PEDANTIC_FILE}: the subject file is not there, so this check has nothing to "
         "read. It is a refusal rather than a pass because `absent` and `clean` are different "
         "states and only one of them means the rule holds.")
 endif()
 
-if(NOT EXISTS "${FASTCACHED_PEDANTIC_PROBE_DIR}/CheckCXXCompilerFlag.cmake")
+if(NOT EXISTS "${PACE_PEDANTIC_PROBE_DIR}/CheckCXXCompilerFlag.cmake")
     message(FATAL_ERROR
-        "${FASTCACHED_PEDANTIC_PROBE_DIR}/CheckCXXCompilerFlag.cmake: the probe stub is not there, "
+        "${PACE_PEDANTIC_PROBE_DIR}/CheckCXXCompilerFlag.cmake: the probe stub is not there, "
         "so every flag would go through a real try_compile -- unavailable in script mode -- and "
         "this check would report on nothing.")
 endif()
@@ -202,7 +202,7 @@ function(add_compile_options)
         # every flag. The rule is about which flag is added under which condition;
         # the genex is the same on all of them and would only obscure the diff.
         string(REGEX REPLACE "^\\$<\\$<COMPILE_LANGUAGE:CXX>:(.*)>$" "\\1" flag "${flag}")
-        set_property(GLOBAL APPEND PROPERTY FASTCACHED_PEDANTIC_RECORDED "${flag}")
+        set_property(GLOBAL APPEND PROPERTY PACE_PEDANTIC_RECORDED "${flag}")
     endforeach()
 endfunction()
 
@@ -212,7 +212,7 @@ endfunction()
 # @param 3 The PEDANTIC_COMPILER_WERROR setting, ON or OFF.
 # @param 4 Name of the variable the recorded flag list is reported through.
 function(pedantic_flags_for compilerId frontendVariant werror outVariable)
-    set(CMAKE_MODULE_PATH "${FASTCACHED_PEDANTIC_PROBE_DIR}")
+    set(CMAKE_MODULE_PATH "${PACE_PEDANTIC_PROBE_DIR}")
     set(CMAKE_CXX_COMPILER_ID "${compilerId}")
     set(CMAKE_CXX_COMPILER_FRONTEND_VARIANT "${frontendVariant}")
 
@@ -230,9 +230,9 @@ function(pedantic_flags_for compilerId frontendVariant werror outVariable)
     endif()
     set(PEDANTIC_COMPILER_WERROR "${werror}")
 
-    set_property(GLOBAL PROPERTY FASTCACHED_PEDANTIC_RECORDED "")
-    include("${FASTCACHED_PEDANTIC_FILE}")
-    get_property(recorded GLOBAL PROPERTY FASTCACHED_PEDANTIC_RECORDED)
+    set_property(GLOBAL PROPERTY PACE_PEDANTIC_RECORDED "")
+    include("${PACE_PEDANTIC_FILE}")
+    get_property(recorded GLOBAL PROPERTY PACE_PEDANTIC_RECORDED)
     set(${outVariable} "${recorded}" PARENT_SCOPE)
 endfunction()
 
@@ -264,7 +264,7 @@ endfunction()
 function(pedantic_fatality_reason flag outVariable)
     set(${outVariable} "" PARENT_SCOPE)
     foreach(row IN LISTS pedanticFatalityFlags)
-        fastcached_row_fields("${row}" rowPattern rowReason)
+        pace_row_fields("${row}" rowPattern rowReason)
         if(flag MATCHES "${rowPattern}")
             set(${outVariable} "${rowReason}" PARENT_SCOPE)
             return()
@@ -284,7 +284,7 @@ endif()
 set(gatedFlags "")
 
 foreach(persona IN LISTS pedanticPersonaTable)
-    fastcached_row_fields("${persona}"
+    pace_row_fields("${persona}"
         personaId personaFrontend personaDriver personaAnchor personaPresets)
 
     pedantic_flags_for("${personaId}" "${personaFrontend}" OFF withoutWerror)
@@ -341,8 +341,8 @@ endforeach()
 # The MSVC family is the warning selectors `cl` and `clang-cl` accept, with `-` or `/`: `w` (every
 # warning off), `wdN` (one off), `woN` (once), `w1N`..`w4N` (moved to a level `/W4` may not show),
 # and `W0` (the level that shows nothing). `weN` is NOT one: it makes a warning an error, which
-# hardens it. The same enumeration is fastcache-cc's argument allowlist
-# (src/apps/fastcache-cc/CompileJob.cpp, the `w`/`wd`/`we`/`wo`/`w1`..`w4` rows); it is C++ inside an
+# hardens it. The same enumeration is pace-cc's argument allowlist
+# (src/apps/pace-cc/CompileJob.cpp, the `w`/`wd`/`we`/`wo`/`w1`..`w4` rows); it is C++ inside an
 # app, so it is cited rather than shared. The GNU family is `-w` (every warning off) and `-Wno-X`,
 # except the fatality-only `-Wno-error=X`, which the WERROR block owns. One list for every persona:
 # clang-cl takes `-Wno-X` too, and a spelling no driver takes cannot be recorded anyway.
@@ -352,7 +352,7 @@ set(pedanticWarningSuppressors
     "^-Wno-")
 set(pedanticWarningSuppressorExceptions "^-Wno-error=")
 foreach(persona IN LISTS pedanticPersonaTable)
-    fastcached_row_fields("${persona}"
+    pace_row_fields("${persona}"
         personaId personaFrontend personaDriver personaAnchor personaPresets)
     foreach(werror IN ITEMS OFF ON)
         pedantic_flags_for("${personaId}" "${personaFrontend}" "${werror}" withoutPedantic OFF)
@@ -388,7 +388,7 @@ set(pedanticReportSections
 
 set(report "")
 foreach(row IN LISTS pedanticReportSections)
-    fastcached_row_fields("${row}" sectionVariable sectionHeading)
+    pace_row_fields("${row}" sectionVariable sectionHeading)
     if(NOT "${${sectionVariable}}" STREQUAL "")
         list(JOIN ${sectionVariable} "\n" sectionBody)
         string(APPEND report "${sectionHeading}:\n${sectionBody}\n")
@@ -454,7 +454,7 @@ message("pedantic suppressions: ${personaCount} compiler persona(s) asked, "
 # rule and add no `-Werror` at all, so asking them this question is asking about a
 # property they were never written to have. The subject is named in the status
 # line below, so a run that asserted nothing says whose module it did not ask.
-if(FASTCACHED_PEDANTIC_FILE STREQUAL "${FASTCACHED_SOURCE_DIR}/cmake/portable/PedanticCompiler.cmake")
+if(PACE_PEDANTIC_FILE STREQUAL "${PACE_SOURCE_DIR}/cmake/portable/PedanticCompiler.cmake")
 set(pedanticFatalityTable
     "GNU|GNU|ON|ON|^-Werror$|1"     "GNU|GNU|ON|OFF|^-Werror$|0"
     "GNU|GNU|OFF|ON|^-Werror$|1"    "GNU|GNU|OFF|OFF|^-Werror$|0"
@@ -527,5 +527,5 @@ if(projectRowsSeen EQUAL 0)
 endif()
 message(STATUS "check-pedantic-suppressions: ${projectRowsSeen} project suppression row(s) applied to both MSVC personas")
 else()
-    message(STATUS "check-pedantic-suppressions: fatality table NOT asserted -- the subject is ${FASTCACHED_PEDANTIC_FILE}, not this repository's module")
+    message(STATUS "check-pedantic-suppressions: fatality table NOT asserted -- the subject is ${PACE_PEDANTIC_FILE}, not this repository's module")
 endif()

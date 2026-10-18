@@ -71,7 +71,7 @@ TABLE
         else
             : > "$scratch/record.tsv"
         fi
-        out="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="$scratch/table.sh" \
+        out="$(PACE_REQUIRED_CONTEXTS_FILE="$scratch/table.sh" \
                bash "$Tool" --record "$scratch/record.tsv" --merge-state "$mergeState" --mergeable "$mergeable" 2>&1)" || got=$?
         local ok=1
         [[ "$got" == "$wantExit" ]] || ok=0
@@ -433,7 +433,7 @@ Gamma	completed	failure	2026-01-01T00:00:00Z" \
     cases=$((cases + 1))
     printf '%s\n' "$All" > "$scratch/record.tsv"
     got=0
-    out="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="$scratch/table.sh" bash "$Tool" --record "$scratch/record.tsv" 2>&1)" || got=$?
+    out="$(PACE_REQUIRED_CONTEXTS_FILE="$scratch/table.sh" bash "$Tool" --record "$scratch/record.tsv" 2>&1)" || got=$?
     if [[ "$got" == 2 && "$out" == *"--merge-state"* && "$out" != *"every required context reports SUCCESS"* ]]; then
         echo "  ok    (exit $got) a record with no merge state is refused as usage, not read as clean"
     else
@@ -495,7 +495,7 @@ byBash="$(awk '
     inTable && /^[ \t]*"/  { n++ }
     END                    { print n + 0 }
 ' "$Table")"
-byReader="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="$Table" bash -c '
+byReader="$(PACE_REQUIRED_CONTEXTS_FILE="$Table" bash -c '
     source_file="$1"
     awk "
         /^RequiredContexts=\\(/ { inTable = 1; next }

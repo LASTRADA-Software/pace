@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/FileTrust.hpp>
+#include <Pace/Platform/FileTrust.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/NodeKey.hpp>
+#include <apps/pace-node/NodeKey.hpp>
 #include <core/Ranges.hpp>
 
 /// @file NodeKeyFakes.hpp
@@ -22,7 +22,7 @@
 /// Shared rather than written per file: every case resolving a key goes through it, and a copy
 /// that answered `Protect` differently would make those cases pass whatever the resolver did
 /// with the answer.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// What a `ScriptedNodeKeyGuard` answers. Every field is REQUIRED: a case that does not care
@@ -76,7 +76,7 @@ class ScriptedNodeKeyGuard final: public Node::INodeKeyFileGuard
     /// platform id @p id -- how a case states WHICH account wrote a file, so the trusted-owner set
     /// (`Node::OwnStateAccountsGuard`) is judged by the production fold over a scripted identity.
     /// @param name The entry's file name.
-    /// @param owner The owner as an operator reads it (`NT SERVICE\FastCacheCompileNode`).
+    /// @param owner The owner as an operator reads it (`NT SERVICE\pace-node`).
     /// @param id The owner as the platform identifies it (a SID's string form).
     void OwnedBy(std::filesystem::path name, std::string owner, std::string id)
     {
@@ -250,4 +250,4 @@ class ScriptedNodeKeyGuard final: public Node::INodeKeyFileGuard
     std::optional<Consensus::DirectorySyncFailure> _syncFailure;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

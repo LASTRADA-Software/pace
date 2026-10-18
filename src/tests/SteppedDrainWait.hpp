@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/BoundedDrain.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -10,7 +10,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A drain wait that advances its own clock by what was asked, never blocks, and runs @p onSleep
@@ -68,4 +68,4 @@ class SteppedDrainWait final: public IDrainWait
     std::atomic<int> _sleeps { 0 };          ///< Polls so far.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

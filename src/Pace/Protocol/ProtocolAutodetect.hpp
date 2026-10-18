@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <span>
+#include <string_view>
+#include <vector>
+
+#include <core/async/Task.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/NetError.hpp>
+
+namespace Pace
+{
+
+/// Identifier for the protocol that should drive a connection.
+enum class ProtocolFlavor : std::uint8_t
+{
+    Unknown = 0,
+    MemcachedText,
+    MemcachedBinary, ///< The memcached binary protocol; `MemcachedBinaryHandler` serves it.
+    RedisResp,       ///< RESP2 and RESP3; `RedisRespHandler` serves it.
+    CompileCache,    ///< pace-kv's own compile-cache binary protocol (CompileCacheWire::Magic).
+};
+
+/// Stable, lower-case name for a ProtocolFlavor, suitable for log output.
+/// @param flavor Flavor to translate.
+/// @return Static string view; never empty.
+[[nodiscard]] constexpr std::string_view ToStringView(ProtocolFlavor flavor) noexcept
+{
+    switch (flavor)
+    {
+        case ProtocolFlavor::MemcachedText:
+            return "memcached-text";
+        case ProtocolFlavor::MemcachedBinary:
+            return "memcached-binary";
+        case ProtocolFlavor::RedisResp:
+            return "redis-resp";
+        case ProtocolFlavor::CompileCache:
+            return "compile-cache";
+        case ProtocolFlavor::Unknown:
+            return "unknown";
+    }
+    return "unknown";
+}
+
+/// Outcome of peeking the start of a stream: which protocol to dispatch to
+/// and the bytes consumed during the peek (must be replayed by the chosen
+/// handler — see ByteReader::PrimeWith).
+struct AutodetectResult
+{
+    ProtocolFlavor flavor { ProtocolFlavor::Unknown };
+    std::vector<std::byte> primer;
+};
+
+/// Classify the protocol from the very first byte of a connection. Exposed so
+/// the routing logic is unit-testable without a socket.
+///   0x80 → memcached binary
+///   0xFC → compile-cache
+///   '*'/'+'/'-'/':'/'$' → Redis RESP
+///   anything else → memcached text
+/// @param first The first byte read from the stream.
+/// @return The detected flavor.
+[[nodiscard]] ProtocolFlavor ClassifyFirstByte(std::byte first) noexcept;
+
+/// Read enough bytes from `socket` to determine the protocol.
+/// Heuristic: the very first byte is sufficient.
+///   0x80 → memcached binary
+///   '*'/'+'/'-'/':'/'$' → Redis RESP
+///   anything else → memcached text
+///
+/// On EOF before any byte arrives, returns NetErrorCode::Eof.
+/// @param socket Source socket; bytes peeked are returned in the primer.
+/// @return Task resolving to the detected flavor + primer bytes.
+[[nodiscard]] core::async::Task<std::expected<AutodetectResult, core::net::NetError>> DetectProtocol(
+    core::net::ISocket* socket);
+
+} // namespace Pace

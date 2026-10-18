@@ -37,7 +37,7 @@
 # script come out of each test's own `add_test()` block, so a check that grows an
 # argument does not silently start running with the wrong one.
 #
-# The verdict rules are read from there too. `FASTCACHED_SCRIPT_CHECK_FAILED` is
+# The verdict rules are read from there too. `PACE_SCRIPT_CHECK_FAILED` is
 # this tree's one spelling of "a `cmake -P` check failed" -- the verdict is the
 # OUTPUT rather than the exit status alone, because the pattern also has to hear a
 # check that merely WARNS, and a warning exits 0 on every CMake -- and a check's own
@@ -67,8 +67,8 @@
 #
 # ## One check in #687's table is deliberately not labelled
 #
-# `compile-cache-caveat` takes `FASTCACHED_SCRATCH_DIR`, `FASTCACHED_CXX_COMPILER`,
-# `FASTCACHED_MAKE_PROGRAM`, `FASTCACHED_GENERATOR` and `FASTCACHED_MSVC_LIKE` --
+# `compile-cache-caveat` takes `PACE_SCRATCH_DIR`, `PACE_CXX_COMPILER`,
+# `PACE_MAKE_PROGRAM`, `PACE_GENERATOR` and `PACE_MSVC_LIKE` --
 # all build-tree facts -- and it CONFIGURES a throwaway project, which is why its
 # ctest timeout is 600 s rather than 60. It cannot run from a bare checkout and it
 # is not cheap enough to want to. That gap is stated rather than papered over: the
@@ -100,7 +100,7 @@ DocSubjectRunners="-P bash"
 # "all runnable" would survive the check script itself being deleted.
 DocSubjectWrappers="run-check.sh"
 CMakeListsRelative="src/tests/CMakeLists.txt"
-FailRegexVariable="FASTCACHED_SCRIPT_CHECK_FAILED"
+FailRegexVariable="PACE_SCRIPT_CHECK_FAILED"
 
 Fatal() { echo "${SelfName}: $*" >&2; exit 1; }
 Say()   { echo "${SelfName}: $*" >&2; }
@@ -117,7 +117,7 @@ Say()   { echo "${SelfName}: $*" >&2; }
 #
 # TWO passes over the file, because a registration may name a variable the same
 # file defines: `sccache-backend-caveat` is invoked with
-# `-DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSccacheCaveatBudgetSeconds}`, and
+# `-DPACE_SCAN_BUDGET_SECONDS=${PaceSccacheCaveatBudgetSeconds}`, and
 # that variable is deliberately ONE value there serving both the argument and the
 # ctest TIMEOUT, so the check's printed headroom is headroom against the number
 # ctest enforces. Resolving it here keeps that single source of truth rather than
@@ -408,15 +408,15 @@ SelfTest() {
         local skipLine=""
         [[ "${1:-}" == "skip" ]] && skipLine='    SKIP_REGULAR_EXPRESSION "SKIP: "'
         SKIPLINE="$skipLine" awk '{ if ($0 == "@SKIP@") { if (length(ENVIRON["SKIPLINE"])) print ENVIRON["SKIPLINE"] } else print }' <<'CML'
-set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
+set(PACE_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
 add_test(
     NAME "alpha-docs"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/alpha.cmake"
 )
 set_tests_properties("alpha-docs" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
 @SKIP@
     TIMEOUT 60
@@ -424,11 +424,11 @@ set_tests_properties("alpha-docs" PROPERTIES
 add_test(
     NAME "beta-docs"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/beta.cmake"
 )
 set_tests_properties("beta-docs" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene;docs-subject"
 @SKIP@
     TIMEOUT 60
@@ -436,11 +436,11 @@ set_tests_properties("beta-docs" PROPERTIES
 add_test(
     NAME "gamma-code"
     COMMAND ${CMAKE_COMMAND}
-        "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/gamma.cmake"
 )
 set_tests_properties("gamma-code" PROPERTIES
-    FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
 )
@@ -459,7 +459,7 @@ message(STATUS "SKIP: no toolchain here")'
     # WARNS exits 0 on every CMake while printing `CMake Warning`, and a check that
     # shells out to another `cmake -P` without reading `RESULT_VARIABLE` exits 0
     # with its child's error on the output. That is why this tree reads verdicts
-    # from output and why `FASTCACHED_SCRIPT_CHECK_FAILED` exists.
+    # from output and why `PACE_SCRIPT_CHECK_FAILED` exists.
     #
     # It is here because the `noisy` fixture above CANNOT test that rule: measured
     # across six CMake versions (#565), `FATAL_ERROR` exits **1** on all of them,
@@ -641,7 +641,7 @@ exit 3'
         /NAME "beta-docs"/ { inBeta = 1 }
         inBeta && /^\)$/   { inBeta = 0 }
         inBeta && /COMMAND \$\{CMAKE_COMMAND\}/ { print "    COMMAND bash"; next }
-        inBeta && /-DFASTCACHED_SOURCE_DIR=/       { next }
+        inBeta && /-DPACE_SOURCE_DIR=/       { next }
         inBeta && /-P .*scripts\/beta\.cmake/     { print "        \"${CMAKE_SOURCE_DIR}/scripts/beta.sh\""; next }
         { print }
     ')"
@@ -661,7 +661,7 @@ exit 3'
 
     # 4. A labelled check whose command needs a build tree.
     tree="${scratch}/t-buildtree"
-    StageTree "$tree" "$(GoodCMakeLists | sed 's|"-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"|"-DW=${CMAKE_CURRENT_BINARY_DIR}"|')"
+    StageTree "$tree" "$(GoodCMakeLists | sed 's|"-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"|"-DW=${CMAKE_CURRENT_BINARY_DIR}"|')"
     AssertStagedDiffers "$tree" "a build-tree argument"
     WriteCheck "$tree" alpha.cmake "$quiet"
     WriteCheck "$tree" beta.cmake "$quiet"
@@ -679,12 +679,12 @@ exit 3'
     #    status, which is 0 for a failing 3.28 `-P` script -- so this case is the
     #    one where a wrong answer looks exactly like a right one.
     tree="${scratch}/t-noregex"
-    StageTree "$tree" "$(GoodCMakeLists | grep -v FASTCACHED_SCRIPT_CHECK_FAILED)"
+    StageTree "$tree" "$(GoodCMakeLists | grep -v PACE_SCRIPT_CHECK_FAILED)"
     AssertStagedDiffers "$tree" "no fail regex"
     WriteCheck "$tree" alpha.cmake "$quiet"
     WriteCheck "$tree" beta.cmake "$noisy"
     WriteCheck "$tree" gamma.cmake "$quiet"
-    Expect "defines no FASTCACHED_SCRIPT_CHECK_FAILED" "the missing-regex refusal did not say so" "a CMakeLists defining no fail regex is REFUSED" want-fail "$tree"
+    Expect "defines no PACE_SCRIPT_CHECK_FAILED" "the missing-regex refusal did not say so" "a CMakeLists defining no fail regex is REFUSED" want-fail "$tree"
 
     # 7. Skipped is its own state, distinct from passed -- and a run in which
     #    EVERY check skipped is refused, because nothing ran.
@@ -719,7 +719,7 @@ exit 3'
     #    #687's own machinery. A `.sh` check reports by EXIT STATUS rather than by
     #    the output pattern, so both arms are asserted: the disjunction's other
     #    half is what the `quietlyBad` fixture above exists for.
-    local bashCML='set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
+    local bashCML='set(PACE_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
 add_test(
     NAME "delta-docs"
     COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/delta.sh"
@@ -749,7 +749,7 @@ exit 1'
     # shrug -- that is the state #687 refuses, and it is the reason the widening
     # names two spellings rather than dropping the requirement.
     tree="${scratch}/t-bash-neither"
-    StageTree "$tree" 'set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
+    StageTree "$tree" 'set(PACE_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
 add_test(
     NAME "epsilon-docs"
     COMMAND echo "nothing to see"
@@ -771,7 +771,7 @@ set_tests_properties("epsilon-docs" PROPERTIES
     #     without the wrapper row `--list` printed
     #     `runnable: table-totals -> scripts/run-check.sh`, called all 10 runnable
     #     and exited 0; with it, it refuses and names `check-table-totals.sh`.
-    local wrappedCML='set(FASTCACHED_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
+    local wrappedCML='set(PACE_SCRIPT_CHECK_FAILED "CMake Error|CMake Warning")
 add_test(
     NAME "zeta-docs"
     COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/zeta.sh"

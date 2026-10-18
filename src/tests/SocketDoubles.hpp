@@ -11,7 +11,7 @@
 #include <core/net/NetError.hpp>
 #include <core/net/testing/SocketDecorator.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A socket whose reads FAIL with a chosen code, and whose writes still go through.
@@ -174,4 +174,4 @@ class ParkingWritableSocket final: public core::net::testing::SocketDecorator
     std::size_t _writesRetiredByClose { 0 };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

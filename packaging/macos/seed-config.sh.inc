@@ -10,10 +10,10 @@
 # Every consumer seeds, rather than relying on the Runtime component to have
 # done it, because macOS does not run the component postinstalls in the order
 # the components are declared. It ran LaunchDaemon's first, whose registration
-# passes --config; fastcached then exited with "no such file" and no service was
+# passes --config; pace-kv then exited with "no such file" and no service was
 # registered at all.
 #
-# **A TABLE, never one hardcoded name.** `fastcache-compile-node.yaml` arrived
+# **A TABLE, never one hardcoded name.** `pace-node.yaml` arrived
 # with #291 and reached no non-Linux package for want of a second entry here, so
 # a worker on macOS or Windows had no annotated reference at all and every
 # setting documented in that file -- including `allow_compile_arg`, which decides
@@ -31,9 +31,9 @@
 # One row per seeded file: `<basename>`. The APPENDIX is per file and is applied
 # below by name rather than carried in the row, because only one file has one and
 # a column that is empty for every row but one is a column nobody maintains.
-FASTCACHED_SEED_FILES="fastcached.yaml fastcache-compile-node.yaml"
+PACE_SEED_FILES="pace-kv.yaml pace-node.yaml"
 
-for _seed in $FASTCACHED_SEED_FILES; do
+for _seed in $PACE_SEED_FILES; do
     _live="${PREFIX}/etc/${_seed}"
     _template="${PREFIX}/etc/${_seed}.default"
 
@@ -63,7 +63,7 @@ for _seed in $FASTCACHED_SEED_FILES; do
     # The daemon is given only --config, precisely so this file governs the cache
     # location; left unset it would come up memory-only and lose the whole cache
     # on every restart. The worker has no such setting and gets no appendix.
-    if [ "$_seed" = "fastcached.yaml" ]; then
+    if [ "$_seed" = "pace-kv.yaml" ]; then
         cat >>"$_live" <<SEED_CONFIG_EOF || true
 
 # --- macOS package defaults -------------------------------------------------
@@ -76,5 +76,5 @@ done
 
 # The daemon's pair, named for the consumers that tighten its mode. Set outside
 # the loop so it holds whether or not this install seeded anything.
-CONFIG="${PREFIX}/etc/fastcached.yaml"
-DEFAULT_CONFIG="${PREFIX}/etc/fastcached.yaml.default"
+CONFIG="${PREFIX}/etc/pace-kv.yaml"
+DEFAULT_CONFIG="${PREFIX}/etc/pace-kv.yaml.default"

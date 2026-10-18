@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end check of `fastcached --migrate-storage`.
+# End-to-end check of `pace-kv --migrate-storage`.
 #
 # What it covers that the unit tests cannot: the CLI wiring, and — the part that
 # actually decides whether the feature works for an operator — that the flag
@@ -16,17 +16,17 @@
 set -uo pipefail
 
 SKIP=77
-FASTCACHED=""
+PACE_KV=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached) FASTCACHED="$2"; shift 2 ;;
+        --pace-kv) PACE_KV="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
-if [[ -z "$FASTCACHED" || ! -x "$FASTCACHED" ]]; then
-    echo "migrate-storage-e2e: no fastcached binary — skipping" >&2
+if [[ -z "$PACE_KV" || ! -x "$PACE_KV" ]]; then
+    echo "migrate-storage-e2e: no pace-kv binary — skipping" >&2
     exit "$SKIP"
 fi
 
@@ -73,7 +73,7 @@ e2e_begin "migrate-storage E2E" "$WORK"
 EMPTY_CONFIG="$WORK/empty.yaml"
 : > "$EMPTY_CONFIG"
 
-fc() { "$FASTCACHED" --config "$EMPTY_CONFIG" "$@"; }
+fc() { "$PACE_KV" --config "$EMPTY_CONFIG" "$@"; }
 
 # The condition `create_store` waits on, as a predicate rather than a loop body.
 #
@@ -105,7 +105,7 @@ create_store() {
     # FUNCTION makes $! the subshell rather than the daemon, so the kill below
     # would land on the wrapper and leave the daemon holding the store -- and
     # `wait` would then block forever. Found exactly that way.
-    "$FASTCACHED" --config "$EMPTY_CONFIG" --port="$p" "$@" &
+    "$PACE_KV" --config "$EMPTY_CONFIG" --port="$p" "$@" &
     local pid=$!
 
     # Waits for the number of stores the CALLER asserts, and that count is a

@@ -8,22 +8,22 @@
 # asserts WHICH refusal, by a phrase only that refusal carries: every refusal prints
 # `CMake Error`, so asserting that alone would pass with the arms exchanged.
 #
-# Usage: cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<dir> -P <this>
+# Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-incremental-link.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-incremental-link.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
 set(failures "")
 set(cases 0)
 
@@ -48,7 +48,7 @@ endfunction()
 # @param ninja the build.ninja body, or `<none>` for no file
 # @param outVar receives the tree's path
 function(fc_stage name ninja outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(MAKE_DIRECTORY "${tree}")
     if(NOT ninja STREQUAL "<none>")
         file(WRITE "${tree}/build.ninja" "${ninja}")
@@ -68,7 +68,7 @@ function(fc_case label tree config msvcStyle want phrase)
     set(cases ${count} PARENT_SCOPE)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" "-DCONFIG=${config}" "-DMSVC_STYLE=${msvcStyle}"
-                -DANCHOR=FastCacheTest -P "${check}"
+                -DANCHOR=PaceTest -P "${check}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE status)
     set(output "${out}${err}")
     string(REPLACE "\n" " " flat "${output}")
@@ -89,13 +89,13 @@ function(fc_case label tree config msvcStyle want phrase)
     endif()
 endfunction()
 
-fc_edge(anchor EXECUTABLE FastCacheTest Debug "/machine:x64 /debug /INCREMENTAL:NO /subsystem:console")
+fc_edge(anchor EXECUTABLE PaceTest Debug "/machine:x64 /debug /INCREMENTAL:NO /subsystem:console")
 fc_edge(shared SHARED_LIBRARY plugin Debug "/machine:x64 /debug /INCREMENTAL:NO")
 # A static library carries flags of its own and no switch; it must neither be judged nor
 # lend its binding to the edge above it.
-fc_edge(archive STATIC_LIBRARY FastCache Debug "/machine:x64")
+fc_edge(archive STATIC_LIBRARY Pace Debug "/machine:x64")
 # Another configuration's edge is not this build's, whatever it says.
-fc_edge(otherConfig EXECUTABLE FastCacheTest Release "/machine:x64 /debug /INCREMENTAL")
+fc_edge(otherConfig EXECUTABLE PaceTest Release "/machine:x64 /debug /INCREMENTAL")
 
 # ---- the passing direction --------------------------------------------------------------
 
@@ -108,7 +108,7 @@ fc_stage(case-insensitive "${anchor}${lower}" tree)
 fc_case("the switch is matched in either introducer and any case, as link.exe reads it"
     "${tree}" Debug ON pass "2 link edge(s) for 'Debug' read, 0 problem(s)")
 
-fc_edge(relAnchor EXECUTABLE FastCacheTest RelWithDebInfo "/machine:x64 /debug /INCREMENTAL:NO")
+fc_edge(relAnchor EXECUTABLE PaceTest RelWithDebInfo "/machine:x64 /debug /INCREMENTAL:NO")
 fc_stage(relwithdebinfo "${relAnchor}" tree)
 fc_case("RelWithDebInfo is judged too" "${tree}" RelWithDebInfo ON pass "1 link edge(s) for 'RelWithDebInfo' read")
 
@@ -142,11 +142,11 @@ fc_case("an edge whose outputs carry an escaped drive colon is still found, and 
     "drive links with /INCREMENTAL in 'Debug'")
 
 fc_stage(no-anchor "${shared}" tree)
-fc_case("the anchor must be found and pass" "${tree}" Debug ON refuse "the anchor 'FastCacheTest' was not found")
+fc_case("the anchor must be found and pass" "${tree}" Debug ON refuse "the anchor 'PaceTest' was not found")
 
-fc_edge(badAnchor EXECUTABLE FastCacheTest Debug "/machine:x64 /debug /INCREMENTAL")
+fc_edge(badAnchor EXECUTABLE PaceTest Debug "/machine:x64 /debug /INCREMENTAL")
 fc_stage(bad-anchor "${badAnchor}" tree)
-fc_case("a refused anchor is not a proven one" "${tree}" Debug ON refuse "the anchor 'FastCacheTest' was not found")
+fc_case("a refused anchor is not a proven one" "${tree}" Debug ON refuse "the anchor 'PaceTest' was not found")
 
 fc_stage(vacuous "${archive}${otherConfig}" tree)
 fc_case("no judged edge is a refusal, never a pass" "${tree}" Debug ON refuse "a pass would be vacuous")

@@ -1,0 +1,672 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Cache/StorageTier.hpp>
+// For `RoleTable`, which is what the role state-set's label values come from --
+// `Role` itself is in `RaftTypes.hpp` and reaches the header. Same rule the tier
+// samples follow against `StorageTierTable`: a fifth role reaches the scrape by
+// being a row rather than by somebody remembering a second place.
+#include <Pace/Consensus/RaftMembership.hpp>
+#include <Pace/Consensus/RaftNode.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
+
+#include <array>
+#include <cstdint>
+#include <format>
+#include <string>
+#include <string_view>
+
+namespace Pace
+{
+
+namespace
+{
+
+    /// One rendered metric: fully-qualified name, help text, kind and value.
+    ///
+    /// Distinct from `CounterDescriptor` because the storage rows below have no
+    /// `IMetricsSink::Counter` to be described by — they come from a
+    /// `StorageStats` field instead. What the two share is the *rendering*, which
+    /// is the loop at the bottom.
+    struct Metric
+    {
+        std::string_view name;
+        std::string_view help;
+        MetricType type;
+        std::uint64_t value;
+    };
+
+    /// How many rows `AppendStorageMetrics` emits, for the one `reserve`.
+    /// A loose estimate by design — it only sizes a buffer.
+    constexpr std::size_t StorageMetricCount = 25;
+
+    /// Append one metric's three exposition lines to `out`.
+    /// @param out Destination.
+    /// @param metric What to render.
+    void Append(std::string& out, Metric const& metric)
+    {
+        out += std::format(
+            "# HELP {0} {1}\n# TYPE {0} {2}\n{0} {3}\n", metric.name, metric.help, TypeName(metric.type), metric.value);
+    }
+
+    /// One per-tier metric: the series, and which `StorageStats` field feeds it.
+    ///
+    /// A projection rather than a value, because one row renders once per tier and
+    /// the tiers are not known where the table is written. The alternative — a
+    /// `Metric` per (series, tier) pair — would put the tier list in two places,
+    /// and a tier added to one and not the other is a series that silently is not
+    /// there, which is the failure `MetricsCatalog` exists to prevent.
+    struct TierMetric
+    {
+        std::string_view name;                                  ///< Series name, without the label.
+        std::string_view help;                                  ///< `# HELP` text.
+        MetricType type;                                        ///< Counter or gauge.
+        std::uint64_t (*project)(StorageStats const&) noexcept; ///< What to read off one tier.
+        /// Whether the series exists only for a tier backed by a file. A tier with no file
+        /// renders NO line rather than a zero, which would read as an empty file.
+        bool fileTiersOnly { false };
+    };
+
+    /// The per-tier series, and only the ones that mean something per tier.
+    ///
+    /// **None of these is a fleet-wide total waiting to be summed**, and the
+    /// `tier` label is the only honest way to read them. `LayeredStorage` mirrors
+    /// every L2 entry it has touched into L1, so adding the two item counts counts
+    /// the mirrored entries twice; adding the two hit counts is worse still, since
+    /// L2 is consulted only when L1 missed. What each row answers is "how is THIS
+    /// tier doing" — is the mirror populated, is the disk tier near its budget,
+    /// which tier is evicting — and the cache's own totals stay on the
+    /// unlabelled `pace_*` series `Snapshot()` feeds.
+    ///
+    /// The hit/miss split is left out entirely rather than published with that
+    /// caveat: it is the number a dashboard is most likely to sum, and a cache
+    /// serving every read would come out at 62%.
+    constexpr std::array TierMetricTable {
+        TierMetric { .name = "pace_tier_items",
+                     .help = "Live entries this tier holds.",
+                     .type = MetricType::Gauge,
+                     .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.itemCount); } },
+        TierMetric { .name = "pace_tier_bytes_used",
+                     .help = "What this tier's budget counts: stored (post-compression) value bytes for the memory "
+                             "tier, the on-disk footprint (pages in use x page size) for the disk tier.",
+                     .type = MetricType::Gauge,
+                     .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.bytesUsed); } },
+        TierMetric { .name = "pace_tier_bytes_limit",
+                     .help = "This tier's configured byte budget (0 = unbounded).",
+                     .type = MetricType::Gauge,
+                     .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.bytesLimit); } },
+        // The disk tier's FILE, beside the footprint `bytes_used` reports. The budget bounds
+        // the footprint; the file exceeds it by its free pages -- the end of the file is cut
+        // at a commit, a page inside it only leaves once later writes reuse it -- so an
+        // operator asking "what is this costing my disk" reads this one.
+        TierMetric { .name = "pace_tier_file_bytes",
+                     .help = "Length of the file backing this tier, free pages included. Exceeds "
+                             "pace_tier_bytes_used by those free pages until a commit cuts them off the end "
+                             "or later writes reuse them; never below it.",
+                     .type = MetricType::Gauge,
+                     .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.fileBytes); },
+                     .fileTiersOnly = true },
+        TierMetric { .name = "pace_tier_evictions_total",
+                     .help = "Entries this tier dropped to stay within its budget.",
+                     .type = MetricType::Counter,
+                     .project = [](StorageStats const& s) noexcept { return s.evictions; } },
+        // The daemon's half of #175. `--storage` carries the same key index as a
+        // node's disk tier and is not scheduled against, so nothing corrects for it
+        // there at all -- this is the only surface on which a `pace-kv` operator
+        // can see it, or alert before the machine starts swapping.
+        //
+        // A gauge, and NOT comparable with `bytes_limit` beside it: that budget is
+        // denominated in whatever bounds the tier, which for a disk tier is bytes on
+        // a filesystem, while this is always resident memory.
+        TierMetric { .name = "pace_tier_index_bytes",
+                     .help = "Resident memory this tier spends on its key index. Always RAM, even for a disk tier, "
+                             "so it is not comparable with pace_tier_bytes_limit.",
+                     .type = MetricType::Gauge,
+                     .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.indexBytes); } },
+    };
+
+} // namespace
+
+/// Render what a machine's size looks like on the wire.
+///
+/// Gauges, every one: they describe a machine rather than count events, which is
+/// why they arrive in a struct instead of through the counter-only sink.
+/// @param out Destination.
+/// @param host The machine's capacity.
+static void AppendHostMetrics(std::string& out, HostCapacity const& host)
+{
+    using enum MetricType;
+
+    auto const table = std::array {
+        Metric { .name = "pace_node_logical_cores",
+                 .help = "Schedulable hardware threads on this node.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.logicalCores) },
+        Metric { .name = "pace_node_memory_total_bytes",
+                 .help = "Physical memory, or the container ceiling when that binds first.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.totalMemoryBytes) },
+        Metric { .name = "pace_node_disk_capacity_bytes",
+                 .help = "Size of the filesystem this node compiles on.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.diskCapacityBytes) },
+        Metric { .name = "pace_node_disk_free_bytes",
+                 .help = "Space on that filesystem an unprivileged process may still write.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.diskFreeBytes) },
+        Metric { .name = "pace_node_slots_configured",
+                 .help = "Concurrent compiles this node advertises to the scheduler.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.configuredSlots) },
+        Metric { .name = "pace_node_slots_busy",
+                 .help = "Compiles running right now. Sampled, not derived from the job "
+                         "counters, which are incremented separately.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.busySlots) },
+        Metric { .name = "pace_node_cordoned",
+                 .help = "1 while an operator has cordoned this node's worker: it takes no new "
+                         "compile and finishes the running ones. 0 otherwise; a restart clears it.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.cordoned) },
+    };
+
+    for (auto const& metric: table)
+        Append(out, metric);
+}
+
+/// Render what a machine is doing right now.
+///
+/// Each figure renders only when the platform reported it: a series that is missing says the
+/// machine would not say, where a zero would say it is idle or out of memory.
+///
+/// The CPU figures are COUNTERS in platform ticks, and a tick is a different length on every
+/// platform, so neither series means anything alone. What does is the ratio of their two
+/// rates -- `rate(busy) / rate(total)` is the machine's busy share over whatever window the
+/// reader chose, which is the arithmetic `CpuBusyPermille` does over two readings.
+/// @param out Destination.
+/// @param load The machine's load.
+static void AppendHostLoadMetrics(std::string& out, HostLoadReading const& load)
+{
+    if (load.cpu.has_value())
+    {
+        Append(out,
+               Metric { .name = "pace_node_cpu_busy_ticks_total",
+                        .help = "Host-wide CPU ticks spent doing anything but idling, compiles included. Platform "
+                                "ticks: read only as rate() of this over rate() of pace_node_cpu_ticks_total.",
+                        .type = MetricType::Counter,
+                        .value = load.cpu->busy });
+        Append(out,
+               Metric { .name = "pace_node_cpu_ticks_total",
+                        .help = "Host-wide CPU ticks accounted for at all; the denominator of "
+                                "pace_node_cpu_busy_ticks_total.",
+                        .type = MetricType::Counter,
+                        .value = load.cpu->total });
+    }
+    if (load.availableMemoryBytes.has_value())
+        Append(out,
+               Metric { .name = "pace_node_memory_available_bytes",
+                        .help = "Memory a new process could actually obtain: available, not free, so the page cache "
+                                "the kernel hands back on demand counts.",
+                        .type = MetricType::Gauge,
+                        .value = *load.availableMemoryBytes });
+}
+
+/// Render the metrics a cache's own statistics carry.
+///
+/// Separate from the sink's counters because the two have different *sources*,
+/// not because they render differently: these come from `StorageStats`, which is
+/// authoritative for command and capacity numbers, and a process without a cache
+/// has none of them. The rendering itself is `Append` either way.
+/// @param out Destination.
+/// @param stats The cache's statistics.
+static void AppendStorageMetrics(std::string& out, StorageStats const& stats)
+{
+    using enum MetricType;
+
+    auto const table = std::array {
+        Metric { .name = "pace_cmd_get_total", .help = "GET commands processed.", .type = Counter, .value = stats.cmdGet },
+        Metric {
+            .name = "pace_cmd_set_total", .help = "SET-family commands processed.", .type = Counter, .value = stats.cmdSet },
+        Metric {
+            .name = "pace_cmd_touch_total", .help = "TOUCH commands processed.", .type = Counter, .value = stats.cmdTouch },
+        Metric {
+            .name = "pace_cmd_flush_total", .help = "FLUSH commands processed.", .type = Counter, .value = stats.cmdFlush },
+        Metric { .name = "pace_get_hits_total",
+                 .help = "GET requests that found a live entry.",
+                 .type = Counter,
+                 .value = stats.getHits },
+        Metric { .name = "pace_get_misses_total",
+                 .help = "GET requests that found nothing.",
+                 .type = Counter,
+                 .value = stats.getMisses },
+        Metric { .name = "pace_delete_hits_total",
+                 .help = "DELETE requests that removed an entry.",
+                 .type = Counter,
+                 .value = stats.deleteHits },
+        Metric { .name = "pace_delete_misses_total",
+                 .help = "DELETE requests with no matching key.",
+                 .type = Counter,
+                 .value = stats.deleteMisses },
+        Metric { .name = "pace_incr_hits_total",
+                 .help = "INCR requests against a present key.",
+                 .type = Counter,
+                 .value = stats.incrHits },
+        Metric { .name = "pace_incr_misses_total",
+                 .help = "INCR requests with no matching key.",
+                 .type = Counter,
+                 .value = stats.incrMisses },
+        Metric { .name = "pace_decr_hits_total",
+                 .help = "DECR requests against a present key.",
+                 .type = Counter,
+                 .value = stats.decrHits },
+        Metric { .name = "pace_decr_misses_total",
+                 .help = "DECR requests with no matching key.",
+                 .type = Counter,
+                 .value = stats.decrMisses },
+        Metric { .name = "pace_touch_hits_total",
+                 .help = "TOUCH requests against a present key.",
+                 .type = Counter,
+                 .value = stats.touchHits },
+        Metric { .name = "pace_touch_misses_total",
+                 .help = "TOUCH requests with no matching key.",
+                 .type = Counter,
+                 .value = stats.touchMisses },
+        Metric { .name = "pace_cas_hits_total",
+                 .help = "CAS requests that matched and stored.",
+                 .type = Counter,
+                 .value = stats.casHits },
+        Metric { .name = "pace_cas_misses_total",
+                 .help = "CAS requests with no matching key.",
+                 .type = Counter,
+                 .value = stats.casMisses },
+        Metric { .name = "pace_cas_badval_total",
+                 .help = "CAS requests rejected on a token mismatch.",
+                 .type = Counter,
+                 .value = stats.casBadval },
+        Metric { .name = "pace_write_errors_total",
+                 .help = "Value writes that failed to persist (disk full, I/O error, corruption, read-only).",
+                 .type = Counter,
+                 .value = stats.writeErrors },
+        Metric { .name = "pace_evictions_total",
+                 .help = "Entries evicted to stay within the memory budget.",
+                 .type = Counter,
+                 .value = stats.evictions },
+        Metric { .name = "pace_evicted_unfetched_total",
+                 .help = "Entries evicted before ever being read.",
+                 .type = Counter,
+                 .value = stats.evictedUnfetched },
+        Metric { .name = "pace_expired_unfetched_total",
+                 .help = "Entries that expired before ever being read.",
+                 .type = Counter,
+                 .value = stats.expiredUnfetched },
+        Metric { .name = "pace_expirations_total",
+                 .help = "Entries removed because their TTL lapsed, by a lookup, a write or the expiry cycle.",
+                 .type = Counter,
+                 .value = stats.expirations },
+        Metric { .name = "pace_items",
+                 .help = "Live entries currently stored.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(stats.itemCount) },
+        Metric { .name = "pace_bytes_used",
+                 .help = "Bytes currently stored.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(stats.bytesUsed) },
+        Metric { .name = "pace_bytes_limit",
+                 .help = "Configured byte budget (0 = unbounded).",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(stats.bytesLimit) },
+    };
+
+    for (auto const& metric: table)
+        Append(out, metric);
+}
+
+/// Render one series per tier that exists, each sample carrying a `tier` label.
+///
+/// `# HELP` and `# TYPE` are emitted once per series, with the samples following:
+/// repeating them for every label value is what a parser rejects.
+///
+/// A tier the cache does not have contributes no line at all — not a zero. That
+/// is the rule `MetricsSnapshot::storage` is optional for, one level down: a
+/// dashboard reads `pace_tier_items{tier="disk"} 0` as a disk tier standing
+/// empty, which is a different claim from a node that has no disk tier.
+/// @param out Destination.
+/// @param tiers The cache's per-tier statistics.
+static void AppendTierMetrics(std::string& out, TieredStorageStats const& tiers)
+{
+    for (auto const& row: TierMetricTable)
+    {
+        auto wroteHeader = false;
+        // Driven by the TIER table, not by a hand-written list of labels — the
+        // rule this file already follows against `MetricsCatalog`, applied to the
+        // other axis. A tier added to `StorageTier` appears here by being a row
+        // rather than by somebody remembering a second place.
+        for (auto const& tierRow: StorageTierTable)
+        {
+            auto const& stats = tiers[static_cast<std::size_t>(tierRow.tier)];
+            if (!stats.has_value() || (row.fileTiersOnly && !tierRow.storedInFile))
+                continue;
+            if (!wroteHeader)
+            {
+                out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n", row.name, row.help, TypeName(row.type));
+                wroteHeader = true;
+            }
+            out += std::format("{}{{tier=\"{}\"}} {}\n", row.name, tierRow.name, row.project(*stats));
+        }
+    }
+}
+
+/// Render what a node believes about its own Raft cluster.
+///
+/// Gauges, every one: they describe a state rather than count events, which is why
+/// they arrive in the snapshot instead of through the counter-only sink. Called
+/// only for a process that runs consensus — see `MetricsSnapshot::consensus`, and
+/// `ConsensusStatus` for why an empty member set is a reading rather than an
+/// absence.
+/// @param out Destination.
+/// @param status What this node counts.
+static void AppendConsensusMetrics(std::string& out, ConsensusStatus const& status)
+{
+    using enum MetricType;
+
+    // The size and the term first, unconditionally: they are what makes the block's
+    // PRESENCE readable, and the two label-carrying series below are absent in states
+    // that are perfectly ordinary. Without an unconditional row a node holding no
+    // configuration during an election would render nothing at all, which reads as a
+    // process with no consensus rather than as the one thing #435 exists to show.
+    //
+    // Voters AND learners (#1449): the members this node replicates to or is replicated
+    // from. How many of them a quorum counts is the `seat` label on the member series
+    // below, which a scraper sums by -- a second gauge would be a second spelling of it.
+    auto const& configuration = status.configuration;
+    Append(out,
+           Metric { .name = "pace_node_consensus_members",
+                    .help = "Members in the configuration this node's consensus operates under, voters and learners "
+                            "alike. 0 is a reading, not an absence: the node holds no configuration, so it campaigns "
+                            "in no election and grants no vote. That is the ordinary waiting state of a node that "
+                            "joined a fleet and is not admitted yet, and a fault for any other. A process running no "
+                            "consensus renders none of these "
+                            "series at all.",
+                    .type = Gauge,
+                    .value = static_cast<std::uint64_t>(configuration.voters.size() + configuration.learners.size()) });
+
+    Append(out,
+           Metric { .name = "pace_node_consensus_term",
+                    .help = "The election term this node is operating in. A gauge rather than a counter: wiping the "
+                            "state directory legitimately resets it, and a counter that resets renders as a spike.",
+                    .type = Gauge,
+                    .value = status.term.value });
+
+    Append(out,
+           Metric { .name = "pace_node_consensus_commit_index",
+                    .help = "How far this node's replicated log is committed. Far behind its peers means it is being "
+                            "caught up rather than participating.",
+                    .type = Gauge,
+                    .value = status.commitIndex.value });
+
+    // A state set: one sample per role, exactly one of them 1. The label values come
+    // from `RoleTable` rather than a hand-written list -- the same rule the counters
+    // follow against `MetricsCatalog` and the tier samples against
+    // `StorageTierTable`, so a fifth role reaches the scrape by being a row.
+    //
+    // `# HELP` and `# TYPE` once, with the samples following: repeating them per
+    // label value is what a parser rejects.
+    out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n",
+                       "pace_node_consensus_role",
+                       "What this node is playing in its cluster. Exactly one sample is 1.",
+                       TypeName(Gauge));
+    for (auto const& row: Consensus::RoleTable)
+        out += std::format("pace_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == status.role ? 1 : 0);
+
+    // One sample per member, carrying its id and its seat. The SET rather than only its
+    // size, because "which members does this node count" is the question an operator
+    // asks when a cluster will not re-elect, and the count alone cannot answer it -- and
+    // since #1449 the seat is half that answer: a learner is a member no quorum counts.
+    // Its spelling is `StandingTable`'s, through `StandingOf`, so the label and every
+    // other place a standing is named cannot disagree.
+    //
+    // No line at all for a node holding no configuration -- the rule a tier the cache
+    // does not have already follows, and readable here for the same reason: the three
+    // series above are unconditional, so their presence is what says consensus is
+    // running and this one's absence says the configuration is empty.
+    if (!Consensus::Membership::IsEmpty(configuration))
+    {
+        out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n",
+                           "pace_node_consensus_member",
+                           "One sample per member of the configuration this node operates under. seat is voter or "
+                           "learner; only a voter is counted by a quorum.",
+                           TypeName(Gauge));
+        for (auto const* const set: { &configuration.voters, &configuration.learners })
+            for (auto const& member: *set)
+                out += std::format("pace_node_consensus_member{{member=\"{}\",seat=\"{}\"}} 1\n",
+                                   member,
+                                   Consensus::TraitsOf(Consensus::Membership::StandingOf(configuration, member)).name);
+    }
+
+    // And who it believes leads, absent during an election.
+    //
+    // Deliberately NOT a `_known` boolean beside it: the presence of this series is
+    // that fact, and a second field carrying it is a second thing to be wrong. It is
+    // also not constrained to the member set above -- a node with no configuration
+    // accepts entries from any leader, so it can name one while counting nobody,
+    // which is #388's signature and the pairing worth being able to see.
+    if (status.knownLeader.has_value())
+    {
+        out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n",
+                           "pace_node_consensus_leader",
+                           "The member this node believes leads. Absent when it believes none does, which is what an "
+                           "election in progress looks like.",
+                           TypeName(Gauge));
+        out += std::format("pace_node_consensus_leader{{leader=\"{}\"}} 1\n", *status.knownLeader);
+    }
+}
+
+std::string RenderInfoMetric(InfoDescriptor const& row, std::string_view value)
+{
+    // The exposition format's three label-value escapes and nothing else: a
+    // backslash, a double quote and a line feed. Anything else is literal UTF-8.
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char const c: value)
+    {
+        switch (c)
+        {
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            default:
+                escaped += c;
+                break;
+        }
+    }
+    return std::format("# HELP {0} {1}\n# TYPE {0} {2}\n{0}{{{3}=\"{4}\"}} 1\n",
+                       row.prometheusName,
+                       row.help,
+                       TypeName(MetricType::Gauge),
+                       row.label,
+                       escaped);
+}
+
+std::string RenderPrometheus(StatsReading const& reading)
+{
+    auto const& snapshot = reading.snapshot;
+    std::string out;
+    // Each metric renders ~3 lines (HELP/TYPE/value); ~200 bytes is a per-row
+    // estimate, so one reserve avoids some of the reallocations the += loop would
+    // otherwise do on every scrape.
+    //
+    // The `+ 2` is the two rows that are neither a storage metric nor a catalogue
+    // row: uptime, and the catalogue-skew gauge. It was `+ 1` until the gauge
+    // arrived, which is the shape where a number beside a table stops describing
+    // it -- so it is spelled as the count of named extras rather than as a
+    // constant somebody has to re-derive.
+    //
+    // NOT a claim that the reserve is sufficient: ~100 catalogue rows alone exceed
+    // it, so a realloc already happens on every scrape. That is pre-existing and
+    // deliberately left alone here rather than retuned in a change about skew --
+    // a corrected estimate would want measuring, not guessing.
+    out.reserve((StorageMetricCount + CounterTable.size() + InfoTable.size() + 2) * 200);
+
+    // Only when there is a cache. A worker running this same endpoint would
+    // otherwise report an empty, unbounded one — zeroes that read as facts.
+    if (snapshot.storage.has_value())
+        AppendStorageMetrics(out, *snapshot.storage);
+
+    // And the numbers that merged view had to discard. Independent of `storage`
+    // rather than nested under it: a cache reports both, a process without one
+    // reports neither, and neither field is derivable from the other.
+    AppendTierMetrics(out, snapshot.storageTiers);
+
+    // And only when the process is a compile node. The daemon leaves this absent
+    // rather than reporting cores it does not schedule against.
+    if (snapshot.host.has_value())
+        AppendHostMetrics(out, *snapshot.host);
+
+    // And what it is doing now, from the same process and for the same reason.
+    if (snapshot.hostLoad.has_value())
+        AppendHostLoadMetrics(out, *snapshot.hostLoad);
+
+    // And whether this node reads through to a shared cache. Only a process that
+    // has an answer says anything: the daemon is the shared cache and has none.
+    if (snapshot.upstreamConfigured.has_value())
+        Append(out,
+               Metric { .name = "pace_node_upstream_configured",
+                        .help = "1 when this node has a shared cache to read through to, 0 when it does not. Read "
+                                "it beside the upstream store counters: those are cumulative, so a node with no "
+                                "upstream and one that has stored nothing yet both report zero.",
+                        .type = MetricType::Gauge,
+                        .value = *snapshot.upstreamConfigured ? 1U : 0U });
+
+    // And what this node counts as its own cluster, for a process that runs
+    // consensus. Absent for the daemon and for a node that leads itself; an empty
+    // member set INSIDE it is a reading and renders, which is the whole of #435.
+    if (snapshot.consensus.has_value())
+        AppendConsensusMetrics(out, *snapshot.consensus);
+
+    // Every counter the sink knows, without exception. Exporting the *table*
+    // rather than a hand-picked subset is the whole point: seven of the nine
+    // live counters used to be absent here, including all five the distributed-
+    // compilation guide tells an operator to read.
+    //
+    // ASKED before read, and that is the whole of #1353 -- asked once, by
+    // `CaptureStatsReading`, which records a row this sink cannot carry as absent. `CounterTable` is
+    // `static_assert`ed to cover every enumerator, so within ONE build the
+    // question cannot fail -- but this loop's build and the sink's need not be the
+    // same one. On a skewed build the catalogue carries a row the sink has no slot
+    // for, `Read` answers `0` because it must answer something, and this loop
+    // rendered a well-formed sample with a plausible value for a counter that
+    // cannot exist. A zero here is indistinguishable from a real one, which is the
+    // defect this project names as *absent reported as zero* -- and #1350's bounds
+    // check made the line better formed rather than absent, which is right for
+    // memory safety and worse for the operator reading it.
+    //
+    // Omitted rather than zeroed, because that is already this file's answer for
+    // something a build does not have: a tier the cache does not run renders no
+    // line at all. And NAMED rather than silently dropped, because a scrape that
+    // is quietly short is the same failure one step along. The marker is a comment
+    // line, which the exposition format allows and every scraper ignores, so a
+    // skewed build degrades to "fewer series plus a visible reason" rather than to
+    // a wrong number or a refused endpoint.
+    std::uint64_t omittedBySkew = 0;
+    std::uint64_t omittedBySurface = 0;
+    for (auto const& row: CounterTable)
+    {
+        auto const* const cell = reading.counters.Find(row.counter);
+        if (cell == nullptr || !cell->Present())
+        {
+            // WHICH absence this is decides whether it is a FAULT, and that is the whole of
+            // #1484. A row this build's sink has no slot for is a skew. A row this PROCESS has
+            // no writer for is an ordinary fact about which surfaces it serves -- counting it
+            // would report every healthy `pace-node` as a build whose catalogue and
+            // sink disagree, which is a confident wrong signal replacing a vague one and costs
+            // the skew series its meaning.
+            //
+            // A null cell is this build having no slot at all, which is the skew reading.
+            auto const why = cell == nullptr ? CounterAbsence::NoSlotInThisBuild : cell->Why();
+            if (why == CounterAbsence::NoWriterInThisProcess)
+            {
+                ++omittedBySurface;
+                out += std::format("# ABSENT {} belongs to a surface this process does not serve, so it has "
+                                   "no writer here; omitted rather than rendered as zero, and NOT a skew.\n",
+                                   row.prometheusName);
+                continue;
+            }
+            ++omittedBySkew;
+            out += std::format("# SKEW {} is in the metrics catalogue and this build's sink has no "
+                               "slot for it; omitted rather than rendered as zero. The catalogue "
+                               "and the sink were compiled against different versions of the "
+                               "counter enum, so this build is inconsistent.\n",
+                               row.prometheusName);
+            continue;
+        }
+        Append(out, Metric { .name = row.prometheusName, .help = row.help, .type = row.type, .value = cell->Value() });
+    }
+
+    // How many catalogue rows this build's sink could not carry, as a SERIES.
+    //
+    // The `# SKEW` lines above are for a human curling the endpoint; a scraper
+    // discards every comment, so on its own the skew reaches monitoring as a
+    // series that silently vanished -- indistinguishable from a rename, a relabel
+    // or a down target, and the one shape an alert cannot fire on. This is the
+    // machine-readable half, and it is a gauge rather than a `Counter` row for the
+    // reason the uptime line below is: it describes THIS RENDER, not an event the
+    // sink tallied -- and a counter row for it would have to survive the very skew
+    // it reports.
+    //
+    // Zero on a healthy build is a real reading rather than an absence, which is
+    // what makes `> 0` alertable.
+    // The machine-readable half of the OTHER absence, and it earns a series by exactly the
+    // argument the skew series does: a scraper discards every comment, so the `# ABSENT` lines
+    // above reach monitoring as series that silently vanished, which is indistinguishable from a
+    // rename or a down target. A gauge rather than a catalogue row for the same reason as the
+    // skew gauge -- it describes THIS RENDER rather than an event the sink tallied.
+    //
+    // Zero on a process that serves everything, which is what makes a nonzero reading mean
+    // something. It is NOT an alert condition: unlike a skew, a nonzero value here is the
+    // healthy state of any binary that does not serve every surface.
+    Append(out,
+           Metric { .name = "pace_metrics_surface_absent",
+                    .help = "Catalogue rows belonging to surfaces this process does not serve, so they have "
+                            "no writer here and are omitted rather than rendered as zero. Not a fault: a "
+                            "nonzero value is the healthy state of a binary that serves only some surfaces.",
+                    .type = MetricType::Gauge,
+                    .value = omittedBySurface });
+
+    Append(out,
+           Metric { .name = "pace_metrics_catalogue_skew",
+                    .help = "Catalogue rows this build's metrics sink has no slot for; nonzero means the "
+                            "catalogue and the sink were compiled against different versions of the counter enum.",
+                    .type = MetricType::Gauge,
+                    .value = omittedBySkew });
+
+    // What build captured this reading. Unconditional, like uptime: every process
+    // serving this endpoint is some build, and a panel titling itself with the version
+    // has no other place to read it from (#134). From the READING, so a decoded one
+    // states the build that sent it.
+    for (auto const& row: InfoTable)
+        out += RenderInfoMetric(row, reading.*row.value);
+
+    // Uptime is neither the cache's nor the sink's: every process that serves
+    // this endpoint has one, and a worker's is as useful as a daemon's.
+    Append(out,
+           Metric { .name = "pace_uptime_seconds",
+                    .help = "Seconds since the process started.",
+                    .type = MetricType::Gauge,
+                    .value = static_cast<std::uint64_t>(snapshot.uptime.value.count()) });
+
+    return out;
+}
+
+std::string RenderPrometheus(IMetricsSink const& metrics,
+                             MetricsSnapshot const& snapshot,
+                             std::span<MetricsSurface const> surfaces)
+{
+    return RenderPrometheus(CaptureStatsReading(metrics, snapshot, surfaces));
+}
+
+} // namespace Pace

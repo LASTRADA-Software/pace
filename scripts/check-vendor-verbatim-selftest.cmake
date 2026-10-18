@@ -34,26 +34,26 @@
 # secondRootDeclared.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-vendor-verbatim-selftest.cmake
 #
 # The verdict is `CMake Error` in the output, never the exit code.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-vendor-verbatim.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-vendor-verbatim.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 set(caseCount 0)
@@ -67,15 +67,15 @@ set(alpha "alpha\n")
 #        `RESYNC:` alone names none.
 # @param outObjected Set to TRUE when the output carries a CMake diagnostic.
 # @param outOutput Set to the output, whitespace flattened so a wrapped phrase still matches.
-function(fastcached_run_check tree writeMode outObjected outOutput)
+function(pace_run_check tree writeMode outObjected outOutput)
     set(extra "")
     if(writeMode MATCHES "^RESYNC:(.*)$")
-        set(extra "-DFASTCACHED_VENDOR_WRITE_MANIFEST=RESYNC" "-DFASTCACHED_VENDOR_RESYNC_ROOT=${CMAKE_MATCH_1}")
+        set(extra "-DPACE_VENDOR_WRITE_MANIFEST=RESYNC" "-DPACE_VENDOR_RESYNC_ROOT=${CMAKE_MATCH_1}")
     elseif(NOT "${writeMode}" STREQUAL "")
-        set(extra "-DFASTCACHED_VENDOR_WRITE_MANIFEST=${writeMode}")
+        set(extra "-DPACE_VENDOR_WRITE_MANIFEST=${writeMode}")
     endif()
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" ${extra} -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" ${extra} -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE runResult)
     if(NOT runResult MATCHES "^[0-9]+$")
         message(FATAL_ERROR
@@ -103,7 +103,7 @@ endfunction()
 # @param name The case name and directory.
 # @param localChanges The body of the "Local changes" section.
 # @param outVar Set to the tree's path.
-function(fastcached_make_tree name localChanges outVar)
+function(pace_make_tree name localChanges outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "# roots\nvendor/endo\n")
@@ -111,7 +111,7 @@ function(fastcached_make_tree name localChanges outVar)
     file(WRITE "${tree}/vendor/endo/sub/b.hpp" "beta\n")
     file(WRITE "${tree}/vendor/VENDOR.md"
         "# Vendored\n\n## Local changes\n\n${localChanges}\n\n## How to send a change back\n\nProse.\n")
-    fastcached_run_check("${tree}" "RESYNC:vendor/endo" objected output)
+    pace_run_check("${tree}" "RESYNC:vendor/endo" objected output)
     if(objected OR NOT EXISTS "${tree}/vendor/MANIFEST")
         message(FATAL_ERROR
             "check-vendor-verbatim-selftest: INCONCLUSIVE -- the setup RESYNC for `${name}` failed, "
@@ -127,9 +127,9 @@ endfunction()
 # @param expect `accept` or `refuse`.
 # @param mustSay A phrase the output must contain, which is what says WHICH verdict fired.
 # @param why What it means when this case fails.
-function(fastcached_judge name tree expect mustSay why)
+function(pace_judge name tree expect mustSay why)
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_run_check("${tree}" "" objected output)
+    pace_run_check("${tree}" "" objected output)
     if("${expect}" STREQUAL "refuse" AND NOT objected)
         list(APPEND failures "${name}: accepted, and must refuse -- ${why}. Output: ${output}")
     elseif("${expect}" STREQUAL "accept" AND objected)
@@ -145,8 +145,8 @@ function(fastcached_judge name tree expect mustSay why)
 endfunction()
 
 # Regenerates the manifest over @p tree, refusing the selftest if the regeneration objected.
-function(fastcached_regenerate tree)
-    fastcached_run_check("${tree}" ON objected output)
+function(pace_regenerate tree)
+    pace_run_check("${tree}" ON objected output)
     if(objected)
         message(FATAL_ERROR "check-vendor-verbatim-selftest: INCONCLUSIVE -- a regeneration over ${tree} failed: ${output}")
     endif()
@@ -155,106 +155,106 @@ endfunction()
 set(rowA "| `vendor/endo/a.hpp` | what | why | endo | prepared as a branch |")
 
 # ---------------------------------------------------------------------------
-fastcached_make_tree("clean" "None." tree)
-fastcached_judge("clean" "${tree}" accept "2 vendored file(s) under 1 root(s) (vendor/endo) match vendor/MANIFEST, 0 of them declared"
+pace_make_tree("clean" "None." tree)
+pace_judge("clean" "${tree}" accept "2 vendored file(s) under 1 root(s) (vendor/endo) match vendor/MANIFEST, 0 of them declared"
     "an upstream tree with a fresh manifest -- a check refusing this refuses everything")
 
-fastcached_make_tree("editedNotRegenerated" "None." tree)
+pace_make_tree("editedNotRegenerated" "None." tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_judge("editedNotRegenerated" "${tree}" refuse "EDITED"
+pace_judge("editedNotRegenerated" "${tree}" refuse "EDITED"
     "an edit with no regeneration is the refusal this check always had")
 
-fastcached_make_tree("blessedByRegeneration" "None." tree)
+pace_make_tree("blessedByRegeneration" "None." tree)
 # Hashed from the FILE, never from the string written into it: `file(WRITE)` emits CRLF on
 # Windows, so the string's hash is not the bytes' hash there.
 file(SHA256 "${tree}/vendor/endo/a.hpp" alphaHash)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
+pace_regenerate("${tree}")
 file(READ "${tree}/vendor/MANIFEST" manifest)
 string(REPLACE ";" "," manifest "${manifest}")
 string(FIND "${manifest}" "vendor/endo/a.hpp  local-change-of ${alphaHash}" recorded)
 if(recorded EQUAL -1)
     list(APPEND failures "blessedByRegeneration: the regeneration did not record a.hpp's upstream hash -- manifest: ${manifest}")
 endif()
-fastcached_judge("blessedByRegeneration" "${tree}" refuse "UNDECLARED LOCAL CHANGE"
+pace_judge("blessedByRegeneration" "${tree}" refuse "UNDECLARED LOCAL CHANGE"
     "an edit silenced by regenerating the manifest, with no VENDOR.md row, is the defect this selftest exists for")
 
-fastcached_make_tree("declared" "${rowA}" tree)
+pace_make_tree("declared" "${rowA}" tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
-fastcached_judge("declared" "${tree}" accept "1 of them declared local change(s)"
+pace_regenerate("${tree}")
+pace_judge("declared" "${tree}" accept "1 of them declared local change(s)"
     "a regenerated edit named by a Local changes row is the legitimate path")
 
-fastcached_make_tree("declaredWithLink"
+pace_make_tree("declaredWithLink"
     "| `vendor/endo/a.hpp` | see [the ticket](https://example.invalid/1) | why; with a semicolon | endo | branch |" tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
-fastcached_judge("declaredWithLink" "${tree}" accept "1 of them declared local change(s)"
+pace_regenerate("${tree}")
+pace_judge("declaredWithLink" "${tree}" accept "1 of them declared local change(s)"
     "a row carrying markdown brackets and a semicolon must still declare its path")
 
-fastcached_make_tree("declaredInProse" "`vendor/endo/a.hpp` was changed, as this sentence explains." tree)
+pace_make_tree("declaredInProse" "`vendor/endo/a.hpp` was changed, as this sentence explains." tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
-fastcached_judge("declaredInProse" "${tree}" refuse "UNDECLARED LOCAL CHANGE"
+pace_regenerate("${tree}")
+pace_judge("declaredInProse" "${tree}" refuse "UNDECLARED LOCAL CHANGE"
     "a path mentioned in prose is not a declaration, or explaining a change would declare it")
 
-fastcached_make_tree("newFile" "None." tree)
+pace_make_tree("newFile" "None." tree)
 file(WRITE "${tree}/vendor/endo/c.hpp" "gamma\n")
-fastcached_regenerate("${tree}")
-fastcached_judge("newFile" "${tree}" refuse "vendor/endo/c.hpp (not in upstream)"
+pace_regenerate("${tree}")
+pace_judge("newFile" "${tree}" refuse "vendor/endo/c.hpp (not in upstream)"
     "a file upstream does not have is a local change and must be declared")
 
-fastcached_make_tree("staleDeclaration" "${rowA}" tree)
-fastcached_judge("staleDeclaration" "${tree}" refuse "STALE DECLARATION"
+pace_make_tree("staleDeclaration" "${rowA}" tree)
+pace_judge("staleDeclaration" "${tree}" refuse "STALE DECLARATION"
     "a row naming a file that is still upstream's describes a change that does not exist")
 
-fastcached_make_tree("revertedChange" "${rowA}" tree)
+pace_make_tree("revertedChange" "${rowA}" tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
+pace_regenerate("${tree}")
 file(WRITE "${tree}/vendor/endo/a.hpp" "${alpha}")
-fastcached_regenerate("${tree}")
-fastcached_judge("revertedChange" "${tree}" refuse "its manifest line says it is upstream's bytes"
+pace_regenerate("${tree}")
+pace_judge("revertedChange" "${tree}" refuse "its manifest line says it is upstream's bytes"
     "a change edited back to upstream's bytes is verbatim again, so its row is stale")
 
-fastcached_make_tree("editedTwice" "${rowA}" tree)
+pace_make_tree("editedTwice" "${rowA}" tree)
 file(SHA256 "${tree}/vendor/endo/a.hpp" alphaHash)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
+pace_regenerate("${tree}")
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited again\n")
-fastcached_regenerate("${tree}")
+pace_regenerate("${tree}")
 file(READ "${tree}/vendor/MANIFEST" manifest)
 string(REPLACE ";" "," manifest "${manifest}")
 string(FIND "${manifest}" "local-change-of ${alphaHash}" recorded)
 if(recorded EQUAL -1)
     list(APPEND failures "editedTwice: the second regeneration lost a.hpp's UPSTREAM hash, so a revert could never be recognised -- manifest: ${manifest}")
 endif()
-fastcached_judge("editedTwice" "${tree}" accept "1 of them declared local change(s)"
+pace_judge("editedTwice" "${tree}" accept "1 of them declared local change(s)"
     "a declared change edited again is still the same declared change")
 
-fastcached_make_tree("resyncClears" "None." tree)
+pace_make_tree("resyncClears" "None." tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha from a newer upstream\n")
-fastcached_run_check("${tree}" "RESYNC:vendor/endo" objected output)
-fastcached_judge("resyncClears" "${tree}" accept "0 of them declared local change(s)"
+pace_run_check("${tree}" "RESYNC:vendor/endo" objected output)
+pace_judge("resyncClears" "${tree}" accept "0 of them declared local change(s)"
     "after a re-sync every file is upstream's, which is what RESYNC says")
 
 # ---------------------------------------------------------------------------
-fastcached_make_tree("noManifestToCarry" "None." tree)
+pace_make_tree("noManifestToCarry" "None." tree)
 file(REMOVE "${tree}/vendor/MANIFEST")
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_run_check("${tree}" ON objected output)
+pace_run_check("${tree}" ON objected output)
 string(FIND "${output}" "RESYNC" said)
 if(NOT objected OR said EQUAL -1)
     list(APPEND failures "noManifestToCarry: a regeneration with no manifest to carry upstream hashes from did not refuse by pointing at RESYNC. Output: ${output}")
 endif()
 
-fastcached_make_tree("malformed" "None." tree)
+pace_make_tree("malformed" "None." tree)
 file(APPEND "${tree}/vendor/MANIFEST" "not a manifest line\n")
-fastcached_judge("malformed" "${tree}" refuse "neither a hash and a path"
+pace_judge("malformed" "${tree}" refuse "neither a hash and a path"
     "a manifest line nobody can read describes a file nothing checked")
 
-fastcached_make_tree("noHeading" "None." tree)
+pace_make_tree("noHeading" "None." tree)
 file(WRITE "${tree}/vendor/VENDOR.md" "# Vendored\n\nNo local changes heading here.\n")
-fastcached_judge("noHeading" "${tree}" refuse "no `## Local changes` section"
+pace_judge("noHeading" "${tree}" refuse "no `## Local changes` section"
     "with the section gone nothing can be declared, and an empty declaration set must not read as none needed")
 
 set(tree "${root}/vacuous")
@@ -263,7 +263,7 @@ file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/endo\n")
 file(MAKE_DIRECTORY "${tree}/vendor/endo")
 file(WRITE "${tree}/vendor/VENDOR.md" "## Local changes\n\nNone.\n")
 file(WRITE "${tree}/vendor/MANIFEST" "# empty\n")
-fastcached_judge("vacuous" "${tree}" refuse "no files were found"
+pace_judge("vacuous" "${tree}" refuse "no files were found"
     "an empty tree and an empty manifest agree perfectly")
 
 # ---------------------------------------------------------------------------
@@ -272,11 +272,11 @@ fastcached_judge("vacuous" "${tree}" refuse "no files were found"
 
 # Adds a second root holding one file to @p tree and re-syncs only it.
 #
-# @param tree A tree from fastcached_make_tree.
-function(fastcached_add_second_root tree)
+# @param tree A tree from pace_make_tree.
+function(pace_add_second_root tree)
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "# roots\nvendor/endo\nvendor/second\n")
     file(WRITE "${tree}/vendor/second/x.hpp" "chi\n")
-    fastcached_run_check("${tree}" "RESYNC:vendor/second" objected output)
+    pace_run_check("${tree}" "RESYNC:vendor/second" objected output)
     if(objected)
         message(FATAL_ERROR
             "check-vendor-verbatim-selftest: INCONCLUSIVE -- importing a second root into ${tree} failed: ${output}")
@@ -285,29 +285,29 @@ endfunction()
 
 set(rowX "| `vendor/second/x.hpp` | what | why | second | prepared as a branch |")
 
-fastcached_make_tree("secondRootSeen" "None." tree)
-fastcached_add_second_root("${tree}")
-fastcached_judge("secondRootSeen" "${tree}" accept "3 vendored file(s) under 2 root(s)"
+pace_make_tree("secondRootSeen" "None." tree)
+pace_add_second_root("${tree}")
+pace_judge("secondRootSeen" "${tree}" accept "3 vendored file(s) under 2 root(s)"
     "a second root imported by its own RESYNC is upstream's and is counted")
 file(WRITE "${tree}/vendor/second/x.hpp" "chi edited\n")
-fastcached_judge("secondRootEdited" "${tree}" refuse "EDITED"
+pace_judge("secondRootEdited" "${tree}" refuse "EDITED"
     "an edit under the SECOND root must be seen, or the check still walks one root")
-fastcached_regenerate("${tree}")
-fastcached_judge("secondRootRegenerated" "${tree}" refuse "vendor/second/x.hpp (upstream sha256"
+pace_regenerate("${tree}")
+pace_judge("secondRootRegenerated" "${tree}" refuse "vendor/second/x.hpp (upstream sha256"
     "a regenerated edit under the second root is a local change like one under the first")
 
-fastcached_make_tree("secondRootDeclared" "${rowX}" tree)
-fastcached_add_second_root("${tree}")
+pace_make_tree("secondRootDeclared" "${rowX}" tree)
+pace_add_second_root("${tree}")
 file(WRITE "${tree}/vendor/second/x.hpp" "chi edited\n")
-fastcached_regenerate("${tree}")
-fastcached_judge("secondRootDeclared" "${tree}" accept "1 of them declared local change(s)"
+pace_regenerate("${tree}")
+pace_judge("secondRootDeclared" "${tree}" accept "1 of them declared local change(s)"
     "a row naming a path under the second root declares it, or no second copy could carry a change")
 
-fastcached_make_tree("resyncOneRoot" "${rowA}" tree)
+pace_make_tree("resyncOneRoot" "${rowA}" tree)
 file(WRITE "${tree}/vendor/endo/a.hpp" "alpha edited\n")
-fastcached_regenerate("${tree}")
-fastcached_add_second_root("${tree}")
-fastcached_judge("resyncOneRoot" "${tree}" accept "1 of them declared local change(s)"
+pace_regenerate("${tree}")
+pace_add_second_root("${tree}")
+pace_judge("resyncOneRoot" "${tree}" accept "1 of them declared local change(s)"
     "a re-sync of the second root must leave the FIRST root's local change a local change")
 file(READ "${tree}/vendor/MANIFEST" manifest)
 string(FIND "${manifest}" "vendor/endo/a.hpp  local-change-of" kept)
@@ -315,32 +315,32 @@ if(kept EQUAL -1)
     list(APPEND failures "resyncOneRoot: the RESYNC of vendor/second marked vendor/endo/a.hpp upstream's")
 endif()
 
-fastcached_make_tree("resyncNamesNoRoot" "None." tree)
+pace_make_tree("resyncNamesNoRoot" "None." tree)
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_run_check("${tree}" "RESYNC:" objected output)
+pace_run_check("${tree}" "RESYNC:" objected output)
 string(FIND "${output}" "RESYNC names no root" said)
 if(NOT objected OR said EQUAL -1)
     list(APPEND failures "resyncNamesNoRoot: a RESYNC naming no root did not refuse by saying so. Output: ${output}")
 endif()
 
-fastcached_make_tree("resyncNamesUnknownRoot" "None." tree)
+pace_make_tree("resyncNamesUnknownRoot" "None." tree)
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_run_check("${tree}" "RESYNC:vendor/elsewhere" objected output)
+pace_run_check("${tree}" "RESYNC:vendor/elsewhere" objected output)
 string(FIND "${output}" "does not name" said)
 if(NOT objected OR said EQUAL -1)
     list(APPEND failures "resyncNamesUnknownRoot: a RESYNC of a root the roots file does not name did not refuse. Output: ${output}")
 endif()
 
-fastcached_make_tree("emptySecondRoot" "None." tree)
+pace_make_tree("emptySecondRoot" "None." tree)
 file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/endo\nvendor/second\n")
 file(MAKE_DIRECTORY "${tree}/vendor/second")
-fastcached_judge("emptySecondRoot" "${tree}" refuse "no files were found under ${tree}/vendor/second"
+pace_judge("emptySecondRoot" "${tree}" refuse "no files were found under ${tree}/vendor/second"
     "an empty root must be refused by name even while another root is full")
 
-fastcached_make_tree("rootDropped" "None." tree)
-fastcached_add_second_root("${tree}")
+pace_make_tree("rootDropped" "None." tree)
+pace_add_second_root("${tree}")
 file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/endo\n")
-fastcached_judge("rootDropped" "${tree}" refuse "OUTSIDE EVERY ROOT"
+pace_judge("rootDropped" "${tree}" refuse "OUTSIDE EVERY ROOT"
     "a manifest line under a root the roots file no longer names describes a copy nothing compares")
 
 # ---------------------------------------------------------------------------

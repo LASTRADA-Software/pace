@@ -1,0 +1,2764 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "CacheProtocol.hpp"
+#include "CompileCorrelation.hpp"
+#include "Dispatch.hpp"
+#include "StubObjectTestSupport.hpp"
+#include "WorkerProtocol.hpp"
+
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/LeaseSigner.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <limits>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+#include <core/async/SyncRun.hpp>
+#include <tests/CompileReplyFakes.hpp>
+#include <tests/LeaseRosterFakes.hpp>
+#include <tests/ScratchPath.hpp>
+#include <tests/ScriptedSocket.hpp>
+#include <tests/Unwrap.hpp>
+
+using namespace Pace;
+using namespace Pace::Cc;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
+
+namespace
+{
+/// A notice these cases do not inspect.
+///
+/// Shared on purpose: every case here asserts the OUTCOME's `credentialIgnored`
+/// flag, not the diagnostic, and a fresh object per call would imply they cared. The
+/// cases that do care build their own recording notice, because a shared one reports
+/// once and would let whichever case ran first silence the rest -- a coupling to
+/// Catch2's ordering that is invisible until it fails.
+/// @return A notice with no sink.
+[[nodiscard]] Pace::Cc::CredentialNotice& Unwatched()
+{
+    static Pace::Cc::CredentialNotice notice = Pace::Cc::CredentialNotice::Silent();
+    return notice;
+}
+
+/// A runner that writes a canned object and reports success.
+///
+/// The object's bytes are settable because the reply's envelope depends on them:
+/// the negotiation falls back to `Identity` for anything compression does not
+/// actually shrink, so a case about compression needs an object that compresses and
+/// a case about the fallback needs one that does not.
+class StubRunner final: public IProcessRunner
+{
+  public:
+    std::string object { "OBJECT" }; ///< What the fake compiler writes.
+
+    /// How long the fake compiler pretends to take.
+    ///
+    /// Zero for every case but the one about a job outliving its grant, which needs a
+    /// compile that measurably outlasts a budget. A real sleep rather than an injected
+    /// clock because the duration being compared is `steady_clock` measured around this
+    /// runner -- so the only honest way to make it large is to actually take that long.
+    /// Kept in milliseconds, and small: the budget it has to beat is narrowed to zero by
+    /// the case, so this exists to be non-zero rather than to be long.
+    std::chrono::milliseconds takes { 0 };
+
+    CompileRun RunCaptureCombined(std::span<std::string const> argv) override
+    {
+        return RunCaptureSplit(argv);
+    }
+    CompileRun RunCaptureSplit(std::span<std::string const> argv) override
+    {
+        Test::WriteStubObject(argv, object);
+        if (takes > std::chrono::milliseconds::zero())
+            std::this_thread::sleep_for(takes);
+        return CompileRun { .exitCode = 0, .out = {}, .err = {} };
+    }
+};
+
+/// Which of the two production lease policies a fixture runs under.
+///
+/// A choice rather than a `LeaseValidator` parameter, because the validator that
+/// checks needs a `KnownSchedulerTerm` to borrow and that object has to outlive it.
+/// Handed in from a case, the lifetime is a rule somebody has to remember at six call
+/// sites; built by the fixture from its own member, it is member ordering and cannot
+/// be got wrong. Both values name production factories -- neither is a lambda written
+/// here.
+enum class LeasePolicy : std::uint8_t
+{
+    /// `UncheckedLeaseValidator()`: a node with no roster. The default, because
+    /// most cases in this file are about codecs, framing and fingerprints and a lease
+    /// they would have to mint first is noise.
+    Unchecked,
+    /// `SignedLeaseValidator()`: a node that holds a roster and checks what it is
+    /// handed against it.
+    Verifying,
+};
+
+/// The roster every verifying worker in this file checks grants against: the scheduler that
+/// mints them, as a voter (#178).
+///
+/// One instance for the file, because a validator BORROWS its roster and the ordinary case
+/// has no reason to care whose it is. A case about the roster itself -- absent, expired,
+/// revoked -- builds its own and says so.
+/// @return The roster.
+[[nodiscard]] Testing::FixedLeaseRoster const& TestRoster()
+{
+    static Testing::FixedLeaseRoster const roster { { "scheduler" } };
+    return roster;
+}
+
+/// The scheduler that mints every grant here, with a key derived from its name, so what these
+/// cases turn on is which FIELDS a grant names and never a key that differs per run.
+/// @return The signer.
+[[nodiscard]] Distributed::KeyPairLeaseSigner const& TestSigner()
+{
+    static auto const signer = Testing::TestLeaseSigner("scheduler");
+    return signer;
+}
+
+/// The endpoint the worker under test advertises, and the one grants must name.
+inline constexpr std::string_view ThisWorker = "worker-under-test:6675";
+
+/// The address this worker has learned it is reachable at, which a case can MOVE.
+///
+/// A fake rather than the production `Node::AnnouncedEndpoint`, and only because of
+/// where this file lives: `pace-cc` does not link the node, so the real class is
+/// out of reach here. The node's own cases use the real one and should go on doing so --
+/// this is the exception, not the pattern.
+///
+/// One fact to get right (answer what was last set), which is what keeps it a local fake
+/// rather than a shared helper. It is deliberately NOT thread-safe: the interface
+/// requires that of a production implementation because a heartbeat thread publishes
+/// while compile threads read, and every case here drives one thread.
+class MovingEndpoint final: public IAdvertisedEndpointSource
+{
+  public:
+    /// @param startup What it answers until a case moves it.
+    explicit MovingEndpoint(std::string_view startup):
+        _endpoint { startup }
+    {
+    }
+
+    /// @copydoc IAdvertisedEndpointSource::Current
+    [[nodiscard]] std::string Current() const override
+    {
+        return _endpoint;
+    }
+
+    /// Learn a new address, as a reload does.
+    /// @param endpoint What to answer from now on.
+    void MoveTo(std::string_view endpoint)
+    {
+        _endpoint = std::string { endpoint };
+    }
+
+  private:
+    std::string _endpoint;
+};
+
+/// Where this worker ends up after a NAT or an interface tells it its real address.
+///
+/// Different in BOTH halves from `ThisWorker`, deliberately: an endpoint comparison that
+/// matched on the host alone, or on the port alone, would pass against a value differing
+/// only in the other.
+inline constexpr std::string_view MovedWorker = "worker-behind-nat:7700";
+
+/// The fleet this worker belongs to, and the one a grant has to name.
+///
+/// Named rather than empty so the cases exercise a real comparison: an empty cluster
+/// on both sides passes whether the check runs or not, which is the shape that would
+/// have let #322 ship with a verifier that never looked.
+inline constexpr std::string_view ThisCluster = "fleet-under-test";
+
+/// What a lease case compiles. Its content is irrelevant to every one of them; it is
+/// named only so the calls that vary the lease do not each restate it.
+inline constexpr std::string_view DefaultSource = "int main(){return 0;}";
+
+/// The wall clock every lease case reads, at `2024-01-01T00:00:00Z`.
+///
+/// `core::platform::ManualWallClock`, never the system one: an expiry compared against real time is
+/// a test whose meaning changes while it runs, and the skew slack is five minutes --
+/// long enough that a case using `now()` would pass for the wrong reason.
+///
+/// `const`, and that is the point of it not being an accessor around a mutable
+/// static. Nothing here advances it, and a shared non-const clock invites the next
+/// case to -- at which point every other lease case's expiry arithmetic silently
+/// depends on the order they ran in.
+core::platform::ManualWallClock const LeaseClock { std::chrono::system_clock::time_point {
+    std::chrono::seconds { 1704067200 } } };
+
+/// The term every grant here is minted under unless a case says otherwise.
+///
+/// Not zero, so a case about an OLDER term has somewhere below it to stand: with the
+/// default at zero the "issued by a deposed scheduler" direction would be
+/// unrepresentable and the epoch cases could only ever test the accepting half.
+constexpr std::uint64_t GrantTerm = 4;
+
+/// A grant, signed the way a scheduler signs one.
+///
+/// Two actors: this mints as the SCHEDULER, and the worker under test verifies. A
+/// fixture where one object did both would prove the MAC round-trips and nothing
+/// about whether the worker ever asks.
+/// @param endpoint The worker the grant is issued FOR.
+/// @param fingerprint The toolchain it authorizes.
+/// @param validFor How long past `LeaseClock()` it lasts; negative for an expired one.
+/// @param cluster Which fleet mints it; defaults to the one the worker belongs to.
+/// @param epoch The scheduler term it is issued under.
+/// @param serial What distinguishes this issuance from the last.
+///
+/// **The serial is a parameter and it has to be** (#614). A grant is spendable exactly
+/// once at a worker, so two calls to this that produced identical bytes would make the
+/// second a replay -- which is what a real scheduler never mints either, since
+/// `LeaseTable::_nextToken` advances per acquisition. A case presenting two grants
+/// therefore names two serials, and a case presenting one need not care.
+/// @return The token, as a client would present it.
+[[nodiscard]] std::string GrantFor(std::string_view endpoint,
+                                   std::string_view fingerprint = "gcc-13",
+                                   std::chrono::seconds validFor = std::chrono::minutes { 10 },
+                                   std::string_view cluster = ThisCluster,
+                                   std::uint64_t epoch = GrantTerm,
+                                   std::string_view serial = "17")
+{
+    return Pace::Distributed::MintLeaseToken(TestSigner(),
+                                             Pace::Distributed::LeaseClaims { .serial = std::string { serial },
+                                                                              .endpoint = std::string { endpoint },
+                                                                              .fingerprint = std::string { fingerprint },
+                                                                              .key = "obj-abc",
+                                                                              .expiresAt = LeaseClock.now() + validFor,
+                                                                              .clusterId = std::string { cluster },
+                                                                              .epoch = epoch,
+                                                                              .signer = {} });
+}
+
+/// Build one of the two production lease validators.
+/// @param policy Which policy.
+/// @param lease What the verifying one borrows -- the spent grants, the learned term and
+///        the reset notice. Borrowed, so it outlives the validator; the unchecked one
+///        ignores it.
+/// @param endpoint Where the worker's advertised address is read. Borrowed for the life
+///        of the validator, exactly as @p lease is -- which is why the fixture holds one
+///        as a member rather than passing a temporary (#1279).
+/// @param metrics Where a term reset is counted; refusals are counted by the surface.
+/// @return The validator.
+[[nodiscard]] LeaseValidator MakeLeaseValidator(LeasePolicy policy,
+                                                Distributed::WorkerLeaseState& lease,
+                                                IAdvertisedEndpointSource const& endpoint,
+                                                IMetricsSink& metrics,
+                                                std::chrono::seconds slack = Distributed::LeaseTokenClockSkewSlack)
+{
+    if (policy == LeasePolicy::Unchecked)
+        return UncheckedLeaseValidator();
+    // Pinned here rather than named at construction: since #401 the fleet is what the
+    // REGISTER reply said, so a validator built for a test has to be told the same way
+    // a production one is. A case that wants the UNREGISTERED worker leaves it unpinned.
+    lease.fleet.Pin(std::string { ThisCluster });
+    return SignedLeaseValidator(TestRoster(), endpoint, {}, LeaseClock, lease, metrics, slack);
+}
+
+/// Remembers every refusal it is told of, in order; safe from the pool threads a worker runs on.
+class RecordingRefusals final: public IJobRefusalObserver
+{
+  public:
+    void OnJobRefused(JobError const& error) override
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        _seen.push_back(error);
+    }
+
+    /// @return What was reported so far.
+    [[nodiscard]] std::vector<JobError> Seen() const
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        return _seen;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::vector<JobError> _seen;
+};
+
+struct Fixture
+{
+    StubRunner runner;
+    Pace::Testing::ScratchDirectory scratch { "fc-wp" };
+    CompileJobRunner jobs;
+    AtomicMetricsSink metrics;
+
+    /// What this worker keeps between lease checks: the spent grants, the term it has
+    /// learned, and where a reset would be said.
+    ///
+    /// Declared BEFORE `worker` on purpose: the validator borrows it, so member order
+    /// is what guarantees it outlives the thing holding the reference. Silent, because
+    /// these cases assert on the REPLY rather than on the log -- named through
+    /// `Silent()` rather than defaulted, which is that notice's own rule.
+    Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+
+    /// Where the validator reads this worker's advertised address, for `lease`'s reason
+    /// and by `lease`'s mechanism: declared BEFORE `worker`, so member order rather than
+    /// a rule somebody remembers is what keeps the borrow alive.
+    MovingEndpoint endpoint { ThisWorker };
+
+    /// Every job the runner refused, as the worker reported it -- declared before `worker`, which
+    /// borrows it, for `lease`'s reason.
+    RecordingRefusals refusals;
+
+    WorkerProtocol worker;
+
+    /// @param codecs What this worker can produce and decode; the production node
+    ///        passes `AvailableCodecs()`, and a case can narrow it to assert what a
+    ///        worker without a codec answers.
+    /// @param policy Which production lease policy to build; see `LeasePolicy`.
+    /// @param slack How far this worker's clock may trail the scheduler's. Production
+    ///        everywhere but the one case that has to observe a job outliving its
+    ///        grant: a verifying grant carries at least `slack` of budget by
+    ///        construction, so at the production value that refusal is unreachable.
+    explicit Fixture(Wire::CodecList codecs = AvailableCodecs(),
+                     LeasePolicy policy = LeasePolicy::Unchecked,
+                     std::chrono::seconds slack = Distributed::LeaseTokenClockSkewSlack):
+        jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() },
+        worker { jobs,
+                 MakeLeaseValidator(policy, lease, endpoint, metrics, slack),
+                 std::move(codecs),
+                 &Testing::TestWorkerKey(),
+                 metrics,
+                 refusals }
+    {
+    }
+    Fixture(Fixture const&) = delete;
+    Fixture& operator=(Fixture const&) = delete;
+    Fixture(Fixture&&) = delete;
+    Fixture& operator=(Fixture&&) = delete;
+    ~Fixture() = default;
+};
+
+/// A COMPILE frame carrying `source` as its source field, already enveloped.
+///
+/// The envelope belongs to the caller because that is exactly what the footprint
+/// cases differ in -- an honest `Identity` one, one declaring an expansion it does
+/// not carry, or a field too short to be an envelope at all. Everything around it
+/// is boilerplate no case varies, so it lives here once.
+/// @param source The source field, enveloped or not, exactly as it should travel.
+/// @param fingerprint The toolchain to claim.
+/// @param accepted What the client says it can decode; what the reply is negotiated
+///        against.
+/// @param leaseToken The grant to present. Defaulted, because most cases here are
+///        about codecs, framing and fingerprints and run against a validator that
+///        refuses nothing; the lease cases pass a real one. A parameter rather than a
+///        second frame builder -- this doc comment already claims that everything
+///        around the source field "is boilerplate no case varies, so it lives here
+///        once", and a copy would have made that false.
+/// @return The framed request.
+[[nodiscard]] std::vector<std::byte> FrameWithSource(std::span<std::byte const> source,
+                                                     std::string_view fingerprint = "gcc-13",
+                                                     Wire::CodecList accepted = { Wire::IdentityCodec },
+                                                     std::string_view leaseToken = "l1")
+{
+    return Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = leaseToken,
+                                                      .fingerprint = fingerprint,
+                                                      .args = {},
+                                                      .source = source,
+                                                      .acceptedCodecs = std::move(accepted),
+                                                      .sourceName = "a.cpp",
+                                                      .compileDir = {},
+                                                      .compileDirReplacement = {},
+                                                      .sourceRoot = {},
+                                                      .sourceRootReplacement = {} });
+}
+
+/// A well-formed COMPILE frame.
+/// @param fingerprint The toolchain the client claims.
+/// @param source The preprocessed translation unit, sent verbatim.
+/// @param accepted What the client says it can decode; what the reply is negotiated
+///        against.
+/// @param leaseToken The grant to present; see `FrameWithSource`.
+/// @return The framed request.
+[[nodiscard]] std::vector<std::byte> CompileFrame(std::string_view fingerprint = "gcc-13",
+                                                  std::string_view source = "int main(){return 0;}",
+                                                  Wire::CodecList accepted = { Wire::IdentityCodec },
+                                                  std::string_view leaseToken = "l1")
+{
+    auto const enveloped =
+        Wire::EncodeCodecEnvelope(Wire::IdentityCodec, static_cast<std::uint32_t>(source.size()), Wire::AsBytes(source));
+    return FrameWithSource(enveloped, fingerprint, std::move(accepted), leaseToken);
+}
+
+/// Decode a reply frame into its status and payload.
+struct Reply
+{
+    bool present { false };
+    Wire::Status status { Wire::Status::Miss };
+    std::vector<std::byte> payload;
+};
+
+[[nodiscard]] Reply Decode(std::vector<std::byte> const& frame)
+{
+    auto const header = Wire::DecodeReplyHeader(frame);
+    if (!header.has_value())
+        return {};
+    auto const body = std::span<std::byte const> { frame }.subspan(Wire::ReplyHeaderSize);
+    return Reply { .present = true, .status = header->status, .payload = { body.begin(), body.end() } };
+}
+
+[[nodiscard]] Wire::ErrorCode ErrorOf(std::vector<std::byte> const& frame)
+{
+    auto const reply = Decode(frame);
+    auto const decoded = Wire::DecodeErrorPayload(reply.payload);
+    return decoded.has_value() ? decoded->first : Wire::ErrorCode::MalformedFrame;
+}
+
+/// The still-enveloped object field of a reply that must be a successful compile.
+///
+/// The shared prefix of every codec assertion below, so the `Ok`-status +
+/// `DecodeCompileResult` chain exists once. A case that hand-rolled it dropped the
+/// status check and would have passed against an error reply.
+/// @param frame The whole reply frame.
+/// @return The object field, exactly as it travelled.
+[[nodiscard]] std::vector<std::byte> FieldOf(std::vector<std::byte> const& frame)
+{
+    auto const reply = Decode(frame);
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const result = Wire::DecodeCompileResult(reply.payload);
+    REQUIRE(result.has_value());
+    // Handed back directly: `CompileResultFields` owns its bytes since #366, so this
+    // no longer has to copy the span out before the decoded buffer goes away.
+    return Unwrap(result).object;
+}
+
+/// Decode the object field of a reply that must be a successful compile.
+/// @param frame The whole reply frame.
+/// @return Its object field.
+/// A successful reply's object field, envelope header and all.
+///
+/// Owns, because this helper RETURNS it and `field` below dies with the call.
+/// `Wire::CodecEnvelopeView` deliberately borrows -- its production consumer reads
+/// it in scope, and owning there would put a second full copy of a preprocessed
+/// translation unit on the path least able to afford it (#366). So the copy belongs
+/// here, at the one caller that needs it, rather than in the wire type.
+///
+/// This is no longer a workaround for an unlabelled hazard, which is what it was
+/// before the type said `View`: it is a local answer to a documented property.
+struct ObjectField
+{
+    std::uint8_t codec { Wire::IdentityCodec }; ///< The codec the worker answered in.
+    std::uint32_t rawLength { 0 };              ///< The size the worker declared, before compression.
+    std::vector<std::byte> bytes;               ///< The object as it travelled.
+};
+
+[[nodiscard]] ObjectField ObjectOf(std::vector<std::byte> const& frame)
+{
+    auto const field = FieldOf(frame);
+    auto const envelope = Wire::DecodeCodecEnvelope(field);
+    REQUIRE(envelope.has_value());
+    return ObjectField { .codec = Unwrap(envelope).codec,
+                         .rawLength = Unwrap(envelope).rawLength,
+                         .bytes = { Unwrap(envelope).bytes.begin(), Unwrap(envelope).bytes.end() } };
+}
+
+/// Every envelope-refusal counter, read back in `EnvelopeError` order.
+///
+/// Derived from the enum rather than listed, for the reason the table case below
+/// records: three cases here each spelled out "and the others are zero" by hand and
+/// each spelled a DIFFERENT subset, so between them they left two of the four
+/// unchecked on some paths. A fifth reason is now checked by every one of them the
+/// moment it exists.
+/// @param metrics The fixture's sink.
+/// @return One count per reason, in enumerator order.
+[[nodiscard]] std::vector<std::uint64_t> EnvelopeCounts(AtomicMetricsSink const& metrics)
+{
+    std::vector<std::uint64_t> counts;
+    for (auto const reason: Enumerators<EnvelopeError>())
+        counts.push_back(metrics.Read(CounterFor(reason)));
+    return counts;
+}
+
+/// The counts a case expects: one for each reason named, zero for every other.
+/// @param raised The reasons this case expects to have fired exactly once.
+/// @return The expected vector, in enumerator order.
+[[nodiscard]] std::vector<std::uint64_t> OnlyRaised(std::initializer_list<EnvelopeError> raised)
+{
+    std::vector<std::uint64_t> expected(EnumeratorCount<EnvelopeError>, 0U);
+    for (auto const reason: raised)
+        expected[static_cast<std::size_t>(reason)] = 1U;
+    return expected;
+}
+
+} // namespace
+
+TEST_CASE("A worker compiles a well-formed job", "[worker-protocol]")
+{
+    Fixture fix;
+    auto const answer = fix.worker.Answer(CompileFrame());
+    REQUIRE(answer.has_value());
+
+    auto const reply = Decode(Unwrap(answer));
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const result = Wire::DecodeCompileResult(reply.payload);
+    REQUIRE(result.has_value());
+    CHECK(Unwrap(result).exitCode == 0);
+
+    auto const object = Wire::DecodeCodecEnvelope(Unwrap(result).object);
+    REQUIRE(object.has_value());
+    CHECK(Wire::AsStringView(Unwrap(object).bytes) == "OBJECT");
+}
+
+TEST_CASE("A worker refuses every verb but COMPILE", "[worker-protocol]")
+{
+    // A worker is not a scheduler and not a cache. The refusal is a REPLY, so a
+    // client that sent the wrong verb to the wrong port learns which -- a dropped
+    // connection is indistinguishable from a dead host.
+    Fixture fix;
+    auto const frames = std::vector<std::vector<std::byte>> {
+        Wire::EncodeFetch("k"),
+        Wire::EncodeLease(Wire::LeaseRequest { .fingerprint = "gcc-13", .key = "k", .acceptedCodecs = {} }),
+        Wire::EncodeRegister(
+            Wire::RegisterRequest { .fingerprint = "gcc-13", .endpoint = "h:1", .slots = 1, .acceptedCodecs = {} }),
+        Wire::EncodeHeartbeat("w1", 0),
+    };
+    for (auto const& frame: frames)
+    {
+        auto const answer = fix.worker.Answer(frame);
+        REQUIRE(answer.has_value());
+        CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::DispatchNotPermitted);
+    }
+}
+
+TEST_CASE("A worker refuses AUTH with the one code the client steps over", "[worker-protocol]")
+{
+    // NOT `DispatchNotPermitted`, which is what the neighbouring case above asserts
+    // for a verb served on a DIFFERENT port. The two are different sentences: that
+    // one says "this endpoint does not do that job", a routing fact a client acts on;
+    // this says "I do not implement this verb", which is what an absent capability
+    // is.
+    //
+    // `Cc::CacheProtocol::Exchange` tolerates exactly `Wire::UnimplementedVerb` and
+    // proceeds unauthenticated -- right against a worker with no credential to check.
+    // Answered anything else, a `PACE_TOKEN`-configured worker was refused at
+    // REGISTER and never joined the fleet at all (#340).
+    //
+    // Asserted by VALUE: the enumerator both ends name is the only thing holding this
+    // contract together, and `pace-cc` links none of `Pace`.
+    Fixture fix;
+
+    auto const auth = Wire::EncodeAuth(Wire::AuthRequest { .username = "bob", .secret = "s3cret" });
+    auto const answer = fix.worker.Answer(auth);
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::UnimplementedVerb);
+
+    // A bare token with no username, which is how `PACE_TOKEN` alone reaches the
+    // wire, takes the same answer.
+    auto const tokenOnly = Wire::EncodeAuth(Wire::AuthRequest { .username = "", .secret = "s3cret" });
+    auto const bare = fix.worker.Answer(tokenOnly);
+    REQUIRE(bare.has_value());
+    CHECK(ErrorOf(Unwrap(bare)) == Wire::UnimplementedVerb);
+}
+
+TEST_CASE("A codec envelope declaring more than the cap is refused before it is decompressed", "[worker-protocol]")
+{
+    // Issue #241. `Compression::Decompress` VALUE-INITIALIZES a buffer of the declared
+    // size, so the pages are touched rather than lazily reserved -- and that size is a
+    // `u32` read straight off the wire, with no enforced relation to the compressed
+    // bytes beside it. A frame of a few dozen bytes therefore drove a multi-gigabyte
+    // allocation, and the listener's in-flight byte budget charged only the FRAME
+    // length, so it passed admission unnoticed.
+    //
+    // `CompileCacheWire.hpp` already said this is what `rawLen` is for: it "lets a
+    // decoder reject a payload whose declared expansion exceeds its cap before
+    // decompressing a byte". No decoder in the tree did.
+    Fixture fix;
+
+    // A non-Identity codec, so the payload takes the decompressing path, declaring the
+    // largest expansion the field can hold.
+    constexpr std::uint32_t FourGiB = 0xFFFFFFFFU;
+    std::array<std::byte, 16> const payload { std::byte { 0x41 } };
+    auto const bomb = Wire::EncodeCodecEnvelope(/*codec=*/1, FourGiB, payload);
+    auto const frame = Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                                  .fingerprint = "gcc-13",
+                                                                  .args = {},
+                                                                  .source = bomb,
+                                                                  .acceptedCodecs = { Wire::IdentityCodec },
+                                                                  .sourceName = "a.cpp",
+                                                                  .compileDir = {},
+                                                                  .compileDirReplacement = {},
+                                                                  .sourceRoot = {},
+                                                                  .sourceRootReplacement = {} });
+    // The entire hostile frame is smaller than the header of what it asked this worker
+    // to allocate. That is the amplification, stated as an assertion.
+    CHECK(frame.size() < 128);
+
+    auto const answer = fix.worker.Answer(frame);
+    // A REPLY, never a close: the frame declared its own length, so the connection is
+    // still synchronised and the peer learns which of its fields was refused.
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::PayloadTooLarge);
+
+    // Nothing downstream ever saw the frame.
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+
+    // And something DID rise. A refusal the worker answers on the wire and counts
+    // nowhere is one an operator can only find in a client's log: a port being
+    // probed with these looked, on `/metrics`, exactly like a port nobody was
+    // talking to. Counted under its own reason, not a shared `bad_envelope`, because
+    // "somebody is declaring 4 GiB at my compile port" is not the same page as "two
+    // of my machines were packaged with different codecs".
+    CHECK(EnvelopeCounts(fix.metrics) == OnlyRaised({ EnvelopeError::DeclaredTooLarge }));
+}
+
+TEST_CASE("An Identity envelope may not lie about the size of the bytes beside it", "[worker-protocol]")
+{
+    // The Identity path never reaches `Decompress`, so it never reached that
+    // function's own length check either -- it could declare any size at all next to
+    // any payload. That is not an allocation, but it is a field describing bytes it
+    // does not describe, and the next receiver to believe it is the next defect.
+    Fixture fix;
+
+    std::array<std::byte, 16> const payload { std::byte { 0x41 } };
+    auto const liar = Wire::EncodeCodecEnvelope(Wire::IdentityCodec, 0xFFFFFFFFU, payload);
+    auto const frame = Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                                  .fingerprint = "gcc-13",
+                                                                  .args = {},
+                                                                  .source = liar,
+                                                                  .acceptedCodecs = { Wire::IdentityCodec },
+                                                                  .sourceName = "a.cpp",
+                                                                  .compileDir = {},
+                                                                  .compileDirReplacement = {},
+                                                                  .sourceRoot = {},
+                                                                  .sourceRootReplacement = {} });
+    auto const answer = fix.worker.Answer(frame);
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::PayloadTooLarge);
+
+    // A modest overstatement is refused too, and as a different fact: it is within the
+    // cap, so what is wrong with it is the disagreement rather than the size -- and it
+    // is answered `malformed-frame`, not `unsupported-codec`. The codec was never in
+    // question, and a refusal whose code and message disagree sends an operator
+    // hunting a codec mismatch that never happened.
+    auto const modest = Wire::EncodeCodecEnvelope(Wire::IdentityCodec, 64, payload);
+    auto const modestFrame = Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                                        .fingerprint = "gcc-13",
+                                                                        .args = {},
+                                                                        .source = modest,
+                                                                        .acceptedCodecs = { Wire::IdentityCodec },
+                                                                        .sourceName = "a.cpp",
+                                                                        .compileDir = {},
+                                                                        .compileDirReplacement = {},
+                                                                        .sourceRoot = {},
+                                                                        .sourceRootReplacement = {} });
+    auto const modestAnswer = fix.worker.Answer(modestFrame);
+    REQUIRE(modestAnswer.has_value());
+    CHECK(ErrorOf(Unwrap(modestAnswer)) == Wire::ErrorCode::MalformedFrame);
+
+    // Two frames, two codes, two counters -- and the counters split where the codes
+    // do not. `MalformedFrame` is all the peer can act on either way, while an
+    // operator seeing the second rise is looking at a version skew and the first at
+    // somebody sizing a request past the cap.
+    CHECK(EnvelopeCounts(fix.metrics) == OnlyRaised({ EnvelopeError::DeclaredTooLarge, EnvelopeError::Malformed }));
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("An envelope refusal's wire code and its message are one fact", "[worker-protocol]")
+{
+    // They come from one table row, never a ternary beside a lookup. This was a
+    // ternary, and it answered `unsupported-codec` for a malformed envelope while the
+    // message said "malformed" -- a refusal that sends an operator hunting a codec
+    // mismatch that never happened. The rule this file already states for
+    // `RefusalTable` applies one layer in.
+    CHECK(WireCodeFor(EnvelopeError::Malformed) == Wire::ErrorCode::MalformedFrame);
+    CHECK(WireCodeFor(EnvelopeError::UnsupportedCodec) == Wire::ErrorCode::UnsupportedCodec);
+    CHECK(WireCodeFor(EnvelopeError::DeclaredTooLarge) == Wire::ErrorCode::PayloadTooLarge);
+    CHECK(WireCodeFor(EnvelopeError::Corrupt) == Wire::ErrorCode::MalformedFrame);
+
+    // Everything below walks the enum's own count rather than a list written out
+    // here. A hand-written list is the guard shape `RowsInEnumeratorOrder` exists to
+    // reject: append a fifth `EnvelopeError` and a four-element list keeps checking
+    // four, so the case that proves every reason is distinguishable stops covering
+    // the new one and still passes. Derived from `Last`, a fifth reason is checked
+    // the moment it exists.
+    std::vector<std::string_view> texts;
+    std::vector<IMetricsSink::Counter> counters;
+    for (auto const reason: Enumerators<EnvelopeError>())
+    {
+        // Every reason says something, and no two say the same thing -- a description
+        // shared between reasons is one an operator cannot act on.
+        auto const text = DescribeEnvelopeError(reason);
+        CHECK_FALSE(text.empty());
+        CHECK(std::ranges::find(texts, text) == texts.end());
+        texts.push_back(text);
+
+        // The third column, and the one that shipped late: for a while these refusals
+        // had a code and a message and incremented nothing at all. No two reasons
+        // share a counter -- deliberately, even where two share a wire code -- because
+        // summing them would hide the one that is somebody probing the port behind the
+        // one that is a packaging mistake.
+        auto const counter = CounterFor(reason);
+        CHECK(std::ranges::find(counters, counter) == counters.end());
+        counters.push_back(counter);
+
+        // And that row names an *envelope* counter rather than a neighbour's. That
+        // every counter has a catalog row is a `static_assert`'s job, not a test's;
+        // what no compile-time check can see is a row built by copying the one above
+        // it and leaving `WorkerJobsRefusedNoSlot` in place -- which would export a
+        // plausible series under a reason that never happened. `DescriptorOf` also
+        // answers nullptr for `Last`, so this covers a row that named the count.
+        auto const* const row = DescriptorOf(counter);
+        REQUIRE(row != nullptr);
+        INFO("counter " << row->prometheusName);
+        CHECK(row->prometheusName.starts_with("pace_worker_jobs_refused_envelope_"));
+    }
+}
+
+TEST_CASE("The envelope ceiling is the surface's own, not a figure this class assumed", "[worker-protocol]")
+{
+    // Passed in rather than baked in: this class never sees the listener that enforced
+    // the frame length, so a listener with a smaller request cap has to say so or the
+    // two disagree about how much memory one request may cost.
+    StubRunner runner;
+    Pace::Testing::ScratchDirectory const scratch { "fc-wp" };
+    CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+    AtomicMetricsSink metrics;
+    constexpr std::size_t TinyCap = 8;
+    WorkerProtocol worker {
+        jobs,   UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(), metrics, IgnoreJobRefusals(),
+        TinyCap
+    };
+
+    // Well under the default ceiling, and over this worker's.
+    auto const answer = worker.Answer(CompileFrame("gcc-13", "int main(){return 0;}"));
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::PayloadTooLarge);
+}
+
+TEST_CASE("A foreign magic is the one case that closes rather than replies", "[worker-protocol]")
+{
+    // There is no framing in which a reply would be meaningful to a peer that is
+    // not speaking this protocol.
+    Fixture fix;
+    std::vector<std::byte> const junk { std::byte { 'G' }, std::byte { 'E' }, std::byte { 'T' } };
+    CHECK_FALSE(fix.worker.Answer(junk).has_value());
+}
+
+TEST_CASE("A fingerprint this worker does not serve is refused as a mismatch", "[worker-protocol]")
+{
+    // A distinct code, because it is a distinct operator problem: the scheduler
+    // sent a job to the wrong fleet, or somebody reached this port directly.
+    Fixture fix;
+    auto const answer = fix.worker.Answer(CompileFrame("clang-19"));
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::FingerprintMismatch);
+}
+
+TEST_CASE("A source in an undecodable codec is refused, not compiled as garbage", "[worker-protocol]")
+{
+    Fixture fix;
+    auto const bogus = Wire::EncodeCodecEnvelope(/*codec=*/200, 10, Wire::AsBytes("xxxxxxxxxx"));
+    auto const frame = Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                                  .fingerprint = "gcc-13",
+                                                                  .args = {},
+                                                                  .source = bogus,
+                                                                  .acceptedCodecs = {},
+                                                                  .sourceName = "a.cpp",
+                                                                  .compileDir = {},
+                                                                  .compileDirReplacement = {},
+                                                                  .sourceRoot = {},
+                                                                  .sourceRootReplacement = {} });
+    auto const answer = fix.worker.Answer(frame);
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::UnsupportedCodec);
+
+    // Its own counter, and the only envelope refusal that is nobody's fault: two
+    // honest processes packaged differently. An operator reading a rise here goes to
+    // the build of the two binaries, not to the network and not to the firewall.
+    CHECK(EnvelopeCounts(fix.metrics) == OnlyRaised({ EnvelopeError::UnsupportedCodec }));
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("A payload that does not expand to its declared size is refused as corrupt", "[worker-protocol]")
+{
+    // The fourth envelope refusal, and the only one of them that implicates the
+    // TRANSPORT: framing this build parsed, a codec it has, and bytes that then
+    // failed to expand. It was the one reason with no case of its own -- the table
+    // proved its row is distinct and nothing proved the worker ever reaches it, so
+    // "answered `malformed-frame`, counted as corrupt" was a claim rather than an
+    // assertion.
+    //
+    // Needs a codec that actually decompresses: a build with compression configured
+    // out reaches `Corrupt` on no path at all, because Identity's length
+    // disagreement is `Malformed` and is covered above.
+    auto const codecs = AvailableCodecs();
+    if (codecs.size() < 2)
+        SKIP("this build offers no codec but Identity");
+
+    Fixture fix;
+
+    // Well inside the ceiling, so `DeclaredTooLarge` cannot answer first, and not a
+    // valid frame for any codec, so the decompressor is what refuses it. Most
+    // preferred first, so `front()` is never Identity here.
+    std::array<std::byte, 16> const garbage { std::byte { 0x7F } };
+    auto const rotten = Wire::EncodeCodecEnvelope(codecs.front(), 64, garbage);
+    auto const frame = Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                                  .fingerprint = "gcc-13",
+                                                                  .args = {},
+                                                                  .source = rotten,
+                                                                  .acceptedCodecs = { Wire::IdentityCodec },
+                                                                  .sourceName = "a.cpp",
+                                                                  .compileDir = {},
+                                                                  .compileDirReplacement = {},
+                                                                  .sourceRoot = {},
+                                                                  .sourceRootReplacement = {} });
+    auto const answer = fix.worker.Answer(frame);
+    REQUIRE(answer.has_value());
+
+    // The same wire code a malformed envelope gets -- all the peer can act on either
+    // way -- and a counter of its own, because an operator seeing this rise is
+    // looking at the link rather than at a version skew.
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::MalformedFrame);
+    CHECK(EnvelopeCounts(fix.metrics) == OnlyRaised({ EnvelopeError::Corrupt }));
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("Every frame-level refusal moves its own counter", "[worker-protocol][metrics]")
+{
+    // The cases above assert the CODE, which is what a client acts on. This asserts
+    // the counter, which is what an operator acts on -- and six of these refusals
+    // used to answer the right code while incrementing nothing, so a port under a
+    // probe looked on `/metrics` exactly like a port nobody was talking to (#327).
+    //
+    // Driven as a table because the property is uniform and the point is coverage:
+    // one row per frame-level refusal, each asserting that ITS counter moved and
+    // that the others did not. A test that only checked "some counter rose" would
+    // pass with every refusal wired to one shared counter, which is the arrangement
+    // this split exists to prevent.
+    using Counter = IMetricsSink::Counter;
+
+    struct Row
+    {
+        std::string_view what;
+        Wire::ErrorCode code;
+        Counter counter;
+        std::function<std::vector<std::byte>()> frame;
+    };
+
+    auto const truncated = [] {
+        auto frame = CompileFrame();
+        frame.resize(Wire::RequestHeaderSize + 2);
+        return frame;
+    };
+    auto const badVersion = [] {
+        auto frame = CompileFrame();
+        frame[1] = std::byte { 99 };
+        return frame;
+    };
+    auto const unknownOp = [] {
+        auto frame = CompileFrame();
+        frame[2] = std::byte { 0xEE };
+        return frame;
+    };
+    // The production encoders, not a frame this file assembled: what is under test is
+    // which counter a refusal moves, and a hand-built frame could be refused for a
+    // reason the real encoder would never produce.
+    auto const authVerb = [] {
+        return Wire::EncodeAuth(Wire::AuthRequest { .username = "bob", .secret = "s" });
+    };
+    auto const cacheVerb = [] {
+        return Wire::EncodeFetch("k");
+    };
+    auto const badPayload = [] {
+        // A COMPILE frame carrying one stray byte: it reaches the verb, so it is not a
+        // truncation, and then fails to split into fields. That is the second
+        // `MalformedFrame` site and the whole reason it needs a counter of its own.
+        //
+        // The DECLARED length has to be rewritten to match, and forgetting to is how
+        // this fixture was wrong on its first run: shortening the bytes while the
+        // header still promised the original payload produced a frame refused as
+        // TRUNCATED, so the case passed its code assertion (both answer
+        // `MalformedFrame`) and moved the neighbouring counter. Which is the exact
+        // confusion the two counters exist to end, arriving in the test written to
+        // prove they are separate.
+        auto frame = CompileFrame();
+        frame.resize(Wire::RequestHeaderSize + 1);
+        constexpr std::size_t LengthOffset = 3;
+        frame[LengthOffset + 0] = std::byte { 0 };
+        frame[LengthOffset + 1] = std::byte { 0 };
+        frame[LengthOffset + 2] = std::byte { 0 };
+        frame[LengthOffset + 3] = std::byte { 1 };
+        return frame;
+    };
+
+    std::array<Row, 6> const rows {
+        Row { .what = "an unsupported version",
+              .code = Wire::ErrorCode::UnsupportedVersion,
+              .counter = Counter::WorkerFramesRefusedUnsupportedVersion,
+              .frame = badVersion },
+        Row { .what = "a truncated frame",
+              .code = Wire::ErrorCode::MalformedFrame,
+              .counter = Counter::WorkerFramesRefusedTruncated,
+              .frame = truncated },
+        Row { .what = "an unknown opcode",
+              .code = Wire::ErrorCode::UnknownOpcode,
+              .counter = Counter::WorkerFramesRefusedUnknownOpcode,
+              .frame = unknownOp },
+        Row { .what = "AUTH on a worker",
+              .code = Wire::UnimplementedVerb,
+              .counter = Counter::WorkerFramesRefusedUnimplementedVerb,
+              .frame = authVerb },
+        Row { .what = "a verb served on another surface",
+              .code = Wire::ErrorCode::DispatchNotPermitted,
+              .counter = Counter::WorkerFramesRefusedNotPermitted,
+              .frame = cacheVerb },
+        Row { .what = "an undecodable payload",
+              .code = Wire::ErrorCode::MalformedFrame,
+              .counter = Counter::WorkerFramesRefusedMalformedPayload,
+              .frame = badPayload },
+    };
+
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.what);
+        Fixture fix;
+        auto const frame = row.frame();
+        auto const answer = fix.worker.Answer(frame);
+        REQUIRE(answer.has_value());
+        CHECK(ErrorOf(Unwrap(answer)) == row.code);
+        CHECK(fix.metrics.Read(row.counter) == 1);
+
+        // And nothing else in the family moved. This is the half that matters: two
+        // of these rows share `MalformedFrame` on the wire, so a test asserting only
+        // the code would pass with both wired to one counter -- and an operator
+        // would then be unable to tell a truncated frame (a framing fault, or a
+        // hostile peer) from an undecodable payload (a version mismatch between two
+        // ends that agree on the framing).
+        for (auto const& other: rows)
+            if (other.counter != row.counter)
+                CHECK(fix.metrics.Read(other.counter) == 0);
+    }
+}
+
+TEST_CASE("A frame shorter than its declared payload is refused", "[worker-protocol]")
+{
+    // The declared length is what makes the framing work; a frame that lies about
+    // it must not be read past its end.
+    Fixture fix;
+    auto frame = CompileFrame();
+    frame.resize(Wire::RequestHeaderSize + 2);
+    auto const answer = fix.worker.Answer(frame);
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::MalformedFrame);
+}
+
+TEST_CASE("An unsupported wire version is refused with a version error", "[worker-protocol]")
+{
+    Fixture fix;
+    auto frame = CompileFrame();
+    frame[1] = std::byte { 99 };
+    auto const answer = fix.worker.Answer(frame);
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::UnsupportedVersion);
+}
+
+TEST_CASE("An unknown opcode is refused and does not close the connection", "[worker-protocol]")
+{
+    Fixture fix;
+    auto frame = CompileFrame();
+    frame[2] = std::byte { 0x7F };
+    auto const answer = fix.worker.Answer(frame);
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::UnknownOpcode);
+}
+
+TEST_CASE("A compile is counted from start to finish", "[worker-protocol][metrics]")
+{
+    // Started and completed are two counters rather than a gauge, because this
+    // sink is counter-only by design: their difference is how many compiles are
+    // running, and the completed count is also the divisor for the wall-time sum.
+    Fixture fix;
+    using Sink = IMetricsSink::Counter;
+
+    REQUIRE(fix.worker.Answer(CompileFrame()).has_value());
+
+    CHECK(fix.metrics.Read(Sink::WorkerJobsStarted) == 1);
+    CHECK(fix.metrics.Read(Sink::WorkerJobsCompleted) == 1);
+
+    // No refusal was counted anywhere. A job that ran must not also appear as one
+    // that did not, which is what a counter incremented on every exit path does.
+    // DERIVED from the catalog rather than written out. It was a list of four, and
+    // #264 added a fifth refusal counter -- a list keeps checking the four it names
+    // and passes, silent about the reason it does not know, which is the guard shape
+    // `RowsInEnumeratorOrder` exists to reject.
+    std::size_t refusalCounters = 0;
+    for (auto const& row: Pace::CounterTable)
+    {
+        if (!row.prometheusName.starts_with("pace_worker_jobs_refused_"))
+            continue;
+        ++refusalCounters;
+        INFO("counter " << row.prometheusName);
+        CHECK(fix.metrics.Read(row.counter) == 0);
+    }
+
+    // A positive control on the derivation: a prefix that matched nothing would make
+    // the loop above vacuous and this case would pass having checked no counter at
+    // all -- the exact way a zero-row scan reads as complete coverage.
+    CHECK(refusalCounters >= 5);
+}
+
+TEST_CASE("A refusal is counted under its own reason", "[worker-protocol][metrics]")
+{
+    // The split is the whole point, exactly as the scheduler's no-worker /
+    // no-capacity split is: a fingerprint nobody serves says the fleet is
+    // misconfigured, and a scratch disk that will not take a file says a machine
+    // is broken. Summing them hides the first behind the second.
+    Fixture fix;
+    using Sink = IMetricsSink::Counter;
+
+    REQUIRE(fix.worker.Answer(CompileFrame("clang-19")).has_value());
+
+    CHECK(fix.metrics.Read(Sink::WorkerJobsRefusedUnknownFingerprint) == 1);
+    CHECK(fix.metrics.Read(Sink::WorkerJobsRefusedScratchUnavailable) == 0);
+    CHECK(fix.metrics.Read(Sink::WorkerJobsRefusedSpawnFailed) == 0);
+
+    // The job started -- the worker took it -- but did not complete, so the
+    // in-flight difference still returns to zero and the wall-time sum is
+    // untouched by a compile that never ran.
+    CHECK(fix.metrics.Read(Sink::WorkerJobsStarted) == 1);
+    CHECK(fix.metrics.Read(Sink::WorkerJobsCompleted) == 0);
+    CHECK(fix.metrics.Read(Sink::WorkerCompileMillisTotal) == 0);
+}
+
+TEST_CASE("A refusal's counter and its wire code come from one row", "[worker-protocol][metrics]")
+{
+    // Both halves of the same refusal, asserted together: the client is told
+    // `fingerprint-mismatch` and the operator sees the fingerprint counter rise.
+    // Two switches could answer these differently and still compile, which is why
+    // they are one table.
+    Fixture fix;
+
+    auto const answer = fix.worker.Answer(CompileFrame("clang-19"));
+    REQUIRE(answer.has_value());
+
+    auto const reply = Decode(Unwrap(answer));
+    CHECK(reply.status == Wire::Status::Error);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedUnknownFingerprint) == 1);
+}
+
+TEST_CASE("A runner refusal counts as started and never as completed", "[worker-protocol]")
+{
+    // #307. This PINS the behaviour rather than changing it, because the docs are
+    // what were wrong. `WorkerJobsStarted` counts jobs handed to the RUNNER, and a
+    // runner refusal returns before `WorkerJobsCompleted` -- so their difference
+    // gains one permanently and is NOT the in-flight count, which is what
+    // IMetricsSink.hpp claimed until now and what the exported help text told
+    // every operator to compute.
+    //
+    // Balancing the pair here is not the fix: `WorkerJobsCompleted` is the _count
+    // half of a duration with `WorkerCompileMillisTotal`, so a refusal counted
+    // there would drag the average compile time toward zero with jobs that never
+    // ran. In-flight is the `pace_node_slots_busy` gauge.
+    //
+    // Asserted as an exact difference after a MIX, not after one refusal: the
+    // drift is cumulative, and a single refusal cannot tell "never returns" from
+    // "off by one once".
+    Fixture fix;
+
+    for ([[maybe_unused]] auto const i: std::views::iota(0, 3))
+    {
+        auto const refused = fix.worker.Answer(CompileFrame("clang-19"));
+        REQUIRE(refused.has_value());
+        CHECK(Decode(Unwrap(refused)).status == Wire::Status::Error);
+    }
+
+    auto const started = fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted);
+    auto const completed = fix.metrics.Read(IMetricsSink::Counter::WorkerJobsCompleted);
+    auto const refusals = fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedUnknownFingerprint);
+
+    CHECK(refusals == 3);
+    CHECK(completed == 0);
+    CHECK(started == 3);
+    // The worker is idle, and the difference says three jobs are running.
+    CHECK(started - completed == 3);
+    // What an operator can actually difference, which is the correction the docs
+    // now carry: the refusals are the missing term.
+    CHECK(started - completed - refusals == 0);
+}
+
+TEST_CASE("A request's declared footprint is what its envelope asks for", "[worker-protocol]")
+{
+    // What an admitting surface charges a request, and the number that was missing:
+    // a frame's own `payloadLength` is the COMPRESSED length, while the envelope one
+    // layer in declares the buffer `Unenvelope` will size and value-initialize. A
+    // hundred bytes may ask for 256 MiB, so a budget reading the frame length admits
+    // as many of them as there are slots (#241).
+    //
+    // Everything that is not a decodable COMPILE answers the frame length instead:
+    // `Answer` refuses each of those on its own terms and none of them ever reaches a
+    // decoder, so charging them anything more would turn a malformed frame into a
+    // busy signal.
+    constexpr std::uint32_t Declared = 64U * 1024U * 1024U;
+
+    SECTION("an envelope declaring a large expansion is charged that expansion")
+    {
+        auto const enveloped = Wire::EncodeCodecEnvelope(0xFE, Declared, Wire::AsBytes(std::string_view { "xx" }));
+        auto const frame = FrameWithSource(enveloped);
+        CHECK(frame.size() < 256U);
+        CHECK(DeclaredRequestFootprint(frame) == Declared);
+    }
+
+    SECTION("an ordinary compile is charged its frame length")
+    {
+        // The envelope declares its own true size, which is smaller than the payload
+        // carrying it, so the frame length is the larger of the two.
+        auto const frame = CompileFrame();
+        CHECK(DeclaredRequestFootprint(frame) == frame.size() - Wire::RequestHeaderSize);
+    }
+
+    SECTION("a foreign verb is charged its frame length")
+    {
+        auto frame = CompileFrame();
+        frame[2] = std::byte { 0x7F };
+        CHECK(DeclaredRequestFootprint(frame) == frame.size() - Wire::RequestHeaderSize);
+    }
+
+    SECTION("a frame shorter than it claims is charged what it claimed")
+    {
+        auto const whole = CompileFrame();
+        auto truncated = whole;
+        truncated.resize(Wire::RequestHeaderSize);
+        CHECK(DeclaredRequestFootprint(truncated) == whole.size() - Wire::RequestHeaderSize);
+    }
+
+    SECTION("a source field too short to be an envelope is charged the frame length")
+    {
+        auto const frame = FrameWithSource({});
+        // Zero bytes cannot hold a codec byte and a `u32`, so the envelope decode is
+        // the one below `SplitFields` that still fails here.
+        CHECK(DeclaredRequestFootprint(frame) == frame.size() - Wire::RequestHeaderSize);
+    }
+
+    SECTION("a frame this protocol does not speak at all is charged nothing")
+    {
+        std::vector<std::byte> const junk(Wire::RequestHeaderSize, std::byte { 'G' });
+        CHECK(DeclaredRequestFootprint(junk) == 0);
+    }
+}
+
+// --- the reply's codec -------------------------------------------------------
+//
+// The object crosses the network on the hot path of a parallel build, so what
+// envelope it goes home in is not cosmetic. All three of these were silently wrong
+// at once (#265): the choice was made from the worker's own list against itself, so
+// the client's was never read; the answer was then discarded and Identity
+// hard-coded; and the node built its worker with a literal `{ Identity }` anyway.
+// Each defect hid the next, and no test distinguished any of it -- which is what
+// these five exist to fix.
+
+namespace
+{
+/// An object that actually compresses, so a case can tell a chosen codec from the
+/// shrink-check falling back to Identity.
+///
+/// A named local rather than `return { 8 * 1024, 'A' }`, which is what
+/// `modernize-return-braced-init-list` asks for and is a trap here: `std::string`
+/// has an `initializer_list<char>` constructor, and that spelling picks the
+/// `(count, char)` one only because `8 * 1024` narrows and so makes the list
+/// candidate non-viable. A later edit to a value that fits in a `char` would
+/// silently become a two-character string.
+[[nodiscard]] std::string CompressibleObject()
+{
+    std::string object(8 * 1024, 'A');
+    return object;
+}
+
+/// A well-formed COMPILE frame that varies only in what the client accepts.
+///
+/// Every case below cares about the third parameter and nothing else, and spelling
+/// the first two positionally made `CompileFrame`'s own defaults dead for this whole
+/// block -- changing them would reach the older cases and not these.
+/// @param accepted What the client says it can decode.
+/// @return The frame.
+[[nodiscard]] std::vector<std::byte> FrameAccepting(Wire::CodecList accepted)
+{
+    return CompileFrame("gcc-13", "int main(){return 0;}", std::move(accepted));
+}
+
+/// Whether this build has any codec at all beyond Identity.
+[[nodiscard]] bool CompressionCompiledIn()
+{
+    return AvailableCodecs().size() > 1;
+}
+
+/// Whether an object field carries `expected` verbatim.
+///
+/// A named bool rather than the comparison inside the `CHECK`, because Catch2
+/// decomposes what it is handed: comparing eight kilobytes of object inline prints
+/// all eight on a failure, which buries the one line saying which case broke.
+/// @param field The reply's object field.
+/// @param expected What the fake compiler wrote.
+/// @return True when they are byte-identical.
+[[nodiscard]] bool CarriesVerbatim(ObjectField const& field, std::string_view expected)
+{
+    return Wire::AsStringView(field.bytes) == expected;
+}
+} // namespace
+
+TEST_CASE("A compiled object comes back in a codec the client accepts", "[worker-protocol][codec]")
+{
+    if (!CompressionCompiledIn())
+        SKIP("this build offers no codec but Identity");
+
+    Fixture fix;
+    fix.runner.object = CompressibleObject();
+
+    auto const answer = fix.worker.Answer(FrameAccepting(AvailableCodecs()));
+    REQUIRE(answer.has_value());
+    auto const object = ObjectOf(Unwrap(answer));
+
+    CHECK(object.codec != Wire::IdentityCodec);
+    // The DECLARED size is the uncompressed one -- it is what bounds the client's
+    // allocation before it decompresses a byte, so a compressed length here would
+    // make every reply undecodable.
+    CHECK(object.rawLength == fix.runner.object.size());
+    CHECK(object.bytes.size() < fix.runner.object.size());
+}
+
+TEST_CASE("A compressed reply is what the launcher already decodes", "[worker-protocol][codec]")
+{
+    if (!CompressionCompiledIn())
+        SKIP("this build offers no codec but Identity");
+
+    // The client side needs no change for any of this, and this is the assertion
+    // that says so: the same `Unenvelope` a dispatch runs on the object it gets back
+    // must reproduce the compiler's bytes exactly.
+    Fixture fix;
+    fix.runner.object = CompressibleObject();
+
+    auto const answer = fix.worker.Answer(FrameAccepting(AvailableCodecs()));
+    REQUIRE(answer.has_value());
+
+    auto const decoded = Unenvelope(FieldOf(Unwrap(answer)), DefaultMaxDecompressedBytes);
+    REQUIRE(decoded.has_value());
+    bool const identical = Wire::AsStringView(decoded.value()) == fix.runner.object;
+    CHECK(identical);
+}
+
+TEST_CASE("A client that accepts only Identity is answered in Identity", "[worker-protocol][codec]")
+{
+    // The client's list is what decides, and a client is entitled to state a list
+    // this worker would rather not use. While the choice was made from the worker's
+    // own list on both sides, this case and the one above were indistinguishable.
+    Fixture fix;
+    fix.runner.object = CompressibleObject();
+
+    auto const answer = fix.worker.Answer(FrameAccepting({ Wire::IdentityCodec }));
+    REQUIRE(answer.has_value());
+    auto const object = ObjectOf(Unwrap(answer));
+
+    CHECK(object.codec == Wire::IdentityCodec);
+    CHECK(object.rawLength == fix.runner.object.size());
+    CHECK(CarriesVerbatim(object, fix.runner.object));
+}
+
+TEST_CASE("A worker offering no codec answers in Identity however the client asks", "[worker-protocol][codec]")
+{
+    // The other half of the same negotiation: two peers compiled with different
+    // codec sets must still complete the exchange, because a build must never lose
+    // distribution over configuration.
+    Fixture fix { Wire::CodecList { Wire::IdentityCodec } };
+    fix.runner.object = CompressibleObject();
+
+    auto const answer = fix.worker.Answer(FrameAccepting(AvailableCodecs()));
+    REQUIRE(answer.has_value());
+    auto const object = ObjectOf(Unwrap(answer));
+
+    CHECK(object.codec == Wire::IdentityCodec);
+    CHECK(CarriesVerbatim(object, fix.runner.object));
+}
+
+TEST_CASE("An object compression does not shrink is sent verbatim", "[worker-protocol][codec]")
+{
+    // The same shrink-check `Core/Compression` applies to stored values: a six-byte
+    // object gets no smaller, and a client should not pay a decompress to learn it.
+    Fixture fix;
+
+    auto const answer = fix.worker.Answer(FrameAccepting(AvailableCodecs()));
+    REQUIRE(answer.has_value());
+    auto const object = ObjectOf(Unwrap(answer));
+
+    CHECK(object.codec == Wire::IdentityCodec);
+    CHECK(CarriesVerbatim(object, "OBJECT"));
+}
+
+TEST_CASE("A codec both ends name but this build cannot produce falls back to Identity", "[worker-protocol][codec]")
+{
+    // `WorkerProtocol.hpp`'s stated contract: a worker built with a list WIDER than
+    // this build can encode answers Identity rather than a codec it cannot produce.
+    // `ChooseCodec` promises only that the choice is in the sender's own list, and
+    // that list is injected, so the two can legitimately diverge.
+    //
+    // What this does NOT do, said plainly because the obvious reading is wrong: it
+    // does not hold `Envelope`'s `IsAvailable` guard in place. Delete that guard and
+    // this case still passes -- `Compression::Compress` hands back a verbatim copy for
+    // a codec it cannot find, the shrink check rejects it, and the answer is Identity
+    // by a longer route. The guard is there to skip that copy, and the copy is not
+    // observable from here. Checked by deleting it rather than assumed.
+    constexpr std::uint8_t noSuchCodec = 200;
+    Fixture fix { Wire::CodecList { noSuchCodec, Wire::IdentityCodec } };
+    fix.runner.object = CompressibleObject();
+
+    auto const answer = fix.worker.Answer(FrameAccepting({ noSuchCodec, Wire::IdentityCodec }));
+    REQUIRE(answer.has_value());
+    auto const object = ObjectOf(Unwrap(answer));
+
+    CHECK(object.codec == Wire::IdentityCodec);
+    CHECK(CarriesVerbatim(object, fix.runner.object));
+}
+
+TEST_CASE("AvailableCodecsCoverEveryCodec", "[worker-protocol][codec]")
+{
+    // `AvailableCodecs` keeps a hand-written list of the non-Identity codecs, because
+    // `Compression` exposes no way to enumerate its descriptor table. A codec added
+    // there and forgotten here is never advertised and never negotiated -- in either
+    // direction, by either end -- while the build stays green and every other case
+    // here passes, since they assert `codec != Identity` rather than which codec.
+    // That is #265's failure shape exactly, so it gets a test rather than a comment.
+    //
+    // `NameList()` is the one public door onto that table: it iterates the same rows
+    // and joins their names. Reading the inventory back out through it is what makes
+    // the omission loud.
+    auto const advertised = AvailableCodecs();
+    auto const names = Compression::NameList();
+
+    for (auto const name: std::views::split(names, std::string_view { ", " }))
+    {
+        auto const codec = Compression::CodecFromName(std::string_view { name.begin(), name.end() });
+        REQUIRE(codec.has_value());
+        if (!Compression::IsAvailable(Unwrap(codec)))
+            continue; // compiled out of this build; correctly absent from the wire list
+
+        auto const id = static_cast<std::uint8_t>(Unwrap(codec));
+        INFO("codec " << Compression::NameOf(Unwrap(codec)) << " is compiled in but not advertised");
+        CHECK(std::ranges::find(advertised, id) != advertised.end());
+    }
+}
+
+TEST_CASE("A lease nobody signed buys no compile", "[worker-protocol][lease]")
+{
+    // This absorbed a second case, "an unauthorized lease is refused before the
+    // payload is even decoded", which after the rework built the same fixture, sent
+    // the same junk token and made a subset of these assertions. Two cases pinning
+    // one scenario are two places to edit when a code or a counter moves, and no way
+    // for a reader to tell what distinguishes them.
+    //
+    // What that case's name was worth keeping is the LAST assertion here: the refusal
+    // lands before any compiler runs.
+    // #281 made the scheduler SIGN its grants and nothing checked the signature, so
+    // a compile port's boundary was reachability plus membership -- and "admitted to
+    // the fleet" is not "granted this compile". Any admitted machine could spend any
+    // worker's CPU without ever asking the scheduler for a slot (#282).
+    //
+    // This case was written as a REPRODUCTION asserting `Status::Ok` and passed. It
+    // is the same frame; only the expected answer moved.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const answer =
+        fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, "not-a-lease-at-all"));
+    REQUIRE(answer.has_value());
+    auto const reply = Decode(Unwrap(answer));
+
+    CHECK(reply.status == Wire::Status::Error);
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::LeaseUnauthorized);
+
+    // The counter has to MOVE. It has existed since #313 and read zero ever since,
+    // by design, because nothing refused a lease -- so a green run in which it still
+    // reads zero would mean the refusal came from somewhere else entirely.
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseUnauthorized) == 1);
+
+    // And the expensive part never ran. This is checked ahead of decompression, let
+    // alone spawning a compiler.
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("A lease signed for ANOTHER worker is refused here", "[worker-protocol][lease]")
+{
+    // Two actors, because a credential is granted by one party and presented to
+    // another. Actor one is the SCHEDULER, minting a genuine grant with the cluster
+    // key: every field authentic, the MAC valid, and the endpoint naming a different
+    // machine. Actor two is THIS worker, which is not that machine.
+    //
+    // The endpoint is the load-bearing field. It is inside the MAC precisely so a
+    // token captured on the way to one worker cannot be replayed against every other
+    // worker trusting the same key.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const answer = fix.worker.Answer(
+        CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor("some-other-worker:6675")));
+    REQUIRE(answer.has_value());
+    auto const reply = Decode(Unwrap(answer));
+
+    CHECK(reply.status == Wire::Status::Error);
+
+    // A code of its own, and that is what the reason exists for: a forged token and
+    // a worker advertising an address the scheduler did not grant are two different
+    // things for an operator to go and do. Collapsing the validator to a `bool` would
+    // have made them one line in a log.
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::LeaseEndpointMismatch);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseEndpointMismatch) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseUnauthorized) == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("A lease that has expired past the skew slack is refused", "[worker-protocol][lease]")
+{
+    // Past the slack, not merely past the expiry: the verifier allows five minutes
+    // for a fleet whose machines are not all NTP-managed, so a grant that lapsed one
+    // second ago is still honoured and a case asserting otherwise would be asserting
+    // the wrong contract.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const stale =
+        GrantFor(ThisWorker, "gcc-13", -(Pace::Distributed::LeaseTokenClockSkewSlack + std::chrono::seconds { 1 }));
+    auto const answer = fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, stale));
+    REQUIRE(answer.has_value());
+
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::LeaseExpired);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseExpired) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("A lease that lapsed within the skew slack still compiles", "[worker-protocol][lease]")
+{
+    // The other half of the previous case, and the one that keeps the slack honest:
+    // without it, a workstation whose clock is minutes out would refuse every job it
+    // was legitimately granted, on exactly the machines nobody is watching.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const barely = GrantFor(ThisWorker, "gcc-13", -std::chrono::seconds { 1 });
+    auto const answer = fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, barely));
+    REQUIRE(answer.has_value());
+
+    CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseExpired) == 0);
+}
+
+TEST_CASE("A grant for one toolchain does not pay for another's compile", "[worker-protocol][lease]")
+{
+    // The fingerprint is inside the MAC as well, so an authentic grant for `clang-18`
+    // cannot be spent on a `gcc-13` job. The client here claims the toolchain the
+    // worker serves -- so the fingerprint check that already existed passes -- and it
+    // is the LEASE that disagrees.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const answer =
+        fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker, "clang-18")));
+    REQUIRE(answer.has_value());
+
+    // `FingerprintMismatch` rather than a code of its own: a client already answers
+    // it correctly, and a second spelling of one fact is how two peers come to
+    // disagree about what happened.
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::FingerprintMismatch);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedUnknownFingerprint) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("An authentic grant naming this worker compiles", "[worker-protocol][lease]")
+{
+    // The case that keeps the four above from being satisfiable by refusing
+    // everything. A validator that never authorizes anything would pass every
+    // refusal assertion in this file and break the entire fleet.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const answer =
+        fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker)));
+    REQUIRE(answer.has_value());
+
+    CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseUnauthorized) == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseEndpointMismatch) == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseExpired) == 0);
+}
+
+/// A well-formed COMPILE frame whose grant was issued under @p epoch.
+///
+/// The sibling of the frame helpers above, and it exists for the reason one of them
+/// already records: every epoch case cares about exactly one argument, and spelling
+/// the four before it positionally made `GrantFor`'s own defaults dead for the whole
+/// block -- fifteen restated defaults across five cases, which also hard-coded
+/// `ThisCluster` and a ten-minute validity into cases about neither. A typo in either
+/// reaches a different refusal with a different counter.
+/// @param epoch The scheduler term the grant names.
+/// @return The frame.
+/// @param serial What distinguishes this issuance; see `GrantFor`.
+[[nodiscard]] std::vector<std::byte> FrameGrantedUnder(std::uint64_t epoch, std::string_view serial = "17")
+{
+    return CompileFrame("gcc-13",
+                        DefaultSource,
+                        { Wire::IdentityCodec },
+                        GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, epoch, serial));
+}
+
+TEST_CASE("A grant already spent here is refused as a replay, and the counter moves", "[worker-protocol][lease][replay]")
+{
+    // **The check that used to not exist at all** (#614). Until now a grant that
+    // authenticated, named this worker and this toolchain and had not expired was
+    // served every single time it arrived -- so a captured token was replayable at its
+    // granted worker, at will, for the whole of its expiry. A lease is single-use by
+    // construction: one grant per lease, presented in exactly one COMPILE frame with no
+    // retry, and a RELEASE goes to the SCHEDULER rather than here. A second arrival is
+    // a replay and never an honest client.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const frame = FrameGrantedUnder(GrantTerm);
+
+    // The honest use, which is also what spends it. Asserted, or this case would pass
+    // against a validator that refuses everything.
+    auto const first = fix.worker.Answer(frame);
+    REQUIRE(first.has_value());
+    REQUIRE(Decode(Unwrap(first)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 1);
+
+    auto const again = fix.worker.Answer(frame);
+    REQUIRE(again.has_value());
+
+    // `LeaseUnauthorized` rather than a code of its own, because the client's answer
+    // is the same -- compile it locally -- and a code it does not know would be worse
+    // than one it does.
+    CHECK(ErrorOf(Unwrap(again)) == Wire::ErrorCode::LeaseUnauthorized);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseReplayed) == 1);
+
+    // And no compiler ran for it, which is the point: the refusal is checked before the
+    // payload is decompressed, let alone spawned.
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 1);
+
+    // BOTH halves. The wire code is shared with two other refusals and the counters
+    // deliberately are not, because a rise in `WrongCluster` says two fleets share a
+    // key file -- a provisioning mistake -- while a rise here says somebody is
+    // replaying a captured grant, which is not. A test asserting only that the replay
+    // counter moved would pass just as happily if this refusal had also been billed to
+    // its neighbours.
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseUnauthorized) == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseWrongCluster) == 0);
+}
+
+TEST_CASE("A grant refused on its claims is not thereby spent", "[worker-protocol][lease][replay]")
+{
+    // The ordering, asserted by CONSEQUENCE because it cannot be seen any other way.
+    // Spending is the one step here with a side effect, so it runs last: a grant
+    // declined for a toolchain this worker does not serve has not been consumed, and
+    // the client still holds something it could legitimately use. Spend first and a
+    // worker would burn a lease every time it answered a question about one.
+    //
+    // Driven through the FINGERPRINT rather than the endpoint, because the endpoint
+    // refusal and the spend both concern "is this grant mine" and a case using it would
+    // not separate them.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const wrongToolchain =
+        CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker, "clang-19"));
+    auto const refused = fix.worker.Answer(wrongToolchain);
+    REQUIRE(refused.has_value());
+    REQUIRE(ErrorOf(Unwrap(refused)) == Wire::ErrorCode::FingerprintMismatch);
+
+    // Nothing was spent, so nothing is remembered -- and a grant that WAS unspendable
+    // would show up here as a replay refusal rather than as this.
+    CHECK(fix.lease.spent.Size() == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseReplayed) == 0);
+}
+
+TEST_CASE("A grant from a term this worker has not heard of is honoured", "[worker-protocol][lease][epoch]")
+{
+    // The direction that must NOT refuse, and it is the one #421 expected to have to
+    // trade availability for. A worker whose heartbeat is stale is the one that is
+    // behind; the scheduler is authoritative about its own term and the MAC has already
+    // proved this grant authentic. Refusing here would make a worker that missed one
+    // heartbeat reject the new leader -- the fleet ceasing to distribute right after an
+    // election.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    fix.lease.term.Learn(4);
+
+    auto const answer = fix.worker.Answer(FrameGrantedUnder(9));
+    REQUIRE(answer.has_value());
+
+    CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerSchedulerTermRegressions) == 0);
+}
+
+TEST_CASE("A scheduler reset is adopted, and the fleet keeps compiling", "[worker-protocol][lease][epoch]")
+{
+    // **The property #614 exists for, at the production surface.** Wiping the Raft
+    // directory, re-bootstrapping, or turning consensus off drops a scheduler's term
+    // back to 0, and that answer is genuine, signed and from the right scheduler.
+    // Before #614 this worker refused it -- and every honest grant after it -- until
+    // the process restarted, while a token captured under the OLD term was accepted,
+    // because the check asked `claimed >= expected`. Exactly inverted.
+    //
+    // Proved by CONSEQUENCE, which is the only way: a validator that accepts everything
+    // would pass the first half, so the reset has to be shown STICKING.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const newer = fix.worker.Answer(FrameGrantedUnder(9, "l1"));
+    REQUIRE(newer.has_value());
+    REQUIRE(Decode(Unwrap(newer)).status == Wire::Status::Ok);
+    REQUIRE(fix.lease.term.Known() == std::optional<std::uint64_t> { 9 });
+
+    // The reset scheduler's first grant: served, where it used to be refused.
+    auto const afterReset = fix.worker.Answer(FrameGrantedUnder(GrantTerm, "l2"));
+    REQUIRE(afterReset.has_value());
+    CHECK(Decode(Unwrap(afterReset)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 2);
+
+    // And it STUCK, which is what says the term was adopted rather than merely ignored.
+    CHECK(fix.lease.term.Known() == std::optional<std::uint64_t> { GrantTerm });
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerSchedulerTermRegressions) == 1);
+
+    // Once per reset, not once per grant: the fleet is steady at the lower term now.
+    auto const steady = fix.worker.Answer(FrameGrantedUnder(GrantTerm, "l3"));
+    REQUIRE(steady.has_value());
+    CHECK(Decode(Unwrap(steady)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerSchedulerTermRegressions) == 1);
+}
+
+TEST_CASE("A replayed grant cannot walk this worker's term backwards", "[worker-protocol][lease][replay][epoch]")
+{
+    // **The reason the spend runs BEFORE the term is learned**, and the case that
+    // would go red if the two were swapped. A captured grant naming an old term is the
+    // one thing that could make the reset above a lie: replayed, it would teach this
+    // worker a term the fleet has moved on from, on demand, as often as somebody sent
+    // it. Spending first means only a grant nobody has used can move the number, which
+    // is what makes a lower term a scheduler that was legitimately reset.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const older = FrameGrantedUnder(GrantTerm, "l1");
+    REQUIRE(Decode(Unwrap(fix.worker.Answer(older))).status == Wire::Status::Ok);
+
+    auto const newer = fix.worker.Answer(FrameGrantedUnder(9, "l2"));
+    REQUIRE(Decode(Unwrap(newer)).status == Wire::Status::Ok);
+    REQUIRE(fix.lease.term.Known() == std::optional<std::uint64_t> { 9 });
+
+    // The replay: refused, and it teaches nothing.
+    auto const replayed = fix.worker.Answer(older);
+    REQUIRE(replayed.has_value());
+    CHECK(ErrorOf(Unwrap(replayed)) == Wire::ErrorCode::LeaseUnauthorized);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseReplayed) == 1);
+    CHECK(fix.lease.term.Known() == std::optional<std::uint64_t> { 9 });
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerSchedulerTermRegressions) == 0);
+}
+
+TEST_CASE("No grant is refused on its term, whatever this worker has learned", "[worker-protocol][lease][epoch]")
+{
+    // **The unreachability of a term refusal, ASSERTED rather than argued** (#614).
+    //
+    // Retiring `EpochMismatch` rests on an argument: every grant that reaches what used
+    // to be the epoch check is unspent, so a lower term is not a replay -- whether it is
+    // a reset or a grant that arrived late across a leadership change, neither is a
+    // reason to refuse it -- and the check could never fire. The
+    // argument is sound and an argument about unreachability is exactly the shape this
+    // repository has been burned by -- so a future change that reintroduces a refusing
+    // path has to fail HERE, rather than silently resurrect a refusal with no counter
+    // and no name.
+    //
+    // Type-level there is already nothing to compare against: `LeaseExpectation` carries
+    // no term member, so a verifier has no argument to be told one through. This is the
+    // behavioural half, and it is driven through the PRODUCTION validator rather than
+    // through `VerifyLeaseToken` -- the pure function is not where a term could be
+    // reintroduced, because it is not where the term is known. `SignedLeaseValidator` is.
+    //
+    // Exhaustive over the cross-product INCLUDING both boundaries, because the defect
+    // this replaces was a comparison (`claimed >= expected`) and a comparison mistake
+    // lives at a boundary. Zero is in the set twice over: it is
+    // `StandaloneSchedulerTerm`, and it is what a reset scheduler states.
+    constexpr std::array Terms { std::uint64_t { 0 },
+                                 std::uint64_t { 1 },
+                                 std::uint64_t { 7 },
+                                 std::uint64_t { 9'999 },
+                                 std::numeric_limits<std::uint64_t>::max() };
+
+    for (auto const learned: Terms)
+    {
+        // A fixture per learned term, so each inner loop starts from a worker that knows
+        // exactly that and nothing else.
+        Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+        fix.lease.term.Learn(learned);
+
+        for (auto const granted: Terms)
+        {
+            INFO("worker learned " << learned << ", grant names " << granted);
+
+            // A serial per pair, because a grant is spendable once: reusing one would
+            // refuse the second pair as a replay and this case would then be asserting
+            // the wrong thing while looking correct.
+            auto const answer = fix.worker.Answer(FrameGrantedUnder(granted, std::format("l{}-{}", learned, granted)));
+            REQUIRE(answer.has_value());
+            CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+        }
+
+        // Every one of them compiled, which is what says the acceptances above are real
+        // rather than a reply this fixture would have produced anyway.
+        CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == Terms.size());
+    }
+}
+
+TEST_CASE("A worker that has never learned a term refuses nothing for it", "[worker-protocol][lease][epoch]")
+{
+    // Cold start. A worker that refused before its first grant could not join a fleet
+    // at all, and every restart would be an outage. `StandaloneSchedulerTerm` is
+    // literally `0`, so a zero standing in for "never learned" would make a single-node
+    // fleet's real term mean "unknown" -- which `SchedulerService.hpp:40` warns about in
+    // as many words, and which after #614 would announce a scheduler reset on every
+    // cold worker's first job.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
+
+    auto const answer = fix.worker.Answer(FrameGrantedUnder(0));
+    REQUIRE(answer.has_value());
+
+    CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerSchedulerTermRegressions) == 0);
+}
+
+TEST_CASE("A worker with no roster to check against refuses no lease, and that is a whole policy",
+          "[worker-protocol][lease]")
+{
+    // `UncheckedLeaseValidator` is what a single-machine install runs, and it is a
+    // named production function rather than an accept-all lambda so that this
+    // property is asserted somewhere rather than being an artefact of how a fixture
+    // happened to be written.
+    //
+    // It is only ever reachable for a node admitting nothing but its own machine:
+    // `NodeConfig`'s startup table refuses a keyless node that admits peers
+    // elsewhere, which is what makes this safe rather than a hole with a comment.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Unchecked };
+
+    auto const answer =
+        fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, "not-a-lease-at-all"));
+    REQUIRE(answer.has_value());
+
+    CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 1);
+}
+
+namespace
+{
+
+// The scripted socket and `Replies` live in `src/tests/ScriptedSocket.hpp`.
+//
+// The comment that used to sit here said sharing would mean moving ninety lines to
+// reuse thirty, and preferred a second copy. That was answered by what happened
+// next: both copies carried the SAME `WriteVectored` defect -- a zero-byte success,
+// which `core::net::sendAll` reads as a short write -- and this one was found only because a
+// case here finally drove a vectored write through it, a day before the other was
+// noticed at all. The cost of a shared fake is lines; the cost of three is that a
+// bug fixed in one stays live in the others (#362).
+/// A registrar with the fields every case below shares.
+[[nodiscard]] WorkerRegistrar MakeRegistrar()
+{
+    return WorkerRegistrar { "gcc-14", "10.0.0.2:6677", 4, Wire::CodecList {}, Wire::CapacityFields {} };
+}
+
+/// A successful REGISTER reply, in the shape wire version 4 gives it.
+///
+/// Built through `EncodeRegisterReply` rather than as a hand-written byte string, so
+/// these cases keep testing the registrar rather than a second implementation of the
+/// record. The byte-level shape is pinned once, in `CompileCacheWire_test.cpp`.
+/// @param workerId The id to assign.
+/// @param clusterId The fleet to name; empty is what an unpinned worker would get.
+/// @return The framed reply.
+[[nodiscard]] std::vector<std::byte> RegisterOk(std::string_view workerId, std::string_view clusterId = "fleet-a")
+{
+    auto const payload = Wire::EncodeRegisterReply(
+        { .workerId = std::string { workerId }, .clusterId = std::string { clusterId }, .epoch = 1 });
+    return Wire::EncodeReply(Wire::Status::Ok, payload);
+}
+
+} // namespace
+
+TEST_CASE("A NotLeader refusal reaches the node as an endpoint, not as prose", "[cc][registrar][notleader]")
+{
+    // The worker half of #237. `SchedulerService::Gate()` refuses EVERY verb off the
+    // leader, `Register` included, so a node that could not read the redirect went on
+    // announcing itself to the demoted scheduler and expired out of the new leader's
+    // registry -- which then answered every lease `NoWorker`. The launcher meanwhile
+    // followed the same refusal correctly and found an empty fleet.
+    //
+    // Asserted as a value rather than "an error happened": the whole fix is that the
+    // endpoint survives the trip from the wire to something the caller can dial.
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Wire::EncodeErrorReply(Wire::ErrorCode::NotLeader, "10.0.0.7:6676") };
+
+    auto const outcome = registrar.Register(scheduler, {});
+    REQUIRE_FALSE(outcome.has_value());
+    REQUIRE(outcome.error().leader.has_value());
+    CHECK(Unwrap(outcome.error().leader) == "10.0.0.7:6676");
+    // And the operator still gets the words, because the two answer different
+    // questions and a redirect this node cannot follow must still be diagnosable.
+    CHECK_FALSE(outcome.error().reason.empty());
+}
+
+TEST_CASE("A refusal that is not a redirect names no leader", "[cc][registrar][notleader]")
+{
+    // `NotAMember` is not a routing fact and following it would send this node's
+    // registration to a second scheduler over a fault the first one already stated.
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Wire::EncodeErrorReply(Wire::ErrorCode::NotAMember, "not in this cluster") };
+
+    auto const outcome = registrar.Register(scheduler, {});
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK_FALSE(outcome.error().leader.has_value());
+}
+
+TEST_CASE("A NotLeader whose message is prose is not a redirect", "[cc][registrar][notleader]")
+{
+    // The rule lives in `RedirectTarget` and this asserts it is REACHED, not that it
+    // is right -- `CacheProtocol_test` owns the grammar. A second reading of the same
+    // refusal here is exactly the drift that rule exists to prevent.
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Wire::EncodeErrorReply(Wire::ErrorCode::NotLeader, "no leader: try again") };
+
+    auto const outcome = registrar.Register(scheduler, {});
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK_FALSE(outcome.error().leader.has_value());
+}
+
+TEST_CASE("A heartbeat refused NotLeader keeps its worker id", "[cc][registrar][notleader]")
+{
+    // A redirect says this scheduler is the wrong one to ask -- not that the fleet
+    // has forgotten this worker. The registry is replicated, so the leader named may
+    // well be holding the very registration this id belongs to, and clearing it would
+    // turn every election into a fleet-wide re-registration storm.
+    //
+    // `UnknownLease` is the refusal that DOES clear it, and the two must not be
+    // conflated: one is "go elsewhere", the other "start again".
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Testing::Replies(
+        { RegisterOk("w-1"), Wire::EncodeErrorReply(Wire::ErrorCode::NotLeader, "10.0.0.7:6676") }) };
+
+    REQUIRE(registrar.Register(scheduler, {}).has_value());
+    REQUIRE(registrar.WorkerId() == "w-1");
+
+    auto const beat = registrar.Heartbeat(scheduler, 0);
+    REQUIRE_FALSE(beat.has_value());
+    REQUIRE(beat.error().leader.has_value());
+    CHECK(Unwrap(beat.error().leader) == "10.0.0.7:6676");
+    CHECK(registrar.WorkerId() == "w-1");
+}
+
+TEST_CASE("A withdrawal an older scheduler cannot answer is survivable", "[cc][registrar]")
+{
+    // The compatibility direction of #573, and the one that decides whether the verb
+    // is safe to add at all. A scheduler that predates `Op::Withdraw` has no row for
+    // the byte and answers `UnknownOpcode` -- which is the CORRECT signal, saying this
+    // daemon is too old rather than that the request was wrong.
+    //
+    // What must follow is that the worker steps over it. Treating an unimplemented
+    // verb as fatal is #283 and #340, where a launcher read one as terminal and took a
+    // permanent 0% hit rate. Here the fallback is the behaviour that existed before
+    // this verb: the entry stops being heartbeated and expires on its own.
+    //
+    // **The id is NOT cleared, and that is what distinguishes this from a heartbeat.**
+    // `Heartbeat`'s `UnknownLease` arm clears it precisely so the retry re-registers;
+    // a withdrawal has nothing to retry, and clearing here would only lose the
+    // diagnostic naming which registration failed to retire.
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Testing::Replies(
+        { RegisterOk("w-1"), Wire::EncodeErrorReply(Wire::ErrorCode::UnknownOpcode, {}) }) };
+
+    REQUIRE(registrar.Register(scheduler, {}).has_value());
+    REQUIRE(registrar.WorkerId() == "w-1");
+
+    auto const retired = registrar.Withdraw(scheduler);
+    REQUIRE_FALSE(retired.has_value());
+    CHECK_FALSE(retired.error().leader.has_value());
+    CHECK(registrar.WorkerId() == "w-1");
+}
+
+TEST_CASE("A registrar that never registered has nothing to withdraw", "[cc][registrar]")
+{
+    // Named rather than silent, and asserted because the caller filters on it: only a
+    // registrar the scheduler actually accepted is moved onto the withdrawal list, so
+    // this arm is what makes that filter's other side reachable at all.
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Testing::Replies({}) };
+
+    auto const retired = registrar.Withdraw(scheduler);
+    REQUIRE_FALSE(retired.has_value());
+    CHECK(retired.error().reason == "not registered");
+    // Nothing was sent: a worker with no id has no id to name, so the verb never
+    // reaches the wire rather than reaching it with an empty field.
+    CHECK(scheduler.Sent().empty());
+}
+
+namespace
+{
+
+/// The interface addresses the one REGISTER sent on @p scheduler carried.
+/// @param scheduler A socket a registrar has registered over once.
+/// @return The list, or nullopt when what was sent is not one REGISTER that decodes.
+[[nodiscard]] std::optional<std::vector<std::string>> RegisteredAddressesOn(Testing::ScriptedSocket const& scheduler)
+{
+    auto const sent = std::span<std::byte const> { scheduler.Sent() };
+    auto const header = Wire::DecodeRequestHeader(sent);
+    if (!header.has_value() || header->opRaw != static_cast<std::uint8_t>(Wire::Op::Register)
+        || sent.size() != Wire::RequestHeaderSize + std::size_t { header->payloadLength })
+        return std::nullopt;
+    auto const decoded = Wire::DecodeRegisterPayload(sent.subspan(Wire::RequestHeaderSize));
+    if (!decoded.has_value())
+        return std::nullopt;
+    return decoded->capacity.interfaceAddresses;
+}
+
+} // namespace
+
+TEST_CASE("A registration carries the addresses it is handed, and the next one does not inherit them",
+          "[cc][registrar][dialhint]")
+{
+    // The addresses are the round's and the capacity is the registrar's: a registrar that
+    // folded one round's list into its own capacity would re-register after a VPN reconnect
+    // still naming the address the machine no longer has.
+    auto registrar = MakeRegistrar();
+    auto const addresses = std::vector<std::string> { "10.8.0.7", "192.168.1.20" };
+
+    Testing::ScriptedSocket first { RegisterOk("w-1") };
+    REQUIRE(registrar.Register(first, addresses).has_value());
+    CHECK(RegisteredAddressesOn(first) == std::optional { addresses });
+
+    Testing::ScriptedSocket second { RegisterOk("w-1") };
+    REQUIRE(registrar.Register(second, {}).has_value());
+    CHECK(RegisteredAddressesOn(second) == std::optional { std::vector<std::string> {} });
+}
+
+TEST_CASE("A registration never carries a label a scheduler would refuse it for", "[cc][registrar][label]")
+{
+    // The registration twin of the lease's rule. A scheduler refuses the WHOLE registration over a
+    // label that is not text or is longer than it records, and the label is display only -- so
+    // sending it would keep this worker out of the fleet for a name. It goes out empty instead, and
+    // the worker registers under its fingerprint as before.
+    struct Case
+    {
+        std::string_view why;
+        std::string label;
+        std::string sent;
+    };
+    auto const atBound = std::string(Wire::MaxToolchainLabelBytes, 'x');
+    auto const cases = std::array {
+        Case { .why = "not text", .label = "g++ \xff 14.2.0", .sent = "" },
+        Case { .why = "over the bound", .label = atBound + "x", .sent = "" },
+        // The control, which a guard dropping every label would fail.
+        Case { .why = "at the bound", .label = atBound, .sent = atBound },
+    };
+
+    for (auto const& [why, label, sent]: cases)
+    {
+        INFO(why);
+        auto registrar = WorkerRegistrar {
+            "gcc-14", "10.0.0.2:6677", 4, Wire::CodecList {}, Wire::CapacityFields { .toolchainLabel = label }
+        };
+        Testing::ScriptedSocket scheduler { RegisterOk("w-1") };
+        REQUIRE(registrar.Register(scheduler, {}).has_value());
+
+        auto const& frame = scheduler.Sent();
+        REQUIRE(frame.size() >= Wire::RequestHeaderSize);
+        auto const registration = Wire::DecodeRegisterPayload(std::span { frame }.subspan(Wire::RequestHeaderSize));
+        REQUIRE(registration.has_value());
+        CHECK(Unwrap(registration).capacity.toolchainLabel == sent);
+    }
+}
+
+TEST_CASE("A heartbeat refused UnknownLease forgets its worker id and names no leader", "[cc][registrar][notleader]")
+{
+    auto registrar = MakeRegistrar();
+    Testing::ScriptedSocket scheduler { Testing::Replies(
+        { RegisterOk("w-1"), Wire::EncodeErrorReply(Wire::ErrorCode::UnknownLease, {}) }) };
+
+    REQUIRE(registrar.Register(scheduler, {}).has_value());
+    auto const beat = registrar.Heartbeat(scheduler, 0);
+    REQUIRE_FALSE(beat.has_value());
+    CHECK_FALSE(beat.error().leader.has_value());
+    CHECK(registrar.WorkerId().empty());
+}
+
+TEST_CASE("A credentialled client reaches a worker that has no AUTH and still gets its answer", "[worker-protocol]")
+{
+    // **The acceptance of #340, and deliberately not "the refusal code changed".**
+    // That assertion passes the moment a constant is edited; this one fails unless
+    // the two halves actually agree, because the refusal bytes come out of the real
+    // `WorkerProtocol` and go into the real `Cc::CacheProtocol::Exchange`.
+    //
+    // What it regresses: with `PACE_TOKEN` set, a worker answering AUTH with
+    // `DispatchNotPermitted` had that refusal returned in place of the answer to the
+    // request the client actually sent -- so a credentialled worker was refused at
+    // REGISTER and never joined the fleet at all. The machine was absent rather than
+    // idle, which is harder to notice.
+    Fixture fix;
+
+    auto const refusal = fix.worker.Answer(Wire::EncodeAuth(Wire::AuthRequest { .username = {}, .secret = "s3cret" }));
+    REQUIRE(refusal.has_value());
+
+    auto const stored = std::vector<std::byte> { std::byte { 0x7 } };
+    Testing::ScriptedSocket client { Testing::Replies({ Unwrap(refusal), Wire::EncodeReply(Wire::Status::Ok, stored) }) };
+
+    // A RECORDING notice, not the shared silent one: this case is about the
+    // diagnostic as much as the flag. Before #363 the flag was set here and only the
+    // launcher's cache path could say so, which is the whole defect.
+    std::vector<std::string> said;
+    Cc::CredentialNotice notice { [&said](std::string_view text) { said.emplace_back(text); } };
+
+    auto const outcome =
+        core::async::syncRun(CacheFetch(&client, &notice, "k", Credential { .username = {}, .secret = "s3cret" }));
+
+    // The command behind the credential is served. This is the half that was broken.
+    REQUIRE(outcome.IsHit());
+    CHECK(outcome.value == stored);
+
+    // And the operator is still told their token went unchecked. Restoring the answer
+    // must not also swallow the fact that nothing checked the credential.
+    CHECK(outcome.credentialIgnored);
+    // And it was SAID, which is the half that had no test at all.
+    CHECK(said.size() == 1);
+    CHECK(notice.Reported());
+}
+
+namespace
+{
+
+/// A runner that reports compiling something other than what it was handed.
+///
+/// The fixture #280 needs, and the one the tree could not previously build. A fake at
+/// `IProcessRunner` sits BELOW the point where `CompileJobRunner` records what it is
+/// about to compile, so it can produce a wrong object but never a wrong report -- that
+/// is #279's half. Substituting the runner itself is the only way to make the
+/// execution diverge from the record, which is the event a correlation exists to catch.
+class LyingRunner final: public ICompileJobRunner
+{
+  public:
+    /// @param correlation What this runner will claim it compiled.
+    explicit LyingRunner(std::string correlation):
+        _correlation { std::move(correlation) }
+    {
+    }
+
+    /// @param job Recorded, then otherwise ignored.
+    /// @return A successful compile carrying the claimed correlation.
+    [[nodiscard]] std::expected<CompileOutcome, JobError> Run(CompileJob const& job) override
+    {
+        _saw = job;
+        return CompileOutcome { .exitCode = 0,
+                                .object = { std::byte { 'O' }, std::byte { 'B' }, std::byte { 'J' } },
+                                .stdoutText = {},
+                                .stderrText = {},
+                                .correlation = _correlation };
+    }
+
+    /// @return The job this runner was actually asked for.
+    [[nodiscard]] CompileJob const& Saw() const noexcept
+    {
+        return _saw;
+    }
+
+  private:
+    std::string _correlation;
+    CompileJob _saw;
+};
+
+} // namespace
+
+TEST_CASE("A reply carries the runner's own correlation, not one recomputed here", "[worker-protocol][correlation]")
+{
+    // The discriminating case for #280, and the reason `WorkerProtocol` takes the
+    // INTERFACE rather than the concrete runner. The sentinel could not have been
+    // derived from the request by any computation, so a `WorkerProtocol` that folded
+    // the digest itself from `fields` would overwrite it and this goes red -- while
+    // every other case in this file, and the ticket's own acceptance criterion, would
+    // still pass under that bug.
+    //
+    // That is the whole point. At this layer two crossed requests are both still
+    // pristine, so a digest taken here agrees with whatever it is compared against and
+    // catches nothing.
+    constexpr std::string_view Sentinel = "ffffffffffffffffffffffffffffffff";
+
+    LyingRunner runner { std::string { Sentinel } };
+    AtomicMetricsSink metrics;
+    WorkerProtocol worker { runner,  UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
+                            metrics, IgnoreJobRefusals() };
+
+    auto const answer = worker.Answer(CompileFrame());
+    REQUIRE(answer.has_value());
+
+    auto const reply = Decode(Unwrap(answer));
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const result = Wire::DecodeCompileResult(reply.payload);
+    REQUIRE(result.has_value());
+    CHECK(Wire::AsStringView(Unwrap(result).correlation) == Sentinel);
+
+    // And the runner really was asked for the job the frame described, so the sentinel
+    // is the only artificial thing about this exchange.
+    CHECK(runner.Saw().fingerprint == "gcc-13");
+    CHECK(runner.Saw().preprocessed == "int main(){return 0;}");
+}
+
+TEST_CASE("The real runner is what a correlation comes from", "[worker-protocol][correlation]")
+{
+    // The wiring assertion. An interface whose only implementation is reached through a
+    // test is the reclaimer-nothing-constructs shape in a new costume, so this drives
+    // the REAL `CompileJobRunner` end to end and recomputes the digest the way a client
+    // will -- from what it asked for, against what came back.
+    StubRunner runner;
+    Pace::Testing::ScratchDirectory const scratch { "fc-wp-corr" };
+    CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+    AtomicMetricsSink metrics;
+    WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
+                            metrics, IgnoreJobRefusals() };
+
+    constexpr std::string_view Source = "int main(){return 0;}";
+    auto const answer = worker.Answer(CompileFrame("gcc-13", Source));
+    REQUIRE(answer.has_value());
+
+    auto const reply = Decode(Unwrap(answer));
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const result = Wire::DecodeCompileResult(reply.payload);
+    REQUIRE(result.has_value());
+    CHECK_FALSE(Unwrap(result).correlation.empty());
+
+    // `FrameWithSource` sends no arguments, names the file `a.cpp` and asks for no
+    // compilation-directory mapping.
+    CHECK(Wire::AsStringView(Unwrap(result).correlation)
+          == CompileCorrelation(CorrelatedCompile { .preprocessed = Source,
+                                                    .args = std::span<std::string const> {},
+                                                    .fingerprint = "gcc-13",
+                                                    .sourceName = "a.cpp",
+                                                    .compileDir = {},
+                                                    .compileDirReplacement = {},
+                                                    .sourceRoot = {},
+                                                    .sourceRootReplacement = {} }));
+}
+
+namespace
+{
+
+/// Produces the reply to one whole framed request.
+///
+/// The seam that lets a scripted socket answer with something COMPUTED rather than
+/// canned, which is the whole point of the case below: a worker's reply depends on
+/// the request, so a fixture that replays fixed bytes cannot show the two ends
+/// agreeing about anything.
+class IFrameResponder
+{
+  public:
+    IFrameResponder() = default;
+    virtual ~IFrameResponder() = default;
+    IFrameResponder(IFrameResponder const&) = delete;
+    IFrameResponder& operator=(IFrameResponder const&) = delete;
+    IFrameResponder(IFrameResponder&&) = delete;
+    IFrameResponder& operator=(IFrameResponder&&) = delete;
+
+    /// @param request One complete request frame, exactly as it was written.
+    /// @return The reply frame.
+    [[nodiscard]] virtual std::vector<std::byte> Answer(std::span<std::byte const> request) = 0;
+};
+
+/// A socket that collects what is written to it and answers through a responder.
+///
+/// The reply is produced on the first READ, by which point the whole request has
+/// been written -- so nothing here has to know where a frame ends, and the framing
+/// stays entirely under test rather than being reimplemented by the fixture.
+class AnsweringPeer final: public core::net::ISocket
+{
+  public:
+    /// @param responder Turns the written request into a reply; must outlive this.
+    explicit AnsweringPeer(IFrameResponder& responder):
+        _responder { responder }
+    {
+    }
+
+    [[nodiscard]] core::net::IoAwaitable write(std::span<std::byte const> bytes) override
+    {
+        _request.insert(_request.end(), bytes.begin(), bytes.end());
+        return core::net::IoAwaitable { core::net::IoResult { bytes.size() } };
+    }
+
+    [[nodiscard]] core::net::IoAwaitable writeVectored(std::span<std::span<std::byte const> const> segments,
+                                                       std::shared_ptr<void const> /*keepAlive*/ = {}) override
+    {
+        std::size_t written = 0;
+        for (auto const& segment: segments)
+        {
+            _request.insert(_request.end(), segment.begin(), segment.end());
+            written += segment.size();
+        }
+        return core::net::IoAwaitable { core::net::IoResult { written } };
+    }
+
+    [[nodiscard]] core::net::IoAwaitable read(std::span<std::byte> buffer) override
+    {
+        if (!_answered)
+        {
+            _reply = _responder.Answer(_request);
+            _answered = true;
+        }
+        // A read of zero is EOF, which is how a peer that has said everything it has
+        // to say tells `core::net::receiveExactly` the frame is over.
+        auto const take = std::min(_reply.size() - _cursor, buffer.size());
+        std::copy_n(_reply.begin() + static_cast<std::ptrdiff_t>(_cursor), take, buffer.begin());
+        _cursor += take;
+        return core::net::IoAwaitable { core::net::IoResult { take } };
+    }
+
+    void close() noexcept override {}
+    [[nodiscard]] bool isClosed() const noexcept override
+    {
+        return false;
+    }
+    [[nodiscard]] std::string peerAddress() const override
+    {
+        return "answering";
+    }
+
+  private:
+    IFrameResponder& _responder;
+    std::vector<std::byte> _request;
+    std::vector<std::byte> _reply;
+    std::size_t _cursor { 0 };
+    bool _answered { false };
+};
+
+constexpr std::string_view SchedulerEndpoint = "sched:6675";
+constexpr std::string_view WorkerEndpoint = "worker:6676";
+
+/// A fleet of two: a minimal scheduler, and a REAL `WorkerProtocol` as the worker.
+///
+/// Everything between the client and the compiler is production code here -- the
+/// request encoding, the codec envelope, the argument list's framing, the source
+/// name, the worker's decode, the runner, and the reply's encoding. That is what
+/// this fixture is for: a correlation is one value computed twice at two ends, and
+/// the failure it must rule out is the two ends DISAGREEING. Both halves tested
+/// separately against the same helper agree by construction and prove nothing.
+class LiveFleet final: public IEndpointExchange, public IFrameResponder
+{
+  public:
+    /// @param worker The worker every COMPILE is handed to; must outlive this.
+    explicit LiveFleet(WorkerProtocol& worker):
+        _worker { worker }
+    {
+    }
+
+    CacheOutcome Exchange(std::string_view hostPort,
+                          std::vector<std::byte> frame,
+                          Credential const& credential,
+                          ExchangeBudget /*budget*/) override
+    {
+        _current = std::string { hostPort };
+        AnsweringPeer peer { *this };
+        return core::async::syncRun(ExchangeFramed(&peer, &Unwatched(), std::move(frame), credential));
+    }
+
+    [[nodiscard]] std::vector<std::byte> Answer(std::span<std::byte const> request) override
+    {
+        if (_current == WorkerEndpoint)
+            return _worker.Answer(request).value_or(std::vector<std::byte> {});
+
+        auto const header = Wire::DecodeRequestHeader(request);
+        if (!header.has_value())
+            return {};
+        auto const* const descriptor = Wire::FindOp(header->opRaw);
+        if (descriptor != nullptr && descriptor->code == Wire::Op::Lease)
+            return Wire::EncodeReply(
+                Wire::Status::Ok,
+                Wire::EncodeLeaseGrant(Wire::LeaseGrant { .endpoint = WorkerEndpoint,
+                                                          .leaseToken = "l1",
+                                                          .workerCodecs = { Wire::IdentityCodec },
+                                                          .lifetime = {},
+                                                          .dialHint = {},
+                                                          .workerKey = Testing::TestWorkerPublicKey() }));
+        // The RELEASE, which `Dispatch` sends on every path out of a compile and
+        // whose answer it deliberately ignores.
+        return Wire::EncodeReply(Wire::Status::Ok, {});
+    }
+
+  private:
+    WorkerProtocol& _worker;
+    std::string _current;
+};
+
+} // namespace
+
+TEST_CASE("A worker's reply is accepted by the client that asked for it", "[worker-protocol][correlation]")
+{
+    // The two ends meeting, end to end and in one process. The client encodes the
+    // request, a real worker decodes it, compiles it and digests what it compiled,
+    // and the client recomputes that digest from what it asked for.
+    //
+    // **This is the case that would catch the two ends disagreeing**, which is the
+    // failure a correlation can fail with and no half-fixture can see: the worker
+    // digests `job.args` as DECODED from the wire and the source name as SENT, while
+    // the client digests what it holds. Anything that changes on the way -- an
+    // argument list encoding that drops an empty element, a source name reduced to
+    // its base name at one end only -- makes every honest compile refuse, which is a
+    // fleet that silently stops distributing rather than a fleet that mis-serves.
+    // Hence the deliberately awkward arguments and the path-shaped source name.
+    Fixture fixture { { Wire::IdentityCodec } };
+    LiveFleet fleet { fixture.worker };
+
+    std::vector<std::string> const args { "", "-O2", "-DMSG=hello world" };
+    auto const request = DispatchRequest { .schedulerEndpoint = SchedulerEndpoint,
+                                           .fingerprint = "gcc-13",
+                                           .objectKey = "objkey",
+                                           .args = args,
+                                           .family = DriverFamily::Gnu,
+                                           .preprocessed = "int main(){return 0;}",
+                                           .sourceName = "/home/dev/checkout/src/Widget.cpp",
+                                           .compileDir = {},
+                                           .compileDirReplacement = {},
+                                           .sourceRoot = {},
+                                           .sourceRootReplacement = {} };
+
+    auto const result = Dispatch(fleet, request);
+
+    INFO("dispatch said: " << result.detail);
+    REQUIRE(result.status == DispatchStatus::Compiled);
+    CHECK(result.exitCode == 0);
+    CHECK_FALSE(result.object.empty());
+}
+
+TEST_CASE("A worker refusing an argument is read by the client as exactly that, naming it", "[worker-protocol][decline]")
+{
+    // Both ends, in one process, because the defect lived BETWEEN them: the worker answered a
+    // refused argument `malformed-frame`, each half was consistent with itself, and the launcher
+    // read that code as "this launcher and the fleet disagree about the wire" -- a version skew,
+    // reported 122 times by a cl-debug build whose client and node were one build. What the
+    // worker says and what the client makes of it are asserted against each other.
+    Fixture fixture { { Wire::IdentityCodec } };
+    LiveFleet fleet { fixture.worker };
+
+    std::vector<std::string> const args { "-O2", "-fanalyzer" };
+    auto const request = DispatchRequest { .schedulerEndpoint = SchedulerEndpoint,
+                                           .fingerprint = "gcc-13",
+                                           .objectKey = "objkey",
+                                           .args = args,
+                                           .family = DriverFamily::Gnu,
+                                           .preprocessed = "int main(){return 0;}",
+                                           .sourceName = "a.cpp",
+                                           .compileDir = {},
+                                           .compileDirReplacement = {},
+                                           .sourceRoot = {},
+                                           .sourceRootReplacement = {} };
+
+    auto const result = Dispatch(fleet, request);
+    INFO("dispatch said: " << result.detail);
+
+    // The worker's half: refused, counted under the argument row, and NOT as a frame fault.
+    REQUIRE(result.status == DispatchStatus::Declined);
+    CHECK(fixture.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedRejectedArgument) == 1);
+    CHECK(fixture.metrics.Read(IMetricsSink::Counter::WorkerFramesRefusedMalformedPayload) == 0);
+    CHECK(result.detail.contains("worker-rejected-argument"));
+
+    // The client's half: WHICH decline. Not the protocol row, and not the one-machine row
+    // either -- every worker of this build refuses the same flag.
+    CHECK(result.decline == DeclineCause::ArgumentRefused);
+    CHECK(result.decline != DeclineCause::ProtocolMismatch);
+    CHECK(result.decline != DeclineCause::WorkerRefused);
+
+    // And the argument travels in the peer's words, without the endpoint `detail` wraps them in,
+    // which is what the invocation log records.
+    CHECK(result.refusal.contains("-fanalyzer"));
+    CHECK_FALSE(result.refusal.contains(WorkerEndpoint));
+
+    // And the node is told WHICH, beside the counter's how many: the argument alone, which is
+    // what it lists where an operator looks.
+    auto const seen = fixture.refusals.Seen();
+    REQUIRE(seen.size() == 1);
+    CHECK(seen.front().reason == JobRefusal::RejectedArgument);
+    REQUIRE(seen.front().subjects.size() == 1);
+    CHECK(seen.front().subjects.front().argument == "-fanalyzer");
+}
+
+TEST_CASE("A refusal that names no argument reaches the observer with no subject", "[worker-protocol][decline]")
+{
+    // The observer is told of EVERY runner refusal, so a node that keys on the reason is not
+    // handed a fingerprint mismatch dressed as an argument.
+    Fixture fix;
+    REQUIRE(fix.worker.Answer(CompileFrame("clang-19")).has_value());
+    auto const seen = fix.refusals.Seen();
+    REQUIRE(seen.size() == 1);
+    CHECK(seen.front().reason == JobRefusal::UnknownFingerprint);
+    CHECK(seen.front().subjects.empty());
+}
+
+TEST_CASE("A worker that has not registered honours no grant, however authentic", "[cc][lease][fleet]")
+{
+    // The acceptance clause of #401, at the seam the ticket is about.
+    //
+    // The ticket's own clause -- "shown red by removing the identity from the
+    // registration reply" -- could not be written before this change, because the
+    // REGISTER reply was a bare worker id and had no identity to remove. It has one
+    // now, and an unpinned worker is what "the reply carried none" produces.
+    //
+    // What makes this a test rather than a restatement is the THIRD case below. The
+    // first two would both pass against a validator that simply refused everything,
+    // which is the shape a "harden the fleet check" change actually ships as -- and
+    // refusing everything is not a narrower window, it is a worker that compiles
+    // nothing. `SchedulerService`'s constructor states that an empty cluster id is
+    // legal and is the one-machine deployment, so the empty case is the control that
+    // has to stay GREEN while the others go red.
+    AtomicMetricsSink metrics;
+
+    SECTION("unregistered refuses an otherwise perfect grant")
+    {
+        Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+        // Deliberately NOT pinned: this is a worker whose first registration round has
+        // not completed, which is every worker for the first moments of its life.
+        MovingEndpoint const endpoint { ThisWorker };
+        auto const validator = SignedLeaseValidator(TestRoster(), endpoint, {}, LeaseClock, lease, metrics);
+
+        auto const refusal = validator(GrantFor(ThisWorker), "gcc-13").refusal;
+        REQUIRE(refusal.has_value());
+        CHECK(Unwrap(refusal).reason == Distributed::LeaseRefusalReason::Unregistered);
+        // Not ClusterMismatch: the two call for opposite operator actions, and a worker
+        // that has not registered would otherwise report a key-provisioning fault on
+        // every start.
+        CHECK(Unwrap(refusal).reason != Distributed::LeaseRefusalReason::ClusterMismatch);
+    }
+
+    SECTION("registered into this fleet accepts the same grant")
+    {
+        Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+        lease.fleet.Pin(std::string { ThisCluster });
+        MovingEndpoint const endpoint { ThisWorker };
+        auto const validator = SignedLeaseValidator(TestRoster(), endpoint, {}, LeaseClock, lease, metrics);
+
+        CHECK_FALSE(validator(GrantFor(ThisWorker), "gcc-13").refusal.has_value());
+    }
+
+    SECTION("registered into a fleet that names none still compiles, and only for grants naming none")
+    {
+        // The control. An engaged-but-empty pin is a registration, not the absence of
+        // one -- which is why this is an optional rather than a string. No node sends an
+        // empty identity now (the formation record mints one), but the codec carries it, and
+        // equality must still pair it with a grant that names none and nothing else.
+        Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+        lease.fleet.Pin(std::string {});
+        MovingEndpoint const endpoint { ThisWorker };
+        auto const validator = SignedLeaseValidator(TestRoster(), endpoint, {}, LeaseClock, lease, metrics);
+
+        CHECK_FALSE(
+            validator(GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ""), "gcc-13").refusal.has_value());
+
+        auto const foreign =
+            validator(GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, 7, "18"), "gcc-13").refusal;
+        REQUIRE(foreign.has_value());
+        CHECK(Unwrap(foreign).reason == Distributed::LeaseRefusalReason::ClusterMismatch);
+    }
+}
+
+TEST_CASE("A worker whose roster is absent refuses every grant, and says so", "[worker-protocol][lease][roster]")
+{
+    // #178. A grant is verified against the roster -- the state this node applied -- so a worker
+    // whose state records no voter's key has nothing it could honour a grant against, however
+    // perfect the grant, and says so on its own wire code and counter: the fact is about THIS
+    // worker, never the grant.
+    //
+    // The control is the same grant through the same validator once the roster is current:
+    // accepted. Without it both refusals would pass against a validator that refused
+    // everything, which is the shape a "check the roster first" change ships as.
+    AtomicMetricsSink metrics;
+    Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+    lease.fleet.Pin(std::string { ThisCluster });
+    MovingEndpoint const endpoint { ThisWorker };
+    Testing::FixedLeaseRoster roster { { "scheduler" } };
+    auto const validator = SignedLeaseValidator(roster, endpoint, {}, LeaseClock, lease, metrics);
+
+    SECTION("no roster at all")
+    {
+        roster.SetStanding(Distributed::RosterStanding::Absent);
+        auto const refusal = validator(GrantFor(ThisWorker), "gcc-13").refusal;
+        REQUIRE(refusal.has_value());
+        CHECK(Unwrap(refusal).reason == Distributed::LeaseRefusalReason::NoRoster);
+        CHECK(Distributed::DescribeLeaseRefusal(Unwrap(refusal).reason).code == Wire::ErrorCode::GrantUnverifiable);
+        CHECK(Distributed::DescribeLeaseRefusal(Unwrap(refusal).reason).workerCounter
+              == IMetricsSink::Counter::WorkerJobsRefusedLeaseNoRoster);
+    }
+
+    SECTION("the control: a current roster accepts the same grant")
+    {
+        roster.SetStanding(Distributed::RosterStanding::Current);
+        CHECK_FALSE(validator(GrantFor(ThisWorker), "gcc-13").refusal.has_value());
+    }
+}
+
+TEST_CASE("A grant from a scheduler the cluster revoked is refused by name at the worker",
+          "[worker-protocol][lease][roster]")
+{
+    // The ex-leader that still holds its key and still mints (#178). Its grant verifies under
+    // the revoked key, so it is named -- `SignerRevoked` -- rather than lumped with junk.
+    AtomicMetricsSink metrics;
+    Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+    lease.fleet.Pin(std::string { ThisCluster });
+    MovingEndpoint const endpoint { ThisWorker };
+    Testing::FixedLeaseRoster roster { { "scheduler" } };
+    auto const validator = SignedLeaseValidator(roster, endpoint, {}, LeaseClock, lease, metrics);
+
+    auto const before = GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, GrantTerm, "50");
+    auto const after = GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, GrantTerm, "51");
+    CHECK_FALSE(validator(before, "gcc-13").refusal.has_value());
+
+    roster.Revoke("scheduler");
+    auto const refusal = validator(after, "gcc-13").refusal;
+    REQUIRE(refusal.has_value());
+    CHECK(Unwrap(refusal).reason == Distributed::LeaseRefusalReason::SignerRevoked);
+    CHECK(Distributed::DescribeLeaseRefusal(Unwrap(refusal).reason).code == Wire::ErrorCode::LeaseUnauthorized);
+}
+
+namespace
+{
+/// A worker over a roster the case OWNS, so it can revoke a signer or silence the leader without
+/// touching the shared `TestRoster` -- the surface that answers, refusal counters and all.
+struct RosterWorker
+{
+    StubRunner runner;
+    Pace::Testing::ScratchDirectory scratch { "fc-wp-roster" };
+    CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+    AtomicMetricsSink metrics;
+    Testing::FixedLeaseRoster roster { { "scheduler" } }; ///< Declared before `worker`, which borrows it.
+    Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+    MovingEndpoint endpoint { ThisWorker };
+    WorkerProtocol worker { jobs,
+                            [this] {
+                                lease.fleet.Pin(std::string { ThisCluster });
+                                return SignedLeaseValidator(roster, endpoint, {}, LeaseClock, lease, metrics);
+                            }(),
+                            AvailableCodecs(),
+                            &Testing::TestWorkerKey(),
+                            metrics,
+                            IgnoreJobRefusals() };
+};
+} // namespace
+
+TEST_CASE("A revoked signer's grant moves the SignerRevoked counter at the surface that refuses it",
+          "[worker-protocol][lease][roster]")
+{
+    // The validator chooses the row; the SURFACE spends it. A case on the row alone passes with the
+    // increment unwired, so this one asks the counter the operator reads -- and that no other moved.
+    RosterWorker fix;
+    fix.roster.Revoke("scheduler");
+    auto const answer =
+        fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker)));
+    REQUIRE(answer.has_value());
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::LeaseUnauthorized);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseSignerRevoked) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseUnauthorized) == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+}
+
+TEST_CASE("A worker no counted leader has spoken to refuses every grant as isolated, and counts it",
+          "[worker-protocol][lease][roster][isolation]")
+{
+    // `Isolated` is a fact about THIS worker, answered before the signature: WHICH refusal is
+    // asserted, not merely that one happened -- `NoRoster` shares its wire code and is a different
+    // operator action. The control is the same grant once a leader speaks again.
+    RosterWorker fix;
+    fix.roster.SetStanding(Distributed::RosterStanding::Isolated);
+    auto const refused =
+        fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker)));
+    REQUIRE(refused.has_value());
+    CHECK(ErrorOf(Unwrap(refused)) == Wire::ErrorCode::GrantUnverifiable);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseIsolated) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseNoRoster) == 0);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 0);
+
+    fix.roster.SetStanding(Distributed::RosterStanding::Current);
+    auto const honoured = fix.worker.Answer(
+        CompileFrame("gcc-13",
+                     DefaultSource,
+                     { Wire::IdentityCodec },
+                     GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, GrantTerm, "77")));
+    REQUIRE(honoured.has_value());
+    CHECK(Decode(Unwrap(honoured)).status != Wire::Status::Error);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseIsolated) == 1);
+}
+
+TEST_CASE("A worker that learns a new address verifies grants naming it, and stops honouring the old one",
+          "[worker-protocol][lease]")
+{
+    // The acceptance clause of #1279 at the validator, and what makes it a test rather
+    // than a restatement is that ONE token carries it: the same grant, unchanged, is
+    // refused before the address moves and accepted after. No implementation that
+    // captured the endpoint can produce that, and neither can one that refuses
+    // everything or accepts everything -- the two shapes a "follow the seam" change
+    // actually ships as.
+    //
+    // It works because a refusal happens BEFORE the spend (#614), so the grant refused
+    // in the first half is still unspent in the second. That ordering is load-bearing
+    // here: presenting an ACCEPTED token twice would be refused `Replayed`, and a case
+    // written that way would pass under the defect.
+    AtomicMetricsSink metrics;
+    Distributed::WorkerLeaseState lease { Distributed::SchedulerTermRegressionNotice::Silent() };
+    lease.fleet.Pin(std::string { ThisCluster });
+
+    MovingEndpoint endpoint { ThisWorker };
+    auto const validator = SignedLeaseValidator(TestRoster(), endpoint, {}, LeaseClock, lease, metrics);
+
+    // Minted up front, both of them, so nothing about WHEN a token was signed can
+    // explain the difference in how it is answered -- the only thing that changes
+    // between the two halves below is what this worker says its address is.
+    auto const forTheNewAddress = GrantFor(MovedWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, GrantTerm, "40");
+    auto const forTheOldAddress = GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 }, ThisCluster, GrantTerm, "41");
+
+    SECTION("before the address moves, the new one is not this worker")
+    {
+        auto const refusal = validator(forTheNewAddress, "gcc-13").refusal;
+        REQUIRE(refusal.has_value());
+        CHECK(Unwrap(refusal).reason == Distributed::LeaseRefusalReason::EndpointMismatch);
+
+        // The control, and it is the half that fails against a validator refusing
+        // everything: the address this worker currently advertises still works.
+        CHECK_FALSE(validator(forTheOldAddress, "gcc-13").refusal.has_value());
+    }
+
+    SECTION("after the address moves, the same grant verifies")
+    {
+        endpoint.MoveTo(MovedWorker);
+
+        CHECK_FALSE(validator(forTheNewAddress, "gcc-13").refusal.has_value());
+
+        // And the mirror, which is what stops this reading as "it accepts more now".
+        // A grant for the address this worker has LEFT is refused -- as a mismatch
+        // rather than as anything else, because `EndpointMismatch` is what an operator
+        // reads as "the fleet is still handing out the old address" and a replay or an
+        // expiry would send them somewhere else entirely.
+        auto const refusal = validator(forTheOldAddress, "gcc-13").refusal;
+        REQUIRE(refusal.has_value());
+        CHECK(Unwrap(refusal).reason == Distributed::LeaseRefusalReason::EndpointMismatch);
+    }
+
+    SECTION("the refusal names the address this worker answers on, so an operator can compare two strings")
+    {
+        endpoint.MoveTo(MovedWorker);
+
+        auto const refusal = validator(forTheOldAddress, "gcc-13").refusal;
+        REQUIRE(refusal.has_value());
+        // Populated only after the MAC verified, so both addresses in it are facts the
+        // scheduler signed or this worker holds -- which is why it is safe to send and
+        // worth asserting: a mismatch whose text named neither address would leave the
+        // operator with a counter and nothing to compare.
+        CHECK(Unwrap(refusal).detail.contains(MovedWorker));
+        CHECK(Unwrap(refusal).detail.contains(ThisWorker));
+    }
+}
+
+TEST_CASE("A compile that outlived its grant is refused as EXPIRED and its object is not served", "[worker-protocol][lease]")
+{
+    // **The worker has two bounds now and must say which one ran out.** Since #522 the
+    // endpoint's answer window is `MaxCompileLeaseLifetime` -- the widest a cluster may
+    // agree on, because that window is armed before the payload and therefore before any
+    // grant can be read -- while the bound that actually applies to a job is the grant's
+    // own. An operator meeting a truncated compile has to be able to tell *the fleet's
+    // lease-lifetime is shorter than our slowest translation unit*, which one setting
+    // fixes, from *this compile exceeded the largest lease anyone may agree on*, which
+    // no setting fixes. Reported as one thing they would go and change the wrong one --
+    // the failure `TransportFailure` records for `Expired` against `Silent` on the
+    // client, arriving on the worker.
+    //
+    // **The skew slack is what makes this hard to observe, and narrowing it is the
+    // only honest way in.** A grant that verifies carries at least `slack` of budget by
+    // construction -- the budget is measured against the same acceptance window the
+    // verifier used, deliberately, because a worker whose clock runs fast would
+    // otherwise refuse every job it was legitimately granted. At the production five
+    // minutes this refusal is unreachable in any test that does not actually compile for
+    // five minutes, so the case narrows the slack to zero and makes the compile take
+    // measurably longer than the nothing that then remains.
+    //
+    // The slack is a real parameter rather than a seam cut for this case: the code it
+    // reaches already argued that a caller with a non-default value must not be able to
+    // split the window, and this is that caller.
+    Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying, std::chrono::seconds { 0 } };
+    fix.lease.fleet.Pin(std::string { ThisCluster });
+    fix.runner.takes = std::chrono::milliseconds { 20 };
+
+    // Expiring exactly now: inside the (zeroed) acceptance window, so it verifies, and
+    // with no budget left at all, so any compile at all outlives it.
+    auto const answer = fix.worker.Answer(CompileFrame(
+        "gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker, "gcc-13", std::chrono::seconds { 0 })));
+    REQUIRE(answer.has_value());
+
+    CHECK(Decode(Unwrap(answer)).status == Wire::Status::Error);
+    // WHICH refusal, not merely that one happened. `LeaseExpired` is the code that
+    // names the lease; anything else sends an operator somewhere unrelated.
+    CHECK(ErrorOf(Unwrap(answer)) == Wire::ErrorCode::LeaseExpired);
+
+    // The compile RAN -- this is not the pre-flight refusal one line up the file, which
+    // never starts a job. That distinction is the case: the worker did the work, then
+    // declined to serve a result the fleet had already reclaimed.
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsStarted) == 1);
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsCompleted) == 1);
+}
+
+TEST_CASE("A compile inside its grant is served, and one from a keyless worker is too", "[worker-protocol][lease]")
+{
+    // **The control, and it carries two distinct claims the case above cannot.**
+    //
+    // Without the first, a build that refused EVERY compile would pass the expiry case
+    // perfectly -- which is the shape this repository keeps rediscovering: an assertion
+    // that the broken state also satisfies.
+    SECTION("a grant with time left still serves its object")
+    {
+        // The SAME narrowed slack and the SAME slow compile as the case above, so the
+        // only thing that differs is how much budget the grant carried. A control that
+        // also relaxed the slack back to production would pass against a build that
+        // refuses on the slack rather than on the budget.
+        Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying, std::chrono::seconds { 0 } };
+        fix.lease.fleet.Pin(std::string { ThisCluster });
+        fix.runner.takes = std::chrono::milliseconds { 20 };
+
+        auto const answer = fix.worker.Answer(CompileFrame(
+            "gcc-13", DefaultSource, { Wire::IdentityCodec }, GrantFor(ThisWorker, "gcc-13", std::chrono::minutes { 10 })));
+        REQUIRE(answer.has_value());
+        CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+        CHECK(fix.metrics.Read(IMetricsSink::Counter::WorkerJobsRefusedLeaseExpired) == 0);
+    }
+
+    SECTION("a worker with no roster has no bound to enforce, and does not invent one")
+    {
+        // The single-machine install. `UncheckedLeaseValidator` authenticates nothing,
+        // so it reports NO remaining budget -- and a caller reading that disengaged
+        // optional as *no time left* rather than *no bound* would refuse every compile
+        // on every keyless node. Two states, one of which is not zero.
+        Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Unchecked };
+
+        auto const answer =
+            fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, "no-lease-needed"));
+        REQUIRE(answer.has_value());
+        CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
+    }
+}
+
+TEST_CASE("An exchange with a scheduler sends the command alone, awaited or run to completion",
+          "[worker][protocol][credential]")
+{
+    // The seam a node's every scheduler verb and its proof go through presents NO credential, and
+    // the awaited twin is the same exchange: the bytes on the wire are the request, with no AUTH
+    // pipelined ahead of it. The guarantee is the signature -- neither takes a credential -- so
+    // what is asserted is that the one place spelling the credential spells none.
+    auto const frame = Wire::EncodeHeartbeat("w-1", /*inFlight=*/0, Wire::LoadFields {});
+
+    Testing::ScriptedSocket blocking { Wire::EncodeReply(Wire::Status::Ok, {}) };
+    CHECK(Cc::ExchangeWithScheduler(blocking, frame).IsHit());
+    CHECK(blocking.Sent() == frame);
+
+    Testing::ScriptedSocket awaited { Wire::EncodeReply(Wire::Status::Ok, {}) };
+    CHECK(core::async::syncRun(Cc::ExchangeWithSchedulerAsync(&awaited, frame)).IsHit());
+    CHECK(awaited.Sent() == frame);
+}

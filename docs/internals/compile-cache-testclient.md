@@ -5,8 +5,8 @@ infrastructure, not a shipped product: no `install()` rule names it, no package
 carries it, it is not built by default, and it is not supported for general
 use. It is documented here for contributors working on the canonicalization
 contract. If you are looking for something to run, you want
-[fastcache-cc](../tools/fastcache-cc.md) or
-[fastcache-compile-node](../tools/fastcache-compile-node.md).
+[pace-cc](../tools/pace-cc.md) or
+[pace-node](../tools/pace-node.md).
 
 It is the **reference localizer**. It links the same `PathCanon` /
 `CompileValue` code the server uses, so the canonicalization parity contract is
@@ -20,7 +20,7 @@ though, so that it cannot quietly stop compiling — which is exactly what happe
 before (issue #84).
 
 ```sh
-cmake --preset clang-debug -DFASTCACHED_BUILD_TESTCLIENT=ON
+cmake --preset clang-debug -DPACE_BUILD_TESTCLIENT=ON
 cmake --build --preset clang-debug --target compile-cache-testclient
 ```
 
@@ -54,7 +54,7 @@ something silently ignored.
 
 Compiles the source, captures the object file and the compiler's dependency
 record, frames them as a `CompileValue`, and STOREs it through a running
-`fastcached` — carrying the *producer's* source-root and build-tree layout.
+`pace-kv` — carrying the *producer's* source-root and build-tree layout.
 
 Both driver families work, and the difference is not cosmetic: an MSVC driver is
 asked for `/showIncludes` and reports on its own output, while a GNU driver is

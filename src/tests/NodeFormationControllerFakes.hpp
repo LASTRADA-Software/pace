@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/EnrollAdmissionSignature.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/SeedSources.hpp>
+#include <Pace/Cluster/EnrollAdmissionSignature.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/SeedSources.hpp>
 
 #include <array>
 #include <atomic>
@@ -22,13 +22,13 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/EndpointDialer.hpp>
-#include <apps/fastcache-compile-node/EnrollChannel.hpp>
-#include <apps/fastcache-compile-node/EnrollClient.hpp>
-#include <apps/fastcache-compile-node/FleetProbe.hpp>
-#include <apps/fastcache-compile-node/FormationController.hpp>
-#include <apps/fastcache-compile-node/FormationLoop.hpp>
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
+#include <apps/pace-node/EndpointDialer.hpp>
+#include <apps/pace-node/EnrollChannel.hpp>
+#include <apps/pace-node/EnrollClient.hpp>
+#include <apps/pace-node/FleetProbe.hpp>
+#include <apps/pace-node/FormationController.hpp>
+#include <apps/pace-node/FormationLoop.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
 #include <tests/FormationFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 
@@ -39,7 +39,7 @@
 /// App-level, beside `NodeFormationFakes.hpp`, because every seam here is a node header, and
 /// `FormationFakes.hpp` is included by library tests that must not reach one. Shared for that
 /// header's reason: a WRONG fake makes its cases pass.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// One poll, as an `IEnrollChannel` was asked it.
@@ -437,4 +437,4 @@ class CountingReformSignal final: public Node::IReformSignal
     int _requests { 0 };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

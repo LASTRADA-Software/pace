@@ -5,7 +5,7 @@
 # compile database contributed nothing, asked of the OBJECTS rather than the source.
 #
 # A separate file rather than a heredoc inside the shell script, and that is not a
-# style choice: bash 3.2 -- which macOS still ships, and which `FASTCACHED_BASH`
+# style choice: bash 3.2 -- which macOS still ships, and which `PACE_BASH`
 # resolves to there -- cannot parse a here-document inside a command substitution.
 # It fails at PARSE time with "unexpected EOF while looking for matching quote", so
 # the whole check dies before running and every selftest case refuses for a reason
@@ -89,11 +89,11 @@ if not best:
 # would report the whole tree.
 #
 # There was a second, on the other axis: `Net/TlsSocket_test.cpp`, empty without
-# `FASTCACHED_ENABLE_TLS`, so that a build not configured like the sweep could not answer
+# `PACE_ENABLE_TLS`, so that a build not configured like the sweep could not answer
 # for it. The TLS socket and its tests are core-cpp's since #1596, and no unit left here is
 # empty without TLS, so that axis has no subject in this tree -- which is also why a
 # build's TLS setting no longer changes the blind set this table records.
-for control, why in (("src/FastCache/Server/Server.cpp",
+for control, why in (("src/Pace/Server/Server.cpp",
                       "the measurement is broken, not the tree -- check `nm`"),):
     if control in best and best[control] <= 2:
         print(f"!ERROR positive control {control} measured as blind "

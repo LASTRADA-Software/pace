@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/WireFields.hpp>
+#include <Pace/Core/WireFields.hpp>
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The `ClusterState` version the build before the replicated dissolve wrote -- TWO layouts back:
@@ -156,4 +156,4 @@ inline constexpr std::uint8_t FourFieldClusterCommandVersion = 2;
                                 WireFields::AsBytes(std::string_view {}) });
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

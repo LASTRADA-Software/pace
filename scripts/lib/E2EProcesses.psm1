@@ -264,7 +264,7 @@ function Invoke-E2EProcessesSelfTest {
     }
     $killed = [System.Collections.Generic.List[int]]::new()
     $recordKill = { param($p) $killed.Add($p.Id) }.GetNewClosure()
-    $started = @{ 4242 = "fastcache-compile-node.exe --listen-node=127.0.0.1:1"; 4343 = "fastcached.exe --listen=127.0.0.1:2" }
+    $started = @{ 4242 = "pace-node.exe --listen-node=127.0.0.1:1"; 4343 = "pace-kv.exe --listen=127.0.0.1:2" }
 
     # The POSITIVE direction first: a process that goes is killed and not named.
     $gone = New-StandIn 4242 { param($ms) $this.Waits.Add($ms); $true } { $false }
@@ -280,13 +280,13 @@ function Invoke-E2EProcessesSelfTest {
     $stays = New-StandIn 4242 { param($ms) $false } { $false }
     $r = @(Stop-E2EProcesses @($stays) $started 5000 $recordKill)
     Check ($r.Count -eq 1) "a process still running when the bound runs out is REPORTED"
-    Check ($r.Count -eq 1 -and $r[0] -like "PID 4242 was still running 5000 ms after its kill: fastcache-compile-node.exe --listen-node=127.0.0.1:1") "by PID and by the command line it was started with"
+    Check ($r.Count -eq 1 -and $r[0] -like "PID 4242 was still running 5000 ms after its kill: pace-node.exe --listen-node=127.0.0.1:1") "by PID and by the command line it was started with"
 
     # A third answer, not folded into either of the others. A getter that throws
     # reads `$null` here, exactly as a real Process's HasExited does with no handle.
     $mute = New-StandIn 4343 { param($ms) throw "no process is associated" } { throw "no process is associated" }
     $r = @(Stop-E2EProcesses @($mute) $started 5000 $recordKill)
-    Check ($r.Count -eq 1 -and $r[0] -like "PID 4343 could not be asked whether it exited (*no process is associated*): fastcached.exe --listen=127.0.0.1:2") "one that cannot be asked is reported as THAT, not as gone"
+    Check ($r.Count -eq 1 -and $r[0] -like "PID 4343 could not be asked whether it exited (*no process is associated*): pace-kv.exe --listen=127.0.0.1:2") "one that cannot be asked is reported as THAT, not as gone"
 
     # And a REAL Process with no handle, not a stand-in: its Id, HasExited and
     # WaitForExit all fail, which is what the two arms above were written against.
@@ -330,11 +330,11 @@ function Invoke-E2EProcessesSelfTest {
         $held = Join-Path $base "run-old"
         New-Item -ItemType Directory -Path $held | Out-Null
         $holder = { @{ Listed = $true; Processes = @(
-            [pscustomobject]@{ Id = 4242; CommandLine = "fastcache-compile-node.exe --cluster-dir=$held\iso-scheduler.state" },
+            [pscustomobject]@{ Id = 4242; CommandLine = "pace-node.exe --cluster-dir=$held\iso-scheduler.state" },
             [pscustomobject]@{ Id = 7; CommandLine = "unrelated.exe --elsewhere" }) } }.GetNewClosure()
         $refuse = { param($path) throw "The process cannot access the file '$path\iso-scheduler.state\raft-log' because it is being used by another process." }
         $r = @(Clear-E2EStaleRoots -Base $base -ListProcesses $holder -Remove $refuse)
-        Check ($r.Count -eq 1 -and $r[0] -like "could not remove $held (*being used by another process*); held by: PID 4242: fastcache-compile-node.exe --cluster-dir=*") "an old root something holds is REPORTED, naming the holder by PID and command line"
+        Check ($r.Count -eq 1 -and $r[0] -like "could not remove $held (*being used by another process*); held by: PID 4242: pace-node.exe --cluster-dir=*") "an old root something holds is REPORTED, naming the holder by PID and command line"
         Check ($r.Count -eq 1 -and $r[0] -notlike "*PID 7*") "and naming only the processes whose command line mentions that root"
 
         $r = @(Clear-E2EStaleRoots -Base $base -ListProcesses $noProcesses -Remove $refuse)
@@ -348,8 +348,8 @@ function Invoke-E2EProcessesSelfTest {
 
     # The `ps` listing a host with no /proc is read from, driven on every platform: the
     # PID's padding, a command line with spaces kept whole, and a line naming no process.
-    $parsed = @(ConvertFrom-E2EPsListing @("    1 /sbin/launchd", "  4242 /usr/local/bin/fastcache-compile-node --cluster-dir=/tmp/run old/x ", "PID COMMAND", "   17"))
-    Check ($parsed.Count -eq 2 -and $parsed[0].Id -eq 1 -and $parsed[0].CommandLine -eq "/sbin/launchd" -and $parsed[1].Id -eq 4242 -and $parsed[1].CommandLine -eq "/usr/local/bin/fastcache-compile-node --cluster-dir=/tmp/run old/x") "a ps listing reads as processes, each command line whole, and a line naming none as none"
+    $parsed = @(ConvertFrom-E2EPsListing @("    1 /sbin/launchd", "  4242 /usr/local/bin/pace-node --cluster-dir=/tmp/run old/x ", "PID COMMAND", "   17"))
+    Check ($parsed.Count -eq 2 -and $parsed[0].Id -eq 1 -and $parsed[0].CommandLine -eq "/sbin/launchd" -and $parsed[1].Id -eq 4242 -and $parsed[1].CommandLine -eq "/usr/local/bin/pace-node --cluster-dir=/tmp/run old/x") "a ps listing reads as processes, each command line whole, and a line naming none as none"
 
     # The real lister, asked for something it must find: this very process.
     $listing = Get-E2EProcessCommandLines

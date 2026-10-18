@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.28)
 # broken", and can stand for days. A guard nobody has watched ACCEPT is not known to work.
 #
 # Each case stages a whole tiny tree -- `scripts/` plus `src/tests/CMakeLists.txt` -- and
-# drives the REAL check over it through `FASTCACHED_SOURCE_DIR`. A fixture reimplementing
+# drives the REAL check over it through `PACE_SOURCE_DIR`. A fixture reimplementing
 # the classifier would be a second thing to be wrong rather than a test of this one.
 #
 # The verdict is read from OUTPUT, never from the exit status, and the output is FLATTENED
@@ -19,14 +19,14 @@ cmake_minimum_required(VERSION 3.28)
 # after flattening. A negative case written without the flatten reports a refutation.
 #
 # Usage:
-#   cmake -DFASTCACHED_CHECK=<path to check-selftest-registered.cmake> \
+#   cmake -DPACE_CHECK=<path to check-selftest-registered.cmake> \
 #         -P scripts/check-selftest-registered-selftest.cmake
 
-if(NOT DEFINED FASTCACHED_CHECK)
-    message(FATAL_ERROR "FASTCACHED_CHECK must be set")
+if(NOT DEFINED PACE_CHECK)
+    message(FATAL_ERROR "PACE_CHECK must be set")
 endif()
-if(NOT EXISTS "${FASTCACHED_CHECK}")
-    message(FATAL_ERROR "the check under test is missing: ${FASTCACHED_CHECK}")
+if(NOT EXISTS "${PACE_CHECK}")
+    message(FATAL_ERROR "the check under test is missing: ${PACE_CHECK}")
 endif()
 
 # The scratch root is REQUIRED, not defaulted to `CMAKE_CURRENT_BINARY_DIR`.
@@ -35,15 +35,15 @@ endif()
 # and running this by hand from the checkout therefore staged eight synthetic trees
 # inside the source tree. It is invisible from ctest, which runs in the build directory,
 # so it would have littered only the tree of whoever ran it directly. `check-script-
-# interpreter-selftest.cmake` already takes `FASTCACHED_SCRATCH_DIR` for this reason;
+# interpreter-selftest.cmake` already takes `PACE_SCRATCH_DIR` for this reason;
 # this now matches it rather than inventing a second convention.
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
+if(NOT DEFINED PACE_SCRATCH_DIR)
     message(FATAL_ERROR
-        "FASTCACHED_SCRATCH_DIR must be set -- this selftest stages trees on disk and "
+        "PACE_SCRATCH_DIR must be set -- this selftest stages trees on disk and "
         "will not guess a location, because under `cmake -P` the guess is the caller's "
         "current directory")
 endif()
-set(stageRoot "${FASTCACHED_SCRATCH_DIR}/selftest-registered-selftest")
+set(stageRoot "${PACE_SCRATCH_DIR}/selftest-registered-selftest")
 file(REMOVE_RECURSE "${stageRoot}")
 
 set(caseCount 0)
@@ -69,7 +69,7 @@ endfunction()
 #   phrase -- text the FLATTENED output must contain ("" to assert nothing further)
 function(ExpectVerdict name dir want phrase)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${dir}" -P "${FASTCACHED_CHECK}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${dir}" -P "${PACE_CHECK}"
         OUTPUT_VARIABLE out
         ERROR_VARIABLE err
         RESULT_VARIABLE rc
@@ -86,7 +86,7 @@ function(ExpectVerdict name dir want phrase)
     # rather than errors changes behaviour inside a sub-run and would be scored a clean
     # pass -- six selftest harnesses in this tree had exactly that blind spot, and the
     # ctest registration this drives already uses the two-alternative pattern through
-    # `FASTCACHED_SCRIPT_CHECK_FAILED`. A harness laxer than the registration it stands
+    # `PACE_SCRIPT_CHECK_FAILED`. A harness laxer than the registration it stands
     # for is a fake more permissive than the thing it models.
     set(refused FALSE)
     if(flat MATCHES "CMake Error|CMake Warning")

@@ -79,7 +79,7 @@ def _line_vs_connections(plt, comparisons, storage, op_mix, metric, ylabel, titl
 
 
 def render_multitarget(target_names: list[str], rows: list, out_dir: Path) -> list[Chart]:
-    """Grouped bar chart of throughput per scenario across targets (fastcached vs real)."""
+    """Grouped bar chart of throughput per scenario across targets (pace-kv vs real)."""
     if not available() or not rows:
         return []
     import matplotlib
@@ -88,7 +88,7 @@ def render_multitarget(target_names: list[str], rows: list, out_dir: Path) -> li
     import matplotlib.pyplot as plt
     import numpy as np
 
-    # Only chart scenarios that have a real competitor (i.e. more than fastcached).
+    # Only chart scenarios that have a real competitor (i.e. more than pace-kv).
     charted = [(name, bt) for name, bt in rows if sum(1 for r in bt.values() if r is not None) > 1]
     if not charted:
         return []
@@ -106,9 +106,9 @@ def render_multitarget(target_names: list[str], rows: list, out_dir: Path) -> li
     axis.set_xticks(indices + width * (len(target_names) - 1) / 2)
     axis.set_xticklabels(labels, fontsize=6, rotation=40, ha="right")
     axis.set_ylabel("ops/sec")
-    axis.set_title("Throughput: fastcached vs real redis/memcached")
+    axis.set_title("Throughput: pace-kv vs real redis/memcached")
     axis.legend()
-    chart = _figure_to_chart(fig, "fastcached vs real", out_dir / "vs_real_throughput.png")
+    chart = _figure_to_chart(fig, "pace-kv vs real", out_dir / "vs_real_throughput.png")
     plt.close(fig)
     return [chart]
 

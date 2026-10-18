@@ -31,15 +31,15 @@ cmake_minimum_required(VERSION 3.28)
 # init to read, so a UBSan-only configuration is not what this answers for.
 #
 # Usage:
-#   cmake -DFASTCACHED_NM=<nm> -DFASTCACHED_SYMBOLS=<sym>[|<sym>...]
-#         -DFASTCACHED_INSTRUMENTED=<obj>[|<obj>...] -DFASTCACHED_UNINSTRUMENTED=<obj>[|<obj>...]
+#   cmake -DPACE_NM=<nm> -DPACE_SYMBOLS=<sym>[|<sym>...]
+#         -DPACE_INSTRUMENTED=<obj>[|<obj>...] -DPACE_UNINSTRUMENTED=<obj>[|<obj>...]
 #         -P scripts/check-sanitized-objects.cmake
 #
 # `|`-separated rather than CMake lists, because a `;` in a `-D` argument splits the argument.
 #
 # Exit: the verdict is the OUTPUT, not the status -- read through `FAIL_REGULAR_EXPRESSION`.
 
-foreach(required FASTCACHED_NM FASTCACHED_SYMBOLS FASTCACHED_INSTRUMENTED FASTCACHED_UNINSTRUMENTED)
+foreach(required PACE_NM PACE_SYMBOLS PACE_INSTRUMENTED PACE_UNINSTRUMENTED)
     if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
         message(FATAL_ERROR
             "check-sanitized-objects: ${required} is not set or is empty.\n"
@@ -48,12 +48,12 @@ foreach(required FASTCACHED_NM FASTCACHED_SYMBOLS FASTCACHED_INSTRUMENTED FASTCA
     endif()
 endforeach()
 
-string(REPLACE "|" ";" symbols "${FASTCACHED_SYMBOLS}")
-string(REPLACE "|" ";" instrumented "${FASTCACHED_INSTRUMENTED}")
-string(REPLACE "|" ";" uninstrumented "${FASTCACHED_UNINSTRUMENTED}")
+string(REPLACE "|" ";" symbols "${PACE_SYMBOLS}")
+string(REPLACE "|" ";" instrumented "${PACE_INSTRUMENTED}")
+string(REPLACE "|" ";" uninstrumented "${PACE_UNINSTRUMENTED}")
 
 # @return in @p out: which of `symbols` @p object references UNDEFINED, as a list.
-function(fastcached_sanitizer_references object out)
+function(pace_sanitizer_references object out)
     if(NOT EXISTS "${object}")
         message(FATAL_ERROR
             "check-sanitized-objects: ${object} does not exist.\n"
@@ -61,13 +61,13 @@ function(fastcached_sanitizer_references object out)
             "uninstrumented one, and must not be reported as either answer.")
     endif()
     execute_process(
-        COMMAND "${FASTCACHED_NM}" -u "${object}"
+        COMMAND "${PACE_NM}" -u "${object}"
         OUTPUT_VARIABLE nmOut
         ERROR_VARIABLE nmErr
         RESULT_VARIABLE nmStatus)
     if(NOT nmStatus EQUAL 0)
         message(FATAL_ERROR
-            "check-sanitized-objects: `${FASTCACHED_NM} -u ${object}` did not answer "
+            "check-sanitized-objects: `${PACE_NM} -u ${object}` did not answer "
             "(${nmStatus}): ${nmErr}\n"
             "An object nm cannot read is not an uninstrumented one, so this refuses rather than "
             "guessing which it was.")
@@ -86,7 +86,7 @@ set(problems "")
 list(LENGTH symbols symbolCount)
 
 foreach(object IN LISTS instrumented)
-    fastcached_sanitizer_references("${object}" found)
+    pace_sanitizer_references("${object}" found)
     list(LENGTH found foundCount)
     if(NOT foundCount EQUAL symbolCount)
         string(REPLACE ";" ", " renderedFound "${found}")
@@ -96,7 +96,7 @@ foreach(object IN LISTS instrumented)
 endforeach()
 
 foreach(object IN LISTS uninstrumented)
-    fastcached_sanitizer_references("${object}" found)
+    pace_sanitizer_references("${object}" found)
     if(NOT found STREQUAL "")
         string(REPLACE ";" ", " renderedFound "${found}")
         string(APPEND problems

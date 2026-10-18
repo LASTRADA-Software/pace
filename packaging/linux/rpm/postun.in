@@ -9,16 +9,16 @@ fi
 
 if [ "$1" -eq 0 ]; then
     # Final removal: cached data is expendable and can be large, so do not
-    # leave it behind. The fastcached user is intentionally kept — other files
+    # leave it behind. The pace-kv user is intentionally kept — other files
     # on the system may still be owned by it.
     #
     # Guarded exactly as the DEB postrm is: systemd's StateDirectory= owns this
     # path, and an operator may have bind-mounted a volume onto it. Recursing
     # into a mountpoint or a symlink on an ordinary erase would destroy data the
     # package never installed.
-    if [ -d /var/lib/fastcached ] && [ ! -L /var/lib/fastcached ] \
-       && ! mountpoint -q /var/lib/fastcached 2>/dev/null; then
-        rm -rf /var/lib/fastcached
+    if [ -d /var/lib/pace-kv ] && [ ! -L /var/lib/pace-kv ] \
+       && ! mountpoint -q /var/lib/pace-kv 2>/dev/null; then
+        rm -rf /var/lib/pace-kv
     fi
 fi
 

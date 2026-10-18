@@ -3,7 +3,7 @@
 The project ships four executables, and these are all of them: every target
 carrying an `install()` rule appears below.
 
-## `fastcached` — the cache daemon
+## `pace-kv` — the cache daemon
 
 The server. It speaks four wire protocols off a single storage engine and
 auto-detects which one a client is using from its first bytes, so one listening
@@ -11,10 +11,10 @@ port serves memcached clients, Redis clients, and the compile cache at once.
 
 Start here: [Quickstart](../getting-started/quickstart.md).
 
-## `fastcache-cc` — the compiler launcher
+## `pace-cc` — the compiler launcher
 
 A drop-in replacement for [ccache](https://ccache.dev/) and
-[sccache](https://github.com/mozilla/sccache) that uses `fastcached` as its
+[sccache](https://github.com/mozilla/sccache) that uses `pace-kv` as its
 backing store. It fronts each compile, serves cache hits by reproducing the
 object file and replaying the compiler's output, and falls back to a real
 compile whenever anything goes wrong.
@@ -26,13 +26,13 @@ consuming machine's layout on a hit. A CI runner with the checkout at
 `/ci/w/1/s` and a developer with it at `/home/alice/proj` therefore share cache
 entries instead of each maintaining their own.
 
-Full reference: [fastcache-cc](fastcache-cc.md).
+Full reference: [pace-cc](pace-cc.md).
 
-## `fastcache-compile-node` — the compile worker
+## `pace-node` — the compile worker
 
 Takes translation units that missed the cache and compiles them, so a build is
 not limited to the cores of the machine running it. Workers register with **one
-of their own** — a `fastcache-compile-node` that serves it, never `fastcached` —
+of their own** — a `pace-node` that serves it, never `pace-kv` —
 and clients are handed one on a miss.
 
 It is the fleet's only binary and wears several hats: a node compiles unless
@@ -46,9 +46,9 @@ build accelerator from being a remote shell.
 Every refusal — no matching toolchain, no free slot, an unreachable worker —
 falls back to a local compile, so distribution cannot fail a build.
 
-Full reference: [fastcache-compile-node](fastcache-compile-node.md).
+Full reference: [pace-node](pace-node.md).
 
-## `fastcache-cli` — the operator's client
+## `pacectl` — the operator's client
 
 A `redis-cli`-shaped client for everything the other three expose. It reads and
 writes the keyspace (`get`, `set`, `mget`, `del`, `ttl`, `expire`, `incr`, …) and
@@ -73,17 +73,17 @@ Its exit codes distinguish outcomes rather than success and failure: a cache
 **miss** exits 1 and an **unreachable** daemon exits 3, so a script can retry one
 and give up on the other.
 
-Full reference: [fastcache-cli](fastcache-cli.md).
+Full reference: [pacectl](pacectl.md).
 
 ## Which do I want?
 
 | Goal | Use |
 |------|-----|
-| Speed up C/C++ compiles across machines | `fastcache-cc` + a `fastcached` daemon |
-| Compile on other machines too, not just cache | add `fastcache-compile-node` workers |
-| Back an existing sccache setup, on GCC or Clang | `fastcached` alone, via `SCCACHE_MEMCACHED` / `SCCACHE_REDIS` |
-| A memcached- or Redis-compatible cache | `fastcached` alone |
-| Read, write or measure a running cache from a terminal | `fastcache-cli` |
+| Speed up C/C++ compiles across machines | `pace-cc` + a `pace-kv` daemon |
+| Compile on other machines too, not just cache | add `pace-node` workers |
+| Back an existing sccache setup, on GCC or Clang | `pace-kv` alone, via `SCCACHE_MEMCACHED` / `SCCACHE_REDIS` |
+| A memcached- or Redis-compatible cache | `pace-kv` alone |
+| Read, write or measure a running cache from a terminal | `pacectl` |
 
 The sccache row is the one with a condition on it, and the condition is the
 compiler rather than the goal:

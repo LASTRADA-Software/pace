@@ -144,7 +144,7 @@ env:
   # fail every branch and pull-request run, where no tag is reachable by design —
   # hence the expression, and hence it lives here: one value, three consumers,
   # spelled once so they cannot drift apart.
-  FASTCACHED_REQUIRE_EXACT_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && 'ON' || 'OFF' }}
+  PACE_REQUIRE_EXACT_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && 'ON' || 'OFF' }}
 
 # Six jobs below carry, in addition to whatever else gates them,
 #
@@ -258,8 +258,8 @@ jobs:
         # required context -- as FAILED, on step 3 of 5, with the two
         # clang-format steps skipped behind it: `Permission denied`, exit **126**,
         # reproduced locally against the same mode and the same invocation
-        # ([#723](https://github.com/LASTRADA-Software/fastcached/issues/723),
-        # and [#720](https://github.com/LASTRADA-Software/fastcached/issues/720)
+        # ([#723](https://github.com/LASTRADA-Software/pace/issues/723),
+        # and [#720](https://github.com/LASTRADA-Software/pace/issues/720)
         # for the mode across fourteen scripts).
         #
         # The mode is now 755, so the bare form would work -- and naming the
@@ -554,7 +554,7 @@ jobs:
       # Sharing needs one VERSION as well as one key: actions/cache hashes it from
       # `path:` as the runner expanded it plus the compression it chose, and the
       # `windows` job is where that fails. Here both runners expand the path to
-      # `/home/runner/work/fastcached/fastcached/.cache/CPM` (run 35340951724), the
+      # `/home/runner/work/pace/pace/.cache/CPM` (run 35340951724), the
       # x86 leg is seen restoring zstd, and the arm64 image LISTS zstd -- nobody has
       # yet seen that leg restore this entry. If it always misses, the second
       # premise has failed and this job takes the `windows` job's shape.
@@ -637,7 +637,7 @@ jobs:
           sudo ln -sf /usr/bin/gcc-${{ env.GCC_VERSION }} /usr/local/bin/gcc
           sudo ln -sf /usr/bin/g++-${{ env.GCC_VERSION }} /usr/local/bin/g++
 
-      # Benchmarks on so fastcache-bench is compiled rather than only ever built
+      # Benchmarks on so pace-bench is compiled rather than only ever built
       # by hand from bench/inproc_bench.py. It is not installed and runs no test
       # — this is purely so a refactor of CacheEngine, LruMode or
       # InMemoryLruStorage cannot silently rot a target nothing else compiles.
@@ -651,8 +651,8 @@ jobs:
       - name: "Configure"
         if: ${{ needs.changes.outputs.code != 'false' }}
         run: >-
-          cmake --preset ${{ matrix.preset }} -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          cmake --preset ${{ matrix.preset }} -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       # The x86 leg of each preset saves; the arm64 leg, the one row naming a
       # `suffix`, only restores. Everything the combined step's post-job save
@@ -682,7 +682,7 @@ jobs:
       - name: "Test"
         if: ${{ needs.changes.outputs.code != 'false' }}
         env:
-          FASTCACHED_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
+          PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
         run: ctest --preset ${{ matrix.preset }}
 
       # The binaries the smoke jobs drive: the daemon every job starts, the launcher
@@ -696,10 +696,10 @@ jobs:
         if: ${{ needs.changes.outputs.code != 'false' && (matrix.preset == 'clang-release') }}
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: |
-            out/build/clang-release/target/fastcached
-            out/build/clang-release/target/fastcache-cc
+            out/build/clang-release/target/pace-kv
+            out/build/clang-release/target/pace-cc
             out/build/clang-release/target/mid-compile-edit-stub
           retention-days: 1
           if-no-files-found: error
@@ -817,7 +817,7 @@ jobs:
           echo "CLANG_TIDY_BIN=$tidy" >> "$GITHUB_ENV"
 
       # TLS on so the TlsSocket/TlsContext sources are also clang-tidy-checked,
-      # and benchmarks on for the same reason: fastcache-bench is first-party
+      # and benchmarks on for the same reason: pace-bench is first-party
       # source, so "fix clang-tidy at the source" has to apply to it too, and
       # this is the only job that runs clang-tidy at all.
       #
@@ -838,8 +838,8 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clang-debug -DENABLE_TIDY=OFF
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       # Which translation units the sweep picks is the part of it that can fail
       # SILENTLY: it has no output of its own to be wrong in, it just sweeps too
@@ -1023,7 +1023,7 @@ jobs:
   # `clang-tidy` above runs on `ubuntu-24.04`, so six translation units wholly
   # inside `#if defined(_WIN32)` preprocess to nothing there and are read by no
   # analyser this project runs
-  # ([#858](https://github.com/LASTRADA-Software/fastcached/issues/858)).
+  # ([#858](https://github.com/LASTRADA-Software/pace/issues/858)).
   #
   # **This closes six of eleven, not eleven.** The other five are behind
   # `#if defined(__APPLE__)` and need a macOS leg; `scripts/tidy-blind-spots.txt`
@@ -1105,8 +1105,8 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clangcl-debug -DENABLE_TIDY=OFF
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       - name: "Self-test the sweep's scope computation"
         shell: bash
@@ -1263,8 +1263,8 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clang-debug -DENABLE_TIDY=OFF
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       - name: "Build"
         run: cmake --build --preset clang-debug
@@ -1287,7 +1287,7 @@ jobs:
   # simply "run everything under TSan".
   #
   # SCOPE, and what it is not. WHAT RUNS is the `TARGETS` table in
-  # `scripts/tsan-gate.sh`; WHAT IS CLAIMED is `FastCachedTsanScope` in
+  # `scripts/tsan-gate.sh`; WHAT IS CLAIMED is `PaceTsanScope` in
   # `scripts/check-tsan-scope.cmake`, whose rows are directories and single
   # files. Neither list is restated here — this comment held a second copy of the
   # tag list and duly went stale, which is the defect the whole mechanism is
@@ -1297,7 +1297,7 @@ jobs:
   # The TAGS were: the first version named three and silently excluded six of
   # ten `Async/` test files while every signal in the run said clean. Then the
   # SCOPE was, and #316 is what that cost — it named three directories, while a
-  # `std::thread` census over `FastCacheTest`'s own sources finds nineteen
+  # `std::thread` census over `PaceTest`'s own sources finds nineteen
   # threaded files with eleven in no row and under no tag. Every threaded `Net/`
   # test was among them, which is the module `BlockingListener` lives in and so
   # the module #260 came out of; that race reached this job only because the node
@@ -1314,14 +1314,14 @@ jobs:
   # of its own — so a check built on it would refuse correct files and miss
   # incorrect ones.
   #
-  # The BINARY half is no longer a proxy, and #1209 is why. `fastcache-cc-tests`
-  # sat in no row: the launcher does not link the FastCache library, so no tag
+  # The BINARY half is no longer a proxy, and #1209 is why. `pace-cc-tests`
+  # sat in no row: the launcher does not link the Pace library, so no tag
   # expression could ever have reached it. It is a row now, run whole. The ticket
   # enumerated the test binaries by hand and its table listed four; this tree
   # registers six with `catch_discover_tests`, five of them in a default
-  # configuration — `fastcache-cli-tests` and `CowTreeTests` were in neither the
+  # configuration — `pacectl-tests` and `CowTreeTests` were in neither the
   # table nor any row. Neither was threaded then, so the ticket's conclusion survived
-  # its census (`fastcache-cli-tests` became threaded with #134 and is a row now), but
+  # its census (`pacectl-tests` became threaded with #134 and is a row now), but
   # a hand list is exact about what it knows and silent about what it
   # does not (#492), and that silence reads identically to complete coverage. So
   # `scripts/check-tsan-scope.cmake` DERIVES the set from the
@@ -1336,7 +1336,7 @@ jobs:
   # So the scope is enforced rather than asserted: `ctest -R tsan-scope-hygiene`
   # runs in the DEFAULT set and fails when a scoped test carries no selected tag.
   # Widening it is two edits that check each other — the `TARGETS` table in
-  # `scripts/tsan-gate.sh` decides what RUNS, and `FastCachedTsanScope` in
+  # `scripts/tsan-gate.sh` decides what RUNS, and `PaceTsanScope` in
   # `scripts/check-tsan-scope.cmake` decides what is CLAIMED. That check reads the
   # tags out of the gate rather than keeping a copy, so the tag half needs one edit.
   #
@@ -1436,22 +1436,22 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clang-tsan
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
 
       # Only the targets the gate runs — but do not read that as "the scope makes
-      # this job cheap". `FastCacheTest` is one binary carrying every library
+      # this job cheap". `PaceTest` is one binary carrying every library
       # `*_test.cpp`, so the tag scope buys RUNTIME and almost nothing at build
       # time. This job's cost is its compile.
       #
       # MEASURED on abb530ed, `cmake --preset clang-tsan
-      # -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON`, counting the
+      # -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON`, counting the
       # object files `ninja -t inputs` says each target set transitively needs:
       #
       #     every CXX compile edge this configure declares      675 (107 third-party)
       #     the three targets before #1209                      498
       #     the four targets below                              580
       #
-      # So adding `fastcache-cc-tests` costs **82 compile edges**, which is exactly
+      # So adding `pace-cc-tests` costs **82 compile edges**, which is exactly
       # its own object count: everything else it needs was already being built for
       # the other rows. At runtime it costs ~3s against the ~18.8s the first two
       # take. That trade is what #1209 asked to have decided rather than corrected
@@ -1466,17 +1466,17 @@ jobs:
       # the one above and a reader reconciling them would be reconciling nothing.
       #
       # What this job still does NOT build: the daemon, the launcher itself
-      # (`fastcache-cc`, as opposed to its tests), `fastcache-cli` (its tests are a
+      # (`pace-cc`, as opposed to its tests), `pacectl` (its tests are a
       # row since #134 gave them a thread pool),
       # `CowTreeTests`, and the two default-OFF targets (benchmarks, testclient).
       # `scripts/check-tsan-scope.cmake` is what keeps that list honest — every
       # Catch2 binary this tree registers is either a `TARGETS` row or carries a
       # written exemption, so a fourth test binary cannot arrive unnoticed the way
-      # `fastcache-cc-tests` did.
+      # `pace-cc-tests` did.
       - name: "Build"
         run: >-
           cmake --build --preset clang-tsan --target
-          FastCacheTest fastcache-compile-node-tests fastcache-cc-tests fastcache-cli-tests tsan-canary
+          PaceTest pace-node-tests pace-cc-tests pacectl-tests tsan-canary
 
       - name: "Report ccache effectiveness"
         run: ccache --show-stats --verbose
@@ -1557,7 +1557,7 @@ jobs:
       # would report 0% for code the suite was never meant to reach and pull the
       # figure down while looking like rigour.
       - name: "Configure"
-        run: cmake --preset clang-coverage -DFASTCACHED_ENABLE_TLS=ON
+        run: cmake --preset clang-coverage -DPACE_ENABLE_TLS=ON
 
       - name: "Build"
         run: cmake --build --preset clang-coverage
@@ -1697,7 +1697,7 @@ jobs:
       - name: "Configure"
         run: |
           cmake --preset clang-release \
-            -DFASTCACHED_ENABLE_TLS=ON \
+            -DPACE_ENABLE_TLS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
             -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang \
             -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \
@@ -1711,7 +1711,7 @@ jobs:
       # that answered nothing SKIP every case that would have noticed (#1432).
       - name: "Test"
         env:
-          FASTCACHED_EXPECT_SHA256_ENGINE: arm-sha2
+          PACE_EXPECT_SHA256_ENGINE: arm-sha2
         run: ctest --preset clang-release
 
   # Builds the container image (which compiles with TLS on against the system
@@ -1729,32 +1729,32 @@ jobs:
           fetch-depth: 0
 
       - name: "Build image"
-        run: docker build -t fastcached:ci .
+        run: docker build -t pace-kv:ci .
 
       - name: "Smoke test the image"
         run: |
-          docker run -d --name fc -p 6674:6674 -p 9259:9259 fastcached:ci \
+          docker run -d --name fc -p 6674:6674 -p 9259:9259 pace-kv:ci \
             --bind=0.0.0.0 --metrics --metrics-bind=0.0.0.0
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:9259/healthz >/dev/null; then break; fi
             sleep 0.5
           done
           curl -fsS http://127.0.0.1:9259/healthz
-          curl -fsS http://127.0.0.1:9259/metrics | grep -q fastcached_cmd_get_total
-          docker exec fc fastcached --healthcheck
+          curl -fsS http://127.0.0.1:9259/metrics | grep -q pace_cmd_get_total
+          docker exec fc pace-kv --healthcheck
           docker rm -f fc
 
   # Smoke tests live in sibling jobs so the PR status check tells you *which*
   # client or protocol broke without opening the log. They share the same
-  # fastcached binary artifact and the same compile-twice / expect-cache-hit
+  # pace-kv binary artifact and the same compile-twice / expect-cache-hit
   # assertion, and cover one supported compile-cache client each: sccache over
-  # the three wire protocols it can reach us on, and our own fastcache-cc over
+  # the three wire protocols it can reach us on, and our own pace-cc over
   # the compile-cache 0xFC protocol.
   #
   # Between the three sccache jobs the only deltas are which sccache version is
   # installed (apt = 0.7.7 = OpenDAL 0.44 = memcached TEXT wire;
   # mozilla-actions's prebuilt = >=0.8 = OpenDAL >=0.45 = memcached BINARY wire)
-  # and which SCCACHE_* env var points sccache at fastcached.
+  # and which SCCACHE_* env var points sccache at pace-kv.
 
   sccache-smoke-memcached-text:
     name: "sccache smoke (memcached text)"
@@ -1765,15 +1765,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: "Download fastcached binary"
+      - name: "Download pace-kv binary"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
-      - name: "Make fastcached executable"
-        run: chmod +x bin/fastcached
+      - name: "Make pace-kv executable"
+        run: chmod +x bin/pace-kv
       # `libyaml-cpp0.8` is THIS artefact's runtime dependency, and without it
-      # `./bin/fastcached` dies at dynamic-link time before it binds anything.
+      # `./bin/pace-kv` dies at dynamic-link time before it binds anything.
       # THIS artefact, not the released one: the `linux` job builds it with the
       # project default (`CPM_USE_LOCAL_PACKAGES ON`) and a runner that has
       # libyaml-cpp-dev, so it links the shared library. What SHIPS does not --
@@ -1788,7 +1788,7 @@ jobs:
       # OFF -- `sccache --help` reports `Memcached: false` on the very 0.7.7 whose
       # OFFICIAL release binary reports `Memcached: true`. Same version, different
       # build. So this leg ran for its whole life against sccache's own local disk
-      # cache, never reaching fastcached, and passed.
+      # cache, never reaching pace-kv, and passed.
       #
       # Pinned to **0.7.7** rather than latest, and the pin is what this leg IS: the
       # memcached wire dialect follows the sccache version -- 0.7.x speaks TEXT,
@@ -1803,7 +1803,7 @@ jobs:
           version: "v0.7.7"
       - name: "Smoke"
         run: >
-          bash scripts/sccache-smoke.sh --fastcached ./bin/fastcached
+          bash scripts/sccache-smoke.sh --pace-kv ./bin/pace-kv
           --protocol memcached --port 11611 --compiler g++-14
           --expect-flavor memcached-text
 
@@ -1816,13 +1816,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: "Download fastcached binary"
+      - name: "Download pace-kv binary"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
-      - name: "Make fastcached executable"
-        run: chmod +x bin/fastcached
+      - name: "Make pace-kv executable"
+        run: chmod +x bin/pace-kv
       - name: "Install C++ compiler + libyaml-cpp runtime"
         run: |
           bash scripts/ci-apt-update.sh
@@ -1835,13 +1835,13 @@ jobs:
       #
       # v0.0.6 while the Windows jobs are on v0.0.11, deliberately: this job uses
       # the action purely to put an sccache BINARY on PATH and then points it at a
-      # fastcached daemon. It never touches the Actions-cache backend, which is
+      # pace-kv daemon. It never touches the Actions-cache backend, which is
       # the only thing the newer version is needed for.
       - name: "Install sccache (binary protocol via OpenDAL >= 0.45)"
         uses: mozilla-actions/sccache-action@v0.0.6
       - name: "Smoke"
         run: >
-          bash scripts/sccache-smoke.sh --fastcached ./bin/fastcached
+          bash scripts/sccache-smoke.sh --pace-kv ./bin/pace-kv
           --protocol memcached --port 11611 --compiler g++-14
           --expect-flavor memcached-binary
 
@@ -1854,15 +1854,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: "Download fastcached binary"
+      - name: "Download pace-kv binary"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
-      - name: "Make fastcached executable"
-        run: chmod +x bin/fastcached
+      - name: "Make pace-kv executable"
+        run: chmod +x bin/pace-kv
       # `libyaml-cpp0.8` is THIS artefact's runtime dependency, and without it
-      # `./bin/fastcached` dies at dynamic-link time before it binds anything.
+      # `./bin/pace-kv` dies at dynamic-link time before it binds anything.
       # THIS artefact, not the released one: the `linux` job builds it with the
       # project default (`CPM_USE_LOCAL_PACKAGES ON`) and a runner that has
       # libyaml-cpp-dev, so it links the shared library. What SHIPS does not --
@@ -1882,7 +1882,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.6
       - name: "Smoke"
         run: >
-          bash scripts/sccache-smoke.sh --fastcached ./bin/fastcached
+          bash scripts/sccache-smoke.sh --pace-kv ./bin/pace-kv
           --protocol redis --port 11611 --compiler g++-14
           --expect-flavor redis-resp
 
@@ -1893,8 +1893,8 @@ jobs:
   # interoperate", the same question the sccache smoke jobs answer for the
   # daemon, while the E2E jobs answer "does the contract hold for each compiler
   # driver on each platform".
-  fastcache-cc-smoke:
-    name: "fastcache-cc smoke (compile-cache 0xFC)"
+  pace-cc-smoke:
+    name: "pace-cc smoke (compile-cache 0xFC)"
     runs-on: ubuntu-24.04
     needs: [changes, linux]
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && (github.event_name != 'push' || github.ref_type != 'branch') }}
@@ -1902,13 +1902,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: "Download the fastcached + fastcache-cc binaries"
+      - name: "Download the pace-kv + pace-cc binaries"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
       - name: "Make the binaries executable"
-        run: chmod +x bin/fastcached bin/fastcache-cc bin/mid-compile-edit-stub
+        run: chmod +x bin/pace-kv bin/pace-cc bin/mid-compile-edit-stub
       - name: "Install a C++ compiler + libyaml-cpp runtime"
         run: |
           bash scripts/ci-apt-update.sh
@@ -1918,8 +1918,8 @@ jobs:
       - name: "Smoke"
         run: |
           bash scripts/compile-cache-e2e.sh \
-            --fastcached ./bin/fastcached \
-            --launcher ./bin/fastcache-cc \
+            --pace-kv ./bin/pace-kv \
+            --launcher ./bin/pace-cc \
             --compiler g++-14 \
             --edit-stub ./bin/mid-compile-edit-stub \
             --port 11611 || { c=$?; [ "$c" = 77 ] && echo "::error::smoke skipped, nothing verified"; exit "$c"; }
@@ -1959,7 +1959,7 @@ jobs:
     # Safe against the MSVC `/showIncludes` hazard that CompileCache.cmake warns
     # about, and the reason is worth writing down rather than re-deriving: that
     # hazard needs an INCREMENTAL build across checkouts at DIFFERENT absolute
-    # paths. Every runner builds from scratch at `D:\a\fastcached\fastcached`, so
+    # paths. Every runner builds from scratch at `D:\a\pace\pace`, so
     # neither half holds, and sharing entries between runs is sharing them
     # between builds that spell every path identically.
     env:
@@ -2059,7 +2059,7 @@ jobs:
         if: ${{ needs.changes.outputs.code != 'false' }}
         run: >
           cmake --preset ${{ matrix.preset }}
-          -DFASTCACHED_ENABLE_TLS=ON
+          -DPACE_ENABLE_TLS=ON
           -DALLOW_SCCACHE_FALLBACK=ON
           "-DOPENSSL_ROOT_DIR=C:/Program Files/OpenSSL"
 
@@ -2091,7 +2091,7 @@ jobs:
       #
       # Here, and NOT in the action's own post step, because sccache keeps its
       # counters in the server and this suite restarts that server: the
-      # `sccache-smoke-*` tests point sccache at a fastcached daemon through
+      # `sccache-smoke-*` tests point sccache at a pace-kv daemon through
       # SCCACHE_MEMCACHED, which zeroes them. That is why the post step reported
       # `Compile requests 0` on run 33243524509 for a build sccache had in fact
       # handled — the E2E job, which runs no ctest, reported 231 requests from the
@@ -2120,7 +2120,7 @@ jobs:
           }
 
       # A spawn BRACKET around `ctest`, and the pair is what makes the reading
-      # mean something ([#966](https://github.com/LASTRADA-Software/fastcached/issues/966)).
+      # mean something ([#966](https://github.com/LASTRADA-Software/pace/issues/966)).
       #
       # `Windows-cl-debug` once failed six tests, all with exit `0xc0000142`
       # (`STATUS_DLL_INIT_FAILED`), and they were exactly the six that spawn a
@@ -2152,11 +2152,11 @@ jobs:
       - name: "Test"
         if: ${{ needs.changes.outputs.code != 'false' }}
         env:
-          FASTCACHED_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
+          PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
           # This runner is elevated, so the FileTrust ACL cases that set a directory's owner to
           # Administrators must RUN, not skip. Set, they fail closed: a runner that turns out not
           # to be elevated turns this red rather than retiring the guard silently.
-          FASTCACHED_EXPECT_ELEVATED: '1'
+          PACE_EXPECT_ELEVATED: '1'
         run: ctest --preset ${{ matrix.preset }} --output-log out/build/${{ matrix.preset }}/ctest-output.log
 
       # The other half of the bracket, and it only runs on a red.
@@ -2224,18 +2224,18 @@ jobs:
             --spawn "${{ steps.spawn-after-red.outputs.reading }}" \
             || echo "::warning::the timeout classifier did not reach a verdict (exit $?); this red is unclassified (#1515)"
 
-      - name: "Upload fastcached.exe"
+      - name: "Upload pace-kv.exe"
         if: ${{ needs.changes.outputs.code != 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-windows-${{ matrix.preset }}${{ matrix.suffix }}
-          path: out/build/${{ matrix.preset }}/target/fastcached.exe
+          name: pace-windows-${{ matrix.preset }}${{ matrix.suffix }}
+          path: out/build/${{ matrix.preset }}/target/pace-kv.exe
           if-no-files-found: error
 
   # End-to-end compile-cache tests. These live in their own jobs, one per
   # platform, so a PR status check names the platform that broke rather than
-  # burying it inside a build matrix. Each starts a real fastcached, drives real
-  # compiles through fastcache-cc, and asserts the launcher's actual contract:
+  # burying it inside a build matrix. Each starts a real pace-kv, drives real
+  # compiles through pace-cc, and asserts the launcher's actual contract:
   # MISS then HIT, the cached object reproduced byte-identically, cross-depth
   # portability (content stored from a deep checkout hits from a shallow one),
   # and a safe fallback when the daemon is unreachable.
@@ -2290,7 +2290,7 @@ jobs:
       # `mid-compile-edit-stub` is the compiler case 11 runs through (#1650); the harness
       # FAILS without it rather than skipping, so it is built with the two binaries.
       - name: "Build"
-        run: cmake --build --preset gcc-release --target fastcached fastcache-cc mid-compile-edit-stub
+        run: cmake --build --preset gcc-release --target pace-kv pace-cc mid-compile-edit-stub
 
       # Run the harness directly rather than through ctest so any failure output
       # lands in this job. Exit 77 means a prerequisite was missing and nothing
@@ -2298,8 +2298,8 @@ jobs:
       - name: "Compile-cache E2E (gcc)"
         run: |
           bash scripts/compile-cache-e2e.sh \
-            --fastcached out/build/gcc-release/target/fastcached \
-            --launcher out/build/gcc-release/target/fastcache-cc \
+            --pace-kv out/build/gcc-release/target/pace-kv \
+            --launcher out/build/gcc-release/target/pace-cc \
             --compiler g++-14 \
             --edit-stub out/build/gcc-release/target/mid-compile-edit-stub \
             --port 21713 || { c=$?; [ "$c" = 77 ] && echo "::error::E2E skipped, nothing verified"; exit "$c"; }
@@ -2308,8 +2308,8 @@ jobs:
       - name: "Compile-cache E2E (clang)"
         run: |
           bash scripts/compile-cache-e2e.sh \
-            --fastcached out/build/gcc-release/target/fastcached \
-            --launcher out/build/gcc-release/target/fastcache-cc \
+            --pace-kv out/build/gcc-release/target/pace-kv \
+            --launcher out/build/gcc-release/target/pace-cc \
             --compiler clang++ \
             --edit-stub out/build/gcc-release/target/mid-compile-edit-stub \
             --port 21715 || { c=$?; [ "$c" = 77 ] && echo "::error::E2E skipped, nothing verified"; exit "$c"; }
@@ -2333,10 +2333,10 @@ jobs:
       - name: "A real target, replayed from cache, passes its own tests"
         run: |
           bash scripts/launcher-replay-e2e.sh \
-            --fastcached out/build/gcc-release/target/fastcached \
-            --launcher out/build/gcc-release/target/fastcache-cc \
+            --pace-kv out/build/gcc-release/target/pace-kv \
+            --launcher out/build/gcc-release/target/pace-cc \
             --compiler g++-14 \
-            --target fastcache-cc-tests \
+            --target pace-cc-tests \
             --canary \
             --port 21717 || { c=$?; [ "$c" = 77 ] && echo "::error::replay E2E skipped, nothing verified"; exit "$c"; }
 
@@ -2383,7 +2383,7 @@ jobs:
       # `mid-compile-edit-stub` is the compiler the mid-compile-save case runs through
       # (#1650); the harness FAILS without it rather than skipping.
       - name: "Build"
-        run: cmake --build --preset cl-release --target fastcached fastcache-cc mid-compile-edit-stub
+        run: cmake --build --preset cl-release --target pace-kv pace-cc mid-compile-edit-stub
 
       # Same assertion as the `windows` job, where the reasoning is written out.
       # Repeated rather than pointed at, because a cache enabled in three jobs and
@@ -2418,9 +2418,9 @@ jobs:
           # Do not let a non-zero exit abort the step before the 77 check below:
           # a skip means nothing was verified and must fail rather than pass.
           $ErrorActionPreference = 'Continue'
-          & pwsh -NoProfile -File src/apps/fastcache-cc/run-launcher-e2e.ps1 `
-            -Fastcached out/build/cl-release/target/fastcached.exe `
-            -Launcher out/build/cl-release/target/fastcache-cc.exe `
+          & pwsh -NoProfile -File src/apps/pace-cc/run-launcher-e2e.ps1 `
+            -PaceKv out/build/cl-release/target/pace-kv.exe `
+            -Launcher out/build/cl-release/target/pace-cc.exe `
             -EditStub out/build/cl-release/target/mid-compile-edit-stub.exe `
             -Port 21714
           $code = $LASTEXITCODE
@@ -2479,11 +2479,11 @@ jobs:
           sudo ln -sf /usr/bin/g++-14 /usr/local/bin/g++
 
       - name: "Configure"
-        # FASTCACHED_PACKAGE_ROOT_PREFIX is OFF by default so that a plain
+        # PACE_PACKAGE_ROOT_PREFIX is OFF by default so that a plain
         # `cmake --install --prefix /usr/local` stays conventional; the package
         # layout (payload rooted at /, units under usr/lib/systemd, config in
         # /etc) is opt-in and this is the job that opts in.
-        # FASTCACHED_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
+        # PACE_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
         # which is where the "only on a tag run" reasoning is written down.
         #
         # -DCPM_USE_LOCAL_PACKAGES=OFF is what makes the payload redistributable,
@@ -2492,9 +2492,9 @@ jobs:
         # libyaml-cpp-dev answers, and `YAML_BUILD_SHARED_LIBS OFF` in CMakeLists
         # is never read by anything — so the daemon links libyaml-cpp.so.0.8. The
         # .deb and .rpm survive that through SHLIBDEPS/AUTOREQ; the TGZ carries no
-        # dependency metadata at all, and the TGZ is what FASTCACHE_AUTO_INSTALL
+        # dependency metadata at all, and the TGZ is what PACE_AUTO_INSTALL
         # unpacks onto a developer's machine, where the loader kills it with 127.
-        run: cmake --preset gcc-release -DCPM_USE_LOCAL_PACKAGES=OFF -DFASTCACHED_BUILD_TESTS=OFF -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON -DFASTCACHED_REQUIRE_EXACT_VERSION=${{ env.FASTCACHED_REQUIRE_EXACT_VERSION }}
+        run: cmake --preset gcc-release -DCPM_USE_LOCAL_PACKAGES=OFF -DPACE_BUILD_TESTS=OFF -DPACE_PACKAGE_ROOT_PREFIX=ON -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442).
@@ -2502,7 +2502,7 @@ jobs:
         run: bash scripts/run-check.sh scripts/check-instruction-set-flags.sh out/build/gcc-release/compile_commands.json
 
       - name: "Build"
-        run: cmake --build --preset gcc-release --target fastcached fastcache-cc fastcache-compile-node fastcache-cli
+        run: cmake --build --preset gcc-release --target pace-kv pace-cc pace-node pacectl
 
       # The flag above is not the fact. A configure line is a claim; what ships is
       # the artefact, and the two have disagreed here for the whole life of this job.
@@ -2523,7 +2523,7 @@ jobs:
           set -euo pipefail
           # systemd-analyze reports problems on stderr but still exits 0 for
           # non-fatal findings, so grep for the ones that matter. The
-          # ExecStart-not-executable note is expected: fastcached is not
+          # ExecStart-not-executable note is expected: pace-kv is not
           # installed at /usr/bin in this step.
           #
           # The compile worker's two units are here too: they carry the most
@@ -2536,8 +2536,8 @@ jobs:
           # `grep -q` that exits at its first match can SIGPIPE the stage feeding
           # it, and the pipeline then reports "no finding" exactly when there was
           # one (build-and-toolchain.md).
-          for unit in packaging/linux/fastcached.service packaging/linux/fastcached-user.service \
-                      packaging/linux/fastcache-compile-node.service packaging/linux/fastcache-compile-node.socket; do
+          for unit in packaging/linux/pace-kv.service packaging/linux/pace-kv-user.service \
+                      packaging/linux/pace-node.service packaging/linux/pace-node.socket; do
             echo "== $unit"
             out=$(systemd-analyze verify "$unit" 2>&1 || true)
             echo "$out"
@@ -2552,7 +2552,7 @@ jobs:
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          deb=$(ls fastcached_*.deb)
+          deb=$(ls pace_*.deb)
           echo "== contents"; dpkg -c "$deb"
           echo "== control"; dpkg -I "$deb"
 
@@ -2564,16 +2564,16 @@ jobs:
 
           # The binaries, the units and the config must each land in the one
           # location that works; /usr/etc or /lib would silently never be read.
-          for path in ./usr/bin/fastcached ./usr/bin/fastcache-cc ./usr/bin/fastcache-compile-node \
-                      ./usr/lib/systemd/system/fastcached.service \
-                      ./usr/lib/systemd/user/fastcached.service \
-                      ./usr/lib/sysusers.d/fastcached.conf \
-                      ./usr/lib/tmpfiles.d/fastcached.conf \
-                      ./usr/lib/systemd/system/fastcache-compile-node.service \
-                      ./usr/lib/systemd/system/fastcache-compile-node.socket \
-                      ./usr/lib/sysusers.d/fastcache-node.conf \
-                      ./etc/fastcached/fastcache-compile-node.yaml \
-                      ./etc/fastcached/fastcached.yaml; do
+          for path in ./usr/bin/pace-kv ./usr/bin/pace-cc ./usr/bin/pace-node \
+                      ./usr/lib/systemd/system/pace-kv.service \
+                      ./usr/lib/systemd/user/pace-kv.service \
+                      ./usr/lib/sysusers.d/pace-kv.conf \
+                      ./usr/lib/tmpfiles.d/pace-kv.conf \
+                      ./usr/lib/systemd/system/pace-node.service \
+                      ./usr/lib/systemd/system/pace-node.socket \
+                      ./usr/lib/sysusers.d/pace-node.conf \
+                      ./etc/pace/pace-node.yaml \
+                      ./etc/pace/pace-kv.yaml; do
             grep -qx "$path" /tmp/deb-paths.txt || { echo "::error::missing $path"; exit 1; }
           done
 
@@ -2586,7 +2586,7 @@ jobs:
           # Both, and for the same reason: an upgrade that reset either one is a
           # silent regression. The worker's file is what makes it work at all, so
           # resetting it un-registers the worker with no error anywhere.
-          for path in /etc/fastcached/fastcached.yaml /etc/fastcached/fastcache-compile-node.yaml; do
+          for path in /etc/pace/pace-kv.yaml /etc/pace/pace-node.yaml; do
             grep -qx "$path" /tmp/debcontrol/conffiles \
               || { echo "::error::$path not registered as a conffile"; exit 1; }
           done
@@ -2595,30 +2595,30 @@ jobs:
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          rpmfile=$(ls fastcached-*.rpm)
+          rpmfile=$(ls pace-*.rpm)
           echo "== contents"; rpm -qlp "$rpmfile"
           echo "== metadata"; rpm -qip "$rpmfile"
 
           rpm -qlp "$rpmfile" > /tmp/rpm-paths.txt
           rpm -qcp "$rpmfile" > /tmp/rpm-config.txt
 
-          for path in /usr/bin/fastcached /usr/bin/fastcache-cc /usr/bin/fastcache-compile-node \
-                      /usr/lib/systemd/system/fastcached.service \
-                      /usr/lib/systemd/user/fastcached.service \
-                      /usr/lib/sysusers.d/fastcached.conf \
-                      /usr/lib/tmpfiles.d/fastcached.conf \
-                      /usr/lib/systemd/system/fastcache-compile-node.service \
-                      /usr/lib/systemd/system/fastcache-compile-node.socket \
-                      /usr/lib/sysusers.d/fastcache-node.conf \
-                      /etc/fastcached/fastcache-compile-node.yaml \
-                      /etc/fastcached/fastcached.yaml; do
+          for path in /usr/bin/pace-kv /usr/bin/pace-cc /usr/bin/pace-node \
+                      /usr/lib/systemd/system/pace-kv.service \
+                      /usr/lib/systemd/user/pace-kv.service \
+                      /usr/lib/sysusers.d/pace-kv.conf \
+                      /usr/lib/tmpfiles.d/pace-kv.conf \
+                      /usr/lib/systemd/system/pace-node.service \
+                      /usr/lib/systemd/system/pace-node.socket \
+                      /usr/lib/sysusers.d/pace-node.conf \
+                      /etc/pace/pace-node.yaml \
+                      /etc/pace/pace-kv.yaml; do
             grep -qx "$path" /tmp/rpm-paths.txt || { echo "::error::missing $path"; exit 1; }
           done
 
           # Both, and for the same reason: an upgrade that reset either one is a
           # silent regression. The worker's file is what makes it work at all, so
           # resetting it un-registers the worker with no error anywhere.
-          for path in /etc/fastcached/fastcached.yaml /etc/fastcached/fastcache-compile-node.yaml; do
+          for path in /etc/pace/pace-kv.yaml /etc/pace/pace-node.yaml; do
             grep -qx "$path" /tmp/rpm-config.txt \
               || { echo "::error::$path not marked %config"; exit 1; }
           done
@@ -2649,8 +2649,8 @@ jobs:
         run: |
           set -euo pipefail
           check="$GITHUB_WORKSPACE/scripts/check-obsolete-conffiles.sh"
-          bash "$check" --deb "$(ls fastcached_*.deb)"  "$GITHUB_WORKSPACE"
-          bash "$check" --rpm "$(ls fastcached-*.rpm)" "$GITHUB_WORKSPACE"
+          bash "$check" --deb "$(ls pace_*.deb)"  "$GITHUB_WORKSPACE"
+          bash "$check" --rpm "$(ls pace-*.rpm)" "$GITHUB_WORKSPACE"
 
       # The .rpm, installed where rpm is the package manager. The steps above only
       # INSPECT it; this one has dnf resolve its dependencies and run its
@@ -2661,7 +2661,7 @@ jobs:
       # cache_dir. What each leg asserts is in the script's header.
       - name: "Install the .rpm on Fedora and exercise the services"
         working-directory: out/build/gcc-release
-        run: bash "$GITHUB_WORKSPACE/scripts/rpm-package-e2e.sh" "$PWD/$(ls fastcached-*.rpm)"
+        run: bash "$GITHUB_WORKSPACE/scripts/rpm-package-e2e.sh" "$PWD/$(ls pace-*.rpm)"
 
       # Install for real and drive traffic through it. The GitHub runner has a
       # live systemd, so this exercises the actual unit — the service account,
@@ -2670,25 +2670,25 @@ jobs:
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          sudo apt-get install -y ./$(ls fastcached_*.deb)
+          sudo apt-get install -y ./$(ls pace_*.deb)
 
           # The postinst enables and starts the unit; it must already be up.
-          sudo systemctl is-enabled fastcached
+          sudo systemctl is-enabled pace-kv
           for _ in $(seq 1 30); do
-            systemctl is-active --quiet fastcached && break
+            systemctl is-active --quiet pace-kv && break
             sleep 1
           done
-          systemctl is-active --quiet fastcached || {
-            echo "::error::service did not start"; sudo journalctl -u fastcached --no-pager; exit 1; }
+          systemctl is-active --quiet pace-kv || {
+            echo "::error::service did not start"; sudo journalctl -u pace-kv --no-pager; exit 1; }
 
           # Proves the daemon is NOT daemonizing: journald only sees stderr
           # from a foreground process.
-          sudo journalctl -u fastcached --no-pager | tee /tmp/fc-journal.txt
+          sudo journalctl -u pace-kv --no-pager | tee /tmp/fc-journal.txt
           grep -q 'ready, accepting connections' /tmp/fc-journal.txt \
             || { echo "::error::startup banner missing from the journal"; exit 1; }
 
           # It must run as the packaged system account, not as root.
-          test "$(systemctl show -p User --value fastcached)" = fastcached
+          test "$(systemctl show -p User --value pace-kv)" = pace-kv
 
           # End-to-end round trip against the packaged default config.
           printf 'set k 0 0 5\r\nhello\r\nget k\r\nquit\r\n' | timeout 10 nc -q1 127.0.0.1 6674 | tee /tmp/fc-proto.txt
@@ -2700,10 +2700,10 @@ jobs:
           # check reads the scriptlet source, which cannot see a scriptlet that
           # did not run. Both halves matter -- unreadable to others AND readable
           # by the account the unit runs as, or the daemon cannot start.
-          _mode=$(stat -c '%a %U:%G' /etc/fastcached/fastcached.yaml)
-          test "$_mode" = "640 root:fastcached" \
-            || { echo "::error::config is '$_mode', expected '640 root:fastcached'"; exit 1; }
-          sudo -u fastcached test -r /etc/fastcached/fastcached.yaml \
+          _mode=$(stat -c '%a %U:%G' /etc/pace/pace-kv.yaml)
+          test "$_mode" = "640 root:pace-kv" \
+            || { echo "::error::config is '$_mode', expected '640 root:pace-kv'"; exit 1; }
+          sudo -u pace-kv test -r /etc/pace/pace-kv.yaml \
             || { echo "::error::the service account cannot read its own config"; exit 1; }
 
           # Reload must apply a reloadable setting rather than restart or fail.
@@ -2711,20 +2711,20 @@ jobs:
           # nothing, so a reflow of the shipped comment would silently turn this
           # into "reload an unchanged file", which passes without ever
           # exercising the SIGHUP path.
-          sudo grep -q '^#log_level: info' /etc/fastcached/fastcached.yaml \
+          sudo grep -q '^#log_level: info' /etc/pace/pace-kv.yaml \
             || { echo "::error::the shipped yaml no longer contains '#log_level: info'; update this step"; exit 1; }
-          sudo sed -i 's/^#log_level: info/log_level: debug/' /etc/fastcached/fastcached.yaml
-          sudo grep -q '^log_level: debug' /etc/fastcached/fastcached.yaml \
+          sudo sed -i 's/^#log_level: info/log_level: debug/' /etc/pace/pace-kv.yaml
+          sudo grep -q '^log_level: debug' /etc/pace/pace-kv.yaml \
             || { echo "::error::config edit did not apply"; exit 1; }
-          sudo systemctl reload fastcached
+          sudo systemctl reload pace-kv
           sleep 2
-          systemctl is-active --quiet fastcached \
+          systemctl is-active --quiet pace-kv \
             || { echo "::error::service died on reload"; exit 1; }
 
           # A clean SIGTERM stop: a non-zero exit here would mean the unit
           # restart-loops in production.
-          sudo systemctl stop fastcached
-          test "$(systemctl show -p Result --value fastcached)" = success
+          sudo systemctl stop pace-kv
+          test "$(systemctl show -p Result --value pace-kv)" = success
 
       - name: "Socket-activate the compile worker on real systemd"
         run: |
@@ -2733,8 +2733,8 @@ jobs:
           # The account the sysusers.d entry must have created. Without it the
           # unit fails to start with "user does not exist", which says nothing
           # about which package forgot to create it.
-          id fastcache-node >/dev/null \
-            || { echo "::error::the fastcache-node service account was not created"; exit 1; }
+          id pace-node >/dev/null \
+            || { echo "::error::the pace-node service account was not created"; exit 1; }
 
           # No scheduler: a node that serves is refused one, and serves the fleet its
           # formation record names -- its own, on this first start.
@@ -2744,36 +2744,36 @@ jobs:
           # disagree about one setting, and nobody had written down which won.
           #
           # `cluster_dir` since #178 PR 6: a node keeps its identity key and its
-          # formation record there. /var/lib/fastcache-node is the StateDirectory= the unit
+          # formation record there. /var/lib/pace-node is the StateDirectory= the unit
           # creates for it -- the one writable place under ProtectSystem=strict that
           # survives a restart, so this step also pins that the unit provides it.
           #
-          # And a disk tier at /var/cache/fastcache-node, the cache_dir the docs
+          # And a disk tier at /var/cache/pace-node, the cache_dir the docs
           # give, which only the unit's CacheDirectory= makes writable: without it
           # the worker refuses to start on a read-only path, and no step here set a
           # cache_dir, which is how that shipped (#1674).
-          printf 'advertise: 127.0.0.1:6674\ncluster_dir: /var/lib/fastcache-node\ntoolchain:\n  - /usr/bin/g++\ncache_memory: 64m\ncache_disk: 256m\ncache_dir: /var/cache/fastcache-node\n' \
-            | sudo tee /etc/fastcached/fastcache-compile-node.yaml >/dev/null
+          printf 'advertise: 127.0.0.1:6674\ncluster_dir: /var/lib/pace-node\ntoolchain:\n  - /usr/bin/g++\ncache_memory: 64m\ncache_disk: 256m\ncache_dir: /var/cache/pace-node\n' \
+            | sudo tee /etc/pace/pace-node.yaml >/dev/null
 
           # Enabling the SOCKET is what enables the worker; the service carries
-          # no [Install] on purpose. And it supersedes fastcached: both serve
+          # no [Install] on purpose. And it supersedes pace-kv: both serve
           # 6674, the socket declares Conflicts= with Before= on the daemon, and
           # this is the takeover on a systemd older than the 259 the .rpm step
-          # measured it on (#1676). fastcached is started first because the step
+          # measured it on (#1676). pace-kv is started first because the step
           # above stopped it, and a fresh install leaves it running.
-          sudo systemctl start fastcached
-          systemctl is-active --quiet fastcached \
-            || { echo "::error::fastcached did not start again before the takeover"; exit 1; }
-          sudo systemctl enable --now fastcache-compile-node.socket
-          systemctl is-active --quiet fastcache-compile-node.socket \
-            || { echo "::error::the socket unit did not start beside a running fastcached"; sudo ss -ltnp || true; exit 1; }
-          systemctl is-active --quiet fastcached \
-            && { echo "::error::enabling the node's socket left fastcached running on the same port"; exit 1; }
+          sudo systemctl start pace-kv
+          systemctl is-active --quiet pace-kv \
+            || { echo "::error::pace-kv did not start again before the takeover"; exit 1; }
+          sudo systemctl enable --now pace-node.socket
+          systemctl is-active --quiet pace-node.socket \
+            || { echo "::error::the socket unit did not start beside a running pace-kv"; sudo ss -ltnp || true; exit 1; }
+          systemctl is-active --quiet pace-kv \
+            && { echo "::error::enabling the node's socket left pace-kv running on the same port"; exit 1; }
 
           # Nothing should be running yet -- that is the whole point of
           # activation. An already-active service here means the socket was
           # bypassed and the unit is just an ordinary daemon.
-          systemctl is-active --quiet fastcache-compile-node \
+          systemctl is-active --quiet pace-node \
             && { echo "::error::the service started without a connection"; exit 1; }
 
           # One connection activates it.
@@ -2792,14 +2792,14 @@ jobs:
           # not computing. `scripts/fleet-dashboard-e2e.sh` measured the same
           # cost directly and carries the numbers.
           for _ in $(seq 1 240); do
-            sudo journalctl -u fastcache-compile-node --no-pager > /tmp/node-log.txt 2>/dev/null || true
+            sudo journalctl -u pace-node --no-pager > /tmp/node-log.txt 2>/dev/null || true
             grep -q 'compile node ready' /tmp/node-log.txt && break
             sleep 1
           done
           cat /tmp/node-log.txt
           grep -q 'compile node ready' /tmp/node-log.txt || {
             echo "::error::a connection did not bring the worker up"
-            systemctl status fastcache-compile-node --no-pager || true; exit 1; }
+            systemctl status pace-node --no-pager || true; exit 1; }
 
           # It must have ADOPTED the socket rather than bound its own, and that is
           # asserted on the STATE as well as on a log line.
@@ -2823,7 +2823,7 @@ jobs:
           # `if` rather than an `&&` chain: under `set -e` the good case would make a
           # chained form return non-zero and abort the step.
           held_6674="$(sudo ss -ltnpH 'sport = :6674' 2>/dev/null || true)"
-          if [[ "$(grep -c LISTEN <<<"$held_6674")" != 1 || "$held_6674" != *'"systemd",pid=1,'* || "$held_6674" != *fastcache-compi* ]]; then
+          if [[ "$(grep -c LISTEN <<<"$held_6674")" != 1 || "$held_6674" != *'"systemd",pid=1,'* || "$held_6674" != *'"pace-node",pid='* ]]; then
             echo "::error::6674 is not the activated socket shared by the worker alone: ${held_6674}"
             sudo ss -ltnp || true; exit 1
           fi
@@ -2836,12 +2836,12 @@ jobs:
 
           # The disk tier is open where the unit made room for it, and the store
           # belongs to the service account.
-          grep -q 'disk 256M [a-z0-9]* at /var/cache/fastcache-node' /tmp/node-log.txt \
-            || { echo "::error::the worker did not open a 256M disk tier at /var/cache/fastcache-node"; exit 1; }
-          test "$(sudo stat -c '%U' /var/cache/fastcache-node/objects.cow)" = fastcache-node \
-            || { echo "::error::the worker's store is not owned by fastcache-node"; exit 1; }
+          grep -q 'disk 256M [a-z0-9]* at /var/cache/pace-node' /tmp/node-log.txt \
+            || { echo "::error::the worker did not open a 256M disk tier at /var/cache/pace-node"; exit 1; }
+          test "$(sudo stat -c '%U' /var/cache/pace-node/objects.cow)" = pace-node \
+            || { echo "::error::the worker's store is not owned by pace-node"; exit 1; }
 
-          test "$(systemctl show -p User --value fastcache-compile-node)" = fastcache-node
+          test "$(systemctl show -p User --value pace-node)" = pace-node
 
           # The stop path, on real systemd and on an ADOPTED descriptor. This is
           # the assertion that matters most here: POSIX does not unblock a parked
@@ -2850,43 +2850,43 @@ jobs:
           # already shipped once, on the ordinary bind path. `Result=success`
           # distinguishes a clean exit from a killed one; `is-system-running`
           # would not.
-          sudo systemctl stop fastcache-compile-node
-          test "$(systemctl show -p Result --value fastcache-compile-node)" = success \
+          sudo systemctl stop pace-node
+          test "$(systemctl show -p Result --value pace-node)" = success \
             || { echo "::error::the worker did not stop cleanly"
-                 sudo journalctl -u fastcache-compile-node --no-pager; exit 1; }
-          sudo systemctl stop fastcache-compile-node.socket
+                 sudo journalctl -u pace-node --no-pager; exit 1; }
+          sudo systemctl stop pace-node.socket
 
       - name: "Verify an upgrade keeps local config edits"
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          echo '# local edit that must survive' | sudo tee -a /etc/fastcached/fastcached.yaml >/dev/null
-          sudo apt-get install -y --reinstall ./$(ls fastcached_*.deb)
-          sudo grep -q 'local edit that must survive' /etc/fastcached/fastcached.yaml \
+          echo '# local edit that must survive' | sudo tee -a /etc/pace/pace-kv.yaml >/dev/null
+          sudo apt-get install -y --reinstall ./$(ls pace_*.deb)
+          sudo grep -q 'local edit that must survive' /etc/pace/pace-kv.yaml \
             || { echo "::error::upgrade discarded the local config edit"; exit 1; }
-          sudo systemctl stop fastcached || true
+          sudo systemctl stop pace-kv || true
 
       - name: "Verify removal deregisters the service"
         run: |
           set -euo pipefail
-          sudo apt-get purge -y fastcached
-          test ! -e /usr/lib/systemd/system/fastcached.service
-          test ! -e /usr/lib/systemd/system/fastcache-compile-node.service
-          test ! -e /usr/lib/systemd/system/fastcache-compile-node.socket
+          sudo apt-get purge -y pace
+          test ! -e /usr/lib/systemd/system/pace-kv.service
+          test ! -e /usr/lib/systemd/system/pace-node.service
+          test ! -e /usr/lib/systemd/system/pace-node.socket
           # A leftover wants-symlink makes systemd log a failure on every boot.
-          test ! -e /etc/systemd/system/multi-user.target.wants/fastcached.service
+          test ! -e /etc/systemd/system/multi-user.target.wants/pace-kv.service
           # The socket is the unit that gets enabled, so it is the one that
           # leaves a symlink behind if the postrm forgets it.
-          test ! -e /etc/systemd/system/sockets.target.wants/fastcache-compile-node.socket
+          test ! -e /etc/systemd/system/sockets.target.wants/pace-node.socket
 
       - name: "Upload packages"
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-linux-packages
+          name: pace-linux-packages
           path: |
-            out/build/gcc-release/fastcached_*.deb
-            out/build/gcc-release/fastcached-*.rpm
-            out/build/gcc-release/fastcached-*.tar.gz
+            out/build/gcc-release/pace_*.deb
+            out/build/gcc-release/pace-*.rpm
+            out/build/gcc-release/pace-*.tar.gz
           if-no-files-found: error
 
   package-macos:
@@ -3034,7 +3034,7 @@ jobs:
         #
         # A REJECTION is not covered by this and must not be: that is Apple having
         # looked at the artefact and refused it, which is a fact about the package
-        # and is fatal on every ref. See `FASTCACHED_NOTARY_VERDICTS`.
+        # and is fatal on every ref. See `PACE_NOTARY_VERDICTS`.
         env:
           REF_TYPE: ${{ github.ref_type }}
         run: |
@@ -3061,7 +3061,7 @@ jobs:
           set -eu
           KEY_PATH=$RUNNER_TEMP/notary-key.p8
           printf '%s' "$APPLE_API_KEY_P8" | base64 --decode -o "$KEY_PATH"
-          xcrun notarytool store-credentials fastcached-notary \
+          xcrun notarytool store-credentials pace-notary \
                 --key "$KEY_PATH" \
                 --key-id "$APPLE_API_KEY_ID" \
                 --issuer "$APPLE_API_ISSUER_ID"
@@ -3088,17 +3088,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=/usr/bin/clang \
             -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-            -DFASTCACHED_BUILD_TESTS=OFF \
-            -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON \
+            -DPACE_BUILD_TESTS=OFF \
+            -DPACE_PACKAGE_ROOT_PREFIX=ON \
             -DCPM_USE_LOCAL_PACKAGES=OFF \
-            -DFASTCACHED_ENABLE_TLS=ON \
+            -DPACE_ENABLE_TLS=ON \
             -DOPENSSL_USE_STATIC_LIBS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
-            -DFASTCACHED_MACOS_SIGN_IDENTITY_APP="$IDENTITY_APP" \
-            -DFASTCACHED_MACOS_SIGN_IDENTITY_PKG="$IDENTITY_PKG" \
-            -DFASTCACHED_MACOS_NOTARIZE="$NOTARIZE" \
-            -DFASTCACHED_MACOS_NOTARY_STALL_IS_FATAL="${{ steps.notary.outputs.stall_is_fatal }}" \
-            -DFASTCACHED_REQUIRE_EXACT_VERSION=${{ env.FASTCACHED_REQUIRE_EXACT_VERSION }}
+            -DPACE_MACOS_SIGN_IDENTITY_APP="$IDENTITY_APP" \
+            -DPACE_MACOS_SIGN_IDENTITY_PKG="$IDENTITY_PKG" \
+            -DPACE_MACOS_NOTARIZE="$NOTARIZE" \
+            -DPACE_MACOS_NOTARY_STALL_IS_FATAL="${{ steps.notary.outputs.stall_is_fatal }}" \
+            -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442).
@@ -3106,7 +3106,7 @@ jobs:
         run: bash scripts/run-check.sh scripts/check-instruction-set-flags.sh out/build/macos-package/compile_commands.json
 
       - name: "Build"
-        run: cmake --build out/build/macos-package --target fastcached fastcache-cc fastcache-compile-node fastcache-cli
+        run: cmake --build out/build/macos-package --target pace-kv pace-cc pace-node pacectl
 
       - name: "Verify the binaries are redistributable"
         # The regression that would otherwise ship silently: everything builds,
@@ -3114,7 +3114,7 @@ jobs:
         # without the build host's Homebrew prefix.
         run: |
           set -euo pipefail
-          for tool in fastcached fastcache-cc fastcache-compile-node fastcache-cli; do
+          for tool in pace-kv pace-cc pace-node pacectl; do
             binary="out/build/macos-package/target/$tool"
             echo "== $tool"; otool -L "$binary"
             strays="$(otool -L "$binary" | tail -n +2 | awk '{print $1}' | grep -v '^/usr/lib/' || true)"
@@ -3229,7 +3229,7 @@ jobs:
         #      and claim nothing about Apple
         #
         # A verdict token this step does not know is refused rather than ignored: a
-        # row added to `FASTCACHED_NOTARY_VERDICTS` and not here must not pass
+        # row added to `PACE_NOTARY_VERDICTS` and not here must not pass
         # quietly, which is what an unguarded `*)` arm would do.
         if: ${{ !cancelled() }}
         env:
@@ -3268,7 +3268,7 @@ jobs:
               unstapled)
                 echo "::error title=Notarization ticket could not be stapled::${name}: Apple accepted the submission and the ticket could not be attached, so an offline install would fall back to an online Gatekeeper check." ;;
               *)
-                echo "::error title=Unknown notarization verdict::'${verdict}' for ${name} is in no row this step knows. A row was added to FASTCACHED_NOTARY_VERDICTS in cmake/MacOSNotarizePkg.cmake and not here."
+                echo "::error title=Unknown notarization verdict::'${verdict}' for ${name} is in no row this step knows. A row was added to PACE_NOTARY_VERDICTS in cmake/MacOSNotarizePkg.cmake and not here."
                 unknown=1 ;;
             esac
           done < "$RECORD"
@@ -3278,7 +3278,7 @@ jobs:
         working-directory: out/build/macos-package
         run: |
           set -euo pipefail
-          pkg=$(ls fastcached-*.pkg)
+          pkg=$(ls pace-*.pkg)
           echo "== choices"
           pkgutil --expand "$pkg" /tmp/pkgx
           grep -E '<choice id=' /tmp/pkgx/Distribution
@@ -3301,8 +3301,8 @@ jobs:
           RECORD: notarization-verdict.txt
         run: |
           set -euo pipefail
-          pkg=$(ls fastcached-*.pkg)
-          dmg=$(ls fastcached-*.dmg)
+          pkg=$(ls pace-*.pkg)
+          dmg=$(ls pace-*.dmg)
 
           # Signing is independent of notarization, so this half is asserted
           # whatever Apple did.
@@ -3338,7 +3338,7 @@ jobs:
           xcrun stapler validate "$dmg"
 
       - name: "Exercise the launchd integration"
-        run: ./scripts/macos-service-e2e.sh --fastcached out/build/macos-package/target/fastcached
+        run: ./scripts/macos-service-e2e.sh --pace-kv out/build/macos-package/target/pace-kv
 
       - name: "Install, exercise and remove the package"
         # --scope daemon, not the installer's default: a runner has no console
@@ -3346,7 +3346,7 @@ jobs:
         # does nothing and there would be no running service to assert against.
         # A LaunchDaemon needs no login, so this variant verifies the whole chain
         # non-interactively — service account created via dscl, job bootstrapped
-        # into the system domain, running as _fastcached, serving on the port,
+        # into the system domain, running as _pace-kv, serving on the port,
         # and every trace removed by the uninstaller. The agent's launchd path is
         # covered by the macos-service-e2e.sh step above.
         #
@@ -3355,16 +3355,16 @@ jobs:
         # means the test did not run and should not pass quietly.
         run: |
           sudo -n true || { echo "::error::passwordless sudo unavailable; the install test cannot run"; exit 1; }
-          ./scripts/macos-package-e2e.sh --scope daemon --pkg "$(ls out/build/macos-package/fastcached-*.pkg)"
+          ./scripts/macos-package-e2e.sh --scope daemon --pkg "$(ls out/build/macos-package/pace-*.pkg)"
 
       - name: "Upload packages"
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-macos-packages
+          name: pace-macos-packages
           path: |
-            out/build/macos-package/fastcached-*.pkg
-            out/build/macos-package/fastcached-*.dmg
-            out/build/macos-package/fastcached-*.tar.gz
+            out/build/macos-package/pace-*.pkg
+            out/build/macos-package/pace-*.dmg
+            out/build/macos-package/pace-*.tar.gz
           if-no-files-found: error
 
   package-windows:
@@ -3415,9 +3415,9 @@ jobs:
           toolset: "14.44"
 
       - name: "Configure"
-        # FASTCACHED_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
+        # PACE_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
         # which is where the "only on a tag run" reasoning is written down.
-        run: cmake --preset cl-release -DALLOW_SCCACHE_FALLBACK=ON -DFASTCACHED_BUILD_TESTS=OFF -DFASTCACHED_REQUIRE_EXACT_VERSION=${{ env.FASTCACHED_REQUIRE_EXACT_VERSION }}
+        run: cmake --preset cl-release -DALLOW_SCCACHE_FALLBACK=ON -DPACE_BUILD_TESTS=OFF -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442). Git Bash, because the wrapper converts its own paths for the
@@ -3427,7 +3427,7 @@ jobs:
         run: bash scripts/run-check.sh scripts/check-instruction-set-flags.sh out/build/cl-release/compile_commands.json
 
       - name: "Build"
-        run: cmake --build --preset cl-release --target fastcached fastcache-cc fastcache-compile-node fastcache-cli
+        run: cmake --build --preset cl-release --target pace-kv pace-cc pace-node pacectl
 
       # Same assertion as the `windows` job, where the reasoning is written out.
       - name: "Assert sccache actually handled the build"
@@ -3473,7 +3473,7 @@ jobs:
           exit $code
 
       # An operator upgrading from the MSI they run TODAY, 0.3.0, whose uninstall
-      # deletes both services and which leaves FastCached auto-starting on 6674. A
+      # deletes both services and which leaves pace-kv auto-starting on 6674. A
       # major upgrade runs that uninstall first, so the new package must register
       # both services again rather than trust them to survive. The upgrade states NO
       # property, as an operator who has read nothing types it: 0.3.0 remembered
@@ -3483,9 +3483,9 @@ jobs:
       # Then two builds of THIS package upgrade one another, each direction being
       # possible because they share a version and CPack's MajorUpgrade allows the
       # same version: keeping both features (the node's registration must SURVIVE,
-      # so no node property is passed), dropping fastcached, then dropping the node
+      # so no node property is passed), dropping pace-kv, then dropping the node
       # (each time the new product deletes the dropped feature's leftover
-      # registration). Last, a fresh install told FASTCACHED_START_SERVICE=0. Every
+      # registration). Last, a fresh install told PACE_START_SERVICE=0. Every
       # transaction is followed by the service table it must leave
       # (scripts/lib/MsiServiceTable.psm1).
       #
@@ -3502,7 +3502,22 @@ jobs:
       #
       # A script, because the subject is Windows Installer and the service control
       # manager across two packages, which no in-process test reaches.
-      - name: "Upgrade from the 0.3.0 MSI, then between two builds of this one"
+      # Pace is a NEW product, and the product it was renamed from is DETECTED by its upgrade
+      # code, never upgraded (packaging/windows/service-actions.xml). The script installs that
+      # product's last release, expects Pace's install over it to be REFUSED with the launch
+      # condition's message, then uninstalls it and installs Pace; its header has the steps.
+      - name: "Refused while the retired product is installed, installed once it is not"
+        shell: pwsh
+        working-directory: out/build/cl-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Get-ChildItem -Filter *.msi | Select-Object -First 1).FullName
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/msi-refuses-retired-product.ps1') -Package $msi
+          if ($LASTEXITCODE -ne 0) { throw "the refusal check exited $LASTEXITCODE" }
+
+      - name: "Upgrade between two builds of this one"
         shell: pwsh
         working-directory: out/build/cl-release
         env:
@@ -3510,29 +3525,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
-          # 0.3.0's installer registers its node only with a scheduler; this one takes none, and a
-          # node that serves refuses one. Its advertise property is 0.3.0's; this package has none.
-          $release030NodeProperties = @('FASTCACHE_NODE_SCHEDULER=127.0.0.1:6675', 'FASTCACHE_NODE_ADVERTISE=127.0.0.1:6674')
-          $fastcachedOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
+          # Pace's own upgrades only: Pace is a new product, and the releases of the product it
+          # was renamed from (0.3.0, 0.5.0) are refused rather than upgraded, as the step above proves.
+          $paceKvOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
           $oldSession = 'Adding UPGRADINGPRODUCTCODE property|UPGRADINGPRODUCTCODE=\{'
-
-          # The asset this step's expectations were written against. A release asset
-          # can be replaced under the same tag; a different file is a different
-          # subject, refused by name rather than tested.
-          $release = 'v0.3.0'
-          $releaseSha256 = 'BBF565C835A72D9F537F6869B3B46AC0176967A574F7CF7337AAC3FAE646CEAB'
-          $releaseProductCode = '{FDCDAB73-40AF-4EDA-9340-7C33986C3207}'
-          $old = Join-Path $env:RUNNER_TEMP 'previous-release'
-          New-Item -ItemType Directory -Force -Path $old | Out-Null
-          gh release download $release --repo LASTRADA-Software/fastcached --pattern '*.msi' --dir $old --clobber
-          if ($LASTEXITCODE -ne 0) { throw "could not download the $release MSI (gh exited $LASTEXITCODE)" }
-          $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
-          if (-not $previous) { throw "release $release carries no .msi, so this step cannot test the upgrade it exists for" }
-          $sha256 = (Get-FileHash -Algorithm SHA256 -Path $previous).Hash
-          if ($sha256 -ne $releaseSha256) { throw "the $release MSI's SHA256 is $sha256, not the pinned ${releaseSha256}: the asset was replaced" }
-          if ((Get-MsiProperty $previous 'ProductCode') -ne $releaseProductCode) {
-            throw "the $release MSI's ProductCode is $(Get-MsiProperty $previous 'ProductCode'), not the pinned $releaseProductCode"
-          }
 
           # The build the Package step made, which the steps after this one install
           # and the upload ships, and a second cpack run of the same tree beside it.
@@ -3557,58 +3553,18 @@ jobs:
           # What makes each transaction below an UPGRADE rather than a second
           # product or a repair, checked against the packages rather than assumed.
           $family = Get-MsiProperty $first 'UpgradeCode'
-          foreach ($package in $previous, $newer) {
-            if ((Get-MsiProperty $package 'UpgradeCode') -ne $family) { throw "$package is not of this package's family $family" }
-          }
+          if ((Get-MsiProperty $newer 'UpgradeCode') -ne $family) { throw "$newer is not of this package's family $family" }
           $productOf = @{}
-          foreach ($package in $previous, $first, $newer) { $productOf[$package] = Get-MsiProperty $package 'ProductCode' }
-          if (@($productOf.Values | Sort-Object -Unique).Count -ne 3) {
-            throw "two of the three packages share a ProductCode, so one install would be a repair: $($productOf.Values -join ', ')"
+          foreach ($package in $first, $newer) { $productOf[$package] = Get-MsiProperty $package 'ProductCode' }
+          if (@($productOf.Values | Sort-Object -Unique).Count -ne 2) {
+            throw "the two builds share a ProductCode, so the upgrade would be a repair: $($productOf.Values -join ', ')"
           }
 
-          # The starting point: 0.3.0 with the node registered.
-          Invoke-Msiexec -Leaves Release030WithNode -Released -Operation '/i' -Package $previous -Log 'previous.log' -Properties $release030NodeProperties -What "installing $release"
-          Assert-InstalledProduct $family $productOf[$previous]
-          Assert-ServiceTable -Row Release030WithNode -Log 'previous.log'
-
-          # Exactly 0, as every upgrade here: 0.3.0 stops its services WITHOUT waiting, and this
-          # package waits for their processes to exit before it replaces a file
-          # (FastCacheAwaitServiceExit) -- 3010 was a file one of them still held, replaced at the
-          # next boot, with the node's checked steps then running whichever binary was on the disk.
-          # No property: the node registration exists and runs afterwards all the same.
-          # And nothing the table did not ask for may happen DURING it, which a row read afterwards
-          # cannot see: Invoke-Msiexec judges every transaction against the row it -Leaves (here: no
-          # unexpected termination, and no start of FastCached, which NodeSelected leaves stopped).
-          # FastCached ran before this upgrade, and PR 1634's CI MEASURED where its stray start came
-          # from: 0.3.0's removal, nested in this upgrade with 0.3.0's own properties, opened a Restart
-          # Manager session and shut FastCached down, and Windows Installer restarted it by name after
-          # the whole transaction had ended ("Failed while restarting applications. Error: 352"), onto
-          # the port the node holds. Nothing of this package can run after that, so the table leaves
-          # FastCached DISABLED beside the node, and that start fails with no process.
-          Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $first -Log 'upgrade.log' -What "the upgrade from $release"
+          # The starting point: this build, default features, so the node is selected.
+          Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $first -Log 'first.log' -What 'installing this build'
           Assert-InstalledProduct $family $productOf[$first]
-          # The control that keeps the judgement above from passing VACUOUSLY: the nested session did
-          # shut FastCached down, so Windows Installer did try to restart it, and only the disabled
-          # start type kept that from starting anything. Wording MEASURED on PR 1634's runner.
-          Assert-MsiLog -Path 'upgrade.log' -Present 'RESTART MANAGER: Successfully shut down all applications in the service''s session that held files in use'
-          # The ORDER is the fix (batch 4 review, B4-2): 0.3.0's own uninstall-service ran FIRST
-          # (RemoveExistingProducts is scheduled afterInstallInitialize); the files waited for 0.3.0's
-          # service processes; FastCached, kept and disabled, was stopped and its PROCESS waited
-          # for -- it held 6674, which the node binds exclusively; and only then was the node
-          # registered and started, both checked, so either failing fails the transaction above. And
-          # what is registered now carries no --scheduler, which the node refuses at every start.
-          Assert-MsiActionOrder -Path 'upgrade.log' -Actions 'FastCacheNodeUninstallService', 'FastCacheAwaitServiceExit', `
-            'FastCachedAwaitExitForNode', 'FastCacheNodeInstallService', 'FastCacheNodeStartService'
-          Assert-NodeRegistrationLacks '--scheduler'
-          Assert-ServiceTable -Row NodeSelected -Log 'upgrade.log'
-
-          # The upgrade re-applied an OLD, exposed 0.3.0 state directory: assert it is now
-          # private, both directions. A 0.3.0 directory owned by the service or SYSTEM is
-          # secured in place; one a foreign account owns or that was junctioned now REFUSES
-          # the ACL by design, which would surface here as this assertion's throw.
+          Assert-ServiceTable -Row NodeSelected -Log 'first.log'
           Assert-NodeStatePrivate
-          # And its firewall opens what the service does: the record the 0.3.0 directory held is
-          # read only after the install secured it, so the rules carry consensus and discovery.
           Assert-NodeFirewall
 
           # Keeping both features, with NO node property: the node is registered again
@@ -3621,70 +3577,80 @@ jobs:
           # And over the advertised endpoint an earlier package of this table REMEMBERED (W-10): planted as
           # that package wrote it, an IP literal a roaming laptop once typed. The property is gone, so the
           # upgrade must forget the value and register the node with no advertise flag at all.
-          $installerKey = 'HKLM:\SOFTWARE\fastcached\Installer'
+          $installerKey = 'HKLM:\SOFTWARE\Pace\Installer'
           New-Item -Path $installerKey -Force | Out-Null
           New-ItemProperty -Path $installerKey -Name 'NodeAdvertise' -Value '10.8.0.7:6674' -PropertyType String -Force | Out-Null
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $newer -Log 'upgrade-newer.log' -What 'an upgrade between two builds'
           Assert-InstalledProduct $family $productOf[$newer]
-          Assert-MsiLog -Path 'upgrade-newer.log' -Present $oldSession, (Get-MsiActionRanPattern 'FastCacheForgetNodeAdvertise') `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeUninstallService'), (Get-MsiActionRanPattern 'FastCachedUninstallService')
+          Assert-MsiLog -Path 'upgrade-newer.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceForgetNodeAdvertise') `
+            -Absent (Get-MsiActionRanPattern 'PaceNodeUninstallService'), (Get-MsiActionRanPattern 'PaceUninstallService')
+          # The ORDER is the fix (batch 4 review, B4-2), asserted on the upgrade that keeps the node: the
+          # files waited for the old product's service processes; pace-kv, kept and disabled, was stopped
+          # and its PROCESS waited for -- it held 6674, which the node binds exclusively; and only then
+          # was the node registered and started, both checked. The node's uninstall-service is not in
+          # this order because a Pace-to-Pace upgrade keeps the registration (its absence is asserted
+          # above). The Restart Manager control is Invoke-Msiexec's own: every transaction of this
+          # build's package must log that MSIRESTARTMANAGERCONTROL disabled it, and the old Pace
+          # package's nested removal carries the same row, so it opens no session to restart pace-kv.
+          Assert-MsiActionOrder -Path 'upgrade-newer.log' -Actions 'PaceAwaitServiceExit', 'PaceAwaitExitForNode', `
+            'PaceNodeInstallService', 'PaceNodeStartService'
           Assert-ServiceTable -Row NodeSelected -Log 'upgrade-newer.log'
           if ($null -ne (Get-ItemProperty -Path $installerKey -Name 'NodeAdvertise' -ErrorAction SilentlyContinue)) {
             throw "the upgrade left the remembered NodeAdvertise value in $installerKey; nothing reads it, and the property is gone"
           }
           Assert-NodeRegistrationLacks '--advertise'
 
-          # Dropping fastcached on an upgrade, the node kept without its properties:
-          # the old product's half keeps fastcached's registration, the new product
-          # has no fastcached.exe to remove it with, so sc.exe deletes the leftover.
+          # Dropping pace-kv on an upgrade, the node kept without its properties:
+          # the old product's half keeps pace-kv's registration, the new product
+          # has no pace-kv.exe to remove it with, so sc.exe deletes the leftover.
           Invoke-Msiexec -Leaves NodeAlone -Operation '/i' -Package $first -Log 'upgrade-node-only.log' -Properties 'ADDLOCAL=CM_C_Cli,CM_C_Node' `
-            -What 'an upgrade deselecting fastcached'
+            -What 'an upgrade deselecting pace-kv'
           Assert-InstalledProduct $family $productOf[$first]
-          Assert-MsiLog -Path 'upgrade-node-only.log' -Present $oldSession, (Get-MsiActionRanPattern 'FastCachedDeleteLeftover') `
-            -Absent (Get-MsiActionRanPattern 'FastCachedUninstallService'), (Get-MsiActionRanPattern 'FastCacheNodeUninstallService')
+          Assert-MsiLog -Path 'upgrade-node-only.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceDeleteLeftover') `
+            -Absent (Get-MsiActionRanPattern 'PaceUninstallService'), (Get-MsiActionRanPattern 'PaceNodeUninstallService')
           Assert-ServiceTable -Row NodeAlone -Log 'upgrade-node-only.log'
 
           # Dropping the node on an upgrade, the same way round: its leftover is
-          # deleted by sc.exe, and fastcached is registered again, auto and started.
+          # deleted by sc.exe, and pace-kv is registered again, auto and started.
           # And its FIREWALL GROUP goes with it (W-11): sc.exe removes no rule, so the fragment
           # removes the group. Populated first, or an empty group afterwards would prove nothing.
-          # (fastcached's group is not asserted the other way round: the daemon binds loopback by
+          # (pace-kv's group is not asserted the other way round: the daemon binds loopback by
           # default, opens no rule, and so leaves nothing to orphan here -- an empty group there is
           # true whether or not its removal works.)
           Assert-NodeFirewall
-          Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $newer -Log 'upgrade-deselect.log' -Properties $fastcachedOnly `
+          Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $newer -Log 'upgrade-deselect.log' -Properties $paceKvOnly `
             -What 'an upgrade deselecting the node'
           Assert-InstalledProduct $family $productOf[$newer]
-          Assert-MsiLog -Path 'upgrade-deselect.log' -Present $oldSession, (Get-MsiActionRanPattern 'FastCacheNodeDeleteLeftover'), `
-            (Get-MsiActionRanPattern 'FastCacheNodeDeleteLeftoverFirewall') `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeUninstallService')
+          Assert-MsiLog -Path 'upgrade-deselect.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceNodeDeleteLeftover'), `
+            (Get-MsiActionRanPattern 'PaceNodeDeleteLeftoverFirewall') `
+            -Absent (Get-MsiActionRanPattern 'PaceNodeUninstallService')
           Assert-ServiceTable -Row DaemonAlone -Log 'upgrade-deselect.log'
-          Assert-FirewallGroupEmpty 'fastcached: FastCacheCompileNode'
+          Assert-FirewallGroupEmpty 'Pace: pace-node'
 
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $newer -Log 'uninstall-upgraded.log' -What 'uninstalling after the upgrades'
           Assert-InstalledProduct $family ''
           Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-upgraded.log'
 
-          # The opt-out: fastcached registered auto and left stopped.
-          Invoke-Msiexec -Leaves DaemonAloneUnstarted -Operation '/i' -Package $first -Log 'install-unstarted.log' -Properties $fastcachedOnly, 'FASTCACHED_START_SERVICE=0' `
-            -What 'a fastcached-only install told not to start it'
+          # The opt-out: pace-kv registered auto and left stopped.
+          Invoke-Msiexec -Leaves DaemonAloneUnstarted -Operation '/i' -Package $first -Log 'install-unstarted.log' -Properties $paceKvOnly, 'PACE_START_SERVICE=0' `
+            -What 'a pace-kv-only install told not to start it'
           Assert-ServiceTable -Row DaemonAloneUnstarted -Log 'install-unstarted.log'
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $first -Log 'uninstall-unstarted.log' -What 'uninstalling the unstarted install'
           Assert-InstalledProduct $family ''
           Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-unstarted.log'
 
-          # Host C, the shared-cache machine (W-12): installed fastcached-only, then upgraded by a
+          # Host C, the shared-cache machine (W-12): installed pace-kv-only, then upgraded by a
           # double-click -- a plain /i of the newer package with NO ADDLOCAL. MigrateFeatureStates
-          # carries the old selection over, so it must stay fastcached-only: the node neither
-          # installed nor registered, and fastcached auto and started as before.
-          Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $first -Log 'install-daemon-only.log' -Properties $fastcachedOnly `
-            -What 'a fastcached-only install, host C'
+          # carries the old selection over, so it must stay pace-kv-only: the node neither
+          # installed nor registered, and pace-kv auto and started as before.
+          Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $first -Log 'install-daemon-only.log' -Properties $paceKvOnly `
+            -What 'a pace-kv-only install, host C'
           Assert-ServiceTable -Row DaemonAlone -Log 'install-daemon-only.log'
           Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $newer -Log 'upgrade-daemon-only.log' `
-            -What 'a plain upgrade of a fastcached-only install, no ADDLOCAL'
+            -What 'a plain upgrade of a pace-kv-only install, no ADDLOCAL'
           Assert-InstalledProduct $family $productOf[$newer]
           Assert-MsiLog -Path 'upgrade-daemon-only.log' -Present $oldSession `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeInstallService'), (Get-MsiActionRanPattern 'FastCacheNodeStartService')
+            -Absent (Get-MsiActionRanPattern 'PaceNodeInstallService'), (Get-MsiActionRanPattern 'PaceNodeStartService')
           Assert-ServiceTable -Row DaemonAlone -Log 'upgrade-daemon-only.log'
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $newer -Log 'uninstall-daemon-only.log' -What 'uninstalling host C'
           Assert-InstalledProduct $family ''
@@ -3692,7 +3658,7 @@ jobs:
 
           # The steps below start from a clean machine: what 0.3.0 seeded, and the
           # identity key the node minted, are not what they assert about.
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
 
       # The DERIVED leg: whatever release is the latest, upgraded to this build.
       # While that is 0.3.0 the step above is this leg, and this step says so. Once
@@ -3710,7 +3676,7 @@ jobs:
       #     so a branch that does not contain the latest release's tag would
       #     install as a downgrade, which msiexec refuses with 1603. That is
       #     refused before any install, naming the cause: rebase.
-      - name: "Upgrade from the latest release, when that is not 0.3.0"
+      - name: "Upgrade from the latest release, when that is Pace"
         shell: pwsh
         working-directory: out/build/cl-release
         env:
@@ -3718,18 +3684,21 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
-          $latest = gh release view --repo LASTRADA-Software/fastcached --json tagName --jq .tagName
+          $latest = gh release view --repo LASTRADA-Software/pace --json tagName --jq .tagName
           if ($LASTEXITCODE -ne 0 -or -not $latest) { throw "could not read the latest release's tag (gh exited $LASTEXITCODE)" }
-          if ($latest -eq 'v0.3.0') {
-            Write-Host "::notice::the latest release is $latest, which the previous step upgrades from with its asset pinned; this leg is covered there"
+          # A release of the product Pace was renamed from (0.5.0 and earlier) is a different
+          # product: refused, not upgraded, as the refusal step proves. Asked of the asset's
+          # upgrade code rather than of the tag, so the first Pace release turns this leg on.
+          $retiredUpgradeCode = '{581D183D-47A3-44FC-97E9-4B5491E792D8}'
+          $old = Join-Path $env:RUNNER_TEMP 'latest-release'
+          New-Item -ItemType Directory -Force -Path $old | Out-Null
+          gh release download $latest --repo LASTRADA-Software/pace --pattern '*.msi' --dir $old --clobber
+          if ($LASTEXITCODE -ne 0) { throw "could not download the $latest MSI (gh exited $LASTEXITCODE)" }
+          $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
+          if (-not $previous) { throw "release $latest carries no .msi, so this step cannot test the upgrade it exists for" }
+          if ((Get-MsiProperty $previous 'UpgradeCode') -eq $retiredUpgradeCode) {
+            Write-Host "::notice::the latest release $latest carries the retired upgrade code $retiredUpgradeCode, which Pace refuses rather than upgrades; the refusal step covers it"
           } else {
-            $old = Join-Path $env:RUNNER_TEMP 'latest-release'
-            New-Item -ItemType Directory -Force -Path $old | Out-Null
-            gh release download $latest --repo LASTRADA-Software/fastcached --pattern '*.msi' --dir $old --clobber
-            if ($LASTEXITCODE -ne 0) { throw "could not download the $latest MSI (gh exited $LASTEXITCODE)" }
-            $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
-            if (-not $previous) { throw "release $latest carries no .msi, so this step cannot test the upgrade it exists for" }
-
             $first = (Get-ChildItem -Filter *.msi | Select-Object -First 1).FullName
             $family = Get-MsiProperty $first 'UpgradeCode'
             if ((Get-MsiProperty $previous 'UpgradeCode') -ne $family) { throw "$previous is not of this package's family $family" }
@@ -3743,7 +3712,7 @@ jobs:
             # registration carries `--scheduler`: the upgrade below, with no property, must
             # register the node again without it, or the service refuses every start.
             Invoke-Msiexec -Leaves NodeSelected -Released -Operation '/i' -Package $previous -Log 'latest.log' `
-              -Properties 'FASTCACHE_NODE_SCHEDULER=127.0.0.1:6675', 'FASTCACHE_NODE_ADVERTISE=127.0.0.1:6674' -What "installing $latest"
+              -Properties 'PACE_NODE_SCHEDULER=127.0.0.1:6675', 'PACE_NODE_ADVERTISE=127.0.0.1:6674' -What "installing $latest"
             Assert-InstalledProduct $family $previousCode
             Assert-ServiceTable -Row NodeSelected -Log 'latest.log'
 
@@ -3754,19 +3723,19 @@ jobs:
             Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $first -Log 'uninstall-latest.log' -What "uninstalling after the upgrade from $latest"
             Assert-InstalledProduct $family ''
             Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-latest.log'
-            Remove-FastCacheMachineState
+            Remove-PaceMachineState
           }
 
       # #1629: a deliberately FAILED upgrade must leave the machine exactly as it was. The shipped
-      # MSI fails last when FASTCACHE_FAIL_FOR_TEST=1, behind every other script action, so the
+      # MSI fails last when PACE_FAIL_FOR_TEST=1, behind every other script action, so the
       # rollback runs every rollback action we have. The scenario is chosen so that the upgrade
       # would CHANGE what is compared, and the last leg proves that a SUCCESSFUL run of it does:
-      # N is installed fastcached-only into a custom root, and N+1 adds the node, which re-registers
-      # fastcached disabled and stopped and creates a second service.
+      # N is installed pace-kv-only into a custom root, and N+1 adds the node, which re-registers
+      # pace-kv disabled and stopped and creates a second service.
       #
       # The upgrade KEEPS N's root. CPack's WiX generator searches INSTALL_ROOT from the old
       # product's Uninstall\<code>\InstallLocation (its `FindInstallLocation` RegistrySearch, in
-      # the generated properties.wxi), so N+1 lands in the custom root too and fastcached's
+      # the generated properties.wxi), so N+1 lands in the custom root too and pace-kv's
       # executable path never changes. A plain re-registration would therefore put the ImagePath
       # back as well as the exact restore does, and the custom root alone makes no ImagePath claim.
       # So N's registration carries ONE thing only the exact restore puts back (Set-NRegistration):
@@ -3774,29 +3743,29 @@ jobs:
       # the exact restore writes it. `--log-level` is a CliParser.cpp option row that
       # BuildServiceArgv re-emits only when it was typed (`emitIfExplicit`, ServiceControl.cpp), so
       # it survives a registration round trip, and `info` is the default: the daemon starts and
-      # serves on its default binds with no new port or file. The twin FastCachedRestoreRegistration
-      # runs `fastcached.exe --install-service --service-start=<auto|manual>` plus its firewall
+      # serves on its default binds with no new port or file. The twin PaceRestoreRegistration
+      # runs `pace-kv.exe --install-service --service-start=<auto|manual>` plus its firewall
       # argument and nothing else, and the command line it registers is BuildServiceCommandLine of
       # THAT invocation (MakeDaemonServiceSpec), written whole by `Reapply`'s ChangeServiceConfig,
       # so it carries no `--log-level`. That the twin drops the flag is INFERRED from that code;
-      # what is MEASURED is that FastCachedInstallService, an invocation of the same shape
+      # what is MEASURED is that PaceInstallService, an invocation of the same shape
       # (`--install-service --service-start=... [firewall]`), registered N as `"<root>bin\
-      # fastcached.exe" --daemon --service-name=FastCached` and nothing more (run 37452107865's
+      # pace-kv.exe" --daemon --service-name=pace-kv` and nothing more (run 37452107865's
       # snapshot of N). The last leg measures it again: a successful upgrade's ImagePath changes.
       # The custom root stays, because it shows that an upgrade keeps it: the last leg asserts the
       # custom root's binary is still there after a SUCCESSFUL upgrade.
       #
       # Three controls run the same failure on patched COPIES, each isolating one claim:
-      #   A  every rollback row that rewrites fastcached's registration switched off -- the exact
+      #   A  every rollback row that rewrites pace-kv's registration switched off -- the exact
       #      restore, its re-registration twin, and the undo -- so NOTHING puts it back: the
-      #      comparison must go red on `service FastCached`, or it cannot see a restore that did
+      #      comparison must go red on `service pace-kv`, or it cannot see a restore that did
       #      not run.
       #   B  only the twin switched off: the comparison must be EMPTY, the exact restore putting N
-      #      back alone with the shipped commit-phase discard. A `service FastCached` difference
+      #      back alone with the shipped commit-phase discard. A `service pace-kv` difference
       #      here is a defect in the exact restore, reported as one; any other field is outside
       #      its job and reported as that.
       #   C  the twin switched off AND the discard deferred again (its commit bit cleared): must go
-      #      red on `service FastCached`. B and C differ ONLY in the discard's phase, which is what
+      #      red on `service pace-kv`. B and C differ ONLY in the discard's phase, which is what
       #      isolates the #1629 fix.
       # Switching off the exact restore ALONE could not discriminate while N's registration matched
       # what the twin rebuilds, which is why N now carries the flag: run 37452107865 MEASURED an
@@ -3825,10 +3794,10 @@ jobs:
           # command line because Start-Process joins an ArgumentList with plain spaces and msiexec
           # parses PROPERTY="value" itself, where a backslash before the closing quote is not an
           # escape (only "" is).
-          $root = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'fastcached 1629 root\'
-          $fastcachedOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
+          $root = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'pace-kv 1629 root\'
+          $paceKvOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
           $withNode = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher,CM_C_Node'
-          $failedHere = 'CustomAction FastCacheFailForTest returned actual error code'
+          $failedHere = 'CustomAction PaceFailForTest returned actual error code'
           $extraFlag = '--log-level=info'
 
           # What only the exact restore puts back (the header says why): a flag the twin's
@@ -3836,20 +3805,20 @@ jobs:
           # writes, never into the key; restarted so the flagged command line is proven to SERVE
           # before the subject depends on it; and read back from the key the snapshot reads.
           function Set-NRegistration {
-            $service = Get-CimInstance Win32_Service -Filter "Name='FastCached'"
-            if (-not $service) { throw "FastCached is not registered, so N's registration cannot be set" }
+            $service = Get-CimInstance Win32_Service -Filter "Name='pace-kv'"
+            if (-not $service) { throw "pace-kv is not registered, so N's registration cannot be set" }
             $changed = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = "$($service.PathName) $extraFlag" }
-            if ($changed.ReturnValue -ne 0) { throw "Win32_Service.Change of FastCached's command line returned $($changed.ReturnValue)" }
-            Restart-Service -Name FastCached -ErrorAction Stop
-            Assert-ServiceState @{ FastCached = @('Auto', 'Running') } | Out-Null
-            $key = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\FastCached'
+            if ($changed.ReturnValue -ne 0) { throw "Win32_Service.Change of pace-kv's command line returned $($changed.ReturnValue)" }
+            Restart-Service -Name pace-kv -ErrorAction Stop
+            Assert-ServiceState @{ 'pace-kv' = @('Auto', 'Running') } | Out-Null
+            $key = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\pace-kv'
             $imagePath = $key.GetValue('ImagePath', '', 'DoNotExpandEnvironmentNames')
-            if (-not $imagePath.EndsWith(" $extraFlag")) { throw "FastCached's ImagePath reads '$imagePath', expected it to end in ' $extraFlag'" }
-            Write-Host "N's FastCached: auto, running, ImagePath $imagePath"
+            if (-not $imagePath.EndsWith(" $extraFlag")) { throw "pace-kv's ImagePath reads '$imagePath', expected it to end in ' $extraFlag'" }
+            Write-Host "N's pace-kv: auto, running, ImagePath $imagePath"
           }
           function Install-N([string] $Log) {
-            Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $first -Log $Log -Properties $fastcachedOnly, "INSTALL_ROOT=`"$root`"" `
-              -What 'build N, fastcached-only, into a custom root'
+            Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $first -Log $Log -Properties $paceKvOnly, "INSTALL_ROOT=`"$root`"" `
+              -What 'build N, pace-kv-only, into a custom root'
             Assert-InstalledProduct $family $firstCode
             Assert-ServiceTable -Row DaemonAlone -Log $Log
             Set-NRegistration
@@ -3858,19 +3827,19 @@ jobs:
             Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $first -Log $Log -What 'uninstalling build N'
             Assert-InstalledProduct $family ''
             Assert-ServiceTable -Row NothingInstalled -Log $Log
-            Remove-FastCacheMachineState
+            Remove-PaceMachineState
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
           }
           # A PowerShell function returns EVERYTHING it emits, so the helpers are piped to Out-Null
           # and the result is asserted to be the one snapshot rather than an array holding it.
           # -Expect RollsBack: no row describes what may START during a rollback, so none is judged, and
           # every unexpected termination still is -- the controls too, by analysis: each restores or
-          # leaves fastcached's REGISTRATION runnable, and starts it once the node's removal has stopped
+          # leaves pace-kv's REGISTRATION runnable, and starts it once the node's removal has stopped
           # the node. A control that crashes a service is a finding about that restore, never exempted.
-          # SETTLED after the snapshot: the rollback's restart of fastcached is an unwaited sc.exe start,
+          # SETTLED after the snapshot: the rollback's restart of pace-kv is an unwaited sc.exe start,
           # so a restore that cannot serve crashes after msiexec exits, past the exit's judgement.
           function Invoke-FailedUpgrade([string] $Package, [string] $Log, [string] $What) {
-            Invoke-Msiexec -Expect RollsBack -Operation '/i' -Package $Package -Log $Log -Properties $withNode, 'FASTCACHE_FAIL_FOR_TEST=1' `
+            Invoke-Msiexec -Expect RollsBack -Operation '/i' -Package $Package -Log $Log -Properties $withNode, 'PACE_FAIL_FOR_TEST=1' `
               -Accept @(1603) -What $What | Out-Null
             Assert-MsiLog -Path $Log -Present $failedHere | Out-Null
             $snapshot = Get-InstallationSnapshot -UpgradeCode $family -Root $root
@@ -3893,7 +3862,7 @@ jobs:
             Write-Host "the $Tag reset reinstalled build N exactly ($($before.Count) fields)"
           }
 
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
           Install-N 'n-install.log'
           $before = Get-InstallationSnapshot -UpgradeCode $family -Root $root
           if ($before -isnot [System.Collections.Specialized.OrderedDictionary]) { throw "the snapshot before is not one ordered dictionary" }
@@ -3922,44 +3891,44 @@ jobs:
             Write-Host "$What, differences:`n  $($differences -join "`n  ")"
             return $differences
           }
-          # The twin: re-registers fastcached through its own --install-service, from what AppSearch
+          # The twin: re-registers pace-kv through its own --install-service, from what AppSearch
           # captured before the transaction, so it needs no rollback state at all.
-          $twinOff = Get-RowsSwitchedOff @('FastCachedRestoreRegistration')
+          $twinOff = Get-RowsSwitchedOff @('PaceRestoreRegistration')
 
           # Control A: the comparison sees a restore that did not run. EVERY rollback row that
-          # rewrites fastcached's registration is off:
-          #   FastCachedRestoreRegistrationExactly  the exact restore, from the rollback state;
-          #   FastCachedRestoreRegistration         its re-registration twin;
-          #   FastCachedUndoRegistration            the undo of a registration the transaction
-          #                                         CREATED -- conditioned NOT FASTCACHED_IMAGEPATH,
+          # rewrites pace-kv's registration is off:
+          #   PaceRestoreRegistrationExactly  the exact restore, from the rollback state;
+          #   PaceRestoreRegistration         its re-registration twin;
+          #   PaceUndoRegistration            the undo of a registration the transaction
+          #                                         CREATED -- conditioned NOT PACE_IMAGEPATH,
           #                                         so already false here, and off so the claim
           #                                         holds of the package rather than of this
           #                                         scenario's properties.
-          # Not rows of this kind, so left on: FastCachedRestartAfterStop (starts the service, the
+          # Not rows of this kind, so left on: PaceRestartAfterStop (starts the service, the
           # `state` field, never the registration), Windows Installer's own StopServices rollback
-          # (FastCachedStopForFiles, Stop only), and the node's rows (FastCacheCompileNode's).
-          $allOff = Get-RowsSwitchedOff @('FastCachedRestoreRegistrationExactly', 'FastCachedRestoreRegistration', 'FastCachedUndoRegistration')
-          $control = @(Invoke-Control 'control-no-restore' "control A: every restore of fastcached's registration switched off" $allOff.Statements $allOff.Verify)
-          if (-not ($control | Where-Object { $_ -like 'service FastCached:*' })) { throw "control A did not go red on fastcached's registration, so the comparison cannot see a restore that did not run" }
+          # (PaceStopForFiles, Stop only), and the node's rows (pace-node's).
+          $allOff = Get-RowsSwitchedOff @('PaceRestoreRegistrationExactly', 'PaceRestoreRegistration', 'PaceUndoRegistration')
+          $control = @(Invoke-Control 'control-no-restore' "control A: every restore of pace-kv's registration switched off" $allOff.Statements $allOff.Verify)
+          if (-not ($control | Where-Object { $_ -like 'service pace-kv:*' })) { throw "control A did not go red on pace-kv's registration, so the comparison cannot see a restore that did not run" }
           Reset-ToN 'control-no-restore'
 
           # Control B: the exact restore works ALONE. Only the twin is off, the shipped commit-phase
           # discard kept: the exact restore must put build N back by itself. A difference in
-          # fastcached's registration is not a weak control; it is a defect in the exact restore,
+          # pace-kv's registration is not a weak control; it is a defect in the exact restore,
           # which the twin was masking. Any OTHER field is outside the exact restore's job, and is
           # reported as that rather than blamed on it.
           $control = @(Invoke-Control 'control-exact-alone' 'control B: only the twin switched off' $twinOff.Statements $twinOff.Verify)
           if ($control.Count) {
-            $registration = @($control | Where-Object { $_ -like 'service FastCached:*' })
-            $elsewhere = @($control | Where-Object { $_ -notlike 'service FastCached:*' })
+            $registration = @($control | Where-Object { $_ -like 'service pace-kv:*' })
+            $elsewhere = @($control | Where-Object { $_ -notlike 'service pace-kv:*' })
             $findings = @()
             if ($registration.Count) {
-              Write-Host "::error title=The exact restore is defective::with its re-registration twin switched off, FastCachedRestoreRegistrationExactly did not restore fastcached's registration by itself; the twin was masking it"
-              $findings += "a DEFECT in FastCachedRestoreRegistrationExactly, not in this check, which must not be loosened:`n$($registration -join "`n")"
+              Write-Host "::error title=The exact restore is defective::with its re-registration twin switched off, PaceRestoreRegistrationExactly did not restore pace-kv's registration by itself; the twin was masking it"
+              $findings += "a DEFECT in PaceRestoreRegistrationExactly, not in this check, which must not be loosened:`n$($registration -join "`n")"
             }
             if ($elsewhere.Count) {
               Write-Host "::error title=Control B differs outside the exact restore's job::fields the exact restore does not write differ with only the twin switched off"
-              $findings += "fields OUTSIDE the exact restore's job (it writes only fastcached's registration), so not its defect:`n$($elsewhere -join "`n")"
+              $findings += "fields OUTSIDE the exact restore's job (it writes only pace-kv's registration), so not its defect:`n$($elsewhere -join "`n")"
             }
             throw "control B: with only the twin switched off, build N did not come back:`n$($findings -join "`n")"
           }
@@ -3967,58 +3936,58 @@ jobs:
           Reset-ToN 'control-exact-alone'
 
           # Control C: a discard inside the script costs the exact restore its state. The twin off as
-          # in B, and FastCacheDiscardRollbackState deferred again (commit bit cleared): B and C differ
+          # in B, and PaceDiscardRollbackState deferred again (commit bit cleared): B and C differ
           # ONLY in the discard's phase, which isolates the #1629 fix.
           # Read the shipped Type, assert the commit bit (0x200) is set, and clear it.
-          $type = [int](Get-MsiCustomActionType $newer 'FastCacheDiscardRollbackState')
-          if (-not ($type -band 0x200)) { throw "FastCacheDiscardRollbackState has Type $type, without the commit bit: the fix is not in this package" }
+          $type = [int](Get-MsiCustomActionType $newer 'PaceDiscardRollbackState')
+          if (-not ($type -band 0x200)) { throw "PaceDiscardRollbackState has Type $type, without the commit bit: the fix is not in this package" }
           $cleared = $type -band (-bnot 0x200)
           $deferredVerify = $twinOff.Verify.Clone()
-          $deferredVerify["SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action``='FastCacheDiscardRollbackState'"] = "$cleared"
+          $deferredVerify["SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action``='PaceDiscardRollbackState'"] = "$cleared"
           $control = @(Invoke-Control 'control-deferred-discard' 'control C: the twin switched off and the rollback state discarded in the script' `
-            ($twinOff.Statements + "UPDATE ``CustomAction`` SET ``Type``=$cleared WHERE ``Action``='FastCacheDiscardRollbackState'") $deferredVerify)
-          if (-not ($control | Where-Object { $_ -like 'service FastCached:*' })) { throw "control C did not go red: a discard inside the script must cost the exact restore its state" }
+            ($twinOff.Statements + "UPDATE ``CustomAction`` SET ``Type``=$cleared WHERE ``Action``='PaceDiscardRollbackState'") $deferredVerify)
+          if (-not ($control | Where-Object { $_ -like 'service pace-kv:*' })) { throw "control C did not go red: a discard inside the script must cost the exact restore its state" }
           Reset-ToN 'control-deferred-discard'
 
           # The scenario discriminates: a SUCCESSFUL run of the same upgrade changes every field the
           # subject relied on, and never runs the failure action. Each field below is one whose READER
           # nothing else shows live: an unchanged field is equal on both sides however it was read, so
           # a reader that returned nothing would pass the subject. Only fields a successful N -> N+1
-          # upgrade really changes are required: fastcached's ImagePath (the extra flag goes) and Start
+          # upgrade really changes are required: pace-kv's ImagePath (the extra flag goes) and Start
           # (disabled under the node's table), its state, the node's registration, the installed
           # product, and the node's firewall group. Never `binary`: the upgrade keeps N's root (see
           # the header), so the custom root's binary must still be THERE, which is asserted instead.
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $newer -Log 'succeeded-upgrade.log' -Properties $withNode -What 'the same upgrade, succeeding'
-          Assert-MsiLog -Path 'succeeded-upgrade.log' -Present (Get-MsiActionRanPattern 'FastCacheNodeStartService') -Absent (Get-MsiActionRanPattern 'FastCacheFailForTest')
+          Assert-MsiLog -Path 'succeeded-upgrade.log' -Present (Get-MsiActionRanPattern 'PaceNodeStartService') -Absent (Get-MsiActionRanPattern 'PaceFailForTest')
           $changed = @(Compare-InstallationSnapshot -Before $before -After (Get-InstallationSnapshot -UpgradeCode $family -Root $root))
           Assert-TransactionSettled
           Write-Host "a successful upgrade changes:`n  $($changed -join "`n  ")"
-          foreach ($field in 'service FastCached', 'state FastCached', 'service FastCacheCompileNode', 'products',
-                             'firewall fastcached: FastCacheCompileNode') {
+          foreach ($field in 'service pace-kv', 'state pace-kv', 'service pace-node', 'products',
+                             'firewall Pace: pace-node') {
             if (-not ($changed | Where-Object { $_ -like "${field}:*" })) { throw "a successful upgrade left '$field' unchanged, so the failed one proved nothing about it" }
           }
           foreach ($value in 'ImagePath', 'Start') {
-            if (-not ($changed | Where-Object { $_ -like 'service FastCached:*' -and $_ -match "\b$value\b" })) { throw "a successful upgrade left fastcached's $value unchanged, so the failed one proved nothing about it" }
+            if (-not ($changed | Where-Object { $_ -like 'service pace-kv:*' -and $_ -match "\b$value\b" })) { throw "a successful upgrade left pace-kv's $value unchanged, so the failed one proved nothing about it" }
           }
-          $kept = Join-Path $root 'bin\fastcached.exe'
+          $kept = Join-Path $root 'bin\pace-kv.exe'
           if (-not (Test-Path -LiteralPath $kept)) { throw "a successful upgrade did not keep N's custom root: $kept is gone" }
           Write-Host "a successful upgrade kept N's custom root: $kept is present"
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $newer -Log 'succeeded-uninstall.log' -What 'uninstalling after the successful upgrade'
           Assert-InstalledProduct $family ''
           Assert-ServiceTable -Row NothingInstalled -Log 'succeeded-uninstall.log'
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
           Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 
       # First the DEFAULT install, a plain /i naming no feature and no property, as
       # an operator who double-clicks the package gets it: every feature is selected
-      # by default, so the node is registered auto and running and fastcached disabled
+      # by default, so the node is registered auto and running and pace-kv disabled
       # and stopped. The [msi] round trip in DocumentedCommandLines_test proves the
       # no-property COMMAND parses and installs; only this transaction proves the
       # package's default feature selection reaches it. Uninstalled again, and the
       # machine state cleared, so what follows starts clean.
       #
-      # Then a fresh install naming the fastcached-only features, and the service table
-      # it must leave: fastcached auto and serving, no node registered, and the
+      # Then a fresh install naming the pace-kv-only features, and the service table
+      # it must leave: pace-kv auto and serving, no node registered, and the
       # install's bin on the machine PATH, which rides the REQUIRED Cli feature.
       - name: "Install the MSI and verify the service"
         shell: pwsh
@@ -4033,14 +4002,14 @@ jobs:
           Assert-ServiceTable -Row NodeSelected -Log 'install-default.log'
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $msi -Log 'uninstall-default.log' -What 'uninstalling the default install'
           Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-default.log'
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
 
           Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $msi -Log 'install.log' `
-            -Properties 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher' -What 'a fastcached-only install'
+            -Properties 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher' -What 'a pace-kv-only install'
 
           Assert-ServiceTable -Row DaemonAlone -Log 'install.log'
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-          if ($machinePath -notlike '*\fastcached\bin*') { throw "machine PATH lacks the install's bin: $machinePath" }
+          if ($machinePath -notlike '*\pace\bin*') { throw "machine PATH lacks the install's bin: $machinePath" }
 
           # The identity it logs on as. Told nothing, CreateService uses LocalSystem
           # -- unrestricted access to every local resource, and a member of the local
@@ -4048,10 +4017,10 @@ jobs:
           # it. Asserted here because this is a SHIPPED service whose identity
           # changed: if the virtual account cannot log on, the service simply never
           # starts, and the check above would be the only thing that noticed.
-          $svc = Get-CimInstance Win32_Service -Filter "Name='FastCached'"
-          if ($svc.StartName -ne 'NT SERVICE\FastCached') {
+          $svc = Get-CimInstance Win32_Service -Filter "Name='pace-kv'"
+          if ($svc.StartName -ne 'NT SERVICE\pace-kv') {
             Show-InstallLog
-            throw "daemon runs as '$($svc.StartName)', expected NT SERVICE\FastCached"
+            throw "daemon runs as '$($svc.StartName)', expected NT SERVICE\pace-kv"
           }
 
           # Running is not serving. The virtual account has to be able to read the
@@ -4090,9 +4059,9 @@ jobs:
           # answer THERE. Honoured and ignored now differ. Asserting what
           # DISTINGUISHES is the whole point -- the 6674 round trip stays, because it
           # is the control that says the daemon still serves at all.
-          $cfg = "$env:ProgramData\fastcached\fastcached.yaml"
+          $cfg = "$env:ProgramData\pace\pace-kv.yaml"
           Add-Content -Path $cfg -Value "`nport: 6699"
-          Restart-Service FastCached -Force
+          Restart-Service pace-kv -Force
           $moved = ''
           for ($i = 0; $i -lt 30 -and -not $moved; $i++) {
             try {
@@ -4115,8 +4084,8 @@ jobs:
           Write-Host "daemon honoured its machine-wide config (answered on 6699)"
 
       # The service table under a FEATURE CHANGE, the transaction nothing above
-      # runs: adding the node disables fastcached and stops it (both would
-      # answer on 6674), removing the node gives fastcached back its auto start and
+      # runs: adding the node disables pace-kv and stops it (both would
+      # answer on 6674), removing the node gives pace-kv back its auto start and
       # removes the node's registration. A script for the previous steps' reason.
       - name: "Changing features re-applies the service table"
         shell: pwsh
@@ -4126,62 +4095,62 @@ jobs:
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
           $msi = (Get-ChildItem -Filter *.msi | Select-Object -First 1).FullName
 
-          # A node that cannot START on a fastcached machine (batch 4 review, B4-1): the transaction
-          # fails, and the rollback leaves fastcached exactly as it found it -- auto again (the node
+          # A node that cannot START on a pace-kv machine (batch 4 review, B4-1): the transaction
+          # fails, and the rollback leaves pace-kv exactly as it found it -- auto again (the node
           # had disabled it), RUNNING again (the transaction stopped it for the node), and its
-          # command line and remembered scope unchanged. fastcached serves on 6699 here (the step
+          # command line and remembered scope unchanged. pace-kv serves on 6699 here (the step
           # above moved it), so a listener this step holds on 6674 is what the node cannot bind: it
           # refuses inside its body, never reports RUNNING (it reports running once it serves), and
           # its checked start fails. Empty and absent are one remembered scope (install.md). And its
-          # LIVE firewall rules (R4-3): the transaction re-registered fastcached with a scope of
+          # LIVE firewall rules (R4-3): the transaction re-registered pace-kv with a scope of
           # 10.0.0.0/8, which rewrites them, so the remembered scope coming back says nothing about
           # what the firewall admits.
           #
-          # A loopback-only fastcached -- the shipped default -- has NO rules, and an empty group
+          # A loopback-only pace-kv -- the shipped default -- has NO rules, and an empty group
           # unchanged proves nothing, so for this case alone it faces the network: `bind: 0.0.0.0`
           # in the machine-wide file, which the transaction's registration and the rollback's both
           # derive the rules from (a --bind in the command line would come back with the exact
-          # restore and never be re-derived), registered as FastCachedInstallService registers it,
+          # restore and never be re-derived), registered as PaceInstallService registers it,
           # with the remembered scope. Undone after the case, so later steps see loopback again.
-          $scopeBefore = "$((Get-ItemProperty -Path 'HKLM:\SOFTWARE\fastcached\Installer' -ErrorAction SilentlyContinue).FirewallAllow)"
-          $cfg = "$env:ProgramData\fastcached\fastcached.yaml"
+          $scopeBefore = "$((Get-ItemProperty -Path 'HKLM:\SOFTWARE\Pace\Installer' -ErrorAction SilentlyContinue).FirewallAllow)"
+          $cfg = "$env:ProgramData\pace\pace-kv.yaml"
           $cfgBefore = Get-Content -Raw -LiteralPath $cfg
-          $fastcachedExe = @(Split-RegisteredCommandLine (Get-CimInstance Win32_Service -Filter "Name='FastCached'").PathName)[0]
+          $paceKvExe = @(Split-RegisteredCommandLine (Get-CimInstance Win32_Service -Filter "Name='pace-kv'").PathName)[0]
           $register = @('--install-service', '--service-start=auto') + @(if ($scopeBefore) { "--firewall-allow=$scopeBefore" })
           Add-Content -Path $cfg -Value "`nbind: 0.0.0.0"
-          & $fastcachedExe @register
-          if ($LASTEXITCODE -ne 0) { throw "re-registering fastcached to face the network exited $LASTEXITCODE" }
-          $fastcachedBefore = Get-CimInstance Win32_Service -Filter "Name='FastCached'"
-          $fastcachedFirewallBefore = Get-FirewallGroupSnapshot 'fastcached: FastCached'
-          $fastcachedFirewallBefore | ForEach-Object { Write-Host "  before: $_" }
+          & $paceKvExe @register
+          if ($LASTEXITCODE -ne 0) { throw "re-registering pace-kv to face the network exited $LASTEXITCODE" }
+          $paceKvBefore = Get-CimInstance Win32_Service -Filter "Name='pace-kv'"
+          $paceKvFirewallBefore = Get-FirewallGroupSnapshot 'Pace: pace-kv'
+          $paceKvFirewallBefore | ForEach-Object { Write-Host "  before: $_" }
           $hold = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, 6674)
           $hold.ExclusiveAddressUse = $true
           $hold.Start()
           try {
             Invoke-Msiexec -Expect NodeCannotBind -Operation '/i' -Package $msi -Log 'add-node-refused.log' -What 'adding the node while 6674 is held' `
-              -Properties 'ADDLOCAL=CM_C_Node', 'FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8' -Accept @(1603)
+              -Properties 'ADDLOCAL=CM_C_Node', 'PACE_FIREWALL_ALLOW=10.0.0.0/8' -Accept @(1603)
           } finally {
             $hold.Stop()
           }
-          Assert-MsiLog -Path 'add-node-refused.log' -Present 'CustomAction FastCacheNodeStartService returned actual error code', `
-            (Get-MsiActionRanPattern 'FastCachedStopForNode'), (Get-MsiActionRanPattern 'FastCachedAwaitExitForNode')
+          Assert-MsiLog -Path 'add-node-refused.log' -Present 'CustomAction PaceNodeStartService returned actual error code', `
+            (Get-MsiActionRanPattern 'PaceStopForNode'), (Get-MsiActionRanPattern 'PaceAwaitExitForNode')
           Assert-ServiceTable -Row DaemonAlone -Log 'add-node-refused.log'
-          $fastcachedAfter = Get-CimInstance Win32_Service -Filter "Name='FastCached'"
-          if ($fastcachedAfter.PathName -cne $fastcachedBefore.PathName) {
-            throw "the failed node install left fastcached registered as '$($fastcachedAfter.PathName)', not '$($fastcachedBefore.PathName)'"
+          $paceKvAfter = Get-CimInstance Win32_Service -Filter "Name='pace-kv'"
+          if ($paceKvAfter.PathName -cne $paceKvBefore.PathName) {
+            throw "the failed node install left pace-kv registered as '$($paceKvAfter.PathName)', not '$($paceKvBefore.PathName)'"
           }
-          $scopeAfter = "$((Get-ItemProperty -Path 'HKLM:\SOFTWARE\fastcached\Installer' -ErrorAction SilentlyContinue).FirewallAllow)"
+          $scopeAfter = "$((Get-ItemProperty -Path 'HKLM:\SOFTWARE\Pace\Installer' -ErrorAction SilentlyContinue).FirewallAllow)"
           if ($scopeAfter -cne $scopeBefore) {
             throw "the failed node install left the remembered firewall scope '$scopeAfter', not '$scopeBefore'"
           }
-          Assert-FirewallGroupUnchanged -Group 'fastcached: FastCached' -Before $fastcachedFirewallBefore
-          Write-Host "the node that could not start rolled back to fastcached auto, running and registered as before, its firewall rules unchanged"
+          Assert-FirewallGroupUnchanged -Group 'Pace: pace-kv' -Before $paceKvFirewallBefore
+          Write-Host "the node that could not start rolled back to pace-kv auto, running and registered as before, its firewall rules unchanged"
           # Loopback again, as every later step expects: the file as it was, and a registration that
           # removes the rules the case opened.
           Set-Content -LiteralPath $cfg -Value $cfgBefore -NoNewline
-          & $fastcachedExe @register
-          if ($LASTEXITCODE -ne 0) { throw "re-registering fastcached on loopback exited $LASTEXITCODE" }
-          Assert-FirewallGroupEmpty 'fastcached: FastCached'
+          & $paceKvExe @register
+          if ($LASTEXITCODE -ne 0) { throw "re-registering pace-kv on loopback exited $LASTEXITCODE" }
+          Assert-FirewallGroupEmpty 'Pace: pace-kv'
 
           # No property at all: this package has no advertised-endpoint property (W-10), so the node is
           # registered with no advertise flag and advertises this machine's name.
@@ -4202,7 +4171,7 @@ jobs:
           # argument -- the pin VERBATIM, since it is security material nothing re-spells.
           $pin = '0123456789abcdef0123456789abcdef@11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo'
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $msi -Log 'scope-node.log' -What 'a repair stating a scope, a seed and a pin' `
-            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8', 'FASTCACHE_FLEET_SEED=seed.example.invalid', "FASTCACHE_FLEET_ID=$pin"
+            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'PACE_FIREWALL_ALLOW=10.0.0.0/8', 'PACE_FLEET_SEED=seed.example.invalid', "PACE_FLEET_ID=$pin"
           Assert-TransactionSettled
           Assert-NodeFirewallScope -Scope '10.0.0.0/8'
           Assert-NodeRegistrationArgument -Argument '--fleet-seed=seed.example.invalid:6674'
@@ -4222,11 +4191,11 @@ jobs:
           # node is RUNNING again (B4-6): the repair stopped it to replace its files, and only the
           # rollback's restart brings it back.
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $msi -Log 'refused-pin.log' -What 'a repair stating a pin the node refuses' `
-            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'FASTCACHE_FLEET_ID=0123456789abcdef0123456789abcdef' `
+            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'PACE_FLEET_ID=0123456789abcdef0123456789abcdef' `
             -Accept @(1603)
-          Assert-MsiLog -Path 'refused-pin.log' -Present 'CustomAction FastCacheNodeCheckArguments returned actual error code'
+          Assert-MsiLog -Path 'refused-pin.log' -Present 'CustomAction PaceNodeCheckArguments returned actual error code'
           Assert-NodeRegistrationArgument -Argument "--fleet-id=$pin"
-          $remembered = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\fastcached\Installer' -Name 'FleetId'
+          $remembered = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Pace\Installer' -Name 'FleetId'
           if ($remembered -cne $pin) {
             throw "the refused repair changed the remembered fleet pin: '$remembered', expected '$pin'"
           }
@@ -4238,14 +4207,14 @@ jobs:
           # and the process it left running had the old command line until its next restart. The PID
           # is the witness, and the log proves no ServiceControl row stopped the node, so a new PID
           # is the transaction's own restart rather than a file replacement's.
-          $nodeBefore = (Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'").ProcessId
+          $nodeBefore = (Get-CimInstance Win32_Service -Filter "Name='pace-node'").ProcessId
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $msi -Log 'reseed-node.log' -What 'a feature change giving the node a new seed' `
-            -Properties 'ADDLOCAL=CM_C_Node', 'FASTCACHE_FLEET_SEED=seed2.example.invalid'
-          Assert-MsiLog -Path 'reseed-node.log' -Present (Get-MsiActionRanPattern 'FastCacheNodeStopForRestart') `
-            -Absent 'ServiceControl\(.*Name=FastCacheCompileNode'
+            -Properties 'ADDLOCAL=CM_C_Node', 'PACE_FLEET_SEED=seed2.example.invalid'
+          Assert-MsiLog -Path 'reseed-node.log' -Present (Get-MsiActionRanPattern 'PaceNodeStopForRestart') `
+            -Absent 'ServiceControl\(.*Name=pace-node'
           Assert-NodeRegistrationArgument -Argument '--fleet-seed=seed2.example.invalid:6674'
           Assert-ServiceTable -Row NodeSelected -Log 'reseed-node.log'
-          $nodeAfter = (Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'").ProcessId
+          $nodeAfter = (Get-CimInstance Win32_Service -Filter "Name='pace-node'").ProcessId
           if ($nodeAfter -eq $nodeBefore) {
             throw "the node was re-registered with a new seed and kept running as PID $nodeBefore, with the old command line"
           }
@@ -4256,13 +4225,13 @@ jobs:
           Assert-ServiceTable -Row DaemonAlone -Log 'remove-node.log'
 
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-          if ($machinePath -notlike '*\fastcached\bin*') { throw "machine PATH lost the install's bin: $machinePath" }
+          if ($machinePath -notlike '*\pace\bin*') { throw "machine PATH lost the install's bin: $machinePath" }
 
       # The compile worker registering ITSELF, from its own command line. What is asserted
       # here is the identity it registers UNDER: told nothing, CreateService logs a
       # service on as LocalSystem -- the whole machine -- and this process compiles
       # input that arrived over the network. The macOS half of the same decision is
-      # the fastcache-node account (issue #87); on Windows it is a virtual account,
+      # the pace-node account (issue #87); on Windows it is a virtual account,
       # which the SCM derives from the service name and creates itself.
       #
       # Run against the built binary rather than the MSI's node feature because the
@@ -4274,17 +4243,17 @@ jobs:
         working-directory: out/build/cl-release
         run: |
           $ErrorActionPreference = 'Stop'
-          $node = Resolve-Path 'target/fastcache-compile-node.exe'
-          $cacheDir = Join-Path $env:RUNNER_TEMP 'fastcache-node-cache'
+          $node = Resolve-Path 'target/pace-node.exe'
+          $cacheDir = Join-Path $env:RUNNER_TEMP 'pace-node-cache'
           # Where the worker keeps the identity key it proves to its scheduler (#178 PR 6):
           # naming a scheduler without one is refused at install time, as at startup.
-          $stateDir = Join-Path $env:RUNNER_TEMP 'fastcache-node-state'
+          $stateDir = Join-Path $env:RUNNER_TEMP 'pace-node-state'
           $toolchain = (Get-Command cl.exe).Source
 
           # --listen-node is NAMED, and it has to be since #290 stage 3.
           #
           # A node opens exactly one 0xFC port, defaulting to 0.0.0.0:6674 -- and
-          # the step above leaves a `fastcached` serving on 6674 for the rest of the
+          # the step above leaves a `pace-kv` serving on 6674 for the rest of the
           # job, where the Linux packaging job stops its daemon before installing the
           # worker. Left defaulted, the worker's only port is a port it cannot have,
           # and a bind it cannot make is now a startup refusal rather than a warning:
@@ -4295,7 +4264,7 @@ jobs:
           # loopback advertise is the coherent single-machine shape and passes the
           # startup table. Co-installing a daemon and a worker on one machine is not
           # a supported shape -- a node answers every verb the daemon does
-          # (docs/tools/fastcache-compile-node.md) -- and this job does it only
+          # (docs/tools/pace-node.md) -- and this job does it only
           # because the MSI under test ships both features.
           & $node --install-service `
               --listen-node=127.0.0.1:6676 `
@@ -4306,12 +4275,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "worker --install-service failed with $LASTEXITCODE" }
 
           try {
-            $svc = Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'"
-            if (-not $svc) { throw 'FastCacheCompileNode was not registered' }
+            $svc = Get-CimInstance Win32_Service -Filter "Name='pace-node'"
+            if (-not $svc) { throw 'pace-node was not registered' }
 
             # The assertion this step exists for.
-            if ($svc.StartName -ne 'NT SERVICE\FastCacheCompileNode') {
-              throw "worker runs as '$($svc.StartName)', expected NT SERVICE\FastCacheCompileNode"
+            if ($svc.StartName -ne 'NT SERVICE\pace-node') {
+              throw "worker runs as '$($svc.StartName)', expected NT SERVICE\pace-node"
             }
 
             # A virtual account cannot write a directory an administrator created,
@@ -4319,7 +4288,7 @@ jobs:
             # the trustee only resolves once the service exists -- so this also pins
             # that the grant happens after CreateService and not before.
             $granted = (Get-Acl $cacheDir).Access | Where-Object {
-              $_.IdentityReference.Value -eq 'NT SERVICE\FastCacheCompileNode' -and $_.AccessControlType -eq 'Allow'
+              $_.IdentityReference.Value -eq 'NT SERVICE\pace-node' -and $_.AccessControlType -eq 'Allow'
             }
             if (-not $granted) { throw "$cacheDir carries no ACE for the worker's virtual account" }
 
@@ -4333,15 +4302,15 @@ jobs:
             # last failure here to log archaeology for a two-line answer. Every
             # branch below is diagnostic and best-effort: the throw is what fails
             # the step, and a diagnostic that cannot run must not mask it.
-            Start-Service FastCacheCompileNode -ErrorAction SilentlyContinue
-            for ($i = 0; $i -lt 30 -and (Get-Service FastCacheCompileNode).Status -ne 'Running'; $i++) { Start-Sleep 1 }
-            if ((Get-Service FastCacheCompileNode).Status -ne 'Running') {
-              $status = (Get-Service FastCacheCompileNode).Status
+            Start-Service pace-node -ErrorAction SilentlyContinue
+            for ($i = 0; $i -lt 30 -and (Get-Service pace-node).Status -ne 'Running'; $i++) { Start-Sleep 1 }
+            if ((Get-Service pace-node).Status -ne 'Running') {
+              $status = (Get-Service pace-node).Status
 
               # What was actually registered. A registration replays this command
               # line at every start, so it is the first thing to read and the one
               # thing a status word can never carry.
-              $registered = (Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'").PathName
+              $registered = (Get-CimInstance Win32_Service -Filter "Name='pace-node'").PathName
               Write-Host "registered PathName: $registered"
 
               # The sharpest version: run what was registered, in the foreground,
@@ -4368,20 +4337,20 @@ jobs:
               try {
                 Get-WinEvent -FilterHashtable @{ LogName = 'System'; StartTime = (Get-Date).AddMinutes(-5) } `
                   -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Message -match 'FastCacheCompileNode' } |
+                  Where-Object { $_.Message -match 'pace-node' } |
                   Select-Object -First 10 TimeCreated, Id, Message | Format-List
               } catch { Write-Host "event log read failed: $_" }
 
               throw "worker did not start under its virtual account: $status"
             }
-            Stop-Service FastCacheCompileNode -Force
+            Stop-Service pace-node -Force
           }
           finally {
             & $node --uninstall-service
           }
 
-          if (Get-Service -Name FastCacheCompileNode -ErrorAction SilentlyContinue) {
-            throw 'FastCacheCompileNode survived --uninstall-service'
+          if (Get-Service -Name pace-node -ErrorAction SilentlyContinue) {
+            throw 'pace-node survived --uninstall-service'
           }
 
       # The firewall half of --install-service, on the REAL Windows Firewall: the rule a
@@ -4399,9 +4368,9 @@ jobs:
         working-directory: out/build/cl-release
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = (Resolve-Path 'target/fastcached.exe').Path
-          $name = 'FastCachedFirewallProbe'
-          $group = "fastcached: $name"
+          $exe = (Resolve-Path 'target/pace-kv.exe').Path
+          $name = 'PaceFirewallProbe'
+          $group = "Pace: $name"
           $config = Join-Path $env:RUNNER_TEMP 'firewall-probe.yaml'
           Set-Content -LiteralPath $config -Value '# The firewall probe: named so no machine-wide configuration is read.'
           if (@(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue).Count -ne 0) {
@@ -4426,7 +4395,7 @@ jobs:
             if ($svc.Service -ne $name) { throw "rule service is '$($svc.Service)', expected '$name'" }
 
             # A rule scoped to a service SID matches nothing unless the service itself carries
-            # one: fastcached's virtual-account services register SERVICE_SID_TYPE_UNRESTRICTED
+            # one: pace-kv's virtual-account services register SERVICE_SID_TYPE_UNRESTRICTED
             # (ServiceControl.cpp), so this is the other half of the service-filter check above
             # rather than a second subject.
             $sidType = @(& sc.exe qsidtype $name)
@@ -4460,7 +4429,7 @@ jobs:
       # not happen leaves a service running on built-in defaults and an operator
       # editing a file that is not there.
       # The POSITIVE CONTROL for the step below, and the half
-      # [#866](https://github.com/LASTRADA-Software/fastcached/issues/866) asks for
+      # [#866](https://github.com/LASTRADA-Software/pace/issues/866) asks for
       # by name. That step's assertions are all of the form "no entry matches", and
       # a mask or a filter that matches NOTHING passes every one of them on a
       # perfectly broken machine. #866's first half -- making `$planting` mirror
@@ -4565,8 +4534,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $dir = "$env:ProgramData\fastcached"
-          $cfg = "$dir\fastcached.yaml"
+          $dir = "$env:ProgramData\pace"
+          $cfg = "$dir\pace-kv.yaml"
 
           # Seeding happened at all. This is also the assertion that catches
           # %ProgramData% being absent from the service environment, which would
@@ -4575,6 +4544,10 @@ jobs:
           # matches" and would pass loudest on a file that is not there.
           if (-not (Test-Path $cfg)) { throw "installer did not seed $cfg" }
           if (-not (Select-String -Path $cfg -Pattern '^#port:' -Quiet)) {
+            # Say what WAS there: a file some later step wrote, an empty seed and another app's
+            # template are three different defects.
+            Write-Host "$cfg is $((Get-Item -LiteralPath $cfg).Length) bytes; its first 20 lines:"
+            Get-Content -LiteralPath $cfg -TotalCount 20 | ForEach-Object { Write-Host "  | $_" }
             throw "$cfg does not look like the shipped template"
           }
 
@@ -4616,7 +4589,7 @@ jobs:
           # and it is declared once because two copies is how one of them loses an
           # entry.
           $broad = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-4', 'S-1-5-32-546')
-          # The write mask, now PlantingRights from src/FastCache/Platform/FileTrust.cpp
+          # The write mask, now PlantingRights from src/Pace/Platform/FileTrust.cpp
           # bit for bit (#866). It was NOT that mirror in either direction, while a
           # comment presented it as one -- "a comment naming what it duplicates
           # vouches for the duplicate's bugs":
@@ -4646,7 +4619,7 @@ jobs:
                     -bor [int64][Security.AccessControl.FileSystemRights]::TakeOwnership `
                     -bor [int64]1073741824 `
                     -bor [int64]268435456
-          # The read mask is ReadingRights from src/FastCache/Platform/FileTrust.cpp,
+          # The read mask is ReadingRights from src/Pace/Platform/FileTrust.cpp,
           # spelled for PowerShell. ReadData rather than the Read composite: that
           # one includes ReadPermissions, which almost every entry carries, so a
           # band against it would fire on principals that cannot read a byte. The
@@ -4722,7 +4695,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
-          $cfg = "$env:ProgramData\fastcached\fastcached.yaml"
+          $cfg = "$env:ProgramData\pace\pace-kv.yaml"
           $marker = '# local edit that must survive'
           Add-Content -Path $cfg -Value $marker
 
@@ -4740,8 +4713,8 @@ jobs:
           # also a transaction the service table is applied on, so it must leave
           # the table the install left.
           Assert-ServiceTable -Row DaemonAlone -Log 'reinstall.log'
-          $svc = Get-CimInstance Win32_Service -Filter "Name='FastCached'"
-          if ($svc.StartName -ne 'NT SERVICE\FastCached') {
+          $svc = Get-CimInstance Win32_Service -Filter "Name='pace-kv'"
+          if ($svc.StartName -ne 'NT SERVICE\pace-kv') {
             throw "after reinstall the daemon runs as '$($svc.StartName)'"
           }
 
@@ -4757,17 +4730,17 @@ jobs:
 
           # Documented behaviour on every platform: the configuration is the
           # operator's, not the package's, so it outlives the package.
-          if (-not (Test-Path "$env:ProgramData\fastcached\fastcached.yaml")) {
+          if (-not (Test-Path "$env:ProgramData\pace\pace-kv.yaml")) {
             throw 'uninstall removed the configuration'
           }
 
-      # Named fastcached-<platform>-packages like the Linux and macOS jobs, so the
+      # Named pace-<platform>-packages like the Linux and macOS jobs, so the
       # release job below collects all three with one pattern and a new platform
       # is a new upload row rather than an edit there.
       - name: "Upload the MSI and the ZIP"
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-windows-packages
+          name: pace-windows-packages
           path: |
             out/build/cl-release/*.msi
             out/build/cl-release/*.zip
@@ -4802,7 +4775,7 @@ jobs:
       - sccache-smoke-memcached-text
       - sccache-smoke-memcached-binary
       - sccache-smoke-redis
-      - fastcache-cc-smoke
+      - pace-cc-smoke
       - windows
       - clang-tidy-windows
       - compile-cache-e2e-linux
@@ -4826,7 +4799,7 @@ jobs:
       # below reads it back rather than restating it. No history needed.
       - uses: actions/checkout@v4
 
-      # Every packaging job uploads under fastcached-<platform>-packages. The
+      # Every packaging job uploads under pace-<platform>-packages. The
       # archives do not collide in a flat directory: CPack stamps the system name
       # into each (…-Linux-x86_64.tar.gz vs …-Darwin-arm64.tar.gz), which is also
       # why the asset list below names them separately and so catches one going
@@ -4834,7 +4807,7 @@ jobs:
       - name: "Download every platform's packages"
         uses: actions/download-artifact@v4
         with:
-          pattern: fastcached-*-packages
+          pattern: pace-*-packages
           merge-multiple: true
           path: dist
 
@@ -4842,7 +4815,7 @@ jobs:
       # the tag produces a fallback version and packages named after a release
       # nobody cut — a defect invisible in every green job above and observable
       # only in the filenames. So the filenames are what gets asserted. The
-      # packaging jobs also configure with -DFASTCACHED_REQUIRE_EXACT_VERSION=ON
+      # packaging jobs also configure with -DPACE_REQUIRE_EXACT_VERSION=ON
       # on a tag run, which fails earlier and closer to the cause; this is the
       # backstop that no packaging change can bypass.
       #
@@ -4898,10 +4871,10 @@ jobs:
             file="${hits[0]}"
             name="${file##*/}"
 
-            # `fastcached-<version>` followed by a separator, not a substring test:
+            # `pace-<version>` followed by a separator, not a substring test:
             # 0.1.1 would otherwise be satisfied by a 0.1.10 package.
             case "$name" in
-              fastcached-"$version"[-_.]* | fastcached_"$version"[-_.]*) ;;
+              pace-"$version"[-_.]* | pace_"$version"[-_.]*) ;;
               *)
                 echo "::error::$name does not carry the tag's version ($version): the build used a fallback version, so that checkout could not see the tag"
                 echo "| \`$pattern\` | $name | **wrong version** |" >> "$GITHUB_STEP_SUMMARY"
@@ -4954,7 +4927,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "fastcached ${{ github.ref_name }}"
+          name: "Pace ${{ github.ref_name }}"
           # The whole point: CI assembles the release, a human publishes it with
           # /publish-release once the assets have been verified.
           draft: true
@@ -4968,17 +4941,17 @@ jobs:
           fail_on_unmatched_files: true
           # One row per shipped artifact, each specific enough that a single
           # platform dropping out breaks exactly one row: a shared
-          # `fastcached-*.tar.gz` would be satisfied by the Linux archive alone
+          # `pace-*.tar.gz` would be satisfied by the Linux archive alone
           # while macOS shipped nothing. macOS is arm64-only because the runner is
           # Apple Silicon, so the day an x86_64 package appears this list gains a
           # row. The version is deliberately a wildcard — it is pinned to the tag
           # by the assertion step above, which can say so in its own words.
           files: |
-            dist/fastcached_*_amd64.deb
-            dist/fastcached-*.x86_64.rpm
-            dist/fastcached-*-Linux-x86_64.tar.gz
-            dist/fastcached-*-Darwin-arm64.pkg
-            dist/fastcached-*-Darwin-arm64.dmg
-            dist/fastcached-*-Darwin-arm64.tar.gz
-            dist/fastcached-*-Windows-AMD64.msi
-            dist/fastcached-*-Windows-AMD64.zip
+            dist/pace_*_amd64.deb
+            dist/pace-*.x86_64.rpm
+            dist/pace-*-Linux-x86_64.tar.gz
+            dist/pace-*-Darwin-arm64.pkg
+            dist/pace-*-Darwin-arm64.dmg
+            dist/pace-*-Darwin-arm64.tar.gz
+            dist/pace-*-Windows-AMD64.msi
+            dist/pace-*-Windows-AMD64.zip

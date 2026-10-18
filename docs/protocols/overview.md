@@ -1,6 +1,6 @@
 # Protocols overview
 
-fastcached speaks five wire protocols off the same storage engine — four
+pace-kv speaks five wire protocols off the same storage engine — four
 compatible with existing clients, plus one of its own:
 
 | Protocol             | Reference                                  | Status      |
@@ -9,7 +9,7 @@ compatible with existing clients, plus one of its own:
 | memcached (binary)   | [memcached protocol_binary.xml][mcb]       | Full        |
 | memcached (meta)     | [memcached protocol.txt §meta][mc]         | Full        |
 | Redis (RESP2 + RESP3) | [Redis Serialization Protocol][resp]      | Key-value subset, plus sets, streams, pub/sub and transactions |
-| Compile cache (`0xFC`) | [Compile cache](compile-cache.md)        | fastcached's own |
+| Compile cache (`0xFC`) | [Compile cache](compile-cache.md)        | pace-kv's own |
 
 The compile cache is deliberately unlike the other four: they move opaque
 bytes, while it understands that a value is a compile result and rewrites
@@ -28,7 +28,7 @@ speaks one protocol; mixing on a single connection is not supported.
 ## At a glance
 
 Each row is a logical capability area; cells show how complete each
-protocol is in fastcached today.
+protocol is in pace-kv today.
 
 | Capability area               | memcached text | memcached binary | memcached meta | Redis RESP |
 |-------------------------------|:---:|:---:|:---:|:---:|
@@ -54,7 +54,7 @@ protocol is in fastcached today.
 
 Legend: **Full** = full spec coverage · **Partial** = subset · **n/a** =
 not part of that protocol · **Not supported** = not implemented in
-fastcached.
+pace-kv.
 
 The next page, the [Coverage matrix](coverage-matrix.md), maps each
 logical operation to the specific command, opcode, or meta-flag in
@@ -71,7 +71,7 @@ every protocol.
   flag across `mg`, `ms`, `md`, `ma`.
 - [Binary opcodes](binary-opcodes.md) — hex table.
 - [Binary status codes](status-codes.md) — every status code
-  fastcached emits.
+  pace-kv emits.
 - [Redis RESP](redis-resp.md) — supported subset and rationale.
 
 ## Compatibility

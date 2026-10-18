@@ -15,31 +15,31 @@ gets a section of its own rather than a footnote.
 
 | | What it is | Where it runs |
 |---|---|---|
-| **`fastcache-cc`** | A launcher. It is put *in front of* your compiler and decides, per translation unit, whether to compile or to fetch. | On the machine doing the build. Starts and exits once per source file. |
-| **`fastcache-compile-node`** | A node. It compiles work sent to it, and holds a cache of its own. It may additionally schedule for a fleet and take part in consensus. | On any machine contributing to a fleet — including the one you are building on. |
-| **`fastcached`** | The shared cache daemon. Objects land here so *other* machines get them. | One machine, or a few. It is shared infrastructure. |
+| **`pace-cc`** | A launcher. It is put *in front of* your compiler and decides, per translation unit, whether to compile or to fetch. | On the machine doing the build. Starts and exits once per source file. |
+| **`pace-node`** | A node. It compiles work sent to it, and holds a cache of its own. It may additionally schedule for a fleet and take part in consensus. | On any machine contributing to a fleet — including the one you are building on. |
+| **`pace-kv`** | The shared cache daemon. Objects land here so *other* machines get them. | One machine, or a few. It is shared infrastructure. |
 
 Two things about this list surprise people, and both matter:
 
-**The scheduler is not `fastcached`.** Handing out other machines' CPU time is a
+**The scheduler is not `pace-kv`.** Handing out other machines' CPU time is a
 decision only one node may make at a time, and a cache daemon has no way to
-establish which node that is. So scheduling lives on `fastcache-compile-node`,
-where cluster leadership already lives. `fastcached` answers reads and writes of
+establish which node that is. So scheduling lives on `pace-node`,
+where cluster leadership already lives. `pace-kv` answers reads and writes of
 the cache and nothing else — send it a scheduling request and it tells you, by
 name, where the scheduler went.
 
-**A node is a cache too.** `fastcache-compile-node` serves a cache tier of its own
+**A node is a cache too.** `pace-node` serves a cache tier of its own
 by default, on `127.0.0.1:6674` — the address the launcher already looks at. So a
 developer who starts a node gets a local cache with no configuration at all.
 
-None of these is required. `fastcache-cc` alone against a `fastcached` is a
+None of these is required. `pace-cc` alone against a `pace-kv` is a
 complete, useful setup; everything else is added when you want it.
 
 ---
 
 ## One compile, start to finish
 
-Your build system runs `fastcache-cc g++ -c foo.cpp -o foo.o` instead of
+Your build system runs `pace-cc g++ -c foo.cpp -o foo.o` instead of
 `g++ -c foo.cpp -o foo.o`. Here is what happens between those two commands.
 
 This is the **client's** side of the story. If a fleet is involved, the same
@@ -49,7 +49,7 @@ worker is trusted with — is
 
 ```mermaid
 flowchart TD
-    start["build runs<br/>fastcache-cc g++ -c foo.cpp"] --> id["1. Identify the compiler<br/>banner + target triple"]
+    start["build runs<br/>pace-cc g++ -c foo.cpp"] --> id["1. Identify the compiler<br/>banner + target triple"]
     id --> direct{"2. Direct mode:<br/>is there a manifest for this<br/>source + args + compiler?"}
     direct -->|"yes, and every<br/>header still matches"| hit
     direct -->|"no manifest, or<br/>a header changed"| pre["3. Preprocess<br/>~1.4 s on a large file"]
@@ -73,12 +73,12 @@ Note where the two "the cache did not serve this" edges go. A **miss** and a
 that is the point rather than a shortcut: the cache and the scheduler are separate
 services on separate machines, so a failure of one says nothing about the other.
 Sending a miss to step 7 and a transport failure straight to step 8b is what made
-a mistyped `FASTCACHE_ADDR` turn every build on an estate local while the fleet
+a mistyped `PACE_ADDR` turn every build on an estate local while the fleet
 sat idle and healthy, with the build green throughout
-([#236](https://github.com/LASTRADA-Software/fastcached/issues/236)). What the
+([#236](https://github.com/LASTRADA-Software/pace/issues/236)). What the
 launcher does *not* do afterwards is push the result at a daemon that just failed
 to answer — step 9 is skipped in that case, so reaching step 7 costs a wrong
-`FASTCACHE_ADDR` no more connections than it cost before.
+`PACE_ADDR` no more connections than it cost before.
 
 ### 1. Identify the compiler
 
@@ -156,8 +156,8 @@ could never hit.
 
 ### 5. Look it up
 
-One request, to whatever `FASTCACHE_ADDR` names. That address is always a
-**cache**, never a scheduler — either a shared `fastcached`, or a node's own tier
+One request, to whatever `PACE_ADDR` names. That address is always a
+**cache**, never a scheduler — either a shared `pace-kv`, or a node's own tier
 on this machine. Mixing the two up is a common first mistake, and it presents as
 every compile being refused.
 
@@ -189,7 +189,7 @@ real and overwrites the entry rather than leaving it to mislead every later buil
 If no scheduler is configured, the real compiler runs locally. That is the whole
 of it, and it is a complete setup.
 
-If `FASTCACHE_SCHEDULER` is set, the launcher first asks that scheduler for a
+If `PACE_SCHEDULER` is set, the launcher first asks that scheduler for a
 worker, naming the toolchain fingerprint and the object key. Whatever comes back,
 the build cannot break: **every refusal ends in the local compile that would have
 happened anyway.** Refusals are named rather than lumped together, because they
@@ -305,8 +305,8 @@ When the scheduler answers `no-worker`, ask both ends what they think the
 fingerprint is:
 
 ```sh
-fastcache-cc --print-toolchain-fingerprint /usr/bin/g++   # on the client
-journalctl -u fastcache-compile-node | grep serving       # on the worker
+pace-cc --print-toolchain-fingerprint /usr/bin/g++   # on the client
+journalctl -u pace-node | grep serving       # on the worker
 ```
 
 They must be identical strings. If they are not, the two machines genuinely have
@@ -327,7 +327,7 @@ states still wins.
 The model above turns this into three separate questions with three separate
 answers. Ask them in order — the first one that applies is the whole story.
 
-Start with `fastcache-cc --show-stats`, which is a per-machine tally:
+Start with `pace-cc --show-stats`, which is a per-machine tally:
 
 ```
   compiles     : 1842
@@ -345,19 +345,19 @@ Start with `fastcache-cc --show-stats`, which is a per-machine tally:
 A non-zero **`unavailable`** means the launcher never got an answer, so the hit
 rate is meaningless. The reasons under it name the cause. The two usual ones:
 
-- **`missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR`.** All three must be set and
-  non-empty. `FASTCACHE_ADDR` has a default (`127.0.0.1:6674`), so in practice it
+- **`missing PACE_ADDR/SOURCE_DIR/BINARY_DIR`.** All three must be set and
+  non-empty. `PACE_ADDR` has a default (`127.0.0.1:6674`), so in practice it
   is the two roots that are missing — and if you are using this project's own
   CMake module, it sets them for you.
 - **`fetch exchange failed`.** Nothing answered at that address — usually nothing
   is listening. Start the daemon or the node. Note that this is a report about the
-  *cache*: the compiles themselves were still dispatched if `FASTCACHE_SCHEDULER`
+  *cache*: the compiles themselves were still dispatched if `PACE_SCHEDULER`
   names a fleet, so a build can show 100% `unavailable` and still have been fast.
 
 ### 2. The cache is reached, but everything is a miss
 
 Then the key differs from whatever produced the entries you expected to hit. Run
-one compile with `FASTCACHE_VERBOSE=1` and read the notes. The ones that matter:
+one compile with `PACE_VERBOSE=1` and read the notes. The ones that matter:
 
 | Note | Means |
 |---|---|
@@ -373,20 +373,20 @@ on the other is a different key, and build systems add flags you never typed.
 
 ### 3. Caching works, but nothing is ever dispatched
 
-Hits and misses look normal, but no compile goes to a worker. `FASTCACHE_VERBOSE=1`
+Hits and misses look normal, but no compile goes to a worker. `PACE_VERBOSE=1`
 names the reason directly:
 
 ```
-fastcache-cc: not dispatched (rejected (no-worker)); compiling locally
+pace-cc: not dispatched (rejected (no-worker)); compiling locally
 ```
 
 Rule out the cheap thing first: **is this machine admitted to the fleet?** A client is
 admitted by the machine ticket its own node mints, so the machine needs a node running
-at `FASTCACHE_ADDR` and that node's key admitted to the cluster; otherwise every lease is
+at `PACE_ADDR` and that node's key admitted to the cluster; otherwise every lease is
 refused `not-a-member` and every compile is local, behind a perfectly green build.
-`fastcache-cli explain-admission <machine>` on the scheduler says where it stands.
-(`FASTCACHE_TOKEN` is not the cause any more: it is sent to the cache at
-`FASTCACHE_ADDR` alone.)
+`pacectl explain-admission <machine>` on the scheduler says where it stands.
+(`PACE_TOKEN` is not the cause any more: it is sent to the cache at
+`PACE_ADDR` alone.)
 
 Otherwise it is a fingerprint mismatch. Compare the two machines as above; if they
 differ, their toolchains genuinely differ, and the fix is to make them the same
@@ -394,7 +394,7 @@ rather than to loosen the match — an over-loose match produces a wrong object 
 every other machine then fetches.
 
 What is **not** a reason is the cache being down. `cache unavailable (…)` names a
-wrong or unreachable `FASTCACHE_ADDR`, and a `DISPATCHED` line follows it — see
+wrong or unreachable `PACE_ADDR`, and a `DISPATCHED` line follows it — see
 [the two edges out of step 5](#one-compile-start-to-finish).
 
 ---
@@ -442,7 +442,7 @@ member holds.
    the part to read — it tells you whether this node brought a cluster with it:
 
    ```
-   consensus on 0.0.0.0:6680 as n1 (3 member(s), state in /var/lib/fastcache-cluster/n1)
+   consensus on 0.0.0.0:6680 as n1 (3 member(s), state in /var/lib/pace-cluster/n1)
    consensus on 0.0.0.0:6680 as n4 (no cluster yet; waiting to be admitted, state in …)
    ```
 
@@ -481,7 +481,7 @@ formation record says so from then on.
 The sequence:
 
 1. The joiner asks a member to admit it
-   ([enrollment](tools/fastcache-compile-node.md#enrolling-a-machine-instead-of-typing-it)), and an operator there
+   ([enrollment](tools/pace-node.md#enrolling-a-machine-instead-of-typing-it)), and an operator there
    approves its identity key.
 2. The joiner dissolves its cluster of one, records itself a **learner** of the fleet's,
    and starts from an empty configuration, which it learns from the leader. It reaches
@@ -531,11 +531,11 @@ membership is still a Raft decision. See
 
 | What | Where | Survives a restart? |
 |---|---|---|
-| Shared cached objects | `fastcached`'s `--storage` path, or memory only without it | Only with `--storage` |
+| Shared cached objects | `pace-kv`'s `--storage` path, or memory only without it | Only with `--storage` |
 | A node's own cache | Memory, plus `--cache-dir/objects.cow` if given | Only with `--cache-dir` |
-| Consensus state, and the node's identity | `--cluster-dir`, default `fastcache-cluster` | Yes — it must, or a node could vote twice in one term |
+| Consensus state, and the node's identity | `--cluster-dir`, default `pace-cluster` | Yes — it must, or a node could vote twice in one term |
 | Dashboard history | `fleet-history.bin` in the cluster dir, else the cache dir, else memory | Where a directory exists |
-| Launcher statistics | `%LOCALAPPDATA%\fastcache-cc` or `$XDG_STATE_HOME/fastcache-cc` | Yes |
+| Launcher statistics | `%LOCALAPPDATA%\pace-cc` or `$XDG_STATE_HOME/pace-cc` | Yes |
 | Cached toolchain fingerprints | `toolchains/*.fingerprint` in that same state directory | Yes, until the toolchain changes |
 
 Two consequences worth drawing out.
@@ -586,19 +586,19 @@ translation unit being compiled anyway. A refused lease or an absent fleet makes
 that the real compiler here; a daemon that could not be reached or that refused
 does **not**, and the compile is still dispatched — see
 [the two edges out of step 5](#one-compile-start-to-finish). Run with
-`FASTCACHE_VERBOSE=1` to see which path a translation unit took.
+`PACE_VERBOSE=1` to see which path a translation unit took.
 
 ---
 
 ## Where to go next
 
 - [Quickstart](getting-started/quickstart.md) — a running daemon in two minutes.
-- [fastcache-cc](tools/fastcache-cc.md) — every environment variable, the
+- [pace-cc](tools/pace-cc.md) — every environment variable, the
   statistics, and the fall-back reasons by name.
 - [Distributed compilation](getting-started/distributed-compilation.md) — setting
   up a fleet, and what to watch once it runs.
 - [Cluster communication](operations/cluster-communication.md) — the same compile
   from the fleet's side, every connection in one table, and firewall rules.
-- [fastcache-compile-node](tools/fastcache-compile-node.md) — every flag, the
+- [pace-node](tools/pace-node.md) — every flag, the
   node's cache tier, the cluster, and the fleet dashboard.
 - [Architecture](internals/architecture.md) — the module map, for contributors.

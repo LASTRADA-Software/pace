@@ -24,7 +24,7 @@
 # is here too: it drives the completeness assertion that replaced the floor.
 #
 # #1369 gave the check a SECOND source of optional targets -- the directories the root added
-# under a `FASTCACHED_BUILD_*` option outside `src/`, which was `vendor/` -- and fifteen cases
+# under a `PACE_BUILD_*` option outside `src/`, which was `vendor/` -- and fifteen cases
 # that drove it. #1596 removed that directory, and the reader and its cases went with it; the
 # two cases that pinned the frame walker the reader shared with the reference scan stay, since
 # the scan still walks frames that way. Every synthetic tree still carries a root
@@ -34,26 +34,26 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-target-file-guards-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-target-file-guards.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-target-file-guards.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 
@@ -68,7 +68,7 @@ add_subdirectory(src/apps)
 # The case supplies the WHOLE table, because where a stray bracket sits decides
 # whether it reproduces anything: `file(STRINGS ... REGEX)` discards lines that do
 # not match BEFORE building the list, so a bracket on a discarded line is invisible.
-function(fastcached_make_tree name tableBody registrations outVar)
+function(pace_make_tree name tableBody registrations outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src/apps")
@@ -86,15 +86,15 @@ set(caseCount 0)
 # The ordinary two-row table every case starts from.
 set(plainTable
 "# The app table.
-set(FastCachedApps
-    \"alpha|FASTCACHED_BUILD_ALPHA|ON|The alpha app\"
-    \"beta|FASTCACHED_BUILD_BETA|OFF|The beta app\"
+set(PaceApps
+    \"alpha|PACE_BUILD_ALPHA|ON|The alpha app\"
+    \"beta|PACE_BUILD_BETA|OFF|The beta app\"
 )
 ")
 
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE ignored)
     set(combined "${captured}${capturedErrors}")
     # `CMake Error|CMake Warning`, never `CMake Error` alone: a sub-run that merely WARNS
@@ -116,12 +116,12 @@ endfunction()
 # 1. A guarded reference passes. Without this the check could refuse everything,
 #    which is exactly as useless as refusing nothing and looks like rigour.
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("guarded" "${plainTable}"
+pace_make_tree("guarded" "${plainTable}"
 "if(TARGET alpha)
     add_test(NAME a COMMAND $<TARGET_FILE:alpha>)
 endif()
 " tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "guarded: a properly guarded reference was refused -- the check refuses everything")
 endif()
@@ -129,10 +129,10 @@ endif()
 # 2. An unguarded reference is refused, and NAMES the file and line. A guard whose
 #    file:line is missing or wrong sends the reader to the wrong place.
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("unguarded" "${plainTable}"
+pace_make_tree("unguarded" "${plainTable}"
 "add_test(NAME a COMMAND $<TARGET_FILE:alpha>)
 " tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "unguarded: a reference with no enclosing `TARGET alpha` was accepted -- that is a generate-time hard error, not a skipped test")
 else()
@@ -150,8 +150,8 @@ endif()
 #    over a scan that examined nothing. #510 turns on this refusal existing, and
 #    fixing the readers must make it rare rather than remove it.
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("vacuous" "${plainTable}" "# no registrations here at all\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("vacuous" "${plainTable}" "# no registrations here at all\n" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "vacuous: a tree with no reference to any optional target passed -- two empty lists agree perfectly, which is the defect this check exists to refuse")
 else()
@@ -172,13 +172,13 @@ endif()
 #    than none, because it reads as coverage.
 set(bracketTable
 "# The app table.
-set(FastCachedApps
-    \"alpha|FASTCACHED_BUILD_ALPHA|ON|The alpha app ] with a stray bracket\"
-    \"beta|FASTCACHED_BUILD_BETA|OFF|The beta app\"
+set(PaceApps
+    \"alpha|PACE_BUILD_ALPHA|ON|The alpha app ] with a stray bracket\"
+    \"beta|PACE_BUILD_BETA|OFF|The beta app\"
 )
 ")
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("bracket" "${bracketTable}"
+pace_make_tree("bracket" "${bracketTable}"
 "if(TARGET alpha)
     add_test(NAME a COMMAND $<TARGET_FILE:alpha>)
 endif()
@@ -186,7 +186,7 @@ if(TARGET beta)
     add_test(NAME b COMMAND $<TARGET_FILE:beta>)
 endif()
 " tree)
-fastcached_run_check("${tree}" objected bracketOutput)
+pace_run_check("${tree}" objected bracketOutput)
 if(objected)
     list(APPEND failures "bracket: a stray closing bracket in the app table made the check refuse a correct tree")
 else()
@@ -201,19 +201,19 @@ endif()
 #    still found, and some is not all.
 set(incompleteTable
 "# The app table.
-set(FastCachedApps
-    \"alpha|FASTCACHED_BUILD_ALPHA|ON|The alpha app\"
-    \"beta|FASTCACHED_BUILD_BETA|OFF|The beta app\"
+set(PaceApps
+    \"alpha|PACE_BUILD_ALPHA|ON|The alpha app\"
+    \"beta|PACE_BUILD_BETA|OFF|The beta app\"
 )
-# A third option the row filter cannot see: FASTCACHED_BUILD_GAMMA
+# A third option the row filter cannot see: PACE_BUILD_GAMMA
 ")
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("incomplete" "${incompleteTable}"
+pace_make_tree("incomplete" "${incompleteTable}"
 "if(TARGET alpha)
     add_test(NAME a COMMAND $<TARGET_FILE:alpha>)
 endif()
 " tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "incomplete: the app table declared a build option the reader never turned into a target, and the check passed anyway -- that is the 5-to-1 truncation going unreported")
 else()
@@ -227,7 +227,7 @@ endif()
 # 6. A condition spelled across lines is still a frame, in the reference scan too: a guarded
 #    reference inside it passes, and an `endif()` does not pop the frame ENCLOSING it.
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("multi-line-guard" "${plainTable}"
+pace_make_tree("multi-line-guard" "${plainTable}"
 "if(TARGET alpha AND
    NOT SOMETHING_ELSE)
     add_test(NAME a COMMAND $<TARGET_FILE:alpha>)
@@ -240,7 +240,7 @@ if(TARGET beta)
     add_test(NAME b COMMAND $<TARGET_FILE:beta>)
 endif()
 " tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "multi-line-guard: a condition spelled across lines was not followed, so a guarded reference was refused or an enclosing guard was popped early")
 endif()
@@ -249,13 +249,13 @@ endif()
 #     used to pop nothing and carry on, every later verdict in the file drawn from the wrong
 #     frames. The reference is guarded, so the refusal can only be the lost track.
 math(EXPR caseCount "${caseCount} + 1")
-fastcached_make_tree("stray-endif" "${plainTable}"
+pace_make_tree("stray-endif" "${plainTable}"
 "if(TARGET alpha)
     add_test(NAME a COMMAND $<TARGET_FILE:alpha>)
 endif()
 endif()
 " tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 string(FIND "${output}" "src/tests/CMakeLists.txt:4: an if()/elseif()/endif() this checker could not match to its chain" position)
 if(NOT objected OR position EQUAL -1)
     list(APPEND failures "stray-endif: an endif() with no open if() was not reported at src/tests/CMakeLists.txt:4")

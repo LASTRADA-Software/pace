@@ -34,9 +34,9 @@
 #
 # `activeCodePage` is honoured from Windows 10 1903 / Server 2022. An older host
 # ignores it in SILENCE, which is the one thing a build-time setting must not be
-# allowed to be -- so `FastCache::NarrowTextIsUtf8()` reports the outcome rather
+# allowed to be -- so `Pace::NarrowTextIsUtf8()` reports the outcome rather
 # than the intent, and a Catch2 case asserts it. See
-# src/FastCache/Platform/NarrowText.hpp.
+# src/Pace/Platform/NarrowText.hpp.
 #
 # ## What the COMPILER thinks a narrow literal is
 #
@@ -73,10 +73,10 @@ endif()
 # it. Doing it here means a new binary is covered by existing rather than by
 # somebody remembering.
 #
-# Call once, after every add_subdirectory() -- fastcached_collect_executables()
+# Call once, after every add_subdirectory() -- pace_collect_executables()
 # reads the build system as it stands, so a target added later is a target left
 # out.
-function(fastcached_declare_utf8_code_page)
+function(pace_declare_utf8_code_page)
     if(NOT WIN32)
         return()
     endif()
@@ -94,11 +94,11 @@ function(fastcached_declare_utf8_code_page)
         return()
     endif()
 
-    fastcached_collect_executables("${CMAKE_SOURCE_DIR}" executables)
+    pace_collect_executables("${CMAKE_SOURCE_DIR}" executables)
 
     # Not an error, unlike the same check in cmake/Coverage.cmake: coverage needs a
     # suite to measure, while this needs only whatever was built, and a configure
-    # with every FASTCACHED_BUILD_* off legitimately builds no executable at all.
+    # with every PACE_BUILD_* off legitimately builds no executable at all.
     # Said out loud regardless -- if the call ever moves ahead of the
     # add_subdirectory() calls that define the targets, this line is the only thing
     # that would say so.

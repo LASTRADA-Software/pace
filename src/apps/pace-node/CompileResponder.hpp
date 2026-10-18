@@ -1,0 +1,381 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include "CompileCapacity.hpp"
+#include "FrameEndpoint.hpp"
+
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <WorkerProtocol.hpp>
+#include <core/async/IExecutor.hpp>
+#include <core/async/Task.hpp>
+
+namespace Pace::Node
+{
+
+/// Serves the compile verbs on the node's merged `0xFC` listener.
+///
+/// The second half of #290, and it is **a change to how compiles RUN, not to how frames
+/// are routed**. Routing a `Compile` to a component is one row of `MergedResponder`;
+/// what makes it work is the two lines in `Answer` below, and they are the whole
+/// subject of this class.
+///
+/// ## The reactor may not compile
+///
+/// `WorkerServer` serves its own port over a **blocking** listener, so one hop suffices
+/// there: `Serve` steps onto the executor before it reads anything, and nothing after
+/// that line suspends -- `core::net::BlockingSocket::Read` does its `recv` eagerly and hands back
+/// an already-ready awaitable, so the whole request stays on the pool thread.
+///
+/// This surface is a **reactor**. A frame arrives on the reactor thread, and:
+///
+///   1. `_protocol.Answer` spawns a compiler and blocks for seconds. Run there it would
+///      stall every other connection that reactor owns -- #213 one layer over, and the
+///      worker would advertise `slots` while running one at a time.
+///   2. The reply is written by `FrameEndpoint`'s connection task to a **reactor
+///      socket**, so the answer has to come back to the reactor thread before it is
+///      returned.
+///
+/// **Neither failure is visible at a call site.** A compile served on the reactor
+/// produces a correct object; a reply returned from the pool thread writes a correct
+/// socket, most of the time, on the platform you tested. So the property is asserted by
+/// `CompileResponder_test.cpp` on the thread identities themselves -- a test that only
+/// checks the object passes under both bugs.
+///
+/// ## It spends the worker's own accounting, not a second one
+///
+/// The `CompileCapacity` here is `WorkerServer`'s: the same slot cap, the same in-flight
+/// byte budget, the same drain. Two counters would make one machine answer to two caps
+/// depending on which door a client used, and the slot figure it advertises to the fleet
+/// would describe neither.
+///
+/// ## What it does NOT change
+///
+/// Every policy is the one the dedicated port already applies. Membership is
+/// `RefuseUnlessMember`, shared with the accept loop rather than restated. The lease is
+/// checked where it always was, inside `Cc::WorkerProtocol`, by the validator this node
+/// chose at startup. Nothing here widens who may compile on this machine -- the merged
+/// listener is an additional door onto the same policy.
+///
+/// ## And it answers the cordon
+///
+/// `Op::Cordon` is the second verb of the `Compile` family (#1303), and it is here because
+/// it governs exactly this surface's admission: a cordoned worker refuses a new compile
+/// and lets the running ones finish. It is gated on LOCALITY rather than membership --
+/// whether a machine's CPU serves the fleet is decided on that machine -- and it is a
+/// round trip, not a compile, so every per-verb question below answers it as one.
+class CompileResponder final: public IFrameResponder
+{
+  public:
+    /// @param protocol Answers each compile; must outlive this. The same object the
+    ///        dedicated worker port answers with, so the lease validator, the codec
+    ///        list and the toolchain map cannot differ between the two doors.
+    /// @param capacity `WorkerServer::Capacity()`, never a second one; must outlive
+    ///        this.
+    /// @param membership Decides who may spend this machine's CPU; must outlive this.
+    /// @param locality Decides who may cordon this worker: this machine only. Must
+    ///        outlive this.
+    /// @param jobs Where a compile runs. Sized to the slot cap by the assembler, which
+    ///        is what makes an admitted job always find a thread. Must outlive this.
+    /// @param home Where the answer is returned from -- the reactor this surface's
+    ///        sockets belong to. **Not derivable here**: `Answer` is handed a frame and
+    ///        a peer, and nothing in either says which loop is driving the connection,
+    ///        so the one thread the reply may be produced on is injected rather than
+    ///        guessed. Must outlive this.
+    /// @param metrics Where the refusals and the byte counters land; must outlive this.
+    /// @param logger Where a compile that threw is reported; must outlive this.
+    /// @param progressInterval How often a running compile pulses `Status::Progress`
+    ///        at its client. Defaults to the value both ends of this wire derive from
+    ///        (`CompileCacheWire::DefaultProgressInterval`), which is where the
+    ///        production number belongs -- the client's own idle bound has to agree
+    ///        with it and there is no handshake on this wire to agree it at run time.
+    ///
+    ///        It is a PARAMETER rather than that constant read at the point of use for
+    ///        the reason every other ambient value here is injected: a case proving the
+    ///        pulse reaches a real client end-to-end would otherwise have to hold a
+    ///        compile for five seconds to see one frame, and a suite that costs seconds
+    ///        per liveness assertion is a suite that stops being run. Nothing in
+    ///        production passes it.
+    CompileResponder(Cc::WorkerProtocol& protocol,
+                     CompileCapacity& capacity,
+                     Distributed::IMembershipOracle const& membership,
+                     ILocalityOracle const& locality,
+                     core::async::IExecutor& jobs,
+                     core::async::IExecutor& home,
+                     IMetricsSink& metrics,
+                     ILogger& logger,
+                     std::chrono::milliseconds progressInterval = CompileCacheWire::DefaultProgressInterval) noexcept:
+        _protocol { protocol },
+        _capacity { capacity },
+        _membership { membership },
+        _locality { locality },
+        _jobs { jobs },
+        _home { home },
+        _metrics { metrics },
+        _logger { logger },
+        _progressInterval { progressInterval }
+    {
+    }
+
+    /// @copydoc IFrameResponder::Answer
+    ///
+    /// Admits, hops to the pool, compiles, hops back, answers. The two hops are the
+    /// point; see the class comment for why each one is invisible when it is missing.
+    [[nodiscard]] core::async::Task<FrameReply> Answer(std::span<std::byte const> frame, PeerIdentity peer) override;
+
+    /// @copydoc IFrameResponder::RefusePeer
+    ///
+    /// Membership, decided from the peer's host alone -- so the endpoint asks it before
+    /// a payload byte is read, and a caller with no claim on this machine cannot make it
+    /// buffer a multi-megabyte preprocessed translation unit on the way to being refused
+    /// (#285, #377). The same ordering the accept loop has used since it existed.
+    ///
+    /// **This is not the whole gate**, and deliberately so: a compile also needs a lease
+    /// the scheduler issued for this worker's endpoint, and that is a property of the
+    /// payload rather than of the peer. It is checked where it always was, inside
+    /// `Cc::WorkerProtocol`.
+    ///
+    /// A cordon is asked of LOCALITY instead, and membership is not consulted for it at
+    /// all: a fleet member is exactly who must not be able to take this machine out of the
+    /// fleet from somewhere else.
+    [[nodiscard]] std::optional<std::vector<std::byte>> RefusePeer(PeerIdentity const& peer,
+                                                                   std::uint8_t opRaw) const override;
+
+    /// @copydoc IFrameResponder::CheckCredential
+    ///
+    /// `NoPolicy`: AUTH is the Session family's; this surface is never routed one.
+    [[nodiscard]] CredentialVerdict CheckCredential(std::span<std::byte const> /*payload*/) const override
+    {
+        return NotTheSessionSurface();
+    }
+
+    /// @copydoc IFrameResponder::RefusalReply
+    ///
+    /// Counted against this worker's own frame-level series, so a client hammering the
+    /// merged port with oversized COMPILE declarations moves the same counter it moves
+    /// on the dedicated one. An operator reads the two side by side and must not have to
+    /// know which door a refusal came through to find it.
+    ///
+    /// Every arm goes through `Cc::Refuse`, including the two this surface cannot
+    /// produce: `ctest -R worker-refusals-counted` covers this file now, and it covers
+    /// it by there being no `EncodeErrorReply` here to leave a refusal uncounted.
+    [[nodiscard]] std::vector<std::byte> RefusalReply(CompileCacheWire::PrePayloadDecision decision,
+                                                      std::uint8_t opRaw,
+                                                      std::string_view detail) const override;
+
+    /// @copydoc IFrameResponder::EndpointRefusalReply
+    ///
+    /// The byte-budget arm is the one that matters and the one that regressed: the
+    /// dedicated compile port refused an unaffordable frame with
+    /// `CompileRefusal::EndpointBusy` and the merged listener answered a bare code, so
+    /// `worker_jobs_refused_endpoint_busy_total` -- which the operator documentation
+    /// still tells a reader to watch -- stopped moving when that port was retired
+    /// (#447).
+    ///
+    /// The credential arms are uncounted and say why in their rows: `AUTH` belongs to the
+    /// `Session` family, which `MergedResponder` routes to the session component, and a
+    /// compile carries its own per-job lease rather than a connection credential.
+    [[nodiscard]] std::vector<std::byte> EndpointRefusalReply(EndpointRefusal refusal,
+                                                              std::uint8_t opRaw,
+                                                              std::string_view detail) const override;
+
+    /// @copydoc IFrameResponder::RequestTimeout
+    ///
+    /// **However long a compiler runs, which is the whole of #223 arriving on the
+    /// server side.** The endpoint's own window is five seconds -- right for a cache
+    /// round trip, and a guarantee that every translation unit worth distributing is
+    /// compiled and then thrown away, because `ServeConnection` is not parked on the
+    /// socket while this answers: the sweep closes it silently, the compile finishes,
+    /// hops home, and its write fails. Short TUs would keep succeeding, so a smoke
+    /// test passes.
+    ///
+    /// **`MaxCompileLeaseLifetime`, and it is deliberately the CEILING rather than the
+    /// default.** The rule it serves is unchanged and is #249's: past the grant's own
+    /// expiry the scheduler has reclaimed the lease and may have re-granted the key, so
+    /// an object produced after it is one nobody can use, and serving longer than the
+    /// grant lives is doing work the fleet has already given away. What changed is that
+    /// the grant's expiry is no longer a constant this build knows -- since #522 it
+    /// comes from a replicated setting, so a fleet that has told itself its translation
+    /// units are long mints grants this surface must be prepared to serve out.
+    ///
+    /// **This window cannot be the grant's, because of WHEN it is asked.** The endpoint
+    /// arms it at the point it decides to serve, which is before the payload is read --
+    /// and the grant is inside the payload. So at this moment no authenticated bound
+    /// exists, and the only value that cannot cut a legal job short is the largest one
+    /// a cluster is allowed to agree on. `Validate` is what makes that safe: the
+    /// ceiling is a constant this build knows, never a number a peer can name.
+    ///
+    /// **The cost is stated rather than absorbed.** A peer that has already passed
+    /// `RefusePeer` -- a fleet member, not a stranger -- may now hold a compile socket
+    /// for the ceiling rather than the old default while it uploads. That is bounded by
+    /// the connection cap and by the in-flight byte budget, neither of which this
+    /// widens, and it is the second reason `MaxCompileLeaseLifetime` is an hour rather
+    /// than a rounder, more generous number.
+    ///
+    /// The per-job bound is the grant's own `expiresAt` and tightens as soon as one is
+    /// verified; `WorkerProtocol` owns that, and owns saying WHICH of the two ran out.
+    ///
+    /// A cordon is a one-byte round trip and gets the endpoint's own window: nothing it
+    /// does runs for longer than a lock.
+    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t opRaw) const noexcept override
+    {
+        return IsCordon(opRaw) ? FrameServer::HeaderTimeout : CompileCacheWire::MaxCompileLeaseLifetime;
+    }
+
+    /// @copydoc IFrameResponder::MaxRequestBytes
+    ///
+    /// The worker's own ceiling, READ OFF the `Cc::WorkerProtocol` it was built into
+    /// rather than restated. A surface that buffered more than the decoder's ceiling would
+    /// accept, and allocate, precisely the frames the budget skips -- and since #1667 the
+    /// ceiling is `--compile-request-max`, so a constant spelled here would be a second
+    /// answer that agrees only while nobody sets the option.
+    [[nodiscard]] std::size_t MaxRequestBytes() const noexcept override
+    {
+        return _protocol.MaxDecompressedBytes();
+    }
+
+    /// @copydoc IFrameResponder::MaxOpenConnections
+    ///
+    /// Hundreds, for the reason the cache surface's is: this bounds descriptors, not
+    /// work. What bounds the expensive thing is the slot cap, which is checked in
+    /// `Answer` and refuses with `NoCapacity` rather than queueing -- so sizing this to
+    /// the slot count would make a client that arrives at a busy worker wait for a
+    /// descriptor instead of being told the fleet is full.
+    [[nodiscard]] std::size_t MaxOpenConnections() const noexcept override
+    {
+        return 256;
+    }
+
+    /// @copydoc IFrameResponder::MaxInFlightBytes
+    ///
+    /// The worker's own budget, read off the shared accounting rather than restated:
+    /// this is the figure `Answer` charges the declared footprint against, and a
+    /// ceiling advertised to the endpoint that differed from the one actually spent
+    /// would refuse at one number and account at another.
+    [[nodiscard]] std::size_t MaxInFlightBytes() const noexcept override
+    {
+        return _capacity.ByteBudget();
+    }
+
+    /// @copydoc IFrameResponder::HoldsOwnByteBudget
+    ///
+    /// **Yes, and this surface is why the column exists.** `Answer` charges
+    /// `DeclaredRequestFootprint` against `CompileCapacity` -- the same accounting
+    /// the dedicated port uses and the same figure the worker advertises -- and it
+    /// holds that for the compile. The endpoint holding its own reservation over the
+    /// same frame counted one buffer twice for minutes, in a pool shared with the
+    /// scheduler verbs on this listener (#448).
+    ///
+    /// A cordon charges nothing here -- it holds one byte for as long as a lock -- so the
+    /// endpoint's reservation is the only one, and it must keep it.
+    [[nodiscard]] bool HoldsOwnByteBudget(std::uint8_t opRaw) const noexcept override
+    {
+        return !IsCordon(opRaw);
+    }
+
+    /// @copydoc IFrameResponder::PeerWatchCounter
+    ///
+    /// **Yes, and this is the one surface for which the question is worth asking.** A
+    /// compile runs for seconds to minutes while nothing here reads the socket, so a
+    /// client that is killed mid-build -- `Ctrl-C`, a cancelled CI job, a reclaimed
+    /// runner -- goes unnoticed until the object is written into a socket nobody is
+    /// reading. #223 measured that at 84 MB for a single translation unit.
+    ///
+    /// The compile itself is unaffected and still counts in `WorkerJobsCompleted`: it
+    /// ran and this machine paid for it, and only the handover found nobody there.
+    /// Stopping the compile as well needs a cancellable process seam, which
+    /// `IProcessRunner` does not have and
+    /// [#661](https://github.com/LASTRADA-Software/pace/issues/661) is about.
+    ///
+    /// Not for a cordon, which is answered before a watch could see anything and is no
+    /// job for a departure to be counted against.
+    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t opRaw) const noexcept override
+    {
+        if (IsCordon(opRaw))
+            return std::nullopt;
+        return IMetricsSink::Counter::WorkerJobsAbandonedClientGone;
+    }
+
+    /// @copydoc IFrameResponder::ProgressInterval
+    ///
+    /// **Yes, and this is the only surface where the question has an answer.** It is the
+    /// exact converse of `PeerWatchCounter` above and they are two halves of one
+    /// problem: a compile runs for seconds to minutes with nothing said in either
+    /// direction, so each end has to be given a way to notice that the other has
+    /// stopped. The watch above is this node noticing a client that left; this is the
+    /// client noticing a worker that has stopped making progress, which before #245 cost
+    /// it the whole ten-minute dispatch budget.
+    ///
+    /// The interval comes from the shared wire header rather than from a flag here,
+    /// because it has to agree with the bound the CLIENT measures silence against and
+    /// there is no negotiation on this wire to agree it at run time. `CompileCacheWire`
+    /// holds both numbers and asserts the relation between them.
+    ///
+    /// Not for a cordon: `Status::Progress` is admitted by `Op::Compile` alone, which the
+    /// wire table asserts, and a pulse ahead of a one-byte answer would be a frame the
+    /// client refuses.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t opRaw) const noexcept override
+    {
+        if (IsCordon(opRaw))
+            return std::nullopt;
+        return _progressInterval;
+    }
+
+    /// @copydoc IFrameResponder::StreamFor
+    ///
+    /// **Not a stream**: a compile is long, and its liveness is `ProgressInterval`'s pulse ahead of ONE reply,
+    /// never a series a client reads as it arrives.
+    [[nodiscard]] IFrameStream* StreamFor(std::uint8_t /*opRaw*/) noexcept override
+    {
+        return nullptr;
+    }
+
+    /// @copydoc IFrameResponder::NodeProver
+    ///
+    /// **None.** This surface verifies a per-job LEASE, which is the scheduler's signature over a
+    /// grant, and that is a different question from *which machine is this caller*. A proven
+    /// identity still reaches the membership half of this gate through `RefusePeer`.
+    [[nodiscard]] INodeProver* NodeProver() noexcept override
+    {
+        return nullptr;
+    }
+
+  private:
+    /// @param opRaw The verb's byte.
+    /// @return Whether it is `Op::Cordon`, the one verb here that is not a compile.
+    [[nodiscard]] static constexpr bool IsCordon(std::uint8_t opRaw) noexcept
+    {
+        return opRaw == static_cast<std::uint8_t>(CompileCacheWire::Op::Cordon);
+    }
+
+    /// Cordon this worker or lift the cordon, and say what it is doing now.
+    /// @param frame The whole request, header included.
+    /// @return The `CordonFields` reply, or the refusal.
+    [[nodiscard]] std::vector<std::byte> AnswerCordon(std::span<std::byte const> frame);
+
+    Cc::WorkerProtocol& _protocol;
+    CompileCapacity& _capacity;
+    Distributed::IMembershipOracle const& _membership;
+    ILocalityOracle const& _locality;
+    core::async::IExecutor& _jobs;
+    core::async::IExecutor& _home;
+    IMetricsSink& _metrics;
+    ILogger& _logger;
+    /// How often a running compile says it is still there; see the constructor.
+    std::chrono::milliseconds _progressInterval;
+};
+
+} // namespace Pace::Node

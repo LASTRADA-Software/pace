@@ -120,7 +120,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # It is the EIGHTH copy of that walk under `scripts/` -- `check-tsan-scope`,
 # `check-test-names`, `check-corrupt-store-diagnostics`, `check-bind-failure-seam`,
 # `check-worker-refusals-counted`, `scripts/lib/CheckCommon.cmake` (wrapped as
-# `fastcached_scan_code_lines`) and `check-tools-page-installed-set` (wrapped as
+# `pace_scan_code_lines`) and `check-tools-page-installed-set` (wrapped as
 # `fc_capture_lines`) already carry one, and neither wrapper is a drop-in here.
 # **#495 is the ticket for consolidating them and this is not it.** The citation is what
 # keeps this copy inside that ticket's audit rather than hiding from it -- an
@@ -166,16 +166,16 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # must make it compare unequal.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-selftest-registered.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-selftest-registered.cmake
 #
 # Exit: the verdict is the OUTPUT, not the status -- `message(FATAL_ERROR)` is read
 # through `FAIL_REGULAR_EXPRESSION`, because a `-P` script that merely WARNS exits 0.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(registrationFile "${FASTCACHED_SOURCE_DIR}/src/tests/CMakeLists.txt")
+set(registrationFile "${PACE_SOURCE_DIR}/src/tests/CMakeLists.txt")
 if(NOT EXISTS "${registrationFile}")
     message(FATAL_ERROR "the registration table is missing: ${registrationFile}")
 endif()
@@ -194,7 +194,7 @@ file(READ "${registrationFile}" registrationRaw)
 # scripts. It is safe HERE and not there, and the difference is the data: what gets
 # matched against this content is a script NAME and a FLAG, neither of which can contain
 # a bracket, whereas the shell dispatch shapes the walk recognises ARE brackets.
-fastcached_split_lines_verbatim("${registrationRaw}" registrationLines)
+pace_split_lines_verbatim("${registrationRaw}" registrationLines)
 set(registrationContent "")
 set(registeredCmakeNames "")
 set(registeredPythonNames "")
@@ -271,21 +271,21 @@ endif()
 # None of those files carries the token today, so this changes no verdict now. It is the
 # direction of failure that decides it: over-broad fails CLOSED, and the scan reports its
 # denominator so a shrink is visible.
-file(GLOB_RECURSE shScripts "${FASTCACHED_SOURCE_DIR}/scripts/*.sh")
-file(GLOB_RECURSE ps1Scripts "${FASTCACHED_SOURCE_DIR}/scripts/*.ps1")
-file(GLOB_RECURSE cmakeScripts "${FASTCACHED_SOURCE_DIR}/scripts/*.cmake")
+file(GLOB_RECURSE shScripts "${PACE_SOURCE_DIR}/scripts/*.sh")
+file(GLOB_RECURSE ps1Scripts "${PACE_SOURCE_DIR}/scripts/*.ps1")
+file(GLOB_RECURSE cmakeScripts "${PACE_SOURCE_DIR}/scripts/*.cmake")
 # `.py` was absent from every one of these lines (#1274): the globs, the scanned set
 # and the cross-check pairs. `scripts/` holds eight Python files, one of which offers
 # `--self-test` and one of which IS a self-test by its name, so the language this
 # check reported on was two thirds of the tree's scripting and the missing third was
 # silent -- which is what an extension list does when it is short.
-file(GLOB_RECURSE pyScripts "${FASTCACHED_SOURCE_DIR}/scripts/*.py")
+file(GLOB_RECURSE pyScripts "${PACE_SOURCE_DIR}/scripts/*.py")
 set(allScripts ${shScripts} ${ps1Scripts} ${pyScripts})
 
 list(LENGTH allScripts scriptCount)
 if(scriptCount EQUAL 0)
     message(FATAL_ERROR
-        "no scripts were found under ${FASTCACHED_SOURCE_DIR}/scripts; this check would "
+        "no scripts were found under ${PACE_SOURCE_DIR}/scripts; this check would "
         "pass vacuously. Either the tree moved or the glob stopped matching -- and a "
         "check reporting clean over an empty set is the defect it exists to prevent.")
 endif()
@@ -310,7 +310,7 @@ foreach(pair "shScripts;--self-test;shell" "ps1Scripts;-SelfTest;PowerShell")
     if(classCount EQUAL 0 AND registrationContent MATCHES "${needle}")
         message(FATAL_ERROR
             "the registration table names ${label} self-tests and the `${globVar}` glob "
-            "matched nothing under ${FASTCACHED_SOURCE_DIR}/scripts. Two independent "
+            "matched nothing under ${PACE_SOURCE_DIR}/scripts. Two independent "
             "sources disagree about whether this tree has any, so the glob has stopped "
             "matching and this check would report clean over a population it never read.")
     endif()
@@ -332,7 +332,7 @@ if(pyCount EQUAL 0 AND registeredPythonNames)
     message(FATAL_ERROR
         "the registration table hands ${registeredPythonCount} Python script(s) to the "
         "interpreter and the `pyScripts` glob matched nothing under "
-        "${FASTCACHED_SOURCE_DIR}/scripts. Two independent sources disagree about "
+        "${PACE_SOURCE_DIR}/scripts. Two independent sources disagree about "
         "whether this tree has any, so the glob has stopped matching and every "
         "unregistered Python self-test would pass unseen.")
 endif()
@@ -370,7 +370,7 @@ if(cmakeSelftestCount EQUAL 0 AND registeredCmakeSelftests)
     message(FATAL_ERROR
         "the registration table runs ${registeredCmakeSelftestCount} "
         "`*-selftest.cmake` file(s) with `-P`, and the `*.cmake` glob found none under "
-        "${FASTCACHED_SOURCE_DIR}/scripts. Two independent sources disagree about "
+        "${PACE_SOURCE_DIR}/scripts. Two independent sources disagree about "
         "whether this tree has any, so the glob has stopped matching and every "
         "unregistered `.cmake` self-test would pass unseen.")
 endif()
@@ -423,7 +423,7 @@ if(pySelftestCount EQUAL 0 AND registeredPySelftests)
     message(FATAL_ERROR
         "the registration table hands ${registeredPySelftestCount} `*-selftest.py` "
         "file(s) to the interpreter (${registeredPySelftests}) and the `*.py` glob "
-        "found no file with that suffix under ${FASTCACHED_SOURCE_DIR}/scripts, though "
+        "found no file with that suffix under ${PACE_SOURCE_DIR}/scripts, though "
         "it did find other Python. Two independent sources disagree about which files "
         "this tree has: either the registration names one that was renamed or deleted, "
         "or the suffix this check looks for has drifted from the one the tree uses.")

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every page that recommends pointing sccache at fastcached must carry, right
+# Every page that recommends pointing sccache at pace-kv must carry, right
 # there, what that costs under MSVC and clang-cl.
 #
-# "Point sccache at fastcached" is by definition ONE cache shared by every
+# "Point sccache at pace-kv" is by definition ONE cache shared by every
 # checkout and every machine pointed at it, which is the maximal form of the
 # hazard in .agent/rules/build-and-toolchain.md. PR #171 put a `message(WARNING)`
 # in cmake/portable/CompileCache.cmake, which reaches the audience that
@@ -24,17 +24,17 @@
 # guaranteed present.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-sccache-backend-caveat.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-sccache-backend-caveat.cmake
 #
 # Optionally, and all three only affect what this reports about ITSELF -- never
 # the verdict, which is a property of the source tree alone:
 #
-#   -DFASTCACHED_SCAN_BUDGET_SECONDS=<n>    the wall-clock budget to report
+#   -DPACE_SCAN_BUDGET_SECONDS=<n>    the wall-clock budget to report
 #                                           headroom against. Omitted, the cost
 #                                           is reported with no headroom line.
-#   -DFASTCACHED_SCAN_NARRATE_AFTER=<n>     start narrating progress once the
+#   -DPACE_SCAN_NARRATE_AFTER=<n>     start narrating progress once the
 #                                           scan has been running this long.
-#   -DFASTCACHED_SCAN_PROGRESS_EVERY=<n>    how often, in files, to consider
+#   -DPACE_SCAN_PROGRESS_EVERY=<n>    how often, in files, to consider
 #                                           narrating.
 #
 # Exit codes: 0 = every recommendation carries its caveat. 1 = at least one does not.
@@ -58,7 +58,7 @@ cmake_minimum_required(VERSION 3.28)
 
 # ---------------------------------------------------------------------------
 # What counts as recommending the configuration. These two environment variables
-# are the only way to point sccache at a fastcached daemon, so naming one IS the
+# are the only way to point sccache at a pace-kv daemon, so naming one IS the
 # recommendation -- there is no way to describe the setup without them, and no
 # other reason to write them down.
 #
@@ -66,9 +66,9 @@ cmake_minimum_required(VERSION 3.28)
 #
 # No row may contain a ';' -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
-set(FastCachedSccacheBackendMarkers
-    "SCCACHE_MEMCACHED|Points sccache at a fastcached daemon over the memcached wire format."
-    "SCCACHE_REDIS|The same, over RESP2. sccache reaches fastcached through one of these two or not at all."
+set(PaceSccacheBackendMarkers
+    "SCCACHE_MEMCACHED|Points sccache at a pace-kv daemon over the memcached wire format."
+    "SCCACHE_REDIS|The same, over RESP2. sccache reaches pace-kv through one of these two or not at all."
 )
 
 # ---------------------------------------------------------------------------
@@ -82,8 +82,8 @@ set(FastCachedSccacheBackendMarkers
 # but it is checked here too because here it would otherwise present as a page
 # that simply forgot its caveat -- sending whoever reads that message off to
 # write a second copy of one that already exists.
-set(FastCachedSccacheSnippet "docs/snippets/sccache-backend-caveat.md")
-set(FastCachedSccacheSnippetInclude "^[ \t]*--8<--[ ]*\"([^\"]+)\"")
+set(PaceSccacheSnippet "docs/snippets/sccache-backend-caveat.md")
+set(PaceSccacheSnippetInclude "^[ \t]*--8<--[ ]*\"([^\"]+)\"")
 
 # ---------------------------------------------------------------------------
 # What counts as the caveat where it cannot be included -- README.md is rendered
@@ -96,10 +96,10 @@ set(FastCachedSccacheSnippetInclude "^[ \t]*--8<--[ ]*\"([^\"]+)\"")
 # cannot disagree. Presence, not wording: each surface has its own length and
 # voice, and pinning the prose would make every rewording a test failure while
 # still not checking that the three facts survived it.
-set(FastCachedSccacheCaveatElements
+set(PaceSccacheCaveatElements
     "the exposed compilers|MSVC / clang-cl|A caveat that does not say WHEN it applies is one every reader learns to skip. GCC and Clang are genuinely unaffected -- their preprocessed output carries the paths, so two checkouts never share an entry to begin with -- and a warning that fired for them too would cost exactly the case that matters."
     "the mechanism|/showIncludes / /EP|Without it the reader cannot tell a performance note from a correctness one, nor recognise the symptom when it arrives hours later somewhere else as an object built against a header it never read."
-    "the remedy|fastcache-cc|A hazard with no way out reads as a reason to stop reading. The launcher in this repository does not have this failure mode -- it rewrites a hit's paths into the consuming checkout and refuses a hit whose replayed dependency is absent -- which is the whole reason it exists."
+    "the remedy|pace-cc|A hazard with no way out reads as a reason to stop reading. The launcher in this repository does not have this failure mode -- it rewrites a hit's paths into the consuming checkout and refuses a hit whose replayed dependency is absent -- which is the whole reason it exists."
 )
 
 # How far AFTER a recommendation its caveat may sit, in lines.
@@ -108,16 +108,16 @@ set(FastCachedSccacheCaveatElements
 # thing it qualifies -- which is also what CliParser_test.cpp asserts about the
 # rendered `--help` -- and a window that also looked backwards was measurably
 # satisfied by unrelated prose: with the whole caveat deleted from README.md, a
-# symmetric window still found "MSVC" and "fastcache-cc" 10 and 34 lines ABOVE
+# symmetric window still found "MSVC" and "pace-cc" 10 and 34 lines ABOVE
 # the marker, in a different section, and reported only the mechanism missing.
 # Looking forward only, the same deletion reports all three.
-set(FastCachedSccacheCaveatWindow 40)
+set(PaceSccacheCaveatWindow 40)
 
 # ---------------------------------------------------------------------------
 # Where to look. A file or a directory; directories are scanned recursively.
 #
 #   <path relative to the source root>|<why this root is scanned>
-set(FastCachedSccacheScanRoots
+set(PaceSccacheScanRoots
     "README.md|The project's own pitch, and the surface issue #170 was filed about."
     "docs|The published documentation site."
     "src|Help text, an app README, and anything else that reaches a user."
@@ -130,7 +130,7 @@ set(FastCachedSccacheScanRoots
 # Which files are searched for a recommendation. Wider than the extensions this
 # tree happens to use today, because a file this does not scan is a hole that
 # reports green.
-set(FastCachedSccacheScanGlobs
+set(PaceSccacheScanGlobs
     "*.md" "*.txt" "*.rst"
     "*.cpp" "*.cc" "*.cxx" "*.hpp" "*.h" "*.hh" "*.inl" "*.ipp"
     "*.cmake" "*.sh" "*.ps1" "*.bat" "*.py"
@@ -153,7 +153,7 @@ set(FastCachedSccacheScanGlobs
 # must appear in the exemption table, and its row must say what owns it instead.
 # `--help` is owned by CliParser_test.cpp, which asserts against the RENDERED
 # string -- strictly better evidence than anything available here.
-set(FastCachedSccacheJudgedGlobs "*.md")
+set(PaceSccacheJudgedGlobs "*.md")
 
 # ---------------------------------------------------------------------------
 # Files that name a marker without recommending anything, or that something else
@@ -162,12 +162,12 @@ set(FastCachedSccacheJudgedGlobs "*.md")
 # fails this check rather than being ignored.
 #
 #   <path relative to the source root>|<why it is not judged here>
-set(FastCachedSccacheExemptPaths
+set(PaceSccacheExemptPaths
     "scripts/sccache-smoke.sh|A harness that drives a real sccache against a real daemon to prove the memcached text, memcached binary and RESP2 wire formats are all detected. It sets the variables to exercise the daemon, not to advise anyone to."
     "scripts/sccache-smoke.ps1|The Windows half of the same harness."
     "scripts/check-sccache-backend-caveat.cmake|This check. Its own marker table has to spell the variables out."
     "scripts/check-sccache-backend-caveat-selftest.cmake|This check's selftest. It synthesises a tree containing one recommendation carrying its caveat, so the marker is test DATA -- and it is deliberately written out in full rather than assembled from fragments, because a file that dodged this scan by spelling the variable in halves is exactly the hole the scan exists to close. It was caught by this check on its first ctest run, which is the mechanism working."
-    "src/FastCache/Config/CliParser.cpp|The daemon's `--help`, whose sccache examples DO carry the caveat -- as a row of UsageFooters. It is owned by the `--help qualifies its sccache examples with the MSVC caveat` case in CliParser_test.cpp, which asserts the same three elements against the RENDERED usage string and additionally that the caveat reads after the examples. See the note on FastCachedSccacheJudgedGlobs above for why a source scan is the weaker of the two."
+    "src/Pace/Config/CliParser.cpp|The daemon's `--help`, whose sccache examples DO carry the caveat -- as a row of UsageFooters. It is owned by the `--help qualifies its sccache examples with the MSVC caveat` case in CliParser_test.cpp, which asserts the same three elements against the RENDERED usage string and additionally that the caveat reads after the examples. See the note on PaceSccacheJudgedGlobs above for why a source scan is the weaker of the two."
     "docs/snippets/sccache-backend-caveat.md|The caveat itself, which names the variables in the header telling an author what this check requires. Judging it would have it satisfy itself, which is a check that cannot fail."
     ".github/workflows/build.yml|Names the variable in a comment explaining why the Windows sccache assertion must be read BEFORE ctest -- the `sccache-smoke-*` tests restart the sccache server with it, zeroing the statistics -- and the smoke jobs themselves invoke the harness that sets it. That is the workflow driving the daemon, never advising anyone to build that way, which is the same ground as the sccache-smoke rows above. It is also YAML, where a caveat could only be a comment: this check cannot tell a comment stating the caveat from a comment merely mentioning the variable, so a green result here would prove nothing about what the file says. Owned by .agent/rules/build-and-toolchain.md, which states the caveat in full at the passage that comment refers to, and which this check does judge."
 )
@@ -206,7 +206,7 @@ set(FastCachedSccacheExemptPaths
 # AGENT.md again. Two of these three rows are wall times somebody else recorded,
 # divided by a corpus count taken here; a reader who assumes all three were
 # observed the same way will trust the widest one most, and it is the softest.
-set(FastCachedSccacheScanCostBands
+set(PaceSccacheScanCostBands
     "2|native|A filesystem reached directly -- ext4, or NTFS from a Windows cmake. DERIVED: 0.47 s reported in #479 for this class of work, over a corpus of this size. Not measured here."
     "20|bridged|WSL2 9p -- the WSL1 mechanism the older notes in this tree call DrvFs -- with the machine otherwise quiet. MEASURED: 4.0-5.1 s over this corpus across four checkouts on one machine, load average 0.6-0.9, 2026-09-03, of which 0.4 s was user+sys and the rest was wait."
     "unbounded|bridged and contended|The same bridge while several lanes build and run ctest at once. DERIVED: two lanes each timed 53-57 s twice on 2026-09-03 (#479). The per-file figure is that divided by a corpus count taken separately, on a machine state that could not afterwards be reproduced. It is the least directly observed row here and the one a slow run is most likely to land in."
@@ -225,19 +225,19 @@ set(FastCachedSccacheScanCostBands
 # The threshold sits above the bridged-and-quiet band's whole run so an ordinary
 # WSL checkout stays silent, and far below any plausible ceiling so a contended
 # one has narrated several times before anything kills it.
-set(FastCachedSccacheScanNarrateAfterSeconds 10)
-set(FastCachedSccacheScanProgressEvery 100)
+set(PaceSccacheScanNarrateAfterSeconds 10)
+set(PaceSccacheScanProgressEvery 100)
 
 # ---------------------------------------------------------------------------
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
+if(NOT DEFINED PACE_SOURCE_DIR)
     message(FATAL_ERROR
-        "FASTCACHED_SOURCE_DIR is not set. Invoke this script as: cmake "
-        "-DFASTCACHED_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
+        "PACE_SOURCE_DIR is not set. Invoke this script as: cmake "
+        "-DPACE_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
 endif()
 
-if(NOT IS_DIRECTORY "${FASTCACHED_SOURCE_DIR}")
-    message(FATAL_ERROR "'${FASTCACHED_SOURCE_DIR}' is not a directory. Is it the source root?")
+if(NOT IS_DIRECTORY "${PACE_SOURCE_DIR}")
+    message(FATAL_ERROR "'${PACE_SOURCE_DIR}' is not a directory. Is it the source root?")
 endif()
 
 # The two narration settings are overridable so the selftest can drive the slow
@@ -265,17 +265,17 @@ set(scanBudgetSeconds "")
 # for every knob -- and a fourth knob is a row rather than a fourth spelling.
 #
 # No field may contain a '|' or a ';'.
-set(FastCachedSccacheScanKnobs
-    "FASTCACHED_SCAN_NARRATE_AFTER|FastCachedSccacheScanNarrateAfterSeconds|0|the number of seconds a run must already have taken before it starts narrating progress"
-    "FASTCACHED_SCAN_PROGRESS_EVERY|FastCachedSccacheScanProgressEvery|1|the number of files between progress checkpoints. It is the modulus the checkpoint divides by, so 0 is a division by zero rather than a way to turn narration off -- raise FASTCACHED_SCAN_NARRATE_AFTER for that"
-    "FASTCACHED_SCAN_BUDGET_SECONDS|scanBudgetSeconds|1|the wall-clock budget headroom is reported against. Omit it entirely to run with no budget and no headroom line, which is how it is switched off"
+set(PaceSccacheScanKnobs
+    "PACE_SCAN_NARRATE_AFTER|PaceSccacheScanNarrateAfterSeconds|0|the number of seconds a run must already have taken before it starts narrating progress"
+    "PACE_SCAN_PROGRESS_EVERY|PaceSccacheScanProgressEvery|1|the number of files between progress checkpoints. It is the modulus the checkpoint divides by, so 0 is a division by zero rather than a way to turn narration off -- raise PACE_SCAN_NARRATE_AFTER for that"
+    "PACE_SCAN_BUDGET_SECONDS|scanBudgetSeconds|1|the wall-clock budget headroom is reported against. Omit it entirely to run with no budget and no headroom line, which is how it is switched off"
 )
-foreach(row IN LISTS FastCachedSccacheScanKnobs)
+foreach(row IN LISTS PaceSccacheScanKnobs)
     string(REPLACE "|" ";" knobFields "${row}")
     list(LENGTH knobFields knobFieldCount)
     if(NOT knobFieldCount EQUAL 4)
         message(FATAL_ERROR
-            "FastCachedSccacheScanKnobs row split into ${knobFieldCount} field(s) where 4 are "
+            "PaceSccacheScanKnobs row split into ${knobFieldCount} field(s) where 4 are "
             "wanted -- a '|' or a ';' has got into a field: ${row}")
     endif()
     list(GET knobFields 0 knobName)
@@ -309,10 +309,10 @@ endforeach()
 # contended bands are two orders of magnitude apart, and no rounding closes that.
 #
 # @param outVar Set to the current wall time in whole seconds since the epoch,
-#        or the next injected reading when FASTCACHED_SCAN_CLOCK_READINGS is set,
+#        or the next injected reading when PACE_SCAN_CLOCK_READINGS is set,
 #        the last of which repeats for every call after it.
-function(fastcached_wall_seconds outVar)
-    get_property(injected GLOBAL PROPERTY FastCachedSccacheScanClockReadings)
+function(pace_wall_seconds outVar)
+    get_property(injected GLOBAL PROPERTY PaceSccacheScanClockReadings)
     # Quoted, because `if(injected STREQUAL "")` does not fire when the variable
     # is UNSET -- which is what an unset GLOBAL property leaves it as. CMake then
     # reads the left operand as the literal string `injected`, which is never
@@ -336,7 +336,7 @@ function(fastcached_wall_seconds outVar)
     list(GET injected 0 nowSeconds)
     if(remaining GREATER 1)
         list(REMOVE_AT injected 0)
-        set_property(GLOBAL PROPERTY FastCachedSccacheScanClockReadings "${injected}")
+        set_property(GLOBAL PROPERTY PaceSccacheScanClockReadings "${injected}")
     endif()
     set(${outVar} "${nowSeconds}" PARENT_SCOPE)
 endfunction()
@@ -352,20 +352,20 @@ endfunction()
 # script has, and there is no arrangement of real sleeps that makes a backward
 # step happen on demand. Injected readings place one.
 #
-# NOT a FastCachedSccacheScanKnobs row, and the table says why itself: no field
+# NOT a PaceSccacheScanKnobs row, and the table says why itself: no field
 # there may contain a ';', and a ';' is exactly what separates these elements. It
 # is a list of whole seconds, so it carries its own guard below.
-if(DEFINED FASTCACHED_SCAN_CLOCK_READINGS)
+if(DEFINED PACE_SCAN_CLOCK_READINGS)
     # ','-separated, not ';'. The selftest carries each case as a '|'-delimited
     # row whose fields may hold neither a ';' -- that splits the CMake list -- nor
     # a space, which is how the row's extra arguments are split. A comma is
     # special to none of the three, so the translation happens here rather than
     # every caller inventing an encoding.
-    string(REPLACE "," ";" clockReadings "${FASTCACHED_SCAN_CLOCK_READINGS}")
+    string(REPLACE "," ";" clockReadings "${PACE_SCAN_CLOCK_READINGS}")
     list(LENGTH clockReadings clockReadingCount)
     if(clockReadingCount LESS 2)
         message(FATAL_ERROR
-            "FASTCACHED_SCAN_CLOCK_READINGS holds ${clockReadingCount} reading(s) and an interval "
+            "PACE_SCAN_CLOCK_READINGS holds ${clockReadingCount} reading(s) and an interval "
             "needs two. It is a ','-separated list of whole seconds handed out in order, the last "
             "of which repeats -- so `1000,900` is a clock that steps 100s backwards after its "
             "first reading, and `900,1000` the same step forwards.")
@@ -377,10 +377,10 @@ if(DEFINED FASTCACHED_SCAN_CLOCK_READINGS)
         # naming a line rather than naming the flag.
         if(NOT reading MATCHES "^[0-9]+$")
             message(FATAL_ERROR
-                "FASTCACHED_SCAN_CLOCK_READINGS holds '${reading}', which is not a whole number.")
+                "PACE_SCAN_CLOCK_READINGS holds '${reading}', which is not a whole number.")
         endif()
     endforeach()
-    set_property(GLOBAL PROPERTY FastCachedSccacheScanClockReadings "${clockReadings}")
+    set_property(GLOBAL PROPERTY PaceSccacheScanClockReadings "${clockReadings}")
 endif()
 
 # What an interval MEANS, separated from taking one.
@@ -427,14 +427,14 @@ endif()
 # @param endSeconds The later reading.
 # @param outSeconds Set to the interval. Negative means the clock moved back, and
 #        the record below is what says so to the reporting arm.
-function(fastcached_scan_interval label startSeconds endSeconds outSeconds)
+function(pace_scan_interval label startSeconds endSeconds outSeconds)
     math(EXPR intervalSeconds "${endSeconds} - ${startSeconds}")
     set(${outSeconds} "${intervalSeconds}" PARENT_SCOPE)
     if(intervalSeconds LESS 0)
         # `list(APPEND)` treats an unset variable as an empty list, so the read
         # needs no guard of its own here -- unlike an `if(... STREQUAL "")`, which
-        # is the trap `fastcached_wall_seconds` quotes its own read against.
-        get_property(stepped GLOBAL PROPERTY FastCachedSccacheScanSteppedIntervals)
+        # is the trap `pace_wall_seconds` quotes its own read against.
+        get_property(stepped GLOBAL PROPERTY PaceSccacheScanSteppedIntervals)
         # The VALUE travels with the label, because it is the one figure the
         # refusal can show that is actually negative. Reporting only the whole-run
         # and walk intervals leaves a message whose two numbers are positive under
@@ -442,7 +442,7 @@ function(fastcached_scan_interval label startSeconds endSeconds outSeconds)
         # at, which is the confident wrong detail this arm exists to avoid.
         list(APPEND stepped "${label} (${intervalSeconds}s)")
         list(REMOVE_DUPLICATES stepped)
-        set_property(GLOBAL PROPERTY FastCachedSccacheScanSteppedIntervals "${stepped}")
+        set_property(GLOBAL PROPERTY PaceSccacheScanSteppedIntervals "${stepped}")
     endif()
 endfunction()
 
@@ -458,7 +458,7 @@ if(DEFINED ENV{SOURCE_DATE_EPOCH})
     set(clockFrozen TRUE)
 endif()
 
-fastcached_wall_seconds(runStartSeconds)
+pace_wall_seconds(runStartSeconds)
 
 # The `"value|reason"` row convention, defined once (#513). What it does with a
 # malformed row, and which field may hold a `|`, are stated there and not here.
@@ -474,7 +474,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # in it and the defect was exactly that shape: CMake split the element in two,
 # the loop matched and broke on the truncated half, and the only symptom was a
 # conditions sentence that stopped mid-way. Nothing failed, and nothing could
-# have. The rule was already written down for FastCachedSccacheBackendMarkers
+# have. The rule was already written down for PaceSccacheBackendMarkers
 # 200 lines above and did not carry itself to a new table, which is why this is a
 # check rather than a second comment.
 #
@@ -490,10 +490,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # fails, and both hand the reader a specific, confident, wrong answer.
 set(bandRowIndex 0)
 set(previousCeiling "")
-list(LENGTH FastCachedSccacheScanCostBands bandRowCount)
-foreach(row IN LISTS FastCachedSccacheScanCostBands)
+list(LENGTH PaceSccacheScanCostBands bandRowCount)
+foreach(row IN LISTS PaceSccacheScanCostBands)
     math(EXPR bandRowIndex "${bandRowIndex} + 1")
-    set(bandWhere "FastCachedSccacheScanCostBands row ${bandRowIndex} of ${bandRowCount}")
+    set(bandWhere "PaceSccacheScanCostBands row ${bandRowIndex} of ${bandRowCount}")
 
     string(FIND "${row}" "|" firstSeparator)
     if(firstSeparator EQUAL -1)
@@ -502,7 +502,7 @@ foreach(row IN LISTS FastCachedSccacheScanCostBands)
             "A ';' anywhere in a row splits the CMake list in two and truncates it silently. No "
             "row may contain one.")
     endif()
-    fastcached_row_fields("${row}" bandCeiling bandRowName bandRowConditions)
+    pace_row_fields("${row}" bandCeiling bandRowName bandRowConditions)
 
     if(bandRowIndex EQUAL bandRowCount)
         if(NOT bandCeiling STREQUAL "unbounded")
@@ -545,32 +545,32 @@ endforeach()
 # two comments before this; a relationship the design rests on is worth more than
 # prose in the file that depends on it.
 if(NOT scanBudgetSeconds STREQUAL "")
-    math(EXPR narrationRoom "${FastCachedSccacheScanNarrateAfterSeconds} * 2")
+    math(EXPR narrationRoom "${PaceSccacheScanNarrateAfterSeconds} * 2")
     if(scanBudgetSeconds LESS ${narrationRoom})
         message(FATAL_ERROR
-            "FASTCACHED_SCAN_BUDGET_SECONDS is ${scanBudgetSeconds}s and narration does not start "
-            "until ${FastCachedSccacheScanNarrateAfterSeconds}s, so a run killed at that budget "
+            "PACE_SCAN_BUDGET_SECONDS is ${scanBudgetSeconds}s and narration does not start "
+            "until ${PaceSccacheScanNarrateAfterSeconds}s, so a run killed at that budget "
             "could be killed having explained nothing -- which is the bare timeout this check's "
             "narration exists to replace. The budget must be at least twice the narration "
-            "threshold. Lower FastCachedSccacheScanNarrateAfterSeconds or raise the budget in "
+            "threshold. Lower PaceSccacheScanNarrateAfterSeconds or raise the budget in "
             "src/tests/CMakeLists.txt, and keep them moving together.")
     endif()
 endif()
 
 set(markerLiterals "")
-foreach(row IN LISTS FastCachedSccacheBackendMarkers)
-    fastcached_row_fields("${row}" markerLiteral markerReason)
+foreach(row IN LISTS PaceSccacheBackendMarkers)
+    pace_row_fields("${row}" markerLiteral markerReason)
     list(APPEND markerLiterals "${markerLiteral}")
 endforeach()
 
 set(exemptPaths "")
-foreach(row IN LISTS FastCachedSccacheExemptPaths)
-    fastcached_row_fields("${row}" exemptPath exemptReason)
+foreach(row IN LISTS PaceSccacheExemptPaths)
+    pace_row_fields("${row}" exemptPath exemptReason)
     list(APPEND exemptPaths "${exemptPath}")
 endforeach()
 
-set(snippetPath "${FASTCACHED_SOURCE_DIR}/${FastCachedSccacheSnippet}")
-get_filename_component(snippetName "${FastCachedSccacheSnippet}" NAME)
+set(snippetPath "${PACE_SOURCE_DIR}/${PaceSccacheSnippet}")
+get_filename_component(snippetName "${PaceSccacheSnippet}" NAME)
 
 # ---------------------------------------------------------------------------
 # An exemption for a path that no longer exists is one that has stopped being
@@ -578,16 +578,16 @@ get_filename_component(snippetName "${FastCachedSccacheSnippet}" NAME)
 # is printed with it: whether to move the row or delete it depends on why it was
 # written, and this is the last moment anyone will look.
 set(staleExemptions "")
-foreach(row IN LISTS FastCachedSccacheExemptPaths)
-    fastcached_row_fields("${row}" exemptPath exemptReason)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${exemptPath}")
+foreach(row IN LISTS PaceSccacheExemptPaths)
+    pace_row_fields("${row}" exemptPath exemptReason)
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${exemptPath}")
         list(APPEND staleExemptions "  ${exemptPath}\n      is exempted but does not exist. It was exempted because: ${exemptReason}")
     endif()
 endforeach()
 
 if(NOT EXISTS "${snippetPath}")
     set(missingSnippet
-        "  ${FastCachedSccacheSnippet}\n      is the canonical caveat every documentation page includes, and it is not there")
+        "  ${PaceSccacheSnippet}\n      is the canonical caveat every documentation page includes, and it is not there")
 else()
     set(missingSnippet "")
 endif()
@@ -604,7 +604,7 @@ set(scanFiles "")
 # matches the observation almost exactly.
 # @param globs The shell globs, each like `*.md`.
 # @param outVar Set to an anchored alternation regex.
-function(fastcached_globs_to_regex globs outVar)
+function(pace_globs_to_regex globs outVar)
     set(parts "")
     foreach(glob IN LISTS globs)
         string(REPLACE "." "PLACEHOLDERDOT" one "${glob}")
@@ -616,8 +616,8 @@ function(fastcached_globs_to_regex globs outVar)
     set(${outVar} "(${joined})$" PARENT_SCOPE)
 endfunction()
 
-fastcached_globs_to_regex("${FastCachedSccacheScanGlobs}" scanRegex)
-fastcached_globs_to_regex("${FastCachedSccacheJudgedGlobs}" judgedRegex)
+pace_globs_to_regex("${PaceSccacheScanGlobs}" scanRegex)
+pace_globs_to_regex("${PaceSccacheJudgedGlobs}" judgedRegex)
 
 set(judgedFiles "")
 set(missingRoots "")
@@ -627,13 +627,13 @@ set(missingRoots "")
 # band and the headroom are both taken from the whole-run figure, and at
 # whole-second resolution a ~2 s walk prints as 1 s or 2 s. Reported as evidence,
 # never quoted as a quantity.
-fastcached_wall_seconds(walkStartSeconds)
-foreach(row IN LISTS FastCachedSccacheScanRoots)
-    fastcached_row_fields("${row}" scanRoot scanRootReason)
-    set(rootPath "${FASTCACHED_SOURCE_DIR}/${scanRoot}")
+pace_wall_seconds(walkStartSeconds)
+foreach(row IN LISTS PaceSccacheScanRoots)
+    pace_row_fields("${row}" scanRoot scanRootReason)
+    set(rootPath "${PACE_SOURCE_DIR}/${scanRoot}")
     if(IS_DIRECTORY "${rootPath}")
         # ONE traversal per root, partitioned afterwards. See
-        # `fastcached_globs_to_regex` for the arithmetic this replaces.
+        # `pace_globs_to_regex` for the arithmetic this replaces.
         file(GLOB_RECURSE rootAll LIST_DIRECTORIES false "${rootPath}/*")
 
         set(rootFiles ${rootAll})
@@ -645,7 +645,7 @@ foreach(row IN LISTS FastCachedSccacheScanRoots)
         list(APPEND judgedFiles ${rootJudged})
     elseif(EXISTS "${rootPath}")
         list(APPEND scanFiles "${rootPath}")
-        foreach(glob IN LISTS FastCachedSccacheJudgedGlobs)
+        foreach(glob IN LISTS PaceSccacheJudgedGlobs)
             string(REPLACE "*" ".*" globPattern "${glob}")
             if(rootPath MATCHES "${globPattern}$")
                 list(APPEND judgedFiles "${rootPath}")
@@ -667,7 +667,7 @@ foreach(row IN LISTS FastCachedSccacheScanRoots)
     # which is the bare timeout this narration exists to replace, surviving
     # inside the fix for it.
     if(NOT clockFrozen)
-        fastcached_wall_seconds(rootWalkSeconds)
+        pace_wall_seconds(rootWalkSeconds)
         # Through the shared spelling for the RECORD, not for a branch: this
         # interval is one of the four, and a step it sees is a step the cost line
         # below must not report a band across even when the whole-run interval
@@ -675,9 +675,9 @@ foreach(row IN LISTS FastCachedSccacheScanRoots)
         # the threshold's minimum is 0, so a negative already fails it, and this
         # site's failure direction is silence on exactly the contended run
         # narration exists to explain.
-        fastcached_scan_interval(
+        pace_scan_interval(
             "a root's walk narration point" "${runStartSeconds}" "${rootWalkSeconds}" walkElapsed)
-        if(walkElapsed GREATER_EQUAL ${FastCachedSccacheScanNarrateAfterSeconds})
+        if(walkElapsed GREATER_EQUAL ${PaceSccacheScanNarrateAfterSeconds})
             list(LENGTH scanFiles walkedSoFar)
             message(
                 "sccache backend caveat: still walking -- ${walkedSoFar} candidate(s) after "
@@ -689,8 +689,8 @@ foreach(row IN LISTS FastCachedSccacheScanRoots)
 endforeach()
 list(REMOVE_DUPLICATES scanFiles)
 list(SORT scanFiles)
-fastcached_wall_seconds(walkEndSeconds)
-fastcached_scan_interval("the directory walk" "${walkStartSeconds}" "${walkEndSeconds}" walkSeconds)
+pace_wall_seconds(walkEndSeconds)
+pace_scan_interval("the directory walk" "${walkStartSeconds}" "${walkEndSeconds}" walkSeconds)
 list(LENGTH scanFiles scanCount)
 
 # ---------------------------------------------------------------------------
@@ -709,20 +709,20 @@ foreach(scanFile IN LISTS scanFiles)
     math(EXPR filesVisited "${filesVisited} + 1")
 
     # Narrate, but only once the run is ALREADY slow. See
-    # FastCachedSccacheScanNarrateAfterSeconds for why a fast run stays silent
+    # PaceSccacheScanNarrateAfterSeconds for why a fast run stays silent
     # and why this line is the whole answer to a `ctest` TIMEOUT on this check.
     #
     # `%` rather than a countdown so the checkpoint is a property of the file
     # index rather than of a second counter that could fall out of step with it.
-    math(EXPR sinceCheckpoint "${filesVisited} % ${FastCachedSccacheScanProgressEvery}")
+    math(EXPR sinceCheckpoint "${filesVisited} % ${PaceSccacheScanProgressEvery}")
     if(sinceCheckpoint EQUAL 0 AND NOT clockFrozen)
-        fastcached_wall_seconds(checkpointSeconds)
+        pace_wall_seconds(checkpointSeconds)
         # Recorded for the walk site's reason, and this is the interval a step
         # landing in the READ phase shows up in FIRST -- the cost line's whole-run
         # interval can stay positive right through it.
-        fastcached_scan_interval(
+        pace_scan_interval(
             "a progress checkpoint" "${runStartSeconds}" "${checkpointSeconds}" elapsedSeconds)
-        if(elapsedSeconds GREATER_EQUAL ${FastCachedSccacheScanNarrateAfterSeconds})
+        if(elapsedSeconds GREATER_EQUAL ${PaceSccacheScanNarrateAfterSeconds})
             math(EXPR checkpointMsPerFile "${elapsedSeconds} * 1000 / ${filesVisited}")
             math(EXPR projectedSeconds "${elapsedSeconds} * ${scanCount} / ${filesVisited}")
             set(narrated TRUE)
@@ -736,12 +736,12 @@ foreach(scanFile IN LISTS scanFiles)
                 "after ${elapsedSeconds}s, about ${checkpointMsPerFile} ms/file, so the whole scan "
                 "needs roughly ${projectedSeconds}s at this rate. This check does no compute worth "
                 "measuring and cannot wedge -- it reads N files and exits -- so a run this slow is "
-                "the filesystem, not a hang. See FastCachedSccacheScanCostBands in "
+                "the filesystem, not a hang. See PaceSccacheScanCostBands in "
                 "${CMAKE_CURRENT_LIST_FILE} for which band that per-file cost lands in.")
         endif()
     endif()
 
-    file(RELATIVE_PATH relativeFile "${FASTCACHED_SOURCE_DIR}" "${scanFile}")
+    file(RELATIVE_PATH relativeFile "${PACE_SOURCE_DIR}" "${scanFile}")
 
     list(FIND exemptPaths "${relativeFile}" exemptPosition)
     if(NOT exemptPosition EQUAL -1)
@@ -788,7 +788,7 @@ foreach(scanFile IN LISTS scanFiles)
         continue()
     endif()
 
-    fastcached_split_lines_tokenised("${content}" fileLines)
+    pace_split_lines_tokenised("${content}" fileLines)
     list(LENGTH fileLines lineCount)
 
     # A split that lost a line does not report a missing line -- it reports a
@@ -806,7 +806,7 @@ foreach(scanFile IN LISTS scanFiles)
             "${newlineCount} newline(s), so this check cannot trust its own line numbers -- and "
             "a merged element would silently widen the caveat window to whatever it swallowed. "
             "A character CMake's list syntax reserves has reached the split unneutralised; "
-            "fastcached_split_lines in ${CMAKE_CURRENT_LIST_FILE} says which four those are.")
+            "pace_split_lines in ${CMAKE_CURRENT_LIST_FILE} says which four those are.")
     endif()
 
     # `foreach(IN LISTS)` with a running counter rather than an indexed
@@ -832,7 +832,7 @@ foreach(scanFile IN LISTS scanFiles)
         math(EXPR markerHits "${markerHits} + 1")
 
         # The window: this line and the ones after it, clamped to the file.
-        math(EXPR windowLast "${lineIndex} + ${FastCachedSccacheCaveatWindow}")
+        math(EXPR windowLast "${lineIndex} + ${PaceSccacheCaveatWindow}")
         if(windowLast GREATER ${lastLine})
             set(windowLast ${lastLine})
         endif()
@@ -843,7 +843,7 @@ foreach(scanFile IN LISTS scanFiles)
         # asked of it -- that is what "one wording" means.
         set(satisfied FALSE)
         foreach(windowLine IN LISTS windowLines)
-            if(windowLine MATCHES "${FastCachedSccacheSnippetInclude}"
+            if(windowLine MATCHES "${PaceSccacheSnippetInclude}"
                AND CMAKE_MATCH_1 STREQUAL "${snippetName}"
                AND missingSnippet STREQUAL "")
                 set(satisfied TRUE)
@@ -855,8 +855,8 @@ foreach(scanFile IN LISTS scanFiles)
         set(missingElements "")
         if(NOT satisfied)
             list(JOIN windowLines "\n" window)
-            foreach(row IN LISTS FastCachedSccacheCaveatElements)
-                fastcached_row_fields("${row}" elementName elementSpellings elementReason)
+            foreach(row IN LISTS PaceSccacheCaveatElements)
+                pace_row_fields("${row}" elementName elementSpellings elementReason)
                 string(REPLACE " / " ";" spellings "${elementSpellings}")
 
                 set(present FALSE)
@@ -880,7 +880,7 @@ foreach(scanFile IN LISTS scanFiles)
             math(EXPR humanLine "${lineIndex} + 1")
             list(JOIN missingElements ", " missingText)
             list(APPEND violations
-                "  ${relativeFile}:${humanLine}\n      names ${lineMarker}, and the ${FastCachedSccacheCaveatWindow} lines after it neither include ${snippetName} nor carry: ${missingText}")
+                "  ${relativeFile}:${humanLine}\n      names ${lineMarker}, and the ${PaceSccacheCaveatWindow} lines after it neither include ${snippetName} nor carry: ${missingText}")
         endif()
     endforeach()
 endforeach()
@@ -896,8 +896,8 @@ endforeach()
 # nobody re-measures stops being a margin silently; an observation printed on
 # every run cannot. It states the finding and stops -- no remedy is suggested,
 # because an instrument cannot know whether the remedy is the thing in dispute.
-fastcached_wall_seconds(runEndSeconds)
-fastcached_scan_interval("the whole run" "${runStartSeconds}" "${runEndSeconds}" runSeconds)
+pace_wall_seconds(runEndSeconds)
+pace_scan_interval("the whole run" "${runStartSeconds}" "${runEndSeconds}" runSeconds)
 math(EXPR bytesReadKiB "${bytesRead} / 1024")
 
 # ANY interval going backwards spoils the cost report, and they can disagree: a
@@ -907,7 +907,7 @@ math(EXPR bytesReadKiB "${bytesRead} / 1024")
 # every interval writes as it is taken, never rebuilt here from the two the cost
 # line happens to hold variables for -- an arm that enumerates its sources is an
 # arm that can be silent about a source somebody adds later.
-get_property(steppedIntervals GLOBAL PROPERTY FastCachedSccacheScanSteppedIntervals)
+get_property(steppedIntervals GLOBAL PROPERTY PaceSccacheScanSteppedIntervals)
 
 # What was walked and read is true whether or not a cost could be computed, so it
 # is spelled once for every arm that cannot report one. It also stops two arms
@@ -996,8 +996,8 @@ else()
     # an instrument quietly reporting nothing in the shape of an answer.
     set(bandName "")
     set(bandConditions "")
-    foreach(row IN LISTS FastCachedSccacheScanCostBands)
-        fastcached_row_fields("${row}" bandCeiling rowBandName rowBandConditions)
+    foreach(row IN LISTS PaceSccacheScanCostBands)
+        pace_row_fields("${row}" bandCeiling rowBandName rowBandConditions)
         # Two `if`s rather than one `OR`: the catch-all row's ceiling is a WORD,
         # and handing a word to LESS_EQUAL is a hard error the moment anything
         # evaluates it. Not worth resting on short-circuit order.
@@ -1016,7 +1016,7 @@ else()
 
     if(bandName STREQUAL "")
         message(FATAL_ERROR
-            "${msPerFile} ms/file matched no row of FastCachedSccacheScanCostBands, so this check "
+            "${msPerFile} ms/file matched no row of PaceSccacheScanCostBands, so this check "
             "cannot say which of its known conditions it is running under. The last row's ceiling "
             "must be the word `unbounded` -- it is the catch-all, and without it a cost above every "
             "listed ceiling renders as an empty band name, which reads like an answer and is not "
@@ -1043,11 +1043,11 @@ else()
     # about, reappearing one level up. It happens when the checkpoint interval is
     # wider than the corpus: no ordinary run meets that, a trimmed scan table
     # would, and nothing else would ever say so.
-    if(runSeconds GREATER_EQUAL ${FastCachedSccacheScanNarrateAfterSeconds} AND NOT narrated)
+    if(runSeconds GREATER_EQUAL ${PaceSccacheScanNarrateAfterSeconds} AND NOT narrated)
         string(APPEND headroom
-            " This run passed the ${FastCachedSccacheScanNarrateAfterSeconds}s narration threshold and "
+            " This run passed the ${PaceSccacheScanNarrateAfterSeconds}s narration threshold and "
             "narrated nothing, so a timeout here would have carried no explanation: "
-            "${FastCachedSccacheScanProgressEvery} file(s) between checkpoints against "
+            "${PaceSccacheScanProgressEvery} file(s) between checkpoints against "
             "${scanCount} candidate(s).")
     endif()
 
@@ -1064,8 +1064,8 @@ endif()
 set(vacuous "")
 if(markerHits EQUAL 0)
     set(markerTable "")
-    foreach(row IN LISTS FastCachedSccacheBackendMarkers)
-        fastcached_row_fields("${row}" markerLiteral markerReason)
+    foreach(row IN LISTS PaceSccacheBackendMarkers)
+        pace_row_fields("${row}" markerLiteral markerReason)
         string(APPEND markerTable "  ${markerLiteral}\n      ${markerReason}\n")
     endforeach()
     string(APPEND vacuous
@@ -1090,7 +1090,7 @@ set(sccacheCaveatReportSections
 
 set(report "")
 foreach(row IN LISTS sccacheCaveatReportSections)
-    fastcached_row_fields("${row}" sectionVariable sectionHeading)
+    pace_row_fields("${row}" sectionVariable sectionHeading)
     if(NOT "${${sectionVariable}}" STREQUAL "")
         list(JOIN ${sectionVariable} "\n" sectionBody)
         string(APPEND report "${sectionHeading}:\n${sectionBody}\n")
@@ -1099,26 +1099,26 @@ endforeach()
 
 if(NOT report STREQUAL "")
     set(rulebook "")
-    foreach(row IN LISTS FastCachedSccacheCaveatElements)
-        fastcached_row_fields("${row}" elementName elementSpellings elementReason)
+    foreach(row IN LISTS PaceSccacheCaveatElements)
+        pace_row_fields("${row}" elementName elementSpellings elementReason)
         string(APPEND rulebook "  ${elementName} -- any of: ${elementSpellings}\n      ${elementReason}\n")
     endforeach()
 
     message(FATAL_ERROR
         "${report}"
-        "\nPointing sccache at fastcached is ONE cache shared by every checkout and every "
+        "\nPointing sccache at pace-kv is ONE cache shared by every checkout and every "
         "machine pointed at it, which under MSVC and clang-cl is the maximal form of the "
         "hazard in .agent/rules/build-and-toolchain.md: sccache hashes `/EP` output, which "
         "carries no paths, and replays a hit's `/showIncludes` with the absolute paths of "
         "the checkout that stored it. Anywhere this project recommends that configuration "
-        "it says so in the same breath, within ${FastCachedSccacheCaveatWindow} lines AFTER "
+        "it says so in the same breath, within ${PaceSccacheCaveatWindow} lines AFTER "
         "the variable, one of two ways.\n\n"
         "  1. Include the canonical caveat -- `--8<-- \"${snippetName}\"`. Preferred, and "
         "all a MkDocs page ever needs.\n"
         "  2. State it, for a surface that can include nothing. README.md is rendered by "
         "GitHub, so it restates it, and must then carry:\n\n"
         "${rulebook}\n"
-        "Wording is free; those three facts are not. ${FastCachedSccacheSnippet} is the one "
+        "Wording is free; those three facts are not. ${PaceSccacheSnippet} is the one "
         "wording -- reword it there and every page that includes it follows. Exempt a file "
         "only when it names the variable without recommending anything, or when something "
         "else is a better judge of it than a text scan, and say which in its row.\n"
@@ -1127,4 +1127,4 @@ endif()
 
 list(LENGTH recommendingFiles recommendingCount)
 message("sccache backend caveat: ${markerHits} recommendation(s) across ${recommendingCount} file(s) "
-        "each carry the MSVC/clang-cl caveat within ${FastCachedSccacheCaveatWindow} lines")
+        "each carry the MSVC/clang-cl caveat within ${PaceSccacheCaveatWindow} lines")

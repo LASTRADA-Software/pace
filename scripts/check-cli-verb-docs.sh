@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every verb `fastcache-cli` accepts is documented, and every verb the docs claim it
+# Every verb `pacectl` accepts is documented, and every verb the docs claim it
 # accepts exists.
 #
 # ## Why this exists
 #
-# `docs/tools/fastcache-cli.md` carries a Commands table, and nothing read it. That is
+# `docs/tools/pacectl.md` carries a Commands table, and nothing read it. That is
 # the shape `check-resp-command-docs.sh` was written for one phase earlier, in the same
 # tree, about the same kind of table: `RedisResp.hpp` had said for months that its table
 # was the source of truth "if this prose drifts", and the prose drifted -- because a
@@ -106,7 +106,7 @@ TableVerbs() {
 # split, as the RESP check does -- without it a cell splits in half and the verbs after
 # the pipe are lost from a row that documents them.
 #
-# @param 1 path to fastcache-cli.md
+# @param 1 path to pacectl.md
 DocVerbs() {
     awk '
         /^## Commands/ { inside = 1; next }
@@ -133,8 +133,8 @@ DocVerbs() {
 # @param 1 source directory
 Verify() {
     local dir="$1"
-    local impl="${dir}/src/apps/fastcache-cli/CliVerbs.cpp"
-    local doc="${dir}/docs/tools/fastcache-cli.md"
+    local impl="${dir}/src/apps/pacectl/CliVerbs.cpp"
+    local doc="${dir}/docs/tools/pacectl.md"
     local tableFile docFile verb tableCount docCount
 
     if [ ! -r "$impl" ]; then
@@ -197,7 +197,7 @@ Verify() {
 
 Stage() {
     local root="$1" verbs="$2" docVerbs="$3"
-    mkdir -p "${root}/src/apps/fastcache-cli" "${root}/docs/tools"
+    mkdir -p "${root}/src/apps/pacectl" "${root}/docs/tools"
     {
         echo '    // A decoy table above the real one, spelling `.name` -- this is what a'
         echo '    // file-wide grep would wrongly report as undocumented verbs.'
@@ -212,9 +212,9 @@ Stage() {
             echo '          .handler = &Something },'
         done
         echo '    });'
-    } > "${root}/src/apps/fastcache-cli/CliVerbs.cpp"
+    } > "${root}/src/apps/pacectl/CliVerbs.cpp"
     {
-        echo '# `fastcache-cli`'
+        echo '# `pacectl`'
         echo ''
         echo '## Commands'
         echo ''
@@ -229,7 +229,7 @@ Stage() {
         echo 'Prose mentioning `get` and `--ttl`, which must not be read as a listing.'
         echo ''
         echo '## Output'
-    } > "${root}/docs/tools/fastcache-cli.md"
+    } > "${root}/docs/tools/pacectl.md"
 }
 
 RunCase() {
@@ -283,27 +283,27 @@ SelfTest() {
     # renamed literal or a renamed heading, forever.
     Stage "${tmp}/renamed-table" "get set" "get set"
     sed 's/constexpr auto VerbTable/constexpr auto RenamedTable/' \
-        "${tmp}/renamed-table/src/apps/fastcache-cli/CliVerbs.cpp" > "${tmp}/renamed-table/x" \
-        && mv "${tmp}/renamed-table/x" "${tmp}/renamed-table/src/apps/fastcache-cli/CliVerbs.cpp"
+        "${tmp}/renamed-table/src/apps/pacectl/CliVerbs.cpp" > "${tmp}/renamed-table/x" \
+        && mv "${tmp}/renamed-table/x" "${tmp}/renamed-table/src/apps/pacectl/CliVerbs.cpp"
     RunCase "a renamed table literal refuses rather than reading nothing" fail "${tmp}/renamed-table" || bad=1
     ran=$(( ran + 1 ))
 
     Stage "${tmp}/renamed-heading" "get set" "get set"
     sed 's/^## Commands/## Verbs/' \
-        "${tmp}/renamed-heading/docs/tools/fastcache-cli.md" > "${tmp}/renamed-heading/x" \
-        && mv "${tmp}/renamed-heading/x" "${tmp}/renamed-heading/docs/tools/fastcache-cli.md"
+        "${tmp}/renamed-heading/docs/tools/pacectl.md" > "${tmp}/renamed-heading/x" \
+        && mv "${tmp}/renamed-heading/x" "${tmp}/renamed-heading/docs/tools/pacectl.md"
     RunCase "a renamed doc heading refuses rather than reading nothing" fail "${tmp}/renamed-heading" || bad=1
     ran=$(( ran + 1 ))
 
     Stage "${tmp}/missing-doc" "get set" "get set"
-    rm -f "${tmp}/missing-doc/docs/tools/fastcache-cli.md"
+    rm -f "${tmp}/missing-doc/docs/tools/pacectl.md"
     RunCase "a missing doc is a refusal, not a pass" fail "${tmp}/missing-doc" || bad=1
     ran=$(( ran + 1 ))
 
     # The decoy is what makes the bounded read worth having: staged trees all carry a
     # `.name`-spelling table above the real one, and this case says so out loud so the
     # property is not silently resting on the fixture.
-    if grep -q 'McStatsSubs' "${tmp}/agree/src/apps/fastcache-cli/CliVerbs.cpp"; then
+    if grep -q 'McStatsSubs' "${tmp}/agree/src/apps/pacectl/CliVerbs.cpp"; then
         echo "  ok   the fixtures carry a decoy .name table above VerbTable"
         ran=$(( ran + 1 ))
     else

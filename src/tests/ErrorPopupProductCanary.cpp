@@ -2,7 +2,7 @@
 //
 // Reports where this process's CRT would send a failed assert, and exits (#1389).
 //
-// Built with the PRODUCT policy (`FASTCACHED_ERROR_POPUPS_POLICY on-request`), so the
+// Built with the PRODUCT policy (`PACE_ERROR_POPUPS_POLICY on-request`), so the
 // startup object installs the suppression only when the environment carries the variable.
 // `scripts/error-popup-product-gate.cmake` runs it twice -- with the variable and without --
 // and requires the two answers to differ in the right direction: routed to a file when

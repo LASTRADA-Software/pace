@@ -5,7 +5,7 @@
 #
 # THE DEFECT THIS EXISTS FOR. `tidy-blind-spots` is registered under
 # `CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ENABLE_SANITIZER_ADDRESS AND
-# FASTCACHED_ENABLE_TLS`. Its own registration block says, in as many words:
+# PACE_ENABLE_TLS`. Its own registration block says, in as many words:
 #
 #     KNOWN RESIDUAL: if that job's flags change, this stops being registered and
 #     reports nothing, which reads like a pass. The selftest below runs everywhere and
@@ -25,7 +25,7 @@
 # away and be blind to one ARRIVING, which is the direction that actually happens.
 #
 # WHAT COUNTS AS THE POPULATION, and why it is narrower than "conditionally registered".
-# A registration whose false arm calls `fastcached_register_skipped_test` is already
+# A registration whose false arm calls `pace_register_skipped_test` is already
 # honest: the row exists either way and says which state it is in. Those are EXCLUDED,
 # so this check measures exactly the registrations that VANISH. Platform conditions
 # (`if(NOT WIN32)`) are excluded too -- a platform is not something a job configures,
@@ -34,7 +34,7 @@
 #
 # THREE ROUTES TO SATISFACTION, and the third is not optional. An option can be ON
 # because a job passed `-DOPT=ON`, because a preset the job names sets it, or because
-# its `option()` default is already ON and nobody turned it off. `FASTCACHED_BUILD_TUI`
+# its `option()` default is already ON and nobody turned it off. `PACE_BUILD_TUI`
 # is the third kind: it appears in NO job and NO preset and is nonetheless on in every
 # CI build, because it defaults ON. A check missing that route would report three
 # vendor-tui rows as unreachable -- a loud, misattributed finding sending somebody to a
@@ -70,8 +70,8 @@ Fail() { echo "CONDITIONAL CHECK REACH FAILED: $*" >&2; Failed=$(( Failed + 1 ))
 
 # --- the population ---------------------------------------------------------
 #
-# Every `add_test` under an `if()` whose condition names a `FASTCACHED_*`/`ENABLE_*`
-# option, minus the names that also have a `fastcached_register_skipped_test` arm.
+# Every `add_test` under an `if()` whose condition names a `PACE_*`/`ENABLE_*`
+# option, minus the names that also have a `pace_register_skipped_test` arm.
 # Prints `<test name><TAB><comma-separated option tokens>`.
 DeriveRegistrations() {
     local file="$1"
@@ -82,7 +82,7 @@ DeriveRegistrations() {
         {
             line = trim($0)
             if (line ~ /^#/) next
-            if (match(line, /fastcached_register_skipped_test\(["]/)) {
+            if (match(line, /pace_register_skipped_test\(["]/)) {
                 rest = substr(line, RSTART + RLENGTH)
                 q = index(rest, "\"")
                 if (q > 0) skipped[substr(rest, 1, q - 1)] = 1
@@ -114,7 +114,7 @@ DeriveRegistrations() {
                 # error, so the check would not have run at all on the one platform
                 # nobody here would have tested it on.
                 for (i = 1; i <= n; i++)
-                    if (w[i] ~ /^(FASTCACHED|ENABLE)_[A-Z0-9_]+$/) {
+                    if (w[i] ~ /^(PACE|ENABLE)_[A-Z0-9_]+$/) {
                         if (index("," out ",", "," w[i] ",") == 0) out = (out == "" ? w[i] : out "," w[i])
                     }
                 # AND or OR. `vendor-sanitized` is registered under
@@ -136,7 +136,7 @@ DeriveRegistrations() {
                     # trailing `AND NOT MSVC` names no option and does not mix.
                     probe = toks
                     gsub(/\([^()]*\)/, "", probe)
-                    if (probe ~ /(FASTCACHED|ENABLE)_[A-Z0-9_]+/) mode = "mixed"
+                    if (probe ~ /(PACE|ENABLE)_[A-Z0-9_]+/) mode = "mixed"
                 }
                 if (out != "") { found[nm] = out; modeOf[nm] = mode }
                 pending = 0
@@ -181,9 +181,9 @@ DerivePresets() {
             for (i = 2; i <= n; i += 2) if (parts[i] != "") print cur "\t@inherits=" parts[i]
             next
         }
-        /"(FASTCACHED|ENABLE)_[A-Z0-9_]+"[ \t]*:/ {
+        /"(PACE|ENABLE)_[A-Z0-9_]+"[ \t]*:/ {
             s = $0
-            if (!match(s, /"(FASTCACHED|ENABLE)_[A-Z0-9_]+"/)) next
+            if (!match(s, /"(PACE|ENABLE)_[A-Z0-9_]+"/)) next
             k = substr(s, RSTART + 1, RLENGTH - 2)
             v = s; sub(/.*:[ \t]*"?/, "", v); sub(/"?,?[ \t]*$/, "", v)
             print cur "\t" k "=" v
@@ -358,7 +358,7 @@ Scan() {
                     why="${why}${why:+, }${tok} via preset ${preset}"
                     continue
                 fi
-                # Route 3: the option's own default. `FASTCACHED_BUILD_TUI` is here.
+                # Route 3: the option's own default. `PACE_BUILD_TUI` is here.
                 d="$(awk -F'\t' -v t="$tok" '$1 == t { print $2; exit }' "$defaults")"
                 if [ "${d:-}" = "ON" ]; then
                     why="${why}${why:+, }${tok} via its ON default"
@@ -373,7 +373,7 @@ Scan() {
         if [ -n "$satisfiedBy" ]; then
             echo "ok: ${name} [${toks}] -- reachable in job '${satisfiedBy}' (${why})"
         else
-            Fail "${name} is registered only when [${toks}] hold, and NO job in build.yml both configures that and runs ctest. It is therefore absent from every CI run, and absent reads exactly like passing. Remedy, in preference order: (1) make an existing ctest-running job configure it -- add the \`-D\` to that job's configure step; (2) if it genuinely cannot run in CI, give the registration an \`else()\` arm calling \`fastcached_register_skipped_test\` so the row exists and says why, which also removes it from this check's population; (3) if the check has been superseded, delete it rather than leaving it registered under a condition nothing meets. Do NOT satisfy this by loosening the registration's condition -- the condition describes what the check needs to be meaningful."
+            Fail "${name} is registered only when [${toks}] hold, and NO job in build.yml both configures that and runs ctest. It is therefore absent from every CI run, and absent reads exactly like passing. Remedy, in preference order: (1) make an existing ctest-running job configure it -- add the \`-D\` to that job's configure step; (2) if it genuinely cannot run in CI, give the registration an \`else()\` arm calling \`pace_register_skipped_test\` so the row exists and says why, which also removes it from this check's population; (3) if the check has been superseded, delete it rather than leaving it registered under a condition nothing meets. Do NOT satisfy this by loosening the registration's condition -- the condition describes what the check needs to be meaningful."
         fi
     done < "$regs"
 
@@ -392,7 +392,7 @@ SelfTest() {
         mkdir -p "${d}/src/tests" "${d}/.github/workflows" "${d}/scripts/lib"
         cp "${Root}/scripts/lib/workflow-walk.awk" "${d}/scripts/lib/"
         cp "${Root}/scripts/lib/conditional-check-reach.awk" "${d}/scripts/lib/"
-        printf 'option(FASTCACHED_THING "t" OFF)\noption(FASTCACHED_DEFAULTED "t" ON)\n' > "${d}/CMakeLists.txt"
+        printf 'option(PACE_THING "t" OFF)\noption(PACE_DEFAULTED "t" ON)\n' > "${d}/CMakeLists.txt"
         # Pretty-printed, one key per line, because that is what `CMakePresets.json`
         # is and what `DerivePresets` reads. A compact one-line fixture passes no
         # information to a line-oriented reader, and the first version of this
@@ -408,7 +408,7 @@ SelfTest() {
         {
             printf 'if(%s)\n    add_test(\n        NAME "staged-check"\n        COMMAND true\n    )\n' "$cond"
             if [ "$skipArm" = "skip" ]; then
-                printf 'else()\n    fastcached_register_skipped_test("staged-check" "not here")\n'
+                printf 'else()\n    pace_register_skipped_test("staged-check" "not here")\n'
             fi
             printf 'endif()\n'
         } > "${d}/src/tests/CMakeLists.txt"
@@ -423,7 +423,7 @@ SelfTest() {
 
     # 1. ACCEPTING arm first. A guard nobody has watched accept is not known to work,
     #    and one that refused every tree would pass every refusing case below.
-    StageTree "${scratch}/a" "FASTCACHED_THING" "none" "-DFASTCACHED_THING=ON"
+    StageTree "${scratch}/a" "PACE_THING" "none" "-DPACE_THING=ON"
     ran=$(( ran + 1 ))
     out="$(Run "${scratch}/a")" && rc=0 || rc=$?
     if [ "${rc:-0}" -eq 0 ] && grep -q "ok: staged-check" <<< "$out"; then
@@ -433,7 +433,7 @@ SelfTest() {
     fi
 
     # 2. The defect itself: nothing configures it.
-    StageTree "${scratch}/b" "FASTCACHED_THING" "none" ""
+    StageTree "${scratch}/b" "PACE_THING" "none" ""
     ran=$(( ran + 1 ))
     out="$(Run "${scratch}/b")" && rc=0 || rc=$?
     if [ "${rc:-0}" -ne 0 ] && grep -q "NO job in build.yml" <<< "$out"; then
@@ -443,7 +443,7 @@ SelfTest() {
     fi
 
     # 3. The skip arm takes it out of the population -- the row is honest already.
-    StageTree "${scratch}/c" "FASTCACHED_THING" "skip" ""
+    StageTree "${scratch}/c" "PACE_THING" "skip" ""
     ran=$(( ran + 1 ))
     out="$(Run "${scratch}/c")" && rc=0 || rc=$?
     if [ "${rc:-0}" -ne 0 ] && grep -q "no option-gated registration was derived" <<< "$out"; then
@@ -463,7 +463,7 @@ SelfTest() {
     fi
 
     # 5. The DEFAULT route -- the one whose absence would invent three findings.
-    StageTree "${scratch}/e" "FASTCACHED_DEFAULTED" "none" ""
+    StageTree "${scratch}/e" "PACE_DEFAULTED" "none" ""
     ran=$(( ran + 1 ))
     out="$(Run "${scratch}/e")" && rc=0 || rc=$?
     if [ "${rc:-0}" -eq 0 ] && grep -q "via its ON default" <<< "$out"; then
@@ -473,7 +473,7 @@ SelfTest() {
     fi
 
     # 6. Configuring is not running. The job builds and never calls ctest.
-    StageTree "${scratch}/f" "FASTCACHED_THING" "none" "-DFASTCACHED_THING=ON"
+    StageTree "${scratch}/f" "PACE_THING" "none" "-DPACE_THING=ON"
     sed -i.bak 's/ctest --preset p1/cmake --build ./' "${scratch}/f/.github/workflows/build.yml"
     ran=$(( ran + 1 ))
     out="$(Run "${scratch}/f")" && rc=0 || rc=$?
@@ -493,10 +493,10 @@ SelfTest() {
     # Staged as a `run: |` block rather than by `sed`ing the one-line step, because
     # the defect is about a comment INSIDE such a block: a trailing comment on a
     # live line would test the anchor twice and the stripper not at all.
-    StageTree "${scratch}/g" "FASTCACHED_THING" "none" "-DFASTCACHED_THING=ON"
+    StageTree "${scratch}/g" "PACE_THING" "none" "-DPACE_THING=ON"
     {
         printf 'jobs:\n  builder:\n    steps:\n      - name: configure\n        run: |\n'
-        printf '          cmake --preset p1 -DFASTCACHED_THING=ON\n'
+        printf '          cmake --preset p1 -DPACE_THING=ON\n'
         printf '      - name: test\n        run: |\n'
         printf '          # we used to ctest --preset p1 here\n'
         printf '          cmake --build .\n'
@@ -509,10 +509,10 @@ SelfTest() {
         Fail "self-test 7: expected the no-ctest refusal over a commented mention, got rc=${rc} <<${out}>>"
     fi
 
-    StageTree "${scratch}/h" "FASTCACHED_THING" "none" "-DFASTCACHED_THING=ON"
+    StageTree "${scratch}/h" "PACE_THING" "none" "-DPACE_THING=ON"
     {
         printf 'jobs:\n  builder:\n    steps:\n      - name: configure\n        run: |\n'
-        printf '          cmake --preset p1 -DFASTCACHED_THING=ON\n'
+        printf '          cmake --preset p1 -DPACE_THING=ON\n'
         printf '      - name: test\n        run: echo "that is not a pass -- it skips in ctest by design"\n'
     } > "${scratch}/h/.github/workflows/build.yml"
     ran=$(( ran + 1 ))

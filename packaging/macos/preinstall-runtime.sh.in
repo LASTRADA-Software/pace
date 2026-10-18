@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runtime component preinstall. Runs as root, from the macOS Installer, before
+# anything of Pace's is laid down.
+#
+# Pace is fastcached renamed (0.6.0), and it refuses to install while fastcached
+# is installed: the two would register two daemons for one port under two sets
+# of launchd labels, and nothing of Pace's knows how to remove fastcached's. The
+# remedy is fastcached's own uninstaller, which removes its jobs, its accounts
+# and its receipts -- so the refusal names it, and the receipts it forgets are
+# the evidence asked for here. See docs/upgrading-to-pace.md.
+#
+# Unlike the postinstall scripts, this one exits non-zero on purpose: that is
+# what stops the installation, and it stops it before any file is written.
+#
+# A string rather than `pkgutil | grep -q`: under a pipefail-minded reading a
+# grep that stops early is a false negative, and this script must not read
+# "not installed" because the probe was cut short.
+set -u
+
+receipts=$(/usr/sbin/pkgutil --pkgs 2>/dev/null) || receipts=""
+case "$receipts" in
+    *software.lastrada.fastcached*)
+        echo "fastcached is installed. Run 'sudo /opt/fastcached/bin/fastcached-uninstall', then install Pace (see docs/upgrading-to-pace.md)." >&2
+        exit 1
+        ;;
+esac
+exit 0

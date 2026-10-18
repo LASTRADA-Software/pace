@@ -36,7 +36,7 @@
 # The sanitizers are the opposite case: they must reach this code, and being declared before
 # `include(Sanitizers)` is exactly what keeps them off it. So the top-level CMakeLists.txt
 # applies them target by target after the includes, to the targets this file names in
-# `FASTCACHED_MONOCYPHER_TARGETS`, beside core-cpp's. `ctest -R vendor-sanitized` reads the
+# `PACE_MONOCYPHER_TARGETS`, beside core-cpp's. `ctest -R vendor-sanitized` reads the
 # result in the objects.
 #
 # NOT gated on any option: this is what every node's identity will be signed with (#178), so
@@ -44,10 +44,10 @@
 #
 # ## Dependency-free, and it must stay so
 #
-# It depends on nothing -- not FastCache, not the standard library beyond `<stddef.h>` and
-# `<stdint.h>`. That is what lets `fastcache-cc`'s `_fc_cc_core`, which deliberately does not
-# link FastCache, link this later to verify a signed lease. The ONLY first-party code allowed
-# to include a Monocypher header is `src/FastCache/Core/{Ed25519,X25519,Hkdf}.cpp`
+# It depends on nothing -- not Pace, not the standard library beyond `<stddef.h>` and
+# `<stdint.h>`. That is what lets `pace-cc`'s `_fc_cc_core`, which deliberately does not
+# link Pace, link this later to verify a signed lease. The ONLY first-party code allowed
+# to include a Monocypher header is `src/Pace/Core/{Ed25519,X25519,Hkdf}.cpp`
 # (`ctest -R crypto-seam`); everything else reaches the primitives through those.
 
 set(_fcMonocypherRoot "${CMAKE_CURRENT_LIST_DIR}/../vendor/monocypher")
@@ -70,29 +70,29 @@ endforeach()
 # the top-level directory, which is where the target below is declared.
 set_source_files_properties(${_fcMonocypherSources} PROPERTIES LANGUAGE CXX)
 
-add_library(fastcache-monocypher STATIC ${_fcMonocypherSources})
+add_library(pace-monocypher STATIC ${_fcMonocypherSources})
 
 # SYSTEM, so a warning a consumer's flags would raise inside upstream's header is upstream's to
 # fix and never this project's build failure. Both directories, because upstream installs the
 # two headers side by side and `monocypher-ed25519.h` is spelled `<monocypher-ed25519.h>` by
 # anything that consumes it that way.
-target_include_directories(fastcache-monocypher SYSTEM PUBLIC
+target_include_directories(pace-monocypher SYSTEM PUBLIC
     "${_fcMonocypherRoot}/src"
     "${_fcMonocypherRoot}/src/optional"
 )
-target_compile_definitions(fastcache-monocypher PUBLIC MONOCYPHER_CPP_NAMESPACE=monocypher)
-target_compile_features(fastcache-monocypher PUBLIC cxx_std_23)
+target_compile_definitions(pace-monocypher PUBLIC MONOCYPHER_CPP_NAMESPACE=monocypher)
+target_compile_features(pace-monocypher PUBLIC cxx_std_23)
 
 # Monocypher's sources are UTF-8: measured, three non-ASCII bytes in the four files, one U+2014 in
 # a comment in monocypher.c. Stated per TARGET, so it is a claim about this code and not about
 # every third-party source in the build.
 if(MSVC)
-    target_compile_options(fastcache-monocypher PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+    target_compile_options(pace-monocypher PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 endif()
 
 # No analyser on upstream's code, and no module scan: it declares and imports no module, and a
 # scan over a `.c` file compiled as C++ is two edges of nothing.
-set_target_properties(fastcache-monocypher PROPERTIES
+set_target_properties(pace-monocypher PROPERTIES
     CXX_CLANG_TIDY ""
     CXX_SCAN_FOR_MODULES OFF
 )
@@ -100,4 +100,4 @@ set_target_properties(fastcache-monocypher PROPERTIES
 # What the sanitizer block in the top-level CMakeLists.txt instruments. Every target this file
 # declares is on it; a second one added here without a row would be built with no sanitizer in
 # every sanitizer configuration, which is the defect that block exists to close.
-set(FASTCACHED_MONOCYPHER_TARGETS fastcache-monocypher)
+set(PACE_MONOCYPHER_TARGETS pace-monocypher)
