@@ -2338,7 +2338,7 @@ function Invoke-MsiServiceTableSelfTest {
     $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\Pace\bin\pace-kv.exe' })
     ExpectThrow 'unchanged: a rollback that admits another PROGRAM is refused, naming it' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'Pace: X') { throw $verdict }
-    } 'holds \[.*program=C:\\Elsewhere\\pace\.exe\]'
+    } 'holds \[.*program=C:\\Elsewhere\\pace-kv\.exe\]'
     ExpectThrow 'unchanged: a rollback that changes the PROFILE is refused, naming it' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($profileAfter) 'Pace: X') { throw $verdict }
     } 'holds \[.*profile=Private'
@@ -2705,7 +2705,9 @@ function Invoke-MsiServiceTableSelfTest {
         $data = @(foreach ($key in @($items.Keys | Sort-Object)) { "<Data Name='$key'>$($items[$key])</Data>" }) -join ''
         "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Service Control Manager'/><EventID Qualifiers='49152'>$id</EventID><TimeCreated SystemTime='$stamp'/></System><EventData>$data$binary</EventData></Event>" }
     $hexOf = { param([string] $text) (([Text.Encoding]::Unicode.GetBytes("$text$([char] 0)")) | ForEach-Object { $_.ToString('X2') }) -join '' }
-    $realBinary = '46006100730074004300610063006800650043006F006D00700069006C0065004E006F00640065000000'
+    # Copied from a real 7031 event of the service before the rename to Pace, and re-encoded for its
+    # new name: the layout -- UTF-16LE, NUL-terminated -- is what the event carries.
+    $realBinary = '70006100630065002D006E006F00640065000000'
     $parses = @(
         @{ Case = 'the service name is read from the binary data, the time in UTC'
            Xml = (& $eventXml 7031 '2026-10-06T12:12:48.1234567Z' @{ param1 = 'pace-node'; param2 = '1' } $realBinary); Message = "The node`r`n terminated."

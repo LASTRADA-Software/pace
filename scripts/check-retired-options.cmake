@@ -7,6 +7,8 @@
 #
 #   cmake -DPACE_SOURCE_DIR=<repo> -P scripts/check-retired-options.cmake
 
+cmake_minimum_required(VERSION 3.28)
+
 if(NOT PACE_SOURCE_DIR)
     message(FATAL_ERROR "PACE_SOURCE_DIR must name the repository")
 endif()

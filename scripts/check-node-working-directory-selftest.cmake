@@ -46,7 +46,7 @@ file(REMOVE_RECURSE "${root}")
 set(failures "")
 set(caseCount 0)
 
-# The three units the check's table names, in their good form. A case then
+# The four units the check's tables name, in their good form. A case then
 # overwrites exactly one of them, so every failure is attributable to the thing
 # the case changed rather than to the tree being incomplete.
 set(GoodWorker
@@ -96,6 +96,7 @@ function(pace_make_tree name file body outVar)
     file(WRITE "${tree}/packaging/linux/pace-node.service" "${GoodWorker}")
     file(WRITE "${tree}/packaging/linux/pace-kv.service" "${GoodDaemon}")
     file(WRITE "${tree}/packaging/linux/pace-kv-user.service" "${GoodDaemon}")
+    file(WRITE "${tree}/packaging/linux/pace-node-user.service" "${GoodWorker}")
     file(WRITE "${tree}/packaging/config/pace-node.yaml" "${GoodReference}")
     file(WRITE "${tree}/docs/tools/pace-node.md" "${GoodPage}")
     file(WRITE "${tree}/src/apps/pace-node/NodeDefaults.hpp" "${GoodNodeDefaults}")

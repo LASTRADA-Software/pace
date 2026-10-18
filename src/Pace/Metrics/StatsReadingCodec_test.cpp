@@ -620,7 +620,7 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // (roaming node addresses: the endpoint resolver counts each published move). Clients and nodes
     // upgrade together. Read off the built test, never computed by hand.
     //
-    // Moved when the rename to Pace renamed every series (`fastcached_`/`fastcache_` to `pace_`),
+    // Moved when the rename to Pace renamed every series into `pace_` (both old prefixes),
     // which the layout folds in by name. Clients and nodes upgrade together. Read off the built test.
     CHECK(StatsReadingLayout == 0x603edf728d83daf4ULL);
 }

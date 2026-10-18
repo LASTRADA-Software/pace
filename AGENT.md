@@ -65,7 +65,7 @@ so adding an executable is adding a row:
 
 ```
 src/apps/
-  pace/               the daemon (PACE_BUILD_DAEMON, default ON)
+  pace-kv/            the daemon (PACE_BUILD_DAEMON, default ON)
   pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
                             args; does NOT link the Pace library (`_fc_cc_core`)

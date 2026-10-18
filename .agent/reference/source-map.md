@@ -241,7 +241,7 @@ each one, so adding an executable is adding a row:
 
 ```
 src/apps/
-  pace/               the daemon (PACE_BUILD_DAEMON, default ON)
+  pace-kv/            the daemon (PACE_BUILD_DAEMON, default ON)
   pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER,
                             default ON) — a drop-in sccache-style launcher that
                             keys on preprocess+relativized-args, FETCHes and
