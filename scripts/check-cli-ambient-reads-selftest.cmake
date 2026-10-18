@@ -33,25 +33,25 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         [-DGIT_EXECUTABLE=<git>] -P scripts/check-cli-ambient-reads-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-cli-ambient-reads.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-cli-ambient-reads.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -82,8 +82,8 @@ set(tableHeader "# SPDX-License-Identifier: Apache-2.0\n# <path>|<token>|<reason
 
 # ---------------------------------------------------------------------------
 # Stage a tree, apply one case, run the check, return its collapsed output.
-function(fastcached_stage_and_run name target path content exemptions outOutput)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target path content exemptions outOutput)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     # `~n~`, `~lb~`, `~rb~`, `~sc~`, `~bar~` and `~bs~` are a newline, `[`, `]`, `;`, `|`
@@ -143,7 +143,7 @@ function(fastcached_stage_and_run name target path content exemptions outOutput)
                 "case `${name}` asks for the git enumeration path and no git was found. "
                 "Skipping it would leave the mode CI takes untested")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE addStatus)
         if(NOT initStatus EQUAL 0 OR NOT addStatus EQUAL 0)
@@ -154,7 +154,7 @@ function(fastcached_stage_and_run name target path content exemptions outOutput)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -170,7 +170,7 @@ endfunction()
 #
 # Needle fields are ' && '-separated; `-` means none. The field count is asserted per row,
 # because a row that does not parse runs as a different case than it reads as.
-set(FastCachedAmbientReadCases
+set(PaceAmbientReadCases
     # THE ACCEPTING ARM, in both modes, with the comment naming every token present.
     "baseline via walk|none|-|-|-|no getenv, isatty, ioctl, GetConsoleMode across && directory walk && 0 exemption row(s) && the control recognised 1 read(s)|CMake Error"
     "baseline via git|none-git|-|-|-|no getenv, isatty, ioctl, GetConsoleMode across && git ls-files|CMake Error"
@@ -223,7 +223,7 @@ set(FastCachedAmbientReadCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedAmbientReadCases)
+foreach(row IN LISTS PaceAmbientReadCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 7)
@@ -240,7 +240,7 @@ foreach(row IN LISTS FastCachedAmbientReadCases)
     list(GET fields 6 caseMustNotAppear)
 
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${casePath}" "${caseContent}" "${caseExemptions}" output)
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${casePath}" "${caseContent}" "${caseExemptions}" output)
 
     foreach(field must mustNot)
         if(field STREQUAL "must")

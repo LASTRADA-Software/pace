@@ -42,25 +42,25 @@
 # failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         [-DGIT_EXECUTABLE=<git>] -P scripts/check-ranges-seam-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-ranges-seam.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-ranges-seam.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -147,8 +147,8 @@ set(baseRoots "# planted\nvendor/upstream\n")
 
 # ---------------------------------------------------------------------------
 # Stage a tree, apply one mutation, run the check, return its collapsed output.
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     # `~n~`, `~lb~`, `~rb~` and `~sc~` are a newline, `[`, `]` and `;`, none of which can
@@ -245,7 +245,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
                 "case `${name}` asks for the git enumeration path and no git was found. "
                 "Skipping it silently would leave the mode CI actually takes untested")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -263,7 +263,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -283,7 +283,7 @@ endfunction()
 #
 # Needle fields are ' && '-separated; `-` means none. `CMake Error` in the last field means the
 # case expects the check to PASS. The field count is asserted per row below.
-set(FastCachedRangesSeamCases
+set(PaceRangesSeamCases
     # The baselines, in both enumeration modes. The vendored direct call is DECLINED here.
     "baseline via walk|none|-|-|none called directly && directory walk && 1 declined under third-party roots && std::ranges::iota -> Ranges::Iota && std::ranges::fold_left -> Ranges::FoldLeft|CMake Error"
     "baseline via git|none-git|-|-|none called directly && git ls-files && 1 declined under third-party roots|CMake Error"
@@ -325,7 +325,7 @@ set(FastCachedRangesSeamCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedRangesSeamCases)
+foreach(row IN LISTS PaceRangesSeamCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -342,7 +342,7 @@ foreach(row IN LISTS FastCachedRangesSeamCases)
 
     math(EXPR caseCount "${caseCount} + 1")
 
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
 
     if(NOT applied)
         list(APPEND failures

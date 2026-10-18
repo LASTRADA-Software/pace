@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end test of FASTCACHE_AUTO_START (POSIX) — the other half of issue
+# End-to-end test of PACE_AUTO_START (POSIX) — the other half of issue
 # #90 from scripts/check-compile-cache-daemon-staging.cmake, which proves the
 # module can STAGE a pace-kv daemon out of a mirrored release archive with
 # fake, --version-only stand-ins. What that mirror test cannot reach is
@@ -11,8 +11,8 @@
 # through a real configure instead.
 #
 # What is asserted:
-#   1. Daemon appears     — with FASTCACHE_AUTO_START=ON, FASTCACHE_CC already
-#                           pointed at the real launcher, and FASTCACHE_ADDR
+#   1. Daemon appears     — with PACE_AUTO_START=ON, PACE_CC already
+#                           pointed at the real launcher, and PACE_ADDR
 #                           naming a port nothing is listening on, the
 #                           configure leaves a pace-kv process listening
 #                           on that port when it exits — not merely staged,
@@ -32,7 +32,7 @@
 #                           not a failure, mirroring the module's own
 #                           constraint.
 #
-# This does NOT go through FASTCACHE_AUTO_INSTALL's download path at all —
+# This does NOT go through PACE_AUTO_INSTALL's download path at all —
 # the real pace-kv built by this project's own build is placed exactly
 # where the module would have staged one, so the test exercises the SPAWN and
 # PROBE logic without needing network access or a published release, which
@@ -142,7 +142,7 @@ daemonPidfile="${storageDir}/fastcached.pid"
 
 # Stage the real, freshly built binaries exactly where the module would have
 # put them after auto-installing from a real release — same directory shape
-# (<dir>/<version>/<platform>/<exe>) — so FASTCACHE_AUTO_INSTALL never has
+# (<dir>/<version>/<platform>/<exe>) — so PACE_AUTO_INSTALL never has
 # anything to do and this test needs no network access. The platform token
 # MUST match the asset-table row the module itself resolves for this host
 # (_fc_asset_<row>_platform in CompileCache.cmake) — _fc_auto_start_fastcached
@@ -173,21 +173,21 @@ chmod +x "${binDir}/pace-kv" "${binDir}/pace-cc"
 
 commonArgs=(
     -S "$fixtureDir"
-    "-DFASTCACHED_MODULE_DIR=${sourceDir}/cmake/portable"
+    "-DPACE_MODULE_DIR=${sourceDir}/cmake/portable"
     "-DCMAKE_CXX_COMPILER=${compiler}"
-    "-DFASTCACHE_CC=${binDir}/pace-cc"
-    "-DFASTCACHE_ADDR=${addr}"
-    "-DFASTCACHE_AUTO_START=ON"
-    "-DFASTCACHE_AUTO_START_STORAGE_DIR=${storageDir}"
-    # AUTO_INSTALL stays OFF: FASTCACHE_CC is already supplied above, so the
+    "-DPACE_CC=${binDir}/pace-cc"
+    "-DPACE_ADDR=${addr}"
+    "-DPACE_AUTO_START=ON"
+    "-DPACE_AUTO_START_STORAGE_DIR=${storageDir}"
+    # AUTO_INSTALL stays OFF: PACE_CC is already supplied above, so the
     # only thing left for auto-start to do is find/stage/spawn the DAEMON,
     # which _fc_auto_start_fastcached still needs a resolvable release row
     # for. Pinning AUTO_INSTALL_DIR at the same stage directory and a version
     # this test controls means it finds the daemon already sitting there
     # (see the EXISTS check ahead of any fetch in _fc_auto_start_fastcached)
     # and never reaches the network.
-    "-DFASTCACHE_AUTO_INSTALL_DIR=${stageDir}"
-    "-DFASTCACHE_AUTO_INSTALL_VERSION=${version}"
+    "-DPACE_AUTO_INSTALL_DIR=${stageDir}"
+    "-DPACE_AUTO_INSTALL_VERSION=${version}"
 )
 
 echo "--- first configure: expect a daemon to be spawned ---"
@@ -218,17 +218,17 @@ int daemonStartProbe() { return 42; }
 EOF
 
 compile_once() {
-    FASTCACHE_ADDR="$addr" \
-    FASTCACHE_SOURCE_DIR="$sourceDir" \
-    FASTCACHE_BINARY_DIR="$buildDir1" \
-    FASTCACHE_VERBOSE=1 \
-    FASTCACHE_NO_STATS=1 \
+    PACE_ADDR="$addr" \
+    PACE_SOURCE_DIR="$sourceDir" \
+    PACE_BINARY_DIR="$buildDir1" \
+    PACE_VERBOSE=1 \
+    PACE_NO_STATS=1 \
     "${binDir}/pace-cc" "$compiler" -c "$src" -o "${workdir}/probe.o" 2>&1
 }
 
 # Same output path both times, deliberately: the object path is one of the
 # arguments the key is computed over (relativized when it falls under
-# FASTCACHE_SOURCE_DIR/FASTCACHE_BINARY_DIR, left absolute and hashed verbatim
+# PACE_SOURCE_DIR/PACE_BINARY_DIR, left absolute and hashed verbatim
 # otherwise — which is exactly this probe's situation, compiling out of a
 # mktemp workdir outside both roots). Two different output filenames would
 # therefore key two different entries and the second compile would MISS
@@ -255,7 +255,7 @@ secondPid="$(cat "$daemonPidfile")"
 [[ "$firstPid" == "$secondPid" ]] || fail "pidfile changed from ${firstPid} to ${secondPid}; a second daemon replaced the first"
 kill -0 "$secondPid" 2>/dev/null || fail "the original daemon (PID ${secondPid}) is no longer running"
 
-# Every launcher run here opts out of statistics -- `compile_once` sets FASTCACHE_NO_STATS=1,
+# Every launcher run here opts out of statistics -- `compile_once` sets PACE_NO_STATS=1,
 # and so do CompileCache.cmake's configure probes -- and none dispatches, so today none of
 # them writes to a state directory at all. The seam is kept anyway: dropping one of those
 # opt-outs would otherwise put this run's records in the developer's log, silently.

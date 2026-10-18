@@ -19,7 +19,7 @@ target_link_libraries(compile-cache-testclient PRIVATE Pace)
 # The CLI is a pure function over argv, so it is unit-testable without a daemon
 # or a compiler. Its own binary rather than a row in PaceTest: the test
 # glob only reaches src/Pace, and this tool is gated off by default.
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     add_executable(compile-cache-testclient-tests
         TestClientCli.cpp
         TestClientCli_test.cpp
@@ -33,5 +33,5 @@ if(FASTCACHED_BUILD_TESTS)
     # count. On 3.6.0 the exit code was the failure count, and a case failing four
     # assertions was scored *skipped* (#1128). `catch-skip-return-code` requires the
     # property, and `catch-skip-exit-contract` that it still means what it says.
-    catch_discover_tests(compile-cache-testclient-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+    catch_discover_tests(compile-cache-testclient-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
 endif()

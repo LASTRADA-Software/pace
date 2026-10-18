@@ -2399,7 +2399,7 @@ int main(int argc, char** argv)
     }
     if (cliOnly.version)
     {
-        std::cout << "pace-node " << FASTCACHE_NODE_VERSION << '\n';
+        std::cout << "pace-node " << PACE_NODE_VERSION << '\n';
         return CommandExitCode(CommandEnding::Completed);
     }
     // The parse above IS the check: an argument its row refuses has exited there, naming the flag.
@@ -2420,8 +2420,8 @@ int main(int argc, char** argv)
     // silently stop taking effect -- an operator's settings disappearing at an
     // upgrade with nothing anywhere saying why. Said once, at every start, because
     // the remedy is to delete the file and there is nothing else to report.
-    if (ReadEnvironmentVariable("FASTCACHE_NODE_ARGS").has_value())
-        std::cerr << "pace-node: FASTCACHE_NODE_ARGS is set and is no longer read; this worker is "
+    if (ReadEnvironmentVariable("PACE_NODE_ARGS").has_value())
+        std::cerr << "pace-node: PACE_NODE_ARGS is set and is no longer read; this worker is "
                      "configured by --config=<file> (see /etc/fastcached/pace-node.yaml). Delete "
                      "the leftover /etc/fastcached/compile-node.env and put those settings in the YAML file.\n";
 

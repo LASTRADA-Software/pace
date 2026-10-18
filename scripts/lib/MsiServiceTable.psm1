@@ -103,7 +103,7 @@ $ErrorActionPreference = 'Stop'
 #                          no pace-kv registration left behind.
 #   DaemonAlone         -- pace-kv without the node: auto and running, and no
 #                          node registration left behind.
-#   DaemonAloneUnstarted -- the same, installed with FASTCACHED_START_SERVICE=0:
+#   DaemonAloneUnstarted -- the same, installed with PACE_START_SERVICE=0:
 #                          registered auto and left stopped.
 #   NothingInstalled    -- after an uninstall.
 $script:ServiceTable = [ordered]@{
@@ -159,7 +159,7 @@ $script:TransactionEvents = @($script:ServiceControlEventMeanings.Keys | Sort-Ob
 # The exit codes with which a transaction COMMITTED, each with its meaning; every other exit code is a
 # transaction that failed and ROLLED BACK. A rollback restarts what it stopped with Windows Installer's
 # own unawaited StartServices, so a rolled-back transaction's node may not be RUNNING yet at msiexec's
-# exit, where a committed one's is: FastCacheNodeStartService waits for RUNNING and checks it. A
+# exit, where a committed one's is: PaceNodeStartService waits for RUNNING and checks it. A
 # hashtable for the same reason as the table above.
 $script:MsiCommittedExitCodes = @{
     0    = 'success'
@@ -174,7 +174,7 @@ $script:MsiCommittedExitCodes = @{
 $script:LastMsiTransaction = $null
 
 # How long after msiexec EXITS a transaction is judged the second time, at the least. A restore's
-# own restart is unwaited (`FastCachedRestartAfterStop` is `sc.exe start`, which returns at START
+# own restart is unwaited (`PaceRestartAfterStop` is `sc.exe start`, which returns at START
 # PENDING), and PR 1634's CI timed a start that could not serve: started at 12:12:47, its first
 # unexpected termination at 12:12:48, the recovery's restart 1000 ms after that. Judged only at the
 # exit, such a crash lands after the read; before the judgement moved into Invoke-Msiexec, the snapshot
@@ -558,7 +558,7 @@ function Assert-InstalledProduct([string] $UpgradeCode, [string] $ProductCode) {
 # configuration and the node's state directory with its identity key -- so the
 # next step starts from a machine that never had this product, and refuses by
 # name when a directory survives.
-function Remove-FastCacheMachineState {
+function Remove-PaceMachineState {
     foreach ($dir in "$env:ProgramData\fastcached", "$env:ProgramData\fastcache-node") {
         Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
         if (Test-Path $dir) { throw "$dir survived its removal, so the next install would read the previous one's files" }
@@ -567,7 +567,7 @@ function Remove-FastCacheMachineState {
 
 # The firewall rules the MSI's node registration opens: what the SERVICE opens at its next
 # start, which since the zero-config defaults is consensus and discovery beside the node port --
-# with the discovery reply port the PACKAGE pins (FASTCACHE_DISCOVERY_REPLY_PORT, default 6682),
+# with the discovery reply port the PACKAGE pins (PACE_DISCOVERY_REPLY_PORT, default 6682),
 # so no rule admits any local port. DocumentedCommandLines_test's [msi] case derives the same
 # reply rule from the fragment's own command line.
 $script:NodeFirewallRuleNames = @(
@@ -1671,7 +1671,7 @@ function Get-Witness7036State([object[]] $Events = @(), [datetime] $StartedUtc, 
 #
 # 'node stopped' (Get-Witness7036State) is judged by whether the node's restart was AWAITED:
 #   * at the exit of a transaction that COMMITTED ($script:MsiCommittedExitCodes), it was:
-#     FastCacheNodeStartService waits for RUNNING and checks it (Return="check"), so the node ran, and
+#     PaceNodeStartService waits for RUNNING and checks it (Return="check"), so the node ran, and
 #     a 'running' missed while its 'stopped' was read is the witness failing on the STATE: refused;
 #   * at the exit of one that ROLLED BACK, it was not: the rollback restarts the node with Windows
 #     Installer's own StartServices, and msiexec can exit before RUNNING. DEFERRED, never passed: the
@@ -1734,7 +1734,7 @@ function Invoke-TransactionJudgement {
             $code = [int] $Transaction.ExitCode
             if ($script:MsiCommittedExitCodes.ContainsKey($code)) {
                 & $evidence
-                throw "'$what' returned $code ($($script:MsiCommittedExitCodes[$code])), so it committed past FastCacheNodeStartService, which waits for the node to be RUNNING and checks it, and of the node's 7036s since it began only its stop (at $stopAt) was read: $missedRunning"
+                throw "'$what' returned $code ($($script:MsiCommittedExitCodes[$code])), so it committed past PaceNodeStartService, which waits for the node to be RUNNING and checks it, and of the node's 7036s since it began only its stop (at $stopAt) was read: $missedRunning"
             }
             $Transaction.Deferred = "'$what' exited $code, a transaction that ROLLED BACK, and at msiexec's exit the node's own stop (7036 stopped at $stopAt) was read with no 'running' after it ('node stopped'): the rollback restarts the node with Windows Installer's own StartServices, which nothing awaits, so whether the node re-enters RUNNING was DEFERRED to the settled judgement"
             $witness = "7036 DEFERRED ('node stopped'): the node's own stop at $stopAt was read and it has not re-entered RUNNING; the transaction exited $code and rolled back, and its restart is not awaited, so the settled judgement decides"
@@ -2047,7 +2047,7 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The waiting assertion against the real service control manager. EventLog is
     # auto and running on every Windows host; a fresh GUID names no service.
-    $nobody = 'FastCachedSelfTest' + [guid]::NewGuid().ToString('N')
+    $nobody = 'PaceSelfTest' + [guid]::NewGuid().ToString('N')
     Assert-ServiceState -Expect ([ordered]@{ EventLog = @('Auto', 'Running'); $nobody = $null }) -TimeoutSeconds 5 -StableSeconds 1
     Pass 'live: a running service stays one process, and an absent one stays absent'
     # The acquisition half of the restart check: a running service is observed
@@ -2171,18 +2171,18 @@ function Invoke-MsiServiceTableSelfTest {
     # The log assertions, over a log written here in the verbose format.
     $log = Join-Path ([IO.Path]::GetTempPath()) ('msi-service-table-' + [guid]::NewGuid().ToString('N') + '.log')
     Set-Content -Path $log -Value @(
-        'MSI (s) (7C:40) [10:00:00:000]: Doing action: FastCacheNodeDeleteLeftover',
-        'MSI (s) (7C:40) [10:00:00:001]: Skipping action: FastCacheNodeUninstallService (condition is false)',
-        'MSI (s) (7C:40) [10:00:00:002]: Doing action: FastCacheNodeStartServiceLater')
+        'MSI (s) (7C:40) [10:00:00:000]: Doing action: PaceNodeDeleteLeftover',
+        'MSI (s) (7C:40) [10:00:00:001]: Skipping action: PaceNodeUninstallService (condition is false)',
+        'MSI (s) (7C:40) [10:00:00:002]: Doing action: PaceNodeStartServiceLater')
     try {
-        Assert-MsiLog -Path $log -Present (Get-MsiActionRanPattern 'FastCacheNodeDeleteLeftover') `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeUninstallService'), (Get-MsiActionRanPattern 'FastCacheNodeStartService')
+        Assert-MsiLog -Path $log -Present (Get-MsiActionRanPattern 'PaceNodeDeleteLeftover') `
+            -Absent (Get-MsiActionRanPattern 'PaceNodeUninstallService'), (Get-MsiActionRanPattern 'PaceNodeStartService')
         Pass 'log: a ran action is present, a skipped one and a prefix of a longer name are not'
         ExpectThrow 'log: a skipped action is not a ran one' {
-            Assert-MsiLog -Path $log -Present (Get-MsiActionRanPattern 'FastCacheNodeUninstallService')
+            Assert-MsiLog -Path $log -Present (Get-MsiActionRanPattern 'PaceNodeUninstallService')
         } 'has no line matching'
         ExpectThrow 'log: a ran action is refused where it must be absent' {
-            Assert-MsiLog -Path $log -Absent (Get-MsiActionRanPattern 'FastCacheNodeDeleteLeftover')
+            Assert-MsiLog -Path $log -Absent (Get-MsiActionRanPattern 'PaceNodeDeleteLeftover')
         } 'has 1 line\(s\) matching'
     } finally {
         Remove-Item -Force $log -ErrorAction SilentlyContinue
@@ -2250,28 +2250,28 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The diagnosis never throws, so it cannot replace the failure it runs beside: a name no host
     # registers is reported as such.
-    $said = Show-ServiceDiagnosis 'FastCacheSelfTestNoSuchService' 6>&1 | Out-String
+    $said = Show-ServiceDiagnosis 'PaceSelfTestNoSuchService' 6>&1 | Out-String
     if ($said -notmatch 'not registered') { throw "diagnosis: an unregistered service said '$said'" }
     Pass 'diagnosis: an unregistered service is reported, not thrown'
 
     # The order verdict, over a synthetic upgrade log: the old product's uninstall, then this
     # product's registration and start, passes; each way it can go wrong is named.
     $upgradeLog = @(
-        'MSI (s) (7C:40) [10:00:00:001]: Doing action: FastCacheNodeUninstallService',
-        'MSI (s) (7C:40) [10:00:00:002]: Doing action: FastCacheNodeInstallService',
-        'MSI (s) (7C:40) [10:00:00:003]: Doing action: FastCacheNodeStartService')
-    $order = 'FastCacheNodeUninstallService', 'FastCacheNodeInstallService', 'FastCacheNodeStartService'
+        'MSI (s) (7C:40) [10:00:00:001]: Doing action: PaceNodeUninstallService',
+        'MSI (s) (7C:40) [10:00:00:002]: Doing action: PaceNodeInstallService',
+        'MSI (s) (7C:40) [10:00:00:003]: Doing action: PaceNodeStartService')
+    $order = 'PaceNodeUninstallService', 'PaceNodeInstallService', 'PaceNodeStartService'
     if ($null -ne ($v = Get-MsiActionOrderVerdict $upgradeLog $order)) { throw "order: the sequence as it must run was refused: $v" }
     Pass 'order: the old uninstall, then the registration, then the start, passes'
     ExpectThrow 'order: the old uninstall AFTER the registration is refused' {
         if ($v = Get-MsiActionOrderVerdict @($upgradeLog[1], $upgradeLog[0], $upgradeLog[2]) $order) { throw $v }
-    } 'FastCacheNodeInstallService ran \(line 1\) before FastCacheNodeUninstallService'
+    } 'PaceNodeInstallService ran \(line 1\) before PaceNodeUninstallService'
     ExpectThrow 'order: a registration that never ran is named' {
         if ($v = Get-MsiActionOrderVerdict @($upgradeLog[0], $upgradeLog[2]) $order) { throw $v }
-    } 'FastCacheNodeInstallService never ran'
+    } 'PaceNodeInstallService never ran'
     ExpectThrow 'order: a skipped action is not a run' {
-        if ($v = Get-MsiActionOrderVerdict @($upgradeLog[0], $upgradeLog[1], 'Skipping action: FastCacheNodeStartService (condition is false)') $order) { throw $v }
-    } 'FastCacheNodeStartService never ran'
+        if ($v = Get-MsiActionOrderVerdict @($upgradeLog[0], $upgradeLog[1], 'Skipping action: PaceNodeStartService (condition is false)') $order) { throw $v }
+    } 'PaceNodeStartService never ran'
 
     # The absence verdict: 0.3.0's registration is refused, the new one passes, and a flag that
     # merely shares the prefix is not the flag.
@@ -2397,24 +2397,24 @@ function Invoke-MsiServiceTableSelfTest {
     # What failed, read whatever shape Windows Installer gave it: an action that could not START names
     # no CustomAction and no code (round 5), one that ran and failed does, and a clean log says nothing.
     $startFailure = @('Action start 5:34:04: InstallFiles.', 'noise', 'noise', 'noise',
-        'MSI (s) (88:AC) [05:34:04:780]: Product: pace-kv -- Error 1721. There is a problem with this Windows Installer package. Action: FastCacheAwaitServiceExit, location: C:\Program Files\fastcached\, command: ...',
+        'MSI (s) (88:AC) [05:34:04:780]: Product: pace-kv -- Error 1721. There is a problem with this Windows Installer package. Action: PaceAwaitServiceExit, location: C:\Program Files\fastcached\, command: ...',
         'after')
     $found = @(Get-MsiFailureLines $startFailure)
-    if ($found.Count -ne 4 -or $found[-1] -notmatch 'Error 1721.*FastCacheAwaitServiceExit' -or $found -contains 'after') {
+    if ($found.Count -ne 4 -or $found[-1] -notmatch 'Error 1721.*PaceAwaitServiceExit' -or $found -contains 'after') {
         throw "failure lines: an action that could not start was not reported with its context: $($found -join ' | ')"
     }
     Pass 'failure lines: an action that could not start is reported, with the lines before it'
-    $ranAndFailed = @('CustomAction FastCacheNodeStartService returned actual error code 2 (note this may not be 100% accurate)')
+    $ranAndFailed = @('CustomAction PaceNodeStartService returned actual error code 2 (note this may not be 100% accurate)')
     if (@(Get-MsiFailureLines $ranAndFailed).Count -ne 1) { throw 'failure lines: an action that ran and failed was not reported' }
     Pass 'failure lines: an action that ran and failed is reported'
-    $ignoredThenFailed = @('CustomAction FastCacheClearRollbackState returned actual error code 1 but will be translated to success due to continue marking',
+    $ignoredThenFailed = @('CustomAction PaceClearRollbackState returned actual error code 1 but will be translated to success due to continue marking',
         'one', 'two', 'three', 'four', $ranAndFailed[0])
     $found = @(Get-MsiFailureLines $ignoredThenFailed)
     if ($found.Count -ne 4 -or $found[0] -ne 'two' -or $found[-1] -ne $ranAndFailed[0]) {
         throw "failure lines: an ignored action's non-zero code was reported as a failure: $($found -join ' | ')"
     }
     Pass 'failure lines: an action translated to success is not a failure, and the real one is'
-    if (@(Get-MsiFailureLines @('Action ended 5:34:04: FastCacheNodeStartService. Return value 1.', 'Installation success or error status: 0.')).Count -ne 0) {
+    if (@(Get-MsiFailureLines @('Action ended 5:34:04: PaceNodeStartService. Return value 1.', 'Installation success or error status: 0.')).Count -ne 0) {
         throw 'failure lines: a clean log reported a failure'
     }
     Pass 'failure lines: a clean log reports nothing'
@@ -2784,7 +2784,7 @@ function Invoke-MsiServiceTableSelfTest {
         "MSI (s) (D8:AC) [$(& $stamp 1)]: RESTART MANAGER: Will attempt to shut down and restart applications in no UI modes.",
         "MSI (c) (80:EC) [$(& $stamp 1)]: RESTART MANAGER: Session opened.",
         "MSI (s) (D8:AC) [$(& $stamp 2)]: RESTART MANAGER: Shut down the nested session's applications.",
-        "MSI (s) (D8:AC) [$(& $stamp 32)]: Doing action: FastCacheNodeStartService",
+        "MSI (s) (D8:AC) [$(& $stamp 32)]: Doing action: PaceNodeStartService",
         "MSI (s) (D8:AC) [$(& $stamp 33)]: RESTART MANAGER: Restarted FastCached.",
         "MSI (s) (D8:AC) [$(& $stamp 38)]: Product: pace-kv -- Installation completed successfully.")
     try {
@@ -2796,8 +2796,8 @@ function Invoke-MsiServiceTableSelfTest {
             } 6>&1 | ForEach-Object { "$_" })
         if ($shown -notcontains 'refused') { throw "log on refusal: the judgement did not refuse ($($shown.Count) line(s))" }
         $text = $shown -join "`n"
-        foreach ($want in @('--- the tail ---\n(MSI [^\n]*\n)*MSI [^\n]*Doing action: FastCacheNodeStartService\n', 'RESTART MANAGER: Shut down the nested session''s applications',
-                '--- the actions from 10 s before to 5 s after each finding .*---\n.*Doing action: FastCacheNodeStartService\n.*RESTART MANAGER: Restarted FastCached\.\n.*Product: pace-kv -- Installation completed successfully\.')) {
+        foreach ($want in @('--- the tail ---\n(MSI [^\n]*\n)*MSI [^\n]*Doing action: PaceNodeStartService\n', 'RESTART MANAGER: Shut down the nested session''s applications',
+                '--- the actions from 10 s before to 5 s after each finding .*---\n.*Doing action: PaceNodeStartService\n.*RESTART MANAGER: Restarted FastCached\.\n.*Product: pace-kv -- Installation completed successfully\.')) {
             if ($text -notmatch $want) { throw "log on refusal: nothing shown matches '$want' in:`n$text" }
         }
         if (@(Show-MsiLog $judgedLog 6>$null).Count -ne 0) { throw 'log on refusal: Show-MsiLog wrote to the output stream' }
@@ -2859,7 +2859,7 @@ function Invoke-MsiServiceTableSelfTest {
     # which nothing awaits. At msiexec's exit the only 7036 read was the node's own STOP, and the
     # judgement called the witness dead. The node's own stop is the node's outcome ('node stopped'),
     # deferred at the exit of a ROLLED-BACK transaction and refused at the exit of a COMMITTED one (its
-    # FastCacheNodeStartService awaited RUNNING, so a missed 'running' is the witness failing on the
+    # PaceNodeStartService awaited RUNNING, so a missed 'running' is the witness failing on the
     # state); settled, a node that never came back is refused naming the outcome, through the
     # settled judgement alone and through the row's own wait.
     $nodeStoppedAt2 = @(& $entered 2 'FastCacheCompileNode' 'Stopped')
@@ -2880,7 +2880,7 @@ function Invoke-MsiServiceTableSelfTest {
         $committed = & $record 'NodeSelected' '' 5 0 @() 0
         ExpectThrow 'node stopped: at the exit of a COMMITTED transaction it is refused as the witness failing on the state' {
             Invoke-TransactionJudgement -Transaction $committed -ReadEvents { $nodeStoppedAt2 } -Observe (& $nodeIs 'Running' 40 0) 6>$null
-        } "returned 0 \(success\), so it committed past FastCacheNodeStartService, .*only its stop \(at 2026-10-06T12:12:16\.000Z\) was read: the reader reads the node's, so the node's 'running' was missed: the 7036 witness failed on the STATE"
+        } "returned 0 \(success\), so it committed past PaceNodeStartService, .*only its stop \(at 2026-10-06T12:12:16\.000Z\) was read: the reader reads the node's, so the node's 'running' was missed: the 7036 witness failed on the STATE"
         if ($committed.Deferred) { throw "node stopped: a committed transaction was deferred: '$($committed.Deferred)'" }
         $restart = & $record 'NodeSelected' '' 5 0 @() 3010
         ExpectThrow 'node stopped: a success that needs a restart is a committed transaction too' {
@@ -3031,7 +3031,7 @@ function Invoke-MsiServiceTableSelfTest {
 Export-ModuleMember -Function Get-ServiceObservation, Get-ServiceVerdict, Assert-ServiceState, Assert-ServiceTable,
     Get-MsiProperty, Get-MsiCustomActionType, Get-InstalledProductCodes, Assert-InstalledProduct, Show-MsiLog, Invoke-Msiexec, Assert-MsiLog,
     Get-MsiRestartManagerLines, Show-MsiRestartManagerLines, Get-MsiLogTimeOfDay, Get-MsiLinesAround, Show-MsiLogAroundFindings,
-    Get-MsiActionRanPattern, Get-ServiceStabilityVerdict, Get-UpgradeVersionVerdict, Remove-FastCacheMachineState,
+    Get-MsiActionRanPattern, Get-ServiceStabilityVerdict, Get-UpgradeVersionVerdict, Remove-PaceMachineState,
     Assert-NodeStatePrivate, Get-NodeServiceAccessVerdict, Get-DirectoryOwnerVerdict, Get-NodeFirewallVerdict, Assert-NodeFirewall,
     Get-NodeFirewallScopeVerdict, Assert-NodeFirewallScope, Get-NodeRegistrationArgumentVerdict,
     Assert-NodeRegistrationArgument, Get-MsiActionOrderVerdict, Assert-MsiActionOrder,

@@ -78,7 +78,7 @@
 # writing this check's selftest showed the house reader of the day merged a line ending
 # in a backslash with the next one, which its own comment claimed it prevented. The walk
 # this check wrote instead now lives in `scripts/lib/CheckCommon.cmake` as
-# `fastcached_scan_code_lines`, with the measurement and the consequences, because
+# `pace_scan_code_lines`, with the measurement and the consequences, because
 # `check-ranges-seam.cmake` became its second caller.
 #
 # Runs as `cmake -P`: it reads files, compares strings and reports. See
@@ -86,7 +86,7 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-istreambuf-iterator.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-istreambuf-iterator.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -94,15 +94,15 @@ cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # The banned token. Spelled once: it is the thing being matched, the thing counted for
 # the matched-nothing guard, and the thing named in the failure text.
 set(bannedToken "istreambuf_iterator")
 
-# The line walk is `fastcached_scan_code_lines` in `scripts/lib/CheckCommon.cmake`, which
+# The line walk is `pace_scan_code_lines` in `scripts/lib/CheckCommon.cmake`, which
 # carries the measurement behind it: why it builds no CMake list, and the comment-ordering
 # false green it has already had.
 
@@ -120,7 +120,7 @@ set(bannedToken "istreambuf_iterator")
 # has THREE values since the consolidation: a walk now says whether there was no index at all
 # or whether the index named no file matching this question.
 
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/*.cpp" "src/*.hpp"
     GLOBS "src/*.cpp" "src/*.hpp"
     FILES_OUT sourceFiles
@@ -131,7 +131,7 @@ if(NOT sourceFiles)
     message("  No C++ source was found under src/ in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "istreambuf-iterator: the scan matched no C++ sources and cannot conclude")
 endif()
 
@@ -148,7 +148,7 @@ foreach(relative IN LISTS sourceFiles)
     # staged is still named here. Reading it emits `CMake Error ... failed to open for
     # reading`, which the registration's FAIL_REGULAR_EXPRESSION scores as THIS check
     # failing -- for a reason with nothing to do with the banned iterator.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
 
@@ -156,13 +156,13 @@ foreach(relative IN LISTS sourceFiles)
     # nowhere, and splitting each of them into lines to discover that costs seconds on
     # every platform for nothing -- the same measurement that took the refusal scan
     # from 2.9s to 208ms.
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
     string(FIND "${wholeFile}" "${bannedToken}" tokenPosition)
     if(tokenPosition EQUAL -1)
         continue()
     endif()
 
-    fastcached_scan_code_lines("${wholeFile}" "${bannedToken}" hits)
+    pace_scan_code_lines("${wholeFile}" "${bannedToken}" hits)
     foreach(hit IN LISTS hits)
         if(hit MATCHES "^mention:([0-9]+)$")
             math(EXPR mentionCount "${mentionCount} + 1")

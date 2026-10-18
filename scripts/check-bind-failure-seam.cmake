@@ -59,7 +59,7 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-bind-failure-seam.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-bind-failure-seam.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -69,8 +69,8 @@
 # version so the whole set moves together with the project's own.
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 set(seam "JudgeBindFailure")
@@ -120,8 +120,8 @@ endif()
 # ---------------------------------------------------------------------------
 # What is scanned. ONE traversal; two patterns would mean two walks of a tree that
 # costs 2.09 s on DrvFs (#502).
-file(GLOB_RECURSE sources RELATIVE "${FASTCACHED_SOURCE_DIR}"
-     "${FASTCACHED_SOURCE_DIR}/${nodeDirectory}/*")
+file(GLOB_RECURSE sources RELATIVE "${PACE_SOURCE_DIR}"
+     "${PACE_SOURCE_DIR}/${nodeDirectory}/*")
 list(FILTER sources INCLUDE REGEX "\\.(cpp|hpp)$")
 list(SORT sources)
 
@@ -130,7 +130,7 @@ if(NOT sources)
     message("  The glob over ${nodeDirectory} matched no C++ file at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "bind-failure seam: the scan matched no source file and cannot conclude")
 endif()
 
@@ -167,8 +167,8 @@ foreach(relative IN LISTS sources)
     # not read. That is NOT a file with no bind site in it, and the difference is the
     # whole of clause two: counting it as compliant is how a scan reports a clean
     # tree it never looked at.
-    file(SIZE "${FASTCACHED_SOURCE_DIR}/${relative}" sizeOnDisk)
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" content)
+    file(SIZE "${PACE_SOURCE_DIR}/${relative}" sizeOnDisk)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" content)
     string(LENGTH "${content}" contentLength)
     if(sizeOnDisk GREATER 0 AND contentLength EQUAL 0)
         list(APPEND unreadable "${relative}")

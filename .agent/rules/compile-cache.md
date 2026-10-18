@@ -30,7 +30,7 @@ collapse or a mis-serve and is now covered by regression tests:
   an edited file was answered with the object built from the previous revision.
   That is a wrong build rather than a cold cache, and direct mode hid it, since
   its manifest hashes the source's own bytes — hence the e2e case that edits a
-  source with `FASTCACHE_NO_DIRECT=1` and requires a MISS.
+  source with `PACE_NO_DIRECT=1` and requires a MISS.
 - **`/` introduces an option only on Windows.** On POSIX it starts an absolute
   path, and treating it as an option leaves absolute paths unrelativized.
 - **Only machine-independent dependency paths may be hashed.** The dependency set
@@ -100,7 +100,7 @@ collapse or a mis-serve and is now covered by regression tests:
   "no source file found" and was passed through *in silence*, which reads exactly
   like a broken cache; and the obvious "add .ixx so modules are supported" change
   would have turned that accident into a silent wrong build. The refusal now says
-  so under `FASTCACHE_VERBOSE`. **The flag half holds through clang-cl's pass-through
+  so under `PACE_VERBOSE`. **The flag half holds through clang-cl's pass-through
   too** (`/clang:-fmodule-output=x.pcm`, #1680): `ProducesSideArtefact` judges the
   argument a pass-through carries, by the driver it is handed to, where it used to read
   the whole spelling, match no row, and cache a compile whose hit came back without its BMI.
@@ -548,7 +548,7 @@ same on both — the same defect with no MSVC anywhere near it.
       naming a file that is gone, under a zero exit code. Covering it is not available — it
       would mean recording the producing machine's per-drive cwd in the value, which is exactly
       the machine-specific state the key exists to keep out — so the compile is refused
-      instead, the way a module interface unit is, and says so under `FASTCACHE_VERBOSE`. Six
+      instead, the way a module interface unit is, and says so under `PACE_VERBOSE`. Six
       things about its shape are load-bearing:
       - **It is a ROOT test that begins with an anchor test, and both halves cut opposite
         ways.** Refusing on the anchor alone would take a drive-relative *root* (`C:src\proj`)
@@ -957,7 +957,7 @@ same on both — the same defect with no MSVC anywhere near it.
       `CanonicalSourceToken` first and returned in **complete** silence when it declined,
       before `BuildManifest` ran — so a TU under neither root, which is an ordinary
       `add_subdirectory(../shared shared)` layout, produced no line even under
-      `FASTCACHE_VERBOSE`. Giving `BuildManifest`'s error a path while leaving that guard
+      `PACE_VERBOSE`. Giving `BuildManifest`'s error a path while leaving that guard
       alone would have fixed the case an operator almost never reaches. Issue #57 closed
       pointing straight at it.
     - **Five faults, not the two the refusal paths happen to have.** `Unanchored` is a
@@ -1018,7 +1018,7 @@ same on both — the same defect with no MSVC anywhere near it.
       single grammar carrying both, so `Cc::RootReconciler::Region` takes the object path and
       returns that span verbatim wherever it appears. Respelling it hands the build system
       back an output it never asked for, and a build whose `-o` does not share a spelling
-      with `FASTCACHE_BINARY_DIR` then gets a depfile Ninja rejects outright and make
+      with `PACE_BINARY_DIR` then gets a depfile Ninja rejects outright and make
       matches against no rule at all. **By value and not by position**, because position
       does not say what a path is: `-MP` emits a phony rule per header whose TARGET is a
       path the compiler reported, and exempting every target would leave those unreconciled
@@ -1117,7 +1117,7 @@ same on both — the same defect with no MSVC anywhere near it.
       spelling while the source and include paths are the real one, which is what `cl`
       actually does — a build system spells everything one way and the compiler reports its
       dependencies resolved the other way. Spelling the outputs the same way as the roots is
-      what a real build does (`-o` and `FASTCACHE_BINARY_DIR` come from one generator) and
+      what a real build does (`-o` and `PACE_BINARY_DIR` come from one generator) and
       it is what makes the second property testable at all: the replayed depfile's rule
       target must be byte-identical to the one the compiler wrote. A third leg repeats it
       with roots carrying a trailing separator. Both assertions were verified by
@@ -1131,7 +1131,7 @@ same on both — the same defect with no MSVC anywhere near it.
       up. Every other case keeps its roots unambiguous,
       so a regression in the reconciliation cannot present as a failure of something else.
 - **A dependency cache outside the checkout is a ROOT of its own** (`<DEPROOT>`,
-  `PathCanon::Layout::dependencyRoot`, `FASTCACHE_DEPS_DIR`, which the module sets from
+  `PathCanon::Layout::dependencyRoot`, `PACE_DEPS_DIR`, which the module sets from
   `CPM_SOURCE_CACHE`). CPM files each dependency under the commit it pinned, so the bytes are
   machine-independent while the location (`~/.cache/...`) is per user. Measured on this repo,
   two Docker machines with different homes: 10 of 1155 hits; the same two with the cache at
@@ -1317,7 +1317,7 @@ same on both — the same defect with no MSVC anywhere near it.
     of the cap rather than by a knob of its own, because the cap is already the
     operator's statement of the largest thing this server will handle.
   - **The launcher declines the store before connecting**, at
-    `FASTCACHE_MAX_STORE_BYTES` (256 MiB by default, `0` disables). Surviving the
+    `PACE_MAX_STORE_BYTES` (256 MiB by default, `0` disables). Surviving the
     refusal is not enough: without a ceiling every rebuild of that translation
     unit pays the full transfer to be told no, and one 356 MB entry would dominate
     a cache sized for thousands of ordinary objects. The default matching the
@@ -1437,7 +1437,7 @@ same on both — the same defect with no MSVC anywhere near it.
   fix it: you cannot produce a localized prefix by forcing English, and forcing it on
   the real compile anglicizes every diagnostic a developer reads.
   - The marker is now a **required, undefaulted parameter** of `RenderShowIncludes`,
-    fed from `FASTCACHE_MSVC_DEPS_PREFIX` at the one place the launcher reads its
+    fed from `PACE_MSVC_DEPS_PREFIX` at the one place the launcher reads its
     environment. That is *stronger* than the invariant it replaces: the producer spells
     no literal at all, so it cannot drift from its parser — there is nothing to drift
     with. A default argument would let the next call site omit the build's prefix and
@@ -1466,7 +1466,7 @@ same on both — the same defect with no MSVC anywhere near it.
     (#825, the table above) and says that guard was worse than merely unproven: it read
     **stderr alone**, and a COMPILE puts the notes on stdout, so it could not fire for
     the case it was written for and would have fired only on a `/EP` run. #700's own floor is *discovered, never
-    inferred from a failed parse*. What ships instead is a `FASTCACHE_VERBOSE` line on
+    inferred from a failed parse*. What ships instead is a `PACE_VERBOSE` line on
     every dispatched compile that synthesises notes, naming the prefix and its
     provenance, because that is the one line answering *why did my build stop rebuilding
     this file*.
@@ -1549,11 +1549,11 @@ same on both — the same defect with no MSVC anywhere near it.
   rule can change that. The remedy there is a shorter build root, and it belongs in
   the tool's `## Known limitations` rather than in a fix.
 
-## An object file is not a byte string, and `FASTCACHE_VERIFY` is where that bites
+## An object file is not a byte string, and `PACE_VERIFY` is where that bites
 
 <!-- agent-tripwire: An object file is not a byte string. Every MSVC driver stamps the clock into the COFF `TimeDateStamp` -->
 
-`FASTCACHE_VERIFY` compiles a sampled hit again and compares the two objects. It
+`PACE_VERIFY` compiles a sampled hit again and compares the two objects. It
 compared them with `memcmp`, and on Windows that **can never succeed**: every
 MSVC-family driver stamps the wall clock into the COFF header, and a cached object
 was produced earlier than the fresh compile it is checked against *by construction*.
@@ -2119,7 +2119,7 @@ path HITs across the two checkouts in every spelling.
 - **`objkey-v7` and `manifest-v7` moved together**, and the manifest half is required on
   its own: a `v6` manifest is shared between checkouts and points straight at the
   producer's object. The object half retires every entry stored before the scan existed.
-- **A hit `FASTCACHE_VERIFY` rejects is `VERIFY-MISMATCH`, never `HIT`**, in
+- **A hit `PACE_VERIFY` rejects is `VERIFY-MISMATCH`, never `HIT`**, in
   `invocations.log`, on the trace line and in `--show-stats` (`Outcome::VerifyMismatch`).
   The verifier compiles to the same path, so the build links the fresh object; logging
   it as a hit counted every wrong object the verifier caught as a success. Note what it
@@ -2515,7 +2515,7 @@ four were each wrong in a draft of #1650 before they were right:
 - **An input that cannot be observed is `UNCACHEABLE`, never `INPUTS-MOVED`**, whose text
   promises the next build caches; an unreadable input usually stays unreadable. The statistics
   `detail` is the row's FIXED sentence, so `--show-stats` ranks one row per cause, and the path
-  is on the `FASTCACHE_VERBOSE` line -- which, for a save during the compile in direct mode, is
+  is on the `PACE_VERBOSE` line -- which, for a save during the compile in direct mode, is
   written AFTER the manifest was recorded and says whether it was.
 - **Nothing the witness holds travels.** No identity, instant or verdict reaches a key, a
   manifest, a `CompileValue` or the wire, or two checkouts stop sharing;
@@ -2975,7 +2975,7 @@ nobody can account for.
   operator, then a probe that ASKS the compiler, then the English default. Three sources
   but **FOUR** provenances, because *asked and declined* and *never asked* carry the same
   marker and differ only in the remedy: telling an operator to set
-  `FASTCACHE_MSVC_DEPS_PREFIX` is advice already taken by whoever wrote `auto`, so
+  `PACE_MSVC_DEPS_PREFIX` is advice already taken by whoever wrote `auto`, so
   collapsing the pair gives the one operator who opted in a confident wrong answer.
   `MarkerSource::DiscoveryDeclined` is that fourth state, and a `static_assert` holds its
   label distinct from `Default`'s — the two are equal in every other observable, so a
@@ -2999,7 +2999,7 @@ nobody can account for.
       spawn per FILE, paid on CACHE HITS too — where not running a compiler is the entire
       value of the hit — to rediscover the English default on almost every machine. **A cost
       that cannot be amortised cannot be a default.** So the operator asks, with
-      `FASTCACHE_MSVC_DEPS_PREFIX=auto` (`Cc::MarkerDiscoveryRequest`, read by the RESOLVER
+      `PACE_MSVC_DEPS_PREFIX=auto` (`Cc::MarkerDiscoveryRequest`, read by the RESOLVER
       so the one value that means *ask, do not tell* has one reading), and `WantsMarkerProbe`
       adds only the three facts the resolver cannot know: a parsed compile, `/showIncludes`
       in play, and an MSVC-family driver read off `DriverSpec::family` rather than by naming

@@ -304,7 +304,7 @@ class CredentialNotice
 /// **It deliberately says nothing about whether the invocation continues.** A
 /// cache and a compile fleet are two services, usually on two machines, and an
 /// answer about one is not an answer about the other — `RunCached` used to return
-/// on a fetch that failed at the transport, so an unreachable `FASTCACHE_ADDR`
+/// on a fetch that failed at the transport, so an unreachable `PACE_ADDR`
 /// took a perfectly healthy fleet down with it and every build went local while
 /// staying green (issue #236).
 /// @param kind How the exchange ended.

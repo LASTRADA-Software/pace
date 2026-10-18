@@ -8,13 +8,13 @@
 # payload and is the documented way back out.
 set -u
 
-PREFIX="/@FASTCACHED_MACOS_PREFIX@"
+PREFIX="/@PACE_MACOS_PREFIX@"
 
 # The PACKAGE identifier, which is what receipts are filed under -- not a launchd
 # label, though the daemon's happens to be the same string. Kept separate from the
 # JOBS table below because the two answer different questions: one is what macOS
 # recorded about this install, the other is what is registered with launchd.
-LABEL="@FASTCACHED_MACOS_BUNDLE_ID@"
+LABEL="@PACE_MACOS_BUNDLE_ID@"
 
 # Every launchd job this package can leave behind, one row per line:
 #
@@ -26,16 +26,16 @@ LABEL="@FASTCACHED_MACOS_BUNDLE_ID@"
 # script removes ${PREFIX}, so a worker job left bootstrapped would point at an
 # executable that is gone -- registered, unspawnable, and with nothing left on
 # disk that knows how to remove it.
-JOBS="pace-kv|@FASTCACHED_MACOS_BUNDLE_ID@
-pace-node|@FASTCACHED_MACOS_NODE_LABEL@"
+JOBS="pace-kv|@PACE_MACOS_BUNDLE_ID@
+pace-node|@PACE_MACOS_NODE_LABEL@"
 
 # Every account the postinstalls create, one per line. A stale account is what
 # makes the next install pick a DIFFERENT uid, silently orphaning the state
 # directory the old one owned -- so removal is as much a part of this package as
 # creation, and `ctest -R service-accounts` fails when one is created and not
 # removed.
-ACCOUNTS="@FASTCACHED_MACOS_SERVICE_ACCOUNT@
-@FASTCACHED_MACOS_NODE_ACCOUNT@"
+ACCOUNTS="@PACE_MACOS_SERVICE_ACCOUNT@
+@PACE_MACOS_NODE_ACCOUNT@"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "pace-uninstall: must run as root; try: sudo $0" >&2
@@ -105,7 +105,7 @@ done
 rm -f /etc/paths.d/fastcached || true
 # Only remove the symlinks if they still point into our prefix: someone may have
 # replaced them with a Homebrew install, and deleting that would be rude.
-for tool in @FASTCACHED_MACOS_LINKED_TOOLS@; do
+for tool in @PACE_MACOS_LINKED_TOOLS@; do
     link="/usr/local/bin/${tool}"
     if [ -L "$link" ] && [ "$(readlink "$link")" = "${PREFIX}/bin/${tool}" ]; then
         rm -f "$link" || true

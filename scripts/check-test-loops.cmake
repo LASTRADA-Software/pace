@@ -29,7 +29,7 @@
 # ## What it matches
 #
 # Over the file with its comments removed and its newlines kept
-# (`fastcached_strip_comments`), so prose explaining a rule is not read as breaking it and a
+# (`pace_strip_comments`), so prose explaining a rule is not read as breaking it and a
 # header broken across lines is still one header:
 #
 #   * a `for (` whose header reaches TWO `;` before the `)` that closes it -- a range-for
@@ -99,7 +99,7 @@
 # failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-test-loops.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-test-loops.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -107,8 +107,8 @@ cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ endif()
 # is about waits in TESTS. So `loop` widens to all of `src/` (#1452) and they do not.
 #
 # pathspec|rules|what it is
-set(FastCachedTestLoopScope
+set(PaceTestLoopScope
     "src/*_test.cpp|loop spin poll|every Catch2 test source (#1446)"
     "src/tests/*.cpp|loop spin poll|the shared test programs and canaries (#1446)"
     "src/tests/*.hpp|loop spin poll|the shared test helpers (#1446)"
@@ -160,7 +160,7 @@ set(FastCachedTestLoopScope
 # a message about matching no site, which reads as the site having been converted. None of the four
 # fields may contain `|` or `;`, and the text may not contain `[` or `]`: these rows are a
 # CMake list. Checked below rather than left as a comment nothing reads.
-set(FastCachedTestLoopExemptions
+set(PaceTestLoopExemptions
     "loop|src/tests/TsanCanary.cpp|for (|The ThreadSanitizer canary's loops are its race: a change to this file is judged by a RATE over a few hundred runs (scripts/tsan-canary-rate.sh), never by a green run, and rewriting three loops would re-open that measurement for a spelling."
     "spin|src/Pace/Protocol/LiveStreamReactors_test.cpp|stopping->load(|Not a wait: a heartbeat coroutine that beats until the case says stop, and whose frame the rig's reactors free when a case ends early."
     "loop|src/apps/pace-cc/ToolchainProbe.cpp|it != end|A recursive_directory_iterator advanced by the error-code overload. A range-based for calls ++it, which THROWS on an unreadable directory instead of setting ec -- and surviving that to report a PARTIAL walk is this loop's whole purpose, so converting it would be a behaviour regression rather than a modernisation."
@@ -211,7 +211,7 @@ set(pollPatternAnchored
 # ---------------------------------------------------------------------------
 # Exemption rows, checked for shape before anything is decided from them.
 set(exemptionIndex 0)
-foreach(row IN LISTS FastCachedTestLoopExemptions)
+foreach(row IN LISTS PaceTestLoopExemptions)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 4)
@@ -264,7 +264,7 @@ endif()
 set(useGit FALSE)
 if(GIT_EXECUTABLE)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${FASTCACHED_SOURCE_DIR}" rev-parse --show-prefix
+        COMMAND "${GIT_EXECUTABLE}" -C "${PACE_SOURCE_DIR}" rev-parse --show-prefix
         OUTPUT_VARIABLE prefixInWorkTree ERROR_QUIET RESULT_VARIABLE gitStatus
         OUTPUT_STRIP_TRAILING_WHITESPACE)
     if(gitStatus EQUAL 0 AND prefixInWorkTree STREQUAL "")
@@ -287,28 +287,28 @@ message(STATUS "test-loops: mode: ${scanMode}")
 # synthetic tree. That is a seam a self-test takes and CI does not, so the resolved path is part
 # of this check's OUTPUT on every run -- a guard whose self-test exercised one mode while CI
 # exercised another has already shipped in this tree and passed.
-if(NOT DEFINED FASTCACHED_TEST_LOOPS_BACKLOG)
-    set(FASTCACHED_TEST_LOOPS_BACKLOG "${CMAKE_CURRENT_LIST_DIR}/check-test-loops-backlog.txt")
+if(NOT DEFINED PACE_TEST_LOOPS_BACKLOG)
+    set(PACE_TEST_LOOPS_BACKLOG "${CMAKE_CURRENT_LIST_DIR}/check-test-loops-backlog.txt")
 endif()
-if(NOT EXISTS "${FASTCACHED_TEST_LOOPS_BACKLOG}")
+if(NOT EXISTS "${PACE_TEST_LOOPS_BACKLOG}")
     message("")
-    message("  The backlog file is not there: ${FASTCACHED_TEST_LOOPS_BACKLOG}")
+    message("  The backlog file is not there: ${PACE_TEST_LOOPS_BACKLOG}")
     message("")
     message("Refused by name rather than read as an empty backlog. Empty would refuse every")
     message("un-converted site in the tree -- loudly, and with a diagnosis that sends whoever")
     message("meets it to the loops rather than to the missing file.")
     message(FATAL_ERROR "test-loops: the backlog file cannot be read")
 endif()
-file(STRINGS "${FASTCACHED_TEST_LOOPS_BACKLOG}" backlogLines)
-set(FastCachedTestLoopBacklog "")
+file(STRINGS "${PACE_TEST_LOOPS_BACKLOG}" backlogLines)
+set(PaceTestLoopBacklog "")
 foreach(backlogLine IN LISTS backlogLines)
     string(STRIP "${backlogLine}" backlogLine)
     if(backlogLine STREQUAL "" OR backlogLine MATCHES "^#")
         continue()
     endif()
-    list(APPEND FastCachedTestLoopBacklog "${backlogLine}")
+    list(APPEND PaceTestLoopBacklog "${backlogLine}")
 endforeach()
-get_filename_component(backlogShown "${FASTCACHED_TEST_LOOPS_BACKLOG}" NAME)
+get_filename_component(backlogShown "${PACE_TEST_LOOPS_BACKLOG}" NAME)
 # WHICH backlog, on every run and before any row is judged: the path is overridable so
 # the self-test can stage one, and a run judged against the wrong table would otherwise
 # look exactly like a run judged against the right one.
@@ -320,12 +320,12 @@ message(STATUS "test-loops: backlog file: ${backlogShown}")
 set(backlogIndex 0)
 set(backlogIssues "")
 set(backlogSeen "")
-foreach(row IN LISTS FastCachedTestLoopBacklog)
+foreach(row IN LISTS PaceTestLoopBacklog)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 4)
         message("")
-        message("  FastCachedTestLoopBacklog row has ${fieldCount} field(s), not 4:")
+        message("  PaceTestLoopBacklog row has ${fieldCount} field(s), not 4:")
         message("    ${row}")
         message("")
         message("The shape is rule|file|count|issue. A row this reader cannot split would be read")
@@ -356,7 +356,7 @@ foreach(row IN LISTS FastCachedTestLoopBacklog)
     # in every clause and sends whoever reads it looking for a conversion that never happened.
     if("${backlogRule}/${backlogFile}" IN_LIST backlogSeen)
         message("")
-        message("  FastCachedTestLoopBacklog has two rows for ${backlogRule} in ${backlogFile}:")
+        message("  PaceTestLoopBacklog has two rows for ${backlogRule} in ${backlogFile}:")
         message("    ${row}")
         message("")
         message("One row per rule per file. With two, the scan matches the first and the second")
@@ -380,7 +380,7 @@ set(sourceFiles "")
 set(ruleFiles_loop "")
 set(ruleFiles_spin "")
 set(ruleFiles_poll "")
-foreach(scopeRow IN LISTS FastCachedTestLoopScope)
+foreach(scopeRow IN LISTS PaceTestLoopScope)
     string(REPLACE "|" ";" scopeFields "${scopeRow}")
     list(LENGTH scopeFields scopeFieldCount)
     if(scopeFieldCount LESS 3)
@@ -407,7 +407,7 @@ foreach(scopeRow IN LISTS FastCachedTestLoopScope)
     set(rowFiles "")
     if(useGit)
         execute_process(
-            COMMAND "${GIT_EXECUTABLE}" -C "${FASTCACHED_SOURCE_DIR}" ls-files -- "${pathspec}"
+            COMMAND "${GIT_EXECUTABLE}" -C "${PACE_SOURCE_DIR}" ls-files -- "${pathspec}"
             OUTPUT_VARIABLE tracked RESULT_VARIABLE lsStatus OUTPUT_STRIP_TRAILING_WHITESPACE)
         if(NOT lsStatus EQUAL 0)
             message(FATAL_ERROR "test-loops: `git ls-files -- ${pathspec}` failed (${lsStatus}), so the scope cannot be read")
@@ -416,7 +416,7 @@ foreach(scopeRow IN LISTS FastCachedTestLoopScope)
             string(REPLACE "\n" ";" rowFiles "${tracked}")
         endif()
     else()
-        file(GLOB_RECURSE rowFiles RELATIVE "${FASTCACHED_SOURCE_DIR}" "${FASTCACHED_SOURCE_DIR}/${pathspec}")
+        file(GLOB_RECURSE rowFiles RELATIVE "${PACE_SOURCE_DIR}" "${PACE_SOURCE_DIR}/${pathspec}")
     endif()
     if(NOT rowFiles)
         message("")
@@ -459,10 +459,10 @@ set(exemptedCount 0)
 set(staleBacklog "")
 
 foreach(sourceFile IN LISTS sourceFiles)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${sourceFile}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${sourceFile}")
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${sourceFile}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${sourceFile}" wholeFile)
     # Whole-file filters first: the walk below is O(n^2), and a file with no `for` and no
     # `while` has nothing to say.
     string(FIND "${wholeFile}" "for" forAt)
@@ -470,7 +470,7 @@ foreach(sourceFile IN LISTS sourceFiles)
     if(forAt EQUAL -1 AND whileAt EQUAL -1)
         continue()
     endif()
-    fastcached_strip_comments("${wholeFile}" code)
+    pace_strip_comments("${wholeFile}" code)
 
     # Every `for (` at all, for the matched-nothing guard: this tree's tests are full of
     # range-fors, so a scan that sees none is not reading what it thinks it is.
@@ -611,7 +611,7 @@ foreach(sourceFile IN LISTS sourceFiles)
             string(APPEND violations "${ruleSiteText}")
             if(allowed GREATER 0)
                 string(APPEND violations
-                    "\n      ^ ${ruleSites} ${rule} site(s) here, and FastCachedTestLoopBacklog records ${allowed} for ${allowedIssue}")
+                    "\n      ^ ${ruleSites} ${rule} site(s) here, and PaceTestLoopBacklog records ${allowed} for ${allowedIssue}")
             endif()
         elseif(ruleSites LESS allowed)
             math(EXPR fixed "${allowed} - ${ruleSites}")
@@ -675,8 +675,8 @@ if(violationCount GREATER 0)
     message("it parks, or `vendor/`. The `loop` rule reaches every C++ source under src/ (#1452);")
     message("`spin` and `poll` are test-only, because the wait they ask for is a test helper.")
     message("")
-    message("A site that must STAY takes a row in FastCachedTestLoopExemptions, with its reason.")
-    message("A site nobody has decided about yet belongs in FastCachedTestLoopBacklog with the")
+    message("A site that must STAY takes a row in PaceTestLoopExemptions, with its reason.")
+    message("A site nobody has decided about yet belongs in PaceTestLoopBacklog with the")
     message("issue that will decide it -- and if the count for its file is already there, then")
     message("this is a NEW site and the answer is to convert it, not to raise the number. Both")
     message("tables are in ${CMAKE_CURRENT_LIST_FILE}.")
@@ -689,7 +689,7 @@ endif()
 
 if(NOT staleBacklog STREQUAL "")
     message("")
-    message("FastCachedTestLoopBacklog no longer describes the tree:${staleBacklog}")
+    message("PaceTestLoopBacklog no longer describes the tree:${staleBacklog}")
     message("")
     message("This is the ratchet, and it only turns one way. A converted site comes OFF the")
     message("backlog in the same change that converts it, or the number it left behind is room")
@@ -699,7 +699,7 @@ endif()
 
 if(NOT staleRows STREQUAL "")
     message("")
-    message("FastCachedTestLoopExemptions has STALE row(s) matching no site:${staleRows}")
+    message("PaceTestLoopExemptions has STALE row(s) matching no site:${staleRows}")
     message("")
     message("The site was converted, moved or deleted -- OR the text names something outside the header as extracted, which ends at the SECOND `;`, so an increment clause cannot be matched. Check that before concluding the site is gone. Remove the row -- a standing exemption")
     message("for a site that is gone would wave the next one of that text through silently.")

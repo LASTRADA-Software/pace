@@ -36,6 +36,6 @@ TEST_CASE("CRC32C streaming equals one-shot", "[crc32c]")
 TEST_CASE("CRC32C detects single-bit changes", "[crc32c]")
 {
     std::string_view const a = "pace-kv";
-    std::string_view const b = "Fastcached";
+    std::string_view const b = "PaceKv";
     REQUIRE(Pace::Crc32c::Compute(Pace::AsBytes(a)) != Pace::Crc32c::Compute(Pace::AsBytes(b)));
 }

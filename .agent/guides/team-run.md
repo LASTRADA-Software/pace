@@ -153,7 +153,7 @@ Each of these is a scar, not a preference.
   routinely is one nobody believes on the day it is right. Three-dot compares from the
   merge base and shows only your work. It still catches the real accident: after a
   `reset --soft`, the merge base *is* the new master, so the deletions show up either way.
-- **New build directories need `--fresh`.** Existing trees can have `FASTCACHE_CC-NOTFOUND`
+- **New build directories need `--fresh`.** Existing trees can have `PACE_CC-NOTFOUND`
   baked into `CMakeCache`, and `find_program` never revisits a filled entry — they fall
   through to whatever else is installed, silently. Confirm the
   `[cache] Enabling pace-cc` configure line. (Since #815 that fall-through is ccache

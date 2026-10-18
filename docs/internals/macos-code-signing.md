@@ -76,10 +76,10 @@ unexercised until after a merge.
 
 ```sh
 cmake -S . -B build \
-  -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON \
-  -DFASTCACHED_MACOS_SIGN_IDENTITY_APP="Developer ID Application: … (TEAMID)" \
-  -DFASTCACHED_MACOS_SIGN_IDENTITY_PKG="Developer ID Installer: … (TEAMID)" \
-  -DFASTCACHED_MACOS_NOTARIZE=ON
+  -DPACE_PACKAGE_ROOT_PREFIX=ON \
+  -DPACE_MACOS_SIGN_IDENTITY_APP="Developer ID Application: … (TEAMID)" \
+  -DPACE_MACOS_SIGN_IDENTITY_PKG="Developer ID Installer: … (TEAMID)" \
+  -DPACE_MACOS_NOTARIZE=ON
 cd build && cpack -G productbuild
 ```
 
@@ -139,6 +139,6 @@ xcrun stapler validate fastcached-*.dmg
 
 ## Related
 
-Configure-time guard: `FASTCACHED_MACOS_NOTARIZE` requires both identities.
+Configure-time guard: `PACE_MACOS_NOTARIZE` requires both identities.
 Apple rejects an unsigned or ad-hoc submission, but only after a multi-minute
 round trip, so the mistake is caught at configure time instead.

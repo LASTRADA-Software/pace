@@ -30,24 +30,24 @@ cmake_minimum_required(VERSION 3.28)
 # and this case goes red.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-macro-bare-parameters-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of the failure signal in the
 # output.
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-macro-bare-parameters.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-macro-bare-parameters.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 set(caseCount 0)
@@ -69,7 +69,7 @@ endfunction()
 # Run the real check over a staged tree and report whether it OBJECTED.
 function(RunCheck tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErrors
         RESULT_VARIABLE ignored
@@ -165,17 +165,17 @@ set(dataEnd "# macro-bare-parameter-scan: data-end")
 
 # The control. Every case below is evidence only if a clean tree passes.
 ExpectVerdict("clean"
-"macro(fastcached_thing want)
+"macro(pace_thing want)
     if(\"\${want}\" STREQUAL \"yes\")
         message(STATUS \"yes\")
     endif()
 endmacro()
-fastcached_thing(yes)
+pace_thing(yes)
 " "pass" "1 macro definition")
 
 # The rule itself, on an `if`.
 ExpectVerdict("bare-if"
-"macro(fastcached_thing want)
+"macro(pace_thing want)
     if(want STREQUAL \"yes\")
         message(STATUS \"yes\")
     endif()
@@ -185,7 +185,7 @@ endmacro()
 # The rule on an `elseif`, which is where BOTH real instances were and which a
 # checker spelling the pattern `(el)?if` cannot see.
 ExpectVerdict("elseif-only"
-"macro(fastcached_thing want other)
+"macro(pace_thing want other)
     if(\"\${other}\" STREQUAL \"a\")
         message(STATUS \"a\")
     elseif(want STREQUAL \"b\")
@@ -196,7 +196,7 @@ endmacro()
 
 # And on a `while`, the third construct that reads a bare name as a variable.
 ExpectVerdict("bare-while"
-"macro(fastcached_thing want)
+"macro(pace_thing want)
     while(want)
         break()
     endwhile()
@@ -211,19 +211,19 @@ endmacro()
 # than the violation, so a check that refused it would be refusing correct code
 # everywhere.
 ExpectVerdict("function-is-fine"
-"function(fastcached_thing want)
+"function(pace_thing want)
     if(want STREQUAL \"yes\")
         message(STATUS \"yes\")
     endif()
 endfunction()
-macro(fastcached_other thing)
+macro(pace_other thing)
     message(STATUS \"\${thing}\")
 endmacro()
 " "pass" "2 macro definition|1 macro definition")
 
 # The unquoted expansion, which is correct.
 ExpectVerdict("bare-expansion-is-fine"
-"macro(fastcached_thing want)
+"macro(pace_thing want)
     if(\${want} STREQUAL \"yes\")
         message(STATUS \"yes\")
     endif()
@@ -233,7 +233,7 @@ endmacro()
 # A name that merely CONTAINS a parameter name. The match is on whole words, so a
 # checker without boundaries would refuse this.
 ExpectVerdict("substring-is-fine"
-"macro(fastcached_thing want)
+"macro(pace_thing want)
     if(wanted STREQUAL \"yes\")
         message(STATUS \"yes\")
     endif()
@@ -246,7 +246,7 @@ endmacro()
 # `ARGN` is a real variable inside a macro, so reading it bare is correct even though
 # it appears in the parameter list position of every variadic macro.
 ExpectVerdict("argn-is-fine"
-"macro(fastcached_thing want ARGN)
+"macro(pace_thing want ARGN)
     if(ARGN)
         message(STATUS \"has extra\")
     endif()
@@ -258,7 +258,7 @@ endmacro()
 
 # A bare name AFTER the macro has closed is an ordinary variable read at file scope.
 ExpectVerdict("outside-macro-is-fine"
-"macro(fastcached_thing want)
+"macro(pace_thing want)
     message(STATUS \"\${want}\")
 endmacro()
 if(want STREQUAL \"yes\")
@@ -270,7 +270,7 @@ endif()
 # The marker, both ways.
 
 ExpectVerdict("marked-with-reason"
-"macro(fastcached_thing status)
+"macro(pace_thing status)
     execute_process(COMMAND \${CMAKE_COMMAND} -E true RESULT_VARIABLE status)
     # macro-bare-parameter: `status` here is the RESULT_VARIABLE the line above sets,
     # not the parameter of the same name.
@@ -281,7 +281,7 @@ endmacro()
 " "pass" "1 site.s. marked")
 
 ExpectVerdict("marked-without-reason"
-"macro(fastcached_thing status)
+"macro(pace_thing status)
     # macro-bare-parameter:
     if(status EQUAL 0)
         message(STATUS \"ok\")
@@ -296,7 +296,7 @@ endmacro()
 # must be its own outcome and not a quiet skip, or the run reports the same all-clear
 # over a body it never looked at.
 ExpectVerdict("unreadable-definition"
-"macro(fastcached_thing
+"macro(pace_thing
        want)
     if(want STREQUAL \"yes\")
         message(STATUS \"yes\")
@@ -307,7 +307,7 @@ endmacro()
 # And a tree with no macro at all: the scan has nothing to examine, which is
 # indistinguishable from a scan that stopped recognising `macro(` unless it says so.
 ExpectVerdict("no-macros-at-all"
-"function(fastcached_thing want)
+"function(pace_thing want)
     message(STATUS \"\${want}\")
 endfunction()
 " "refuse" "found no macro definition at all")
@@ -322,13 +322,13 @@ endfunction()
 # that passes by way of a DIFFERENT refusal is not evidence for this one.
 ExpectVerdict("data-region-is-exempt"
 "${dataBegin}
-macro(fastcached_staged beta)
+macro(pace_staged beta)
     if(beta STREQUAL \"yes\")
         message(STATUS \"b\")
     endif()
 endmacro()
 ${dataEnd}
-macro(fastcached_real gamma)
+macro(pace_real gamma)
     if(\"\${gamma}\" STREQUAL \"yes\")
         message(STATUS \"ok\")
     endif()
@@ -339,13 +339,13 @@ endmacro()
 # level up: every line below an unclosed `data-begin` is skipped while the run
 # reports the same all-clear.
 ExpectVerdict("unterminated-data-region"
-"macro(fastcached_real gamma)
+"macro(pace_real gamma)
     if(\"\${gamma}\" STREQUAL \"yes\")
         message(STATUS \"ok\")
     endif()
 endmacro()
 ${dataBegin}
-macro(fastcached_staged beta)
+macro(pace_staged beta)
     if(beta STREQUAL \"yes\")
         message(STATUS \"b\")
     endif()
@@ -355,7 +355,7 @@ endmacro()
 # The mirror. A `data-end` closing nothing means the regions do not balance, and
 # nobody can then say which lines this scan examined.
 ExpectVerdict("stray-data-end"
-"macro(fastcached_real gamma)
+"macro(pace_real gamma)
     if(\"\${gamma}\" STREQUAL \"yes\")
         message(STATUS \"ok\")
     endif()

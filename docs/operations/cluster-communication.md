@@ -97,7 +97,7 @@ sequenceDiagram
 
 ### 1. The client asks a cache
 
-`FASTCACHE_ADDR` decides which one. Pointed at a node's own tier — the default,
+`PACE_ADDR` decides which one. Pointed at a node's own tier — the default,
 and the reason that tier exists — a **local hit never leaves the machine**. A
 local miss makes the node read through to whatever `--upstream` names, and
 populate its own tier on the way back, so the second build of the same tree does
@@ -248,7 +248,7 @@ against an **allowlist** of accepted flag shapes — the code-generation, langua
 and diagnostic options a distributed compile actually carries, per driver family —
 and refuses anything else, naming the offending flag. An allowlist fails safe: a
 flag it does not yet recognise costs one local compile (visible as
-`fastcache_worker_jobs_refused_rejected_argument_total`), where a denylist that
+`pace_worker_jobs_refused_rejected_argument_total`), where a denylist that
 missed one flag was code execution
 ([#240](https://github.com/LASTRADA-Software/fastcached/issues/240)).
 
@@ -302,10 +302,10 @@ thing to go and do, and the sum of them names none.
 
 | Refusal | Counter | What it means | What to do |
 |---|---|---|---|
-| `payload-too-large` | `fastcache_worker_jobs_refused_envelope_declared_too_large_total` | The envelope declared it expands past this worker's request ceiling | Nothing honest declares that by accident. Read it as a probe of the port, or as a client configured with a larger ceiling than the worker |
-| `unsupported-codec` | `fastcache_worker_jobs_refused_envelope_unsupported_codec_total` | The payload is in a codec this build cannot decode | A packaging difference between two honest machines — a client built with zstd talking to a worker that was not. Every one of these cost a local compile |
-| `malformed-frame` | `fastcache_worker_jobs_refused_envelope_malformed_total` | The envelope did not parse, or an uncompressed one disagreed with the bytes beside it | A version skew, or something on the port that is not this protocol at all |
-| `malformed-frame` | `fastcache_worker_jobs_refused_envelope_corrupt_total` | The bytes parsed and then did not expand to their declared size | The only one of the four that implicates the transport: a codec version skew, or a link damaging payloads |
+| `payload-too-large` | `pace_worker_jobs_refused_envelope_declared_too_large_total` | The envelope declared it expands past this worker's request ceiling | Nothing honest declares that by accident. Read it as a probe of the port, or as a client configured with a larger ceiling than the worker |
+| `unsupported-codec` | `pace_worker_jobs_refused_envelope_unsupported_codec_total` | The payload is in a codec this build cannot decode | A packaging difference between two honest machines — a client built with zstd talking to a worker that was not. Every one of these cost a local compile |
+| `malformed-frame` | `pace_worker_jobs_refused_envelope_malformed_total` | The envelope did not parse, or an uncompressed one disagreed with the bytes beside it | A version skew, or something on the port that is not this protocol at all |
+| `malformed-frame` | `pace_worker_jobs_refused_envelope_corrupt_total` | The bytes parsed and then did not expand to their declared size | The only one of the four that implicates the transport: a codec version skew, or a link damaging payloads |
 
 The last two share a wire code and do not share a counter, which is the split
 working rather than an inconsistency. `malformed-frame` is all the *client* can act
@@ -371,8 +371,8 @@ and the dashboard are off unless configured.
 
 | Opened by | Answered by | Port | When | Carries |
 |---|---|---|---|---|
-| `pace-cc` | a cache — `pace-kv` or a node's `--listen-node` | `FASTCACHE_ADDR`, default `127.0.0.1:6674` | once per operation | `FETCH`, `STORE` |
-| `pace-cc` | the leader's scheduler, or this PC's own node, which redirects to it unless it leads | `FASTCACHE_SCHEDULER`, the leader's node port or this PC's own, `:6674` by default | on a cache miss, when dispatch is configured | `LEASE` |
+| `pace-cc` | a cache — `pace-kv` or a node's `--listen-node` | `PACE_ADDR`, default `127.0.0.1:6674` | once per operation | `FETCH`, `STORE` |
+| `pace-cc` | the leader's scheduler, or this PC's own node, which redirects to it unless it leads | `PACE_SCHEDULER`, the leader's node port or this PC's own, `:6674` by default | on a cache miss, when dispatch is configured | `LEASE` |
 | `pace-cc` | the worker named in the grant | whatever that worker advertises, which defaults to the address that machine routes from, on its `--listen-node` port | once per dispatched compile, held for its duration | `COMPILE` |
 | `pace-cc` | the scheduler that granted the lease | `:6674` | a **second** connection, on every path out of the compile | `RELEASE` |
 | a **node** | the leader's scheduler | where its formation record says the fleet's voters answer, `:6674` by default | `REGISTER` once per toolchain, then `HEARTBEAT` every **20 s** | capacity, load, and its closed history buckets — after a handshake proving the node's identity key, with every frame sealed |
@@ -495,7 +495,7 @@ differs from the caller's, the registration is still accepted and the scheduler
 counts it:
 
 ```
-fastcached_dispatch_worker_endpoint_mismatch_total
+pace_dispatch_worker_endpoint_mismatch_total
 ```
 
 alongside an **info** line naming both addresses and the toolchain, written for the
@@ -560,7 +560,7 @@ records the new host for the member's consensus endpoint as well as its `0xFC` o
 the two recorded endpoints share a host (they do unless `--raft-self` and `--advertise` were
 pinned apart). A beacon from before the move can never undo it. A learner dials every voter
 itself, so only its `0xFC` endpoint is moved. Two counters show it:
-`fastcache_node_endpoint_changes_total` and `fastcache_node_raft_endpoint_changes_total`
+`pace_node_endpoint_changes_total` and `pace_node_raft_endpoint_changes_total`
 ([the node's metrics](../tools/pace-node.md#when-this-nodes-address-moves)).
 
 **The move is recorded by a commit, so it heals only while the voters that did not move
@@ -641,7 +641,7 @@ entry — every surface, every connection already open, from any address, includ
 machine's own loopback — with nothing to edit or reload on any machine. A connection that
 presents the revoked key, by a proof or by a ticket, is refused as the forgotten machine's
 on every later request, and counted apart from a stranger's
-(`fastcache_node_requests_refused_key_revoked_total`), because *a machine an operator
+(`pace_node_requests_refused_key_revoked_total`), because *a machine an operator
 removed* and *a machine nobody ever admitted* are opposite diagnoses. Only a **new** key
 brings the machine back: re-admitting the key it still holds is refused by name.
 
@@ -687,7 +687,7 @@ questions are:
     machine's CPU is not thereby entitled to read everything it has ever compiled. The rule belongs to the **verb**, so
     widening the bind does not widen who is served, and every off-box `FETCH` is
     refused `not-a-member` and counted in
-    `fastcache_node_cache_requests_refused_not_local_total`.
+    `pace_node_cache_requests_refused_not_local_total`.
 
     A cache several machines share is `--upstream` pointed at a `pace-kv`. That
     one is shared infrastructure somebody operates and serves non-members on
@@ -846,18 +846,18 @@ open.
 
 | What you see | Which leg | What to check |
 |---|---|---|
-| A worker never appears in the fleet at all | node → scheduler | Is the worker's key admitted to the cluster? A `REGISTER` from a key the cluster does not hold is refused, and `fastcache_scheduler_requests_refused_node_identity_required_total` or `fastcache_node_proofs_refused_unknown_key_total` climbs on the scheduler. Does `--advertise` name an address others can reach? |
+| A worker never appears in the fleet at all | node → scheduler | Is the worker's key admitted to the cluster? A `REGISTER` from a key the cluster does not hold is refused, and `pace_scheduler_requests_refused_node_identity_required_total` or `pace_node_proofs_refused_unknown_key_total` climbs on the scheduler. Does `--advertise` name an address others can reach? |
 | Workers appear, then vanish, then reappear | node → scheduler | Heartbeats are not arriving inside 90 s. On the dashboard, registrations and expiries both climbing is this, not a growing fleet |
-| Every compile happens locally, build stays green | client → scheduler | Is `FASTCACHE_SCHEDULER` set? Is this machine admitted — does a node run here, at `FASTCACHE_ADDR`, to mint its tickets, and is that node's key admitted to the cluster? `pacectl explain-admission <machine>` on the scheduler says. Run with `FASTCACHE_VERBOSE=1`, which names the refusal |
-| A lease is granted, then the compile runs locally anyway | client → node | The worker refused the client `not-a-member`. Is that worker a member of the fleet, so the state it applies admits the machines the cluster admitted? Or give it `--fleet-open`: membership gates its compile port, not only a scheduler's. The scheduler's counters stay correct and flat — the lease *was* granted — so look at the **worker**: its ready line names who it admits, and `fastcache_worker_jobs_refused_not_a_member_total` counts each turned-away client ([#235](https://github.com/LASTRADA-Software/fastcached/issues/235)) |
+| Every compile happens locally, build stays green | client → scheduler | Is `PACE_SCHEDULER` set? Is this machine admitted — does a node run here, at `PACE_ADDR`, to mint its tickets, and is that node's key admitted to the cluster? `pacectl explain-admission <machine>` on the scheduler says. Run with `PACE_VERBOSE=1`, which names the refusal |
+| A lease is granted, then the compile runs locally anyway | client → node | The worker refused the client `not-a-member`. Is that worker a member of the fleet, so the state it applies admits the machines the cluster admitted? Or give it `--fleet-open`: membership gates its compile port, not only a scheduler's. The scheduler's counters stay correct and flat — the lease *was* granted — so look at the **worker**: its ready line names who it admits, and `pace_worker_jobs_refused_not_a_member_total` counts each turned-away client ([#235](https://github.com/LASTRADA-Software/fastcached/issues/235)) |
 | `no-worker`, though the toolchain looks identical | client → scheduler | Fingerprints must match byte for byte. Compare the node's `serving …` startup lines against the client's |
 | `/fleet` answers `503` | operator → dashboard | You are asking a follower. The reply names the leader |
-| Peers are seen but never authenticated | node → segment | The reply port is being dropped while the beacon port passes. Scope the rule to the program, or pin `--discovery-reply-port` and open that port; on Windows, run `--install-service` again, which opens it. If `fastcache_discovery_proofs_refused_unknown_key_total` climbs instead, the handshake completes and the key is one the cluster does not hold: discovery admits nobody, so enrol the machine or `--cluster-admit` it under the key the warning names |
+| Peers are seen but never authenticated | node → segment | The reply port is being dropped while the beacon port passes. Scope the rule to the program, or pin `--discovery-reply-port` and open that port; on Windows, run `--install-service` again, which opens it. If `pace_discovery_proofs_refused_unknown_key_total` climbs instead, the handshake completes and the key is one the cluster does not hold: discovery admits nobody, so enrol the machine or `--cluster-admit` it under the key the warning names |
 | The cluster elects, then re-elects, repeatedly | node → node | Consensus traffic is not getting through promptly, or a member is unreachable. The role-change log lines carry the term |
-| A consensus member never joins, and the others' `fastcache_raft_peer_connections_refused_proof_total` climbs | node → node | The key it proves is not the one the cluster records for it. Its own `fastcache_raft_peer_dials_ended_by_acceptor_total` climbs for the same connections. Compare its `--print-identity` with the cluster's record, and admit it under the key it holds -- `--enroll-approve`, or `--cluster-admit ...@<key>` |
-| `fastcache_raft_peer_dials_refused_wrong_target_total` climbs | node → node | An address this node has for one member now answers as another: a node moved, or two swapped addresses. The log line names both ids; the other end counts `..._connections_refused_wrong_target_total` |
+| A consensus member never joins, and the others' `pace_raft_peer_connections_refused_proof_total` climbs | node → node | The key it proves is not the one the cluster records for it. Its own `pace_raft_peer_dials_ended_by_acceptor_total` climbs for the same connections. Compare its `--print-identity` with the cluster's record, and admit it under the key it holds -- `--enroll-approve`, or `--cluster-admit ...@<key>` |
+| `pace_raft_peer_dials_refused_wrong_target_total` climbs | node → node | An address this node has for one member now answers as another: a node moved, or two swapped addresses. The log line names both ids; the other end counts `..._connections_refused_wrong_target_total` |
 | `..._refused_own_id_total` climbs on either end | node → node | Two machines answer to one id — a copied `--cluster-dir` or a duplicated `--node-id`. The address in the accepting node's log is the second machine |
-| `fastcache_raft_peer_dials_refused_timeout_total` climbs after an upgrade | node → node | The peer runs a build from before the handshake, which never sends a challenge. Consensus members upgrade together; see [Raft peer authentication](#raft-peer-authentication) |
+| `pace_raft_peer_dials_refused_timeout_total` climbs after an upgrade | node → node | The peer runs a build from before the handshake, which never sends a challenge. Consensus members upgrade together; see [Raft peer authentication](#raft-peer-authentication) |
 | One machine's cache hit rate is zero | node → upstream | Is `--upstream` set on that node, and reachable? An unreachable upstream is indistinguishable from a miss by design |
 
 ## What is authenticated, and what is not
@@ -961,7 +961,7 @@ compatibility mode, on purpose: an older peer proves only the cluster key, or na
 direction for the keys that seal its session, and accepting one would be the fallback the
 handshake exists to refuse. A version 4 member is refused at the handshake, by version, and
 only the dialling side can see it, because the acceptor challenges first: an upgraded member
-dialling an old one counts `fastcache_raft_peer_dials_refused_no_challenge_total`, while an
+dialling an old one counts `pace_raft_peer_dials_refused_no_challenge_total`, while an
 old member dialling an upgraded one refuses its challenge and closes before a proof, which the
 upgraded acceptor counts nowhere. So:
 
@@ -969,7 +969,7 @@ upgraded acceptor counts nowhere. So:
   since-retired `--raft-peer`, every member's list was given every other member's
   `@<key>` first — a cluster whose members cannot verify each other does not form;
 - then upgrade **all** consensus members together. A mixed cluster shows as
-  `fastcache_raft_peer_dials_refused_no_challenge_total` on the new nodes (an older peer's
+  `pace_raft_peer_dials_refused_no_challenge_total` on the new nodes (an older peer's
   challenge is at another version). Their accepting side counts nothing: an older dialler
   refuses the newer challenge and closes before it sends a proof.
 
@@ -997,7 +997,7 @@ same misconfiguration usually shows on both ends of the connection:
 | A message naming another member | `..._frames_refused_sender_total` | `..._dials_ended_frame_sender_total` (a learner's two-way session) | A message whose tag verified named a sender other than the member the connection proved |
 | A frame the reader cannot use | `..._frames_refused_unreadable_total`, `..._frames_refused_over_cap_total` or `..._frames_refused_bad_magic_total` | `..._dials_ended_frame_unreadable_total`, `..._dials_ended_frame_over_cap_total` or `..._dials_ended_frame_bad_magic_total` (a learner's two-way session) | A frame at another wire version, one declaring more than the reader buffers, or one that is not this wire at all |
 
-Every series is prefixed `fastcache_raft_peer_`. Refusals before an id is proved are
+Every series is prefixed `pace_raft_peer_`. Refusals before an id is proved are
 logged at most once a minute and name only the source address — anything on the network
 can provoke them, and an id nobody proved is not worth printing — except a revoked key,
 which is named whole, since it is what you match against the revocation you made; refusals
@@ -1034,12 +1034,12 @@ certified or renewed.
   learner applies the forget.
 - **A worker that has heard from no leader its fleet counts for 65 minutes refuses every
   grant**, answered `grant-unverifiable` and counted in
-  `fastcache_worker_jobs_refused_lease_isolated_total`: an hour plus the lease clock slack,
+  `pace_worker_jobs_refused_lease_isolated_total`: an hour plus the lease clock slack,
   because a worker cut off from its fleet still lists a voter the fleet may have forgotten
   meanwhile. Shorter would refuse legitimate work through a partition that cuts only
   consensus; longer widens that window. It lifts the moment a leader speaks again.
 - **A worker whose applied state names no voter yet refuses every grant**, answered
-  `grant-unverifiable` too and counted in `fastcache_worker_jobs_refused_lease_no_roster_total`:
+  `grant-unverifiable` too and counted in `pace_worker_jobs_refused_lease_no_roster_total`:
   a node that has started or joined but not yet applied its fleet's state.
 
 The certified roster that came before this — endorsements from a majority of voters on

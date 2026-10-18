@@ -1591,7 +1591,7 @@ TEST_CASE("A member still at version 4 is refused at its challenge, and this dia
     // What an upgraded member SEES of a member that is not, from the side that can see it at all:
     // the acceptor challenges first, so a version-5 dialler meets the version-4 CHALLENGE, refuses it
     // by version and sends no proof -- counted as `NoChallenge`
-    // (`fastcache_raft_peer_dials_refused_no_challenge_total`), with the version in the log line. The
+    // (`pace_raft_peer_dials_refused_no_challenge_total`), with the version in the log line. The
     // opposite direction is the server's case beside its silent peer: a version-4 dialler refuses the
     // version-5 challenge and closes, and the acceptor counts nothing.
     Harness harness;

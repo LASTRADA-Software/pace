@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Whether a set-but-EMPTY `FASTCACHE_ADDR` opts out — checked as a pure
+# Whether a set-but-EMPTY `PACE_ADDR` opts out — checked as a pure
 # computation, over the one distinction a developer cannot easily stage.
 #
-# `docs/tools/pace-cc.md` promises that a set but empty `FASTCACHE_ADDR`
+# `docs/tools/pace-cc.md` promises that a set but empty `PACE_ADDR`
 # means no caching. The launcher honours that when it reads its own environment;
 # `cmake/portable/CompileCache.cmake` decides whether the launcher is used AT ALL,
-# and decided it from `if("$ENV{FASTCACHE_ADDR}" STREQUAL "")` — true for an unset
-# name and for an empty one alike, so `export FASTCACHE_ADDR=` was folded straight
+# and decided it from `if("$ENV{PACE_ADDR}" STREQUAL "")` — true for an unset
+# name and for an empty one alike, so `export PACE_ADDR=` was folded straight
 # back into the default and kept caching
 # ([#372](https://github.com/LASTRADA-Software/fastcached/issues/372)).
 #
@@ -25,7 +25,7 @@
 #
 # So `_fc_resolve_addr` takes presence as a parameter and reads nothing, and the
 # rows below state presence explicitly. The module's own single line of
-# acquisition — `if(DEFINED ENV{FASTCACHE_ADDR})` — is what this cannot cover, and
+# acquisition — `if(DEFINED ENV{PACE_ADDR})` — is what this cannot cover, and
 # that is stated rather than implied.
 #
 # Verdict is read from the OUTPUT, not the exit code, because that is the contract
@@ -36,13 +36,13 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # Under `cmake -P` the module returns after its pure computations, so this brings
 # in the function without the launcher probing, the download and the daemon start.
-include("${FASTCACHED_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
+include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 
 if(NOT COMMAND _fc_resolve_addr)
     message(FATAL_ERROR
@@ -75,7 +75,7 @@ set(_checked 0)
 set(_optOuts 0)
 set(_defaults 0)
 foreach(_row IN LISTS _rows)
-    fastcached_row_fields("${_row}" _present _value _expectWanted _about)
+    pace_row_fields("${_row}" _present _value _expectWanted _about)
 
     _fc_resolve_addr("${_present}" "${_value}" _gotWanted)
     math(EXPR _checked "${_checked} + 1")

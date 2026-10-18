@@ -36,7 +36,7 @@
 # The sanitizers are the opposite case: they must reach this code, and being declared before
 # `include(Sanitizers)` is exactly what keeps them off it. So the top-level CMakeLists.txt
 # applies them target by target after the includes, to the targets this file names in
-# `FASTCACHED_MONOCYPHER_TARGETS`, beside core-cpp's. `ctest -R vendor-sanitized` reads the
+# `PACE_MONOCYPHER_TARGETS`, beside core-cpp's. `ctest -R vendor-sanitized` reads the
 # result in the objects.
 #
 # NOT gated on any option: this is what every node's identity will be signed with (#178), so
@@ -100,4 +100,4 @@ set_target_properties(fastcache-monocypher PROPERTIES
 # What the sanitizer block in the top-level CMakeLists.txt instruments. Every target this file
 # declares is on it; a second one added here without a row would be built with no sanitizer in
 # every sanitizer configuration, which is the defect that block exists to close.
-set(FASTCACHED_MONOCYPHER_TARGETS fastcache-monocypher)
+set(PACE_MONOCYPHER_TARGETS fastcache-monocypher)

@@ -160,9 +160,9 @@ Abort() {
 # A missing awk program is refused BY NAME: a reader that ran over no program is
 # not a clean tree, and an empty extraction here compares as a difference, which
 # would send whoever met it to fix a workflow that is correct.
-FastCachedWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
-FastCachedDbAwk="$(dirname "${BASH_SOURCE[0]}")/check-tidy-sweep-database.awk"
-for awkProgram in "$FastCachedWalkAwk" "$FastCachedDbAwk"; do
+PaceWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
+PaceDbAwk="$(dirname "${BASH_SOURCE[0]}")/check-tidy-sweep-database.awk"
+for awkProgram in "$PaceWalkAwk" "$PaceDbAwk"; do
     if [ ! -f "$awkProgram" ]; then
         echo "check-tidy-sweep-database: missing awk program ${awkProgram}; no workflow was read," >&2
         echo "  so this is a refusal and not a clean run. It is expected beside this script." >&2
@@ -172,7 +172,7 @@ done
 
 # @param 1 the workflow  @param 2 the job key  @param 3 the step name
 ExtractWorkflowConfigure() {
-    awk -v job="$2" -v step="$3"         -f "$FastCachedWalkAwk" -f "$FastCachedDbAwk" "$1" "$1"
+    awk -v job="$2" -v step="$3"         -f "$PaceWalkAwk" -f "$PaceDbAwk" "$1" "$1"
 }
 
 # ---------------------------------------------------------------------------
@@ -243,7 +243,7 @@ DocumentationSites() {
     # file it cannot open (`error: failed to stat 'X': Permission denied`) and leaves it out, and
     # the walk's `grep -r` exits 2 for the same file into a pipeline whose status is `sed`'s. A
     # document that could not be read is one whose line was never compared, so any stderr is a
-    # refusal, quoted -- the rule `fastcached_tracked_files` follows for the CMake checks.
+    # refusal, quoted -- the rule `pace_tracked_files` follows for the CMake checks.
     # Refused as a LINE, never an exit: this runs in a process substitution, where an exit ends
     # only the subshell and leaves the caller reading a truncated list with a clean status.
     if ! errors="$(mktemp 2>/dev/null)" || [[ -z "$errors" ]]; then
@@ -352,7 +352,7 @@ CompareConfigure() {
 # is indistinguishable from one that passes because nothing is wrong -- which is
 # how the drift it now catches survived in the first place.
 SelfTest() {
-    ci='cmake --preset clang-debug -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON'
+    ci='cmake --preset clang-debug -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON'
     failures=0
 
     # One reporter for every kind of case, so a second helper cannot drift out of
@@ -380,22 +380,22 @@ SelfTest() {
     ExpectCompare() { ExpectComparePair "$1" "$2" "$ci" "$3"; }
 
     ExpectCompare "identical but for -B and wrapping" agree \
-        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON"
+        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON"
     ExpectCompare "same options in a different order" agree \
-        "cmake --preset clang-debug -B ${DatabaseDir} -DFASTCACHED_ENABLE_TLS=ON -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF"
+        "cmake --preset clang-debug -B ${DatabaseDir} -DPACE_ENABLE_TLS=ON -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF"
     ExpectCompare "a different preset" differ \
-        "cmake --preset clang-release -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON"
+        "cmake --preset clang-release -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON"
     ExpectCompare "a -D CI passes that the documentation drops" differ \
         "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF"
     ExpectCompare "a -D the documentation adds that CI does not pass" differ \
-        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON -DFASTCACHED_BUILD_NODE=OFF"
+        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON -DPACE_BUILD_NODE=OFF"
     ExpectCompare "a changed -D VALUE, not just a changed name" differ \
-        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON"
+        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON"
     ExpectCompare "nothing documented at all" differ ''
     # The regression itself: the pre-#454 hand-rolled line names no preset, so it
     # agrees with nothing.
     ExpectCompare "the pre-#454 hand-rolled line" differ \
-        "cmake -S . -B ${DatabaseDir} -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON"
+        "cmake -S . -B ${DatabaseDir} -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON"
 
     # The other spelling of each token, on BOTH sides at once -- which is the
     # only arrangement in which an unrecognised token hides a disagreement
@@ -429,12 +429,12 @@ SelfTest() {
     }
 
     ExpectDocument "a fenced block with backslash continuations" \
-        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DFASTCACHED_ENABLE_TLS=ON" \
+        "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF -DPACE_ENABLE_TLS=ON" \
         "Configure it like so:
 
 \`\`\`sh
 cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF \\
-      -DFASTCACHED_ENABLE_TLS=ON
+      -DPACE_ENABLE_TLS=ON
 \`\`\`"
     ExpectDocument "a shell header comment" \
         "cmake --preset clang-debug -B ${DatabaseDir} -DENABLE_TIDY=OFF" \
@@ -611,7 +611,7 @@ and again, three hundred lines further down:
           cmake --preset cl-debug'
 
     ExpectWorkflow "steps and an id: added around it" \
-        'cmake --preset clang-debug -DENABLE_TIDY=OFF -DFASTCACHED_ENABLE_TLS=ON' \
+        'cmake --preset clang-debug -DENABLE_TIDY=OFF -DPACE_ENABLE_TLS=ON' \
         'jobs:
   clang-tidy:
     name: "clang-tidy"
@@ -622,7 +622,7 @@ and again, three hundred lines further down:
       - name: "Configure"
         run: >-
           cmake --preset clang-debug -DENABLE_TIDY=OFF
-          -DFASTCACHED_ENABLE_TLS=ON
+          -DPACE_ENABLE_TLS=ON
       - name: "Sweep"
         id: sweep
         run: scripts/tidy-sweep.sh'
@@ -646,7 +646,7 @@ and again, three hundred lines further down:
     # the scalar. Truncating there silently dropped every option after it, and a
     # truncated command still compares as a command.
     ExpectWorkflow "a blank line inside the block scalar does not truncate it" \
-        'cmake --preset clang-debug -DENABLE_TIDY=OFF -DFASTCACHED_ENABLE_TLS=ON' \
+        'cmake --preset clang-debug -DENABLE_TIDY=OFF -DPACE_ENABLE_TLS=ON' \
         'jobs:
   clang-tidy:
     steps:
@@ -654,7 +654,7 @@ and again, three hundred lines further down:
         run: >-
           cmake --preset clang-debug -DENABLE_TIDY=OFF
 
-          -DFASTCACHED_ENABLE_TLS=ON
+          -DPACE_ENABLE_TLS=ON
 
       - name: "Sweep"
         run: scripts/tidy-sweep.sh'
@@ -686,7 +686,7 @@ and again, three hundred lines further down:
     # The extraction must come from the SHARED walk, which is a different claim
     # from "the extraction is right". Every case above would pass just as well if
     # this script had kept a private reader beside the shared one. So the library
-    # is copied, one line disabled, and `FastCachedWalkAwk` pointed at the copy.
+    # is copied, one line disabled, and `PaceWalkAwk` pointed at the copy.
     #
     # Two lines, and each produces a DIFFERENT wrong answer rather than the same
     # empty one -- which matters, because a case that only ever sees "" cannot
@@ -695,18 +695,18 @@ and again, three hundred lines further down:
     # @param 1 what the line holds up  @param 2 a sed expression  @param 3 want
     WalkNeuter() {
         local what="$1" expr="$2" want="$3" neutered realWalk got
-        printf '%s\n' "$FastCachedWorkflowFixture" > "$scratch/wf.yml"
+        printf '%s\n' "$PaceWorkflowFixture" > "$scratch/wf.yml"
         neutered="$scratch/neutered-walk.awk"
-        sed "$expr" "$FastCachedWalkAwk" > "$neutered"
-        if cmp -s "$neutered" "$FastCachedWalkAwk"; then
+        sed "$expr" "$PaceWalkAwk" > "$neutered"
+        if cmp -s "$neutered" "$PaceWalkAwk"; then
             echo "  FAIL: self-test walk neuter '$what' changed no line, so it stages nothing" >&2
             failures=$((failures + 1))
             return
         fi
-        realWalk="$FastCachedWalkAwk"
-        FastCachedWalkAwk="$neutered"
+        realWalk="$PaceWalkAwk"
+        PaceWalkAwk="$neutered"
         got="$(ExtractWorkflowConfigure "$scratch/wf.yml" "clang-tidy" "Configure")"
-        FastCachedWalkAwk="$realWalk"
+        PaceWalkAwk="$realWalk"
         Report "walk neuter '$what'" "$want" "${got%"${got##*[![:space:]]}"}"
     }
 
@@ -715,7 +715,7 @@ and again, three hundred lines further down:
     # spellings of empty: whole, nothing, and truncated-but-well-formed. That last
     # one is the answer this check records having shipped once, because a truncated
     # command still compares as a command.
-    FastCachedWorkflowFixture='jobs:
+    PaceWorkflowFixture='jobs:
   clang-tidy:
     steps:
       - name: "Configure"

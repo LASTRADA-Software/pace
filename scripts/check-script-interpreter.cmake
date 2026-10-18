@@ -33,7 +33,7 @@
 # Condition on those figures: this repository's macOS job, its brew installs, on
 # that date. They are a property of the image, not of the registration.
 #
-# `${FASTCACHED_BASH}` is `/bin/bash` everywhere but Windows, which has none and
+# `${PACE_BASH}` is `/bin/bash` everywhere but Windows, which has none and
 # resolves Git for Windows' `bin/bash.exe` instead, since a WSL launcher can come first
 # on its PATH (#1355). Defined once in `src/tests/CMakeLists.txt`; this asserts
 # every site uses it.
@@ -61,7 +61,7 @@
 # gives a classifier read in a shape it does not recognise.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-script-interpreter.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-script-interpreter.cmake
 #
 # Exit codes: 0 always. The verdict is `CMake Error` in the output, which is why
 # the registration carries FAIL_REGULAR_EXPRESSION.
@@ -73,18 +73,18 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(testsFile "${FASTCACHED_SOURCE_DIR}/src/tests/CMakeLists.txt")
+set(testsFile "${PACE_SOURCE_DIR}/src/tests/CMakeLists.txt")
 if(NOT EXISTS "${testsFile}")
     message(FATAL_ERROR "the test registration file is missing: ${testsFile}")
 endif()
 
 # The token every site must use, spelled once. `\${` so this is the literal text
-# `${FASTCACHED_BASH}` and not an expansion of a variable this script never sets.
-set(expectedToken "\${FASTCACHED_BASH}")
+# `${PACE_BASH}` and not an expansion of a variable this script never sets.
+set(expectedToken "\${PACE_BASH}")
 
 # Scripts NOT bound by the bash-3.2 rule, and the ONE other token each may use.
 #
@@ -97,7 +97,7 @@ set(expectedToken "\${FASTCACHED_BASH}")
 # An exemption outlives the shape it was granted for, so it is deleted with the shape
 # rather than reworded.
 set(interpreterExemptions
-    "tidy-sweep.sh|\${FASTCACHED_BASH44}|declares a bash-4.4 floor and exits 77 below one, so the 3.2 pin asserts a rule it is not bound by and reports SKIPPED on macOS in perpetuity (#598). FASTCACHED_BASH44 is version-CHECKED rather than merely found, because a stock macOS find_program returns /bin/bash 3.2 quite happily."
+    "tidy-sweep.sh|\${PACE_BASH44}|declares a bash-4.4 floor and exits 77 below one, so the 3.2 pin asserts a rule it is not bound by and reports SKIPPED on macOS in perpetuity (#598). PACE_BASH44 is version-CHECKED rather than merely found, because a stock macOS find_program returns /bin/bash 3.2 quite happily."
 )
 
 # Read and split by hand rather than with `file(STRINGS)`, for the reason
@@ -106,7 +106,7 @@ set(interpreterExemptions
 # going blind does not make a scan fail -- it leaves a smaller set that still
 # agrees unanimously.
 file(READ "${testsFile}" content)
-fastcached_split_lines_verbatim("${content}" lines)
+pace_split_lines_verbatim("${content}" lines)
 
 # CMP0219 exists only on newer CMake than the declared minimum, so it is set
 # behind `if(POLICY ...)`. Unset, a macro called with a backslash in an argument
@@ -137,7 +137,7 @@ set(exemptSites "")
 # A FUNCTION and not a macro, and that is a fix rather than a preference. A macro
 # substitutes its arguments TEXTUALLY, so `${text}` re-expands the argument's own
 # content -- and every message here interpolates `${expectedToken}`, whose value is the
-# literal string `${FASTCACHED_BASH}`. This script deliberately never sets that variable
+# literal string `${PACE_BASH}`. This script deliberately never sets that variable
 # (see the `\${` note above), so the second expansion resolved it to nothing and the
 # violation read:
 #
@@ -153,7 +153,7 @@ set(exemptSites "")
 # against a tree with two bad registrations, one of whose lines carries a `;`: 3 findings
 # unquoted becomes 4. The escape and the expansion have to agree, and only one of them was
 # being thought about.
-function(fastcached_add_violation text)
+function(pace_add_violation text)
     string(REPLACE ";" "\\;" _escapedViolation "${text}")
     set(_grown "${violations}")
     list(APPEND _grown "${_escapedViolation}")
@@ -166,7 +166,7 @@ endfunction()
 # bare invocation** (#1579): a wrapped `COMMAND` puts the checked script on a continuation
 # line with no token before it, and shown alone that line is indistinguishable from a site
 # that really does name no interpreter. A manager read exactly that and told a lane twice,
-# with confidence, that their registration was missing `${FASTCACHED_BASH}` and
+# with confidence, that their registration was missing `${PACE_BASH}` and
 # `run-check.sh`. It had both, on the line above, which the message did not show.
 #
 # A DISPLAY walk and deliberately not a classifying one. It looks back for the line that
@@ -178,7 +178,7 @@ endfunction()
 # @param allLines   every line of the file, in order
 # @param at         the 1-based number of the offending line
 # @param outBlock   receives the rendered block
-function(fastcached_command_block allLines at outBlock)
+function(pace_command_block allLines at outBlock)
     set(_first "${at}")
     # Six is enough for every registration shape in this tree and bounds a file whose
     # command openers have been renamed out from under this walk.
@@ -213,12 +213,12 @@ foreach(line IN LISTS lines)
         continue()
     endif()
 
-    # The definition itself. Without it every `COMMAND ${FASTCACHED_BASH} x.sh`
+    # The definition itself. Without it every `COMMAND ${PACE_BASH} x.sh`
     # expands to `COMMAND x.sh`, which RUNS -- the script is executable and has a
     # shebang -- so the tests would pass while the interpreter this check exists
     # to pin was chosen by the kernel instead. A green suite proving nothing,
     # which is why the definition is asserted rather than assumed.
-    if(line MATCHES "set\\(FASTCACHED_BASH[ \t]")
+    if(line MATCHES "set\\(PACE_BASH[ \t]")
         set(sawDefinition TRUE)
     endif()
 
@@ -234,11 +234,11 @@ foreach(line IN LISTS lines)
     # the tree actually uses are covered by that one rule: `COMMAND <tok> "x.sh"`
     # and `set(<var> <tok> "x.sh")`.
     if(NOT line MATCHES "([^ \t]+)[ \t]+\"[^\"]*scripts/[^\"]*\\.sh\"")
-        fastcached_command_block("${lines}" "${lineNumber}" commandBlock)
-        fastcached_add_violation(
+        pace_command_block("${lines}" "${lineNumber}" commandBlock)
+        pace_add_violation(
              "src/tests/CMakeLists.txt:${lineNumber} runs a shell script in a form this scan cannot classify, so it cannot say which interpreter it gets:${commandBlock}
       This scan reads LINES, not CMake commands. A `COMMAND` that WRAPS leaves the checked script on a continuation line with no token before it -- so if the interpreter is on a line above, this scan cannot see it and the registration may be perfectly correct. Read the whole command printed above before changing anything.
-      REMEDY: put the interpreter and the checked script on ONE line, as the other registrations here do. Do not add `\${FASTCACHED_BASH}` a second time -- check first whether the line above already carries it.
+      REMEDY: put the interpreter and the checked script on ONE line, as the other registrations here do. Do not add `\${PACE_BASH}` a second time -- check first whether the line above already carries it.
       This is the LOUD direction: a wrapped-but-correct registration is REFUSED, never a wrong one passed silently. Widening the scan to join continuations is deliberately not done, because a join that merged lines wrongly could make an unclassifiable site look classified, and skipping one is what this check exists to prevent.")
         continue()
     endif()
@@ -279,7 +279,7 @@ foreach(line IN LISTS lines)
     # message has to say, because a maintainer sent to look for one finds nothing.
     if(token MATCHES "^(COMMAND|set\\(.*)$")
         string(STRIP "${line}" shownLine)
-        fastcached_add_violation(
+        pace_add_violation(
              "src/tests/CMakeLists.txt:${lineNumber} runs a shell script with NO interpreter token before it, so the kernel picks one from the shebang and this check cannot pin it. Line: ${shownLine}")
     elseif(NOT token STREQUAL "${expectedToken}" AND NOT _exemptToken STREQUAL "")
         # An exempt script, run through the one token its row permits. Counted as a site
@@ -290,12 +290,12 @@ foreach(line IN LISTS lines)
         list(APPEND exemptSites "${_exemptScript} -> ${_exemptToken}")
         if(NOT token STREQUAL "${_exemptToken}")
             string(STRIP "${line}" shownLine)
-            fastcached_add_violation(
+            pace_add_violation(
                  "src/tests/CMakeLists.txt:${lineNumber} runs `${_exemptScript}` as `${token}`. That script is exempt from the `${expectedToken}` pin, but the exemption names ONE permitted token, `${_exemptToken}`, and this is not it. An exemption that admitted any token would readmit exactly what this check refuses: a literal path that breaks on another platform, or a bare `bash` resolved from PATH by ctest at run time. The row's stated reason is: ${_exemptReason} Line: ${shownLine}")
         endif()
     elseif(NOT token STREQUAL "${expectedToken}")
         string(STRIP "${line}" shownLine)
-        fastcached_add_violation(
+        pace_add_violation(
              "src/tests/CMakeLists.txt:${lineNumber} runs a shell script as `${token}` rather than `${expectedToken}`. A bare `bash` is resolved from PATH by ctest at RUN time -- CMake leaves it unresolved in CTestTestfile.cmake -- so which interpreter it gets is a property of the image rather than of this file. On the macOS image today it happens to be the same `/bin/bash` 3.2.57 the bash-3.2 rule is about, measured; naming it removes the dependency on that staying true. A literal `/bin/bash` is refused too: correct today, and broken on Windows the day a row moves. Line: ${shownLine}")
     endif()
 endforeach()
@@ -304,13 +304,13 @@ endforeach()
 # form that stopped matching would otherwise take this whole check silently out of
 # service -- which is the failure it exists to prevent, one level up.
 if(siteCount EQUAL 0)
-    fastcached_add_violation(
+    pace_add_violation(
          "found no script-driven test registrations at all in src/tests/CMakeLists.txt -- either they are gone or they are spelled in a way this scan does not recognise, and in both cases this check is vouching for nothing")
 endif()
 
 if(NOT sawDefinition)
-    fastcached_add_violation(
-         "src/tests/CMakeLists.txt defines no `FASTCACHED_BASH`, so every site using it expands to no interpreter at all -- the script would still RUN, from its shebang, and every test would stay green while the interpreter was chosen by the kernel rather than pinned here")
+    pace_add_violation(
+         "src/tests/CMakeLists.txt defines no `PACE_BASH`, so every site using it expands to no interpreter at all -- the script would still RUN, from its shebang, and every test would stay green while the interpreter was chosen by the kernel rather than pinned here")
 endif()
 
 if(violations)
@@ -319,7 +319,7 @@ if(violations)
         message("  ${violation}")
     endforeach()
     message("")
-    message("Every script-driven test runs through `\${FASTCACHED_BASH}`, defined once in")
+    message("Every script-driven test runs through `\${PACE_BASH}`, defined once in")
     message("src/tests/CMakeLists.txt. On macOS that is `/bin/bash`, the 2007 interpreter")
     message("the bash-3.2 rule is about; on Windows, which has none, it is a PATH lookup.")
     message("")
@@ -329,16 +329,16 @@ if(violations)
 endif()
 
 # The exempt sites are named, not folded into the total. "all N run through
-# ${FASTCACHED_BASH}" stopped being true the moment an exemption existed, and a summary
+# ${PACE_BASH}" stopped being true the moment an exemption existed, and a summary
 # that overstates its own coverage is what this check is about one level up -- a reader
 # would take the pin as universal and it is not.
 math(EXPR pinnedCount "${siteCount} - ${exemptCount}")
 if(exemptCount GREATER 0)
     message(STATUS
         "script interpreter: ${pinnedCount} of ${siteCount} script-driven registration(s) run "
-        "through \${FASTCACHED_BASH}; ${exemptCount} exempt by a named row: ${exemptSites}")
+        "through \${PACE_BASH}; ${exemptCount} exempt by a named row: ${exemptSites}")
 else()
     message(STATUS
         "script interpreter: all ${siteCount} script-driven registration(s) run through "
-        "\${FASTCACHED_BASH}")
+        "\${PACE_BASH}")
 endif()

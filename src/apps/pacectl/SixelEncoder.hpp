@@ -60,7 +60,7 @@ class ISixelEncoder
 
 /// The production encoder, or why this build has none.
 ///
-/// A build without core-cpp's terminal UI (`FASTCACHED_BUILD_TUI=OFF`) refuses by saying so, rather than
+/// A build without core-cpp's terminal UI (`PACE_BUILD_TUI=OFF`) refuses by saying so, rather than
 /// failing to link, so the composition that asks for one can report why the Sixel rung is out of
 /// reach.
 /// @return The encoder, or the reason there is none.

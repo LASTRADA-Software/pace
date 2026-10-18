@@ -63,7 +63,7 @@ class DialedExchange final: public Cc::IEndpointExchange
 /// loopback literal at that port, whatever host the node binds.
 ///
 /// The operator's machine runs a node configured like this invocation far more often than one on a
-/// default, which is the launcher's reasoning for `FASTCACHE_ADDR`'s port as well.
+/// default, which is the launcher's reasoning for `PACE_ADDR`'s port as well.
 /// @param cfg The configuration the verb was invoked with.
 /// @return `host:port` to mint from, or nullopt when @p cfg serves no node port.
 [[nodiscard]] std::optional<std::string> OwnNodeTicketSource(NodeConfig const& cfg);

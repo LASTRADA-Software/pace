@@ -241,13 +241,13 @@ each one, so adding an executable is adding a row:
 
 ```
 src/apps/
-  fastcached/               the daemon (FASTCACHED_BUILD_DAEMON, default ON)
-  pace-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER,
+  fastcached/               the daemon (PACE_BUILD_DAEMON, default ON)
+  pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER,
                             default ON) — a drop-in sccache-style launcher that
                             keys on preprocess+relativized-args, FETCHes and
                             hit-replays with include paths localized,
                             misses→compile→STORE, and falls back safely on any
-                            cache error. Config via `FASTCACHE_*` env, wired
+                            cache error. Config via `PACE_*` env, wired
                             through `CMAKE_<LANG>_COMPILER_LAUNCHER`. Platform
                             work sits behind `IProcessRunner` / `Net/ISocket` /
                             `IPathResolver` (the last collapsing every spelling
@@ -262,7 +262,7 @@ src/apps/
                             daemon's without linking the library. `Cli/Options`
                             is header-only, so including it costs no build row.
   pace-node/   the compile worker AND the peer service (
-                            FASTCACHED_BUILD_NODE, default ON) — registers with a
+                            PACE_BUILD_NODE, default ON) — registers with a
                             scheduler's `--serve-scheduler` endpoint (another node's;
                             `--listen-dispatch` on the daemon is gone) and answers
                             `Compile` on its own port. It may also BE the scheduler,
@@ -287,7 +287,7 @@ src/apps/
                             framed surfaces are `FrameEndpoint`s over one shared
                             `NodeIoLoop`, and its HTTP surface is
                             `AdminHttpServer`.
-  pacectl/            the operator's client (FASTCACHED_BUILD_CLI, default
+  pacectl/            the operator's client (PACE_BUILD_CLI, default
                             ON, INSTALLED). Reads, writes and measures a running
                             cache from a terminal; `docs/tools/pacectl.md`
                             is its reference. It was absent from this tree and
@@ -296,7 +296,7 @@ src/apps/
                             throughout — which is what a missing row of a table
                             called the spec looks like
   compile-cache-testclient/ low-level `0xFC` protocol probe + cross-depth
-                            validation (FASTCACHED_BUILD_TESTCLIENT, default
+                            validation (PACE_BUILD_TESTCLIENT, default
                             OFF — test infrastructure, never installed, but
                             built by the `linux` and `clang-tidy` CI jobs for the
                             reason `pace-bench` is: a target nothing
@@ -309,7 +309,7 @@ src/apps/
                             the canonicalization contract proves nothing if it
                             reimplements either side of it
   pace-bench/          in-process storage micro-benchmarks
-                            (FASTCACHED_BUILD_BENCHMARKS, default OFF — test
+                            (PACE_BUILD_BENCHMARKS, default OFF — test
                             infrastructure, never installed). Catch2 benchmarks
                             decomposing a lookup layer by layer, plus a
                             thread-scaling tier; driven by `bench/inproc_bench.py`,

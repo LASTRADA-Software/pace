@@ -54,20 +54,20 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
+#   cmake -DPACE_SOURCE_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
 #         -P scripts/check-cli-ambient-reads.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # Spelled once each: what is matched, what the refusals name, and what the exemption
 # rows are validated against.
-set(FastCachedAmbientTokens "getenv" "isatty" "ioctl" "GetConsoleMode")
+set(PaceAmbientTokens "getenv" "isatty" "ioctl" "GetConsoleMode")
 set(subjectRoot "src/apps/pacectl")
 set(controlRoot "src/Pace/Platform")
 set(exemptionTable "scripts/cli-ambient-read-exemptions.txt")
@@ -79,7 +79,7 @@ set(exemptionTable "scripts/cli-ambient-read-exemptions.txt")
 # is `FIND`/`SUBSTRING` rather than a split -- immune to them by construction, the reason
 # `check-cli-text-cell.cmake` walks the same way. Consolidating the copies of this idiom
 # is [#495](https://github.com/LASTRADA-Software/fastcached/issues/495), not this ticket.
-function(fastcached_ambient_hits content outHits)
+function(pace_ambient_hits content outHits)
     set(hits "")
     set(rest "${content}")
     set(lineNumber 0)
@@ -122,7 +122,7 @@ function(fastcached_ambient_hits content outHits)
                 string(SUBSTRING "${stripped}" 0 ${lineAt} stripped)
             endif()
 
-            foreach(token IN LISTS FastCachedAmbientTokens)
+            foreach(token IN LISTS PaceAmbientTokens)
                 string(FIND "${stripped}" "${token}" tokenAt)
                 if(NOT tokenAt EQUAL -1)
                     list(APPEND hits "${lineNumber}:${token}")
@@ -146,9 +146,9 @@ endfunction()
 # Whether @p content names any token at all: the cheap whole-file test that keeps the
 # line walk off the files that cannot match. Walking every file line by line to find
 # that out costs seconds on every platform for nothing.
-function(fastcached_mentions_any content outMentions)
+function(pace_mentions_any content outMentions)
     set(mentions FALSE)
-    foreach(token IN LISTS FastCachedAmbientTokens)
+    foreach(token IN LISTS PaceAmbientTokens)
         string(FIND "${content}" "${token}" at)
         if(NOT at EQUAL -1)
             set(mentions TRUE)
@@ -165,10 +165,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # fixture staging synthetic trees takes the walk while CI takes git.
 #
 # The ROOT is this check's question and stays here; how a question is answered is
-# `fastcached_tracked_files` (#1485), which this wrapper keeps parameterising by root. The
+# `pace_tracked_files` (#1485), which this wrapper keeps parameterising by root. The
 # pathspec and the glob are the same question twice, or the two modes cover two sets.
-function(fastcached_sources_under root outFiles outMode)
-    fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+function(pace_sources_under root outFiles outMode)
+    pace_tracked_files("${PACE_SOURCE_DIR}"
         PATHSPECS "${root}/*.cpp" "${root}/*.hpp"
         GLOBS "${root}/*.cpp" "${root}/*.hpp"
         FILES_OUT files
@@ -177,33 +177,33 @@ function(fastcached_sources_under root outFiles outMode)
     set(${outMode} "${mode}" PARENT_SCOPE)
 endfunction()
 
-list(JOIN FastCachedAmbientTokens ", " tokenList)
+list(JOIN PaceAmbientTokens ", " tokenList)
 
 # ---------------------------------------------------------------------------
 # The subject.
-fastcached_sources_under("${subjectRoot}" subjectFiles scanSource)
+pace_sources_under("${subjectRoot}" subjectFiles scanSource)
 list(LENGTH subjectFiles subjectCount)
 if(subjectCount EQUAL 0)
     message("")
     message("  No C++ source was found under ${subjectRoot}/.")
     message("")
     message("That is not a clean binary, it is a scan with no subject -- a moved directory,")
-    message("or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "cli-ambient-reads: the scan matched no sources under ${subjectRoot} and cannot conclude")
 endif()
 
 set(subjectHits "")
 foreach(relative IN LISTS subjectFiles)
     # `git ls-files` lists the INDEX, so a file deleted and not yet staged is still named.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
-    fastcached_mentions_any("${wholeFile}" mentions)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
+    pace_mentions_any("${wholeFile}" mentions)
     if(NOT mentions)
         continue()
     endif()
-    fastcached_ambient_hits("${wholeFile}" hits)
+    pace_ambient_hits("${wholeFile}" hits)
     foreach(hit IN LISTS hits)
         list(APPEND subjectHits "${relative}:${hit}")
     endforeach()
@@ -212,19 +212,19 @@ endforeach()
 # ---------------------------------------------------------------------------
 # THE FAIL-CLOSED GUARD: the scanner must recognise a token where the platform seams
 # read them. Asked BEFORE any verdict about the subject.
-fastcached_sources_under("${controlRoot}" controlFiles controlSource)
+pace_sources_under("${controlRoot}" controlFiles controlSource)
 set(controlCount 0)
 set(controlFile "")
 foreach(relative IN LISTS controlFiles)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
-    fastcached_mentions_any("${wholeFile}" mentions)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
+    pace_mentions_any("${wholeFile}" mentions)
     if(NOT mentions)
         continue()
     endif()
-    fastcached_ambient_hits("${wholeFile}" hits)
+    pace_ambient_hits("${wholeFile}" hits)
     list(LENGTH hits controlCount)
     # One recognising file is the whole question, so the walk stops there rather than
     # paying for the rest of the platform tree on every run.
@@ -251,7 +251,7 @@ endif()
 # ---------------------------------------------------------------------------
 # The exemption table: required, validated row by row, and every row must still
 # describe the tree.
-if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${exemptionTable}")
+if(NOT EXISTS "${PACE_SOURCE_DIR}/${exemptionTable}")
     message("")
     message("  ${exemptionTable} is missing.")
     message("")
@@ -261,7 +261,7 @@ if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${exemptionTable}")
     message(FATAL_ERROR "cli-ambient-reads: the exemption table ${exemptionTable} is missing")
 endif()
 
-file(READ "${FASTCACHED_SOURCE_DIR}/${exemptionTable}" tableText)
+file(READ "${PACE_SOURCE_DIR}/${exemptionTable}" tableText)
 set(tableProblems "")
 set(exempted "")
 set(rowCount 0)
@@ -310,7 +310,7 @@ while(NOT rest STREQUAL "")
         list(APPEND tableProblems "${exemptionTable}:${tableLine}: ${rowPath} may name ${rowToken}, but the row gives no reason")
         continue()
     endif()
-    list(FIND FastCachedAmbientTokens "${rowToken}" tokenIndex)
+    list(FIND PaceAmbientTokens "${rowToken}" tokenIndex)
     if(tokenIndex EQUAL -1)
         list(APPEND tableProblems "${exemptionTable}:${tableLine}: `${rowToken}` is not a token this scan matches (${tokenList})")
         continue()

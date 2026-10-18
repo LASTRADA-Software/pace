@@ -15,7 +15,7 @@ reading.
 | Code | What happened | What to do |
 |---|---|---|
 | `UnsupportedFormatVersion` | A healthy store written by another build | [Convert it](upgrading-a-store.md). Never delete it. |
-| `MalformedValue` | A client sent a value this build cannot parse | Look at the client. Counted by `fastcached_cache_malformed_values_total`. |
+| `MalformedValue` | A client sent a value this build cannot parse | Look at the client. Counted by `pace_cache_malformed_values_total`. |
 | `InUse` | Another process holds the store open | Stop it, or give this process its own path — see [Deployment](deployment.md). |
 | `Corrupt` | The bytes on disk are damaged | Read on. |
 
@@ -61,8 +61,8 @@ counts the pages the store has in use; the file also holds free pages awaiting r
 up to a group commit's worth of copy-on-write pages at steady state — and a store
 written by a build before the file-growth fix can hold far more free pages than live
 ones. Such a store is intact and serving; a fixed build shrinks it as the cache turns
-over, with no action from you. `fastcached_tier_file_bytes` beside
-`fastcached_tier_bytes_used` shows the gap.
+over, with no action from you. `pace_tier_file_bytes` beside
+`pace_tier_bytes_used` shows the gap.
 
 **Damage in what `Open` touches: the process refuses to start.** This is an
 outage, not a degradation. Both binaries treat a store that will not open as
@@ -99,14 +99,14 @@ something reads the page the damage landed on. Then:
 - a read of an affected key **fails** rather than reporting a miss;
 - every key on an undamaged page keeps serving;
 - on `pace-kv`, a write that cannot be persisted logs `storage write failed` at
-  `Warn` and moves `fastcached_write_errors_total`.
+  `Warn` and moves `pace_write_errors_total`.
 
 That second case is the common one, and it is why the answer below is not "delete
 it".
 
 !!! warning "A compile node does not raise the write-error signal"
 
-    `fastcached_write_errors_total` is fed by a decorator only `pace-kv` puts
+    `pace_write_errors_total` is fed by a decorator only `pace-kv` puts
     around its storage. `pace-node` does not, so on a node that
     counter is exported and **can never rise**, and no `storage write failed`
     line is ever written. Do not build a node alert on either.
@@ -187,7 +187,7 @@ next month.
 3. **Check the neighbours.** Damage on one store on a machine is a store; damage
    on several is the machine. `dmesg`, the SMART attributes of the device, and
    whether the filesystem was remounted read-only are the three that pay.
-4. **Check `fastcached_cache_malformed_values_total`.** If that is what is
+4. **Check `pace_cache_malformed_values_total`.** If that is what is
    rising, the problem is a client sending nonsense, and it is not `Corrupt`
    at all.
 
@@ -200,7 +200,7 @@ through the same field and call for opposite responses, and an alert that
 collapses them is an alert that will eventually tell somebody to delete a healthy
 cache.
 
-On `pace-kv`, `Corrupt` beside a rising `fastcached_write_errors_total` is the
+On `pace-kv`, `Corrupt` beside a rising `pace_write_errors_total` is the
 disk. On a compile node that counter cannot move (see above), so the signal is the
 process: `Corrupt` at startup on a node that will not come up is an outage, and
 pages accordingly.

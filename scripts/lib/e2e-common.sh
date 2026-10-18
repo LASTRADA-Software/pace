@@ -80,9 +80,9 @@
 # `e2e_begin` after the EXIT trap, because it installs a TERM trap whose whole
 # purpose is to let the EXIT trap run (see `fail`).
 #
-# And a fixture exports its OWN `FASTCACHE_*` settings AFTER sourcing this file,
+# And a fixture exports its OWN `PACE_*` settings AFTER sourcing this file,
 # because sourcing it clears every one it inherited -- see
-# `e2e_scrub_fastcache_environment` below.
+# `e2e_scrub_pace_environment` below.
 
 # The text every failure message is prefixed with, so a suite log says which
 # fixture stopped. Set by `e2e_begin`.
@@ -113,14 +113,14 @@ _e2e_on_fail=""
 _e2e_wait_seconds=20
 
 # ---------------------------------------------------------------------------
-# A fixture inherits no FASTCACHE_* setting
+# A fixture inherits no PACE_* setting
 # ---------------------------------------------------------------------------
 #
 # The launcher, pace-kv and the node read their whole configuration from
-# FASTCACHE_* variables, so one this shell inherited decides what a fixture
-# measures: an operator's FASTCACHE_SCHEDULER dispatches each "local" compile to
+# PACE_* variables, so one this shell inherited decides what a fixture
+# measures: an operator's PACE_SCHEDULER dispatches each "local" compile to
 # their fleet, whose objects name a worker's scratch directory instead of the
-# fixture's checkout, and FASTCACHE_VERIFY or FASTCACHE_NO_DIRECT changes the
+# fixture's checkout, and PACE_VERIFY or PACE_NO_DIRECT changes the
 # outcome a case asserts. A fixture sets what it means and inherits nothing.
 #
 # So SOURCING this file clears them, and every fixture gets that by construction.
@@ -134,17 +134,17 @@ _e2e_wait_seconds=20
 # would silently turn the knob off. A row here is a claim that nothing this project
 # ships reads the name -- a launcher setting must never be added.
 #
-#   FASTCACHE_TSAN_TIMEOUT  `tsan-gate.sh`'s per-target bound, read after it
+#   PACE_TSAN_TIMEOUT  `tsan-gate.sh`'s per-target bound, read after it
 #                           sources this file.
-E2eInheritedKnobs="FASTCACHE_TSAN_TIMEOUT"
+E2eInheritedKnobs="PACE_TSAN_TIMEOUT"
 
-# Unset every FASTCACHE_* variable in this shell's environment except the harness
+# Unset every PACE_* variable in this shell's environment except the harness
 # knobs in `E2eInheritedKnobs`. Runs when this file is sourced; callable again.
-e2e_scrub_fastcache_environment() {
+e2e_scrub_pace_environment() {
     local name
     for name in $(compgen -e); do
         case "$name" in
-            FASTCACHE_*)
+            PACE_*)
                 case " ${E2eInheritedKnobs} " in
                     *" ${name} "*) ;;
                     *) unset "$name" ;;
@@ -153,7 +153,7 @@ e2e_scrub_fastcache_environment() {
         esac
     done
 }
-e2e_scrub_fastcache_environment
+e2e_scrub_pace_environment
 
 # Begin a run. Call once, at the top level, after the EXIT trap is installed.
 #
@@ -574,15 +574,15 @@ EOF
 
 # Which tool this host answers with: `ss`, `lsof`, `netstat`, or `none`.
 #
-# Overridable through `FASTCACHED_E2E_LISTENER_TOOL` **only so the self-test can drive the
+# Overridable through `PACE_E2E_LISTENER_TOOL` **only so the self-test can drive the
 # rows this host cannot reach**; production sets nothing. Without it, `lsof` is dead code
 # on Linux and on Windows, `netstat` is dead code everywhere but Windows, and `none` --
 # the arm the whole `unattributable` outcome exists for -- is reachable on no developer
 # machine at all. An arm nobody has watched fire is untested rather than proven, and this
 # one fails OPEN, so an untested `none` would look exactly like a working one.
 _e2e_listener_tool() {
-    if [ -n "${FASTCACHED_E2E_LISTENER_TOOL:-}" ]; then
-        echo "$FASTCACHED_E2E_LISTENER_TOOL"
+    if [ -n "${PACE_E2E_LISTENER_TOOL:-}" ]; then
+        echo "$PACE_E2E_LISTENER_TOOL"
         return 0
     fi
     case "$(uname -s)" in
@@ -766,7 +766,7 @@ _e2e_poll_pause=0.2
 # is the same defect as a figure with no conditions, and it propagated by being
 # copied rather than asked.)
 # NOT measured on bash 3.2, which macOS ships as `/bin/bash` and which
-# `FASTCACHED_BASH` resolves to on every non-Windows platform -- so the one
+# `PACE_BASH` resolves to on every non-Windows platform -- so the one
 # interpreter this file is most careful about is the one the reading cannot be
 # checked on. A marker FILE has no such question on any bash: the timer creates it
 # or it does not, and `[ -e ]` is the whole reading.
@@ -3820,7 +3820,7 @@ _e2e_launcher_state_misdirected() {
 # `-z`, which clears the log. That the caller's log was spared is no evidence the launcher
 # recorded HERE -- a launcher recording nowhere spares it too.
 #
-# `--no-stats` is for a fixture whose every launcher run sets FASTCACHE_NO_STATS=1. Such a
+# `--no-stats` is for a fixture whose every launcher run sets PACE_NO_STATS=1. Such a
 # run writes NOTHING to the state directory -- the toolchain fingerprint cache beside the
 # log is written only by a dispatch or by `--print-toolchain-fingerprint` -- so there is no
 # record to count, and the control is the shim's own record instead: at least one run
@@ -3839,11 +3839,11 @@ e2e_launcher_state_assert_used() {
     fi
     if [ "${1-}" = "--no-stats" ]; then
         [ ! -f "$_e2e_launcher_state_log" ] \
-            || fail "every launcher run here sets FASTCACHE_NO_STATS=1, yet this run's state log exists (${_e2e_launcher_state_log})"
+            || fail "every launcher run here sets PACE_NO_STATS=1, yet this run's state log exists (${_e2e_launcher_state_log})"
         # The guard in `e2e_launcher_state_enter` is one of them.
         [ "${runs:-0}" -ge 2 ] \
             || fail "no launcher run of this fixture went through the launcher-state shim (${runs:-0} run(s), the guard included), so nothing says its runs were redirected"
-        e2e_note "$(( runs - 1 )) launcher run(s) went through the launcher-state shim with every state variable at this run's root, and recorded no statistics, as FASTCACHE_NO_STATS asks"
+        e2e_note "$(( runs - 1 )) launcher run(s) went through the launcher-state shim with every state variable at this run's root, and recorded no statistics, as PACE_NO_STATS asks"
         return 0
     fi
     if [ -f "$_e2e_launcher_state_log" ]; then

@@ -73,11 +73,11 @@
 # Windows leg before it lands.
 set -uo pipefail
 
-FastCachedScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FastCachedWalkAwk="${FastCachedScriptDir}/lib/workflow-walk.awk"
-FastCachedLexAwk="${FastCachedScriptDir}/lib/shell-lex.awk"
+PaceScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PaceWalkAwk="${PaceScriptDir}/lib/workflow-walk.awk"
+PaceLexAwk="${PaceScriptDir}/lib/shell-lex.awk"
 
-for awkProgram in "${FastCachedWalkAwk}" "${FastCachedLexAwk}"; do
+for awkProgram in "${PaceWalkAwk}" "${PaceLexAwk}"; do
     if [ ! -f "${awkProgram}" ]; then
         echo "check-workflow-walk-selftest: missing awk program ${awkProgram}; nothing was driven,"
         echo "  so this is a refusal and not a clean run."
@@ -85,8 +85,8 @@ for awkProgram in "${FastCachedWalkAwk}" "${FastCachedLexAwk}"; do
     fi
 done
 
-FastCachedWork="$(mktemp -d)"
-trap 'rm -rf "${FastCachedWork}"' EXIT
+PaceWork="$(mktemp -d)"
+trap 'rm -rf "${PaceWork}"' EXIT
 
 Failures=0
 Cases=0
@@ -111,7 +111,7 @@ Counted() {
 # One TSV line per event, with the per-line kinds tallied per PASS rather than
 # printed: a transcript carrying one line per input line would be unreadable, and
 # the tally is what says a kind fired at all.
-cat > "${FastCachedWork}/drive.awk" <<'DRIVER'
+cat > "${PaceWork}/drive.awk" <<'DRIVER'
 # The `if:` conditions `WorkflowMatrixDecide` is driven with, each against one job's combinations.
 BEGIN {
     Cond("arm", "${{ matrix.suffix == '' }}")
@@ -220,7 +220,7 @@ DRIVER
 # Drive the library @p 2 over the fixture @p 1, the file passed TWICE as every
 # consumer passes it.
 Drive() {
-    awk -f "${FastCachedLexAwk}" -f "$2" -f "${FastCachedWork}/drive.awk" "$1" "$1" 2>&1
+    awk -f "${PaceLexAwk}" -f "$2" -f "${PaceWork}/drive.awk" "$1" "$1" 2>&1
 }
 
 # ---- assertions -------------------------------------------------------------
@@ -314,7 +314,7 @@ RequireOrder() {
 # ---- the fixtures -----------------------------------------------------------
 Stage() {
     Cases=$((Cases + 1))
-    cat > "${FastCachedWork}/$1.yml"
+    cat > "${PaceWork}/$1.yml"
 }
 
 Stage rich <<'YML'
@@ -640,8 +640,8 @@ YML
 # stale list while reporting on the current library.
 Judge() {
     local name="$1" lib="$2" t text=""
-    t="${FastCachedWork}/$1-$3.out"
-    Drive "${FastCachedWork}/${name}.yml" "${lib}" > "${t}"
+    t="${PaceWork}/$1-$3.out"
+    Drive "${PaceWork}/${name}.yml" "${lib}" > "${t}"
     # Read ONCE, by the shell itself: `read -d ''` runs to end of file, which is its
     # non-zero status, and forks nothing. The file stays for whoever reads a failure.
     IFS= read -r -d '' text < "${t}" || true
@@ -842,10 +842,10 @@ Judge() {
 }
 
 echo "check-workflow-walk-selftest: driving scripts/lib/workflow-walk.awk"
-Judge rich "${FastCachedWalkAwk}" clean
-Judge folded "${FastCachedWalkAwk}" clean
-Judge edges "${FastCachedWalkAwk}" clean
-Judge matrix "${FastCachedWalkAwk}" clean
+Judge rich "${PaceWalkAwk}" clean
+Judge folded "${PaceWalkAwk}" clean
+Judge edges "${PaceWalkAwk}" clean
+Judge matrix "${PaceWalkAwk}" clean
 CleanFailures=${Failures}
 
 # ---- the neuters ------------------------------------------------------------
@@ -857,9 +857,9 @@ CleanFailures=${Failures}
 Neuter() {
     local name="$1" expr="$2" case="$3" why="$4" lib before
     Neuters=$((Neuters + 1))
-    lib="${FastCachedWork}/neuter-${name}.awk"
-    sed "${expr}" "${FastCachedWalkAwk}" > "${lib}"
-    if cmp -s "${lib}" "${FastCachedWalkAwk}"; then
+    lib="${PaceWork}/neuter-${name}.awk"
+    sed "${expr}" "${PaceWalkAwk}" > "${lib}"
+    if cmp -s "${lib}" "${PaceWalkAwk}"; then
         Fail "neuter ${name}: the sed expression changed nothing, so no line was neutered"
         return 1
     fi

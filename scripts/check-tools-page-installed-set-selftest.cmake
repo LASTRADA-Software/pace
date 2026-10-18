@@ -44,21 +44,21 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-tools-page-installed-set-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-tools-page-installed-set.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-tools-page-installed-set.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -72,13 +72,13 @@ endif()
 # this question.
 set(baseAppTable
 "# SPDX-License-Identifier: Apache-2.0
-set(FASTCACHED_APPS
+set(PACE_APPS
     #  directory                   option                          default  description
-    \"pace-kv|FASTCACHED_BUILD_DAEMON|ON|Build the pace-kv daemon\"
-    \"pace-cc|FASTCACHED_BUILD_LAUNCHER|ON|Build the launcher\"
-    \"pace-node|FASTCACHED_BUILD_NODE|ON|Build the compile worker\"
-    \"compile-cache-testclient|FASTCACHED_BUILD_TESTCLIENT|OFF|Build the test client\"
-    \"pace-bench|FASTCACHED_BUILD_BENCHMARKS|OFF|Build the micro-benchmarks\"
+    \"pace-kv|PACE_BUILD_DAEMON|ON|Build the pace-kv daemon\"
+    \"pace-cc|PACE_BUILD_LAUNCHER|ON|Build the launcher\"
+    \"pace-node|PACE_BUILD_NODE|ON|Build the compile worker\"
+    \"compile-cache-testclient|PACE_BUILD_TESTCLIENT|OFF|Build the test client\"
+    \"pace-bench|PACE_BUILD_BENCHMARKS|OFF|Build the micro-benchmarks\"
 )
 ")
 
@@ -136,8 +136,8 @@ Full reference: [pace-node](pace-node.md).
 # `omit` is structural rather than textual: it names an app directory whose
 # CMakeLists.txt is not written at all, which is the "the table names something the
 # tree does not have" case and cannot be expressed as a string replacement.
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     # Decode the placeholders. `~n~` is a newline; `~lb~`, `~rb~` and `~sc~` are `[`,
@@ -236,7 +236,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endforeach()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -260,7 +260,7 @@ endfunction()
 # contain a '|' or a ';': the first is the row separator and the second splits the
 # CMake list silently, which is how this project's own row tables have lost half a
 # sentence three times. The field count is asserted per row below.
-set(FastCachedToolsPageCases
+set(PaceToolsPageCases
     # The baseline. Every refusal below is evidence only if this passes.
     "baseline|none|-|-|3 installed target(s) of 5 app(s)|CMake Error"
 
@@ -286,7 +286,7 @@ set(FastCachedToolsPageCases
 
     # The app table restructured out from under the scan. Two empty lists agree
     # perfectly, so this must never read as a clean tree.
-    "app table matched nothing|apptable|set(FASTCACHED_APPS|set(FASTCACHED_PROGRAMS_RENAMED|the app table matched no rows|-"
+    "app table matched nothing|apptable|set(PACE_APPS|set(PACE_PROGRAMS_RENAMED|the app table matched no rows|-"
 
     # The table names an app the tree does not have. Unknown is not absent.
     "app named by the table is missing|omit|pace-cc|-|does not exist. Whether that app installs anything is therefore unknown|-"
@@ -310,7 +310,7 @@ set(FastCachedToolsPageCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedToolsPageCases)
+foreach(row IN LISTS PaceToolsPageCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -327,7 +327,7 @@ foreach(row IN LISTS FastCachedToolsPageCases)
 
     math(EXPR caseCount "${caseCount} + 1")
 
-    fastcached_stage_and_run("${caseCount}-${caseTarget}" "${caseTarget}"
+    pace_stage_and_run("${caseCount}-${caseTarget}" "${caseTarget}"
                              "${caseFrom}" "${caseTo}" output applied)
 
     if(NOT applied)

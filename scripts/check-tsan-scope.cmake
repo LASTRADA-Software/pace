@@ -77,7 +77,7 @@
 # would be two implementations of one rule differing only in syntax.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-tsan-scope.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-tsan-scope.cmake
 #
 # Its own decisions are driven over synthetic trees by
 # `scripts/check-tsan-scope-selftest.cmake`, which `include()`s this file for the
@@ -89,8 +89,8 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ endif()
 # which this gate reached only through the node binary being run whole. The event
 # loop and the sockets that were `Async/` and `Net/` are core-cpp's since #1596, and
 # the gate instruments them as core-cpp's archives (`tsan-gate.sh`).
-set(FastCachedTsanScope
+set(PaceTsanScope
     # Directories: everything here is concurrency-bearing.
     "src/Pace/Consensus"
     "src/Pace/Distributed"
@@ -136,7 +136,7 @@ set(FastCachedTsanScope
 
 # The gate whose scope this enforces. Its `TARGETS` table is the source of truth
 # for which tags are selected; see the header for why nothing is copied out of it.
-set(FastCachedTsanGate "${FASTCACHED_SOURCE_DIR}/scripts/tsan-gate.sh")
+set(PaceTsanGate "${PACE_SOURCE_DIR}/scripts/tsan-gate.sh")
 
 # ---------------------------------------------------------------------------
 # Parse the tag expressions out of the gate's TARGETS table.
@@ -149,9 +149,9 @@ set(FastCachedTsanGate "${FASTCACHED_SOURCE_DIR}/scripts/tsan-gate.sh")
 # scope this cannot read must not read as an empty scope -- the whole file exists
 # because "nothing was checked" and "everything is fine" look identical otherwise.
 
-if(NOT EXISTS "${FastCachedTsanGate}")
+if(NOT EXISTS "${PaceTsanGate}")
     message(FATAL_ERROR
-        "check-tsan-scope: ${FastCachedTsanGate} does not exist.\n"
+        "check-tsan-scope: ${PaceTsanGate} does not exist.\n"
         "This check derives the sanitized scope from that script's TARGETS "
         "table; it cannot substitute a list of its own.")
 endif()
@@ -184,7 +184,7 @@ endif()
 # nothing for CMake's list parser to group, and every bracket reaches the tag
 # matcher untouched. `check-test-names.cmake` reads its sources the same way and
 # for the same reason.
-file(READ "${FastCachedTsanGate}" gateContent)
+file(READ "${PaceTsanGate}" gateContent)
 string(REPLACE "\r\n" "\n" gateContent "${gateContent}")
 set(inTable FALSE)
 set(targetRows "")
@@ -216,7 +216,7 @@ endwhile()
 if(NOT sawTable OR inTable)
     message(FATAL_ERROR
         "check-tsan-scope: could not read the TARGETS=( ... ) table in "
-        "${FastCachedTsanGate}.\n"
+        "${PaceTsanGate}.\n"
         "It must open with `TARGETS=(` and close with `)` in column zero. If "
         "that table changed shape, this parser changes with it -- do not restore "
         "a copy of the tag list here. The rule lives in "
@@ -234,12 +234,12 @@ endif()
 # stays free of the escaping the surrounding file argues against, and a row is
 # `"name|tagExpression|links"` by construction -- the parser refuses the table
 # outright if it is not.
-set(FastCachedTsanGateTargets "")
+set(PaceTsanGateTargets "")
 foreach(row IN LISTS targetRows)
     string(LENGTH "${row}" rowLength)
     if(rowLength LESS 3)
         message(FATAL_ERROR
-            "check-tsan-scope: the TARGETS table in ${FastCachedTsanGate} holds "
+            "check-tsan-scope: the TARGETS table in ${PaceTsanGate} holds "
             "an empty row.\n"
             "Every row is `\"name|tagExpression|links\"`; an empty one is a row that "
             "names no binary, which would silently shrink the sanitized scope. "
@@ -264,10 +264,10 @@ foreach(row IN LISTS targetRows)
             "`|`.\n"
             "The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
     endif()
-    list(APPEND FastCachedTsanGateTargets "${rowName}")
+    list(APPEND PaceTsanGateTargets "${rowName}")
 endforeach()
 
-set(FastCachedTsanScopeTags "")
+set(PaceTsanScopeTags "")
 foreach(row IN LISTS targetRows)
     # "name|[a],[b]|links" -> [a],[b] -> a;b
     string(REGEX REPLACE "^\"[^|]*\\|" "" rowTags "${row}")
@@ -298,14 +298,14 @@ foreach(row IN LISTS targetRows)
     string(REGEX MATCHALL "\\[([A-Za-z0-9_-]+)\\]" rowTagMatches "${rowTags}")
     foreach(tagMatch IN LISTS rowTagMatches)
         string(REGEX REPLACE "^\\[|\\]$" "" tag "${tagMatch}")
-        list(APPEND FastCachedTsanScopeTags "${tag}")
+        list(APPEND PaceTsanScopeTags "${tag}")
     endforeach()
 endforeach()
-list(REMOVE_DUPLICATES FastCachedTsanScopeTags)
+list(REMOVE_DUPLICATES PaceTsanScopeTags)
 
-if(NOT FastCachedTsanScopeTags)
+if(NOT PaceTsanScopeTags)
     message(FATAL_ERROR
-        "check-tsan-scope: the TARGETS table in ${FastCachedTsanGate} names no "
+        "check-tsan-scope: the TARGETS table in ${PaceTsanGate} names no "
         "Catch2 tags at all.\n"
         "Either every target is now run whole -- in which case this check has "
         "nothing to enforce and should be removed deliberately -- or the table "
@@ -354,13 +354,13 @@ endif()
 # to `scripts/tsan-gate.sh` that has to carry the empty-scope refusal with it, which
 # is its own change rather than a rider on a dependency bump. Until somebody makes
 # it, the next bump past this version asks again.
-set(FastCachedCatch2TagLabelWatermark "3.16.1")
+set(PaceCatch2TagLabelWatermark "3.16.1")
 
-set(FastCachedProjectCMakeLists "${FASTCACHED_SOURCE_DIR}/CMakeLists.txt")
+set(PaceProjectCMakeLists "${PACE_SOURCE_DIR}/CMakeLists.txt")
 
 # Everything ABOVE this line is definition; everything below it SCANS.
 # `check-tsan-scope-selftest.cmake` `include()`s this file with the guard set, so
-# it stages its synthetic trees from `FastCachedTsanScope` and drives them with
+# it stages its synthetic trees from `PaceTsanScope` and drives them with
 # the tags parsed out of the real gate -- rather than keeping copies of either.
 # That is the same rule the header states about the tag list: a second copy is
 # not a cross-check, it is a second thing to be wrong, and a self-test whose
@@ -369,13 +369,13 @@ set(FastCachedProjectCMakeLists "${FASTCACHED_SOURCE_DIR}/CMakeLists.txt")
 # Nothing else may use this. It is not a mode this check offers to an operator --
 # there is no argument that reaches it and `cmake -P` never sets it -- so the
 # scanning path cannot be skipped from a command line.
-if(FastCachedTsanScopeDefinitionsOnly)
+if(PaceTsanScopeDefinitionsOnly)
     return()
 endif()
 
-if(NOT EXISTS "${FastCachedProjectCMakeLists}")
+if(NOT EXISTS "${PaceProjectCMakeLists}")
     message(FATAL_ERROR
-        "check-tsan-scope: ${FastCachedProjectCMakeLists} does not exist.\n"
+        "check-tsan-scope: ${PaceProjectCMakeLists} does not exist.\n"
         "The Catch2 version is read from there to decide whether this scope "
         "mechanism is still necessary; a reading it cannot take must not read as "
         "one that found nothing to say. The rule lives in "
@@ -385,7 +385,7 @@ endif()
 # Read the declared version WITHOUT building a list, for the reason the TARGETS
 # reader above gives at length: `CMakeLists.txt` is full of brackets, and
 # `file(STRINGS)` would merge elements around an unbalanced one.
-file(READ "${FastCachedProjectCMakeLists}" projectCMakeLists)
+file(READ "${PaceProjectCMakeLists}" projectCMakeLists)
 string(REPLACE "\r\n" "\n" projectCMakeLists "${projectCMakeLists}")
 string(FIND "${projectCMakeLists}" "NAME Catch2" catch2NamePos)
 set(declaredCatch2Version "")
@@ -399,7 +399,7 @@ endif()
 if(declaredCatch2Version STREQUAL "")
     message(FATAL_ERROR
         "check-tsan-scope: could not read a `NAME Catch2 ... VERSION x.y.z` "
-        "declaration out of ${FastCachedProjectCMakeLists}.\n"
+        "declaration out of ${PaceProjectCMakeLists}.\n"
         "That declaration is what says whether the Catch2 in this tree can "
         "express the sanitized scope as CTest labels. If the dependency moved, "
         "this reader moves with it -- do not delete the question, because a "
@@ -407,10 +407,10 @@ if(declaredCatch2Version STREQUAL "")
         "in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
-if(declaredCatch2Version VERSION_GREATER "${FastCachedCatch2TagLabelWatermark}")
+if(declaredCatch2Version VERSION_GREATER "${PaceCatch2TagLabelWatermark}")
     message(FATAL_ERROR
         "Catch2 has moved to ${declaredCatch2Version}, past the "
-        "${FastCachedCatch2TagLabelWatermark} this scope mechanism was reasoned "
+        "${PaceCatch2TagLabelWatermark} this scope mechanism was reasoned "
         "about (#312).\n\n"
         "Re-evaluate expressing the ThreadSanitizer scope as CTest labels: "
         "`catch_discover_tests(... ADD_TAGS_AS_LABELS)` exports each case's tags "
@@ -424,7 +424,7 @@ if(declaredCatch2Version VERSION_GREATER "${FastCachedCatch2TagLabelWatermark}")
         "check between them exist for. Moving the scope without moving the guard "
         "trades a workaround for a hole.\n\n"
         "If the move is not being made now, that is a legitimate answer: raise "
-        "FastCachedCatch2TagLabelWatermark to ${declaredCatch2Version} in "
+        "PaceCatch2TagLabelWatermark to ${declaredCatch2Version} in "
         "${CMAKE_CURRENT_LIST_FILE} and say in the commit why the scope stayed a "
         "tag expression. Do NOT make the watermark read the version out of "
         "CMakeLists.txt -- a watermark that tracks its subject is one that can "
@@ -436,7 +436,7 @@ endif()
 # case, so immediately after the opening `"` or after a preceding `]`. A bare
 # `[reactor]` in a comment -- or in a test NAME -- is prose, and matching it would
 # let a file talk its way into the scope without joining it.
-string(REPLACE ";" "|" tagAlternation "${FastCachedTsanScopeTags}")
+string(REPLACE ";" "|" tagAlternation "${PaceTsanScopeTags}")
 set(tagPattern "[\"]\\[(${tagAlternation})\\]|\\]\\[(${tagAlternation})\\]")
 
 # ---------------------------------------------------------------------------
@@ -447,13 +447,13 @@ set(tagPattern "[\"]\\[(${tagAlternation})\\]|\\]\\[(${tagAlternation})\\]")
 # this tree happens to use today, because a guard that covers the macro in front
 # of it and not the neighbouring one is a guard somebody walks around without
 # meaning to.
-set(FastCachedCaseMacroPattern "^[ \t]*(TEST_CASE|TEST_CASE_METHOD|TEMPLATE_TEST_CASE|SCENARIO)[ \t]*\\(")
+set(PaceCaseMacroPattern "^[ \t]*(TEST_CASE|TEST_CASE_METHOD|TEMPLATE_TEST_CASE|SCENARIO)[ \t]*\\(")
 
 # A case header may span lines, and 28 of the ones in scope do. This is the
 # runaway bound: a header still open after this many lines is a PARSE FAILURE and
 # is refused by name, never quietly abandoned -- an abandoned header is a case
 # nobody checked, which is this file's entire subject.
-set(FastCachedCaseHeaderLineBound 60)
+set(PaceCaseHeaderLineBound 60)
 
 # Split one line into its quoted string literals and the text between them,
 # WITHOUT ever building a CMake list.
@@ -473,7 +473,7 @@ set(FastCachedCaseHeaderLineBound 60)
 # this tree: zero case headers contain one. If one appears, the name splits into
 # two literals and the LAST is still the tag string, so the classification
 # survives it; only the reported name would be short.
-function(FastCachedSplitLiterals line out)
+function(PaceSplitLiterals line out)
     set(rest "${line}")
     set(bare "")
     set(count 0)
@@ -516,7 +516,7 @@ endfunction()
 # How many times `needle` occurs in `text`. By length difference rather than by
 # `MATCHALL` + `list(LENGTH)`, for the reason above: no list is built, so nothing
 # in the text can be grouped by CMake's list parser.
-function(FastCachedCountChar text needle out)
+function(PaceCountChar text needle out)
     string(REPLACE "${needle}" "" without "${text}")
     string(LENGTH "${text}" withLength)
     string(LENGTH "${without}" withoutLength)
@@ -536,7 +536,7 @@ endfunction()
 # tree-wide carry no tag string at all, where the first literal is the whole
 # name; those are counted by ARITY (`< 2` literals) rather than by pattern, since
 # a name is free to contain `[async]` and must not be able to talk its way in.
-function(FastCachedScanTestFile testFile relativeFile tagPattern out)
+function(PaceScanTestFile testFile relativeFile tagPattern out)
     file(READ "${testFile}" sourceRest)
     string(REPLACE "\r\n" "\n" sourceRest "${sourceRest}")
 
@@ -557,7 +557,7 @@ function(FastCachedScanTestFile testFile relativeFile tagPattern out)
         math(EXPR lineNumber "${lineNumber} + 1")
 
         if(NOT inHeader)
-            if(NOT line MATCHES "${FastCachedCaseMacroPattern}")
+            if(NOT line MATCHES "${PaceCaseMacroPattern}")
                 continue()
             endif()
             set(inHeader TRUE)
@@ -569,7 +569,7 @@ function(FastCachedScanTestFile testFile relativeFile tagPattern out)
             set(headerLast "")
         endif()
 
-        FastCachedSplitLiterals("${line}" lit)
+        PaceSplitLiterals("${line}" lit)
         if(lit_count GREATER 0)
             if(headerCount EQUAL 0)
                 set(headerFirst "${lit_first}")
@@ -577,18 +577,18 @@ function(FastCachedScanTestFile testFile relativeFile tagPattern out)
             set(headerLast "${lit_last}")
             math(EXPR headerCount "${headerCount} + ${lit_count}")
         endif()
-        FastCachedCountChar("${lit_bare}" "(" opens)
-        FastCachedCountChar("${lit_bare}" ")" closes)
+        PaceCountChar("${lit_bare}" "(" opens)
+        PaceCountChar("${lit_bare}" ")" closes)
         if(opens GREATER 0)
             set(headerEntered TRUE)
         endif()
         math(EXPR headerDepth "${headerDepth} + ${opens} - ${closes}")
 
         math(EXPR headerSpan "${lineNumber} - ${headerLine} + 1")
-        if(headerSpan GREATER "${FastCachedCaseHeaderLineBound}")
+        if(headerSpan GREATER "${PaceCaseHeaderLineBound}")
             message(FATAL_ERROR
                 "check-tsan-scope: the case macro at ${relativeFile}:${headerLine} "
-                "has no closing `)` within ${FastCachedCaseHeaderLineBound} lines.\n"
+                "has no closing `)` within ${PaceCaseHeaderLineBound} lines.\n"
                 "This reader tracks parenthesis depth with string literals "
                 "removed, so it is reporting that it lost its place rather than "
                 "that the source is wrong. A header it cannot read is a case it "
@@ -638,8 +638,8 @@ set(caseCount 0)
 set(scopeDirCount 0)
 set(scopeFileCount 0)
 
-foreach(scopeRow IN LISTS FastCachedTsanScope)
-    set(absoluteRow "${FASTCACHED_SOURCE_DIR}/${scopeRow}")
+foreach(scopeRow IN LISTS PaceTsanScope)
+    set(absoluteRow "${PACE_SOURCE_DIR}/${scopeRow}")
     if(IS_DIRECTORY "${absoluteRow}")
         math(EXPR scopeDirCount "${scopeDirCount} + 1")
         # GLOB_RECURSE, for the reason check-net-boundary.cmake states: a file
@@ -679,14 +679,14 @@ foreach(scopeRow IN LISTS FastCachedTsanScope)
         message(FATAL_ERROR
             "check-tsan-scope: the scope row ${scopeRow} names neither a "
             "directory nor a file that exists.\n"
-            "If it moved, update FastCachedTsanScope here and the TARGETS "
+            "If it moved, update PaceTsanScope here and the TARGETS "
             "table in scripts/tsan-gate.sh together.")
     endif()
 
     foreach(testFile IN LISTS testFiles)
         math(EXPR scannedCount "${scannedCount} + 1")
-        file(RELATIVE_PATH relativeFile "${FASTCACHED_SOURCE_DIR}" "${testFile}")
-        FastCachedScanTestFile("${testFile}" "${relativeFile}" "${tagPattern}" fileFindings)
+        file(RELATIVE_PATH relativeFile "${PACE_SOURCE_DIR}" "${testFile}")
+        PaceScanTestFile("${testFile}" "${relativeFile}" "${tagPattern}" fileFindings)
         math(EXPR caseCount "${caseCount} + ${fileFindings_cases}")
         # A STRING throughout, and `STREQUAL ""` rather than `if(fileFindings)`:
         # the report holds case names, and a name that happened to be `NO` or
@@ -710,14 +710,14 @@ if(caseCount EQUAL 0)
 endif()
 
 if(NOT uncovered STREQUAL "")
-    string(REPLACE ";" "]\n    [" printableTags "[${FastCachedTsanScopeTags}]")
+    string(REPLACE ";" "]\n    [" printableTags "[${PaceTsanScopeTags}]")
     message(FATAL_ERROR
         "These test CASES are in the ThreadSanitizer scope but carry no tag the "
         "gate selects on, so they are NOT run under "
         "TSan:\n${uncovered}\n"
         "Give each of them one of these tags:\n    ${printableTags}\n\n"
         "If a file genuinely does not belong in the sanitized scope, the fix is "
-        "to narrow FastCachedTsanScope here -- replace the directory row with "
+        "to narrow PaceTsanScope here -- replace the directory row with "
         "the file rows that do belong -- because widening the tag list would "
         "pull the file IN, not let it out. To widen the scope instead, edit the "
         "TARGETS table in scripts/tsan-gate.sh; this check reads its tags from "
@@ -725,7 +725,7 @@ if(NOT uncovered STREQUAL "")
         "The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
-string(REPLACE ";" "],[" renderedTags "[${FastCachedTsanScopeTags}]")
+string(REPLACE ";" "],[" renderedTags "[${PaceTsanScopeTags}]")
 message("tsan scope: ${caseCount} case(s) in ${scannedCount} test file(s) from "
         "${scopeDirCount} directory row(s) and ${scopeFileCount} file row(s) are "
         "selected by ${renderedTags}")

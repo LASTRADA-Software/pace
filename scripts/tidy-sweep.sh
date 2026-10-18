@@ -51,8 +51,8 @@
 # with CI's own flags, into a directory of its own:
 #
 #   cmake --preset clang-debug -B out/build/tidy22 -DENABLE_TIDY=OFF \
-#         -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON \
-#         -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+#         -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON \
+#         -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 #
 # That line is the `clang-tidy` job's `Configure` step verbatim plus `-B`, and
 # `check-tidy-sweep-database.sh` asserts it stays that way. It is deliberately NOT

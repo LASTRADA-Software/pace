@@ -8,7 +8,7 @@
 #      portable across checkout paths, so a CI runner and a developer working
 #      from different directories share cache hits. It must already be installed
 #      and on PATH. It is configured purely through the environment and caches
-#      nothing unless FASTCACHE_ADDR / FASTCACHE_SOURCE_DIR / FASTCACHE_BINARY_DIR
+#      nothing unless PACE_ADDR / PACE_SOURCE_DIR / PACE_BINARY_DIR
 #      are all set; the address defaults to pace-kv's own port,
 #      127.0.0.1:6674, and the two roots are injected here via `cmake -E env`,
 #      because CMake already knows them. Selecting it is conditional on a daemon
@@ -40,12 +40,12 @@
 # it is included before CPM is even bootstrapped), and it must never fail a
 # configure, since a build that has no cache should still be a build.
 #
-# When none of the three is installed, -DFASTCACHE_AUTO_INSTALL=ON fetches
+# When none of the three is installed, -DPACE_AUTO_INSTALL=ON fetches
 # pace-cc from GitHub Releases rather than leaving the build uncached; see
 # the block below. That alone still leaves a genuinely clean machine uncached,
 # because a launcher with no daemon to talk to caches nothing —
-# -DFASTCACHE_AUTO_START=ON additionally stages and starts a pace-kv daemon
-# in the background when none answers at FASTCACHE_ADDR (issue #90); off by
+# -DPACE_AUTO_START=ON additionally stages and starts a pace-kv daemon
+# in the background when none answers at PACE_ADDR (issue #90); off by
 # default, and independently of auto-install, since starting a background
 # process is a bigger side effect than downloading a file and CI relies on no
 # daemon answering by default. To disable everything: -DUSE_COMPILER_CACHE=OFF.
@@ -158,10 +158,10 @@ endfunction()
 #
 # **The two are different instructions and folding them together broke the
 # documented opt-out** (#372). `docs/tools/pace-cc.md` promises that a set
-# but empty `FASTCACHE_ADDR` means no caching, and the launcher honours that when
+# but empty `PACE_ADDR` means no caching, and the launcher honours that when
 # it reads its own environment at run time. This module decided whether the
-# launcher is used AT ALL from `if("$ENV{FASTCACHE_ADDR}" STREQUAL "")`, which is
-# true for both -- so `export FASTCACHE_ADDR=` was turned straight back into the
+# launcher is used AT ALL from `if("$ENV{PACE_ADDR}" STREQUAL "")`, which is
+# true for both -- so `export PACE_ADDR=` was turned straight back into the
 # default and kept caching, on every shell and every platform.
 #
 # That is the same defect this codebase has now fixed three times in three places:
@@ -186,7 +186,7 @@ endfunction()
 function(_fc_resolve_addr present value outWanted)
     if(present)
         # Whatever they set, empty INCLUDED. An empty one reaches
-        # `if(NOT FASTCACHE_ADDR)` below and opts out by name.
+        # `if(NOT PACE_ADDR)` below and opts out by name.
         set(${outWanted} "${value}" PARENT_SCOPE)
     else()
         # Nobody said anything, so the compiled-in default: a stock `pace-kv`
@@ -204,7 +204,7 @@ endfunction()
 # entry had been changed by hand since -- and "changed by hand" was read as "differs from what
 # this module last applied", which cannot see a `-D` that typed the value already held. Measured:
 # a tree configured off from an agent's shell, reconfigured from a terminal holding the variable
-# with `-DFASTCACHE_SCHEDULER=` to say OFF explicitly, came up ON. That is the blind spot
+# with `-DPACE_SCHEDULER=` to say OFF explicitly, came up ON. That is the blind spot
 # `OptionSpec::explicitBit` exists for, and CMake offers nothing that says a `-D` was on this
 # command line. So nothing is inferred: a `-D`, empty included, always outranks an ambient
 # variable, and a difference is REPORTED, naming the `-D` that would apply it, never acted on.
@@ -257,7 +257,7 @@ endfunction()
 # What configure SAYS about dispatch and what it BAKES, from the scheduler it holds.
 #
 # **Decided HERE and baked into the launcher, never left to the build's environment.** The
-# launcher reads `FASTCACHE_SCHEDULER` at run time, and this module used to pass it nothing --
+# launcher reads `PACE_SCHEDULER` at run time, and this module used to pass it nothing --
 # so dispatch was whatever the environment of whichever process ran `ninja` happened to hold.
 # Measured on a workstation: agents set it in one shell and built from the next, every compile
 # recorded `NOT_CONFIGURED`, and 341 misses compiled locally while the fleet's `dispatched`
@@ -270,9 +270,9 @@ endfunction()
 # at every configure.** A configure is not always one somebody ran: ninja re-runs CMake by itself
 # whenever a CMakeLists.txt changes, from whatever shell started the build. Measured on the same
 # machine, a first version that re-read the environment turned dispatch OFF at exactly such a
-# re-run -- the build shell had no FASTCACHE_SCHEDULER -- and printed so into a build log nobody
+# re-run -- the build shell had no PACE_SCHEDULER -- and printed so into a build log nobody
 # reads, which is the original failure one step later. Set-but-empty and unset are the same
-# answer in the environment, unlike FASTCACHE_ADDR (#372), because the launcher reads them the
+# answer in the environment, unlike PACE_ADDR (#372), because the launcher reads them the
 # same way (`EnvOr`): neither dispatches, so neither is a value the environment PRESENTS.
 #
 # One function for the line and the entry, because the line is the module's claim and the entry
@@ -281,7 +281,7 @@ endfunction()
 # The line says where the value came from, and that it is CONFIGURATION: nothing here asks the
 # scheduler anything, and "pace-cc is the launcher" was once read as "the fleet is building".
 #
-# **The entry is baked in BOTH states.** An endpoint when dispatch is on; `FASTCACHE_SCHEDULER=`
+# **The entry is baked in BOTH states.** An endpoint when dispatch is on; `PACE_SCHEDULER=`
 # when it is off, which the launcher reads as unset -- so a value in the build's own environment
 # cannot turn on a dispatch configure said was off, any more than it can retarget one it said was
 # on. That is what keeps the printed line true of the build.
@@ -293,31 +293,31 @@ endfunction()
 # @param outLine     The status line.
 # @param outEnvEntry The `NAME=VALUE` the launcher runs with.
 function(_fc_dispatch_state endpoint seeded unapplied envValue outLine outEnvEntry)
-    set(${outEnvEntry} "FASTCACHE_SCHEDULER=${endpoint}" PARENT_SCOPE)
+    set(${outEnvEntry} "PACE_SCHEDULER=${endpoint}" PARENT_SCOPE)
     set(turnOn "<host:port>")
     set(unappliedClause "")
     if(unapplied)
         set(turnOn "${envValue}")
-        set(unappliedClause "; the ${envValue} in the environment is NOT applied -- -DFASTCACHE_SCHEDULER=${envValue} retargets it")
+        set(unappliedClause "; the ${envValue} in the environment is NOT applied -- -DPACE_SCHEDULER=${envValue} retargets it")
     endif()
     if(NOT "${endpoint}" STREQUAL "")
-        set(source "held in this build tree's cache, where a -DFASTCACHE_SCHEDULER or the configure that created the tree put it")
+        set(source "held in this build tree's cache, where a -DPACE_SCHEDULER or the configure that created the tree put it")
         if(seeded)
             set(source "seeded from the configure environment and held in this build tree's cache")
         endif()
         set(${outLine}
-            "[cache] dispatch: ${endpoint} (configured, ${source}; baked into the launcher, so the build's own environment does not change it; not probed -- each compile records DISPATCHED or DECLINED in invocations.log; -DFASTCACHE_SCHEDULER= turns it off${unappliedClause})"
+            "[cache] dispatch: ${endpoint} (configured, ${source}; baked into the launcher, so the build's own environment does not change it; not probed -- each compile records DISPATCHED or DECLINED in invocations.log; -DPACE_SCHEDULER= turns it off${unappliedClause})"
             PARENT_SCOPE)
         return()
     endif()
-    set(source "FASTCACHE_SCHEDULER is empty in this build tree's cache")
+    set(source "PACE_SCHEDULER is empty in this build tree's cache")
     if(seeded)
-        set(source "no FASTCACHE_SCHEDULER in the configure environment, and this build tree now holds that")
+        set(source "no PACE_SCHEDULER in the configure environment, and this build tree now holds that")
     elseif(unapplied)
-        set(source "FASTCACHE_SCHEDULER is empty in this build tree's cache, which outranks the ${envValue} in the environment")
+        set(source "PACE_SCHEDULER is empty in this build tree's cache, which outranks the ${envValue} in the environment")
     endif()
     set(${outLine}
-        "[cache] dispatch: off (${source}; every miss compiles on this machine -- -DFASTCACHE_SCHEDULER=${turnOn} turns it on)"
+        "[cache] dispatch: off (${source}; every miss compiles on this machine -- -DPACE_SCHEDULER=${turnOn} turns it on)"
         PARENT_SCOPE)
 endfunction()
 
@@ -453,7 +453,7 @@ if(DEFINED CMAKE_CXX_COMPILER_LAUNCHER OR DEFINED CMAKE_C_COMPILER_LAUNCHER)
     return()
 endif()
 
-find_program(FASTCACHE_CC pace-cc DOC "pace-cc tool path; needs a pace-kv daemon to be used")
+find_program(PACE_CC pace-cc DOC "pace-cc tool path; needs a pace-kv daemon to be used")
 find_program(SCCACHE sccache DOC "sccache tool path")
 find_program(CCACHE ccache DOC "ccache tool path")
 
@@ -463,25 +463,25 @@ find_program(CCACHE ccache DOC "ccache tool path")
 # this pointing at a binary that is no longer there for the life of the build tree.
 # Forget a path that has stopped existing so the lookup — and the fetch — can run
 # again.
-if(FASTCACHE_CC AND NOT EXISTS "${FASTCACHE_CC}")
-    unset(FASTCACHE_CC CACHE)
-    find_program(FASTCACHE_CC pace-cc DOC "pace-cc tool path; needs a pace-kv daemon to be used")
+if(PACE_CC AND NOT EXISTS "${PACE_CC}")
+    unset(PACE_CC CACHE)
+    find_program(PACE_CC pace-cc DOC "pace-cc tool path; needs a pace-kv daemon to be used")
 endif()
 
-# Where the cache is: FASTCACHE_ADDR from the environment, else localhost's own
+# Where the cache is: PACE_ADDR from the environment, else localhost's own
 # port. That default reaches whichever of the two serves it -- a stock `pace-kv`
 # (and the service the installers register) listens there, and so does a
 # `pace-node`, whose --listen-cache defaults to the same address for
 # exactly this reason. An empty value opts out of pace-cc entirely -- either
-# spelling: `-DFASTCACHE_ADDR=` on this configure, or a set-but-empty
-# `FASTCACHE_ADDR` in the environment, which is what the operator documentation
+# spelling: `-DPACE_ADDR=` on this configure, or a set-but-empty
+# `PACE_ADDR` in the environment, which is what the operator documentation
 # promises and what #372 made true here.
 # `DEFINED ENV{}` rather than an emptiness test: see `_fc_resolve_addr`, and #372.
 set(_fc_addr_env_present FALSE)
-if(DEFINED ENV{FASTCACHE_ADDR})
+if(DEFINED ENV{PACE_ADDR})
     set(_fc_addr_env_present TRUE)
 endif()
-_fc_resolve_addr("${_fc_addr_env_present}" "$ENV{FASTCACHE_ADDR}" _fc_addr_wanted)
+_fc_resolve_addr("${_fc_addr_env_present}" "$ENV{PACE_ADDR}" _fc_addr_wanted)
 
 # Held, not re-read: the environment seeds a tree with no entry, and after that only a -D moves
 # the address -- see `_fc_hold_setting` for the reconfigure that silently undid a -D. A later
@@ -489,16 +489,16 @@ _fc_resolve_addr("${_fc_addr_env_present}" "$ENV{FASTCACHE_ADDR}" _fc_addr_wante
 # because the address decides whether pace-cc is tried at all: a tree holding the empty
 # opt-out never reaches the row that would print anything else.
 set(_fc_addr_cached FALSE)
-if(DEFINED CACHE{FASTCACHE_ADDR})
+if(DEFINED CACHE{PACE_ADDR})
     set(_fc_addr_cached TRUE)
 endif()
-_fc_hold_setting("${_fc_addr_cached}" "${FASTCACHE_ADDR}" "${_fc_addr_env_present}" "${_fc_addr_wanted}"
+_fc_hold_setting("${_fc_addr_cached}" "${PACE_ADDR}" "${_fc_addr_env_present}" "${_fc_addr_wanted}"
                  _fc_addr _fc_addr_seeded _fc_addr_unapplied)
-set(FASTCACHE_ADDR "${_fc_addr}" CACHE STRING
+set(PACE_ADDR "${_fc_addr}" CACHE STRING
     "host:port of the pace-kv compile-cache daemon, 127.0.0.1:6674 by default (empty disables the pace-cc launcher)"
     FORCE)
 if(_fc_addr_unapplied)
-    _fc_unapplied_note(FASTCACHE_ADDR "${_fc_addr}" "${_fc_addr_wanted}" _fc_addr_note)
+    _fc_unapplied_note(PACE_ADDR "${_fc_addr}" "${_fc_addr_wanted}" _fc_addr_note)
     message(STATUS "${_fc_addr_note}")
 endif()
 
@@ -510,13 +510,13 @@ endif()
 # root of its own (`<DEPROOT>`), so two machines whose caches sit in different homes still
 # share: without it every include directory into the cache reached the key verbatim, and two
 # users never shared an object. Asked of CPM's own variable, cache entry first and then the
-# environment, the order CPM reads them in; an explicit FASTCACHE_DEPS_DIR outranks both, and
+# environment, the order CPM reads them in; an explicit PACE_DEPS_DIR outranks both, and
 # none of them set names no root, which is how the launcher behaved before it had one.
 set(_fc_deps_dir "")
-if(DEFINED FASTCACHE_DEPS_DIR)
-    set(_fc_deps_dir "${FASTCACHE_DEPS_DIR}")
-elseif(DEFINED ENV{FASTCACHE_DEPS_DIR})
-    set(_fc_deps_dir "$ENV{FASTCACHE_DEPS_DIR}")
+if(DEFINED PACE_DEPS_DIR)
+    set(_fc_deps_dir "${PACE_DEPS_DIR}")
+elseif(DEFINED ENV{PACE_DEPS_DIR})
+    set(_fc_deps_dir "$ENV{PACE_DEPS_DIR}")
 elseif(CPM_SOURCE_CACHE)
     set(_fc_deps_dir "${CPM_SOURCE_CACHE}")
 elseif(DEFINED ENV{CPM_SOURCE_CACHE})
@@ -527,11 +527,11 @@ if(NOT _fc_deps_dir STREQUAL "")
     string(REGEX REPLACE "/$" "" _fc_deps_dir "${_fc_deps_dir}")
 endif()
 
-set(_fc_fastcache_env
-    "FASTCACHE_ADDR=${FASTCACHE_ADDR}"
-    "FASTCACHE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-    "FASTCACHE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-    "FASTCACHE_DEPS_DIR=${_fc_deps_dir}")
+set(_fc_pace_env
+    "PACE_ADDR=${PACE_ADDR}"
+    "PACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "PACE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+    "PACE_DEPS_DIR=${_fc_deps_dir}")
 
 # Where a miss is dispatched, decided once: see `_fc_dispatch_state` for why configure decides it
 # and the build's environment does not. Joined to the LAUNCHER's environment only, never the
@@ -542,28 +542,28 @@ set(_fc_fastcache_env
 # tree does not hold is said on the dispatch line itself, which is printed only when pace-cc
 # is the launcher -- the one launcher a scheduler means anything to.
 set(_fc_scheduler_cached FALSE)
-if(DEFINED CACHE{FASTCACHE_SCHEDULER})
+if(DEFINED CACHE{PACE_SCHEDULER})
     set(_fc_scheduler_cached TRUE)
 endif()
 set(_fc_scheduler_env_present FALSE)
-if(NOT "$ENV{FASTCACHE_SCHEDULER}" STREQUAL "")
+if(NOT "$ENV{PACE_SCHEDULER}" STREQUAL "")
     set(_fc_scheduler_env_present TRUE)
 endif()
-_fc_hold_setting("${_fc_scheduler_cached}" "${FASTCACHE_SCHEDULER}"
-                 "${_fc_scheduler_env_present}" "$ENV{FASTCACHE_SCHEDULER}"
+_fc_hold_setting("${_fc_scheduler_cached}" "${PACE_SCHEDULER}"
+                 "${_fc_scheduler_env_present}" "$ENV{PACE_SCHEDULER}"
                  _fc_scheduler _fc_scheduler_seeded _fc_scheduler_unapplied)
-set(FASTCACHE_SCHEDULER "${_fc_scheduler}" CACHE STRING
+set(PACE_SCHEDULER "${_fc_scheduler}" CACHE STRING
     "host:port of the compile-fleet scheduler pace-cc dispatches misses to, baked into the launcher (empty: every miss compiles locally)"
     FORCE)
 _fc_dispatch_state("${_fc_scheduler}" "${_fc_scheduler_seeded}" "${_fc_scheduler_unapplied}"
-                   "$ENV{FASTCACHE_SCHEDULER}" _fc_dispatch_line _fc_dispatch_env)
+                   "$ENV{PACE_SCHEDULER}" _fc_dispatch_line _fc_dispatch_env)
 
 # Optional auto-install of pace-cc from this project's GitHub Releases.
 #
 # Vendored into another repository, everything above buys that repository
 # nothing unless pace-cc is already on its PATH — a manual, out-of-band
 # step on every new checkout and every fresh machine. With
-# FASTCACHE_AUTO_INSTALL=ON this fetches the launcher itself: a prebuilt binary
+# PACE_AUTO_INSTALL=ON this fetches the launcher itself: a prebuilt binary
 # from the latest stable release, picked by host OS and architecture.
 #
 # Prebuilt rather than built from source, because building it would need a
@@ -578,7 +578,7 @@ _fc_dispatch_state("${_fc_scheduler}" "${_fc_scheduler_seeded}" "${_fc_scheduler
 #
 # Nothing here can fail a configure. Every error path — no binary published for
 # this platform, no network, a corrupt download, a binary that will not run —
-# reports one status line and leaves FASTCACHE_CC empty, so selection falls
+# reports one status line and leaves PACE_CC empty, so selection falls
 # through to sccache, then ccache, then no caching, exactly as it does today.
 #
 # That last property is why the download is deliberately *not* checked with
@@ -586,28 +586,28 @@ _fc_dispatch_state("${_fc_scheduler}" "${_fc_scheduler_seeded}" "${_fc_scheduler
 # is captured (measured), which is the one thing this must never be. The hash is
 # compared by hand below instead — the same guarantee, minus the abort.
 
-option(FASTCACHE_AUTO_INSTALL
+option(PACE_AUTO_INSTALL
        "Download pace-cc from GitHub Releases when no compiler-cache launcher is installed [default: OFF]"
        OFF)
 
-set(FASTCACHE_AUTO_INSTALL_REPO "LASTRADA-Software/fastcached" CACHE STRING
+set(PACE_AUTO_INSTALL_REPO "LASTRADA-Software/fastcached" CACHE STRING
     "owner/name of the GitHub repository to fetch prebuilt pace-cc binaries from")
-set(FASTCACHE_AUTO_INSTALL_API "https://api.github.com" CACHE STRING
+set(PACE_AUTO_INSTALL_API "https://api.github.com" CACHE STRING
     "base URL of the GitHub API used to resolve the latest release")
-set(FASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE "https://github.com" CACHE STRING
+set(PACE_AUTO_INSTALL_DOWNLOAD_BASE "https://github.com" CACHE STRING
     "base URL release archives are downloaded from (point at a mirror to install without reaching GitHub)")
-set(FASTCACHE_AUTO_INSTALL_VERSION "" CACHE STRING
+set(PACE_AUTO_INSTALL_VERSION "" CACHE STRING
     "exact pace-cc version to install (empty resolves the latest stable release)")
-set(FASTCACHE_AUTO_INSTALL_TTL_HOURS "24" CACHE STRING
+set(PACE_AUTO_INSTALL_TTL_HOURS "24" CACHE STRING
     "how long a resolved latest release is reused before the GitHub API is asked again")
-set(FASTCACHE_AUTO_INSTALL_HOST_SYSTEM "" CACHE STRING
+set(PACE_AUTO_INSTALL_HOST_SYSTEM "" CACHE STRING
     "system to fetch pace-cc for (empty asks CMAKE_HOST_SYSTEM_NAME)")
-set(FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR "" CACHE STRING
+set(PACE_AUTO_INSTALL_HOST_PROCESSOR "" CACHE STRING
     "processor to fetch pace-cc for (empty asks CMAKE_HOST_SYSTEM_PROCESSOR)")
 
 # Auto-installing the launcher alone leaves a genuinely clean machine exactly
 # where it started: pace-cc caches nothing unless a pace-kv daemon
-# answers at FASTCACHE_ADDR, and nothing installs one. FASTCACHE_AUTO_START is
+# answers at PACE_ADDR, and nothing installs one. PACE_AUTO_START is
 # the separate opt-in that does — separate because starting a long-lived
 # background process from a `cmake` configure is a materially bigger side
 # effect than downloading a file, and a user who wants one but not the other
@@ -621,11 +621,11 @@ set(FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR "" CACHE STRING
 # what matters is that nothing gets started here. A default of ON
 # would remove that boundary for everyone who has not opted out, rather than
 # adding it only for those who opt in. No CI-environment sniffing backs this
-# up — an explicit -DFASTCACHE_AUTO_START=ON is trusted at face value, the
+# up — an explicit -DPACE_AUTO_START=ON is trusted at face value, the
 # same way every other flag in this module is; guessing at "is this CI" from
 # environment variables would just be a second, less legible way to be wrong.
-option(FASTCACHE_AUTO_START
-       "Start a fetched pace-kv daemon in the background when none answers at FASTCACHE_ADDR [default: OFF]"
+option(PACE_AUTO_START
+       "Start a fetched pace-kv daemon in the background when none answers at PACE_ADDR [default: OFF]"
        OFF)
 
 # Where a fetched launcher is kept. Per user rather than per build tree, so the
@@ -636,9 +636,9 @@ option(FASTCACHE_AUTO_START
 # (src/apps/pace-cc/Stats.cpp) — with the *cache* spellings rather than the
 # state ones, since a re-downloadable binary is by definition cache and belongs
 # where a cache cleaner may take it.
-if(NOT DEFINED FASTCACHE_AUTO_INSTALL_DIR)
-    if(DEFINED ENV{FASTCACHE_CACHE_DIR} AND NOT "$ENV{FASTCACHE_CACHE_DIR}" STREQUAL "")
-        set(_fc_auto_dir_default "$ENV{FASTCACHE_CACHE_DIR}")
+if(NOT DEFINED PACE_AUTO_INSTALL_DIR)
+    if(DEFINED ENV{PACE_CACHE_DIR} AND NOT "$ENV{PACE_CACHE_DIR}" STREQUAL "")
+        set(_fc_auto_dir_default "$ENV{PACE_CACHE_DIR}")
     elseif(CMAKE_HOST_WIN32 AND NOT "$ENV{LOCALAPPDATA}" STREQUAL "")
         set(_fc_auto_dir_default "$ENV{LOCALAPPDATA}/pace-cc")
     elseif(CMAKE_HOST_APPLE AND NOT "$ENV{HOME}" STREQUAL "")
@@ -653,18 +653,18 @@ if(NOT DEFINED FASTCACHE_AUTO_INSTALL_DIR)
         set(_fc_auto_dir_default "${CMAKE_BINARY_DIR}/CMakeFiles/pace-cc")
     endif()
     get_filename_component(_fc_auto_dir_default "${_fc_auto_dir_default}" ABSOLUTE)
-    set(FASTCACHE_AUTO_INSTALL_DIR "${_fc_auto_dir_default}" CACHE PATH
+    set(PACE_AUTO_INSTALL_DIR "${_fc_auto_dir_default}" CACHE PATH
         "directory prebuilt pace-cc binaries are staged in, shared across repositories and build trees")
 endif()
 
 # Where an auto-started daemon keeps its cache. Persistent rather than
 # in-memory, so the cache survives the daemon being restarted (a reboot, a
 # manual kill) rather than starting cold every time — a subdirectory of the
-# same per-user tree the staged binaries live in (FASTCACHE_AUTO_INSTALL_DIR),
+# same per-user tree the staged binaries live in (PACE_AUTO_INSTALL_DIR),
 # since both are per-machine, re-creatable state that a cache cleaner may take.
-if(NOT DEFINED FASTCACHE_AUTO_START_STORAGE_DIR)
-    set(FASTCACHE_AUTO_START_STORAGE_DIR "${FASTCACHE_AUTO_INSTALL_DIR}/daemon-storage" CACHE PATH
-        "storage directory for a daemon FASTCACHE_AUTO_START starts, so its cache survives a restart")
+if(NOT DEFINED PACE_AUTO_START_STORAGE_DIR)
+    set(PACE_AUTO_START_STORAGE_DIR "${PACE_AUTO_INSTALL_DIR}/daemon-storage" CACHE PATH
+        "storage directory for a daemon PACE_AUTO_START starts, so its cache survives a restart")
 endif()
 
 # Published-asset table, one row per (host system, host architecture) this
@@ -682,7 +682,7 @@ endif()
 #                                different prefixes
 #   _fc_asset_<id>_exe           staged launcher's filename
 #   _fc_asset_<id>_daemon_member path to the daemon inside the same archive,
-#                                staged only when FASTCACHE_AUTO_START asks
+#                                staged only when PACE_AUTO_START asks
 #                                for it — see _fc_auto_start_fastcached below
 #   _fc_asset_<id>_daemon_exe    staged daemon's filename
 set(_fc_asset_rows linux_x86_64 darwin_arm64 windows_amd64)
@@ -720,7 +720,7 @@ set(_fc_asset_windows_amd64_daemon_member "bin/pace-kv.exe")
 set(_fc_asset_windows_amd64_daemon_exe "pace-kv.exe")
 
 # The host the table above is asked about: this machine, unless
-# FASTCACHE_AUTO_INSTALL_HOST_SYSTEM / _HOST_PROCESSOR state another.
+# PACE_AUTO_INSTALL_HOST_SYSTEM / _HOST_PROCESSOR state another.
 #
 # `scripts/check-compile-cache-autoinstall.cmake` states one, because each of
 # its rows exercises a different way to decline and on a host no binary is
@@ -736,11 +736,11 @@ set(_fc_asset_windows_amd64_daemon_exe "pace-kv.exe")
 function(_fc_auto_install_host systemVar processorVar)
     set(_system "${CMAKE_HOST_SYSTEM_NAME}")
     set(_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
-    if(NOT "${FASTCACHE_AUTO_INSTALL_HOST_SYSTEM}" STREQUAL "")
-        set(_system "${FASTCACHE_AUTO_INSTALL_HOST_SYSTEM}")
+    if(NOT "${PACE_AUTO_INSTALL_HOST_SYSTEM}" STREQUAL "")
+        set(_system "${PACE_AUTO_INSTALL_HOST_SYSTEM}")
     endif()
-    if(NOT "${FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR}" STREQUAL "")
-        set(_processor "${FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR}")
+    if(NOT "${PACE_AUTO_INSTALL_HOST_PROCESSOR}" STREQUAL "")
+        set(_processor "${PACE_AUTO_INSTALL_HOST_PROCESSOR}")
     endif()
     set(${systemVar} "${_system}" PARENT_SCOPE)
     set(${processorVar} "${_processor}" PARENT_SCOPE)
@@ -783,15 +783,15 @@ function(_fc_auto_install_release_json outVar reasonVar)
 
     # One cache file per repository: the staging directory is shared, and two
     # projects pointing at different forks must not read each other's answer.
-    string(REPLACE "/" "_" _repoSlug "${FASTCACHE_AUTO_INSTALL_REPO}")
-    set(_cacheFile "${FASTCACHE_AUTO_INSTALL_DIR}/${_repoSlug}-latest.json")
+    string(REPLACE "/" "_" _repoSlug "${PACE_AUTO_INSTALL_REPO}")
+    set(_cacheFile "${PACE_AUTO_INSTALL_DIR}/${_repoSlug}-latest.json")
 
     if(EXISTS "${_cacheFile}")
         file(TIMESTAMP "${_cacheFile}" _stamp "%s")
         string(TIMESTAMP _now "%s" UTC)
         if(_stamp AND _now)
             math(EXPR _ageHours "(${_now} - ${_stamp}) / 3600")
-            if(_ageHours LESS ${FASTCACHE_AUTO_INSTALL_TTL_HOURS})
+            if(_ageHours LESS ${PACE_AUTO_INSTALL_TTL_HOURS})
                 file(READ "${_cacheFile}" _cached)
                 set(${outVar} "${_cached}" PARENT_SCOPE)
                 set(${reasonVar} "" PARENT_SCOPE)
@@ -811,7 +811,7 @@ function(_fc_auto_install_release_json outVar reasonVar)
 
     set(_tmp "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-download/latest.json")
     file(DOWNLOAD
-        "${FASTCACHE_AUTO_INSTALL_API}/repos/${FASTCACHE_AUTO_INSTALL_REPO}/releases/latest"
+        "${PACE_AUTO_INSTALL_API}/repos/${PACE_AUTO_INSTALL_REPO}/releases/latest"
         "${_tmp}"
         ${_headers}
         STATUS _status
@@ -841,7 +841,7 @@ function(_fc_auto_install_release_json outVar reasonVar)
 endfunction()
 
 # Resolve which release row, version and (when not pinned) release-metadata
-# JSON an auto-install should use — the part of _fc_auto_install_fastcache_cc
+# JSON an auto-install should use — the part of _fc_auto_install_pace_cc
 # that has nothing to do with the launcher specifically. Split out so
 # _fc_auto_start_fastached (below) resolves to the *same* release the launcher
 # did rather than asking the GitHub API a second time and risking a different
@@ -867,8 +867,8 @@ function(_fc_auto_install_resolve_release rowVar versionVar jsonVar reasonVar)
     # A pinned version is an answer in itself and costs no API call, which is
     # also what makes an auto-installing build reproducible.
     set(_json "")
-    if(FASTCACHE_AUTO_INSTALL_VERSION)
-        set(_version "${FASTCACHE_AUTO_INSTALL_VERSION}")
+    if(PACE_AUTO_INSTALL_VERSION)
+        set(_version "${PACE_AUTO_INSTALL_VERSION}")
     else()
         _fc_auto_install_release_json(_json _why)
         if(NOT _json)
@@ -899,15 +899,15 @@ endfunction()
 # Download and stage a prebuilt pace-cc for this host.
 # @param outVar Set to the staged executable's path, or empty on any failure.
 # @param reasonVar Set to a short diagnostic when outVar is empty.
-function(_fc_auto_install_fastcache_cc outVar reasonVar)
+function(_fc_auto_install_pace_cc outVar reasonVar)
     set(${outVar} "" PARENT_SCOPE)
 
     # An empty address is the documented way to opt out of pace-cc, so
     # fetching it would quietly override an instruction not to use it. Reported
     # rather than skipped: asking for the fetch and getting nothing, with no word
     # about why, is the silent fall-through the rest of this module avoids.
-    if(NOT FASTCACHE_ADDR)
-        set(${reasonVar} "FASTCACHE_ADDR is empty, which opts out of pace-cc" PARENT_SCOPE)
+    if(NOT PACE_ADDR)
+        set(${reasonVar} "PACE_ADDR is empty, which opts out of pace-cc" PARENT_SCOPE)
         return()
     endif()
 
@@ -919,15 +919,15 @@ function(_fc_auto_install_fastcache_cc outVar reasonVar)
 
     # Cached for the lifetime of this configure so a later auto-start of the
     # daemon (from the very same release) resolves nothing a second time.
-    set(_FASTCACHE_RESOLVED_ROW "${_row}" CACHE INTERNAL "")
-    set(_FASTCACHE_RESOLVED_VERSION "${_version}" CACHE INTERNAL "")
-    set(_FASTCACHE_RESOLVED_JSON "${_json}" CACHE INTERNAL "")
+    set(_PACE_RESOLVED_ROW "${_row}" CACHE INTERNAL "")
+    set(_PACE_RESOLVED_VERSION "${_version}" CACHE INTERNAL "")
+    set(_PACE_RESOLVED_JSON "${_json}" CACHE INTERNAL "")
 
     # Keyed by platform as well as version. A home directory is not always local
     # to one machine — a shared or synchronised $HOME is normal — and two hosts of
     # different architectures reaching the same staging directory must not be
     # handed each other's binary.
-    set(_stagedDir "${FASTCACHE_AUTO_INSTALL_DIR}/${_version}/${_fc_asset_${_row}_platform}")
+    set(_stagedDir "${PACE_AUTO_INSTALL_DIR}/${_version}/${_fc_asset_${_row}_platform}")
     set(_staged "${_stagedDir}/${_fc_asset_${_row}_exe}")
 
     if(NOT EXISTS "${_staged}")
@@ -988,7 +988,7 @@ function(_fc_auto_install_fetch_archive row version json unpackDirVar reasonVar)
     # Prefer the URL and digest the API reported. A pinned version has no
     # metadata to consult, so its URL is composed from the documented layout —
     # which is also the path an internal mirror takes, since pinning a version
-    # and pointing FASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE elsewhere installs
+    # and pointing PACE_AUTO_INSTALL_DOWNLOAD_BASE elsewhere installs
     # without reaching GitHub at all.
     if(_json)
         string(JSON _assetCount ERROR_VARIABLE _jsonErr LENGTH "${_json}" assets)
@@ -1018,7 +1018,7 @@ function(_fc_auto_install_fetch_archive row version json unpackDirVar reasonVar)
             return()
         endif()
     else()
-        set(_url "${FASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE}/${FASTCACHE_AUTO_INSTALL_REPO}/releases/download/v${_version}/${_assetName}")
+        set(_url "${PACE_AUTO_INSTALL_DOWNLOAD_BASE}/${PACE_AUTO_INSTALL_REPO}/releases/download/v${_version}/${_assetName}")
     endif()
 
     message(STATUS "[cache] Fetching the pace-kv ${_version} release archive for ${_fc_asset_${_row}_platform}")
@@ -1128,11 +1128,11 @@ function(_fc_auto_install_download row version json stagedDir reasonVar)
 endfunction()
 
 # Split from the connect attempt below only by host/port parsing, itself
-# already done once for FASTCACHE_ADDR — kept as its own function so the race
+# already done once for PACE_ADDR — kept as its own function so the race
 # check (does *anything* answer) and the future probe share no code by
 # accident growing shared state.
 #
-# @param addr host:port to parse (FASTCACHE_ADDR's own shape).
+# @param addr host:port to parse (PACE_ADDR's own shape).
 # @param hostVar Set to the host part.
 # @param portVar Set to the port part.
 function(_fc_split_host_port addr hostVar portVar)
@@ -1195,15 +1195,15 @@ function(_fc_first_line text outVar)
     set(${outVar} "${_line}" PARENT_SCOPE)
 endfunction()
 
-# Is anything at all answering at FASTCACHE_ADDR? Deliberately cheaper and
-# less discerning than _fc_probe_fastcache_cc: that probe needs a real
+# Is anything at all answering at PACE_ADDR? Deliberately cheaper and
+# less discerning than _fc_probe_pace_cc: that probe needs a real
 # compiler invocation and answers "does the CACHE work", which is not the
 # question here. This only answers "would starting a daemon collide with one
 # already running" — ours from an earlier configure, or someone else's — so
 # two configures racing on the same port must not both attempt a bind. Losing
 # this race is deliberately not a failure case: whichever configure's spawn
 # loses treats the winner's daemon as its own, which is exactly what
-# _fc_probe_fastcache_cc then evaluates.
+# _fc_probe_pace_cc then evaluates.
 #
 # CMake has no raw-socket primitive, so this shells out to the daemon binary
 # itself with --version against the address — the one operation every
@@ -1224,7 +1224,7 @@ function(_fc_daemon_answering addr outVar)
     # pace-cc's own probe path already proves connectivity end-to-end at
     # negligible cost (it fails fast, ~10ms, against a closed port), so reuse
     # it here instead of inventing a second way to ask the same question.
-    if(NOT FASTCACHE_CC)
+    if(NOT PACE_CC)
         return()
     endif()
     set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-probe")
@@ -1240,13 +1240,13 @@ function(_fc_daemon_answering addr outVar)
     endif()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
-                "FASTCACHE_ADDR=${addr}"
-                "FASTCACHE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-                "FASTCACHE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-                "FASTCACHE_VERBOSE=1"
-                "FASTCACHE_NO_STATS=1"
-                "FASTCACHE_TIMEOUT=500ms"
-                "${FASTCACHE_CC}" "${CMAKE_CXX_COMPILER}" ${_args}
+                "PACE_ADDR=${addr}"
+                "PACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+                "PACE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+                "PACE_VERBOSE=1"
+                "PACE_NO_STATS=1"
+                "PACE_TIMEOUT=500ms"
+                "${PACE_CC}" "${CMAKE_CXX_COMPILER}" ${_args}
         WORKING_DIRECTORY "${_dir}"
         TIMEOUT 3
         RESULT_VARIABLE _rc
@@ -1257,14 +1257,14 @@ function(_fc_daemon_answering addr outVar)
     endif()
 endfunction()
 
-# Stage and start a pace-kv daemon in the background when FASTCACHE_ADDR is
-# otherwise unreachable, so FASTCACHE_AUTO_INSTALL's launcher has something to
+# Stage and start a pace-kv daemon in the background when PACE_ADDR is
+# otherwise unreachable, so PACE_AUTO_INSTALL's launcher has something to
 # talk to on a genuinely clean machine (issue #90). Nothing here may fail a
-# configure, exactly like _fc_auto_install_fastcache_cc: every failure is one
+# configure, exactly like _fc_auto_install_pace_cc: every failure is one
 # status line and a fall-through to the probe finding no daemon, which is the
-# behaviour without FASTCACHE_AUTO_START at all.
+# behaviour without PACE_AUTO_START at all.
 function(_fc_auto_start_fastcached)
-    _fc_daemon_answering("${FASTCACHE_ADDR}" _answering)
+    _fc_daemon_answering("${PACE_ADDR}" _answering)
     if(_answering)
         # Ours from an earlier configure, or a pre-existing daemon started by
         # hand — either way there is nothing to start, and starting a second
@@ -1272,9 +1272,9 @@ function(_fc_auto_start_fastcached)
         return()
     endif()
 
-    _fc_split_host_port("${FASTCACHE_ADDR}" _bindHost _bindPort)
+    _fc_split_host_port("${PACE_ADDR}" _bindHost _bindPort)
     if(NOT _bindPort)
-        message(STATUS "[cache] Not starting a daemon: FASTCACHE_ADDR '${FASTCACHE_ADDR}' has no port")
+        message(STATUS "[cache] Not starting a daemon: PACE_ADDR '${PACE_ADDR}' has no port")
         return()
     endif()
 
@@ -1284,10 +1284,10 @@ function(_fc_auto_start_fastcached)
     # the launcher just staged, if a release published in between the two
     # calls. Falling through to a fresh resolution below still works when the
     # launcher came from PATH and resolved nothing.
-    if(DEFINED _FASTCACHE_RESOLVED_ROW AND _FASTCACHE_RESOLVED_ROW)
-        set(_row "${_FASTCACHE_RESOLVED_ROW}")
-        set(_version "${_FASTCACHE_RESOLVED_VERSION}")
-        set(_json "${_FASTCACHE_RESOLVED_JSON}")
+    if(DEFINED _PACE_RESOLVED_ROW AND _PACE_RESOLVED_ROW)
+        set(_row "${_PACE_RESOLVED_ROW}")
+        set(_version "${_PACE_RESOLVED_VERSION}")
+        set(_json "${_PACE_RESOLVED_JSON}")
     else()
         _fc_auto_install_resolve_release(_row _version _json _why)
         if(NOT _row)
@@ -1301,7 +1301,7 @@ function(_fc_auto_start_fastcached)
         return()
     endif()
 
-    set(_stagedDir "${FASTCACHE_AUTO_INSTALL_DIR}/${_version}/${_fc_asset_${_row}_platform}")
+    set(_stagedDir "${PACE_AUTO_INSTALL_DIR}/${_version}/${_fc_asset_${_row}_platform}")
     set(_staged "${_stagedDir}/${_fc_asset_${_row}_daemon_exe}")
 
     if(NOT EXISTS "${_staged}")
@@ -1319,11 +1319,11 @@ function(_fc_auto_start_fastcached)
         endif()
     endif()
 
-    file(MAKE_DIRECTORY "${FASTCACHE_AUTO_START_STORAGE_DIR}")
+    file(MAKE_DIRECTORY "${PACE_AUTO_START_STORAGE_DIR}")
 
-    # Bind whatever host FASTCACHE_ADDR actually named — including a LAN
+    # Bind whatever host PACE_ADDR actually named — including a LAN
     # address someone deliberately pointed a shared daemon at — and default
-    # only when it named none, since FASTCACHE_ADDR's own default
+    # only when it named none, since PACE_ADDR's own default
     # (127.0.0.1:6674, set near the top of this file) is loopback-only and an
     # auto-started daemon should not be reachable from the network by
     # surprise.
@@ -1335,7 +1335,7 @@ function(_fc_auto_start_fastcached)
     set(_daemonArgs
         "--bind=${_bindArg}"
         "--port=${_bindPort}"
-        "--storage=${FASTCACHE_AUTO_START_STORAGE_DIR}")
+        "--storage=${PACE_AUTO_START_STORAGE_DIR}")
 
     if(CMAKE_HOST_WIN32)
         # No double-fork equivalent outside the SCM path (see
@@ -1370,7 +1370,7 @@ function(_fc_auto_start_fastcached)
         # machine reboots or a human kills it), and for a test that needs to
         # clean one up without a PID execute_process never hands back, since
         # --daemon double-forks.
-        set(_pidfile "${FASTCACHE_AUTO_START_STORAGE_DIR}/fastcached.pid")
+        set(_pidfile "${PACE_AUTO_START_STORAGE_DIR}/fastcached.pid")
         execute_process(
             COMMAND "${_staged}" --daemon ${_daemonArgs} "--pidfile=${_pidfile}"
             RESULT_VARIABLE _rc
@@ -1410,7 +1410,7 @@ function(_fc_auto_start_fastcached)
     set(_upAttempt 0)
     set(_up FALSE)
     while(_upAttempt LESS 10 AND NOT _up)
-        _fc_daemon_answering("${FASTCACHE_ADDR}" _up)
+        _fc_daemon_answering("${PACE_ADDR}" _up)
         if(NOT _up)
             execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.1)
         endif()
@@ -1418,9 +1418,9 @@ function(_fc_auto_start_fastcached)
     endwhile()
 
     if(_up)
-        message(STATUS "[cache] Auto-started pace-kv (${_staged}) listening on ${FASTCACHE_ADDR}, storage=${FASTCACHE_AUTO_START_STORAGE_DIR}")
+        message(STATUS "[cache] Auto-started pace-kv (${_staged}) listening on ${PACE_ADDR}, storage=${PACE_AUTO_START_STORAGE_DIR}")
     else()
-        message(STATUS "[cache] Started pace-kv (${_staged}) but it is not answering on ${FASTCACHE_ADDR} yet; the probe below will report the outcome")
+        message(STATUS "[cache] Started pace-kv (${_staged}) but it is not answering on ${PACE_ADDR} yet; the probe below will report the outcome")
     endif()
 endfunction()
 
@@ -1438,14 +1438,14 @@ endif()
 # decision already made, and preempting it would be the behaviour change this is
 # careful not to be.
 if(USE_COMPILER_CACHE
-   AND FASTCACHE_AUTO_INSTALL
-   AND NOT FASTCACHE_CC
+   AND PACE_AUTO_INSTALL
+   AND NOT PACE_CC
    AND NOT _fc_sccache_selectable
    AND NOT CCACHE)
-    _fc_auto_install_fastcache_cc(_fc_auto_installed _fc_auto_why_not)
+    _fc_auto_install_pace_cc(_fc_auto_installed _fc_auto_why_not)
     if(_fc_auto_installed)
         message(STATUS "[cache] Auto-installed pace-cc (${_fc_auto_installed})")
-        set(FASTCACHE_CC "${_fc_auto_installed}" CACHE FILEPATH
+        set(PACE_CC "${_fc_auto_installed}" CACHE FILEPATH
             "pace-cc tool path; needs a pace-kv daemon to be used" FORCE)
     else()
         message(STATUS "[cache] Not auto-installing pace-cc: ${_fc_auto_why_not}")
@@ -1454,17 +1454,17 @@ endif()
 
 # Belongs after auto-install rather than inside it: starting a daemon is
 # useful whether pace-cc came from PATH or was just staged above, and
-# either way FASTCACHE_CC has to be a real path before _fc_daemon_answering
+# either way PACE_CC has to be a real path before _fc_daemon_answering
 # can shell out to it to test the port.
 if(USE_COMPILER_CACHE
-   AND FASTCACHE_AUTO_START
-   AND FASTCACHE_CC
-   AND FASTCACHE_ADDR)
+   AND PACE_AUTO_START
+   AND PACE_CC
+   AND PACE_ADDR)
     _fc_auto_start_fastcached()
 endif()
 
 # Ask pace-cc itself whether the cache works, by compiling one tiny
-# translation unit through it with FASTCACHE_VERBOSE=1 and requiring a reported
+# translation unit through it with PACE_VERBOSE=1 and requiring a reported
 # cache outcome. A launcher that cannot reach its daemon still compiles fine —
 # it just runs the real compiler — so nothing but an end-to-end exchange tells
 # "the cache works" apart from "every TU will silently pay a failed connect,
@@ -1476,7 +1476,7 @@ endif()
 #
 # @param outVar Set to TRUE when the cache served the probe, FALSE otherwise.
 # @param reasonVar Set to a short diagnostic when outVar is FALSE.
-function(_fc_probe_fastcache_cc outVar reasonVar)
+function(_fc_probe_pace_cc outVar reasonVar)
     set(${outVar} FALSE PARENT_SCOPE)
 
     set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-probe")
@@ -1494,7 +1494,7 @@ function(_fc_probe_fastcache_cc outVar reasonVar)
 
     # A probe that answers takes ~0.1s locally and little more over a LAN, so ten
     # seconds is generous for a working daemon and a bounded wait for a broken
-    # one. The cap has to live here: FASTCACHE_TIMEOUT bounds the launcher's
+    # one. The cap has to live here: PACE_TIMEOUT bounds the launcher's
     # send/recv but not its connect(), so an address that drops packets rather
     # than refusing them — a firewall, a downed VPN, a host that is simply gone —
     # stalls on the TCP connect timeout instead (measured: 2m30s), and every
@@ -1502,16 +1502,16 @@ function(_fc_probe_fastcache_cc outVar reasonVar)
     set(_timeoutSeconds 10)
 
     # NO_STATS keeps the probe out of `pace-cc --show-stats`, where it would
-    # read as a build that never hits. FASTCACHE_TIMEOUT bounds a daemon that accepts
+    # read as a build that never hits. PACE_TIMEOUT bounds a daemon that accepts
     # the connection and then stalls; builds keep the launcher's own default.
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
-                ${_fc_fastcache_env}
-                "FASTCACHE_SCHEDULER="
-                "FASTCACHE_VERBOSE=1"
-                "FASTCACHE_NO_STATS=1"
-                "FASTCACHE_TIMEOUT=2s"
-                "${FASTCACHE_CC}" "${CMAKE_CXX_COMPILER}" ${_args}
+                ${_fc_pace_env}
+                "PACE_SCHEDULER="
+                "PACE_VERBOSE=1"
+                "PACE_NO_STATS=1"
+                "PACE_TIMEOUT=2s"
+                "${PACE_CC}" "${CMAKE_CXX_COMPILER}" ${_args}
         WORKING_DIRECTORY "${_dir}"
         TIMEOUT ${_timeoutSeconds}
         RESULT_VARIABLE _rc
@@ -1544,7 +1544,7 @@ endfunction()
 #                            there and not being used is the silence #815 is
 #                            about. Empty for a row whose absence explains
 #                            itself, which is why pace-cc has none: an
-#                            emptied FASTCACHE_ADDR is a documented opt-out (#372)
+#                            emptied PACE_ADDR is a documented opt-out (#372)
 #   _fc_cache_<id>_env       NAME=VALUE pairs to inject around the invocation
 #   _fc_cache_<id>_check     function deciding usability at configure time
 #                            (empty when being installed is enough); called as
@@ -1562,7 +1562,7 @@ endfunction()
 #   _fc_cache_<id>_predicts_detail  what to tell the operator about fixing this
 #                            row, printed with that warning
 # Supporting a fourth launcher is adding an id here plus its ten variables.
-set(_fc_cache_candidates fastcache_cc sccache ccache)
+set(_fc_cache_candidates pace_cc sccache ccache)
 
 # Render "<label>[ <detail>]" for a row, so a launcher and where it points are
 # named the same way whether it won or was passed over. Diagnosing a daemon that
@@ -1577,14 +1577,14 @@ function(_fc_cache_describe id outVar)
     set(${outVar} "${_text}" PARENT_SCOPE)
 endfunction()
 
-set(_fc_cache_fastcache_cc_label "pace-cc")
-set(_fc_cache_fastcache_cc_program "${FASTCACHE_CC}")
-set(_fc_cache_fastcache_cc_requires "${FASTCACHE_ADDR}")
-# No note: an empty FASTCACHE_ADDR is the documented way to opt out of this row
+set(_fc_cache_pace_cc_label "pace-cc")
+set(_fc_cache_pace_cc_program "${PACE_CC}")
+set(_fc_cache_pace_cc_requires "${PACE_ADDR}")
+# No note: an empty PACE_ADDR is the documented way to opt out of this row
 # (#372), so a machine that took it does not need telling what it just asked for.
-set(_fc_cache_fastcache_cc_requires_note "")
-set(_fc_cache_fastcache_cc_env ${_fc_fastcache_env} "${_fc_dispatch_env}")
-set(_fc_cache_fastcache_cc_check _fc_probe_fastcache_cc)
+set(_fc_cache_pace_cc_requires_note "")
+set(_fc_cache_pace_cc_env ${_fc_pace_env} "${_fc_dispatch_env}")
+set(_fc_cache_pace_cc_check _fc_probe_pace_cc)
 # A WIRE VERSION mismatch, and only that. "not installed", "no answer" and "the
 # probe was uncacheable" predict nothing about the replacement, and warning on
 # them is how a warning becomes one people learn to skip.
@@ -1593,16 +1593,16 @@ set(_fc_cache_fastcache_cc_check _fc_probe_fastcache_cc)
 # in `Protocol/CompileCacheWire.hpp`. Nothing connects the two, so a rename there
 # disarms this silently -- narrower than the display-sentence parsing it replaced,
 # and recorded rather than hidden.
-set(_fc_cache_fastcache_cc_predicts "unsupported-version")
+set(_fc_cache_pace_cc_predicts "unsupported-version")
 # Names the remedy, and names the DIRECTION, which is the step #815's acceptance
 # clause 2 says the refusal stops short of. `unsupported wire version 3; this
 # server speaks 1..1` is accurate and leaves the reader to work out which end is
 # behind -- and the sentence is written by the DAEMON, so an old daemon will go on
 # sending the old wording forever and cannot be fixed there. It is read here.
-set(_fc_cache_fastcache_cc_predicts_detail
-    "A daemon IS answering at ${FASTCACHE_ADDR} and it is one you installed; it is simply out of step with this pace-cc, so this build is not using the cache you think it is. Read the refusal above as `unsupported wire version <N>; this server speaks <lo>..<hi>`: <N> is what this launcher speaks and <lo>..<hi> is what the daemon accepts, so an <hi> below <N> means the DAEMON is the older of the two and is the one to replace. Compare `pace-cc --version` against the daemon's, and check which binary the service actually starts -- a packaged daemon on PATH ahead of a hand-built launcher is how #815 was found. This is a normal state during a rollout, which is why it is a warning and not a refusal to configure.")
-set(_fc_cache_fastcache_cc_detail "at ${FASTCACHE_ADDR}")
-set(_fc_cache_fastcache_cc_caveat "")
+set(_fc_cache_pace_cc_predicts_detail
+    "A daemon IS answering at ${PACE_ADDR} and it is one you installed; it is simply out of step with this pace-cc, so this build is not using the cache you think it is. Read the refusal above as `unsupported wire version <N>; this server speaks <lo>..<hi>`: <N> is what this launcher speaks and <lo>..<hi> is what the daemon accepts, so an <hi> below <N> means the DAEMON is the older of the two and is the one to replace. Compare `pace-cc --version` against the daemon's, and check which binary the service actually starts -- a packaged daemon on PATH ahead of a hand-built launcher is how #815 was found. This is a normal state during a rollout, which is why it is a warning and not a refusal to configure.")
+set(_fc_cache_pace_cc_detail "at ${PACE_ADDR}")
+set(_fc_cache_pace_cc_caveat "")
 
 set(_fc_cache_sccache_label "sccache")
 set(_fc_cache_sccache_program "${SCCACHE}")
@@ -1771,7 +1771,7 @@ if(_fc_cache_chosen)
     # Whether a miss leaves this machine, said beside the launcher that decides it: "pace-cc
     # is the launcher" read as "the fleet is building", and it was not. Only for the row that can
     # dispatch at all, and in the words `_fc_dispatch_state` derived from the value it baked.
-    if(_fc_cache_chosen STREQUAL "fastcache_cc")
+    if(_fc_cache_chosen STREQUAL "pace_cc")
         message(STATUS "${_fc_dispatch_line}")
     endif()
 
@@ -1943,7 +1943,7 @@ if(_fc_cache_chosen)
     # machines. Under ccache or sccache the rule's root would sit in their key and buy nothing,
     # and changing the program's own `__FILE__` for no gain is not this module's to do.
     set(_fc_source_map_flags "")
-    if(_fc_cache_chosen STREQUAL "fastcache_cc")
+    if(_fc_cache_chosen STREQUAL "pace_cc")
         _fc_source_prefix_map_rules("${CMAKE_SOURCE_DIR}" "${_fc_deps_dir}" _fc_source_maps)
         list(TRANSFORM _fc_source_maps PREPEND "-fmacro-prefix-map=" OUTPUT_VARIABLE _fc_source_map_flags)
         list(JOIN _fc_source_map_flags " " _fc_source_map_flags)
@@ -1979,9 +1979,9 @@ if(_fc_cache_chosen)
         endif()
 
         # `check_compiler_flag` rather than the per-language modules, and cached in
-        # `FASTCACHE_<LANG>_HAS_DEBUG_PREFIX_MAP`, so a reconfigure pays nothing.
-        check_compiler_flag(${_lang} "-fdebug-prefix-map=/a=/b" FASTCACHE_${_lang}_HAS_DEBUG_PREFIX_MAP)
-        if(FASTCACHE_${_lang}_HAS_DEBUG_PREFIX_MAP)
+        # `PACE_<LANG>_HAS_DEBUG_PREFIX_MAP`, so a reconfigure pays nothing.
+        check_compiler_flag(${_lang} "-fdebug-prefix-map=/a=/b" PACE_${_lang}_HAS_DEBUG_PREFIX_MAP)
+        if(PACE_${_lang}_HAS_DEBUG_PREFIX_MAP)
             string(APPEND CMAKE_${_lang}_FLAGS " ${_fc_prefix_map_flags}")
             list(APPEND _fc_prefix_map_langs ${_lang})
         else()
@@ -1989,8 +1989,8 @@ if(_fc_cache_chosen)
         endif()
 
         if(NOT _fc_source_map_flags STREQUAL "")
-            check_compiler_flag(${_lang} "-fmacro-prefix-map=/a=/b" FASTCACHE_${_lang}_HAS_MACRO_PREFIX_MAP)
-            if(FASTCACHE_${_lang}_HAS_MACRO_PREFIX_MAP)
+            check_compiler_flag(${_lang} "-fmacro-prefix-map=/a=/b" PACE_${_lang}_HAS_MACRO_PREFIX_MAP)
+            if(PACE_${_lang}_HAS_MACRO_PREFIX_MAP)
                 string(APPEND CMAKE_${_lang}_FLAGS " ${_fc_source_map_flags}")
                 list(APPEND _fc_source_map_langs ${_lang})
             else()

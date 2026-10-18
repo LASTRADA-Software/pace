@@ -20,7 +20,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Fastcached  = "$PSScriptRoot/../../out/build/clangcl-debug/target/pace-kv.exe",
+    [string]$PaceKv  = "$PSScriptRoot/../../out/build/clangcl-debug/target/pace-kv.exe",
     [string]$Client      = "$PSScriptRoot/../../out/build/clangcl-debug/target/compile-cache-testclient.exe",
     # Drawn per run when 0, for the reason `.agent/rules/testing.md` gives: a
     # fixed port needs a reaper, and this file had neither -- #220's defect
@@ -41,11 +41,11 @@ $exitCode = 0
 # refuse-or-reap decision and the draw both live in one module, so this fixture
 # cannot drift from its two siblings the way it did while each owned a copy.
 Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EPorts.psm1") -Force
-$Port = Get-E2EFixturePort $Port $Fastcached "pace-kv"
+$Port = Get-E2EFixturePort $Port $PaceKv "pace-kv"
 
-function Start-Fastcached {
+function Start-PaceKv {
     Write-Host "starting pace-kv on 127.0.0.1:$Port ..."
-    $p = Start-Process -FilePath $Fastcached -ArgumentList "--bind","127.0.0.1","--port","$Port" -PassThru -WindowStyle Hidden
+    $p = Start-Process -FilePath $PaceKv -ArgumentList "--bind","127.0.0.1","--port","$Port" -PassThru -WindowStyle Hidden
     Start-Sleep -Milliseconds 600
     if ($p.HasExited) { throw "pace-kv exited immediately (exit $($p.ExitCode))" }
     return $p
@@ -94,7 +94,7 @@ function Invoke-CrossDepth([string]$compiler, [string]$deepSrc, [string]$shallow
     return $true
 }
 
-$server = Start-Fastcached
+$server = Start-PaceKv
 try {
     if ($Synthetic -or $CheckoutRoots.Count -eq 0) {
         Write-Host "=== synthetic cross-depth (generated source, no project files) ==="

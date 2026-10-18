@@ -30,7 +30,7 @@ namespace Pace
 /// would remove the need for it.
 ///
 /// `Identity` is always available — even in a build configured with
-/// `FASTCACHED_ENABLE_COMPRESSION=OFF` — and stores the value verbatim. It is
+/// `PACE_ENABLE_COMPRESSION=OFF` — and stores the value verbatim. It is
 /// also the shrink-check fallback: a value that does not get smaller when
 /// compressed is stored under `Identity` so a read never pays a pointless
 /// decompress.
@@ -49,7 +49,7 @@ class Compression
   public:
     /// Whether `codec` can actually be used by this build. `Identity` is
     /// always usable; `Lz4`/`Zstd` are usable only when the library was built
-    /// with `FASTCACHED_ENABLE_COMPRESSION` (the `FC_COMPRESSION_ENABLED`
+    /// with `PACE_ENABLE_COMPRESSION` (the `FC_COMPRESSION_ENABLED`
     /// compile definition).
     /// @param codec Codec to test.
     /// @return True if the codec is compiled in and selectable.
@@ -61,7 +61,7 @@ class Compression
     /// true about a running store.** A codec this build lacks is not an error at the
     /// encode path -- `CowTreeStorage` and `InMemoryLruStorage` each fall back to
     /// storing verbatim rather than dropping data -- so a value configured `zstd` on
-    /// a `FASTCACHED_ENABLE_COMPRESSION=OFF` build is stored, tagged and read back
+    /// a `PACE_ENABLE_COMPRESSION=OFF` build is stored, tagged and read back
     /// under `Identity`. Config validation refuses a codec an operator NAMES, which
     /// leaves exactly one route in: a DEFAULT, which nobody typed and nothing
     /// validates.

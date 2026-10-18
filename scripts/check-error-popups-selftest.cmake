@@ -9,22 +9,22 @@
 # refusal carries: every refusal prints `CMake Error`, so asserting that alone would pass
 # with the arms exchanged.
 #
-# Usage: cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<dir> -P <this>
+# Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-error-popups.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-error-popups.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
 set(failures "")
 set(cases 0)
 set(variable "FC_SELFTEST_SUPPRESS")
@@ -53,7 +53,7 @@ endfunction()
 # @param edges the build.ninja body, or `<none>` for no file
 # @param outVar receives the tree's path
 function(fc_stage name manifest registrations nested catchTests edges outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(MAKE_DIRECTORY "${tree}/src/apps/x")
     file(WRITE "${tree}/error-popups-Debug.manifest" "${manifest}")
     string(REPLACE "@TREE@" "${tree}" registrations "${registrations}")

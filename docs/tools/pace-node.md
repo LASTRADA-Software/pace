@@ -269,12 +269,12 @@ alone. See [who may use it](#who-may-use-it).
 And the client, which is the launcher you already use:
 
 ```sh
-export FASTCACHE_ADDR=build-cache.internal:6674
-export FASTCACHE_SCHEDULER=build-cache.internal:6675
+export PACE_ADDR=build-cache.internal:6674
+export PACE_SCHEDULER=build-cache.internal:6675
 cmake -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc ...
 ```
 
-Unset `FASTCACHE_SCHEDULER` and every miss compiles locally again, which is the
+Unset `PACE_SCHEDULER` and every miss compiles locally again, which is the
 behaviour without this feature.
 
 ## `--advertise` is the flag to get right
@@ -331,8 +331,8 @@ startup refusal as well.
 
 | Series | What a rise means |
 |---|---|
-| `fastcache_node_endpoint_changes_total` | The endpoint this node advertises moved: the address it routes from changed (a DHCP renewal, Wi-Fi to wired, another network), or a reload re-pinned `--advertise`. Each move is logged at Info with the old and the new endpoint; a worker's heartbeat is woken to re-register under the new one at once, and a lease granted for the old one is honoured until it has. Zero on a node whose `--advertise` stays pinned to one value; a reload that re-pins it to another counts one move. |
-| `fastcache_node_raft_endpoint_changes_total` | The Raft endpoint this node advertises moved, for the same two reasons. Read it beside the row above: the two move together unless `--raft-self` is pinned apart from `--advertise`. It stays at zero on a node that dials in (a learner) or runs no consensus: nobody dials such a node's Raft port, so none is derived. |
+| `pace_node_endpoint_changes_total` | The endpoint this node advertises moved: the address it routes from changed (a DHCP renewal, Wi-Fi to wired, another network), or a reload re-pinned `--advertise`. Each move is logged at Info with the old and the new endpoint; a worker's heartbeat is woken to re-register under the new one at once, and a lease granted for the old one is honoured until it has. Zero on a node whose `--advertise` stays pinned to one value; a reload that re-pins it to another counts one move. |
+| `pace_node_raft_endpoint_changes_total` | The Raft endpoint this node advertises moved, for the same two reasons. Read it beside the row above: the two move together unless `--raft-self` is pinned apart from `--advertise`. It stays at zero on a node that dials in (a learner) or runs no consensus: nobody dials such a node's Raft port, so none is derived. |
 
 ## Anything the fleet reads has to be text
 
@@ -420,7 +420,7 @@ When something did move:
 The old fingerprint **stops being served immediately**, before the new registration
 is announced. A client still holding a lease for it is refused `unknown-fingerprint`
 and compiles locally — the ordinary fallback, counted by
-`fastcache_worker_jobs_refused_unknown_fingerprint_total`.
+`pace_worker_jobs_refused_unknown_fingerprint_total`.
 
 A witness-driven check can only ever notice what it is already watching, so once
 every fifteen minutes the node surveys the machine **unconditionally**. That is the
@@ -566,7 +566,7 @@ scheduler scheduler.internal:6675 did not register a1b2c3:
 It is refused rather than cleaned up because a fingerprint is matched byte for
 byte: a worker admitted under a repaired name would match no client's toolchain
 and would sit in the fleet registered and never picked. The leader counts it as
-`fastcached_dispatch_worker_registrations_malformed_total`, which is the only
+`pace_dispatch_worker_registrations_malformed_total`, which is the only
 trace a peer that never says anything else leaves behind.
 
 The commonest way to produce one is a `--toolchain=<fingerprint>=...` label
@@ -652,7 +652,7 @@ pc-9 would be admitted with no identity key; a machine is admitted and forgotten
 
 A forgotten machine is refused at every door, from any address, once its connection proves
 the revoked key or presents a ticket signed by it; the refusal is counted as
-`fastcache_node_requests_refused_key_revoked_total`, apart from a stranger's, because *a machine
+`pace_node_requests_refused_key_revoked_total`, apart from a stranger's, because *a machine
 you removed* and *a machine nobody admitted* are opposite diagnoses. Only a connection that
 PROVED the key is told why. One that showed it in a ticket is answered in a stranger's words: a
 ticket is bytes anybody may have captured, and *revoked* would tell its holder that the machine
@@ -695,7 +695,7 @@ pace-node \
 ```
 
 ```sh
-export FASTCACHE_ADDR=127.0.0.1:6677   # the node, not the shared cache
+export PACE_ADDR=127.0.0.1:6677   # the node, not the shared cache
 ```
 
 ### Why a second copy is not redundant
@@ -842,8 +842,8 @@ compress into it.
 
 The file can briefly be longer than that footprint: pages freed inside it are reused
 by later writes rather than counted, and each group commit cuts the free pages off
-its end. `fastcached_tier_bytes_used{tier="disk"}` reports the footprint and
-`fastcached_tier_file_bytes{tier="disk"}` the file's length, so both are visible.
+its end. `pace_tier_bytes_used{tier="disk"}` reports the footprint and
+`pace_tier_file_bytes{tier="disk"}` the file's length, so both are visible.
 
 Changing a codec needs no migration and no `--migrate-cache`: every record carries
 the codec it was written under, so reads keep decoding correctly and only later
@@ -851,13 +851,13 @@ writes follow the new setting. A store written by a mixed sequence of settings i
 readable throughout.
 
 `none` is always available; `lz4` and `zstd` depend on
-`FASTCACHED_ENABLE_COMPRESSION`, and **which half of that rule you meet depends on
+`PACE_ENABLE_COMPRESSION`, and **which half of that rule you meet depends on
 whether you named the codec or inherited it.** A codec you *name* is refused by name
 at startup:
 
 ```
 --memory-compression=zstd: codec 'zstd' is not available in this build
-(rebuild with FASTCACHED_ENABLE_COMPRESSION)
+(rebuild with PACE_ENABLE_COMPRESSION)
 ```
 
 The disk half's **default** is `zstd`, and a default is typed by nobody and validated
@@ -902,7 +902,7 @@ unreachable for ten seconds. Inside that window a local miss is answered as a mi
 store is not offered upstream, without dialling, so a build with that `pace-kv` down
 pays at most one timeout every ten seconds rather than one per miss. The first operation
 after the window tries again, and one that gets any answer ends the window at once. A
-store skipped this way counts in `fastcache_node_cache_upstream_store_failures_total`,
+store skipped this way counts in `pace_node_cache_upstream_store_failures_total`,
 exactly as a refused one does: the fleet did not get the object either way.
 
 ### Reading it
@@ -911,15 +911,15 @@ Eight counters on `/metrics`, and the splits are the point:
 
 | Series | Says |
 |---|---|
-| `fastcache_node_cache_hits_total` | Served without touching the network. |
-| `fastcache_node_cache_misses_total` | The local tier did not hold it. |
-| `fastcache_node_cache_upstream_hits_total` | The `pace-kv` its `--upstream` names answered after a local miss. |
-| `fastcache_node_cache_fill_failures_total` | The upstream supplied it and the local tier refused. |
-| `fastcache_node_cache_store_failures_total` | A local write failed — this one is reported to the client. |
-| `fastcache_node_cache_upstream_stores_total` | The fleet accepted an object this node offered. |
-| `fastcache_node_cache_upstream_store_failures_total` | The fleet would not take it. Zero on a node with no `--upstream` — see below. |
-| `fastcache_node_cache_requests_refused_not_local_total` | A caller that is not on this machine asked this tier for something. The node port faces the network on every node, so this counts other machines: ordinary on a node clients are pointed at for the scheduler — peers reaching the right host for the wrong verb — and, anywhere else, something off-box asking for this machine's build output, which [#287](https://github.com/LASTRADA-Software/fastcached/issues/287) withdrew from peers — give them a shared `pace-kv` via `--upstream`. |
-| `fastcache_node_upstream_configured` | `1` when this node has a `pace-kv` to read through to (`--upstream`), `0` when it does not. Absent on a node running no cache at all. |
+| `pace_node_cache_hits_total` | Served without touching the network. |
+| `pace_node_cache_misses_total` | The local tier did not hold it. |
+| `pace_node_cache_upstream_hits_total` | The `pace-kv` its `--upstream` names answered after a local miss. |
+| `pace_node_cache_fill_failures_total` | The upstream supplied it and the local tier refused. |
+| `pace_node_cache_store_failures_total` | A local write failed — this one is reported to the client. |
+| `pace_node_cache_upstream_stores_total` | The fleet accepted an object this node offered. |
+| `pace_node_cache_upstream_store_failures_total` | The fleet would not take it. Zero on a node with no `--upstream` — see below. |
+| `pace_node_cache_requests_refused_not_local_total` | A caller that is not on this machine asked this tier for something. The node port faces the network on every node, so this counts other machines: ordinary on a node clients are pointed at for the scheduler — peers reaching the right host for the wrong verb — and, anywhere else, something off-box asking for this machine's build output, which [#287](https://github.com/LASTRADA-Software/fastcached/issues/287) withdrew from peers — give them a shared `pace-kv` via `--upstream`. |
+| `pace_node_upstream_configured` | `1` when this node has a `pace-kv` to read through to (`--upstream`), `0` when it does not. Absent on a node running no cache at all. |
 
 ### The operator verbs
 
@@ -958,10 +958,10 @@ is no more than `/metrics` already serves unauthenticated.
 
 | Counter | What a rise means |
 |---|---|
-| `fastcache_node_status_requests_refused_not_a_member_total` | An operator verb was refused because the caller is not a fleet member: `node-status`, `node-metrics`, or `explain-admission` asked about a machine (asked about the caller's own connection, it is answered to anyone and moves nothing). Unlike the cache tier's not-local refusal this is not ordinary on any deployment: a steady rise is `pacectl` run from a machine the cluster has not admitted, or has forgotten, and a burst from one host is somebody scanning. |
-| `fastcache_node_status_requests_refused_payload_too_large_total` | A header declared more payload than these verbs may carry. `node-status` and `node-metrics` are **fieldless**, so against either this came from no client of this tree at any version. `explain-admission` carries one subject -- a machine id or a 43-character key -- under its own 512-byte ceiling, and is reachable before admission, so against it this is an operand no roster could name or a stranger probing the port. Never sum it with the cache tier's row of the same name. |
-| `fastcache_node_admission_explanations_refused_malformed_total` | An `explain-admission` arrived that was not exactly one field naming its subject. No shipped client can build one -- the CLI encodes it through `EncodeExplainAdmissionRequest` -- so a rise is a client of another build or somebody probing the port by hand, and the two are told apart by whether anything else on this surface refuses at the same time. Kept apart from the node-status refusals, which are fieldless verbs and cannot arise from the same mistake. |
-| `fastcache_node_status_requests_refused_endpoint_busy_total` | The surface had no bytes left in flight. These are the verbs somebody reaches for when a node is in trouble, so this is the node saying it is too busy to say what it is. Read it beside `fastcache_node_cache_requests_refused_endpoint_busy_total`, never summed: this says the diagnosis failed, that says why. |
+| `pace_node_status_requests_refused_not_a_member_total` | An operator verb was refused because the caller is not a fleet member: `node-status`, `node-metrics`, or `explain-admission` asked about a machine (asked about the caller's own connection, it is answered to anyone and moves nothing). Unlike the cache tier's not-local refusal this is not ordinary on any deployment: a steady rise is `pacectl` run from a machine the cluster has not admitted, or has forgotten, and a burst from one host is somebody scanning. |
+| `pace_node_status_requests_refused_payload_too_large_total` | A header declared more payload than these verbs may carry. `node-status` and `node-metrics` are **fieldless**, so against either this came from no client of this tree at any version. `explain-admission` carries one subject -- a machine id or a 43-character key -- under its own 512-byte ceiling, and is reachable before admission, so against it this is an operand no roster could name or a stranger probing the port. Never sum it with the cache tier's row of the same name. |
+| `pace_node_admission_explanations_refused_malformed_total` | An `explain-admission` arrived that was not exactly one field naming its subject. No shipped client can build one -- the CLI encodes it through `EncodeExplainAdmissionRequest` -- so a rise is a client of another build or somebody probing the port by hand, and the two are told apart by whether anything else on this surface refuses at the same time. Kept apart from the node-status refusals, which are fieldless verbs and cannot arise from the same mistake. |
+| `pace_node_status_requests_refused_endpoint_busy_total` | The surface had no bytes left in flight. These are the verbs somebody reaches for when a node is in trouble, so this is the node saying it is too busy to say what it is. Read it beside `pace_node_cache_requests_refused_endpoint_busy_total`, never summed: this says the diagnosis failed, that says why. |
 
 #### A host the cluster has forgotten
 
@@ -988,20 +988,20 @@ is rendered by every node.
 
 | Counter | What a rise means |
 |---|---|
-| `fastcache_live_subscriptions_opened_total` | A `pacectl live-stats` session subscribed and was granted a stream. One per dashboard opened against this node; a climb nobody explains is a client re-subscribing in a loop rather than holding its stream. |
-| `fastcache_live_snapshots_rendered_total` | A snapshot was rendered for a subject. **Once per subject per tick, whatever the number of watchers** -- read it against the opened count: a rate that grows with the number of dashboards rather than with time is the render being paid per watcher again. |
-| `fastcache_live_snapshots_skipped_total` | A subscriber was still writing a previous snapshot when the next was due, so it was sent the newest and told how many it missed. **The node never waits for a slow watcher**; a rise is a slow link or a stalled terminal on the watching side. |
-| `fastcache_live_subscriptions_revoked_total` | A stream ended because its peer stopped passing the gate -- a reload or a replicated removal revoked a host that was still watching. Removal fails open unless something re-checks live connections; this is that re-check acting. |
-| `fastcache_live_subscriptions_ended_not_leader_total` | A fleet stream ended because this node stopped leading; the watcher was told where the new leader is and follows it. A rise with no election you know of is leadership flapping. |
-| `fastcache_live_subscriptions_refused_at_capacity_total` | A subscription was refused because the node already streams to its maximum number of watchers. Long before a team reaches it, dashboards left open everywhere do. |
-| `fastcache_live_subscriptions_refused_unauthenticated_total` | A fleet subscription was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
-| `fastcache_live_subscriptions_stalled_total` | A stream ended because a single push stayed unwritten past its bound -- the watcher stopped reading altogether, so its buffers were released rather than held. |
-| `fastcache_live_subscriptions_ended_by_client_total` | A watching client closed its stream -- the ordinary way a dashboard ends. Opened minus this, minus the ended rows above, is the streams still open. |
-| `fastcache_live_subscriptions_ended_by_reset_total` | A watching client reset its connection instead of closing it -- a dashboard killed while pushes were still unread does this. Counted apart from the orderly close, because only a reset says the watcher went away abruptly. |
-| `fastcache_live_subscriptions_refused_not_a_member_total` | A subscription was refused because its peer is not a fleet member. Live stats stream to the same peers `NodeStatus` answers; a burst from one host is a stranger probing the port. |
-| `fastcache_live_subscriptions_refused_malformed_total` | A `SUBSCRIBE` did not decode, or named a subject this build does not serve. No client of this tree sends one; a rise is a client of another build, or not a client at all. |
-| `fastcache_live_subscriptions_refused_payload_too_large_total` | A `SUBSCRIBE` header declared more than the control payload the verb is bounded to, and was refused before a byte of it was read. No client of this tree at any version sends one. |
-| `fastcache_live_subscriptions_refused_endpoint_busy_total` | A subscription was refused because the `0xFC` listener's in-flight byte budget was full of other requests. The dashboard retries; a rise says the view went missing exactly when the node was busiest. |
+| `pace_live_subscriptions_opened_total` | A `pacectl live-stats` session subscribed and was granted a stream. One per dashboard opened against this node; a climb nobody explains is a client re-subscribing in a loop rather than holding its stream. |
+| `pace_live_snapshots_rendered_total` | A snapshot was rendered for a subject. **Once per subject per tick, whatever the number of watchers** -- read it against the opened count: a rate that grows with the number of dashboards rather than with time is the render being paid per watcher again. |
+| `pace_live_snapshots_skipped_total` | A subscriber was still writing a previous snapshot when the next was due, so it was sent the newest and told how many it missed. **The node never waits for a slow watcher**; a rise is a slow link or a stalled terminal on the watching side. |
+| `pace_live_subscriptions_revoked_total` | A stream ended because its peer stopped passing the gate -- a reload or a replicated removal revoked a host that was still watching. Removal fails open unless something re-checks live connections; this is that re-check acting. |
+| `pace_live_subscriptions_ended_not_leader_total` | A fleet stream ended because this node stopped leading; the watcher was told where the new leader is and follows it. A rise with no election you know of is leadership flapping. |
+| `pace_live_subscriptions_refused_at_capacity_total` | A subscription was refused because the node already streams to its maximum number of watchers. Long before a team reaches it, dashboards left open everywhere do. |
+| `pace_live_subscriptions_refused_unauthenticated_total` | A fleet subscription was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
+| `pace_live_subscriptions_stalled_total` | A stream ended because a single push stayed unwritten past its bound -- the watcher stopped reading altogether, so its buffers were released rather than held. |
+| `pace_live_subscriptions_ended_by_client_total` | A watching client closed its stream -- the ordinary way a dashboard ends. Opened minus this, minus the ended rows above, is the streams still open. |
+| `pace_live_subscriptions_ended_by_reset_total` | A watching client reset its connection instead of closing it -- a dashboard killed while pushes were still unread does this. Counted apart from the orderly close, because only a reset says the watcher went away abruptly. |
+| `pace_live_subscriptions_refused_not_a_member_total` | A subscription was refused because its peer is not a fleet member. Live stats stream to the same peers `NodeStatus` answers; a burst from one host is a stranger probing the port. |
+| `pace_live_subscriptions_refused_malformed_total` | A `SUBSCRIBE` did not decode, or named a subject this build does not serve. No client of this tree sends one; a rise is a client of another build, or not a client at all. |
+| `pace_live_subscriptions_refused_payload_too_large_total` | A `SUBSCRIBE` header declared more than the control payload the verb is bounded to, and was refused before a byte of it was read. No client of this tree at any version sends one. |
+| `pace_live_subscriptions_refused_endpoint_busy_total` | A subscription was refused because the `0xFC` listener's in-flight byte budget was full of other requests. The dashboard retries; a rise says the view went missing exactly when the node was busiest. |
 
 ### The fleet document over `0xFC`
 
@@ -1011,11 +1011,11 @@ It is admitted as the fleet subject of a subscription is, by the same decision: 
 
 | Counter | What a rise means |
 |---|---|
-| `fastcache_fleet_text_requests_refused_not_a_member_total` | A fleet read was refused because its peer is not a fleet member. The fleet is read by the same peers a subscription to it streams to; a burst from one host is a stranger probing the port. |
-| `fastcache_fleet_text_requests_refused_unauthenticated_total` | A fleet read was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
-| `fastcache_fleet_text_requests_refused_malformed_total` | A `fleet-text` request did not decode. No client of this tree sends one; a rise is a client of another build, or not a client at all. |
-| `fastcache_fleet_text_requests_refused_payload_too_large_total` | A `fleet-text` header declared more than the control payload the verb is bounded to, and was refused before a byte of it was read. No client of this tree at any version sends one. |
-| `fastcache_fleet_text_requests_refused_endpoint_busy_total` | A fleet read was refused because the `0xFC` listener's in-flight byte budget was full of other requests. A rise says an operator asked for the fleet exactly when the leader was busiest. |
+| `pace_fleet_text_requests_refused_not_a_member_total` | A fleet read was refused because its peer is not a fleet member. The fleet is read by the same peers a subscription to it streams to; a burst from one host is a stranger probing the port. |
+| `pace_fleet_text_requests_refused_unauthenticated_total` | A fleet read was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
+| `pace_fleet_text_requests_refused_malformed_total` | A `fleet-text` request did not decode. No client of this tree sends one; a rise is a client of another build, or not a client at all. |
+| `pace_fleet_text_requests_refused_payload_too_large_total` | A `fleet-text` header declared more than the control payload the verb is bounded to, and was refused before a byte of it was read. No client of this tree at any version sends one. |
+| `pace_fleet_text_requests_refused_endpoint_busy_total` | A fleet read was refused because the `0xFC` listener's in-flight byte budget was full of other requests. A rise says an operator asked for the fleet exactly when the leader was busiest. |
 
 
 Read the two upstream counters beside the gauge, never on their own. They are
@@ -1027,7 +1027,7 @@ counter answered the question the wrong way round: a node with no upstream count
 every local store as an upstream failure, so a single-machine install reported a
 100 % failure rate against a shared cache it never had.
 
-The alert worth writing is `fastcache_node_upstream_configured == 1` **and** a
+The alert worth writing is `pace_node_upstream_configured == 1` **and** a
 rising failure counter. That is a fleet whose shared cache is unreachable. Without
 the first clause it fires on every laptop.
 
@@ -1036,22 +1036,22 @@ small for this machine's working set — a different problem from a fleet that i
 missing a lot, and a different fix. An upstream *store* failure says the fleet is
 unreachable; a local store failure says this node is broken.
 
-Beside them, what the tier is holding. `fastcached_items`, `fastcached_bytes_used`
-and `fastcached_bytes_limit` describe the cache as a whole, and a per-tier set
+Beside them, what the tier is holding. `pace_items`, `pace_bytes_used`
+and `pace_bytes_limit` describe the cache as a whole, and a per-tier set
 carries the split a merged view cannot:
 
 | Series | Says |
 |---|---|
-| `fastcached_tier_items{tier="memory"\|"disk"}` | Live entries in that tier. |
-| `fastcached_tier_bytes_used{tier=…}` | What its budget counts: the stored (compressed) value bytes for `memory`, the on-disk footprint — pages in use times the page size — for `disk`. |
-| `fastcached_tier_bytes_limit{tier=…}` | Its budget; `0` means unbounded. |
-| `fastcached_tier_file_bytes{tier="disk"}` | The length of the disk tier's file, free pages included. Runs ahead of `bytes_used` by its free pages: those at the end go at the next commit, those inside the file only once later writes reuse them. Never below it. No line for a tier with no file. |
-| `fastcached_tier_evictions_total{tier=…}` | Entries it dropped to stay inside that budget. |
-| `fastcached_tier_index_bytes{tier=…}` | Resident memory its key index costs. Always RAM, even for a disk tier, so it is **not** comparable with `bytes_limit` and must not be added to it. |
+| `pace_tier_items{tier="memory"\|"disk"}` | Live entries in that tier. |
+| `pace_tier_bytes_used{tier=…}` | What its budget counts: the stored (compressed) value bytes for `memory`, the on-disk footprint — pages in use times the page size — for `disk`. |
+| `pace_tier_bytes_limit{tier=…}` | Its budget; `0` means unbounded. |
+| `pace_tier_file_bytes{tier="disk"}` | The length of the disk tier's file, free pages included. Runs ahead of `bytes_used` by its free pages: those at the end go at the next commit, those inside the file only once later writes reuse them. Never below it. No line for a tier with no file. |
+| `pace_tier_evictions_total{tier=…}` | Entries it dropped to stay inside that budget. |
+| `pace_tier_index_bytes{tier=…}` | Resident memory its key index costs. Always RAM, even for a disk tier, so it is **not** comparable with `bytes_limit` and must not be added to it. |
 
 **Do not sum across tiers.** The memory tier mirrors what it reads out of the disk
 tier, so adding the two item counts counts the mirrored entries twice — and the
-unlabelled `fastcached_*` series above are already the cache's own totals. What
+unlabelled `pace_*` series above are already the cache's own totals. What
 each label answers is "how is *this* tier doing": whether the mirror is populated,
 which tier is evicting, how close the disk half is to `--cache-disk`.
 
@@ -1062,7 +1062,7 @@ disk tier standing empty.
 ### It answers where `pace-cc` already looks
 
 `--listen-node` defaults to port **6674** on loopback — the address the launcher uses
-when nobody sets `FASTCACHE_ADDR`, and the one `cmake/portable/CompileCache.cmake`
+when nobody sets `PACE_ADDR`, and the one `cmake/portable/CompileCache.cmake`
 passes. So the whole thing works with no configuration: start a node, build, and
 the launcher finds it.
 
@@ -1115,12 +1115,12 @@ machine](#the-named-machine)).
 with an operator's standing: a process on this machine, or a **voter** of the cluster, by its
 proven key or the machine ticket its node mints. A caller that only `--fleet-open` admits is
 refused `identified-caller-required`, counted on
-`fastcache_scheduler_requests_refused_identified_caller_required_total` or
-`fastcache_enrollment_control_refused_identified_caller_required_total`; otherwise, on an open
+`pace_scheduler_requests_refused_identified_caller_required_total` or
+`pace_enrollment_control_refused_identified_caller_required_total`; otherwise, on an open
 node, anybody could approve their own enrollment. A machine the roster admits as a **learner** is
 refused `operator-standing-required`, counted on
-`fastcache_scheduler_requests_refused_operator_standing_required_total` or
-`fastcache_enrollment_control_refused_operator_standing_required_total`: a ticket proves a fleet
+`pace_scheduler_requests_refused_operator_standing_required_total` or
+`pace_enrollment_control_refused_operator_standing_required_total`: a ticket proves a fleet
 machine, never an operator, and any process on that machine can have its node mint one. Run the
 verb on a voter -- the office PC, or any machine promoted to one -- or promote the machine.
 
@@ -1171,7 +1171,7 @@ Refusals are counted, because this withdrew access somebody may have been relyin
 on:
 
 ```
-fastcache_node_cache_requests_refused_not_local_total
+pace_node_cache_requests_refused_not_local_total
 ```
 
 The node port faces the network on every node, so this counts every other machine that
@@ -1190,7 +1190,7 @@ table and nothing else
 
 A laptop or a CI runner that runs `pace-cc` against the fleet never joins its
 consensus and needs no scheduler of its own, but it is admitted the way every machine is:
-**by its key**. It runs a node of its own — the one `FASTCACHE_ADDR` already points at,
+**by its key**. It runs a node of its own — the one `PACE_ADDR` already points at,
 serving this machine's cache tier — and that node's identity key is admitted to the
 cluster, as a [learner](#a-machine-that-is-usually-away-admitting-a-learner) so its
 absence costs no quorum. A machine that joins by
@@ -1254,7 +1254,7 @@ That ordering mattered:
 [#290](https://github.com/LASTRADA-Software/fastcached/issues/290) put the cache and
 scheduler verbs on one listener, and could only do so once the tier stopped depending
 on its socket to stay private. On a scheduling node
-`fastcache_node_cache_requests_refused_not_local_total` therefore rises in normal
+`pace_node_cache_requests_refused_not_local_total` therefore rises in normal
 operation — it counts peers reaching the right host for the wrong verb — where on a
 node nobody points clients at it stays at zero.
 
@@ -1843,7 +1843,7 @@ decided about** — so one machine asking under ever-new ids cannot fill it and 
 real joiner out. A NAT or a VM host with more machines behind it than that enrolls them a
 few at a time: an approved or rejected row stops counting at once. Past its share an
 address is refused `enrollment-host-full` and counted in
-`fastcache_enrollment_requests_refused_host_cap_total`, apart from a full list. If many
+`pace_enrollment_requests_refused_host_cap_total`, apart from a full list. If many
 addresses fill the list anyway, drop everything nobody has decided about:
 
 ```sh
@@ -1851,7 +1851,7 @@ pace-node --scheduler=10.0.0.1:6675 --enroll-clear
 ```
 
 Approved and rejected rows stay, the leader logs which ids went, and
-`fastcache_enrollment_requests_cleared_total` counts them. It bans nobody: a machine still
+`pace_enrollment_requests_cleared_total` counts them. It bans nobody: a machine still
 asking is recorded again at its next poll.
 
 The joiner asks by itself. A node whose formation finds a fleet it should join -- by the
@@ -1907,7 +1907,7 @@ leader checks that signature before it lists or refreshes anything. The id and t
 public — a beacon carries the key — so without it any host could poll under a joiner's id
 and key with an address of its own, and the address an approval recorded would be whoever
 polled last. A request that does not verify is refused and counted
-(`fastcache_enrollment_requests_refused_forged_total`), and the row does not move.
+(`pace_enrollment_requests_refused_forged_total`), and the row does not move.
 
 The claimed address and the observed host are shown side by side and never checked
 against each other — [#242](https://github.com/LASTRADA-Software/fastcached/issues/242)
@@ -1929,7 +1929,7 @@ pace-node --scheduler=10.0.0.1:6675 --enroll-approve=<id>@<key>
 ```
 
 The key is required, and it must be the one the row holds, or nothing is admitted and
-`fastcache_enrollment_approvals_refused_key_mismatch_total` counts it. An id alone names a
+`pace_enrollment_approvals_refused_key_mismatch_total` counts it. An id alone names a
 row, and a row whose machine stopped asking is replaced by the next machine to ask under
 that id — which an approval by id would have admitted without anybody comparing its key.
 
@@ -1963,7 +1963,7 @@ leader that loses leadership and wins it back does not resume admitting. While i
 `enrollment-window-open` is raised naming the deadline and when it was armed, and `pacectl node` reports
 `auto-approve (N min left)`. Afterwards, `--enroll-list` marks every row the window
 admitted with when the window was armed, and
-`fastcache_enrollment_approvals_auto_total` counts them apart from the approvals a person
+`pace_enrollment_approvals_auto_total` counts them apart from the approvals a person
 made — the question after a window is who got in while nobody was looking. A later poll
 under an id with a different key is still never auto-approved: the row keeps its first key
 whether or not the window is armed.
@@ -1989,7 +1989,7 @@ A learner applies the fleet's state, so it checks the grants it is handed from i
 round with nothing typed.
 
 `pacectl node` carries the window's mode and the number waiting, and
-`fastcache_enrollment_requests_refused_full_total` counts the requests a full list
+`pace_enrollment_requests_refused_full_total` counts the requests a full list
 turned away.
 
 #### A joiner that already ran a cluster of its own
@@ -2089,10 +2089,10 @@ number of milliseconds — `600000ms` and `600 000` are both refused rather than
 half-read. Refusals arrive from the leader before the change is replicated, so a
 rejected value is an error you see rather than a setting that quietly does nothing.
 
-**What tells you it is too short**: `fastcached_dispatch_leases_released_late_total`
+**What tells you it is too short**: `pace_dispatch_leases_released_late_total`
 on the scheduler — a client reporting back after its own lease had expired, which is
 a real compile that outran the bound — and
-`fastcache_worker_jobs_refused_lease_expired_total` on the workers. Both mean a job
+`pace_worker_jobs_refused_lease_expired_total` on the workers. Both mean a job
 outlived its lease, and both are the signal to raise this number. Neither counts
 leases that merely expired: a client that never reports back reaches neither.
 
@@ -2143,7 +2143,7 @@ its sessions only until the configuration stops counting it — a reconcile pass
 losing another voter before then must not leave a quorum nobody can reach — and then
 every connection it proved ends at its next frame and every redial is refused, even by
 a node whose bootstrap roster still names that key. Discovery reports its beacon as revoked.
-Enrollment refuses it at the door (`fastcache_enrollment_requests_refused_revoked_key_total`),
+Enrollment refuses it at the door (`pace_enrollment_requests_refused_revoked_key_total`),
 and an approval or a `--cluster-admit` naming it is refused by name. No verb revokes a
 key without forgetting its machine, or forgets one without revoking: the first would
 leave a member the quorum goes on counting, whose revocation therefore never reaches the
@@ -2353,7 +2353,7 @@ every beacon carries it, so a pin by name alone would stop nobody who can hear t
 names. Do not compose the value by hand: on any machine of the fleet, `pacectl node`
 prints it as `fleet-id` -- the cluster id, `@`, and the key of every voter its state records,
 comma-separated -- ready to paste into `--fleet-id`, the `fleet_id` key of the configuration
-file, or the installer's `FASTCACHE_FLEET_ID`. An office has one or two voters, so the list is
+file, or the installer's `PACE_FLEET_ID`. An office has one or two voters, so the list is
 short and no chain of trust is needed. The cluster id is held to the spelling a node mints
 (32 lowercase hex digits), every key to the one key format, and **an id with no key is
 refused where it is typed** rather than taken as a pin by name. Pinned, a node:
@@ -2361,14 +2361,14 @@ refused where it is typed** rather than taken as a pin by name. Pinned, a node:
 - **yields only to its cluster as a pinned voter SIGNS it**, whichever route proved it -- a
   beacon, a typed seed, DNS SRV, a remembered endpoint. A fleet it would otherwise have joined,
   and an impostor claiming the pinned id under a key of its own, are counted
-  (`fastcache_formation_yields_refused_pin_total`, per proof) and raised as
+  (`pace_formation_yields_refused_pin_total`, per proof) and raised as
   `foreign-fleet-visible`; the impostor's detail names its key;
 - **takes no answer to its `Enroll` that a pinned voter did not sign** -- an approval, a
   refusal or a not-yet -- and **asks no leader whose key it does not pin**: a `NotLeader` that
   redirects it to one is refused, naming that leader's key and the `--fleet-id` to add it to,
   because a voter promoted since the pin was written is the honest cause;
 - **follows no dissolve into another cluster**, and takes no approval from one: counted
-  (`fastcache_formation_admissions_refused_pin_total`), logged, nothing changed;
+  (`pace_formation_admissions_refused_pin_total`), logged, nothing changed;
 - **wins every tiebreak against the pinned fleet**: a node whose own cluster happens to be
   the older still asks the fleet it is pinned to, rather than waiting to be joined;
 - **records nobody while it could not answer as a pinned voter**: a node pinned to another
@@ -2553,21 +2553,21 @@ other node, reading through to it.
 
 | Series | Says |
 |---|---|
-| `fastcache_node_shared_cache_hits_total` | Objects the fleet's shared tier on this machine answered. |
-| `fastcache_node_shared_cache_misses_total` | Objects the shared tier on this machine did not hold. |
-| `fastcache_node_shared_cache_store_failures_total` | Objects the shared tier could not keep. A sustained rate is this machine's disk. |
-| `fastcache_node_shared_cache_requests_refused_not_a_member_total` | A caller that proved no key and presented no ticket the fleet admits. |
-| `fastcache_node_shared_cache_requests_refused_not_serving_total` | Answered `not-shared-cache`: the setting names another machine, or this one and its tier is unavailable. |
-| `fastcache_node_shared_cache_requests_refused_payload_too_large_total` | A request declaring more than one object's ceiling. |
-| `fastcache_node_shared_cache_requests_refused_endpoint_busy_total` | Refused because the surface's in-flight byte budget was spent. |
-| `fastcache_node_shared_cache_requests_refused_unsupported_version_total` | A request from a build of another wire version. |
-| `fastcache_node_shared_cache_requests_refused_malformed_payload_total` | A request whose payload would not decode. |
-| `fastcache_node_shared_cache_requests_refused_foreign_generation_total` | A store of a value generation this build does not implement. |
-| `fastcache_node_shared_cache_proofs_refused_wrong_key_total` | The machine answering at the shared cache's announced address proved a key that is not the named machine's; nothing was sent. |
-| `fastcache_node_shared_cache_proofs_failed_total` | The shared cache could not be reached, or did not complete the handshake; the build compiled locally. |
-| `fastcache_node_shared_cache_unresolved_total` | Operations skipped because the `shared-cache` setting names no machine this node can reach by key; `pacectl node` says which reason. |
-| `fastcache_node_shared_cache_stale_hints_total` | The address this node's last proven session to the shared cache connected to failed, and the announced name was dialled instead. |
-| `fastcache_node_shared_cache_sessions_opened_total` | Proven sessions this node opened to the shared cache. One per burst of misses is healthy; one per miss means the kept session is being lost. |
+| `pace_node_shared_cache_hits_total` | Objects the fleet's shared tier on this machine answered. |
+| `pace_node_shared_cache_misses_total` | Objects the shared tier on this machine did not hold. |
+| `pace_node_shared_cache_store_failures_total` | Objects the shared tier could not keep. A sustained rate is this machine's disk. |
+| `pace_node_shared_cache_requests_refused_not_a_member_total` | A caller that proved no key and presented no ticket the fleet admits. |
+| `pace_node_shared_cache_requests_refused_not_serving_total` | Answered `not-shared-cache`: the setting names another machine, or this one and its tier is unavailable. |
+| `pace_node_shared_cache_requests_refused_payload_too_large_total` | A request declaring more than one object's ceiling. |
+| `pace_node_shared_cache_requests_refused_endpoint_busy_total` | Refused because the surface's in-flight byte budget was spent. |
+| `pace_node_shared_cache_requests_refused_unsupported_version_total` | A request from a build of another wire version. |
+| `pace_node_shared_cache_requests_refused_malformed_payload_total` | A request whose payload would not decode. |
+| `pace_node_shared_cache_requests_refused_foreign_generation_total` | A store of a value generation this build does not implement. |
+| `pace_node_shared_cache_proofs_refused_wrong_key_total` | The machine answering at the shared cache's announced address proved a key that is not the named machine's; nothing was sent. |
+| `pace_node_shared_cache_proofs_failed_total` | The shared cache could not be reached, or did not complete the handshake; the build compiled locally. |
+| `pace_node_shared_cache_unresolved_total` | Operations skipped because the `shared-cache` setting names no machine this node can reach by key; `pacectl node` says which reason. |
+| `pace_node_shared_cache_stale_hints_total` | The address this node's last proven session to the shared cache connected to failed, and the announced name was dialled instead. |
+| `pace_node_shared_cache_sessions_opened_total` | Proven sessions this node opened to the shared cache. One per burst of misses is healthy; one per miss means the kept session is being lost. |
 
 ## Running it as a service
 
@@ -2619,7 +2619,7 @@ bursty and rare.
 The port is **6674**, the node's own default and where every local client looks —
 `pace-cc`, `CompileCache.cmake` and `pacectl` all default to
 `127.0.0.1:6674` — so this machine's builds use the node's cache tier with no
-`FASTCACHE_ADDR` at all. The plain `pace-kv` the package also installs listens on
+`PACE_ADDR` at all. The plain `pace-kv` the package also installs listens on
 6674 too, and a fresh install enables and starts it, so the node **supersedes** it:
 the socket declares `Conflicts=pace-kv.service`, and enabling the socket stops the
 daemon and takes the port; with both enabled, a boot starts the node. Disable the
@@ -2725,7 +2725,7 @@ Three properties are deliberate:
 - **It is asked of this machine.** The node answers a cordon from its own machine only —
   `--cordon` dials this node's own `--listen-node`, and `pacectl cordon` must be
   pointed at the node on the machine it runs on — and refuses
-  one from anywhere else, counted in `fastcache_worker_cordons_refused_not_local_total`.
+  one from anywhere else, counted in `pace_worker_cordons_refused_not_local_total`.
   Whether a machine serves the fleet is decided on that machine.
 - **It is not persisted, and a restart lifts it.** The cordon lives in the running
   worker's memory and nowhere else: not in the configuration, not in the cluster's
@@ -2737,7 +2737,7 @@ Three properties are deliberate:
 
 A compile that reaches a cordoned worker anyway — leased in the second before the
 scheduler heard, or dialled directly — is refused `no-capacity` and compiled locally
-by its client, counted in `fastcache_worker_jobs_refused_cordoned_total`. A steady rise
+by its client, counted in `pace_worker_jobs_refused_cordoned_total`. A steady rise
 there says the scheduler is not hearing this worker's heartbeat.
 
 ### macOS and Windows
@@ -2892,7 +2892,7 @@ What an installer cannot guess is a machine of the fleet to ask when no beacon r
 and the one fleet this machine may join; both are optional:
 
 ```
-msiexec /i fastcached.msi FASTCACHE_FLEET_SEED=office-a.vpn.example FASTCACHE_FLEET_ID=<cluster-id>@<key>
+msiexec /i fastcached.msi PACE_FLEET_SEED=office-a.vpn.example PACE_FLEET_ID=<cluster-id>@<key>
 ```
 
 Select the **pace-node** feature (silently: `ADDLOCAL=CM_C_Cli,CM_C_Node` on a
@@ -2900,7 +2900,7 @@ first install, `ADDLOCAL=CM_C_Node` to add it to one that is there). On a
 machine that also runs pace-kv, the MSI disables `FastCached` and stops it,
 because both would answer on 6674. Every transaction that keeps the node -- a repair, a
 feature change, an upgrade -- registers it again, and the optional properties are
-remembered for it: `FASTCACHE_FIREWALL_ALLOW`, `FASTCACHE_FLEET_SEED` and `FASTCACHE_FLEET_ID` are kept under
+remembered for it: `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and `PACE_FLEET_ID` are kept under
 `HKLM\SOFTWARE\fastcached\Installer` and read back unless the transaction states a new
 value, so a repair that leaves them out keeps the firewall scope rather than opening the
 rules to any address. Registering again is also what clears the `--scheduler` an earlier
@@ -2911,20 +2911,20 @@ There is no such property any more. The registration carries no `--advertise`, a
 advertises the address this machine routes from on its `--listen-node` port, re-derived when
 the network changes, so a renamed machine or a new VPN address needs no reinstall or restart --
 where a remembered IP literal on a roaming laptop pinned it and vetoed every dial hint at every
-upgrade. An address that must be typed goes under `advertise:` in the configuration file. `FASTCACHE_FIREWALL_ALLOW`
+upgrade. An address that must be typed goes under `advertise:` in the configuration file. `PACE_FIREWALL_ALLOW`
 is optional: it is passed as `--firewall-allow` (one address with an optional
 `/prefix`) to this registration and to pace-kv's, and left out the rules admit any
-address. `FASTCACHE_FLEET_SEED` is optional as well: one name or `name:port`, registered as
+address. `PACE_FLEET_SEED` is optional as well: one name or `name:port`, registered as
 `--fleet-seed` and replayed at every start, so a node across a VPN asks that machine while it is
 alone; more than one goes under `fleet_seed:` in the configuration file.
-`FASTCACHE_FLEET_ID` is optional as well: the pin `pacectl node` prints on a machine of the
+`PACE_FLEET_ID` is optional as well: the pin `pacectl node` prints on a machine of the
 fleet, registered VERBATIM as `--fleet-id` and replayed at every start, so the node joins that fleet
 and no other. A pin is security material: one the node cannot parse fails the WHOLE transaction
 before anything is remembered or registered -- the MSI runs `--check-arguments` over the node's
 arguments as its first step -- so a repair or
 upgrade keeps the registration and the remembered pin it had, rather than starting a node that
 trusts on first use. A malformed seed fails it the same way.
-`FASTCACHE_DISCOVERY_REPLY_PORT` defaults to `6682` and is passed as
+`PACE_DISCOVERY_REPLY_PORT` defaults to `6682` and is passed as
 `--discovery-reply-port`, so the registration's firewall rule is `discovery-reply udp/6682`
 rather than the any-port rule above; pass another port to move it, or pass it empty to leave the
 port to the kernel. The package pins it and a node run by hand does not, for the multi-instance
@@ -3252,7 +3252,7 @@ making it wait. Until
 [#213](https://github.com/LASTRADA-Software/fastcached/issues/213) the loop
 served each connection inline, which meant a worker advertising thirty ran
 exactly one at a time — the cap could never be reached, the
-`fastcache_worker_jobs_refused_no_slot_total` counter could never move, and a
+`pace_worker_jobs_refused_no_slot_total` counter could never move, and a
 saturated fleet reported `1 / 30 compiling`.
 
 **`--slots=0` is not a number of compiles: it is no worker at all.** Zero used to be
@@ -3276,7 +3276,7 @@ leader's series survive the election that moves leadership away from it
 ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)). Its worker
 cells on that row are **absent** rather than zero: it offers no slots because it has
 no worker, and a zero there would read as a worker that offers nothing and would enter
-the fleet's own busy/free arithmetic. Its `fastcache_node_slots_configured` gauge
+the fleet's own busy/free arithmetic. Its `pace_node_slots_configured` gauge
 does read 0, which is a different question with a different right answer -- that one
 is this node's configured capacity, and zero is what it is.
 
@@ -3332,11 +3332,11 @@ already running hold reservations against them. The worker states both at startu
 A request over `--compile-request-max` is refused `payload-too-large` and compiled
 on the client. A compile refused by the budget is told `endpoint-busy` rather than
 `no-capacity`, and counted as
-`fastcache_worker_jobs_refused_endpoint_busy_total`: slots were free and memory was
+`pace_worker_jobs_refused_endpoint_busy_total`: slots were free and memory was
 not, so more machines would not have helped. `pace-cc --show-stats` tallies it
 as `a node had no room for another request (endpoint-busy)`, apart from withdrawn slots — a
 tally that also covers a full connection cap, so read the node's own counter: a rising
-`fastcache_worker_jobs_refused_endpoint_busy_total` is the signal to raise
+`pace_worker_jobs_refused_endpoint_busy_total` is the signal to raise
 `--compile-inflight-max`.
 
 The node's one `0xFC` listener holds its own pool of bytes for frames still being
@@ -3389,10 +3389,10 @@ opposite:
 
 | Refusal | Counter | What to do |
 | --- | --- | --- |
-| `no-worker` | `fastcached_dispatch_leases_no_worker_total` | Nothing serves that toolchain — a fingerprint mismatch. |
-| `no-capacity` | `fastcached_dispatch_leases_no_capacity_total` | The fleet is full of your own build. Add machines -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
-| `withdrawn` | `fastcached_dispatch_leases_withdrawn_total` | The machines are there and unavailable — somebody is using them, or a disk is full. |
-| `all-excluded` | `fastcached_dispatch_leases_all_excluded_total` | The machines are there and the clients cannot reach them — a network problem. |
+| `no-worker` | `pace_dispatch_leases_no_worker_total` | Nothing serves that toolchain — a fingerprint mismatch. |
+| `no-capacity` | `pace_dispatch_leases_no_capacity_total` | The fleet is full of your own build. Add machines -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
+| `withdrawn` | `pace_dispatch_leases_withdrawn_total` | The machines are there and unavailable — somebody is using them, or a disk is full. |
+| `all-excluded` | `pace_dispatch_leases_all_excluded_total` | The machines are there and the clients cannot reach them — a network problem. |
 
 Never sum them. `withdrawn` folded into `no-capacity` reads as "the fleet is too
 small", so a fleet whose build hosts have all filled their scratch disks would
@@ -3490,7 +3490,7 @@ Every row says two things before anything else:
 | `surface-accept-degraded` | live | alert | a serving surface's accept loop has failed to accept for longer than any transient explains, on a failure this build does not classify, and backs off: it accepts little or nothing. The detail names each surface and what its last accept answered | check the host for exhausted file descriptors or memory, and report the reason with the node's version so the failure can be classified. The row clears by itself once an accept succeeds. `/healthz` answers `503` while it is raised |
 | `fleet-split-healing` | live | warning | this fleet and another established one are one fleet split in two, by a key this fleet already held: its speaker is a VOTER recorded here under that key, which heals by itself -- the detail names which side yields and why -- or its speaker is a LEARNER here, or a machine of this fleet once asked it and it lists that machine, which are first-use trust and wait on an operator -- the detail names the machine the evidence rests on. Not evaluated, as `foreign-fleet-visible` is, until discovery has heard enough to say there is none | where it heals by itself, nothing: the yielding fleet dissolves and rejoins by itself, and a machine the survivor did not record waits on its `--enroll-list`. Where an operator decides, nothing moves until one does: ask the named machine which fleet it belongs to and check the other fleet with `--cluster-status`; if it is yours, `--cluster-forget` each machine of the fleet that does not stay and approve it on the survivor's `--enroll-list`. It clears a few minutes after the other fleet stops being heard |
 | `consensus-leader-silent` | live | warning | no leader this node's applied configuration counts has spoken to it for longer than it may trust that state (65 minutes, `LeaderSilenceBound`), so every lease grant it is handed is refused -- a voter its fleet forgot meanwhile could still be in the state it holds. The start counts as contact, so a node starting cut off has the same 65 minutes. The detail says how long it has been | restore its Raft sessions to the fleet: check the network path to its voters and `--cluster-status` on one of them. Compiles sent to it fall back to their own machines meanwhile; it clears at the first leader contact |
-| `state-directory-unsynced` | latched | warning | the filesystem holding the state directory answers a directory sync with "not supported here" (`EINVAL`, `ENOTSUP`, `EBADF` from `fsync`; `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` from `FlushFileBuffers`), so a replaced state file is not known to survive a power loss: every replace still lands and is used. The detail names the directory and the answer; also counted in `fastcache_state_directory_syncs_unsupported_total` | stop the node, move the state directory **whole** to a local volume (it holds the node's identity, so a new empty directory is a new machine), point `--cluster-dir` at it and start; restarting on the same volume does not clear it |
+| `state-directory-unsynced` | latched | warning | the filesystem holding the state directory answers a directory sync with "not supported here" (`EINVAL`, `ENOTSUP`, `EBADF` from `fsync`; `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` from `FlushFileBuffers`), so a replaced state file is not known to survive a power loss: every replace still lands and is used. The detail names the directory and the answer; also counted in `pace_state_directory_syncs_unsupported_total` | stop the node, move the state directory **whole** to a local volume (it holds the node's identity, so a new empty directory is a new machine), point `--cluster-dir` at it and start; restarting on the same volume does not clear it |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older
@@ -3580,7 +3580,7 @@ what decides that, because every worker does.
 
 ### Every other series a node exports
 
-The tables below complete the set: every `fastcache_*` series a node renders that is
+The tables below complete the set: every `pace_*` series a node renders that is
 not covered by the refusal table or the cache-tier discussion above. They were
 exported and documented nowhere until
 [#553](https://github.com/LASTRADA-Software/fastcached/issues/553) — a counter an
@@ -3595,47 +3595,47 @@ exposition cannot drift apart again without a red build.
 
 | Series | Says |
 |---|---|
-| `fastcache_worker_jobs_started_total` | Compiles this worker handed to its runner. NOT the running count when differenced with jobs_completed_total: a refused job increments this one only, so the difference drifts up and never returns. Use the fastcache_node_slots_busy gauge for what is running now. |
-| `fastcache_worker_jobs_completed_total` | Compiles that finished, whatever the compiler concluded. Also the count half of the compile-time sum below. |
-| `fastcache_worker_compile_milliseconds_total` | Total wall time spent compiling. Divide by jobs_completed_total, or take rate() of both, for the average compile. |
-| `fastcache_worker_jobs_abandoned_client_gone_total` | Compiles whose client had disconnected before the object could be written back. The compile itself still counts in jobs_completed_total -- the compiler ran and this machine paid for it; only the delivery found nobody there. Never a refusal: nothing was declined and no reply was sent. |
-| `fastcache_worker_bytes_received_total` | Request payload bytes read from clients. |
-| `fastcache_worker_bytes_returned_total` | Reply payload bytes written back to clients. |
+| `pace_worker_jobs_started_total` | Compiles this worker handed to its runner. NOT the running count when differenced with jobs_completed_total: a refused job increments this one only, so the difference drifts up and never returns. Use the pace_node_slots_busy gauge for what is running now. |
+| `pace_worker_jobs_completed_total` | Compiles that finished, whatever the compiler concluded. Also the count half of the compile-time sum below. |
+| `pace_worker_compile_milliseconds_total` | Total wall time spent compiling. Divide by jobs_completed_total, or take rate() of both, for the average compile. |
+| `pace_worker_jobs_abandoned_client_gone_total` | Compiles whose client had disconnected before the object could be written back. The compile itself still counts in jobs_completed_total -- the compiler ran and this machine paid for it; only the delivery found nobody there. Never a refusal: nothing was declined and no reply was sent. |
+| `pace_worker_bytes_received_total` | Request payload bytes read from clients. |
+| `pace_worker_bytes_returned_total` | Reply payload bytes written back to clients. |
 
 
 **Compiles this node would not run.** Refusals decided after the request was understood. Each names a different thing to go and fix, which is why they are not one counter.
 
 | Series | Says |
 |---|---|
-| `fastcache_worker_jobs_refused_rejected_argument_total` | Jobs refused over an argument this worker will not pass to a compiler. |
-| `fastcache_worker_jobs_refused_scratch_unavailable_total` | Jobs refused because the scratch directory could not be prepared: a full or read-only disk, not a client or fleet problem. |
-| `fastcache_worker_jobs_refused_spawn_failed_total` | Jobs refused because the compiler could not be spawned: the toolchain this worker advertises is not usable here. |
-| `fastcache_worker_jobs_refused_compiler_unclassified_total` | Jobs refused because this worker cannot classify the compiler its own --toolchain names: it ran, and this build does not recognise which driver it is. Not a path fault -- see fastcache_worker_jobs_refused_spawn_failed_total for that one. |
-| `fastcache_worker_jobs_refused_survey_in_flight_total` | Jobs refused because this worker had not finished identifying its toolchains: it is still starting, not misconfigured. Rises only from clients dialling this port directly -- the scheduler is not offered this worker until the survey completes. |
-| `fastcache_worker_jobs_refused_not_a_member_total` | Connections refused because the caller is neither on this machine nor a cluster member. A rise means something is trying to spend a machine it has no claim on. |
-| `fastcache_worker_jobs_refused_stopping_total` | Jobs refused because this worker had begun stopping. Never sum with no_slot: that one says the fleet is too small, this one says a node is draining and a retry will land somewhere else. |
-| `fastcache_worker_jobs_refused_cordoned_total` | Jobs refused because an operator cordoned this worker. Never sum with stopping: a stop ends by itself, a cordon lasts until somebody lifts it. A steady rise says the scheduler is not hearing this worker's heartbeat. |
-| `fastcache_worker_cordons_refused_not_local_total` | Cordon requests refused because they came from another machine. A machine is cordoned from itself; a rise means somebody elsewhere is trying to take it out of the fleet. |
+| `pace_worker_jobs_refused_rejected_argument_total` | Jobs refused over an argument this worker will not pass to a compiler. |
+| `pace_worker_jobs_refused_scratch_unavailable_total` | Jobs refused because the scratch directory could not be prepared: a full or read-only disk, not a client or fleet problem. |
+| `pace_worker_jobs_refused_spawn_failed_total` | Jobs refused because the compiler could not be spawned: the toolchain this worker advertises is not usable here. |
+| `pace_worker_jobs_refused_compiler_unclassified_total` | Jobs refused because this worker cannot classify the compiler its own --toolchain names: it ran, and this build does not recognise which driver it is. Not a path fault -- see pace_worker_jobs_refused_spawn_failed_total for that one. |
+| `pace_worker_jobs_refused_survey_in_flight_total` | Jobs refused because this worker had not finished identifying its toolchains: it is still starting, not misconfigured. Rises only from clients dialling this port directly -- the scheduler is not offered this worker until the survey completes. |
+| `pace_worker_jobs_refused_not_a_member_total` | Connections refused because the caller is neither on this machine nor a cluster member. A rise means something is trying to spend a machine it has no claim on. |
+| `pace_worker_jobs_refused_stopping_total` | Jobs refused because this worker had begun stopping. Never sum with no_slot: that one says the fleet is too small, this one says a node is draining and a retry will land somewhere else. |
+| `pace_worker_jobs_refused_cordoned_total` | Jobs refused because an operator cordoned this worker. Never sum with stopping: a stop ends by itself, a cordon lasts until somebody lifts it. A steady rise says the scheduler is not hearing this worker's heartbeat. |
+| `pace_worker_cordons_refused_not_local_total` | Cordon requests refused because they came from another machine. A machine is cordoned from itself; a rise means somebody elsewhere is trying to take it out of the fleet. |
 
 
 **A dispatched compile whose envelope or lease did not hold.** The envelope rows are about the bytes; the lease rows are about the credential. A rise in a lease row on a healthy fleet names a clock, a roster or a rollout rather than a client.
 
 | Series | Says |
 |---|---|
-| `fastcache_worker_jobs_refused_envelope_malformed_total` | Jobs refused because the request's codec envelope could not be parsed, or an uncompressed one disagreed with the bytes beside it: a version skew, or a peer not speaking this protocol. |
-| `fastcache_worker_jobs_refused_envelope_unsupported_codec_total` | Jobs refused because the payload is in a codec this build cannot decode: two honest processes packaged differently. Every one cost a local compile. |
-| `fastcache_worker_jobs_refused_envelope_declared_too_large_total` | Jobs refused because the envelope declared it expands past this endpoint's ceiling, before a byte was decompressed. Nothing honest declares that by accident: read it as a probe or a mis-set client. |
-| `fastcache_worker_jobs_refused_envelope_corrupt_total` | Jobs refused because the payload did not expand to its declared size. The only envelope refusal that implicates the transport: a codec version skew, or a link damaging payloads. |
-| `fastcache_worker_jobs_refused_lease_unauthorized_total` | Jobs refused because the lease was not signed by any voter this worker's roster names. A security signal, not a capacity one -- or a launcher predating this lease format, which presents a token that cannot authenticate. |
-| `fastcache_worker_jobs_refused_lease_unregistered_total` | Jobs refused because this worker has not registered and so knows no fleet. A few at startup are ordinary; a rise that does not stop means the scheduler is unreachable and this node is compiling nothing while looking alive. |
-| `fastcache_worker_jobs_refused_lease_wrong_cluster_total` | Jobs refused because an authentic lease was issued by a different fleet. Every grant is signed by a voter's own identity key, so a rise means one key votes in two clusters -- a `--cluster-dir` copied to a second site, which copies the node and its key with it. |
-| `fastcache_worker_jobs_refused_lease_replayed_total` | Jobs refused because an authentic, unexpired lease had **already been spent** at this worker. A lease authorizes exactly one compile, so nothing honest produces this and it should read zero forever; any rise is a captured grant presented a second time. |
-| `fastcache_worker_jobs_refused_lease_endpoint_mismatch_total` | Jobs refused because an authentic lease named a different worker. Usually a registered endpoint that is not the one clients dial, not a replay. |
-| `fastcache_worker_jobs_refused_lease_expired_total` | Jobs refused because an authentic lease had expired. A rise on one machine and nowhere else is that machine's clock, not the fleet's leases. |
-| `fastcache_worker_jobs_refused_lease_isolated_total` | Grants refused because this worker has heard from no leader its fleet counts for longer than it may trust the state it applied (65 minutes), so a voter the fleet forgot meanwhile could still be in it. Should read zero; a rise means this worker is cut off from its fleet's consensus -- check its Raft sessions -- while something still hands it grants. |
-| `fastcache_worker_jobs_refused_lease_no_roster_total` | Grants refused because the state this worker applied records no voter's key yet, so no grant from anybody could verify. A few while a node starts or joins are ordinary; a rise that does not stop means this node never applied its fleet's state. |
-| `fastcache_worker_jobs_refused_lease_signer_revoked_total` | Grants refused because they verify under a key the cluster has revoked: the removed machine itself, still leasing out work. Should read zero forever; a rise names a machine somebody removed and nobody stopped. Shares its wire code with `..._unauthorized_total` and nothing else. |
-| `fastcache_worker_scheduler_term_regressions_total` | Times this worker adopted a scheduler term that went **backwards**. Not a refusal — the grant is served. Two causes look identical here and the rate separates them: a grant minted before a leadership change and delivered after one is ordinary and appears as occasional counts tracking elections; a scheduler that was reset repeats until somebody stops it. |
+| `pace_worker_jobs_refused_envelope_malformed_total` | Jobs refused because the request's codec envelope could not be parsed, or an uncompressed one disagreed with the bytes beside it: a version skew, or a peer not speaking this protocol. |
+| `pace_worker_jobs_refused_envelope_unsupported_codec_total` | Jobs refused because the payload is in a codec this build cannot decode: two honest processes packaged differently. Every one cost a local compile. |
+| `pace_worker_jobs_refused_envelope_declared_too_large_total` | Jobs refused because the envelope declared it expands past this endpoint's ceiling, before a byte was decompressed. Nothing honest declares that by accident: read it as a probe or a mis-set client. |
+| `pace_worker_jobs_refused_envelope_corrupt_total` | Jobs refused because the payload did not expand to its declared size. The only envelope refusal that implicates the transport: a codec version skew, or a link damaging payloads. |
+| `pace_worker_jobs_refused_lease_unauthorized_total` | Jobs refused because the lease was not signed by any voter this worker's roster names. A security signal, not a capacity one -- or a launcher predating this lease format, which presents a token that cannot authenticate. |
+| `pace_worker_jobs_refused_lease_unregistered_total` | Jobs refused because this worker has not registered and so knows no fleet. A few at startup are ordinary; a rise that does not stop means the scheduler is unreachable and this node is compiling nothing while looking alive. |
+| `pace_worker_jobs_refused_lease_wrong_cluster_total` | Jobs refused because an authentic lease was issued by a different fleet. Every grant is signed by a voter's own identity key, so a rise means one key votes in two clusters -- a `--cluster-dir` copied to a second site, which copies the node and its key with it. |
+| `pace_worker_jobs_refused_lease_replayed_total` | Jobs refused because an authentic, unexpired lease had **already been spent** at this worker. A lease authorizes exactly one compile, so nothing honest produces this and it should read zero forever; any rise is a captured grant presented a second time. |
+| `pace_worker_jobs_refused_lease_endpoint_mismatch_total` | Jobs refused because an authentic lease named a different worker. Usually a registered endpoint that is not the one clients dial, not a replay. |
+| `pace_worker_jobs_refused_lease_expired_total` | Jobs refused because an authentic lease had expired. A rise on one machine and nowhere else is that machine's clock, not the fleet's leases. |
+| `pace_worker_jobs_refused_lease_isolated_total` | Grants refused because this worker has heard from no leader its fleet counts for longer than it may trust the state it applied (65 minutes), so a voter the fleet forgot meanwhile could still be in it. Should read zero; a rise means this worker is cut off from its fleet's consensus -- check its Raft sessions -- while something still hands it grants. |
+| `pace_worker_jobs_refused_lease_no_roster_total` | Grants refused because the state this worker applied records no voter's key yet, so no grant from anybody could verify. A few while a node starts or joins are ordinary; a rise that does not stop means this node never applied its fleet's state. |
+| `pace_worker_jobs_refused_lease_signer_revoked_total` | Grants refused because they verify under a key the cluster has revoked: the removed machine itself, still leasing out work. Should read zero forever; a rise names a machine somebody removed and nobody stopped. Shares its wire code with `..._unauthorized_total` and nothing else. |
+| `pace_worker_scheduler_term_regressions_total` | Times this worker adopted a scheduler term that went **backwards**. Not a refusal — the grant is served. Two causes look identical here and the rate separates them: a grant minted before a leadership change and delivered after one is ordinary and appears as occasional counts tracking elections; a scheduler that was reset repeats until somebody stops it. |
 
 > Lease and roster series were **retired**: one by
 > [#614](https://github.com/LASTRADA-Software/fastcached/issues/614), because a worker now
@@ -3652,24 +3652,24 @@ exposition cannot drift apart again without a red build.
 
 | Series | Says |
 |---|---|
-| `fastcache_worker_frames_refused_unsupported_version_total` | Frames refused for naming a protocol version this build does not serve: a peer built against another release. |
-| `fastcache_worker_frames_refused_truncated_total` | Frames shorter than the payload their own header declared: a framing or transport fault, or a peer sending nonsense. Never sum with malformed_payload -- they share a wire code and nothing else. |
-| `fastcache_worker_frames_refused_unknown_opcode_total` | Frames naming an opcode this build has no row for. |
-| `fastcache_worker_frames_refused_unimplemented_verb_total` | Frames naming a verb that exists and is not served here, such as AUTH on a worker that checks no credential. |
-| `fastcache_worker_frames_refused_not_permitted_total` | Frames naming a verb this node serves on another surface: a client reached the compile port with a cache or scheduler request. |
-| `fastcache_worker_frames_refused_malformed_payload_total` | Frames whose payload did not decode into the fields its verb requires: a version or encoding mismatch between two ends that agree on the framing. |
+| `pace_worker_frames_refused_unsupported_version_total` | Frames refused for naming a protocol version this build does not serve: a peer built against another release. |
+| `pace_worker_frames_refused_truncated_total` | Frames shorter than the payload their own header declared: a framing or transport fault, or a peer sending nonsense. Never sum with malformed_payload -- they share a wire code and nothing else. |
+| `pace_worker_frames_refused_unknown_opcode_total` | Frames naming an opcode this build has no row for. |
+| `pace_worker_frames_refused_unimplemented_verb_total` | Frames naming a verb that exists and is not served here, such as AUTH on a worker that checks no credential. |
+| `pace_worker_frames_refused_not_permitted_total` | Frames naming a verb this node serves on another surface: a client reached the compile port with a cache or scheduler request. |
+| `pace_worker_frames_refused_malformed_payload_total` | Frames whose payload did not decode into the fields its verb requires: a version or encoding mismatch between two ends that agree on the framing. |
 
 
 **Connections swept on a deadline.** A sweep is not a refusal: the peer ran out of time rather than being told no. The two sweep rows are split by whether a verb had been named, because a peer that connected and never spoke is a different problem from one whose answer outran its window.
 
 | Series | Says |
 |---|---|
-| `fastcache_frame_request_deadline_sweeps_total` | Connections swept before the peer named a verb. A peer counted here connected and did not speak, so no honest client of this surface appears in it. Never sum with answer_deadline: that one is a request this node accepted outrunning its budget, this one is a knock at the door. |
-| `fastcache_frame_answer_deadline_sweeps_total` | Connections swept after the peer named a verb, meaning the answer outran the window that verb allows. For a compile that is a translation unit outliving its lease grant, so a rise is a question about the lease timeout rather than about this worker. |
-| `fastcache_frame_deadline_refusals_sent_total` | Swept connections whose peer was sent a frame saying why. A second event, not a restatement of answer_deadline_sweeps: only a connection parked inside the surface can be told, because a connection parked on the socket is ended by the close and the close is the write side gone. The gap between the two is how many swept peers were left to infer it. |
-| `fastcache_frame_peer_watch_departures_total` | Peers the watch saw leave while the connection could still act on it: the observation, where jobs_abandoned_client_gone is the decision. Subtract the second from the first for what was suppressed on purpose -- an empty reply, or a socket this node closed itself. A client that vanished and was NOT noticed is this row flat while the object was written anyway. It does not rise for a client that hangs up after reading its reply, which is every honest one. |
-| `fastcache_frame_peer_watch_departures_observed_total` | Every peer departure the watch reached, before either suppression -- the denominator the row above cannot supply for itself. That row flat is both the healthy reading and a watch that never ran; this one rising is what says the mechanism is live, and on a healthy surface it rises once per compile. Subtract for what was suppressed on purpose. Never below the row above. A watch that ended because the peer sent bytes is a pipelined request and appears in neither. |
-| `fastcache_frame_peer_watch_departures_abortive_total` | Of the row two above, the departures where the peer RESET rather than closing gracefully. A subset under the same suppressions, so it is never above that row and subtracting gives the graceful half. **This is the half worth alerting on:** a graceful mid-answer departure is a cancelled build, a `Ctrl-C` or a reclaimed CI runner and its rate means nothing, while a rise here is crashing clients, a machine losing its route, or a middlebox resetting long-lived connections. |
+| `pace_frame_request_deadline_sweeps_total` | Connections swept before the peer named a verb. A peer counted here connected and did not speak, so no honest client of this surface appears in it. Never sum with answer_deadline: that one is a request this node accepted outrunning its budget, this one is a knock at the door. |
+| `pace_frame_answer_deadline_sweeps_total` | Connections swept after the peer named a verb, meaning the answer outran the window that verb allows. For a compile that is a translation unit outliving its lease grant, so a rise is a question about the lease timeout rather than about this worker. |
+| `pace_frame_deadline_refusals_sent_total` | Swept connections whose peer was sent a frame saying why. A second event, not a restatement of answer_deadline_sweeps: only a connection parked inside the surface can be told, because a connection parked on the socket is ended by the close and the close is the write side gone. The gap between the two is how many swept peers were left to infer it. |
+| `pace_frame_peer_watch_departures_total` | Peers the watch saw leave while the connection could still act on it: the observation, where jobs_abandoned_client_gone is the decision. Subtract the second from the first for what was suppressed on purpose -- an empty reply, or a socket this node closed itself. A client that vanished and was NOT noticed is this row flat while the object was written anyway. It does not rise for a client that hangs up after reading its reply, which is every honest one. |
+| `pace_frame_peer_watch_departures_observed_total` | Every peer departure the watch reached, before either suppression -- the denominator the row above cannot supply for itself. That row flat is both the healthy reading and a watch that never ran; this one rising is what says the mechanism is live, and on a healthy surface it rises once per compile. Subtract for what was suppressed on purpose. Never below the row above. A watch that ended because the peer sent bytes is a pipelined request and appears in neither. |
+| `pace_frame_peer_watch_departures_abortive_total` | Of the row two above, the departures where the peer RESET rather than closing gracefully. A subset under the same suppressions, so it is never above that row and subtracting gives the graceful half. **This is the half worth alerting on:** a graceful mid-answer departure is a cancelled build, a `Ctrl-C` or a reclaimed CI runner and its rate means nothing, while a rise here is crashing clients, a machine losing its route, or a middlebox resetting long-lived connections. |
 
 **What this machine is, and how loaded it is.** Rendered only by a process that has a
 capacity to report, so a daemon emits none of them — `MetricsSnapshot::host` is absent
@@ -3678,16 +3678,16 @@ fact about it. These are gauges, not counters, except the two CPU tick series.
 
 | Series | Says |
 |---|---|
-| `fastcache_node_logical_cores` | Schedulable hardware threads on this node. |
-| `fastcache_node_memory_total_bytes` | Physical memory, or the container ceiling when that binds first. |
-| `fastcache_node_disk_capacity_bytes` | Size of the filesystem this node compiles on. |
-| `fastcache_node_disk_free_bytes` | Space on that filesystem an unprivileged process may still write. |
-| `fastcache_node_slots_configured` | Concurrent compiles this node advertises to the scheduler. |
-| `fastcache_node_slots_busy` | Compiles running right now — **sampled**, so it is a reading and not a difference of two counters. |
-| `fastcache_node_cordoned` | 1 while an operator has cordoned this node's worker, 0 otherwise. Read beside `fastcache_node_slots_busy`: cordoned with compiles running is draining, cordoned with none is safe to stop. A restart clears it, so `== 1` for a day is a machine somebody forgot. |
-| `fastcache_node_cpu_busy_ticks_total` | Host-wide CPU ticks spent doing anything but idling, this node's own compiles included. A **counter** in platform ticks, whose length differs per platform, so it means nothing alone: `rate(fastcache_node_cpu_busy_ticks_total[1m]) / rate(fastcache_node_cpu_ticks_total[1m])` is the machine's busy share. Absent when the platform would not report its CPU. |
-| `fastcache_node_cpu_ticks_total` | Host-wide CPU ticks accounted for at all: the denominator of the row above. |
-| `fastcache_node_memory_available_bytes` | Memory a new process could actually obtain: *available*, not free, so the page cache the kernel hands back on demand counts. Absent when the platform would not say. |
+| `pace_node_logical_cores` | Schedulable hardware threads on this node. |
+| `pace_node_memory_total_bytes` | Physical memory, or the container ceiling when that binds first. |
+| `pace_node_disk_capacity_bytes` | Size of the filesystem this node compiles on. |
+| `pace_node_disk_free_bytes` | Space on that filesystem an unprivileged process may still write. |
+| `pace_node_slots_configured` | Concurrent compiles this node advertises to the scheduler. |
+| `pace_node_slots_busy` | Compiles running right now — **sampled**, so it is a reading and not a difference of two counters. |
+| `pace_node_cordoned` | 1 while an operator has cordoned this node's worker, 0 otherwise. Read beside `pace_node_slots_busy`: cordoned with compiles running is draining, cordoned with none is safe to stop. A restart clears it, so `== 1` for a day is a machine somebody forgot. |
+| `pace_node_cpu_busy_ticks_total` | Host-wide CPU ticks spent doing anything but idling, this node's own compiles included. A **counter** in platform ticks, whose length differs per platform, so it means nothing alone: `rate(pace_node_cpu_busy_ticks_total[1m]) / rate(pace_node_cpu_ticks_total[1m])` is the machine's busy share. Absent when the platform would not report its CPU. |
+| `pace_node_cpu_ticks_total` | Host-wide CPU ticks accounted for at all: the denominator of the row above. |
+| `pace_node_memory_available_bytes` | Memory a new process could actually obtain: *available*, not free, so the page cache the kernel hands back on demand counts. Absent when the platform would not say. |
 
 The CPU figures are raw counters rather than a utilization on purpose. A utilization is a
 difference between two readings, so the node would have to hold the earlier one, and the
@@ -3709,21 +3709,21 @@ the **quorum**, answered by whichever node you scrape, leader or not.
 
 | Series | Says |
 |---|---|
-| `fastcache_node_consensus_members` | How many members the configuration this node operates under names — voters and learners alike. `0` is a *reading*, not an absence: the node holds no configuration, so it stands for no election and grants no vote. That is the ordinary waiting state of a node that joined a fleet before it is admitted, and a fault for any other — see the alert below. |
-| `fastcache_node_consensus_term` | The election term this node is operating in. A gauge and not a counter: wiping `--cluster-dir` legitimately resets it, and a counter that resets renders as a spike of its whole history. |
-| `fastcache_node_consensus_commit_index` | How far this node's replicated log is committed. Far behind its peers means it is being caught up rather than taking part. |
-| `fastcache_node_consensus_role` | One sample per role — `follower`, `pre-candidate`, `candidate`, `leader` — with exactly one of them `1`. A node cycling between `candidate` and `follower` is a cluster that cannot settle. |
-| `fastcache_node_consensus_member` | One sample per member of that configuration, carrying its id and its `seat` — `voter` or `learner`. The set rather than only its size, because "which members does this node count" is what you ask when an election will not resolve, and since learners exist the seat is half that answer: `count by (seat)` says how many a quorum counts. No samples at all when the configuration is empty. |
-| `fastcache_node_consensus_leader` | The member this node believes leads. **Absent** when it believes none does, which is what an election in progress looks like — not an empty label, which a dashboard would draw as a member. |
+| `pace_node_consensus_members` | How many members the configuration this node operates under names — voters and learners alike. `0` is a *reading*, not an absence: the node holds no configuration, so it stands for no election and grants no vote. That is the ordinary waiting state of a node that joined a fleet before it is admitted, and a fault for any other — see the alert below. |
+| `pace_node_consensus_term` | The election term this node is operating in. A gauge and not a counter: wiping `--cluster-dir` legitimately resets it, and a counter that resets renders as a spike of its whole history. |
+| `pace_node_consensus_commit_index` | How far this node's replicated log is committed. Far behind its peers means it is being caught up rather than taking part. |
+| `pace_node_consensus_role` | One sample per role — `follower`, `pre-candidate`, `candidate`, `leader` — with exactly one of them `1`. A node cycling between `candidate` and `follower` is a cluster that cannot settle. |
+| `pace_node_consensus_member` | One sample per member of that configuration, carrying its id and its `seat` — `voter` or `learner`. The set rather than only its size, because "which members does this node count" is what you ask when an election will not resolve, and since learners exist the seat is half that answer: `count by (seat)` says how many a quorum counts. No samples at all when the configuration is empty. |
+| `pace_node_consensus_leader` | The member this node believes leads. **Absent** when it believes none does, which is what an election in progress looks like — not an empty label, which a dashboard would draw as a member. |
 
-The alert worth writing is `fastcache_node_consensus_members == 0` sustained on a node
+The alert worth writing is `pace_node_consensus_members == 0` sustained on a node
 that is not currently being admitted. Such a node has been admitted to the *fleet* and
 never adopted the *configuration*: it answers cluster verbs, it names the leader
 correctly, and it is excused from every deadline, so it neither campaigns nor answers a
 pre-vote ([#388](https://github.com/LASTRADA-Software/fastcached/issues/388)). Nothing
 is wrong until the leader goes, and then the cluster cannot re-elect. The second one
 worth writing is the whole fleet disagreeing about
-`fastcache_node_consensus_leader{leader=...}` for longer than an election takes.
+`pace_node_consensus_leader{leader=...}` for longer than an election takes.
 
 ### The enrollment window
 
@@ -3734,22 +3734,22 @@ repeating warning, because that is a state and a counter cannot carry one.
 
 | Series | Says |
 |---|---|
-| `fastcache_enrollment_rosters_served_total` | An approved joiner was handed the roster. Per roster SENT, not per machine: an approval is answered on every poll, so a joiner whose reply was lost and asked again counts twice. It carries no secret, so a rise past the machines anybody approved is a retry rather than a leak -- and the pending list names who asked. |
-| `fastcache_enrollment_approvals_manual_total` | A joiner an operator admitted by name with `--enroll-approve`, counted once the cluster agreed to record it under the key it asked with. A refused approval admitted nobody and is not counted. |
-| `fastcache_enrollment_approvals_auto_total` | A joiner an armed `--enroll-auto-approve` deadline admitted on the leader's own authority, under the key it asked with first. Counted apart from the manual approvals, because the question after a window is who got in while nobody was looking; `--enroll-list` marks each such row with when the window was armed. |
-| `fastcache_enrollment_requests_refused_host_cap_total` | A request refused because its address already had 4 requests nobody had decided about on the list. Apart from the full-list series because the cause is one address asking a lot — a NAT or a VM host rolling out more than a handful at once, or a flood — where a full list is many machines waiting. |
-| `fastcache_enrollment_requests_cleared_total` | Requests `--enroll-clear` dropped: rows nobody had decided about, forgotten on an operator's word. The leader's log names the ids. |
-| `fastcache_enrollment_approvals_refused_key_mismatch_total` | An approval refused because the key it named is not the key the row under that id holds, so nothing was admitted. The machine asking under the id is not the one the operator compared — most often because that one stopped asking, its row lapsed, and another machine asked under the same id. |
-| `fastcache_enrollment_requests_refused_id_too_long_total` | A request refused because the id it named is longer than every id this fleet carries may be. Refused where it enters, so the list never shows a row `--enroll-reject` could not name; a machine that keeps sending one was not minted by this software. |
-| `fastcache_formation_yields_total` | Times this node decided to ask another fleet to admit it: while solitary it proved a fleet it yields to — an established one, or an older solitary one — and recorded the join before asking. More than one on a machine that should have joined once is a fleet that keeps refusing it or stops answering. |
-| `fastcache_formation_joins_abandoned_total` | Joins this node gave up because the fleet it asked gave no answer it signed for ten minutes: silence, or only what nobody signs -- a full list, a not-leader, a redirect. It stays in its own cluster, keeps serving, and asks again when it next proves a fleet it yields to. |
-| `fastcache_formation_admissions_refused_total` | Admissions this node did not believe although they were signed by a key it proved for that fleet: the roster does not record it under its own key, or records no member under the key that proved the fleet. The fleet answered, wrongly — an approval of another key for this id, most often. A roster copied by somebody else is not counted here: it carries no signature the fleet made, and is `admissions_unverified` below. Nothing was archived; the node stays in its own cluster, and gives the join up if it goes on. |
-| `fastcache_formation_admissions_unverified_total` | Answers to this node's join — an admission, a refusal or a not-yet — it refused because nothing bound them to the fleet it asked: no signature, one that does not verify over this node's own request and the outcome it states, or a genuine one by a key it never proved for that fleet. Such an answer counts as no answer: a refusal does not send the node away, and a not-yet does not keep it waiting. Nor does any other answer nobody signed -- a full list, a not-leader naming nobody, a redirect: those count towards giving the join up too, though they are not counted here. A roster is public — every member's id and key rides every beacon — so its content alone cannot say who answered; the signature, over a nonce this node chose, by a key it proved for that fleet, is what does. A rise is something answering at the endpoint this node polls that is not that fleet. Nothing was archived; the node stays in its own cluster, and gives the join up if it goes on. |
-| `fastcache_formation_yields_refused_pin_total` | Proven fleets this node would have asked to admit it and did not, because `--fleet-id` pins it to another cluster. Counted per proof, so a fleet that keeps beaconing keeps counting. A steady rise is a fleet on this segment the pin keeps this node out of — a second office, or somebody proving an older fleet to be joined; `foreign-fleet-visible` names it. |
-| `fastcache_formation_admissions_refused_pin_total` | Moves into another cluster this node refused because `--fleet-id` pins it elsewhere: an admission from a fleet the pin does not name, or its own fleet's order to dissolve into one. Nothing changed; the node stays where it is, and the log names both ids. |
-| `fastcache_state_file_replaces_fell_back_total` | Serving bodies that found, as they started, that the state files in this node's directory are replaced by the classic rename because the POSIX-semantics one was refused — a filesystem without it, or a path form it will not take. Every replace still lands; on Windows a reader holding a state file open then makes its replace fail. The warning names the directory and the refusal. |
-| `fastcache_state_directory_syncs_unsupported_total` | Serving bodies that found, as they started, that the filesystem holding this node's state directory cannot sync a directory at all, so a replaced state file is not known to survive a power loss there. Every replace still lands and is used. The warning names the directory and the answer; a local volume syncs. |
-| `fastcache_enrollment_requests_expired_total` | A request the leader forgot because its machine stopped asking for ten minutes before anybody decided about it — switched off, or given up waiting for a person. A machine that asks again is recorded afresh; a row somebody decided about goes quietly. |
+| `pace_enrollment_rosters_served_total` | An approved joiner was handed the roster. Per roster SENT, not per machine: an approval is answered on every poll, so a joiner whose reply was lost and asked again counts twice. It carries no secret, so a rise past the machines anybody approved is a retry rather than a leak -- and the pending list names who asked. |
+| `pace_enrollment_approvals_manual_total` | A joiner an operator admitted by name with `--enroll-approve`, counted once the cluster agreed to record it under the key it asked with. A refused approval admitted nobody and is not counted. |
+| `pace_enrollment_approvals_auto_total` | A joiner an armed `--enroll-auto-approve` deadline admitted on the leader's own authority, under the key it asked with first. Counted apart from the manual approvals, because the question after a window is who got in while nobody was looking; `--enroll-list` marks each such row with when the window was armed. |
+| `pace_enrollment_requests_refused_host_cap_total` | A request refused because its address already had 4 requests nobody had decided about on the list. Apart from the full-list series because the cause is one address asking a lot — a NAT or a VM host rolling out more than a handful at once, or a flood — where a full list is many machines waiting. |
+| `pace_enrollment_requests_cleared_total` | Requests `--enroll-clear` dropped: rows nobody had decided about, forgotten on an operator's word. The leader's log names the ids. |
+| `pace_enrollment_approvals_refused_key_mismatch_total` | An approval refused because the key it named is not the key the row under that id holds, so nothing was admitted. The machine asking under the id is not the one the operator compared — most often because that one stopped asking, its row lapsed, and another machine asked under the same id. |
+| `pace_enrollment_requests_refused_id_too_long_total` | A request refused because the id it named is longer than every id this fleet carries may be. Refused where it enters, so the list never shows a row `--enroll-reject` could not name; a machine that keeps sending one was not minted by this software. |
+| `pace_formation_yields_total` | Times this node decided to ask another fleet to admit it: while solitary it proved a fleet it yields to — an established one, or an older solitary one — and recorded the join before asking. More than one on a machine that should have joined once is a fleet that keeps refusing it or stops answering. |
+| `pace_formation_joins_abandoned_total` | Joins this node gave up because the fleet it asked gave no answer it signed for ten minutes: silence, or only what nobody signs -- a full list, a not-leader, a redirect. It stays in its own cluster, keeps serving, and asks again when it next proves a fleet it yields to. |
+| `pace_formation_admissions_refused_total` | Admissions this node did not believe although they were signed by a key it proved for that fleet: the roster does not record it under its own key, or records no member under the key that proved the fleet. The fleet answered, wrongly — an approval of another key for this id, most often. A roster copied by somebody else is not counted here: it carries no signature the fleet made, and is `admissions_unverified` below. Nothing was archived; the node stays in its own cluster, and gives the join up if it goes on. |
+| `pace_formation_admissions_unverified_total` | Answers to this node's join — an admission, a refusal or a not-yet — it refused because nothing bound them to the fleet it asked: no signature, one that does not verify over this node's own request and the outcome it states, or a genuine one by a key it never proved for that fleet. Such an answer counts as no answer: a refusal does not send the node away, and a not-yet does not keep it waiting. Nor does any other answer nobody signed -- a full list, a not-leader naming nobody, a redirect: those count towards giving the join up too, though they are not counted here. A roster is public — every member's id and key rides every beacon — so its content alone cannot say who answered; the signature, over a nonce this node chose, by a key it proved for that fleet, is what does. A rise is something answering at the endpoint this node polls that is not that fleet. Nothing was archived; the node stays in its own cluster, and gives the join up if it goes on. |
+| `pace_formation_yields_refused_pin_total` | Proven fleets this node would have asked to admit it and did not, because `--fleet-id` pins it to another cluster. Counted per proof, so a fleet that keeps beaconing keeps counting. A steady rise is a fleet on this segment the pin keeps this node out of — a second office, or somebody proving an older fleet to be joined; `foreign-fleet-visible` names it. |
+| `pace_formation_admissions_refused_pin_total` | Moves into another cluster this node refused because `--fleet-id` pins it elsewhere: an admission from a fleet the pin does not name, or its own fleet's order to dissolve into one. Nothing changed; the node stays where it is, and the log names both ids. |
+| `pace_state_file_replaces_fell_back_total` | Serving bodies that found, as they started, that the state files in this node's directory are replaced by the classic rename because the POSIX-semantics one was refused — a filesystem without it, or a path form it will not take. Every replace still lands; on Windows a reader holding a state file open then makes its replace fail. The warning names the directory and the refusal. |
+| `pace_state_directory_syncs_unsupported_total` | Serving bodies that found, as they started, that the filesystem holding this node's state directory cannot sync a directory at all, so a replaced state file is not known to survive a power loss there. Every replace still lands and is used. The warning names the directory and the answer; a local volume syncs. |
+| `pace_enrollment_requests_expired_total` | A request the leader forgot because its machine stopped asking for ten minutes before anybody decided about it — switched off, or given up waiting for a person. A machine that asks again is recorded afresh; a row somebody decided about goes quietly. |
 
 Both are rendered by **every** node, consensus or not, and read zero on a machine
 that has no window at all. That is deliberate and is this project's rule rather than
@@ -3770,12 +3770,12 @@ no writer exists, so the rows are absent rather than a zero that claims nobody t
 
 | Series | Says |
 |---|---|
-| `fastcache_discovery_proofs_refused_unknown_key_total` | A peer proved possession of a key the roster does not hold for the id it claimed. **The ordinary cause is a new machine nobody has admitted yet**: enrol it, or `--cluster-admit` it under the key the warning names. The other cause is a machine claiming a known member's id under its own key, and the log line -- id, the address it came from, the key whole -- is what tells them apart. Logged at most once a minute with how many it stands for; every one is counted. |
-| `fastcache_discovery_proofs_refused_revoked_key_total` | A peer proved possession of a key the roster has REVOKED. The remedy is the opposite of the row above: that machine was removed and is never admitted again under that key, so a rise is a decommissioned machine still running, or one somebody restored from a backup of its state directory. |
-| `fastcache_discovery_proofs_refused_forged_total` | A proof whose signature does not verify under the key it carries. An honest node cannot produce one, so it is somebody sending datagrams by hand, or a build that disagrees about the signed message -- which moves the discovery wire's version when it changes, so it should not happen between two builds of this project. Logged by the address it came from and nothing it claimed. |
-| `fastcache_discovery_beacons_over_bound_total` | A beacon that reached a bound. At a bound the oldest entry nothing vouches for is displaced -- a peer of this cluster the roster holds no key for, another fleet that has proven nothing -- and a new fleet is dropped only when every remembered fleet has answered a challenge; what the roster or an answer vouches for is never displaced. A beacon is unauthenticated, so every table it grows is one anything on the segment can try to fill by inventing ids, and an overflow is counted rather than logged. One series for every bound: it says a flood is under way, not which table it reached. A healthy segment produces none, so a rise is somebody flooding the beacon port. |
-| `fastcache_discovery_replies_withheld_total` | A challenge or a proof this node did not send. A reply goes to whatever address its request came from, and that address is whatever the sender typed, so no reply is larger than the datagram that provoked it -- a beacon is padded to its sender's proof, a challenge to the beacon, and a proof that would still exceed its challenge is withheld -- and answers, each a signature, are rate-limited, a burst and then a steady refill, so a flood buys this node few signings and its victim few proofs. Two builds of this project never trip the size rule against each other, save once and briefly when a node's summary grows between its beacon and its answer; a steady rise is somebody sending challenges by hand, or a flood of them. |
-| `fastcache_discovery_proof_checks_withheld_total` | A proof whose signature this node did not check. It answered a challenge this node issued and had not yet spent, but the check budget was spent -- first the budget of the host it came from, then the one every proof shares -- or that challenge had already failed two signature checks. A forged proof spends no challenge, so without these one live challenge would buy a signature check per datagram; with them a flood costs this node a few percent of a core at most, and a challenge a forger exhausted is simply asked again at the next beacon. A healthy segment produces none; a rise is somebody sending proofs faster than this node checks them, most likely forgeries against one challenge, and a warning names the address they come from. |
+| `pace_discovery_proofs_refused_unknown_key_total` | A peer proved possession of a key the roster does not hold for the id it claimed. **The ordinary cause is a new machine nobody has admitted yet**: enrol it, or `--cluster-admit` it under the key the warning names. The other cause is a machine claiming a known member's id under its own key, and the log line -- id, the address it came from, the key whole -- is what tells them apart. Logged at most once a minute with how many it stands for; every one is counted. |
+| `pace_discovery_proofs_refused_revoked_key_total` | A peer proved possession of a key the roster has REVOKED. The remedy is the opposite of the row above: that machine was removed and is never admitted again under that key, so a rise is a decommissioned machine still running, or one somebody restored from a backup of its state directory. |
+| `pace_discovery_proofs_refused_forged_total` | A proof whose signature does not verify under the key it carries. An honest node cannot produce one, so it is somebody sending datagrams by hand, or a build that disagrees about the signed message -- which moves the discovery wire's version when it changes, so it should not happen between two builds of this project. Logged by the address it came from and nothing it claimed. |
+| `pace_discovery_beacons_over_bound_total` | A beacon that reached a bound. At a bound the oldest entry nothing vouches for is displaced -- a peer of this cluster the roster holds no key for, another fleet that has proven nothing -- and a new fleet is dropped only when every remembered fleet has answered a challenge; what the roster or an answer vouches for is never displaced. A beacon is unauthenticated, so every table it grows is one anything on the segment can try to fill by inventing ids, and an overflow is counted rather than logged. One series for every bound: it says a flood is under way, not which table it reached. A healthy segment produces none, so a rise is somebody flooding the beacon port. |
+| `pace_discovery_replies_withheld_total` | A challenge or a proof this node did not send. A reply goes to whatever address its request came from, and that address is whatever the sender typed, so no reply is larger than the datagram that provoked it -- a beacon is padded to its sender's proof, a challenge to the beacon, and a proof that would still exceed its challenge is withheld -- and answers, each a signature, are rate-limited, a burst and then a steady refill, so a flood buys this node few signings and its victim few proofs. Two builds of this project never trip the size rule against each other, save once and briefly when a node's summary grows between its beacon and its answer; a steady rise is somebody sending challenges by hand, or a flood of them. |
+| `pace_discovery_proof_checks_withheld_total` | A proof whose signature this node did not check. It answered a challenge this node issued and had not yet spent, but the check budget was spent -- first the budget of the host it came from, then the one every proof shares -- or that challenge had already failed two signature checks. A forged proof spends no challenge, so without these one live challenge would buy a signature check per datagram; with them a flood costs this node a few percent of a core at most, and a challenge a forger exhausted is simply asked again at the next beacon. A healthy segment produces none; a rise is somebody sending proofs faster than this node checks them, most likely forgeries against one challenge, and a warning names the address they come from. |
 
 ### What a refused connection looks like
 
@@ -3811,59 +3811,59 @@ practice is a cache `STORE`.
 
 | Series | Says | Counted for |
 |---|---|---|
-| `fastcache_worker_frames_refused_payload_too_large_total` | A header declared more payload than the surface will buffer, so nothing was read. **The cheapest probe there is** — it needs 24 bytes where the envelope series needs a whole frame sent and read — which is why it has its own counter rather than leaning on them. | compile verbs |
-| `fastcache_worker_jobs_refused_endpoint_busy_total` | A request would not fit in the bytes already in flight. A slot was free and the memory was not, so more machines would not have helped. | compile verbs |
-| `fastcache_node_frame_connections_refused_at_capacity_total` | The listener already holds every *connection* it will, so a new one was turned away before it sent anything. | every verb — it is decided before one is named |
-| `fastcache_node_cache_requests_refused_payload_too_large_total` | The cache surface's half of the frame ceiling. On a node holding a tier this is the one that actually fires, and it needs 24 bytes and no body to move. | cache verbs |
-| `fastcache_node_cache_requests_refused_endpoint_busy_total` | The cache surface's half of the byte budget: a `STORE` that would not fit in the bytes already in flight. The listener's ceiling folds to the largest component's — the cache's 256 MiB, or a worker's compile budget wherever that is larger — and a `STORE` is what runs into it. | cache verbs |
-| `fastcache_node_cache_requests_refused_unsupported_version_total` | A cache request at a wire version this build cannot decode — a client from another release. Worth alerting on because the launcher steps over it and compiles locally, so the only other symptom is a cache that looks permanently cold. | cache verbs |
-| `fastcache_node_cache_requests_refused_malformed_payload_total` | A `FETCH` or `STORE` body that would not decode, in a frame whose declared length arrived in full. Two ends that agree on the framing and disagree about what goes inside it. | cache verbs |
-| `fastcache_node_cache_requests_refused_foreign_generation_total` | A `STORE` whose value names a canonicalization generation this build does not implement — the value-format twin of the unsupported-version row above, and the same operator action: find the machine that is out of step. Answered `foreign-value-generation`, never `malformed-value`: the value is well formed and the fleet is mid-upgrade, so reading it as a damaged cache is the one wrong move. Flat at zero unless the fleet spans a `CompileValueVersion` bump, so any rise is a real event. It is also the only view of what refusing costs, since the launcher reports a miss and compiles locally. | cache verbs |
-| `fastcache_enrollment_requests_refused_full_total` | The pending list already held every entry it will. A rollout larger than the list is the honest cause, fixed by deciding in batches; many addresses each holding their share is the other, and `--enroll-clear` makes room. One address asking a lot is the host-cap row instead. | `ENROLL` |
-| `fastcache_enrollment_requests_refused_malformed_total` | An `ENROLL` payload that would not decode, one naming no id or no address, or one asking under a small-order or non-canonical key, which no build mints. Flat at zero against this project's own client, so a rise is another implementation or a probe shaped like one. | `ENROLL` |
-| `fastcache_enrollment_requests_refused_forged_total` | An `ENROLL` whose signature does not verify under the key it asks with: a request that key's holder did not make. A joiner's id and key are public, so anybody can poll under them, and only the holder can sign -- which is what keeps a stranger from setting the endpoint a member record keeps. Not ordinary on any deployment: a rise is somebody polling under another machine's identity, or a joiner whose key file and stated key disagree. | `ENROLL` |
-| `fastcache_enrollment_requests_refused_revoked_key_total` | An `ENROLL` asked under a key the cluster has revoked: a machine an operator forgot with `--cluster-forget`, asking to come back as itself. Refused at the door rather than listed, because no approval could admit a revoked key, and the refusal tells the machine to mint a new identity. Expected once after forgetting a machine that is still running; a steady rate is a removed machine nobody stopped. | `ENROLL` |
-| `fastcache_enrollment_control_refused_not_a_member_total` | An `ENROLL-CONTROL` from a host this node does not admit. The decision half of the family is the one that admits a key to the cluster, so it is gated twice — membership here, and `AUTH` in the row below — and this counter is the outer gate reporting. | `ENROLL-CONTROL` |
-| `fastcache_enrollment_control_refused_identified_caller_required_total` | An `ENROLL-CONTROL` -- approve, reject, auto-approve, clear, list -- from a caller only `--fleet-open` admitted: an anonymous caller trying to decide who joins. Never summed with the not-a-member series, a caller nothing admitted. |
-| `fastcache_enrollment_control_refused_operator_standing_required_total` | An `ENROLL-CONTROL` -- approve, reject, auto-approve, clear, list -- from a caller whose machine ticket or proven key names a machine that holds no voter's seat: a learner deciding who joins. Never summed with the identified-caller series, an anonymous caller. |
+| `pace_worker_frames_refused_payload_too_large_total` | A header declared more payload than the surface will buffer, so nothing was read. **The cheapest probe there is** — it needs 24 bytes where the envelope series needs a whole frame sent and read — which is why it has its own counter rather than leaning on them. | compile verbs |
+| `pace_worker_jobs_refused_endpoint_busy_total` | A request would not fit in the bytes already in flight. A slot was free and the memory was not, so more machines would not have helped. | compile verbs |
+| `pace_node_frame_connections_refused_at_capacity_total` | The listener already holds every *connection* it will, so a new one was turned away before it sent anything. | every verb — it is decided before one is named |
+| `pace_node_cache_requests_refused_payload_too_large_total` | The cache surface's half of the frame ceiling. On a node holding a tier this is the one that actually fires, and it needs 24 bytes and no body to move. | cache verbs |
+| `pace_node_cache_requests_refused_endpoint_busy_total` | The cache surface's half of the byte budget: a `STORE` that would not fit in the bytes already in flight. The listener's ceiling folds to the largest component's — the cache's 256 MiB, or a worker's compile budget wherever that is larger — and a `STORE` is what runs into it. | cache verbs |
+| `pace_node_cache_requests_refused_unsupported_version_total` | A cache request at a wire version this build cannot decode — a client from another release. Worth alerting on because the launcher steps over it and compiles locally, so the only other symptom is a cache that looks permanently cold. | cache verbs |
+| `pace_node_cache_requests_refused_malformed_payload_total` | A `FETCH` or `STORE` body that would not decode, in a frame whose declared length arrived in full. Two ends that agree on the framing and disagree about what goes inside it. | cache verbs |
+| `pace_node_cache_requests_refused_foreign_generation_total` | A `STORE` whose value names a canonicalization generation this build does not implement — the value-format twin of the unsupported-version row above, and the same operator action: find the machine that is out of step. Answered `foreign-value-generation`, never `malformed-value`: the value is well formed and the fleet is mid-upgrade, so reading it as a damaged cache is the one wrong move. Flat at zero unless the fleet spans a `CompileValueVersion` bump, so any rise is a real event. It is also the only view of what refusing costs, since the launcher reports a miss and compiles locally. | cache verbs |
+| `pace_enrollment_requests_refused_full_total` | The pending list already held every entry it will. A rollout larger than the list is the honest cause, fixed by deciding in batches; many addresses each holding their share is the other, and `--enroll-clear` makes room. One address asking a lot is the host-cap row instead. | `ENROLL` |
+| `pace_enrollment_requests_refused_malformed_total` | An `ENROLL` payload that would not decode, one naming no id or no address, or one asking under a small-order or non-canonical key, which no build mints. Flat at zero against this project's own client, so a rise is another implementation or a probe shaped like one. | `ENROLL` |
+| `pace_enrollment_requests_refused_forged_total` | An `ENROLL` whose signature does not verify under the key it asks with: a request that key's holder did not make. A joiner's id and key are public, so anybody can poll under them, and only the holder can sign -- which is what keeps a stranger from setting the endpoint a member record keeps. Not ordinary on any deployment: a rise is somebody polling under another machine's identity, or a joiner whose key file and stated key disagree. | `ENROLL` |
+| `pace_enrollment_requests_refused_revoked_key_total` | An `ENROLL` asked under a key the cluster has revoked: a machine an operator forgot with `--cluster-forget`, asking to come back as itself. Refused at the door rather than listed, because no approval could admit a revoked key, and the refusal tells the machine to mint a new identity. Expected once after forgetting a machine that is still running; a steady rate is a removed machine nobody stopped. | `ENROLL` |
+| `pace_enrollment_control_refused_not_a_member_total` | An `ENROLL-CONTROL` from a host this node does not admit. The decision half of the family is the one that admits a key to the cluster, so it is gated twice — membership here, and `AUTH` in the row below — and this counter is the outer gate reporting. | `ENROLL-CONTROL` |
+| `pace_enrollment_control_refused_identified_caller_required_total` | An `ENROLL-CONTROL` -- approve, reject, auto-approve, clear, list -- from a caller only `--fleet-open` admitted: an anonymous caller trying to decide who joins. Never summed with the not-a-member series, a caller nothing admitted. |
+| `pace_enrollment_control_refused_operator_standing_required_total` | An `ENROLL-CONTROL` -- approve, reject, auto-approve, clear, list -- from a caller whose machine ticket or proven key names a machine that holds no voter's seat: a learner deciding who joins. Never summed with the identified-caller series, an anonymous caller. |
 
 **A Raft peer that could not prove which member it is, or proved it and still could not be served.** Every connection between consensus members opens with a handshake: the accepting node challenges, the dialling node signs that challenge with its own identity key and names the member it meant to dial, and the acceptor answers with a verdict signed with its own. Each end checks the other's signature against the key the cluster records for the id it claims. The `connections` and `frames` rows are counted by the node that ACCEPTED the connection, the `dials` rows by the node that DIALLED it — so one misconfigured machine shows on both, from opposite ends. See [cluster communication](../operations/cluster-communication.md#raft-peer-authentication).
 
 | Series | Says |
 |---|---|
-| `fastcache_raft_peer_connections_refused_no_handshake_total` | Raft peer connections closed because the first frame was not a handshake proof this build reads: a Raft message sent without one (a build from before the handshake), a proof at another wire version, one over its size ceiling, or bytes that are not this wire at all. The log line beside it names which and the address it came from. Nothing was read from the connection. |
-| `fastcache_raft_peer_connections_refused_handshake_timeout_total` | Raft peer connections closed because no proof arrived within the handshake bound. Before the handshake existed such a connection held a slot for as long as its socket lived; now it is closed and counted. A few is a slow or stalled peer; a steady rate from one address is something holding connections open on purpose. |
-| `fastcache_raft_peer_connections_refused_proof_total` | Raft peer connections refused because the proof's signature did not verify under the key this node holds for the id it claims: another machine claiming that member's id, which only the member's own private key can prove. No verdict is sent. On a healthy fleet this is flat at zero, so any rise is an impersonation attempt or a member whose key file was replaced without re-admitting it. |
-| `fastcache_raft_peer_connections_refused_unknown_key_total` | Raft peer connections refused because this node holds no key for the id the proof claims, so nothing could be verified and nothing was answered. A machine that is not a member at all -- every member the roster records holds its key. The address is in the log line and the claimed id is not: nobody proved it. |
-| `fastcache_raft_peer_connections_refused_revoked_key_total` | Raft peer connections refused because the proof verified under a key the cluster has REVOKED: the removed machine itself, still dialling. Answered with a signed verdict saying so, so the removed machine reports its own revocation rather than a key problem here. Expected briefly after a --cluster-forget of a key; a steady rate is a machine nobody stopped. |
-| `fastcache_raft_peer_connections_refused_wrong_target_total` | Raft peer connections from a dialler that proved its id but dialled another member at this address: its record of where that member answers is stale, usually because a node moved or two swapped addresses. Refused with a signed verdict, so the dialler reports it by name rather than as a key problem. The log names both ids. |
-| `fastcache_raft_peer_connections_refused_own_id_total` | Raft peer connections from a dialler that proved THIS node's own id, which only this node's private key can do: two machines hold one identity, which is a copied --cluster-dir. Refused with a signed verdict. Never ordinary; the address in the log is the second machine. |
-| `fastcache_raft_peer_frames_refused_tag_total` | Raft connections closed because a frame's tag did not verify under the connection's own session key: a frame changed, injected, replayed, reordered or carried over from another connection. A correct peer never produces one, so a rise is the network path or something on it. |
-| `fastcache_raft_peer_frames_refused_unreadable_total` | Raft connections closed on a frame whose tag verified and which this build cannot read: a wire version other than the one the handshake settled, or a message out of place. A steady count names a peer running a different build. The dialler counts its own direction as `fastcache_raft_peer_dials_ended_frame_unreadable_total`. |
-| `fastcache_raft_peer_frames_refused_over_cap_total` | Raft connections closed on a frame declaring more payload than this node buffers, refused before any of it was read. |
-| `fastcache_raft_peer_frames_refused_bad_magic_total` | Raft connections closed on a frame whose header did not begin with this wire's magic, after which nothing on the connection can be framed. |
-| `fastcache_raft_peer_frames_refused_sender_total` | Raft connections closed because a frame whose tag verified carried a message naming a sender other than the id its connection proved. Only the proven member can produce one, so a rise is a defect in a member rather than an attacker. |
-| `fastcache_raft_peer_connections_ended_key_withdrawn_total` | Proven Raft peer connections this node closed because the key the dialler proved them with stopped being that member's in the cluster's roster: revoked, or replaced by a re-admission. Checked on every frame, so a revocation reaches every open connection at the next message rather than when the connection happens to break. |
-| `fastcache_raft_peer_connections_refused_full_total` | Raft peer connections closed on arrival because the listener already served as many as it holds. A cluster needs one per peer, so a rise is something opening connections it does not need -- the last thing a stranger can still do before proving an id, now that a silent connection is closed at the handshake bound. |
-| `fastcache_raft_peer_dials_refused_timeout_total` | Raft dials abandoned because the acceptor sent no challenge, or no verdict, within the handshake bound. The ordinary cause is a peer running a build from before the handshake, which never sends one, or an address that is not a Raft port. Read beside the peer's own no_handshake series, which rises on the other machine for the same connection. |
-| `fastcache_raft_peer_dials_refused_no_challenge_total` | Raft dials abandoned because the acceptor opened with something other than a challenge this build reads: another wire version, or a port that is not this protocol. The log names the version seen. |
-| `fastcache_raft_peer_dials_refused_acceptor_proof_total` | Raft dials abandoned because the acceptor's verdict did not verify under the key this node holds for the member that answered: another machine answering under that id. Nothing was sent to it. On a healthy fleet flat at zero; a rise names an address that is not the member it claims to be. |
-| `fastcache_raft_peer_dials_refused_acceptor_key_unknown_total` | Raft dials abandoned because this node holds no key for the member that answered, so its verdict could not be verified. Nothing was sent to it. Admit the member again with its key (--cluster-admit=<id>=<host>:<port>@<key>), or wait for the cluster to replicate it. |
-| `fastcache_raft_peer_dials_refused_acceptor_key_revoked_total` | Raft dials abandoned because the member that answered signed with a key the cluster has revoked: a removed machine still answering at an address this node dials. Nothing was sent to it. |
-| `fastcache_raft_peer_dials_refused_wrong_target_total` | Raft dials refused, by a verified verdict, because the member answering at the address is not the one this node dialled: this node's record of that member's address is stale. The log names both. It clears when the replicated state or discovery re-addresses the member. |
-| `fastcache_raft_peer_dials_refused_own_id_total` | Raft dials refused, by a verified verdict, because the acceptor proved this node's own id from this node: two machines hold one private key, a copied --cluster-dir. |
-| `fastcache_raft_peer_dials_refused_own_key_revoked_total` | Raft dials refused, by a verified verdict, because the acceptor's roster has revoked THIS node's key: this machine was removed from the cluster. It never clears by itself; the machine must mint a new identity -- a fresh --cluster-dir -- and be admitted under it. |
-| `fastcache_raft_peer_dials_ended_by_acceptor_total` | Raft dials the acceptor closed after this node sent its proof, without a signed verdict. The causes are the ones an acceptor cannot sign: it holds no key for this node's id, or a different one, or it refused the proof's shape or ran out of handshake time. Never a stale address, a shared identity or a revoked key, which arrive signed and have series of their own. |
-| `fastcache_raft_peer_dials_ended_key_withdrawn_total` | Proven Raft sessions this node ended before sending a frame, because the key the acceptor proved the session with stopped being that member's in the cluster's roster: revoked, or replaced. The redial that follows is judged against the roster as it is now. |
-| `fastcache_raft_peer_dials_ended_frame_tag_total` | Two-way Raft sessions this node dialled -- a learner's, which the acceptor writes back on -- that it ended because a frame the acceptor wrote failed its tag: changed, injected, replayed or reordered in flight. A correct peer never produces one. The acceptor counts its own direction as `fastcache_raft_peer_frames_refused_tag_total`. |
-| `fastcache_raft_peer_dials_ended_frame_sender_total` | Two-way Raft sessions this node dialled that it ended because a message whose tag verified named a sender other than the member the acceptor proved. Nothing it said was delivered. |
-| `fastcache_raft_peer_dials_ended_frame_unreadable_total` | Two-way Raft sessions this node dialled that it ended on a frame whose tag verified and which this build cannot read: a wire version other than the one the handshake settled, or a message out of place. A steady count names a peer running a different build. |
-| `fastcache_raft_peer_dials_ended_frame_over_cap_total` | Two-way Raft sessions this node dialled that it ended on a frame declaring more payload than this node buffers, refused before any of it was read. |
-| `fastcache_raft_peer_dials_ended_frame_bad_magic_total` | Two-way Raft sessions this node dialled that it ended on a frame whose header did not begin with this wire's magic, after which nothing on the connection can be framed. |
-| `fastcache_raft_peer_dials_ended_silent_total` | Two-way Raft sessions this node dialled -- a learner's -- that carried nothing for their idle bound, a hundred of the leader's heartbeat intervals, so this node closed them and redials on the learner's backoff. A steady trickle is the sessions to voters that are not leading, which write a learner nothing; one after a sleep is a half-open session to the leader, which without the bound would never end, so the roster and every forget would stop arriving until a restart. |
-| `fastcache_raft_sends_dropped_no_session_total` | Raft messages dropped for a peer that dials in -- a learner, which nobody dials -- while no session of its is attached: the learner is offline, or has not dialled yet. Raft retransmits, so a drop costs the leader nothing else. |
-| `fastcache_raft_sends_dropped_unknown_peer_total` | Raft messages dropped for a peer this node can place nowhere: it neither dials it nor was told it dials in, so nothing here can reach it however long it waits -- a member whose recorded address this node cannot dial, or an id it was never given an address for. |
-| `fastcache_raft_inbound_sessions_superseded_total` | Raft sessions a peer's newer session superseded: the same id proved a second session while its first was still open, and the first was closed -- a two-way session by the transport, a one-way session by the acceptor. One per reconnect is a roaming member whose old connection had not yet been seen to end; a steady rate from one peer names two machines holding one identity key -- a copied --cluster-dir -- taking the session from each other. |
+| `pace_raft_peer_connections_refused_no_handshake_total` | Raft peer connections closed because the first frame was not a handshake proof this build reads: a Raft message sent without one (a build from before the handshake), a proof at another wire version, one over its size ceiling, or bytes that are not this wire at all. The log line beside it names which and the address it came from. Nothing was read from the connection. |
+| `pace_raft_peer_connections_refused_handshake_timeout_total` | Raft peer connections closed because no proof arrived within the handshake bound. Before the handshake existed such a connection held a slot for as long as its socket lived; now it is closed and counted. A few is a slow or stalled peer; a steady rate from one address is something holding connections open on purpose. |
+| `pace_raft_peer_connections_refused_proof_total` | Raft peer connections refused because the proof's signature did not verify under the key this node holds for the id it claims: another machine claiming that member's id, which only the member's own private key can prove. No verdict is sent. On a healthy fleet this is flat at zero, so any rise is an impersonation attempt or a member whose key file was replaced without re-admitting it. |
+| `pace_raft_peer_connections_refused_unknown_key_total` | Raft peer connections refused because this node holds no key for the id the proof claims, so nothing could be verified and nothing was answered. A machine that is not a member at all -- every member the roster records holds its key. The address is in the log line and the claimed id is not: nobody proved it. |
+| `pace_raft_peer_connections_refused_revoked_key_total` | Raft peer connections refused because the proof verified under a key the cluster has REVOKED: the removed machine itself, still dialling. Answered with a signed verdict saying so, so the removed machine reports its own revocation rather than a key problem here. Expected briefly after a --cluster-forget of a key; a steady rate is a machine nobody stopped. |
+| `pace_raft_peer_connections_refused_wrong_target_total` | Raft peer connections from a dialler that proved its id but dialled another member at this address: its record of where that member answers is stale, usually because a node moved or two swapped addresses. Refused with a signed verdict, so the dialler reports it by name rather than as a key problem. The log names both ids. |
+| `pace_raft_peer_connections_refused_own_id_total` | Raft peer connections from a dialler that proved THIS node's own id, which only this node's private key can do: two machines hold one identity, which is a copied --cluster-dir. Refused with a signed verdict. Never ordinary; the address in the log is the second machine. |
+| `pace_raft_peer_frames_refused_tag_total` | Raft connections closed because a frame's tag did not verify under the connection's own session key: a frame changed, injected, replayed, reordered or carried over from another connection. A correct peer never produces one, so a rise is the network path or something on it. |
+| `pace_raft_peer_frames_refused_unreadable_total` | Raft connections closed on a frame whose tag verified and which this build cannot read: a wire version other than the one the handshake settled, or a message out of place. A steady count names a peer running a different build. The dialler counts its own direction as `pace_raft_peer_dials_ended_frame_unreadable_total`. |
+| `pace_raft_peer_frames_refused_over_cap_total` | Raft connections closed on a frame declaring more payload than this node buffers, refused before any of it was read. |
+| `pace_raft_peer_frames_refused_bad_magic_total` | Raft connections closed on a frame whose header did not begin with this wire's magic, after which nothing on the connection can be framed. |
+| `pace_raft_peer_frames_refused_sender_total` | Raft connections closed because a frame whose tag verified carried a message naming a sender other than the id its connection proved. Only the proven member can produce one, so a rise is a defect in a member rather than an attacker. |
+| `pace_raft_peer_connections_ended_key_withdrawn_total` | Proven Raft peer connections this node closed because the key the dialler proved them with stopped being that member's in the cluster's roster: revoked, or replaced by a re-admission. Checked on every frame, so a revocation reaches every open connection at the next message rather than when the connection happens to break. |
+| `pace_raft_peer_connections_refused_full_total` | Raft peer connections closed on arrival because the listener already served as many as it holds. A cluster needs one per peer, so a rise is something opening connections it does not need -- the last thing a stranger can still do before proving an id, now that a silent connection is closed at the handshake bound. |
+| `pace_raft_peer_dials_refused_timeout_total` | Raft dials abandoned because the acceptor sent no challenge, or no verdict, within the handshake bound. The ordinary cause is a peer running a build from before the handshake, which never sends one, or an address that is not a Raft port. Read beside the peer's own no_handshake series, which rises on the other machine for the same connection. |
+| `pace_raft_peer_dials_refused_no_challenge_total` | Raft dials abandoned because the acceptor opened with something other than a challenge this build reads: another wire version, or a port that is not this protocol. The log names the version seen. |
+| `pace_raft_peer_dials_refused_acceptor_proof_total` | Raft dials abandoned because the acceptor's verdict did not verify under the key this node holds for the member that answered: another machine answering under that id. Nothing was sent to it. On a healthy fleet flat at zero; a rise names an address that is not the member it claims to be. |
+| `pace_raft_peer_dials_refused_acceptor_key_unknown_total` | Raft dials abandoned because this node holds no key for the member that answered, so its verdict could not be verified. Nothing was sent to it. Admit the member again with its key (--cluster-admit=<id>=<host>:<port>@<key>), or wait for the cluster to replicate it. |
+| `pace_raft_peer_dials_refused_acceptor_key_revoked_total` | Raft dials abandoned because the member that answered signed with a key the cluster has revoked: a removed machine still answering at an address this node dials. Nothing was sent to it. |
+| `pace_raft_peer_dials_refused_wrong_target_total` | Raft dials refused, by a verified verdict, because the member answering at the address is not the one this node dialled: this node's record of that member's address is stale. The log names both. It clears when the replicated state or discovery re-addresses the member. |
+| `pace_raft_peer_dials_refused_own_id_total` | Raft dials refused, by a verified verdict, because the acceptor proved this node's own id from this node: two machines hold one private key, a copied --cluster-dir. |
+| `pace_raft_peer_dials_refused_own_key_revoked_total` | Raft dials refused, by a verified verdict, because the acceptor's roster has revoked THIS node's key: this machine was removed from the cluster. It never clears by itself; the machine must mint a new identity -- a fresh --cluster-dir -- and be admitted under it. |
+| `pace_raft_peer_dials_ended_by_acceptor_total` | Raft dials the acceptor closed after this node sent its proof, without a signed verdict. The causes are the ones an acceptor cannot sign: it holds no key for this node's id, or a different one, or it refused the proof's shape or ran out of handshake time. Never a stale address, a shared identity or a revoked key, which arrive signed and have series of their own. |
+| `pace_raft_peer_dials_ended_key_withdrawn_total` | Proven Raft sessions this node ended before sending a frame, because the key the acceptor proved the session with stopped being that member's in the cluster's roster: revoked, or replaced. The redial that follows is judged against the roster as it is now. |
+| `pace_raft_peer_dials_ended_frame_tag_total` | Two-way Raft sessions this node dialled -- a learner's, which the acceptor writes back on -- that it ended because a frame the acceptor wrote failed its tag: changed, injected, replayed or reordered in flight. A correct peer never produces one. The acceptor counts its own direction as `pace_raft_peer_frames_refused_tag_total`. |
+| `pace_raft_peer_dials_ended_frame_sender_total` | Two-way Raft sessions this node dialled that it ended because a message whose tag verified named a sender other than the member the acceptor proved. Nothing it said was delivered. |
+| `pace_raft_peer_dials_ended_frame_unreadable_total` | Two-way Raft sessions this node dialled that it ended on a frame whose tag verified and which this build cannot read: a wire version other than the one the handshake settled, or a message out of place. A steady count names a peer running a different build. |
+| `pace_raft_peer_dials_ended_frame_over_cap_total` | Two-way Raft sessions this node dialled that it ended on a frame declaring more payload than this node buffers, refused before any of it was read. |
+| `pace_raft_peer_dials_ended_frame_bad_magic_total` | Two-way Raft sessions this node dialled that it ended on a frame whose header did not begin with this wire's magic, after which nothing on the connection can be framed. |
+| `pace_raft_peer_dials_ended_silent_total` | Two-way Raft sessions this node dialled -- a learner's -- that carried nothing for their idle bound, a hundred of the leader's heartbeat intervals, so this node closed them and redials on the learner's backoff. A steady trickle is the sessions to voters that are not leading, which write a learner nothing; one after a sleep is a half-open session to the leader, which without the bound would never end, so the roster and every forget would stop arriving until a restart. |
+| `pace_raft_sends_dropped_no_session_total` | Raft messages dropped for a peer that dials in -- a learner, which nobody dials -- while no session of its is attached: the learner is offline, or has not dialled yet. Raft retransmits, so a drop costs the leader nothing else. |
+| `pace_raft_sends_dropped_unknown_peer_total` | Raft messages dropped for a peer this node can place nowhere: it neither dials it nor was told it dials in, so nothing here can reach it however long it waits -- a member whose recorded address this node cannot dial, or an id it was never given an address for. |
+| `pace_raft_inbound_sessions_superseded_total` | Raft sessions a peer's newer session superseded: the same id proved a second session while its first was still open, and the first was closed -- a two-way session by the transport, a one-way session by the acceptor. One per reconnect is a roaming member whose old connection had not yet been seen to end; a steady rate from one peer names two machines holding one identity key -- a copied --cluster-dir -- taking the session from each other. |
 
 **A member admitted with a key the leader could not read.** `--cluster-admit` and
 `pacectl cluster-admit` may name the member's identity key. The leader reads it
@@ -3875,7 +3875,7 @@ own typo read back to them and moves nothing.
 
 | Series | Says |
 |---|---|
-| `fastcache_cluster_admissions_refused_malformed_key_total` | cluster-admit requests the leader refused because the member's identity key was not one: not 43 base64url characters naming 32 bytes, or 32 bytes naming a small-order or non-canonical point, under which a signature proves nothing. Nothing was proposed. This project's clients check the key where it is typed, so a rise names a client that does not. |
+| `pace_cluster_admissions_refused_malformed_key_total` | cluster-admit requests the leader refused because the member's identity key was not one: not 43 base64url characters naming 32 bytes, or 32 bytes naming a small-order or non-canonical point, under which a signature proves nothing. Nothing was proposed. This project's clients check the key where it is typed, so a rise names a client that does not. |
 
 ### Deciding whether a new refusal gets a counter
 
@@ -3891,7 +3891,7 @@ names something an operator would go and act on. It gets none when:
   owns, so that surface's unknown-opcode arm is closed by the definition of the
   family table rather than by a policy anybody chose;
 - the event is **already counted somewhere better placed to see it** — a failed
-  local write moves `fastcache_node_cache_store_failures_total` at the write, where
+  local write moves `pace_node_cache_store_failures_total` at the write, where
   every caller is visible and not only the ones that arrived over the wire.
 
 A new arm nobody has applied the test to yet is **neither counted nor deliberately
@@ -4155,8 +4155,8 @@ from "this node never told us".
 
 ### An unused fleet is not an idle one
 
-**Dispatch is opt-in.** A client asks for a lease only when `FASTCACHE_SCHEDULER`
-names a scheduler; `FASTCACHE_ADDR` alone points the launcher at a *cache*. A node
+**Dispatch is opt-in.** A client asks for a lease only when `PACE_SCHEDULER`
+names a scheduler; `PACE_ADDR` alone points the launcher at a *cache*. A node
 deployed the common way — as a shared cache for a build that compiles locally —
 therefore registers its slots, is never asked for a lease, and reports **0
 compiling** for as long as it runs.
@@ -4426,7 +4426,7 @@ while everything looked healthy.
 
 A root left behind by a node that died — the abandoned-drain path exits without
 running its cleanup, by design — is **reclaimed** by the next node that takes it,
-and counted as `fastcache_worker_scratch_roots_reclaimed_total`. Reclaiming is safe
+and counted as `pace_worker_scratch_roots_reclaimed_total`. Reclaiming is safe
 without any staleness guess: the claim is an operating-system lock, so a root whose
 lock is free is one whose owner is gone, however it went.
 
@@ -4609,34 +4609,34 @@ What a proof does reach is the membership half of both.
 
 | Series | What a rise means |
 |---|---|
-| `fastcache_node_proofs_accepted_total` | The route is live. Every other row below counts a refusal, so this is the only one that distinguishes *working* from *never used*. |
-| `fastcache_node_proofs_rejected_total` | A signature that did not verify under the key the proof presented: somebody who does not hold that key, or a proof relayed onto another handshake. Not a machine waiting to be admitted -- that is the next row. |
-| `fastcache_node_proofs_refused_unknown_key_total` | A genuine signature under a key the cluster does not hold for that id: a machine not yet admitted, or one admitted under another key. The remedy is `--enroll-approve`, never a hunt for an attacker. |
-| `fastcache_node_proofs_refused_revoked_key_total` | The forgotten machine itself, still holding its key and still dialling. |
-| `fastcache_node_proofs_refused_roster_not_yet_applied_total` | A proof this node could not judge **yet**: its consensus had not applied the log it recovered at start, so it answered `roster-not-yet-applied` and the prover asked again a moment later -- never `node-key-unknown`, which would have sent an operator to admit a machine the cluster already holds. A few at every start are the boot order; a count that keeps rising is a node that cannot elect, or cannot hear its leader. |
-| `fastcache_node_requests_refused_key_revoked_total` | Requests refused on a connection a revoked key marked -- by a proof, or by a ticket signed with it -- at every surface that folds the proven identity: a compile, the fleet tables, live stats, `node`, an enrollment verb. It means a machine somebody forgot is still configured to use this fleet, or somebody holds one of its tickets, and the remedy is at that machine or at the cluster (admit it again under a new key), never on this node. Only a proof is told why; a ticket gets a stranger's words, so on a node that is not `--fleet-open` this counter is the only place the difference shows (under `--fleet-open` a stranger is served, so the refusal itself shows it). |
-| `fastcache_node_tickets_accepted_total` | Machine tickets this node verified and spent: AUTH on that connection speaks for the machine the ticket names. The positive half of every `node_tickets_refused` row below. |
-| `fastcache_node_tickets_refused_malformed_total` | Bytes that are not a machine ticket: a client of another version, or none of ours. |
-| `fastcache_node_tickets_refused_not_utf8_total` | A genuine ticket whose machine id or audience is not UTF-8, refused before it is compared, logged or rendered. A forged one is counted as forged, whatever its claims say. |
-| `fastcache_node_tickets_refused_no_roster_total` | This node holds no roster, or one past its certification, so nothing was checked. Never read it as `unknown_machine`: the remedy is this node reaching a leader, not an admission. |
-| `fastcache_node_tickets_refused_unknown_machine_total` | A ticket naming a machine this node's roster holds no live key for, signed by no key it revoked: a machine the cluster has not admitted -- admit it as a learner. |
-| `fastcache_node_tickets_refused_forged_total` | An admitted machine's id, not signed by its key. Reads zero on a healthy fleet. |
-| `fastcache_node_tickets_refused_revoked_total` | Signed by a key the cluster revoked: the forgotten machine itself, still minting. |
-| `fastcache_node_tickets_refused_wrong_audience_total` | A genuine ticket minted for another endpoint: a stale name or address, or a ticket presented somewhere it was not meant for. |
-| `fastcache_node_tickets_refused_expired_total` | A genuine ticket past its expiry and the five-minute clock-skew slack, or further ahead than any node mints, or expiring no later than a spend this node has already let go of. A steady rise from one machine is its clock; a burst from every machine just after this node's clock was corrected is the last case, and it clears by itself within ten minutes, or, if this node accepted tickets while its clock was ahead, once real time reaches that reading; restarting the node clears it at once. |
-| `fastcache_node_tickets_refused_replayed_total` | A genuine ticket this node had already spent. A ticket is presented once, so a rise is a replay. |
-| `fastcache_node_tickets_refused_spent_set_full_total` | This node remembers its capacity of spent tickets, all still acceptable, and admits nothing more until some leave the window. A rise says the set is too small. |
-| `fastcache_node_tickets_minted_total` | Machine tickets this node signed for a process on this machine. Every ticket another node accepts was minted by some node's row here. |
-| `fastcache_node_ticket_mints_refused_not_local_total` | `MINT-TICKET` asked from anywhere but loopback, refused before anything was signed: a ticket is minted for this machine's own processes only, judged from the connection's peer address. A launcher on this machine that dials its node by a LAN address lands here too; point it at loopback. |
-| `fastcache_node_ticket_mints_refused_malformed_total` | `MINT-TICKET` whose audience would not decode, was not UTF-8 text (which every node would refuse to read), or named no one machine -- loopback, a wildcard or no host -- so the ticket would be spendable at any node. A client configured with a loopback endpoint. |
-| `fastcache_node_ticket_mints_refused_no_key_total` | `MINT-TICKET` on a node that holds no identity key. The remedy is this node's state directory, not the client. |
-| `fastcache_node_ticket_mints_refused_no_random_total` | `MINT-TICKET` this node could not draw a nonce for: its own random source failed. Refused rather than signed with a weaker nonce. |
-| `fastcache_node_sealed_frames_refused_total` | A frame whose seal did not verify on a proven connection: injected, altered, replayed or reordered by something between the two ends. On a healthy network this reads zero; a rise is the alarm. |
-| `fastcache_node_proofs_unchallenged_total` | A client sent a proof with no challenge outstanding. A version or client-library mismatch, not a security signal. |
-| `fastcache_node_proofs_malformed_total` | A payload that would not decode. The same kind of mismatch, kept apart so an old client cannot hide a key search. |
-| `fastcache_scheduler_requests_refused_node_identity_required_total` | A joining verb sent on a connection that proved no identity: a node started without `--cluster-dir`, or an older build. |
-| `fastcache_scheduler_requests_refused_identified_caller_required_total` | A cluster control verb -- admit, forget, set -- from a caller only `--fleet-open` admitted. `--fleet-open` admits a caller to what the fleet serves, never to what decides it: send the verb from this machine, or from one whose node presents a machine ticket. |
-| `fastcache_scheduler_requests_refused_operator_standing_required_total` | A cluster control verb -- admit, forget, set -- from a caller whose machine ticket or proven key names a machine that holds no voter's seat. A ticket proves a fleet machine, never an operator: run the verb on a voter, or promote the machine. |
+| `pace_node_proofs_accepted_total` | The route is live. Every other row below counts a refusal, so this is the only one that distinguishes *working* from *never used*. |
+| `pace_node_proofs_rejected_total` | A signature that did not verify under the key the proof presented: somebody who does not hold that key, or a proof relayed onto another handshake. Not a machine waiting to be admitted -- that is the next row. |
+| `pace_node_proofs_refused_unknown_key_total` | A genuine signature under a key the cluster does not hold for that id: a machine not yet admitted, or one admitted under another key. The remedy is `--enroll-approve`, never a hunt for an attacker. |
+| `pace_node_proofs_refused_revoked_key_total` | The forgotten machine itself, still holding its key and still dialling. |
+| `pace_node_proofs_refused_roster_not_yet_applied_total` | A proof this node could not judge **yet**: its consensus had not applied the log it recovered at start, so it answered `roster-not-yet-applied` and the prover asked again a moment later -- never `node-key-unknown`, which would have sent an operator to admit a machine the cluster already holds. A few at every start are the boot order; a count that keeps rising is a node that cannot elect, or cannot hear its leader. |
+| `pace_node_requests_refused_key_revoked_total` | Requests refused on a connection a revoked key marked -- by a proof, or by a ticket signed with it -- at every surface that folds the proven identity: a compile, the fleet tables, live stats, `node`, an enrollment verb. It means a machine somebody forgot is still configured to use this fleet, or somebody holds one of its tickets, and the remedy is at that machine or at the cluster (admit it again under a new key), never on this node. Only a proof is told why; a ticket gets a stranger's words, so on a node that is not `--fleet-open` this counter is the only place the difference shows (under `--fleet-open` a stranger is served, so the refusal itself shows it). |
+| `pace_node_tickets_accepted_total` | Machine tickets this node verified and spent: AUTH on that connection speaks for the machine the ticket names. The positive half of every `node_tickets_refused` row below. |
+| `pace_node_tickets_refused_malformed_total` | Bytes that are not a machine ticket: a client of another version, or none of ours. |
+| `pace_node_tickets_refused_not_utf8_total` | A genuine ticket whose machine id or audience is not UTF-8, refused before it is compared, logged or rendered. A forged one is counted as forged, whatever its claims say. |
+| `pace_node_tickets_refused_no_roster_total` | This node holds no roster, or one past its certification, so nothing was checked. Never read it as `unknown_machine`: the remedy is this node reaching a leader, not an admission. |
+| `pace_node_tickets_refused_unknown_machine_total` | A ticket naming a machine this node's roster holds no live key for, signed by no key it revoked: a machine the cluster has not admitted -- admit it as a learner. |
+| `pace_node_tickets_refused_forged_total` | An admitted machine's id, not signed by its key. Reads zero on a healthy fleet. |
+| `pace_node_tickets_refused_revoked_total` | Signed by a key the cluster revoked: the forgotten machine itself, still minting. |
+| `pace_node_tickets_refused_wrong_audience_total` | A genuine ticket minted for another endpoint: a stale name or address, or a ticket presented somewhere it was not meant for. |
+| `pace_node_tickets_refused_expired_total` | A genuine ticket past its expiry and the five-minute clock-skew slack, or further ahead than any node mints, or expiring no later than a spend this node has already let go of. A steady rise from one machine is its clock; a burst from every machine just after this node's clock was corrected is the last case, and it clears by itself within ten minutes, or, if this node accepted tickets while its clock was ahead, once real time reaches that reading; restarting the node clears it at once. |
+| `pace_node_tickets_refused_replayed_total` | A genuine ticket this node had already spent. A ticket is presented once, so a rise is a replay. |
+| `pace_node_tickets_refused_spent_set_full_total` | This node remembers its capacity of spent tickets, all still acceptable, and admits nothing more until some leave the window. A rise says the set is too small. |
+| `pace_node_tickets_minted_total` | Machine tickets this node signed for a process on this machine. Every ticket another node accepts was minted by some node's row here. |
+| `pace_node_ticket_mints_refused_not_local_total` | `MINT-TICKET` asked from anywhere but loopback, refused before anything was signed: a ticket is minted for this machine's own processes only, judged from the connection's peer address. A launcher on this machine that dials its node by a LAN address lands here too; point it at loopback. |
+| `pace_node_ticket_mints_refused_malformed_total` | `MINT-TICKET` whose audience would not decode, was not UTF-8 text (which every node would refuse to read), or named no one machine -- loopback, a wildcard or no host -- so the ticket would be spendable at any node. A client configured with a loopback endpoint. |
+| `pace_node_ticket_mints_refused_no_key_total` | `MINT-TICKET` on a node that holds no identity key. The remedy is this node's state directory, not the client. |
+| `pace_node_ticket_mints_refused_no_random_total` | `MINT-TICKET` this node could not draw a nonce for: its own random source failed. Refused rather than signed with a weaker nonce. |
+| `pace_node_sealed_frames_refused_total` | A frame whose seal did not verify on a proven connection: injected, altered, replayed or reordered by something between the two ends. On a healthy network this reads zero; a rise is the alarm. |
+| `pace_node_proofs_unchallenged_total` | A client sent a proof with no challenge outstanding. A version or client-library mismatch, not a security signal. |
+| `pace_node_proofs_malformed_total` | A payload that would not decode. The same kind of mismatch, kept apart so an old client cannot hide a key search. |
+| `pace_scheduler_requests_refused_node_identity_required_total` | A joining verb sent on a connection that proved no identity: a node started without `--cluster-dir`, or an older build. |
+| `pace_scheduler_requests_refused_identified_caller_required_total` | A cluster control verb -- admit, forget, set -- from a caller only `--fleet-open` admitted. `--fleet-open` admits a caller to what the fleet serves, never to what decides it: send the verb from this machine, or from one whose node presents a machine ticket. |
+| `pace_scheduler_requests_refused_operator_standing_required_total` | A cluster control verb -- admit, forget, set -- from a caller whose machine ticket or proven key names a machine that holds no voter's seat. A ticket proves a fleet machine, never an operator: run the verb on a voter, or promote the machine. |
 
 **A refused ticket is told less than these counters say.** AUTH answers any address, and a
 ticket is checked under the roster's key for the id it claims -- so `forged`, `unknown_machine`

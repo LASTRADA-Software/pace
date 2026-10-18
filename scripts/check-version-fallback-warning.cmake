@@ -28,7 +28,7 @@
 # DECISION takes its four inputs as arguments and reads nothing, and the rows below
 # state each combination explicitly.
 #
-# What this cannot cover is the wiring — that `_fc_cache_fastcache_cc_rejected_why`
+# What this cannot cover is the wiring — that `_fc_cache_pace_cc_rejected_why`
 # is set where the row is rejected and read where the fallback is chosen. Stated
 # rather than implied: only a real configure exercises that, and the narrow guard
 # is that the reason is remembered as a VARIABLE rather than parsed back out of the
@@ -41,11 +41,11 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-include("${FASTCACHED_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
+include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 
 if(NOT COMMAND _fc_cache_rejection_warning)
     message(FATAL_ERROR
@@ -90,7 +90,7 @@ set(_quiet 0)
 # the wrong way round; the two rows below that #815 flipped from `no` to `yes` were
 # the same mistake made once more, in the other column.
 #
-# No ';' in any field: the row LIST splits on it before `fastcached_row_fields`
+# No ';' in any field: the row LIST splits on it before `pace_row_fields`
 # ever runs. '|' in the LAST field is fine -- that is what the house splitter buys.
 set(_rows
     "rejected (unsupported-version)|unsupported-version|pace-cc|sccache|yes|yes|the whole ticket: a reason that predicts, into a winner that carries the hazard"
@@ -107,7 +107,7 @@ set(_rows
 )
 
 foreach(_row IN LISTS _rows)
-    fastcached_row_fields("${_row}"
+    pace_row_fields("${_row}"
         _reason _predicts _rejectedName _winner _hasCaveat _expect _about)
 
     if(_hasCaveat STREQUAL "yes")
@@ -187,8 +187,8 @@ endif()
 # is the wire error table's `.name`, and nothing else connects the two: rename it
 # there and this warning goes silent with every test still green. That is the
 # coupling `check-tsan-scope` exists for, in a different file.
-set(_module "${FASTCACHED_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
-set(_wire "${FASTCACHED_SOURCE_DIR}/src/Pace/Protocol/CompileCacheWire.hpp")
+set(_module "${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
+set(_wire "${PACE_SOURCE_DIR}/src/Pace/Protocol/CompileCacheWire.hpp")
 foreach(_f "${_module}" "${_wire}")
     if(NOT EXISTS "${_f}")
         message(FATAL_ERROR "check-version-fallback-warning: ${_f} does not exist")
@@ -196,7 +196,7 @@ foreach(_f "${_module}" "${_wire}")
 endforeach()
 
 file(READ "${_module}" _moduleText)
-if(NOT _moduleText MATCHES "set\\(_fc_cache_fastcache_cc_predicts \"([^\"]*)\"\\)")
+if(NOT _moduleText MATCHES "set\\(_fc_cache_pace_cc_predicts \"([^\"]*)\"\\)")
     message(FATAL_ERROR
         "check-version-fallback-warning: could not find pace-cc's `predicts` column in "
         "${_module}. Either it was renamed or the column is gone, and this check now proves "

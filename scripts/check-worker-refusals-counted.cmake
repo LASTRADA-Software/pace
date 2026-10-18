@@ -71,7 +71,7 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-worker-refusals-counted.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-worker-refusals-counted.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
@@ -87,8 +87,8 @@
 # gate on the OTHER platform could tell the difference.
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ endif()
 set(knownSpellings "Refuse" "RefuseUntriaged" "RefuseWithoutCounter")
 
 foreach(relative IN LISTS allowedFiles)
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         message(FATAL_ERROR "a file this check is built on is missing: ${relative}")
     endif()
 endforeach()
@@ -173,7 +173,7 @@ endforeach()
 #
 # Every C++ file under `src/`, headers included, because #447 put refusal rows in a
 # header and the old scan could not see them.
-# Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its files,
+# Through `pace_tracked_files`, this tree's one answer to HOW a check finds its files,
 # rather than a traversal of `src/` of its own: on DrvFs -- where every local gate tree takes
 # its sources from -- the traversal alone cost seconds (#502). The extensions are stated once,
 # right here, as the FILTER.
@@ -183,7 +183,7 @@ endforeach()
 # That is the prefilter moved, not a second one -- see the paragraph beside it for why it
 # cannot hide a match.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/"
     GLOBS "src/*"
     FILTER "^src/.*\\.(cpp|hpp)$"
@@ -195,7 +195,7 @@ if(NOT sources)
     message("  The glob over src/ matched no C++ file at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "worker refusals: the scan matched no source file and cannot conclude")
 endif()
 
@@ -246,7 +246,7 @@ foreach(relative IN LISTS sources)
     if(NOT "${relative}" IN_LIST sourcesHolding)
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" content)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" content)
 
     # Nothing below can fire in a file containing none of these three substrings, and
     # 403 of the 413 files scanned contain none. Measured: splitting and regexing all

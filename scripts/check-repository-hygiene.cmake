@@ -17,7 +17,7 @@
 # already `cmake -P` scripts.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
+#   cmake -DPACE_SOURCE_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
 #         -P scripts/check-repository-hygiene.cmake
 #
 # Exit codes: 0 = clean, or skipped. 1 = at least one forbidden path is tracked.
@@ -43,21 +43,21 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-set(FastCachedForbiddenTrackedPaths
+set(PaceForbiddenTrackedPaths
     "version.txt|The git tag is the single source of truth for the version (see cmake/Version.cmake). A committed version.txt outranks every tag, which makes it a second version carrier that each release has to remember to bump in lock-step - and while it existed it pinned every build, every wire banner and every package to whatever it said. Keep it untracked if you want a local override: that is supported and this check will not complain."
 )
 
 # ---------------------------------------------------------------------------
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
+if(NOT DEFINED PACE_SOURCE_DIR)
     message(FATAL_ERROR
-        "FASTCACHED_SOURCE_DIR is not set. Invoke this script as: cmake "
-        "-DFASTCACHED_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
+        "PACE_SOURCE_DIR is not set. Invoke this script as: cmake "
+        "-DPACE_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
 endif()
 
-if(NOT IS_DIRECTORY "${FASTCACHED_SOURCE_DIR}")
+if(NOT IS_DIRECTORY "${PACE_SOURCE_DIR}")
     message(FATAL_ERROR
-        "FASTCACHED_SOURCE_DIR='${FASTCACHED_SOURCE_DIR}' is not a directory.")
+        "PACE_SOURCE_DIR='${PACE_SOURCE_DIR}' is not a directory.")
 endif()
 
 # The configure step passes the git it already located, so the check and the
@@ -71,13 +71,13 @@ if(NOT GIT_EXECUTABLE)
     return()
 endif()
 
-# Asked through `fastcached_work_tree_state` (#1485), the one spelling of this question. It
+# Asked through `pace_work_tree_state` (#1485), the one spelling of this question. It
 # answers in THREE values and the two negative ones get different sentences here: a check with
 # no index to inspect owes an operator "git cannot answer" or "this is not a checkout", never
 # one message covering both. This check has no directory-walk fallback and must not grow one --
 # its subject is what the INDEX holds, which a walk cannot see.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
-fastcached_work_tree_state("${FASTCACHED_SOURCE_DIR}" workTreeState)
+pace_work_tree_state("${PACE_SOURCE_DIR}" workTreeState)
 if(workTreeState STREQUAL "no-git")
     # THREE situations reach `no-git`, and only two of them are ordinary (#1565).
     #
@@ -99,10 +99,10 @@ if(workTreeState STREQUAL "no-git")
     # `.git` entry. Present and unreadable is the fault; absent is the tarball.
     #
     # It stays in this check rather than becoming a fourth answer from
-    # `fastcached_work_tree_state`, because the two callers disagree about it: a check
+    # `pace_work_tree_state`, because the two callers disagree about it: a check
     # that falls back to a directory WALK is right to treat both alike, and this one
     # has no fallback and must not grow one.
-    if(EXISTS "${FASTCACHED_SOURCE_DIR}/.git")
+    if(EXISTS "${PACE_SOURCE_DIR}/.git")
         # `no-git` also covers "the binary could not be RUN", and only the seam can
         # tell that from "it ran and refused" -- so this asks, rather than claiming
         # the narrower fact. A refusal that names the wrong cause is the one thing
@@ -112,14 +112,14 @@ if(workTreeState STREQUAL "no-git")
         if(NOT gitRuns EQUAL 0)
             message(FATAL_ERROR
                 "the git at ${GIT_EXECUTABLE} could not be RUN, so nothing here could be "
-                "shown to be tracked by it, and ${FASTCACHED_SOURCE_DIR} carries a `.git` "
+                "shown to be tracked by it, and ${PACE_SOURCE_DIR} carries a `.git` "
                 "entry -- this is a checkout with a broken tool, not a tree without an "
                 "index.\n"
                 "       Nothing in this check ran. Fix the git on this host; there is "
                 "nothing to change in the tree.")
         endif()
         message(FATAL_ERROR
-            "git runs on this host and cannot read ${FASTCACHED_SOURCE_DIR}, which "
+            "git runs on this host and cannot read ${PACE_SOURCE_DIR}, which "
             "carries a `.git` entry -- so this is a checkout whose git metadata is "
             "unreachable from here, not a tree without one.\n"
             "       Nothing in this check ran. It reports on what the INDEX holds and "
@@ -130,16 +130,16 @@ if(workTreeState STREQUAL "no-git")
             "read from WSL, or the reverse. Repair it with:\n"
             "         bash scripts/repair-worktree-pointers.sh\n"
             "       run from inside the worktree. If git itself is broken rather than "
-            "the pointer, `git -C ${FASTCACHED_SOURCE_DIR} rev-parse "
+            "the pointer, `git -C ${PACE_SOURCE_DIR} rev-parse "
             "--is-inside-work-tree` prints the reason.")
     endif()
-    message("SKIP: ${FASTCACHED_SOURCE_DIR} carries no `.git` entry and git reports no "
+    message("SKIP: ${PACE_SOURCE_DIR} carries no `.git` entry and git reports no "
             "repository here (an exported source tarball, for instance), so there is no "
             "index to inspect")
     return()
 endif()
 if(NOT workTreeState STREQUAL "work-tree")
-    message("SKIP: ${FASTCACHED_SOURCE_DIR} is inside a repository but outside its work "
+    message("SKIP: ${PACE_SOURCE_DIR} is inside a repository but outside its work "
             "tree (a `.git` directory, or a bare repository), so there is no index to "
             "inspect")
     return()
@@ -147,7 +147,7 @@ endif()
 
 set(trackedViolations "")
 
-foreach(forbiddenRow IN LISTS FastCachedForbiddenTrackedPaths)
+foreach(forbiddenRow IN LISTS PaceForbiddenTrackedPaths)
     string(REPLACE "|" ";" forbiddenFields "${forbiddenRow}")
     list(GET forbiddenFields 0 forbiddenPath)
     list(GET forbiddenFields 1 forbiddenReason)
@@ -159,7 +159,7 @@ foreach(forbiddenRow IN LISTS FastCachedForbiddenTrackedPaths)
     # local version.txt is a supported override and must pass.
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" ls-files --error-unmatch -- "${forbiddenPath}"
-        WORKING_DIRECTORY "${FASTCACHED_SOURCE_DIR}"
+        WORKING_DIRECTORY "${PACE_SOURCE_DIR}"
         OUTPUT_QUIET
         ERROR_QUIET
         RESULT_VARIABLE trackedResult
@@ -171,7 +171,7 @@ foreach(forbiddenRow IN LISTS FastCachedForbiddenTrackedPaths)
     endif()
 endforeach()
 
-list(LENGTH FastCachedForbiddenTrackedPaths forbiddenPathCount)
+list(LENGTH PaceForbiddenTrackedPaths forbiddenPathCount)
 
 if(NOT trackedViolations STREQUAL "")
     list(JOIN trackedViolations "\n" violationReport)

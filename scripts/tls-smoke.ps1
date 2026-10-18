@@ -6,7 +6,7 @@
 # answers +PONG over the encrypted channel.
 #
 # Usage:
-#   tls-smoke.ps1 -Fastcached <path> -Cert <pem> -Key <pem> [-Port <n>]
+#   tls-smoke.ps1 -PaceKv <path> -Cert <pem> -Key <pem> [-Port <n>]
 #
 # The port is DRAWN per run unless one is passed; a passed one is probed first and
 # a leftover listener is refused by name. See scripts/lib/E2EPorts.psm1.
@@ -14,7 +14,7 @@
 # Exit codes: 0 = +PONG over TLS; 1 = ran but no PONG; 77 = a runtime
 # prerequisite (pace-kv / cert) was missing — treated as a skip.
 param(
-    [string]$Fastcached = "",
+    [string]$PaceKv = "",
     # Drawn per run, for the reason `.agent/rules/testing.md` gives: a fixed port
     # needs a reaper, and this file had neither. The constant it used to carry was
     # `11811` -- shared byte for byte with the POSIX half, so the two could not
@@ -31,14 +31,14 @@ $SKIP = 77
 # The skips run FIRST and the port pre-flight second, deliberately: a missing
 # binary is a missing prerequisite, and reporting it as a port collision would
 # name the wrong subject.
-if (-not (Test-Path $Fastcached)) { Write-Host "pace-kv not found: $Fastcached; skipping"; exit $SKIP }
+if (-not (Test-Path $PaceKv)) { Write-Host "pace-kv not found: $PaceKv; skipping"; exit $SKIP }
 if (-not (Test-Path $Cert) -or -not (Test-Path $Key)) { Write-Host "cert/key not found; skipping"; exit $SKIP }
 
 Import-Module (Join-Path $PSScriptRoot "lib/E2EPorts.psm1") -Force
-$Port = Get-E2EFixturePort $Port $Fastcached "pace-kv (TLS)"
+$Port = Get-E2EFixturePort $Port $PaceKv "pace-kv (TLS)"
 
 $log = Join-Path ([System.IO.Path]::GetTempPath()) ('tls-smoke-' + [System.IO.Path]::GetRandomFileName() + '.log')
-$proc = Start-Process -FilePath $Fastcached `
+$proc = Start-Process -FilePath $PaceKv `
     -ArgumentList "--bind=127.0.0.1", "--port=$Port", "--tls", "--tls-cert=$Cert", "--tls-key=$Key" `
     -PassThru -NoNewWindow -RedirectStandardOutput $log -RedirectStandardError "${log}.err"
 try {

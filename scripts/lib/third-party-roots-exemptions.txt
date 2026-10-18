@@ -2,7 +2,7 @@
 # (#1370). Read by `scripts/check-third-party-roots.cmake`, and by nothing else.
 #
 # One row per file and spelling: `<path>|<spelling>|<reason>`. The spelling is one of the
-# names in that check's `FastCachedEnumeratorSpellings` table.
+# names in that check's `PaceEnumeratorSpellings` table.
 # - The REASON is required. An exemption is a decision, and a row without its reason reads
 #   exactly like a row somebody forgot.
 # - A row whose file no longer spells that enumerator is STALE and refused, so this table

@@ -11,27 +11,27 @@
 // runs the real compiler, stores the canonicalized result, and passes the output
 // through. A cache error does not end the invocation — the compile is still
 // dispatched, because a cache and a compile fleet are two services and an answer
-// about one is not an answer about the other — and (when FASTCACHE_VERBOSE is
+// about one is not an answer about the other — and (when PACE_VERBOSE is
 // set) it prints a one-line diagnostic. The build never breaks because the cache
 // is unavailable, and it does not stop distributing either.
 //
 // Config (environment):
-//   FASTCACHE_ADDR       host:port of the cache; defaults to 127.0.0.1:6674,
+//   PACE_ADDR       host:port of the cache; defaults to 127.0.0.1:6674,
 //                        empty disables caching
-//   FASTCACHE_SOURCE_DIR checkout source root (for keying + canonicalization)
-//   FASTCACHE_BINARY_DIR build output root
-//   FASTCACHE_PREFETCH_GROUP     optional prefetch group id (default "default")
-//   FASTCACHE_VERBOSE    if set, print fall-back diagnostics to stderr
-//   FASTCACHE_NO_STATS   if set, do not record invocations to the statistics log
-//   FASTCACHE_NO_DIRECT  if set, disable direct mode (always preprocess)
-//   FASTCACHE_TIMEOUT    deadline for one WHOLE cache exchange, request to last
+//   PACE_SOURCE_DIR checkout source root (for keying + canonicalization)
+//   PACE_BINARY_DIR build output root
+//   PACE_PREFETCH_GROUP     optional prefetch group id (default "default")
+//   PACE_VERBOSE    if set, print fall-back diagnostics to stderr
+//   PACE_NO_STATS   if set, do not record invocations to the statistics log
+//   PACE_NO_DIRECT  if set, disable direct mode (always preprocess)
+//   PACE_TIMEOUT    deadline for one WHOLE cache exchange, request to last
 //                        byte of the reply (default 10s; 0s = unbounded)
-//   FASTCACHE_DISPATCH_TIMEOUT
+//   PACE_DISPATCH_TIMEOUT
 //                        deadline for one whole COMPILE exchange with a worker
 //                        (default 10min; 0s = unbounded). Separate from the
 //                        one above because a compile is bounded by how long a
 //                        compiler runs, not by a round trip (#223).
-//   FASTCACHE_DISPATCH_IDLE
+//   PACE_DISPATCH_IDLE
 //                        deadline on SILENCE during that exchange (default 30s;
 //                        0s = unbounded). All three are durations. A running compile pulses at its
 //                        client every few seconds, so this bounds how long the
@@ -131,8 +131,8 @@ namespace
 using namespace Pace;
 
 // Supplied by the build; defaulted so the tool still compiles standalone.
-#if !defined(FASTCACHE_CC_VERSION)
-    #define FASTCACHE_CC_VERSION "unknown"
+#if !defined(PACE_CC_VERSION)
+    #define PACE_CC_VERSION "unknown"
 #endif
 
 namespace Wire = Pace::CompileCacheWire;
@@ -140,7 +140,7 @@ namespace Wire = Pace::CompileCacheWire;
 // --- config ----------------------------------------------------------------
 
 /// Default deadline for one whole CACHE exchange, overridable with
-/// FASTCACHE_TIMEOUT.
+/// PACE_TIMEOUT.
 ///
 /// Impatient on purpose: a daemon answers a FETCH or a STORE out of memory, so one
 /// that has not finished in ten seconds is one this build is better off without.
@@ -168,7 +168,7 @@ struct Config
     std::string addr;
     std::string srcRoot;
     std::string buildTree;
-    std::string depsRoot; ///< `FASTCACHE_DEPS_DIR`; empty when the build names none.
+    std::string depsRoot; ///< `PACE_DEPS_DIR`; empty when the build names none.
     std::string prefetchGroup { "default" };
     bool verbose { false };
     bool stats { true };  ///< Record each invocation to the per-user log.
@@ -180,7 +180,7 @@ struct Config
     /// to the default, which cannot see the operator who typed the default. That is the
     /// config rule from `AGENT.md`, and the cost of breaking it here is specific: an
     /// English toolchain being explicit, or a value correctly copied out of an English
-    /// `build.ninja`, would be told "the default; set FASTCACHE_MSVC_DEPS_PREFIX" --
+    /// `build.ninja`, would be told "the default; set PACE_MSVC_DEPS_PREFIX" --
     /// advice they have already followed, on the one line this whole setting exists to
     /// emit.
     ///
@@ -209,7 +209,7 @@ struct Config
     /// compile, which is the same shape every other cache failure has here.
     std::string schedulerAddr;
 
-    /// The PASSWORD configured for the cache at `addr` (`FASTCACHE_TOKEN`), empty when none
+    /// The PASSWORD configured for the cache at `addr` (`PACE_TOKEN`), empty when none
     /// is. Presented to that one endpoint alone: every other machine is shown a machine
     /// ticket this machine's node mints per exchange (`Tickets`), and a token sent there
     /// would stand in for a ticket and admit nobody. Held here rather than read at each
@@ -248,7 +248,7 @@ struct Config
     ///
     /// ONE value with one place that decides it: `Cc::ResolveIncludeNoteMarker` asks the
     /// three sources in `Cc::MarkerSource`'s own order -- the operator's
-    /// `FASTCACHE_MSVC_DEPS_PREFIX`, then a probe that ASKS the compiler
+    /// `PACE_MSVC_DEPS_PREFIX`, then a probe that ASKS the compiler
     /// ([#878](https://github.com/LASTRADA-Software/fastcached/issues/878)), then this
     /// English default -- and the first that answers lands here, with
     /// `showIncludesMarkerSource` recording which. The enumerator ORDER is the
@@ -261,7 +261,7 @@ struct Config
 /// Read an environment variable, or a fallback when unset/empty.
 ///
 /// A set-but-empty variable is treated as unset here: every setting below wants
-/// "the user gave me something usable", and an empty FASTCACHE_ADDR is not an
+/// "the user gave me something usable", and an empty PACE_ADDR is not an
 /// address.
 /// @param name The variable to read.
 /// @param fallback Returned when the variable is unset or empty.
@@ -323,7 +323,7 @@ struct Config
 
 /// Read the environment into a `Config`.
 ///
-/// @param namedMarker What `FASTCACHE_MSVC_DEPS_PREFIX` holds, read once by `main` --
+/// @param namedMarker What `PACE_MSVC_DEPS_PREFIX` holds, read once by `main` --
 ///        which also has to ask about it, and must ask the same value.
 /// @param probe The `/showIncludes` marker probe, or nullptr when this invocation must
 ///        not spawn one, which is almost all of them. `WantsMarkerProbe` decides.
@@ -366,7 +366,7 @@ struct Config
     c.dispatchIdle = EnvDuration(Cc::EnvName::DispatchIdle, Cc::DefaultDispatchIdle);
     c.connectTimeout = EnvDuration(Cc::EnvName::ConnectTimeout, DefaultConnectTimeout);
     // A username without a token is not a credential, and `Credential::Configured`
-    // keys on the secret alone — so an operator who sets only FASTCACHE_USER gets
+    // keys on the secret alone — so an operator who sets only PACE_USER gets
     // the same unauthenticated behaviour they had before, rather than an AUTH
     // frame carrying an empty secret that every server would refuse.
     c.schedulerAddr = EnvOr(Cc::EnvName::Scheduler, "");
@@ -434,7 +434,7 @@ struct InvocationRecord
     // The three byte-wide members lead, in one run. Not reading order: a byte-wide
     // member between two 8-aligned ones costs seven bytes of padding, which is this
     // tree's layout rule and the one `DispatchRow` states for itself a file away.
-    bool verbose = false; ///< FASTCACHE_VERBOSE; gates every diagnostic here.
+    bool verbose = false; ///< PACE_VERBOSE; gates every diagnostic here.
 
     Cc::Outcome outcome = Cc::Outcome::Unavailable; ///< What `--show-stats` buckets this compile as.
 
@@ -475,12 +475,12 @@ struct InvocationRecord
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(delta).count());
 }
 
-/// Print a one-line fall-back diagnostic when FASTCACHE_VERBOSE is set, without
+/// Print a one-line fall-back diagnostic when PACE_VERBOSE is set, without
 /// touching the recorded outcome. For diagnostics issued AFTER the outcome is
 /// already decided — a miss that compiled successfully but could not be stored
 /// is still a miss, and recording it as a cache failure would inflate the
 /// "unavailable" bucket in `--show-stats` and hide the real cause.
-/// @param verbose Whether FASTCACHE_VERBOSE was set; `InvocationRecord::verbose`.
+/// @param verbose Whether PACE_VERBOSE was set; `InvocationRecord::verbose`.
 /// @param reason The diagnostic text.
 ///
 /// Takes the FLAG and not the record, deliberately. This reads one bool and writes
@@ -521,7 +521,7 @@ void Note(bool verbose, std::string_view reason)
     return IsForeignGeneration(error) ? "fetch decoded another generation's value" : "fetch decoded malformed";
 }
 
-/// Say, under `FASTCACHE_VERBOSE`, that a stored value would not decode.
+/// Say, under `PACE_VERBOSE`, that a stored value would not decode.
 ///
 /// A rolling upgrade otherwise presents as an endlessly cold cache with no
 /// diagnostic, which is the shape this wire has already recorded paying for once.
@@ -841,7 +841,7 @@ void ReportRefusedReply(InvocationRecord& record, std::string_view reason, std::
               << "); refusing that object and compiling this translation unit locally\n";
 }
 
-/// Emit the outcome trace line (stderr) when FASTCACHE_VERBOSE is set. Useful in
+/// Emit the outcome trace line (stderr) when PACE_VERBOSE is set. Useful in
 /// real use to see the cache working, and the signal the E2E harness asserts on.
 ///
 /// The word printed is the one the statistics log records, `Cc::ToStringView`'s, so
@@ -884,7 +884,7 @@ void WarnIfRejected(InvocationRecord const& record,
 
 /// Report a compile whose roots do not describe it at all.
 ///
-/// Gated on FASTCACHE_VERBOSE like every other launcher diagnostic, and that is a
+/// Gated on PACE_VERBOSE like every other launcher diagnostic, and that is a
 /// deliberate reversal: this started ungated, on the reasoning that issue #66's
 /// defect is invisible and a diagnostic nobody enables is as silent as none. Two
 /// rounds of narrowing failed to find a condition that means "broken" reliably
@@ -1002,7 +1002,7 @@ class CompilerMarkerProbe: public Cc::IMarkerDiscovery
 /// prefix without moving anything a cache stamp covers, which is `AGENT.md`'s
 /// not-cacheable shape -- a stale answer here is a wrong answer that looks right. So the
 /// cost is not paid by default and is not spread; an operator whose notes are not English
-/// asks for it, by setting `FASTCACHE_MSVC_DEPS_PREFIX` to `Cc::MarkerDiscoveryRequest`.
+/// asks for it, by setting `PACE_MSVC_DEPS_PREFIX` to `Cc::MarkerDiscoveryRequest`.
 ///
 /// The other three clauses are facts `ResolveIncludeNoteMarker` cannot know: whether the
 /// line parsed at all, whether this compile deals in `/showIncludes` (the only thing the
@@ -1012,7 +1012,7 @@ class CompilerMarkerProbe: public Cc::IMarkerDiscovery
 /// "this is an MSVC driver" is a second thing to keep in step.
 ///
 /// @param cmd The parsed command line.
-/// @param named What `FASTCACHE_MSVC_DEPS_PREFIX` holds, read once by the caller.
+/// @param named What `PACE_MSVC_DEPS_PREFIX` holds, read once by the caller.
 /// @return True when a probe is worth spawning.
 [[nodiscard]] bool WantsMarkerProbe(Cc::ParsedCommand const& cmd, std::string_view named) noexcept
 {
@@ -1133,7 +1133,7 @@ void ReplayStreams(std::string_view out, std::string_view err)
 ///
 /// **The mechanism that turns a wrong object from invisible into loud**
 /// ([#423](https://github.com/LASTRADA-Software/fastcached/issues/423)). Off unless
-/// `FASTCACHE_VERIFY` names a rate, because a verified hit costs a whole compile.
+/// `PACE_VERIFY` names a rate, because a verified hit costs a whole compile.
 ///
 /// It compiles to the SAME output path rather than a temporary one, having first
 /// copied the served object aside. Two things fall out of that and neither is an
@@ -1219,7 +1219,7 @@ void ReportVerification(InvocationRecord const& record, Cc::HitComparison const&
 
 /// Verify a served hit when it is sampled, and record what the build actually used.
 ///
-/// **A hit `FASTCACHE_VERIFY` rejected is not recorded as a hit.** The verifier compiles
+/// **A hit `PACE_VERIFY` rejected is not recorded as a hit.** The verifier compiles
 /// to the SAME output path, so on a mismatch the object the build links is the fresh one
 /// and the cache's was wrong; logging that as `HIT` counted every wrong object the
 /// verifier caught as a success, in the one report an operator reads to judge the cache.
@@ -1240,7 +1240,7 @@ void ReportVerification(InvocationRecord const& record, Cc::HitComparison const&
                                   Cc::FetchedObject const& fetched)
 {
     // Before the trace, so a build log reads in the order the events happened: the
-    // hit, then what verifying it found. Off unless `FASTCACHE_VERIFY` names a rate, in
+    // hit, then what verifying it found. Off unless `PACE_VERIFY` names a rate, in
     // which case this costs a whole compile (#423). The SERVED key, because that is the
     // entry an operator reading a `WRONG OBJECT` line has to go and look at.
     auto const comparison = VerifyServedObject(cmd, argv, fetched.servedKey, cfg.verifyRate);
@@ -1335,7 +1335,7 @@ void ReportVerification(InvocationRecord const& record, Cc::HitComparison const&
 /// over its own RAW exchange, under `Cc::MintBudget` of the cache's budget: the round trip keeps
 /// the cache's total, the connect is bounded by loopback (#1664).
 /// @param cfg The launcher configuration.
-/// @param verbose Whether FASTCACHE_VERBOSE was set; `InvocationRecord::verbose`.
+/// @param verbose Whether PACE_VERBOSE was set; `InvocationRecord::verbose`.
 /// @return The credentials.
 [[nodiscard]] Cc::TicketCredentials& Tickets(Config const& cfg, bool verbose)
 {
@@ -2108,7 +2108,7 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
     if (!canonicalSource.has_value())
     {
         // Said out loud, because this is the refusal a real build meets and it used
-        // to return in complete silence -- not even under FASTCACHE_VERBOSE. A
+        // to return in complete silence -- not even under PACE_VERBOSE. A
         // source with no canonical token can never key a manifest, so direct mode is
         // off for this translation unit permanently while the compile goes on
         // succeeding: nothing else in the log so much as mentions it (issue #68).
@@ -2881,7 +2881,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
                                            std::span<std::string const> argv)
 {
     if (cfg.addr.empty() || cfg.srcRoot.empty() || cfg.buildTree.empty())
-        return Warn(record, "missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR");
+        return Warn(record, "missing PACE_ADDR/SOURCE_DIR/BINARY_DIR");
 
     // One layout, and it is the build system's own spelling — every consumer of it
     // below either tokenizes against it or emits from it, and both want that form.
@@ -3728,7 +3728,7 @@ int main(int argc, char** argv)
                                                                        : Pace::UsageColor::Plain);
             return 0;
         case Cc::Action::Version:
-            std::cout << "pace-cc " << FASTCACHE_CC_VERSION << '\n';
+            std::cout << "pace-cc " << PACE_CC_VERSION << '\n';
             return 0;
         case Cc::Action::ShowStats:
             return RunStatsReport(command.groupFilter);

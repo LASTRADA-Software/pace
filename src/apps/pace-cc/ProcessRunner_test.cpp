@@ -194,10 +194,10 @@ TEST_CASE("A spawn's added environment is layered on the inherited one, not subs
     // inherited environment SURVIVED.
     auto const runner = MakeProcessRunner();
     std::array<EnvironmentAssignment, 1> const added { {
-        { .name = "FASTCACHE_ENV_PROBE", .value = "layered" },
+        { .name = "PACE_ENV_PROBE", .value = "layered" },
     } };
 
-    auto const run = runner->RunCaptureSplit(EchoEnvironment("FASTCACHE_ENV_PROBE"), added);
+    auto const run = runner->RunCaptureSplit(EchoEnvironment("PACE_ENV_PROBE"), added);
 
     REQUIRE(run.exitCode == 0);
     CHECK(run.out.contains("layered"));
@@ -238,13 +238,13 @@ TEST_CASE("A spawn with no additions inherits what it would have inherited anywa
     // one. Asserted through the OVERLOAD rather than the original, because that is
     // where a rebuilt block would be handed over.
     //
-    // `FASTCACHE_ENV_PROBE` rather than `PATH` as the echoed name: this case is
+    // `PACE_ENV_PROBE` rather than `PATH` as the echoed name: this case is
     // about what was INHERITED, the marker answers that on its own, and asking for
     // "PATH" made the script expand a real `PATH` twice in one `cmd.exe` line. That
     // is what failed on both Windows legs while both sibling cases passed -- the
     // FIXTURE, not the runner. See `EchoEnvironment` for the measurements.
     auto const runner = MakeProcessRunner();
-    auto const run = runner->RunCaptureSplit(EchoEnvironment("FASTCACHE_ENV_PROBE"), {});
+    auto const run = runner->RunCaptureSplit(EchoEnvironment("PACE_ENV_PROBE"), {});
 
     REQUIRE(run.exitCode == 0);
 

@@ -29,7 +29,7 @@ enum class Outcome : std::uint8_t
     Miss,        ///< Compiled and stored.
     Uncacheable, ///< Deliberately not cached (time macros, unparsable line).
     Unavailable, ///< Cache error; fell back to a real compile.
-    /// Served from the cache, then compiled again by `FASTCACHE_VERIFY`, and the fresh
+    /// Served from the cache, then compiled again by `PACE_VERIFY`, and the fresh
     /// object DIFFERED -- so the build used the fresh one and the cache's was wrong.
     ///
     /// Its own outcome and never a `Hit`, because it is the opposite of one: the object
@@ -45,7 +45,7 @@ enum class Outcome : std::uint8_t
     /// Its own outcome because both neighbours would be false: `Miss` claims compiled AND
     /// stored, and `Uncacheable` claims a lasting property of the translation unit, where
     /// this is one invocation's race with an editor. The detail is the verdict's fixed sentence;
-    /// the path is on the `FASTCACHE_VERBOSE` line.
+    /// the path is on the `PACE_VERBOSE` line.
     /// An input that could not be OBSERVED at all is `Uncacheable`, not this.
     InputsMoved,
 };
@@ -59,7 +59,7 @@ enum class Outcome : std::uint8_t
 /// Here rather than in the launcher's `main.cpp`, which is in no test target (#909). Only
 /// a mismatch changes the answer: an unsampled, matching, inconclusive or unsupported
 /// verification leaves the served object in place, and that is a hit.
-/// @param verdict What `FASTCACHE_VERIFY` found, or `NotChecked`.
+/// @param verdict What `PACE_VERIFY` found, or `NotChecked`.
 /// @return `VerifyMismatch` for a rejected hit; `Hit` otherwise.
 [[nodiscard]] Outcome OutcomeOfServedHit(HitVerdict verdict) noexcept;
 
@@ -73,7 +73,7 @@ enum class Outcome : std::uint8_t
 /// conflation `RecordFallback`'s rule already refuses from the other side.
 ///
 /// Before this axis existed there was no third place for it to go, so it went
-/// nowhere: every non-answer from `Dispatch` ended at a `FASTCACHE_VERBOSE`-gated
+/// nowhere: every non-answer from `Dispatch` ended at a `PACE_VERBOSE`-gated
 /// stderr line that deliberately leaves the recorded outcome alone. A fleet in
 /// which *every* dispatch failed therefore produced a perfectly ordinary miss rate
 /// and total silence about distribution
@@ -213,7 +213,7 @@ struct Record
     /// What this compile did about distribution. Defaults to `Unknown` rather than
     /// to any real state, so a caller that never set it makes no claim.
     DispatchOutcome dispatch { DispatchOutcome::Unknown };
-    std::string prefetchGroup;   ///< FASTCACHE_PREFETCH_GROUP at the time of the compile.
+    std::string prefetchGroup;   ///< PACE_PREFETCH_GROUP at the time of the compile.
     std::string source;          ///< Translation-unit path, for per-TU attribution.
     std::uint64_t valueBytes {}; ///< Cached payload size (0 when nothing moved).
     std::uint64_t elapsedMs {};  ///< Wall time this invocation took.
@@ -252,7 +252,7 @@ struct Record
     /// **Recorded, never tallied** -- the one variable-text column on the dispatch axis. It is
     /// kept apart from `dispatchDetail` precisely so the tally stays one row per cause while
     /// the log still says WHICH flag, which is what an operator needs in order to act without
-    /// `FASTCACHE_VERBOSE` or the node's counters. `AppendRecord` bounds it and strips control
+    /// `PACE_VERBOSE` or the node's counters. `AppendRecord` bounds it and strips control
     /// characters, since part of it is a peer's text.
     std::string dispatchSpecifics;
 

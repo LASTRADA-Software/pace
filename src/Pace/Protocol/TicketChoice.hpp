@@ -36,7 +36,7 @@ enum class CredentialChoice : std::uint8_t
 /// Which credential an exchange going to @p audience presents.
 ///
 /// **The password goes to the ONE endpoint it was configured for** -- the cache at
-/// `FASTCACHE_ADDR`, a `pace-kv --requirepass` -- and nowhere else: sent to every node it would
+/// `PACE_ADDR`, a `pace-kv --requirepass` -- and nowhere else: sent to every node it would
 /// stand in for a ticket, and a node admits no machine by a password. An audience that names no one
 /// machine presents nothing, asked through the MINTER's own rule (`NamesNoOneMachine`): loopback
 /// and `localhost` admit this machine as itself, a wildcard is nobody, and asking the node for a
@@ -61,7 +61,7 @@ enum class CredentialChoice : std::uint8_t
 ///
 /// **Loopback whatever else is configured.** The node mints only for a caller on its own machine
 /// (`Op::MintTicket` is judged per connection), so the one address that can answer is this
-/// machine's -- a remote `FASTCACHE_ADDR` or a scheduler elsewhere names somebody who would refuse.
+/// machine's -- a remote `PACE_ADDR` or a scheduler elsewhere names somebody who would refuse.
 /// So the source is `127.0.0.1` at the cache address's PORT, because the node on this machine is
 /// configured like the one the cache address names far more often than it listens on a default.
 /// The one exception is a cache address that is ITSELF a loopback literal -- `[::1]:6674`,
@@ -70,7 +70,7 @@ enum class CredentialChoice : std::uint8_t
 /// qualifies, however it begins (`IsLoopbackHost` parses literals only). There is no default: an
 /// address that is not an endpoint names no port, so there is no source, and the caller says so
 /// rather than guessing one.
-/// @param cacheAddr `FASTCACHE_ADDR`, as the launcher resolved it.
+/// @param cacheAddr `PACE_ADDR`, as the launcher resolved it.
 /// @return `host:port` to mint from, or nullopt when @p cacheAddr names no endpoint.
 [[nodiscard]] inline std::optional<std::string> TicketSourceFor(std::string_view cacheAddr)
 {

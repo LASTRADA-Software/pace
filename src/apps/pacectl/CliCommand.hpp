@@ -132,7 +132,7 @@ struct Command
 ///         the help text alongside it either way.
 [[nodiscard]] Command ParseCommand(std::span<std::string const> argv, Command seed = {});
 
-/// Apply the `FASTCACHE_*` environment to a command before argv is parsed.
+/// Apply the `PACE_*` environment to a command before argv is parsed.
 ///
 /// **A separate step, run first, so "the command line wins" is which one runs second**
 /// rather than a per-field merge -- the shape that has shipped a flag that parsed and
@@ -198,7 +198,7 @@ struct VerbGroup
 /// @return The page, ending in a newline.
 [[nodiscard]] std::string HelpTopicText(VerbSpec const& verb, UsageColor color = UsageColor::Plain);
 
-/// The `FASTCACHE_*` variables this tool reads.
+/// The `PACE_*` variables this tool reads.
 struct EnvVarSpec
 {
     std::string_view name;    ///< The variable, spelled exactly as it is read.

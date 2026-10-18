@@ -41,7 +41,7 @@ class ReclaimLog final: public IReclaimLog
     /// Construct over the observer whose interest gates recording.
     /// @param observer Decides `IsRecording()`; nullptr records nothing.
     /// @param metrics  Where drops are reported as
-    ///                 `fastcached_keyspace_reclaim_events_dropped_total`;
+    ///                 `pace_keyspace_reclaim_events_dropped_total`;
     ///                 nullptr keeps the count readable only via `Dropped()`.
     /// @param capacity Maximum pending entries; beyond it, records are dropped
     ///                 and counted.
@@ -57,7 +57,7 @@ class ReclaimLog final: public IReclaimLog
     /// Entries the log refused because it was full, or could not allocate for.
     /// Monotonic for the life of the log, so "no events fired" stays
     /// distinguishable from "events fired and were dropped". Also exported as
-    /// `fastcached_keyspace_reclaim_events_dropped_total` when a metrics sink
+    /// `pace_keyspace_reclaim_events_dropped_total` when a metrics sink
     /// was supplied — a count only this class can read is one no operator can.
     /// @return The cumulative dropped count.
     [[nodiscard]] std::size_t Dropped() const noexcept;

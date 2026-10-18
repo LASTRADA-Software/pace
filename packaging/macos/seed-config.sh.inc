@@ -31,9 +31,9 @@
 # One row per seeded file: `<basename>`. The APPENDIX is per file and is applied
 # below by name rather than carried in the row, because only one file has one and
 # a column that is empty for every row but one is a column nobody maintains.
-FASTCACHED_SEED_FILES="fastcached.yaml pace-node.yaml"
+PACE_SEED_FILES="fastcached.yaml pace-node.yaml"
 
-for _seed in $FASTCACHED_SEED_FILES; do
+for _seed in $PACE_SEED_FILES; do
     _live="${PREFIX}/etc/${_seed}"
     _template="${PREFIX}/etc/${_seed}.default"
 

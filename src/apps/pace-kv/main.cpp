@@ -87,9 +87,9 @@ namespace
 
 constexpr std::string_view ProgramVersion = Pace::VersionString;
 
-/// Read the metrics port from the FASTCACHED_METRICS_PORT environment variable.
+/// Read the metrics port from the PACE_METRICS_PORT environment variable.
 /// This lets a container's daemon CMD and its separate `--healthcheck` probe
-/// agree on a custom port via a single `-e FASTCACHED_METRICS_PORT=...`, without
+/// agree on a custom port via a single `-e PACE_METRICS_PORT=...`, without
 /// the static image HEALTHCHECK having to learn the daemon's runtime args.
 ///
 /// Reuses the CLI's `Pace::ParsePort`, so the environment fallback accepts
@@ -97,7 +97,7 @@ constexpr std::string_view ProgramVersion = Pace::VersionString;
 /// @return The parsed port, or nullopt when unset/empty/invalid.
 [[nodiscard]] std::optional<std::uint16_t> MetricsPortFromEnv()
 {
-    auto const raw = Pace::ReadEnvironmentVariable("FASTCACHED_METRICS_PORT");
+    auto const raw = Pace::ReadEnvironmentVariable("PACE_METRICS_PORT");
     if (!raw.has_value())
         return std::nullopt;
 
@@ -269,7 +269,7 @@ CowTree::FilePageStore::Durability ToPageStoreDurability(Pace::StorageDurability
     // The EFFECTIVE codec, never the configured one. `ParseCompressionCodec` refuses
     // a codec an operator NAMES, so the one route past it is a DEFAULT -- which
     // nobody typed and nothing validates. On a build without
-    // `FASTCACHED_ENABLE_COMPRESSION` this tier stores plaintext regardless, and
+    // `PACE_ENABLE_COMPRESSION` this tier stores plaintext regardless, and
     // resolving here is what lets the banner report that rather than repeat the
     // configuration back.
     l1->SetCompression({ .codec = Pace::Compression::EffectiveCodec(effective.memoryCompression),
@@ -873,7 +873,7 @@ int DaemonBody(Pace::Config const& effective,
     // at the default log level: it never reaches the trace-only TracingStorage,
     // so a store silently does not happen. This decorator logs each such failure
     // at Warn and counts it into Snapshot().writeErrors (Prometheus
-    // `fastcached_write_errors_total`). It wraps the raw backend so it observes
+    // `pace_write_errors_total`). It wraps the raw backend so it observes
     // the true storage result (e.g. the disk error LayeredStorage propagates).
     Pace::WriteErrorReportingStorage writeErrorReporter { *backend, logger };
     Pace::IStorage* storagePtr = &writeErrorReporter;
@@ -910,7 +910,7 @@ int DaemonBody(Pace::Config const& effective,
     // will not decode is known at THIS layer and nowhere else -- the storage below
     // has already verified what it returned, and the protocol above has no single
     // seam where a storage error becomes a reply. Without it
-    // `fastcache_cache_malformed_values_total` would stay at zero on the one process
+    // `pace_cache_malformed_values_total` would stay at zero on the one process
     // that can observe the event (#296).
     Pace::CacheEngine engine { *storagePtr, clock, core::platform::defaultSystemWallClock(), &metrics };
 
@@ -1035,7 +1035,7 @@ int DaemonBody(Pace::Config const& effective,
             return;
         logger.Logf(Pace::LogLevel::Warn,
                     "{} compression is configured {} and this build has no such codec, so that tier stores "
-                    "plaintext; rebuild with FASTCACHED_ENABLE_COMPRESSION or set the codec to none",
+                    "plaintext; rebuild with PACE_ENABLE_COMPRESSION or set the codec to none",
                     half,
                     Pace::Compression::NameOf(configured));
     };
@@ -1366,7 +1366,7 @@ int main(int argc, char const* const* argv)
     // down to it, silently (#622).
     //
     // The precedence the assembly implements is CLI > config-file > env > default,
-    // so a stray `FASTCACHED_METRICS_PORT` can never override a `metrics_port:` the
+    // so a stray `PACE_METRICS_PORT` can never override a `metrics_port:` the
     // operator wrote — even when they wrote the compiled-in default, which the
     // explicit bit the file's applier sets is what makes distinguishable from an
     // absent key. A container

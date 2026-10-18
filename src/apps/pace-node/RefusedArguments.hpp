@@ -21,7 +21,7 @@
 /// @file RefusedArguments.hpp
 /// Which arguments this worker refused compiles over, said where an operator looks.
 ///
-/// `fastcache_worker_jobs_refused_rejected_argument_total` says how many jobs a worker turned away
+/// `pace_worker_jobs_refused_rejected_argument_total` says how many jobs a worker turned away
 /// over an argument, and until this existed nothing on the node said WHICH: not its log, not its
 /// conditions. A cl-debug build had 372 of them refused over one flag, and the only way to learn
 /// which flag was to reproduce a dispatch by hand. The remedy -- `--allow-compile-arg`, or leaving

@@ -6,7 +6,7 @@
 #
 # Every hygiene check in src/tests/CMakeLists.txt reports failure by printing
 # `CMake Error` or `CMake Warning`, and ctest hears that through a per-test
-# property, `FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"`. A
+# property, `FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"`. A
 # property is a thing that can be silently wrong: a typo'd pattern, a CTest that
 # stops honouring it, a refactor that drops it. The checks would then pass
 # unconditionally, which is the state this whole area exists to leave behind.

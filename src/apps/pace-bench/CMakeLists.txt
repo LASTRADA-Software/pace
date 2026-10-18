@@ -4,12 +4,12 @@
 #
 # Uses Catch2's benchmark support rather than adding a benchmark library: Catch2
 # is already fetched for the test suite, so this target costs no new dependency.
-# That also makes FASTCACHED_BUILD_TESTS a hard prerequisite, since it is what
+# That also makes PACE_BUILD_TESTS a hard prerequisite, since it is what
 # brings Catch2 into the build.
 
-if(NOT FASTCACHED_BUILD_TESTS)
+if(NOT PACE_BUILD_TESTS)
     message(FATAL_ERROR
-        "FASTCACHED_BUILD_BENCHMARKS=ON requires FASTCACHED_BUILD_TESTS=ON "
+        "PACE_BUILD_BENCHMARKS=ON requires PACE_BUILD_TESTS=ON "
         "(the benchmarks use Catch2, which the test suite pulls in).")
 endif()
 
@@ -39,7 +39,7 @@ target_link_libraries(pace-bench PRIVATE Pace Catch2::Catch2WithMain)
 # the configure log are precisely the two places that have been confidently wrong about what
 # the compile line got. `BuildBanner.hpp` states the rule; `BuildBanner_test.cpp` pins it with
 # two readings that differ only in this label and must reach the same verdict.
-target_compile_definitions(pace-bench PRIVATE FASTCACHE_BENCH_BUILD_TYPE="$<CONFIG>")
+target_compile_definitions(pace-bench PRIVATE PACE_BENCH_BUILD_TYPE="$<CONFIG>")
 
 # No `catch_discover_tests` here, deliberately. `scripts/check-tsan-binaries.cmake` derives
 # "every Catch2 test binary this tree registers" from exactly that call, and requires each to

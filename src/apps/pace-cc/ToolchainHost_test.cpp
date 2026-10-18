@@ -333,11 +333,11 @@ TEST_CASE("The real host reaches the same registry the platform leaf does", "[to
 TEST_CASE("The real host reads the environment through the shared leaf", "[toolchain-host]")
 {
     auto const host = MakeToolchainHost();
-    Pace::Testing::ScopedEnv const set { "FASTCACHE_TOOLCHAIN_HOST_PROBE", "present" };
+    Pace::Testing::ScopedEnv const set { "PACE_TOOLCHAIN_HOST_PROBE", "present" };
 
-    auto const value = host->Environment("FASTCACHE_TOOLCHAIN_HOST_PROBE");
+    auto const value = host->Environment("PACE_TOOLCHAIN_HOST_PROBE");
     REQUIRE(value.has_value());
     CHECK(Pace::Testing::Unwrap(value) == "present");
 
-    CHECK_FALSE(host->Environment("FASTCACHE_TOOLCHAIN_HOST_ABSENT").has_value());
+    CHECK_FALSE(host->Environment("PACE_TOOLCHAIN_HOST_ABSENT").has_value());
 }

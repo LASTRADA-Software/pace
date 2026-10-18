@@ -9,19 +9,19 @@
 # arms exchanged. And the output is flattened before it is searched, because CMake wraps
 # its diagnostics and a phrase can straddle a line break.
 #
-# Usage: cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<dir> -P <this>
+# Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-off-thread-assertion-guard.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-off-thread-assertion-guard.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
 
 set(failures "")
 set(cases 0)
@@ -43,7 +43,7 @@ endfunction()
 function(fc_case label ninja wantPass phrase)
     math(EXPR next "${cases} + 1")
     set(cases ${next} PARENT_SCOPE)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/case-${next}")
+    set(tree "${PACE_SCRATCH_DIR}/case-${next}")
     file(MAKE_DIRECTORY "${tree}")
     if(NOT ninja STREQUAL "<none>")
         file(WRITE "${tree}/build.ninja" "${ninja}")

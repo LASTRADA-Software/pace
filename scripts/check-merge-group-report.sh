@@ -162,9 +162,9 @@ Shape() {
     # would otherwise comment on one issue indefinitely and say nothing new. A
     # push report is a TRANSITION; a merge-group report is an EVENT, so it keeps
     # commenting and must NOT set this.
-    grep -q 'FASTCACHED_REPORT_ONLY_IF_NEW' <<< "$(NonComment "$Workflow")" \
+    grep -q 'PACE_REPORT_ONLY_IF_NEW' <<< "$(NonComment "$Workflow")" \
         && Ok "a push report is opened once and never updated" \
-        || Fail "$Workflow never sets \`FASTCACHED_REPORT_ONLY_IF_NEW\`; a context failing on every push to master would then comment on one report forever, which is #774's own objection to reporting pushes at all"
+        || Fail "$Workflow never sets \`PACE_REPORT_ONLY_IF_NEW\`; a context failing on every push to master would then comment on one report forever, which is #774's own objection to reporting pushes at all"
 
     # And it must not be a job in build.yml, for the reason check-release-gate
     # exists: a notifier job is skipped on a tag push, always, and would skip the
@@ -271,7 +271,7 @@ REQ
     # SHELL refused. Measured in #723, where it made eight cases green while
     # testing nothing.
     Decide() {
-        FASTCACHED_REQUIRED_CONTEXTS_FILE="$required" \
+        PACE_REQUIRED_CONTEXTS_FILE="$required" \
             bash "$Decider" "$1" "https://example.invalid/run" "$2" ${3+"$3"} ${4+"$4"}
     }
 
@@ -418,7 +418,7 @@ REQ
     local emptyRequired="${scratch}/empty-required.sh"
     : > "$emptyRequired"
     local got=0
-    FASTCACHED_REQUIRED_CONTEXTS_FILE="$emptyRequired" \
+    PACE_REQUIRED_CONTEXTS_FILE="$emptyRequired" \
         bash "$Decider" merge_group "https://example.invalid/run" "${scratch}/r-pkg.tsv" \
         >/dev/null 2>"${scratch}/err.txt" || got=$?
     if [[ "$got" -ne 0 ]] && grep -q "read 0 required contexts" "${scratch}/err.txt"; then
@@ -560,7 +560,7 @@ STUB
                 echo "        env:"
                 echo "          EVENT: \${{ github.event.workflow_run.event }}"
                 echo "        run: |"
-                echo "          [[ \"\$EVENT\" == push ]] && export FASTCACHED_REPORT_ONLY_IF_NEW=1"
+                echo "          [[ \"\$EVENT\" == push ]] && export PACE_REPORT_ONLY_IF_NEW=1"
                 echo "          scripts/ci-report-issue.sh t b"
             }
         } > "$out"

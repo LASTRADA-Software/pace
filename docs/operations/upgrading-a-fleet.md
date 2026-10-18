@@ -70,7 +70,7 @@ below).
 | A formation record below format 7 (builds of this branch only; no release wrote one) | `UnsupportedFormatVersion` | Move `formation` aside. The node re-forms as a new solitary cluster: re-enroll it. |
 | A configuration file naming `scheduler` (on a serving node), `fleet_member`, `scheduler_token_file`, `cluster_admit_client`, `cluster_forget_client`, `raft_peer`, `raft_join`, `cluster_id`, `serve_scheduler`, `voter_key`, `enroll_from` or `cluster_admit_worker` | refused by name, with its step | Remove the key |
 | A service registration replaying any of those flags, or `--scheduler` on a node that serves | refuses to start under the service manager | `--install-service` again. The MSI does this on upgrade. |
-| MSI properties `FASTCACHE_NODE_SCHEDULER` and `FASTCACHE_NODE_ADVERTISE` | not read; an upgrade forgets the remembered advertised endpoint | Drop them from scripted installs |
+| MSI properties `PACE_NODE_SCHEDULER` and `PACE_NODE_ADVERTISE` | not read; an upgrade forgets the remembered advertised endpoint | Drop them from scripted installs |
 
 ### Coming from 0.4.0: nodes follow their own address
 
@@ -126,10 +126,10 @@ nothing about the others.
 
 | Series | Refused where |
 |---|---|
-| `fastcache_node_cache_requests_refused_unsupported_version_total` | a node's cache tier |
-| `fastcache_worker_frames_refused_unsupported_version_total` | a node's compile worker |
-| `fastcached_dispatch_frames_refused_unsupported_version_total` | the fleet scheduler's port |
-| `fastcached_cache_frames_refused_unsupported_version_total` | the `pace-kv` daemon's compile-cache port |
+| `pace_node_cache_requests_refused_unsupported_version_total` | a node's cache tier |
+| `pace_worker_frames_refused_unsupported_version_total` | a node's compile worker |
+| `pace_dispatch_frames_refused_unsupported_version_total` | the fleet scheduler's port |
+| `pace_cache_frames_refused_unsupported_version_total` | the `pace-kv` daemon's compile-cache port |
 
 Any of them non-zero and rising means something is still speaking the other version.
 These are the *only* places a mismatch is visible, so an operator who has not been told
@@ -160,7 +160,7 @@ its session, so the two refuse each other at the handshake, by version. **Only t
 side can see it**, because the acceptor challenges first:
 
 - an upgraded member DIALLING a version-4 member meets its version-4 challenge, refuses it,
-  and counts `fastcache_raft_peer_dials_refused_no_challenge_total`, with the version in the
+  and counts `pace_raft_peer_dials_refused_no_challenge_total`, with the version in the
   log line;
 - a version-4 member dialling an upgraded one refuses the version-5 challenge and closes
   without a proof, so the upgraded ACCEPTOR counts nothing at all.
@@ -183,10 +183,10 @@ and before you upgraded, you gave each member's `--raft-peer` list every other m
 3. Stop all of them, upgrade, start all of them.
 
 A member left out of step 2 is refused by the others as a key never given
-(`fastcache_raft_peer_connections_refused_unknown_key_total`) until the cluster records its
+(`pace_raft_peer_connections_refused_unknown_key_total`) until the cluster records its
 key -- which the leader does for itself when it leads, and which `--cluster-admit` with
 `@<key>` does for anybody else. A mixed cluster shows as
-`fastcache_raft_peer_dials_refused_no_challenge_total` on the new nodes, counted where they
+`pace_raft_peer_dials_refused_no_challenge_total` on the new nodes, counted where they
 dial an old one; the acceptor challenges first, so an old node dialling a new one closes
 before its proof and the new node counts nothing.
 
@@ -242,7 +242,7 @@ the whole-fleet step above, and what each machine is started with gets simpler:
    `--fleet-seed=<host>` where no beacon reaches, asks to join, and is approved on a voter with
    `--enroll-approve` (or under `--enroll-auto-approve`); see
    [cluster discovery](../getting-started/cluster-discovery.md). There is no key to type.
-3. **Confirm on the workers.** `fastcache_worker_jobs_refused_lease_no_roster_total`
+3. **Confirm on the workers.** `pace_worker_jobs_refused_lease_no_roster_total`
    rising without stopping means a worker's applied state names no voter yet: it has not been
    admitted, and its leases are refused `grant-unverifiable`.
 

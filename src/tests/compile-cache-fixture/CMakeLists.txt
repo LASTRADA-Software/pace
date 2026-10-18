@@ -13,11 +13,11 @@
 cmake_minimum_required(VERSION 3.28)
 project(compile-cache-fixture LANGUAGES CXX)
 
-if(NOT FASTCACHED_MODULE_DIR)
-    message(FATAL_ERROR "FASTCACHED_MODULE_DIR must point at the directory holding CompileCache.cmake")
+if(NOT PACE_MODULE_DIR)
+    message(FATAL_ERROR "PACE_MODULE_DIR must point at the directory holding CompileCache.cmake")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${FASTCACHED_MODULE_DIR}")
+list(APPEND CMAKE_MODULE_PATH "${PACE_MODULE_DIR}")
 include(CompileCache)
 
 # A compile edge, and it has to come AFTER the include (#187).

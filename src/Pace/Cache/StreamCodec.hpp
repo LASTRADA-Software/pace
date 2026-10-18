@@ -316,7 +316,7 @@ namespace detail
 /// an ordinary memcached client may choose, so a decode failure here is a client's
 /// bytes and not a failing disk. It was reported as `StorageErrorCode::Corrupt`,
 /// which is what gets a healthy cache deleted -- and, because `Corrupt` counts as a
-/// persistence failure, it moved `fastcached_write_errors_total` and wrote a
+/// persistence failure, it moved `pace_write_errors_total` and wrote a
 /// "storage write failed" warning while it did so.
 ///
 /// `Corrupt` was never honest from here in any case: integrity is verified BELOW

@@ -39,10 +39,10 @@ namespace
     /// Defined by the build so the value cannot drift from the tag. Guarded rather than
     /// assumed, because a `version` verb reporting a placeholder is worse than one that
     /// does not build.
-#if !defined(FASTCACHE_CLI_VERSION)
-    #error "FASTCACHE_CLI_VERSION must be defined by the build"
+#if !defined(PACE_CLI_VERSION)
+    #error "PACE_CLI_VERSION must be defined by the build"
 #endif
-    constexpr std::string_view ClientVersion = FASTCACHE_CLI_VERSION;
+    constexpr std::string_view ClientVersion = PACE_CLI_VERSION;
 
     /// Turn a failed exchange into an answer.
     ///
@@ -79,7 +79,7 @@ namespace
     {
         auto answer = Concluded(Outcome::Refused, reply.text);
         if (ErrorCodeWord(reply.text) == ErrorCode::NoAuth)
-            answer.advisories.emplace_back("this server requires a credential; set FASTCACHE_TOKEN or pass --token-file");
+            answer.advisories.emplace_back("this server requires a credential; set PACE_TOKEN or pass --token-file");
         return answer;
     }
 
@@ -551,14 +551,14 @@ namespace
         }
 
         auto const record = ParseInfo(*body);
-        auto const* const server = FindField(record, "fastcached_version");
+        auto const* const server = FindField(record, "pace_version");
         fields.push_back(Field { .name = "server", .value = server == nullptr ? AbsentCell() : server->value });
         if (auto const* const dialect = FindField(record, "redis_version"); dialect != nullptr)
             fields.push_back(Field { .name = "resp_dialect", .value = dialect->value });
 
         auto answer = Answered(RecordValue(std::move(fields)));
         if (server == nullptr)
-            answer.advisories.emplace_back("the server's INFO payload named no fastcached_version");
+            answer.advisories.emplace_back("the server's INFO payload named no pace_version");
         return answer;
     }
 
@@ -1239,7 +1239,7 @@ namespace
 
         // **The pin to paste, and the pin this node trusts by** (`--fleet-id`). `fleet-id` is
         // `<cluster-id>@<key>[,<key>...]` for this node's fleet and its voters, exactly what another
-        // machine's --fleet-id (and the installer's FASTCACHE_FLEET_ID) takes. `fleet-pin` reads `none`
+        // machine's --fleet-id (and the installer's PACE_FLEET_ID) takes. `fleet-pin` reads `none`
         // on a node that trusts on first use -- the answer, not an absence -- and both are absent from
         // a node too old to say, for the enrollment state's reason.
         if (fields.runtime.fleetId.has_value())

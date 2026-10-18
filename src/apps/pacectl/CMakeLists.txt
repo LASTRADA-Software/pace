@@ -49,7 +49,7 @@ set(_fc_cli_sources
 )
 
 # The terminal half of the dashboard's input (#1372) is the one place this binary meets core-cpp's
-# terminal UI, `core::tui`, so it is built only where that library is. With `FASTCACHED_BUILD_TUI` off,
+# terminal UI, `core::tui`, so it is built only where that library is. With `PACE_BUILD_TUI` off,
 # `MakeTerminalEvents` still links, and refuses by saying why, so a caller asking for a
 # terminal gets a reason rather than a link error.
 if(TARGET core::tui)
@@ -89,18 +89,18 @@ endif()
 # The version is compiled in from the git tag rather than read at runtime, so
 # `pacectl version` cannot report a value that has drifted from the build. The
 # source refuses to compile without it.
-target_compile_definitions(pacectl PRIVATE FASTCACHE_CLI_VERSION="${FASTCACHED_VERSION_STRING}")
+target_compile_definitions(pacectl PRIVATE PACE_CLI_VERSION="${PACE_VERSION_STRING}")
 
 install(TARGETS pacectl
-    RUNTIME DESTINATION "${FASTCACHED_INSTALL_BINDIR}"
-    COMPONENT "${FASTCACHED_APP_COMPONENT}"
+    RUNTIME DESTINATION "${PACE_INSTALL_BINDIR}"
+    COMPONENT "${PACE_APP_COMPONENT}"
 )
 
 # The command line, the verb handlers, the formatters and the stats ladder's choice are
 # all pure functions over injected seams, so they are unit-testable with no daemon and
 # no socket. Its own binary rather than rows in PaceTest: the library's test glob
 # only reaches src/Pace.
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     add_executable(pacectl-tests
         ${_fc_cli_sources}
         CliAnswer_test.cpp
@@ -136,7 +136,7 @@ if(FASTCACHED_BUILD_TESTS)
     if(TARGET core::tui)
         target_link_libraries(pacectl-tests PRIVATE core::tui)
     endif()
-    target_compile_definitions(pacectl-tests PRIVATE FASTCACHE_CLI_VERSION="${FASTCACHED_VERSION_STRING}")
+    target_compile_definitions(pacectl-tests PRIVATE PACE_CLI_VERSION="${PACE_VERSION_STRING}")
     include(Catch)
     # `SKIP_RETURN_CODE 4` tells ctest a Catch2 skip is a skip and not a failure
     # (#499), and under the Catch2 the top-level CMakeLists pins EXACTLY it is exact: a
@@ -144,5 +144,5 @@ if(FASTCACHED_BUILD_TESTS)
     # count. On 3.6.0 the exit code was the failure count, and a case failing four
     # assertions was scored *skipped* (#1128). `catch-skip-return-code` requires the
     # property, and `catch-skip-exit-contract` that it still means what it says.
-    catch_discover_tests(pacectl-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+    catch_discover_tests(pacectl-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
 endif()

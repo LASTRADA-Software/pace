@@ -25,23 +25,23 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR OR FASTCACHED_SOURCE_DIR STREQUAL "")
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR OR PACE_SOURCE_DIR STREQUAL "")
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR OR FASTCACHED_SCRATCH_DIR STREQUAL "")
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR OR PACE_SCRATCH_DIR STREQUAL "")
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-enumerator-walks.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-enumerator-walks.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(roots "${FASTCACHED_SOURCE_DIR}/scripts/lib/third-party-roots.txt")
+set(roots "${PACE_SOURCE_DIR}/scripts/lib/third-party-roots.txt")
 if(NOT EXISTS "${roots}")
     message(FATAL_ERROR "the third-party roots file is missing: ${roots}")
 endif()
@@ -69,7 +69,7 @@ set(failureCount 0)
 # @param seam       The seam header's content (so a case can remove the anchor).
 # @param planted    `relative/path.hpp|content` rows for the files to plant.
 function(Case name expectFail phrase seam)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src/Pace/Core")
     file(MAKE_DIRECTORY "${tree}/scripts/lib")
@@ -107,7 +107,7 @@ function(Case name expectFail phrase seam)
                 "case that silently ran the fallback instead would be the defect this file "
                 "exists to avoid")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_QUIET)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -115,7 +115,7 @@ function(Case name expectFail phrase seam)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE out
         ERROR_VARIABLE err
         RESULT_VARIABLE status)

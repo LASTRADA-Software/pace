@@ -713,7 +713,7 @@ ServedSurfaces NodeServedSurfacesFor(NodeConfig const& cfg)
     auto const servesScheduler = ServesScheduler(cfg);
     std::array const rows {
         // Never: this binary constructs no `Server`/`ReactorServerLoop`, so
-        // `fastcached_connections_*` read absent rather than as a node nobody has connected to.
+        // `pace_connections_*` read absent rather than as a node nobody has connected to.
         Row { .surface = MetricsSurface::CacheAcceptPath, .served = false },
         // Never: no `CacheEngine`, so nothing here expires or reclaims.
         Row { .surface = MetricsSurface::CacheStorage, .served = false },

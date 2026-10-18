@@ -39,15 +39,15 @@ done
 # gets, and a local chmod that was never staged is not the fact this asks about.
 # A tree with no index cannot answer, and says so.
 ModeTable() {  # $1 = repo root -- prints "<mode> <path>" lines
-    if [ -n "${FASTCACHED_WORKFLOW_MODE_FILE:-}" ]; then
-        cat "$FASTCACHED_WORKFLOW_MODE_FILE"
+    if [ -n "${PACE_WORKFLOW_MODE_FILE:-}" ]; then
+        cat "$PACE_WORKFLOW_MODE_FILE"
         return 0
     fi
     git -C "$1" ls-files -s -- 'scripts/*.sh' 2>/dev/null | awk '{ print $1, $4 }'
 }
 
 ModeSourceName() {
-    if [ -n "${FASTCACHED_WORKFLOW_MODE_FILE:-}" ]; then echo "file"; else echo "git"; fi
+    if [ -n "${PACE_WORKFLOW_MODE_FILE:-}" ]; then echo "file"; else echo "git"; fi
 }
 
 Check() {
@@ -139,7 +139,7 @@ Stage() {  # $1 = name, $2 = run-line body, $3 = mode for scripts/x.sh
 
 Assert() {  # $1 = label, $2 = dir, $3 = pass|fail, $4 = expected mode source
     local out rc
-    out=$(FASTCACHED_WORKFLOW_MODE_FILE="$tmp/$2/modes" Check "$tmp/$2" 2>&1) && rc=0 || rc=1
+    out=$(PACE_WORKFLOW_MODE_FILE="$tmp/$2/modes" Check "$tmp/$2" 2>&1) && rc=0 || rc=1
     cases=$((cases + 1))
     grep -q "modes from $4" <<< "$out" \
         || { echo "  FAIL: $1 -- expected mode source '$4'"; printf '%s\n' "$out"; exit 1; }
@@ -182,7 +182,7 @@ Assert "a commented mention is not a call site" commented2 pass file
 # The scan must refuse rather than pass when it finds nothing.
 mkdir -p "$tmp/no-workflows"
 cases=$((cases + 1))
-if FASTCACHED_WORKFLOW_MODE_FILE=/dev/null Check "$tmp/no-workflows" >/dev/null 2>&1; then
+if PACE_WORKFLOW_MODE_FILE=/dev/null Check "$tmp/no-workflows" >/dev/null 2>&1; then
     echo "  FAIL: a tree with no workflows passed"; exit 1
 else
     echo "  ok: a tree with no workflows is refused"
@@ -191,7 +191,7 @@ fi
 mkdir -p "$tmp/no-hits/.github/workflows"
 printf 'jobs:\n  j:\n    steps:\n      - run: echo hello\n' > "$tmp/no-hits/.github/workflows/build.yml"
 cases=$((cases + 1))
-if FASTCACHED_WORKFLOW_MODE_FILE=/dev/null Check "$tmp/no-hits" >/dev/null 2>&1; then
+if PACE_WORKFLOW_MODE_FILE=/dev/null Check "$tmp/no-hits" >/dev/null 2>&1; then
     echo "  FAIL: a tree with no script invocations passed"; exit 1
 else
     echo "  ok: a tree with no script invocations is refused"

@@ -187,7 +187,7 @@ TEST_CASE("A launcher asks this node for no ticket it would refuse, so the refus
           "[node][session][ticket]")
 {
     // The launcher's choice and the minter's refusal are ONE rule (`NamesNoOneMachine`), asked at
-    // both ends: `FASTCACHE_ADDR=localhost:6674` used to ask for a ticket naming `localhost` on
+    // both ends: `PACE_ADDR=localhost:6674` used to ask for a ticket naming `localhost` on
     // every FETCH and STORE, which this node refused and counted each time.
     Session node;
     NodeOnThisMachine exchange { node.session };

@@ -41,30 +41,30 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-catch-skip-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-catch-skip-return-code.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-catch-skip-return-code.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}/catch-skip-selftest")
+set(root "${PACE_SCRATCH_DIR}/catch-skip-selftest")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 # How many trees the check was actually RUN against, counted where it runs rather than stated
@@ -78,27 +78,27 @@ set(checkRuns 0)
 #
 # Every tree states its third-party roots (#1370). One that did not would be REFUSED for the
 # roots file, and every case below expecting a refusal would pass for that wrong reason.
-function(fastcached_make_tree name relative body outVar)
+function(pace_make_tree name relative body outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     get_filename_component(directory "${tree}/${relative}" DIRECTORY)
     file(MAKE_DIRECTORY "${directory}")
     file(WRITE "${tree}/${relative}" "${body}")
-    fastcached_plant_roots("${tree}")
+    pace_plant_roots("${tree}")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
 
 # @param tree The synthetic tree to give a roots file naming `vendor/upstream`.
-function(fastcached_plant_roots tree)
+function(pace_plant_roots tree)
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "# planted\nvendor/upstream\n")
 endfunction()
 
 # Run the check against a tree and say whether it objected.
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     math(EXPR runs "${checkRuns} + 1")
     set(checkRuns ${runs} PARENT_SCOPE)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErrors
         RESULT_VARIABLE ignored)
@@ -126,9 +126,9 @@ function(fastcached_run_check tree outObjected outOutput)
 endfunction()
 
 # 1. Correct.
-fastcached_make_tree("correct" "src/thing/CMakeLists.txt"
+pace_make_tree("correct" "src/thing/CMakeLists.txt"
     "add_executable(thing-tests a.cpp)\ncatch_discover_tests(thing-tests PROPERTIES SKIP_RETURN_CODE 4)\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "correct: the check objected to a registration that carries the property -- it now refuses everything, which is as useless as refusing nothing")
 endif()
@@ -146,9 +146,9 @@ if(position EQUAL -1)
 endif()
 
 # 2. Bare -- the defect itself.
-fastcached_make_tree("bare" "src/thing/CMakeLists.txt"
+pace_make_tree("bare" "src/thing/CMakeLists.txt"
     "add_executable(thing-tests a.cpp)\ncatch_discover_tests(thing-tests)\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "bare: a registration with no SKIP_RETURN_CODE did not fail the check -- which is the whole defect #499 is about")
 else()
@@ -159,37 +159,37 @@ else()
 endif()
 
 # 3. Present but wrong -- 77 is the script-driven convention, not Catch2's.
-fastcached_make_tree("wrong-value" "src/thing/CMakeLists.txt"
+pace_make_tree("wrong-value" "src/thing/CMakeLists.txt"
     "catch_discover_tests(thing-tests PROPERTIES SKIP_RETURN_CODE 77)\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "wrong-value: SKIP_RETURN_CODE 77 passed, but Catch2 exits 4 -- the property is present, reads correctly in a diff, and does nothing")
 endif()
 
 # 4. Split across lines. Legal CMake; a line-at-a-time scan calls it a violation.
-fastcached_make_tree("continued" "src/thing/CMakeLists.txt"
+pace_make_tree("continued" "src/thing/CMakeLists.txt"
     "catch_discover_tests(thing-tests\n    PROPERTIES\n        SKIP_RETURN_CODE 4\n)\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "continued: a registration with the property on a continuation line was reported as a violation -- correct code failing the check")
 endif()
 
 # 5. Nothing to find. Must be a broken scan, never a clean tree.
-fastcached_make_tree("none" "src/thing/CMakeLists.txt"
+pace_make_tree("none" "src/thing/CMakeLists.txt"
     "add_executable(thing-tests a.cpp)\n# no Catch2 registration here at all\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "none: a tree with no catch_discover_tests registration passed as clean; zero findings must be reported as a scan that stopped working")
 endif()
 
 # 6. A build tree. Vendored third-party registrations are not this rule's business,
 #    and the first version of this check reported one inside `_deps/catch2-src`.
-fastcached_make_tree("excluded" "src/thing/CMakeLists.txt"
+pace_make_tree("excluded" "src/thing/CMakeLists.txt"
     "catch_discover_tests(thing-tests PROPERTIES SKIP_RETURN_CODE 4)\n" tree)
 file(MAKE_DIRECTORY "${tree}/out/build/x/_deps/catch2-src/tests")
 file(WRITE "${tree}/out/build/x/_deps/catch2-src/tests/CMakeLists.txt"
      "catch_discover_tests(SelfTest)\n")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "excluded: a bare registration inside a build tree was reported -- vendored third-party code is not ours to edit and must not fail this check")
 endif()
@@ -202,8 +202,8 @@ endif()
 #    7 plants a vendored registration where CPM actually puts one and leaves it
 #    UNTRACKED; it must be ignored. 8 tracks a bare one; it must still be caught, so
 #    that "ignore what git does not track" cannot degrade into "ignore everything".
-find_program(FASTCACHED_GIT NAMES git)
-if(NOT FASTCACHED_GIT)
+find_program(PACE_GIT NAMES git)
+if(NOT PACE_GIT)
     list(APPEND failures
          "git-mode: no git executable, so the mode CI actually uses could not be exercised at all -- inconclusive, not a pass")
 else()
@@ -218,9 +218,9 @@ else()
         file(WRITE "${tree}/.cache/CPM/catch2/deadbeef/tests/CMakeLists.txt"
              "catch_discover_tests(SelfTest)
 ")
-        fastcached_plant_roots("${tree}")
+        pace_plant_roots("${tree}")
 
-        fastcached_scratch_git("${FASTCACHED_GIT}" scratchGit)
+        pace_scratch_git("${PACE_GIT}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}" RESULT_VARIABLE ignored)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add "src/thing/CMakeLists.txt"
                         RESULT_VARIABLE ignored)
@@ -231,7 +231,7 @@ else()
                             RESULT_VARIABLE ignored)
         endif()
 
-        fastcached_run_check("${tree}" objected output)
+        pace_run_check("${tree}" objected output)
         if(case STREQUAL "untracked")
             if(objected)
                 list(APPEND failures
@@ -265,9 +265,9 @@ endif()
 # registration was found anywhere`. In a real tree other files supply registrations, so
 # that guard stays quiet and the swallowed violation is simply never reported. An
 # assertion on `objected` alone would therefore pass under the bug for the wrong reason.
-fastcached_make_tree("swallowed-registration" "src/thing/CMakeLists.txt"
+pace_make_tree("swallowed-registration" "src/thing/CMakeLists.txt"
     "# the toolchain lives under C:\\\ncatch_discover_tests(thing-tests)\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "swallowed-registration: a bare registration under a comment ending in a backslash was not reported at all -- the two lines merged and the `#` test skipped both, which is a false GREEN")
 else()
@@ -289,9 +289,9 @@ endif()
 # doubled backslash has no observable consequence in its output. Inventing an
 # assertion for it would be a fixture testing the fixture. It is pinned where it IS
 # observable, in `check-succeed-not-skip-selftest.cmake`, which echoes the message.
-fastcached_make_tree("shifted-line-number" "src/thing/CMakeLists.txt"
+pace_make_tree("shifted-line-number" "src/thing/CMakeLists.txt"
     "# the toolchain lives under C:\\\nadd_executable(thing-tests a.cpp)\n\ncatch_discover_tests(thing-tests)\n" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "shifted-line-number: the bare registration on line 4 was not reported at all")
 else()
@@ -307,22 +307,22 @@ endif()
 #    reach it. The planted registration is bare, so a check that failed to decline it
 #    objects -- NOT objecting is the proof, and the name in the output is what says why.
 set(vendoredBody "catch_discover_tests(upstream-tests)\n")
-fastcached_make_tree("vendored-walk" "src/thing/CMakeLists.txt"
+pace_make_tree("vendored-walk" "src/thing/CMakeLists.txt"
     "catch_discover_tests(thing-tests PROPERTIES SKIP_RETURN_CODE 4)\n" tree)
 file(WRITE "${tree}/vendor/upstream/tests/CMakeLists.txt" "${vendoredBody}")
 set(vendoredTrees "${tree}")
-if(FASTCACHED_GIT)
-    fastcached_make_tree("vendored-git" "src/thing/CMakeLists.txt"
+if(PACE_GIT)
+    pace_make_tree("vendored-git" "src/thing/CMakeLists.txt"
         "catch_discover_tests(thing-tests PROPERTIES SKIP_RETURN_CODE 4)\n" tree)
     file(WRITE "${tree}/vendor/upstream/tests/CMakeLists.txt" "${vendoredBody}")
-    fastcached_scratch_git("${FASTCACHED_GIT}" scratchGit)
+    pace_scratch_git("${PACE_GIT}" scratchGit)
     execute_process(COMMAND ${scratchGit} init -q "${tree}" RESULT_VARIABLE ignored)
     execute_process(COMMAND ${scratchGit} -C "${tree}" add -A RESULT_VARIABLE ignored)
     list(APPEND vendoredTrees "${tree}")
 endif()
 foreach(tree IN LISTS vendoredTrees)
     get_filename_component(case "${tree}" NAME)
-    fastcached_run_check("${tree}" objected output)
+    pace_run_check("${tree}" objected output)
     string(REGEX REPLACE "[ \t\r\n]+" " " flat "${output}")
     if(objected)
         list(APPEND failures "${case}: a bare registration in a TRACKED third-party CMakeLists was reported -- upstream's files are copied verbatim and nobody here may edit them")
@@ -334,10 +334,10 @@ foreach(tree IN LISTS vendoredTrees)
 endforeach()
 
 # 13. A roots file naming no root is a refusal, never "nothing is third-party".
-fastcached_make_tree("no-roots" "src/thing/CMakeLists.txt"
+pace_make_tree("no-roots" "src/thing/CMakeLists.txt"
     "catch_discover_tests(thing-tests PROPERTIES SKIP_RETURN_CODE 4)\n" tree)
 file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "# no root at all\n")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 string(REGEX REPLACE "[ \t\r\n]+" " " flat "${output}")
 string(FIND "${flat}" "names no root" position)
 if(NOT objected OR position EQUAL -1)

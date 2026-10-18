@@ -173,19 +173,19 @@ namespace
         /// **Uncounted here, and counted one layer down**, for `StorageWriteFailed`'s reason:
         /// `WriteErrorReportingStorage` sits under every node tier and reports a
         /// persistence-class failure on a removal as it does on a write -- one `Warn` line
-        /// and `fastcached_write_errors_total` -- where every caller is visible. The code is
+        /// and `pace_write_errors_total` -- where every caller is visible. The code is
         /// the write code, because a removal IS a write to the store and the remedy is the
         /// same disk.
         constexpr Cc::UncountedRefusal StorageRemoveFailed {
             .code = Wire::ErrorCode::StorageWriteFailed,
-            .rationale = "WriteErrorReportingStorage already reports this as fastcached_write_errors_total at the "
+            .rationale = "WriteErrorReportingStorage already reports this as pace_write_errors_total at the "
                          "removal, where every caller is visible and not only the ones that arrived over the wire",
         };
 
         /// Why a verb named by `RefusedVerbs` -- today, `AUTH` -- counts nothing.
         ///
         /// **The arm where a counter would be actively harmful.** It is what a
-        /// `FASTCACHE_TOKEN`-configured launcher produces once per exchange for a whole
+        /// `PACE_TOKEN`-configured launcher produces once per exchange for a whole
         /// build, so the series would be dominated by healthy traffic and a port scan
         /// would be invisible inside it -- the same argument
         /// `MergedResponder::UnservedReply` carries, which is why #447 withdrew a
@@ -284,7 +284,7 @@ namespace
     /// This surface's rows. The shape, the lookup and why they exist are on
     /// `Wire::RefusedVerb`; what belongs here is only which verbs and what they say.
     ///
-    /// `Auth`, because a `FASTCACHE_TOKEN` launcher had a permanent 0% hit rate that
+    /// `Auth`, because a `PACE_TOKEN` launcher had a permanent 0% hit rate that
     /// presented exactly as a cache that is merely cold.
     constexpr std::array RefusedVerbs {
         Wire::RefusedVerb { .op = Wire::Op::Auth,

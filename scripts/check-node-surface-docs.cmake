@@ -41,8 +41,8 @@
 #
 # The anchor is therefore narrow and the residue is REFUSED rather than ignored:
 # a phrasing that is a claim about the set of ports is matched by a row of
-# `FastCachedSurfaceCountPatterns` and checked, and every other number-plus-
-# `surface` collocation must appear in `FastCachedSurfaceCountExemptions` with a
+# `PaceSurfaceCountPatterns` and checked, and every other number-plus-
+# `surface` collocation must appear in `PaceSurfaceCountExemptions` with a
 # reason. A new wording is neither checked wrongly nor waved through -- it fails
 # until somebody says which of the two senses it is in.
 #
@@ -65,22 +65,22 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-node-surface-docs.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-node-surface-docs.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
 # Where the truth is. Extracted, never restated: a second copy of the surface
 # list is not a cross-check, it is a second thing to be wrong, and it would go
 # stale in the direction that reports green.
-set(FastCachedSurfaceSource "src/apps/pace-node/NodeSurfaces.cpp")
-set(FastCachedSurfaceHeader "src/apps/pace-node/NodeSurfaces.hpp")
+set(PaceSurfaceSource "src/apps/pace-node/NodeSurfaces.cpp")
+set(PaceSurfaceHeader "src/apps/pace-node/NodeSurfaces.hpp")
 
 # Every markdown page under `docs/` is scanned. GLOBBED, not listed, and that
 # direction is the whole lesson of the two tickets that reached it before this
@@ -101,7 +101,7 @@ set(FastCachedSurfaceHeader "src/apps/pace-node/NodeSurfaces.hpp")
 # Deliberately empty, which is legal and is the strong position: a row here is a
 # page somebody decided the table does not govern, and no such page has been
 # found. A row matching nothing is refused below, so this cannot rot quietly.
-set(FastCachedSurfaceDocExclusions
+set(PaceSurfaceDocExclusions
 )
 
 # Phrasings that are a claim about THE SET OF PORTS A NODE OPENS, and what the
@@ -127,7 +127,7 @@ set(FastCachedSurfaceDocExclusions
 # new pattern cannot arrive without one. It must be a literal the regex CANNOT
 # match without: a needle broader than its pattern only costs time, one narrower
 # silently skips a page the pattern would have caught.
-set(FastCachedSurfaceCountPatterns
+set(PaceSurfaceCountPatterns
     "([a-z]+)-surface table|-surface table|total|Names the table itself, so the number is that table's arity. This is the wording that went stale as `six-surface` while the table had four rows."
     "up to ([a-z]+) surfaces in one process| surfaces in one process|total|Counts what one node process opens, which is the port set by definition."
     "([A-Za-z]+) TCP rules| TCP rules|tcp|Firewall rules for one protocol. A policy role has no protocol, so this cannot be the other sense."
@@ -137,7 +137,7 @@ set(FastCachedSurfaceCountPatterns
 # The residue rule's own literal. Its regex hard-codes `surface`, so a page
 # without that word cannot reach it -- and `print-surfaces` contains it, so
 # Rule A is covered by the same needle.
-set(FastCachedSurfaceResidueNeedle "surface")
+set(PaceSurfaceResidueNeedle "surface")
 
 # Number words, in ascending order so a word's VALUE is its position.
 #
@@ -148,7 +148,7 @@ set(FastCachedSurfaceResidueNeedle "surface")
 # described it being refused. A claim in a comment that nothing reads cannot make
 # the code wrong, so the residue matcher now spells `[A-Za-z0-9]+` and this
 # paragraph is checked by `node-surface-docs-selftest`'s digit case.
-set(FastCachedSurfaceNumberWords
+set(PaceSurfaceNumberWords
     "one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten"
 )
 
@@ -159,7 +159,7 @@ set(FastCachedSurfaceNumberWords
 # repository that the word names two different things.
 #
 #   <path substring>|<the phrase, verbatim and on one line>|<which sense it is in, and why>
-set(FastCachedSurfaceCountExemptions
+set(PaceSurfaceCountExemptions
     "pace-node.md|There is one surface now|Counts the surfaces carrying the COMPILE VERBS, which is one -- the node port -- rather than the arity of the port set. It is the sentence explaining why the startup question has one answer again after #290 merged the ports that used to give it two, so a future merge is exactly what should make somebody re-read it."
 )
 
@@ -182,13 +182,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # carry to a table added later, so it is a check rather than a fourth comment.
 #
 #   <variable holding the table>|<how many fields each row has>
-set(FastCachedSurfaceRowTables
-    "FastCachedSurfaceDocExclusions|2"
-    "FastCachedSurfaceCountPatterns|4"
-    "FastCachedSurfaceCountExemptions|3"
+set(PaceSurfaceRowTables
+    "PaceSurfaceDocExclusions|2"
+    "PaceSurfaceCountPatterns|4"
+    "PaceSurfaceCountExemptions|3"
 )
-foreach(tableRow IN LISTS FastCachedSurfaceRowTables)
-    fastcached_row_fields("${tableRow}" tableName tableArity)
+foreach(tableRow IN LISTS PaceSurfaceRowTables)
+    pace_row_fields("${tableRow}" tableName tableArity)
     set(rowIndex 0)
     list(LENGTH ${tableName} tableLength)
     foreach(row IN LISTS ${tableName})
@@ -219,15 +219,15 @@ set(violations "")
 # rows. A walk over neutralised lines cannot lose a row without noticing -- a
 # `.protocol` reached with no `.name` in hand is reported, because a verdict
 # drawn from a scan that lost the table's shape is worth nothing.
-set(surfaceSource "${FASTCACHED_SOURCE_DIR}/${FastCachedSurfaceSource}")
+set(surfaceSource "${PACE_SOURCE_DIR}/${PaceSurfaceSource}")
 if(NOT EXISTS "${surfaceSource}")
     message(FATAL_ERROR
-        "the surface table's source is missing: ${FastCachedSurfaceSource}. This check has no "
+        "the surface table's source is missing: ${PaceSurfaceSource}. This check has no "
         "ground truth without it and must not report on the documents alone.")
 endif()
 
 file(READ "${surfaceSource}" surfaceContent)
-fastcached_split_lines_tokenised("${surfaceContent}" surfaceLines)
+pace_split_lines_tokenised("${surfaceContent}" surfaceLines)
 
 set(surfaceNames "")
 set(surfaceProtocols "")
@@ -286,14 +286,14 @@ foreach(line IN LISTS surfaceLines)
     elseif(line MATCHES "^[ \t]*\\.protocol[ \t]*=[ \t]*SurfaceProtocol::([A-Za-z]+)")
         if(pendingName STREQUAL "")
             list(APPEND violations
-                 "${FastCachedSurfaceSource}: a `.protocol` row with no `.name` above it; this scan has lost the table's shape, so nothing it says about the documents is worth reading")
+                 "${PaceSurfaceSource}: a `.protocol` row with no `.name` above it; this scan has lost the table's shape, so nothing it says about the documents is worth reading")
         elseif(pendingFlags STREQUAL "")
             # The same lost-shape refusal, in the direction the row restructure
             # opened: a surface whose flags did not extract would contribute no
             # row and simply vanish from the flag rule, which is a guard going
             # quiet rather than a guard firing.
             list(APPEND violations
-                 "${FastCachedSurfaceSource}: the `${pendingName}` surface committed with no `.flags` extracted; this scan has lost the table's shape, so nothing it says about the documents is worth reading")
+                 "${PaceSurfaceSource}: the `${pendingName}` surface committed with no `.flags` extracted; this scan has lost the table's shape, so nothing it says about the documents is worth reading")
             set(pendingName "")
         else()
             list(APPEND surfaceNames "${pendingName}")
@@ -319,17 +319,17 @@ set(rolesLost FALSE)
 if(NOT tableState STREQUAL "after")
     set(rolesLost TRUE)
     list(APPEND violations
-         "${FastCachedSurfaceSource}: the role reader did not find both the surface table's `EnumTable<NodeSurface, ...>` opener and the `};` closing it at the opener's indentation (it stopped `${tableState}` the table); this scan has lost the table's shape, so nothing it says about the documents is worth reading")
+         "${PaceSurfaceSource}: the role reader did not find both the surface table's `EnumTable<NodeSurface, ...>` opener and the `};` closing it at the opener's indentation (it stopped `${tableState}` the table); this scan has lost the table's shape, so nothing it says about the documents is worth reading")
 elseif(NOT surfaceRoleRows)
     set(rolesLost TRUE)
     list(APPEND violations
-         "${FastCachedSurfaceSource}: no endpoint `.role` was extracted from the surface table, though a surface with two endpoints names each; this scan has lost the table's shape, so nothing it says about the documents is worth reading")
+         "${PaceSurfaceSource}: no endpoint `.role` was extracted from the surface table, though a surface with two endpoints names each; this scan has lost the table's shape, so nothing it says about the documents is worth reading")
 endif()
 
 list(LENGTH surfaceNames surfaceCount)
 if(surfaceCount EQUAL 0)
     message(FATAL_ERROR
-        "no surface rows were extracted from ${FastCachedSurfaceSource}. Either the table moved or "
+        "no surface rows were extracted from ${PaceSurfaceSource}. Either the table moved or "
         "its row syntax changed -- and a scan with no ground truth would agree with every document "
         "perfectly. Two empty lists agree, which is the failure this refusal exists to prevent.")
 endif()
@@ -338,14 +338,14 @@ endif()
 # of four and every correct document is reported wrong, so whoever fixes it edits
 # the prose to match a broken scan. The arity is declared independently by the
 # enum, so it is cross-checked rather than trusted.
-set(surfaceHeader "${FASTCACHED_SOURCE_DIR}/${FastCachedSurfaceHeader}")
+set(surfaceHeader "${PACE_SOURCE_DIR}/${PaceSurfaceHeader}")
 if(NOT EXISTS "${surfaceHeader}")
     message(FATAL_ERROR
-        "the surface enum's header is missing: ${FastCachedSurfaceHeader}. Without it the row count "
+        "the surface enum's header is missing: ${PaceSurfaceHeader}. Without it the row count "
         "cannot be cross-checked, and a partial parse would be reported as the documents being wrong.")
 endif()
 file(READ "${surfaceHeader}" headerContent)
-fastcached_split_lines_tokenised("${headerContent}" headerLines)
+pace_split_lines_tokenised("${headerContent}" headerLines)
 
 set(enumeratorCount 0)
 set(inEnum FALSE)
@@ -370,8 +370,8 @@ endforeach()
 
 if(NOT surfaceCount EQUAL ${enumeratorCount})
     message(FATAL_ERROR
-        "${surfaceCount} surface row(s) were extracted from ${FastCachedSurfaceSource} while "
-        "${FastCachedSurfaceHeader} declares ${enumeratorCount} surface enumerator(s). This scan has "
+        "${surfaceCount} surface row(s) were extracted from ${PaceSurfaceSource} while "
+        "${PaceSurfaceHeader} declares ${enumeratorCount} surface enumerator(s). This scan has "
         "lost part of the table, so every document it disagrees with is one it cannot judge -- fix "
         "the extraction rather than the prose.")
 endif()
@@ -385,13 +385,13 @@ list(LENGTH udpCount udpCount)
 set(totalCount "${surfaceCount}")
 
 # ---------------------------------------------------------------------------
-set(docNeedles "${FastCachedSurfaceResidueNeedle}")
-foreach(patternRow IN LISTS FastCachedSurfaceCountPatterns)
-    fastcached_row_fields("${patternRow}" countPattern countNeedle countKind countReason)
+set(docNeedles "${PaceSurfaceResidueNeedle}")
+foreach(patternRow IN LISTS PaceSurfaceCountPatterns)
+    pace_row_fields("${patternRow}" countPattern countNeedle countKind countReason)
     list(APPEND docNeedles "${countNeedle}")
 endforeach()
 
-file(GLOB_RECURSE docFiles LIST_DIRECTORIES false "${FASTCACHED_SOURCE_DIR}/docs/*.md")
+file(GLOB_RECURSE docFiles LIST_DIRECTORIES false "${PACE_SOURCE_DIR}/docs/*.md")
 list(SORT docFiles)
 
 set(exclusionsUsed "")
@@ -402,11 +402,11 @@ set(countClaimsChecked 0)
 set(docsScanned 0)
 
 foreach(docFile IN LISTS docFiles)
-    file(RELATIVE_PATH docPath "${FASTCACHED_SOURCE_DIR}" "${docFile}")
+    file(RELATIVE_PATH docPath "${PACE_SOURCE_DIR}" "${docFile}")
 
     set(excluded FALSE)
-    foreach(row IN LISTS FastCachedSurfaceDocExclusions)
-        fastcached_row_fields("${row}" exclusionPath exclusionReason)
+    foreach(row IN LISTS PaceSurfaceDocExclusions)
+        pace_row_fields("${row}" exclusionPath exclusionReason)
         string(FIND "${docPath}" "${exclusionPath}" position)
         if(NOT position EQUAL -1)
             set(excluded TRUE)
@@ -424,7 +424,7 @@ foreach(docFile IN LISTS docFiles)
     # Flags are looked for across the whole corpus rather than per document: no
     # single page is obliged to name every surface.
     foreach(flagRow IN LISTS surfaceFlagRows)
-        fastcached_row_fields("${flagRow}" flagSurface flag)
+        pace_row_fields("${flagRow}" flagSurface flag)
         string(FIND "${docContent}" "${flag}" position)
         if(NOT position EQUAL -1)
             list(APPEND flagsSeen "${flag}")
@@ -446,7 +446,7 @@ foreach(docFile IN LISTS docFiles)
     if(NOT worthSplitting)
         continue()
     endif()
-    fastcached_split_lines_tokenised("${docContent}" docLines)
+    pace_split_lines_tokenised("${docContent}" docLines)
 
     # -----------------------------------------------------------------------
     # ONE pass over the lines, serving both rules.
@@ -494,7 +494,7 @@ foreach(docFile IN LISTS docFiles)
                     if(missing)
                         foreach(absent IN LISTS missing)
                             list(APPEND violations
-                                 "${docPath}: a `--print-surfaces` transcript does not list the `${absent}` surface, which ${FastCachedSurfaceSource} declares -- an operator copying it opens one port too few")
+                                 "${docPath}: a `--print-surfaces` transcript does not list the `${absent}` surface, which ${PaceSurfaceSource} declares -- an operator copying it opens one port too few")
                         endforeach()
                     else()
                         list(JOIN seenInFence ", " sawText)
@@ -543,7 +543,7 @@ foreach(docFile IN LISTS docFiles)
                     list(FIND surfaceNames "${label}" position)
                     if(position EQUAL -1)
                         list(APPEND violations
-                             "${docPath}: a `--print-surfaces` transcript has a `${label}` line, and ${FastCachedSurfaceSource} declares no such surface -- a reader cannot tell this from real output, and on a firewall worksheet an extra row reads as authorisation to open a port")
+                             "${docPath}: a `--print-surfaces` transcript has a `${label}` line, and ${PaceSurfaceSource} declares no such surface -- a reader cannot tell this from real output, and on a firewall worksheet an extra row reads as authorisation to open a port")
                     else()
                         # A surface with two endpoints prints two ADJACENT rows under one
                         # name, one per ROLE its resolver declares (`discovery beacon`,
@@ -564,9 +564,9 @@ foreach(docFile IN LISTS docFiles)
                         list(FIND surfaceRoleRows "${label}|${role}" declaredRole)
                         list(FIND rowsSeenInFence "${label}|${role}" repeated)
                         if(NOT "${role}" STREQUAL "" AND declaredRole EQUAL -1 AND NOT rolesLost)
-                            set(rowRefusal "has a `${label} ${role}` line, and ${FastCachedSurfaceSource} declares no `${role}` endpoint for the `${label}` surface")
+                            set(rowRefusal "has a `${label} ${role}` line, and ${PaceSurfaceSource} declares no `${role}` endpoint for the `${label}` surface")
                         elseif(NOT repeated EQUAL -1)
-                            set(rowRefusal "prints the `${fullLabel}` row twice, and ${FastCachedSurfaceSource} resolves each endpoint once")
+                            set(rowRefusal "prints the `${fullLabel}` row twice, and ${PaceSurfaceSource} resolves each endpoint once")
                         elseif("${role}" STREQUAL "" AND "${rowsSeenInFence};" MATCHES "(^|;)${label}\\|[a-z]+;")
                             set(rowRefusal "has a `${label}` row with no role beside the `${label}` rows that name one, and a surface is either served or not")
                         elseif(NOT "${role}" STREQUAL "" AND "${label}|" IN_LIST rowsSeenInFence)
@@ -596,18 +596,18 @@ foreach(docFile IN LISTS docFiles)
         # something called a surface must have been classified.
         set(countHandled FALSE)
         set(residueLine "${line}")
-        foreach(patternRow IN LISTS FastCachedSurfaceCountPatterns)
-            fastcached_row_fields("${patternRow}" countPattern countNeedle countKind countReason)
+        foreach(patternRow IN LISTS PaceSurfaceCountPatterns)
+            pace_row_fields("${patternRow}" countPattern countNeedle countKind countReason)
             if(line MATCHES "${countPattern}")
                 string(TOLOWER "${CMAKE_MATCH_1}" numberWord)
-                list(FIND FastCachedSurfaceNumberWords "${numberWord}" wordIndex)
+                list(FIND PaceSurfaceNumberWords "${numberWord}" wordIndex)
                 if(NOT wordIndex EQUAL -1)
                     math(EXPR claimed "${wordIndex} + 1")
                     math(EXPR countClaimsChecked "${countClaimsChecked} + 1")
                     set(countHandled TRUE)
                     if(NOT claimed EQUAL ${${countKind}Count})
                         list(APPEND violations
-                             "${docPath}: `${line}` claims ${claimed} where ${FastCachedSurfaceSource} declares ${${countKind}Count}. This phrasing is a claim about the port set because: ${countReason}")
+                             "${docPath}: `${line}` claims ${claimed} where ${PaceSurfaceSource} declares ${${countKind}Count}. This phrasing is a claim about the port set because: ${countReason}")
                     endif()
                     # Judged, so take it OUT and let the backstop read what is
                     # left. Short-circuiting the whole line meant one recognised
@@ -622,7 +622,7 @@ foreach(docFile IN LISTS docFiles)
         # reports the first match only, so a line opening `the node surface ...`
         # masked a numeric claim later in the same sentence: `node` is not a
         # number word, the rule moved on, and what followed was never judged.
-        # Digits are matched here as well -- see FastCachedSurfaceNumberWords.
+        # Digits are matched here as well -- see PaceSurfaceNumberWords.
         set(handled FALSE)
         set(residueFound FALSE)
         string(REGEX MATCHALL "[A-Za-z0-9]+[- ]surfaces?" residueHits "${residueLine}")
@@ -633,7 +633,7 @@ foreach(docFile IN LISTS docFiles)
                 set(residueFound TRUE)
                 break()
             endif()
-            list(FIND FastCachedSurfaceNumberWords "${residueToken}" wordIndex)
+            list(FIND PaceSurfaceNumberWords "${residueToken}" wordIndex)
             if(NOT wordIndex EQUAL -1)
                 set(residueFound TRUE)
                 break()
@@ -643,8 +643,8 @@ foreach(docFile IN LISTS docFiles)
             continue()
         endif()
 
-        foreach(exemptRow IN LISTS FastCachedSurfaceCountExemptions)
-            fastcached_row_fields("${exemptRow}" exemptPath exemptPhrase exemptReason)
+        foreach(exemptRow IN LISTS PaceSurfaceCountExemptions)
+            pace_row_fields("${exemptRow}" exemptPath exemptPhrase exemptReason)
             string(FIND "${docPath}" "${exemptPath}" pathPosition)
             if(pathPosition EQUAL -1)
                 continue()
@@ -659,7 +659,7 @@ foreach(docFile IN LISTS docFiles)
 
         if(NOT handled)
             list(APPEND violations
-                 "${docPath}: `${line}` counts something called a surface and nothing says which sense it is in. `surface` means BOTH the ${surfaceCount} ports this node opens AND the policy roles that share the node port, so this cannot be judged automatically -- either write it in a form FastCachedSurfaceCountPatterns recognises, or add it to FastCachedSurfaceCountExemptions saying which sense it is in")
+                 "${docPath}: `${line}` counts something called a surface and nothing says which sense it is in. `surface` means BOTH the ${surfaceCount} ports this node opens AND the policy roles that share the node port, so this cannot be judged automatically -- either write it in a form PaceSurfaceCountPatterns recognises, or add it to PaceSurfaceCountExemptions saying which sense it is in")
         endif()
     endforeach()
 endforeach()
@@ -672,10 +672,10 @@ endforeach()
 list(LENGTH surfaceFlagRows flagRowCount)
 if(flagRowCount EQUAL 0)
     list(APPEND violations
-         "no `.flags` were extracted from ${FastCachedSurfaceSource}, so the flag rule compared nothing against nothing and agreed")
+         "no `.flags` were extracted from ${PaceSurfaceSource}, so the flag rule compared nothing against nothing and agreed")
 endif()
 foreach(flagRow IN LISTS surfaceFlagRows)
-    fastcached_row_fields("${flagRow}" name flag)
+    pace_row_fields("${flagRow}" name flag)
     list(FIND flagsSeen "${flag}" seen)
     if(seen EQUAL -1)
         list(APPEND violations
@@ -685,18 +685,18 @@ endforeach()
 
 # An exclusion or exemption whose subject has gone is one that has stopped being
 # checked, and it would go on excusing whatever takes that wording next.
-foreach(row IN LISTS FastCachedSurfaceDocExclusions)
+foreach(row IN LISTS PaceSurfaceDocExclusions)
     list(FIND exclusionsUsed "${row}" position)
     if(position EQUAL -1)
-        fastcached_row_fields("${row}" exclusionPath exclusionReason)
+        pace_row_fields("${row}" exclusionPath exclusionReason)
         list(APPEND violations
              "the exclusion for `${exclusionPath}` matched no document. It was excluded because: ${exclusionReason}")
     endif()
 endforeach()
-foreach(row IN LISTS FastCachedSurfaceCountExemptions)
+foreach(row IN LISTS PaceSurfaceCountExemptions)
     list(FIND exemptionsUsed "${row}" position)
     if(position EQUAL -1)
-        fastcached_row_fields("${row}" exemptPath exemptPhrase exemptReason)
+        pace_row_fields("${row}" exemptPath exemptPhrase exemptReason)
         list(APPEND violations
              "${exemptPath}: the exemption for `${exemptPhrase}` matched nothing. It was exempted because: ${exemptReason}")
     endif()
@@ -715,7 +715,7 @@ if(transcriptsChecked EQUAL 0)
 endif()
 if(countClaimsChecked EQUAL 0)
     list(APPEND violations
-         "no port-set count claim was found in any scanned document. FastCachedSurfaceCountPatterns exists because two such claims went stale through a hand-edit that corrected every port NUMBER, so matching none of them means this rule has stopped looking rather than that the prose is clean")
+         "no port-set count claim was found in any scanned document. PaceSurfaceCountPatterns exists because two such claims went stale through a hand-edit that corrected every port NUMBER, so matching none of them means this rule has stopped looking rather than that the prose is clean")
 endif()
 
 if(violations)

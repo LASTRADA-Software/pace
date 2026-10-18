@@ -156,7 +156,7 @@ enum class StandingReason : std::uint8_t
 /// What this executable's own translation unit saw of the build that produced it.
 struct BuildConfiguration
 {
-    /// What the build system was ASKED for, from `FASTCACHE_BENCH_BUILD_TYPE`. A label; empty
+    /// What the build system was ASKED for, from `PACE_BENCH_BUILD_TYPE`. A label; empty
     /// where the generator resolves the configuration at build time rather than at configure
     /// time. No verdict is drawn from it.
     std::string_view buildTypeLabel;

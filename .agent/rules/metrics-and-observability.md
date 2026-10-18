@@ -23,7 +23,7 @@ fault.
   name, help text, type -- `static_assert`ed to hold one row per enumerator in
   enumerator order, and the renderer walks it. (The guide's names were wrong as well
   as absent -- it said `dispatch_leases_granted` where the series is
-  `fastcached_dispatch_leases_granted_total` -- which is what documenting a series
+  `pace_dispatch_leases_granted_total` -- which is what documenting a series
   nobody could scrape lets you get away with.) Consequences that are each
   load-bearing:
   - **The test asserts over the TABLE, not against a list written out beside it.**
@@ -60,8 +60,8 @@ fault.
   `pace-node` serves the daemon's own `AdminHttpServer` over the same
   renderer -- a second implementation for a process without storage is exactly how
   two endpoints come to disagree -- so `MetricsSnapshot::storage` and `::host` are
-  `optional`. A default-constructed `StorageStats` would publish `fastcached_items 0`
-  and `fastcached_bytes_limit 0`, which is not "no cache" but "an empty, unbounded
+  `optional`. A default-constructed `StorageStats` would publish `pace_items 0`
+  and `pace_bytes_limit 0`, which is not "no cache" but "an empty, unbounded
   cache", and a dashboard reads that as a fact. The daemon leaves `host` absent for
   the mirror-image reason, and **names the field to do it** (`.host = std::nullopt`)
   rather than letting it default: a designated initializer that skips a field added
@@ -75,7 +75,7 @@ fault.
   it:
   - **Absent is not zero, one level below `MetricsSnapshot::storage`.** A tier the
     cache does not have renders **no line**, not a zero and not a bare `# HELP` with
-    no sample beneath it. `fastcached_tier_items{tier="disk"} 0` says a disk tier is
+    no sample beneath it. `pace_tier_items{tier="disk"} 0` says a disk tier is
     standing empty, and a memory-only node has no such tier to be empty.
   - **The label values come from `StorageTierTable`, not from a hand-written list.**
     Same rule the counters follow against `MetricsCatalog`, applied to the other
@@ -194,10 +194,10 @@ fault.
   REPRESENT this counter at all* is about the BUILD, not the world, and a zero there
   is a number for an event that could not have been counted. A catalogue row the
   sink has no slot for is omitted and reported as its own series
-  (`fastcached_metrics_catalogue_skew`), never rendered as a plausible zero (#1353).
+  (`pace_metrics_catalogue_skew`), never rendered as a plausible zero (#1353).
   **A SECOND carve-out, on the same side of the same line (#1484): *could a writer for this
   counter run in this PROCESS at all*.** `pace-node` constructs neither `Server`
-  nor `ReactorServerLoop`, the only writers of `fastcached_connections_*`, so that figure cannot
+  nor `ReactorServerLoop`, the only writers of `pace_connections_*`, so that figure cannot
   move there at any traffic level ever -- and it read `0`, which says the one thing an operator
   most wants to know and gets wrong: *nothing has connected to this node*. Found by dogfooding,
   on a node that two builds had just gone through.
@@ -211,7 +211,7 @@ fault.
 
   **The attribution is one row per (counter, surface) PAIR, so its `size()` is not a count of
   counters** -- it exceeds the catalogue by however many rows are written from two components,
-  and `fastcached_metrics_surface_absent` was asserted against `CounterSoleWriterTable.size()`
+  and `pace_metrics_surface_absent` was asserted against `CounterSoleWriterTable.size()`
   while the two happened to be equal. `AttributedCounterCount()` is the derivation that stays
   right.
 
@@ -259,8 +259,8 @@ fault.
     half times larger. The table therefore holds three rows, and widening it wants the refusal
     tables read properly.
   - The absence carries its REASON, and only one reason is a fault.
-    `fastcached_metrics_catalogue_skew` counts a build whose sink has no slot; the new
-    `fastcached_metrics_surface_absent` counts rows this process cannot write, and a nonzero
+    `pace_metrics_catalogue_skew` counts a build whose sink has no slot; the new
+    `pace_metrics_surface_absent` counts rows this process cannot write, and a nonzero
     value there is the HEALTHY state of any binary serving some surfaces. Collapsing the two --
     which is what reusing `IMetricsSink::Carries` would have done -- makes every compile node
     scrape as a broken build, and costs the skew series its meaning.

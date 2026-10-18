@@ -11,7 +11,7 @@
 # existed. It is gone, and `ctest -R repository-hygiene` fails if it is ever
 # tracked again — see scripts/check-repository-hygiene.cmake. A build with no
 # tag to describe (an exported source tarball, say) states its version with
-# -DFASTCACHED_VERSION=1.2.3 instead.
+# -DPACE_VERSION=1.2.3 instead.
 #
 # Two values come out of this and they are NOT interchangeable:
 #
@@ -39,18 +39,18 @@
 # Declared constants and located tools.
 
 # The triple a build reports when nothing available can say what it is: no tag,
-# no -DFASTCACHED_VERSION. 0.0.0 and not the 0.0.1 the deleted version.txt used
+# no -DPACE_VERSION. 0.0.0 and not the 0.0.1 the deleted version.txt used
 # to claim, because 0.0.0 is a number no release will ever carry: it reads as
 # "this build does not know", sorts below every real release, and is legal in
 # every field the triple reaches. Deliberately not a cache variable — a knob
 # here would be one more place a version could come from.
-set(FastCachedFallbackVersionTriple "0.0.0")
+set(PaceFallbackVersionTriple "0.0.0")
 
 # Escalate "could not resolve a version from a tag" from a warning to a hard
 # error. OFF everywhere except the CI jobs that publish artifacts: shipping
 # fastcached-0.0.0-Linux-x86_64.deb because a tag fetch silently broke is worse
 # than failing the job that would have built it. See .github/workflows/build.yml.
-option(FASTCACHED_REQUIRE_EXACT_VERSION
+option(PACE_REQUIRE_EXACT_VERSION
     "Fail configuration when the version cannot be resolved from a git tag" OFF)
 
 # How long one git query may take, in seconds. A PARAMETER rather than a literal
@@ -60,8 +60,8 @@ option(FASTCACHED_REQUIRE_EXACT_VERSION
 # reported outcome, and a larger budget only hides the cost. The usual cost is a
 # work tree that Windows git and WSL git both use, measured in
 # .agent/rules/build-and-toolchain.md.
-if(NOT DEFINED FastCachedGitTimeoutSeconds)
-    set(FastCachedGitTimeoutSeconds 20)
+if(NOT DEFINED PaceGitTimeoutSeconds)
+    set(PaceGitTimeoutSeconds 20)
 endif()
 
 # The ways a git query can end other than with an answer, one row each, tried IN ORDER:
@@ -93,7 +93,7 @@ endif()
 # rather than in the nearest neighbour: before it, every non-timeout was "could not run",
 # which sent the operator to GIT_EXECUTABLE for a git that had started and crashed. Its
 # words quote CMake's, and a start failure it turns out to catch belongs in `unrunnable`'s
-# <match>. <outcome> is what FastCachedRunGit reports: `failed` is git answering "no",
+# <match>. <outcome> is what PaceRunGit reports: `failed` is git answering "no",
 # `unanswered` is no answer at all.
 #
 # `@QUERY@`, `@RESULT@`, `@BOUND@` and `@GIT@` are filled in per query. A kind is a row
@@ -101,24 +101,24 @@ endif()
 # a timeout, and blaming the Windows/WSL index re-hash for a missing binary sends an
 # operator to the wrong machine. Fields are separated by " | ", so a <match>'s own
 # alternation is written without spaces; no row may contain a ';' (these are CMake lists).
-set(FastCachedGitNonAnswers
+set(PaceGitNonAnswers
     "failed | failed | ^[0-9]+$ | failed `@QUERY@` (exit @RESULT@) | run the quoted git command in the source tree to see why it failed"
     "timeout | unanswered | due to timeout$ | did not answer `@QUERY@` within @BOUND@ s (@RESULT@) | re-run cmake once git answers. A work tree that Windows git and WSL git both use re-hashes every tracked file on each switch, see .agent/rules/build-and-toolchain.md"
     "unrunnable | unanswered | ^([Nn]o such file or directory|[Pp]ermission denied|[Uu]nknown error)$ | could not run `@QUERY@` (@RESULT@, GIT_EXECUTABLE is @GIT@) | check GIT_EXECUTABLE: a cached path to a git that has since moved or gone is the usual cause"
     "died | unanswered | . | ended `@QUERY@` without an answer (@RESULT@) | run the quoted git command in the source tree. The words in parentheses are CMake's for how it ended: a crash or a signal, or a way of failing to start that the unrunnable row does not name yet"
 )
 
-## Split one FastCachedGitNonAnswers row into its fields.
+## Split one PaceGitNonAnswers row into its fields.
 ## @param Row The row.
 ## @param Prefix Receives <Prefix>Kind, <Prefix>Outcome, <Prefix>Match, <Prefix>Happened and
 ##        <Prefix>Advice in the caller's scope.
 # Written once because the classifier and the final report both read the table, and a row
 # with a field too many or too few is refused here rather than read shifted by one.
-function(FastCachedGitNonAnswerFields Row Prefix)
+function(PaceGitNonAnswerFields Row Prefix)
     string(REPLACE " | " ";" fields "${Row}")
     list(LENGTH fields count)
     if(NOT count EQUAL 5)
-        message(FATAL_ERROR "FastCachedGitNonAnswers: a row has 5 fields separated by ' | ', this one has ${count}: ${Row}")
+        message(FATAL_ERROR "PaceGitNonAnswers: a row has 5 fields separated by ' | ', this one has ${count}: ${Row}")
     endif()
     set(index 0)
     foreach(name IN ITEMS Kind Outcome Match Happened Advice)
@@ -128,17 +128,17 @@ function(FastCachedGitNonAnswerFields Row Prefix)
     endforeach()
 endfunction()
 
-## The FastCachedGitNonAnswers row a RESULT_VARIABLE other than "0" belongs to.
+## The PaceGitNonAnswers row a RESULT_VARIABLE other than "0" belongs to.
 ## @param Result The RESULT_VARIABLE.
-## @param Prefix Receives the winning row's fields, named as FastCachedGitNonAnswerFields names
+## @param Prefix Receives the winning row's fields, named as PaceGitNonAnswerFields names
 ##        them, in the caller's scope.
 # The first row whose <match> the result satisfies wins: an exit status is git saying no, and
 # anything else is CMake's words for a git that did not finish, told apart because their
 # remedies are on different machines. A function of its own so a check can hand it the words
 # of a CMake it is not running on (scripts/check-version-git-unanswered.cmake).
-function(FastCachedGitNonAnswerOf Result Prefix)
-    foreach(row IN LISTS FastCachedGitNonAnswers)
-        FastCachedGitNonAnswerFields("${row}" row)
+function(PaceGitNonAnswerOf Result Prefix)
+    foreach(row IN LISTS PaceGitNonAnswers)
+        PaceGitNonAnswerFields("${row}" row)
         if(Result MATCHES "${rowMatch}")
             foreach(name IN ITEMS Kind Outcome Match Happened Advice)
                 set(${Prefix}${name} "${row${name}}" PARENT_SCOPE)
@@ -146,7 +146,7 @@ function(FastCachedGitNonAnswerOf Result Prefix)
             return()
         endif()
     endforeach()
-    message(FATAL_ERROR "FastCachedGitNonAnswers has no row for `${Result}`: its last row must match anything")
+    message(FATAL_ERROR "PaceGitNonAnswers has no row for `${Result}`: its last row must match anything")
 endfunction()
 
 # git, located once. find_program and not find_package(Git): this module is
@@ -180,11 +180,11 @@ find_program(GIT_EXECUTABLE NAMES git DOC "git command line client")
 #
 # No row may contain a ';' — these are CMake lists, and a semicolon inside a row
 # would split it into two.
-set(FastCachedVersionSources
-    "explicit override|FastCachedVersionFromCache|Exact|The version was stated on the cmake command line, so nothing in the tree was consulted."
-    "git tag|FastCachedVersionFromGitTag|Exact|The tag is the single source of truth for the version."
-    "git commit without a matching tag|FastCachedVersionFromGitCommit|Provisional|Create the first release tag with 'git tag -a v0.1.0 -m fastcached-0.1.0' and push it. In CI, check out with fetch-depth 0 so both the tags and enough history to reach them arrive on the runner."
-    "declared fallback|FastCachedVersionFallback|Provisional|Build from a git work tree that has tags, or state the version explicitly with -DFASTCACHED_VERSION=1.2.3 — an exported source tarball has no other way to know."
+set(PaceVersionSources
+    "explicit override|PaceVersionFromCache|Exact|The version was stated on the cmake command line, so nothing in the tree was consulted."
+    "git tag|PaceVersionFromGitTag|Exact|The tag is the single source of truth for the version."
+    "git commit without a matching tag|PaceVersionFromGitCommit|Provisional|Create the first release tag with 'git tag -a v0.1.0 -m fastcached-0.1.0' and push it. In CI, check out with fetch-depth 0 so both the tags and enough history to reach them arrive on the runner."
+    "declared fallback|PaceVersionFallback|Provisional|Build from a git work tree that has tags, or state the version explicitly with -DPACE_VERSION=1.2.3 — an exported source tarball has no other way to know."
 )
 
 # Field limits the triple has to satisfy. One row per limit:
@@ -194,7 +194,7 @@ set(FastCachedVersionSources
 # These are hard constraints of a packaging format rather than opinions, and they
 # are checked here so a bad tag is caught at configure time on every platform
 # instead of by WiX, at release time, on Windows only.
-set(FastCachedVersionFieldLimits
+set(PaceVersionFieldLimits
     "major|0|255|the MSI ProductVersion major field is 8 bits wide"
     "minor|1|255|the MSI ProductVersion minor field is 8 bits wide"
     "patch|2|65535|the MSI ProductVersion build field is 16 bits wide"
@@ -209,7 +209,7 @@ set(FastCachedVersionFieldLimits
 ## @param OutcomeVar Name of the variable to receive HOW the query went:
 ##        `answered` (git exited 0), `failed` (git ran and exited non-zero, or is
 ##        absent), or `unanswered` (git did not finish -- a timeout, a git that
-##        could not start, or one that died). The table FastCachedGitNonAnswers decides.
+##        could not start, or one that died). The table PaceGitNonAnswers decides.
 ## @param LOSS What this caller loses when the query does not answer, as a
 ##        sentence. A caller names its OWN loss, because only some of these
 ##        queries make the version fall back.
@@ -221,11 +221,11 @@ set(FastCachedVersionFieldLimits
 # CMAKE_CURRENT_SOURCE_DIR while the others used CMAKE_SOURCE_DIR.
 #
 # A query that did not answer is recorded in the global property
-# FastCachedVersionUnanswered, which GetVersionInformation reads, so a version
+# PaceVersionUnanswered, which GetVersionInformation reads, so a version
 # built from a partial answer is never reported as Exact. Reading an unanswered
 # query as its NEGATIVE -- "no distance", "clean" -- is what let a timed-out dirty
 # check publish a string claiming a clean tree under the Exact severity.
-function(FastCachedRunGit OutputVar OutcomeVar)
+function(PaceRunGit OutputVar OutcomeVar)
     cmake_parse_arguments(PARSE_ARGV 2 git "ANSWER_ON_FAILURE" "LOSS" "ARGS")
     set(${OutputVar} "" PARENT_SCOPE)
     if(NOT GIT_EXECUTABLE)
@@ -245,7 +245,7 @@ function(FastCachedRunGit OutputVar OutcomeVar)
         OUTPUT_VARIABLE commandOutput
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
-        TIMEOUT ${FastCachedGitTimeoutSeconds}
+        TIMEOUT ${PaceGitTimeoutSeconds}
         RESULT_VARIABLE commandResult
     )
     if(commandResult STREQUAL "0")
@@ -254,7 +254,7 @@ function(FastCachedRunGit OutputVar OutcomeVar)
         return()
     endif()
 
-    FastCachedGitNonAnswerOf("${commandResult}" row)
+    PaceGitNonAnswerOf("${commandResult}" row)
     set(kind "${rowKind}")
     set(outcome "${rowOutcome}")
     set(happened "${rowHappened}")
@@ -266,10 +266,10 @@ function(FastCachedRunGit OutputVar OutcomeVar)
     list(JOIN git_ARGS " " query)
     string(REPLACE "@QUERY@" "git ${query}" happened "${happened}")
     string(REPLACE "@RESULT@" "${commandResult}" happened "${happened}")
-    string(REPLACE "@BOUND@" "${FastCachedGitTimeoutSeconds}" happened "${happened}")
+    string(REPLACE "@BOUND@" "${PaceGitTimeoutSeconds}" happened "${happened}")
     string(REPLACE "@GIT@" "${GIT_EXECUTABLE}" happened "${happened}")
-    set_property(GLOBAL APPEND PROPERTY FastCachedVersionUnanswered "git ${query}")
-    set_property(GLOBAL APPEND PROPERTY FastCachedVersionUnansweredKinds "${kind}")
+    set_property(GLOBAL APPEND PROPERTY PaceVersionUnanswered "git ${query}")
+    set_property(GLOBAL APPEND PROPERTY PaceVersionUnansweredKinds "${kind}")
     message(WARNING "pace-kv: git ${happened}: ${git_LOSS}")
 endfunction()
 
@@ -279,8 +279,8 @@ endfunction()
 # Untracked files deliberately do not count: out/, .cache/ and a local
 # version.txt are all legitimate and none of them changes what the source says.
 # Written once because both git resolvers append the same marker.
-function(FastCachedGitDirtyMarker OutputVar)
-    FastCachedRunGit(pendingChanges outcome
+function(PaceGitDirtyMarker OutputVar)
+    PaceRunGit(pendingChanges outcome
         LOSS "whether the tree has uncommitted changes is unknown, so the version string says -dirty-unknown"
         ARGS status --porcelain --untracked-files=no)
     if(NOT outcome STREQUAL "answered")
@@ -295,7 +295,7 @@ endfunction()
 ## Refuse a triple that project(VERSION) or a packaging format cannot carry.
 ## @param Triple The resolved MAJOR.MINOR.PATCH candidate.
 ## @param Origin How it was obtained, for the diagnostic.
-function(FastCachedRequireVersionTriple Triple Origin)
+function(PaceRequireVersionTriple Triple Origin)
     if(NOT Triple MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
         message(FATAL_ERROR
             "Version triple '${Triple}' (from ${Origin}) is not a bare numeric "
@@ -317,7 +317,7 @@ function(FastCachedRequireVersionTriple Triple Origin)
     endif()
 
     string(REPLACE "." ";" fields "${Triple}")
-    foreach(limitRow IN LISTS FastCachedVersionFieldLimits)
+    foreach(limitRow IN LISTS PaceVersionFieldLimits)
         string(REPLACE "|" ";" limit "${limitRow}")
         list(GET limit 0 fieldName)
         list(GET limit 1 fieldIndex)
@@ -336,10 +336,10 @@ function(FastCachedRequireVersionTriple Triple Origin)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# Resolvers. Each honours the contract documented on FastCachedVersionSources.
+# Resolvers. Each honours the contract documented on PaceVersionSources.
 
 ## Resolver: the version stated on the cmake command line, e.g.
-##   cmake -DFASTCACHED_VERSION=1.2.3 [-DFASTCACHED_VERSION_STRING=1.2.3-vendor1]
+##   cmake -DPACE_VERSION=1.2.3 [-DPACE_VERSION_STRING=1.2.3-vendor1]
 ## @param RequestedTripleName Cache entry holding the triple override.
 ## @param RequestedStringName Cache entry holding the string override.
 ## @param TripleOutVar Name of the variable to receive the triple.
@@ -349,7 +349,7 @@ endfunction()
 # variable the caller asked to have filled, so there is no second name to keep in
 # sync with the call in the top-level CMakeLists.txt. A distro packager building
 # an exported tarball has neither a tag nor a .git and needs exactly this.
-function(FastCachedVersionFromCache RequestedTripleName RequestedStringName
+function(PaceVersionFromCache RequestedTripleName RequestedStringName
                                     TripleOutVar StringOutVar DetailOutVar)
     set(${TripleOutVar} "" PARENT_SCOPE)
     set(${StringOutVar} "" PARENT_SCOPE)
@@ -399,7 +399,7 @@ endfunction()
 ## @param TripleOutVar Name of the variable to receive the triple.
 ## @param StringOutVar Name of the variable to receive the version string.
 ## @param DetailOutVar Name of the variable to receive the source detail.
-function(FastCachedVersionFromGitTag RequestedTripleName RequestedStringName
+function(PaceVersionFromGitTag RequestedTripleName RequestedStringName
                                      TripleOutVar StringOutVar DetailOutVar)
     set(${TripleOutVar} "" PARENT_SCOPE)
     set(${StringOutVar} "" PARENT_SCOPE)
@@ -411,7 +411,7 @@ function(FastCachedVersionFromGitTag RequestedTripleName RequestedStringName
     #   the nearest tag, fails the pattern below, and drops the build to the
     #   fallback while a perfectly good release tag sits one commit further back.
     # --abbrev=0 yields the tag name alone, which is where the triple comes from.
-    FastCachedRunGit(nearestTag outcome ANSWER_ON_FAILURE
+    PaceRunGit(nearestTag outcome ANSWER_ON_FAILURE
         LOSS "the release tag is unknown, so the version falls back past the git-tag row"
         ARGS describe --tags --abbrev=0 --match "v[0-9]*")
     if(nearestTag MATCHES "^v?([0-9]+\\.[0-9]+\\.[0-9]+)")
@@ -428,7 +428,7 @@ function(FastCachedVersionFromGitTag RequestedTripleName RequestedStringName
     # When it does not answer, this row does not answer either. Substituting the
     # bare tag would make a build fourteen commits past v0.3.0 claim to BE v0.3.0,
     # under the Exact severity; the commit row below says only what it knows.
-    FastCachedRunGit(described outcome
+    PaceRunGit(described outcome
         LOSS "the distance from the tag is unknown, so the git-tag row cannot name this build and the version falls back past it"
         ARGS describe --tags --match "v[0-9]*")
     if(NOT outcome STREQUAL "answered" OR described STREQUAL "")
@@ -440,7 +440,7 @@ function(FastCachedVersionFromGitTag RequestedTripleName RequestedStringName
     # package field, and a binary claiming to be a commit it is not is the more
     # expensive mistake. CI release builds are always clean, so no shipped
     # artifact ever carries it.
-    FastCachedGitDirtyMarker(dirtyMarker)
+    PaceGitDirtyMarker(dirtyMarker)
 
     string(REGEX REPLACE "^v" "" versionString "${described}")
 
@@ -465,13 +465,13 @@ endfunction()
 # The triple is the declared fallback — nothing here knows a release number — and
 # the string carries the commit so the build stays identifiable. Provisional, so
 # the caller is warned and told the remedy.
-function(FastCachedVersionFromGitCommit RequestedTripleName RequestedStringName
+function(PaceVersionFromGitCommit RequestedTripleName RequestedStringName
                                         TripleOutVar StringOutVar DetailOutVar)
     set(${TripleOutVar} "" PARENT_SCOPE)
     set(${StringOutVar} "" PARENT_SCOPE)
     set(${DetailOutVar} "" PARENT_SCOPE)
 
-    FastCachedRunGit(insideWorkTree outcome ANSWER_ON_FAILURE
+    PaceRunGit(insideWorkTree outcome ANSWER_ON_FAILURE
         LOSS "whether this is a git work tree is unknown, so the version falls back past the commit row"
         ARGS rev-parse --is-inside-work-tree)
     if(NOT insideWorkTree STREQUAL "true")
@@ -482,18 +482,18 @@ function(FastCachedVersionFromGitCommit RequestedTripleName RequestedStringName
     # name here, and this row is only ever reached because no tag was usable — a
     # v1.2 tag that failed the triple pattern would otherwise end up spliced into
     # the string as 0.0.0-0-gv1.2-3-gdeadbee.
-    FastCachedRunGit(shortCommit outcome ANSWER_ON_FAILURE
+    PaceRunGit(shortCommit outcome ANSWER_ON_FAILURE
         LOSS "the commit is unknown, so the version falls back past the commit row"
         ARGS rev-parse --short HEAD)
     if(shortCommit STREQUAL "")
         return()  # a work tree whose HEAD has no commit yet
     endif()
 
-    FastCachedGitDirtyMarker(dirtyMarker)
+    PaceGitDirtyMarker(dirtyMarker)
 
-    set(${TripleOutVar} "${FastCachedFallbackVersionTriple}" PARENT_SCOPE)
+    set(${TripleOutVar} "${PaceFallbackVersionTriple}" PARENT_SCOPE)
     set(${StringOutVar}
-        "${FastCachedFallbackVersionTriple}-0-g${shortCommit}${dirtyMarker}"
+        "${PaceFallbackVersionTriple}-0-g${shortCommit}${dirtyMarker}"
         PARENT_SCOPE)
     set(${DetailOutVar} "commit ${shortCommit}${dirtyMarker}" PARENT_SCOPE)
 endfunction()
@@ -508,10 +508,10 @@ endfunction()
 # could possibly know the version. The string says `unknown` in as many words: a
 # bug report quoting fastcached-0.0.0-unknown has already answered the first
 # question we would otherwise have to ask.
-function(FastCachedVersionFallback RequestedTripleName RequestedStringName
+function(PaceVersionFallback RequestedTripleName RequestedStringName
                                    TripleOutVar StringOutVar DetailOutVar)
-    set(${TripleOutVar} "${FastCachedFallbackVersionTriple}" PARENT_SCOPE)
-    set(${StringOutVar} "${FastCachedFallbackVersionTriple}-unknown" PARENT_SCOPE)
+    set(${TripleOutVar} "${PaceFallbackVersionTriple}" PARENT_SCOPE)
+    set(${StringOutVar} "${PaceFallbackVersionTriple}-unknown" PARENT_SCOPE)
     set(${DetailOutVar} "no git tag and no -D${RequestedTripleName}" PARENT_SCOPE)
 endfunction()
 
@@ -520,7 +520,7 @@ endfunction()
 ## Resolve the project version from the first source that can answer.
 ## @param VersionTripleVar Name of the variable to receive the numeric
 ##        MAJOR.MINOR.PATCH triple. Setting this same name on the cmake command
-##        line (-DFASTCACHED_VERSION=1.2.3, given the call in the top-level
+##        line (-DPACE_VERSION=1.2.3, given the call in the top-level
 ##        CMakeLists.txt) overrides every source below it.
 ## @param VersionStringVar Name of the variable to receive the full, possibly
 ##        suffixed version string. Overridable the same way, but only together
@@ -529,10 +529,10 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     set(resolvedTriple "")
     set(resolvedString "")
     set(resolvedDetail "")
-    set_property(GLOBAL PROPERTY FastCachedVersionUnanswered "")
-    set_property(GLOBAL PROPERTY FastCachedVersionUnansweredKinds "")
+    set_property(GLOBAL PROPERTY PaceVersionUnanswered "")
+    set_property(GLOBAL PROPERTY PaceVersionUnansweredKinds "")
 
-    foreach(sourceRow IN LISTS FastCachedVersionSources)
+    foreach(sourceRow IN LISTS PaceVersionSources)
         string(REPLACE "|" ";" sourceFields "${sourceRow}")
         list(GET sourceFields 0 sourceLabel)
         list(GET sourceFields 1 sourceResolver)
@@ -554,11 +554,11 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     if(resolvedTriple STREQUAL "")
         message(FATAL_ERROR
             "No version source produced a version. The last row of "
-            "FastCachedVersionSources is supposed to answer unconditionally, so "
+            "PaceVersionSources is supposed to answer unconditionally, so "
             "a resolver has been added or changed and now returns nothing.")
     endif()
 
-    FastCachedRequireVersionTriple("${resolvedTriple}" "${sourceLabel}")
+    PaceRequireVersionTriple("${resolvedTriple}" "${sourceLabel}")
 
     set(sourceDetail "")
     if(NOT resolvedDetail STREQUAL "")
@@ -575,16 +575,16 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     # The advice is the union of what the recorded KINDS call for, each once: the
     # index re-hash only when something timed out, GIT_EXECUTABLE only when git could
     # not be run.
-    get_property(unanswered GLOBAL PROPERTY FastCachedVersionUnanswered)
-    get_property(unansweredKinds GLOBAL PROPERTY FastCachedVersionUnansweredKinds)
+    get_property(unanswered GLOBAL PROPERTY PaceVersionUnanswered)
+    get_property(unansweredKinds GLOBAL PROPERTY PaceVersionUnansweredKinds)
     if(unanswered)
         list(JOIN unanswered "`, `" unansweredText)
         set(sourceAuthority "Provisional")
         string(APPEND sourceAdvice
             " git gave no answer to `${unansweredText}`, so this is not necessarily the "
             "version the work tree would report.")
-        foreach(row IN LISTS FastCachedGitNonAnswers)
-            FastCachedGitNonAnswerFields("${row}" row)
+        foreach(row IN LISTS PaceGitNonAnswers)
+            PaceGitNonAnswerFields("${row}" row)
             if(rowKind IN_LIST unansweredKinds)
                 string(APPEND sourceAdvice " To fix it: ${rowAdvice}.")
             endif()
@@ -594,11 +594,11 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     # One report, three severities, all of it taken from the winning row: an
     # exact source is a STATUS line, a provisional one warns and prints its
     # remedy, and the jobs that publish artifacts pass
-    # -DFASTCACHED_REQUIRE_EXACT_VERSION=ON so a provisional version can never
+    # -DPACE_REQUIRE_EXACT_VERSION=ON so a provisional version can never
     # reach a package name.
     if(sourceAuthority STREQUAL "Exact")
         set(severity STATUS)
-    elseif(FASTCACHED_REQUIRE_EXACT_VERSION)
+    elseif(PACE_REQUIRE_EXACT_VERSION)
         set(severity FATAL_ERROR)
     else()
         set(severity WARNING)

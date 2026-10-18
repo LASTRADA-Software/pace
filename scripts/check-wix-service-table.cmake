@@ -23,7 +23,7 @@
 #
 # The After= rows also pin the ONE sequence: validate, register, remember, start,
 # and only then delete. The node's arguments are CHECKED first, directly after the
-# files and the registry values (FastCacheNodeCheckArguments, Return="check"), so a fleet pin its parser
+# files and the registry values (PaceNodeCheckArguments, Return="check"), so a fleet pin its parser
 # refuses fails the transaction with nothing changed (B3-1, and B4-3: the leftover
 # deletions once ran before it, and nothing restores a deleted service, so they are
 # LAST now); the registration and the waiting start are Return="check" (ci-fix2);
@@ -40,12 +40,12 @@
 # whatever the service table decided. PR 1634's CI measured FastCached started after the table had
 # made it manual and stopped it for the node, and then MEASURED whose session did it: the OLD
 # package's removal, nested in the upgrade, while this package's own logged "Disabled". So this row is
-# necessary and not sufficient; the FastCachedDisableForNode rows below are the other half (see the
+# necessary and not sufficient; the PaceDisableForNode rows below are the other half (see the
 # comment on MSIRESTARTMANAGERCONTROL). Its offence names that defect below, since the footer
 # is generic. msi-custom-action-commands step 13 judges the same row, and refuses a custom action
 # setting the property.
 #
-# The FastCachedDisableForNode rows pin pace-kv DISABLED beside the node, Return="check": an OLD
+# The PaceDisableForNode rows pin pace-kv DISABLED beside the node, Return="check": an OLD
 # package's removal inside an upgrade keeps its own Restart Manager session, and PR 1634's CI MEASURED
 # Windows Installer restarting FastCached by name after the whole transaction had ended, onto the
 # port the node holds. Disabled, that start fails at the service control manager with no process.
@@ -53,7 +53,7 @@
 # Return="ignore" and a checked disable of an absent service failed the node's whole install
 # (rm-nested review, I-1). msi-custom-action-commands step 14 runs the command both ways.
 #
-# The FASTCACHE_INSTALL_LOCATION rows pin how a MAINTENANCE transaction resolves
+# The PACE_INSTALL_LOCATION rows pin how a MAINTENANCE transaction resolves
 # INSTALL_ROOT: from the product's OWN uninstall entry, when Installed, before
 # CostFinalize. CPack resolves it only on an upgrade, and an uninstall of a custom
 # root ran the default root's binary and left its service registered (CI run
@@ -61,7 +61,7 @@
 #
 # One row is a UNIQUENESS pin rather than an element: its opener is the bare
 # `Before="InstallFinalize"`, so rule 1 requires that text exactly once, and the
-# element it opens to be the forced failure's. FastCacheFailForTest is therefore the
+# element it opens to be the forced failure's. PaceFailForTest is therefore the
 # ONE action scheduled there, behind every other script action, which is what
 # "a failure there rolls back everything the script did" rests on (#1629).
 #
@@ -72,15 +72,15 @@
 # present but wrong in a way no row names.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-wix-service-table.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-wix-service-table.cmake
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(_file "${FASTCACHED_SOURCE_DIR}/packaging/windows/service-actions.xml")
+set(_file "${PACE_SOURCE_DIR}/packaging/windows/service-actions.xml")
 if(NOT EXISTS "${_file}")
     message(FATAL_ERROR "check-wix-service-table: ${_file} does not exist")
 endif()
@@ -90,366 +90,366 @@ endif()
 # `[INSTALL_ROOT]`, and a square bracket or a `;` in a list element merges or
 # drops elements in silence. A blank line is a separator and is skipped.
 set(_table [=[
-<Property Id="FASTCACHE_NODE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
-<Property Id="FASTCACHE_NODE_IMAGEPATH"|</Property>|Name="ImagePath"
-<Property Id="FASTCACHE_NODE_IMAGEPATH"|</Property>|Root="HKLM"
-<Property Id="FASTCACHED_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCached"
-<Property Id="FASTCACHED_IMAGEPATH"|</Property>|Name="ImagePath"
-<Property Id="FASTCACHED_IMAGEPATH"|</Property>|Root="HKLM"
+<Property Id="PACE_NODE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+<Property Id="PACE_NODE_IMAGEPATH"|</Property>|Name="ImagePath"
+<Property Id="PACE_NODE_IMAGEPATH"|</Property>|Root="HKLM"
+<Property Id="PACE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCached"
+<Property Id="PACE_IMAGEPATH"|</Property>|Name="ImagePath"
+<Property Id="PACE_IMAGEPATH"|</Property>|Root="HKLM"
 
-<Property Id="FASTCACHE_INSTALL_LOCATION"|</Property>|Root="HKLM"
-<Property Id="FASTCACHE_INSTALL_LOCATION"|</Property>|Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[ProductCode]"
-<Property Id="FASTCACHE_INSTALL_LOCATION"|</Property>|Name="InstallLocation"
-<Property Id="FASTCACHE_INSTALL_LOCATION"|</Property>|Bitness="always64"
-<Property Id="FASTCACHE_INSTALL_LOCATION"|</Property>|Type="raw"
-<SetProperty Action="SetFastCacheInstallRootFromInstallLocation"|/>|Id="INSTALL_ROOT"
-<SetProperty Action="SetFastCacheInstallRootFromInstallLocation"|/>|Value="[FASTCACHE_INSTALL_LOCATION]"
-<SetProperty Action="SetFastCacheInstallRootFromInstallLocation"|/>|Before="CostFinalize" Sequence="both"
-<SetProperty Action="SetFastCacheInstallRootFromInstallLocation"|/>|Condition="Installed AND FASTCACHE_INSTALL_LOCATION"
+<Property Id="PACE_INSTALL_LOCATION"|</Property>|Root="HKLM"
+<Property Id="PACE_INSTALL_LOCATION"|</Property>|Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[ProductCode]"
+<Property Id="PACE_INSTALL_LOCATION"|</Property>|Name="InstallLocation"
+<Property Id="PACE_INSTALL_LOCATION"|</Property>|Bitness="always64"
+<Property Id="PACE_INSTALL_LOCATION"|</Property>|Type="raw"
+<SetProperty Action="SetPaceInstallRootFromInstallLocation"|/>|Id="INSTALL_ROOT"
+<SetProperty Action="SetPaceInstallRootFromInstallLocation"|/>|Value="[PACE_INSTALL_LOCATION]"
+<SetProperty Action="SetPaceInstallRootFromInstallLocation"|/>|Before="CostFinalize" Sequence="both"
+<SetProperty Action="SetPaceInstallRootFromInstallLocation"|/>|Condition="Installed AND PACE_INSTALL_LOCATION"
 
 <Property Id="MSIRESTARTMANAGERCONTROL"|/>|Value="Disable"
 
-<CustomAction Id="FastCacheNodeDeleteLeftover"|/>|sc.exe" delete FastCacheCompileNode"
-<CustomAction Id="FastCacheNodeDeleteLeftover"|/>|Execute="deferred"
-<CustomAction Id="FastCacheNodeDeleteLeftover"|/>|Impersonate="no"
-<CustomAction Id="FastCacheNodeDeleteLeftover"|/>|Return="ignore"
-<CustomAction Id="FastCachedDeleteLeftover"|/>|sc.exe" delete FastCached"
-<CustomAction Id="FastCachedDeleteLeftover"|/>|Execute="deferred"
-<CustomAction Id="FastCachedDeleteLeftover"|/>|Impersonate="no"
-<CustomAction Id="FastCachedDeleteLeftover"|/>|Return="ignore"
+<CustomAction Id="PaceNodeDeleteLeftover"|/>|sc.exe" delete FastCacheCompileNode"
+<CustomAction Id="PaceNodeDeleteLeftover"|/>|Execute="deferred"
+<CustomAction Id="PaceNodeDeleteLeftover"|/>|Impersonate="no"
+<CustomAction Id="PaceNodeDeleteLeftover"|/>|Return="ignore"
+<CustomAction Id="PaceDeleteLeftover"|/>|sc.exe" delete FastCached"
+<CustomAction Id="PaceDeleteLeftover"|/>|Execute="deferred"
+<CustomAction Id="PaceDeleteLeftover"|/>|Impersonate="no"
+<CustomAction Id="PaceDeleteLeftover"|/>|Return="ignore"
 
-<Custom Action="FastCacheNodeDeleteLeftover"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
-<Custom Action="FastCacheNodeDeleteLeftover"|/>|NOT UPGRADINGPRODUCTCODE
-<Custom Action="FastCacheNodeDeleteLeftover"|/>|NOT (FASTCACHE_NODE_SELECTED = "1")
-<Custom Action="FastCacheNodeDeleteLeftover"|/>|FASTCACHE_NODE_REGISTERED_HERE = "1"
-<Custom Action="FastCacheNodeDeleteLeftover"|/>|!~><
-<Custom Action="FastCacheNodeDeleteLeftover"|/>|After="FastCacheDiscardRollbackState"
-<Custom Action="FastCachedDeleteLeftover"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
-<Custom Action="FastCachedDeleteLeftover"|/>|NOT UPGRADINGPRODUCTCODE
-<Custom Action="FastCachedDeleteLeftover"|/>|NOT (FASTCACHED_SELECTED = "1")
-<Custom Action="FastCachedDeleteLeftover"|/>|FASTCACHED_REGISTERED_HERE = "1"
-<Custom Action="FastCachedDeleteLeftover"|/>|!~><
-<Custom Action="FastCachedDeleteLeftover"|/>|After="FastCacheNodeDeleteLeftoverFirewall"
-<CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCacheCompileNode'
-<CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Execute="deferred"
-<CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Impersonate="no"
-<CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Return="ignore"
-<CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCached'
-<CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Execute="deferred"
-<CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Impersonate="no"
-<CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Return="ignore"
-<Custom Action="FastCacheNodeDeleteLeftoverFirewall"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
-<Custom Action="FastCacheNodeDeleteLeftoverFirewall"|/>|NOT (FASTCACHE_NODE_SELECTED = "1")
-<Custom Action="FastCacheNodeDeleteLeftoverFirewall"|/>|FASTCACHE_NODE_REGISTERED_HERE = "1"
-<Custom Action="FastCacheNodeDeleteLeftoverFirewall"|/>|After="FastCacheNodeDeleteLeftover"
-<Custom Action="FastCachedDeleteLeftoverFirewall"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
-<Custom Action="FastCachedDeleteLeftoverFirewall"|/>|NOT (FASTCACHED_SELECTED = "1")
-<Custom Action="FastCachedDeleteLeftoverFirewall"|/>|FASTCACHED_REGISTERED_HERE = "1"
-<Custom Action="FastCachedDeleteLeftoverFirewall"|/>|After="FastCachedDeleteLeftover"
-<Custom Action="FastCachedSeedConfig"|/>|After="FastCacheNodeCheckArguments"
-<CustomAction Id="FastCacheNodeInstallService"|/>|!FastCacheNodeAdvertiseArgument
-<CustomAction Id="FastCacheNodeCheckArguments"|/>|!FastCacheNodeAdvertiseArgument
-<CustomAction Id="FastCacheNodeRestoreRegistration"|/>|!FastCacheNodeAdvertise
-<CustomAction Id="FastCacheForgetNodeAdvertise"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v NodeAdvertise /f /reg:64"
-<CustomAction Id="FastCacheForgetNodeAdvertise"|/>|Execute="deferred"
-<CustomAction Id="FastCacheForgetNodeAdvertise"|/>|Impersonate="no"
-<CustomAction Id="FastCacheForgetNodeAdvertise"|/>|Return="ignore"
-<CPackWiXFragment Id="#PRODUCT">|</CPackWiXFragment>|!FASTCACHE_NODE_ADVERTISE
-<Custom Action="FastCacheForgetNodeAdvertise"|/>|Condition="FASTCACHED_SELECTED = "1" OR FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCacheForgetNodeAdvertise"|/>|After="FastCacheRememberFleetId"
+<Custom Action="PaceNodeDeleteLeftover"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceNodeDeleteLeftover"|/>|NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceNodeDeleteLeftover"|/>|NOT (PACE_NODE_SELECTED = "1")
+<Custom Action="PaceNodeDeleteLeftover"|/>|PACE_NODE_REGISTERED_HERE = "1"
+<Custom Action="PaceNodeDeleteLeftover"|/>|!~><
+<Custom Action="PaceNodeDeleteLeftover"|/>|After="PaceDiscardRollbackState"
+<Custom Action="PaceDeleteLeftover"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceDeleteLeftover"|/>|NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceDeleteLeftover"|/>|NOT (PACE_SELECTED = "1")
+<Custom Action="PaceDeleteLeftover"|/>|PACE_REGISTERED_HERE = "1"
+<Custom Action="PaceDeleteLeftover"|/>|!~><
+<Custom Action="PaceDeleteLeftover"|/>|After="PaceNodeDeleteLeftoverFirewall"
+<CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCacheCompileNode'
+<CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Execute="deferred"
+<CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Impersonate="no"
+<CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Return="ignore"
+<CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCached'
+<CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Execute="deferred"
+<CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Impersonate="no"
+<CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Return="ignore"
+<Custom Action="PaceNodeDeleteLeftoverFirewall"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceNodeDeleteLeftoverFirewall"|/>|NOT (PACE_NODE_SELECTED = "1")
+<Custom Action="PaceNodeDeleteLeftoverFirewall"|/>|PACE_NODE_REGISTERED_HERE = "1"
+<Custom Action="PaceNodeDeleteLeftoverFirewall"|/>|After="PaceNodeDeleteLeftover"
+<Custom Action="PaceDeleteLeftoverFirewall"|/>|WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceDeleteLeftoverFirewall"|/>|NOT (PACE_SELECTED = "1")
+<Custom Action="PaceDeleteLeftoverFirewall"|/>|PACE_REGISTERED_HERE = "1"
+<Custom Action="PaceDeleteLeftoverFirewall"|/>|After="PaceDeleteLeftover"
+<Custom Action="PaceSeedConfig"|/>|After="PaceNodeCheckArguments"
+<CustomAction Id="PaceNodeInstallService"|/>|!PaceNodeAdvertiseArgument
+<CustomAction Id="PaceNodeCheckArguments"|/>|!PaceNodeAdvertiseArgument
+<CustomAction Id="PaceNodeRestoreRegistration"|/>|!PaceNodeAdvertise
+<CustomAction Id="PaceForgetNodeAdvertise"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v NodeAdvertise /f /reg:64"
+<CustomAction Id="PaceForgetNodeAdvertise"|/>|Execute="deferred"
+<CustomAction Id="PaceForgetNodeAdvertise"|/>|Impersonate="no"
+<CustomAction Id="PaceForgetNodeAdvertise"|/>|Return="ignore"
+<CPackWiXFragment Id="#PRODUCT">|</CPackWiXFragment>|!PACE_NODE_ADVERTISE
+<Custom Action="PaceForgetNodeAdvertise"|/>|Condition="PACE_SELECTED = "1" OR PACE_NODE_SELECTED = "1""
+<Custom Action="PaceForgetNodeAdvertise"|/>|After="PaceRememberFleetId"
 
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--discovery-reply-port=
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--scheduler
-<CustomAction Id="FastCacheNodeInstallService"|/>|Return="check"
-<CustomAction Id="FastCacheNodeStartService"|/>|Return="check"
-<CustomAction Id="FastCacheNodeStartService"|/>|/c [System64Folder]net.exe start FastCacheCompileNode && [System64Folder]sc.exe query FastCacheCompileNode | [System64Folder]find.exe "RUNNING""
-<CustomAction Id="FastCacheNodeStartService"|/>|!ping.exe
-<CustomAction Id="FastCacheNodeStartService"|/>|!||
-<CustomAction Id="FastCacheNodeStartService"|/>|!sc.exe" start
-<CustomAction Id="FastCachedInstallService"|/>|!DiscoveryReply
-<Property Id="FASTCACHE_DISCOVERY_REPLY_PORT"|/>|Value="6682"
-<CustomAction Id="FastCachedInstallService"|/>|--service-start=[FASTCACHED_START_MODE] [FastCacheFirewallAllowArgument]"
-<CustomAction Id="FastCachedInstallService"|/>|!--firewall-allow=
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--firewall-allow=
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--cluster-dir
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--advertise=
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--fleet-seed=
-<CustomAction Id="FastCacheNodeInstallService"|/>|!--fleet-id=
-<Custom Action="FastCacheNodeInstallService"|/>|Condition="FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCacheNodeInstallService"|/>|!FASTCACHE_NODE_SCHEDULER
-<Custom Action="FastCacheNodeInstallService"|/>|!FASTCACHE_NODE_ADVERTISE
-<Custom Action="FastCacheNodeInstallService"|/>|!FASTCACHE_FLEET_SEED
-<Custom Action="FastCacheNodeInstallService"|/>|!FASTCACHE_FLEET_ID
-<SetProperty Action="SetFastCacheFirewallAllowArgument"|/>|Id="FastCacheFirewallAllowArgument"
-<SetProperty Action="SetFastCacheFirewallAllowArgument"|/>|Value="--firewall-allow=[FASTCACHE_FIREWALL_ALLOW]"
-<SetProperty Action="SetFastCacheFirewallAllowArgument"|/>|Condition="FASTCACHE_FIREWALL_ALLOW"
-<SetProperty Action="SetFastCacheNodeDiscoveryReplyArgument"|/>|Id="FastCacheNodeDiscoveryReplyArgument"
-<SetProperty Action="SetFastCacheNodeDiscoveryReplyArgument"|/>|Value="--discovery-reply-port=[FASTCACHE_DISCOVERY_REPLY_PORT]"
-<SetProperty Action="SetFastCacheNodeDiscoveryReplyArgument"|/>|Condition="FASTCACHE_DISCOVERY_REPLY_PORT"
-<SetProperty Action="SetFastCacheNodeDiscoveryReplyArgument"|/>|After="SetFastCacheFirewallAllowArgument"
-<SetProperty Action="SetFastCacheFleetSeedArgument"|/>|Id="FastCacheFleetSeedArgument"
-<SetProperty Action="SetFastCacheFleetSeedArgument"|/>|Value="--fleet-seed=[FASTCACHE_FLEET_SEED]"
-<SetProperty Action="SetFastCacheFleetSeedArgument"|/>|Condition="FASTCACHE_FLEET_SEED"
-<SetProperty Action="SetFastCacheFleetSeedArgument"|/>|After="SetFastCacheNodeDiscoveryReplyArgument"
-<SetProperty Action="SetFastCacheFleetIdArgument"|/>|Id="FastCacheFleetIdArgument"
-<SetProperty Action="SetFastCacheFleetIdArgument"|/>|Value="--fleet-id=[FASTCACHE_FLEET_ID]"
-<SetProperty Action="SetFastCacheFleetIdArgument"|/>|Condition="FASTCACHE_FLEET_ID"
-<SetProperty Action="SetFastCacheFleetIdArgument"|/>|After="SetFastCacheFleetSeedArgument"
+<CustomAction Id="PaceNodeInstallService"|/>|!--discovery-reply-port=
+<CustomAction Id="PaceNodeInstallService"|/>|!--scheduler
+<CustomAction Id="PaceNodeInstallService"|/>|Return="check"
+<CustomAction Id="PaceNodeStartService"|/>|Return="check"
+<CustomAction Id="PaceNodeStartService"|/>|/c [System64Folder]net.exe start FastCacheCompileNode && [System64Folder]sc.exe query FastCacheCompileNode | [System64Folder]find.exe "RUNNING""
+<CustomAction Id="PaceNodeStartService"|/>|!ping.exe
+<CustomAction Id="PaceNodeStartService"|/>|!||
+<CustomAction Id="PaceNodeStartService"|/>|!sc.exe" start
+<CustomAction Id="PaceInstallService"|/>|!DiscoveryReply
+<Property Id="PACE_DISCOVERY_REPLY_PORT"|/>|Value="6682"
+<CustomAction Id="PaceInstallService"|/>|--service-start=[PACE_START_MODE] [PaceFirewallAllowArgument]"
+<CustomAction Id="PaceInstallService"|/>|!--firewall-allow=
+<CustomAction Id="PaceNodeInstallService"|/>|!--firewall-allow=
+<CustomAction Id="PaceNodeInstallService"|/>|!--cluster-dir
+<CustomAction Id="PaceNodeInstallService"|/>|!--advertise=
+<CustomAction Id="PaceNodeInstallService"|/>|!--fleet-seed=
+<CustomAction Id="PaceNodeInstallService"|/>|!--fleet-id=
+<Custom Action="PaceNodeInstallService"|/>|Condition="PACE_NODE_SELECTED = "1""
+<Custom Action="PaceNodeInstallService"|/>|!PACE_NODE_SCHEDULER
+<Custom Action="PaceNodeInstallService"|/>|!PACE_NODE_ADVERTISE
+<Custom Action="PaceNodeInstallService"|/>|!PACE_FLEET_SEED
+<Custom Action="PaceNodeInstallService"|/>|!PACE_FLEET_ID
+<SetProperty Action="SetPaceFirewallAllowArgument"|/>|Id="PaceFirewallAllowArgument"
+<SetProperty Action="SetPaceFirewallAllowArgument"|/>|Value="--firewall-allow=[PACE_FIREWALL_ALLOW]"
+<SetProperty Action="SetPaceFirewallAllowArgument"|/>|Condition="PACE_FIREWALL_ALLOW"
+<SetProperty Action="SetPaceNodeDiscoveryReplyArgument"|/>|Id="PaceNodeDiscoveryReplyArgument"
+<SetProperty Action="SetPaceNodeDiscoveryReplyArgument"|/>|Value="--discovery-reply-port=[PACE_DISCOVERY_REPLY_PORT]"
+<SetProperty Action="SetPaceNodeDiscoveryReplyArgument"|/>|Condition="PACE_DISCOVERY_REPLY_PORT"
+<SetProperty Action="SetPaceNodeDiscoveryReplyArgument"|/>|After="SetPaceFirewallAllowArgument"
+<SetProperty Action="SetPaceFleetSeedArgument"|/>|Id="PaceFleetSeedArgument"
+<SetProperty Action="SetPaceFleetSeedArgument"|/>|Value="--fleet-seed=[PACE_FLEET_SEED]"
+<SetProperty Action="SetPaceFleetSeedArgument"|/>|Condition="PACE_FLEET_SEED"
+<SetProperty Action="SetPaceFleetSeedArgument"|/>|After="SetPaceNodeDiscoveryReplyArgument"
+<SetProperty Action="SetPaceFleetIdArgument"|/>|Id="PaceFleetIdArgument"
+<SetProperty Action="SetPaceFleetIdArgument"|/>|Value="--fleet-id=[PACE_FLEET_ID]"
+<SetProperty Action="SetPaceFleetIdArgument"|/>|Condition="PACE_FLEET_ID"
+<SetProperty Action="SetPaceFleetIdArgument"|/>|After="SetPaceFleetSeedArgument"
 
-<Property Id="FASTCACHE_FIREWALL_ALLOW"|</Property>|Key="SOFTWARE\fastcached\Installer"
-<Property Id="FASTCACHE_FIREWALL_ALLOW"|</Property>|Name="FirewallAllow"
-<Property Id="FASTCACHE_FIREWALL_ALLOW"|</Property>|Root="HKLM"
-<Property Id="FASTCACHE_FLEET_SEED"|</Property>|Key="SOFTWARE\fastcached\Installer"
-<Property Id="FASTCACHE_FLEET_SEED"|</Property>|Name="FleetSeed"
-<Property Id="FASTCACHE_FLEET_SEED"|</Property>|Root="HKLM"
-<Property Id="FASTCACHE_FLEET_ID"|</Property>|Key="SOFTWARE\fastcached\Installer"
-<Property Id="FASTCACHE_FLEET_ID"|</Property>|Name="FleetId"
-<Property Id="FASTCACHE_FLEET_ID"|</Property>|Root="HKLM"
-<SetProperty Action="SaveTypedFastCacheFirewallAllow"|/>|Value="[FASTCACHE_FIREWALL_ALLOW]"
-<SetProperty Action="SaveTypedFastCacheFirewallAllow"|/>|Before="AppSearch" Sequence="both"
-<SetProperty Action="SaveTypedFastCacheFirewallAllow"|/>|Condition="FASTCACHE_FIREWALL_ALLOW"
-<SetProperty Action="RestoreTypedFastCacheFirewallAllow"|/>|Id="FASTCACHE_FIREWALL_ALLOW"
-<SetProperty Action="RestoreTypedFastCacheFirewallAllow"|/>|After="AppSearch" Sequence="both"
-<SetProperty Action="RestoreTypedFastCacheFirewallAllow"|/>|Condition="FastCacheFirewallAllowTyped"
-<SetProperty Action="SaveTypedFastCacheFleetSeed"|/>|Value="[FASTCACHE_FLEET_SEED]"
-<SetProperty Action="SaveTypedFastCacheFleetSeed"|/>|Before="AppSearch" Sequence="both"
-<SetProperty Action="SaveTypedFastCacheFleetSeed"|/>|Condition="FASTCACHE_FLEET_SEED"
-<SetProperty Action="RestoreTypedFastCacheFleetSeed"|/>|Id="FASTCACHE_FLEET_SEED"
-<SetProperty Action="RestoreTypedFastCacheFleetSeed"|/>|After="AppSearch" Sequence="both"
-<SetProperty Action="RestoreTypedFastCacheFleetSeed"|/>|Condition="FastCacheFleetSeedTyped"
-<SetProperty Action="SaveTypedFastCacheFleetId"|/>|Value="[FASTCACHE_FLEET_ID]"
-<SetProperty Action="SaveTypedFastCacheFleetId"|/>|Before="AppSearch" Sequence="both"
-<SetProperty Action="SaveTypedFastCacheFleetId"|/>|Condition="FASTCACHE_FLEET_ID"
-<SetProperty Action="RestoreTypedFastCacheFleetId"|/>|Id="FASTCACHE_FLEET_ID"
-<SetProperty Action="RestoreTypedFastCacheFleetId"|/>|After="AppSearch" Sequence="both"
-<SetProperty Action="RestoreTypedFastCacheFleetId"|/>|Condition="FastCacheFleetIdTyped"
-<Component Id="FastCacheRememberedProperties"|</Component>|Guid="87BB5EEE-8B9E-4401-9367-C86DB5061258"
-<Component Id="FastCacheRememberedProperties"|</Component>|Action="removeOnUninstall"
-<ComponentRef Id="FastCacheRememberedProperties"|/>|ComponentRef
-<CustomAction Id="FastCacheRememberFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d "[FASTCACHE_FIREWALL_ALLOW]" /f /reg:64"
-<CustomAction Id="FastCacheRememberFirewallAllow"|/>|Execute="deferred"
-<CustomAction Id="FastCacheRememberFirewallAllow"|/>|Impersonate="no"
-<CustomAction Id="FastCacheRememberFirewallAllow"|/>|Return="check"
-<CustomAction Id="FastCacheRememberFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d "[FASTCACHE_FLEET_SEED]" /f /reg:64"
-<CustomAction Id="FastCacheRememberFleetSeed"|/>|Execute="deferred"
-<CustomAction Id="FastCacheRememberFleetSeed"|/>|Impersonate="no"
-<CustomAction Id="FastCacheRememberFleetSeed"|/>|Return="check"
-<CustomAction Id="FastCacheRememberFleetId"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d "[FASTCACHE_FLEET_ID]" /f /reg:64"
-<CustomAction Id="FastCacheRememberFleetId"|/>|Execute="deferred"
-<CustomAction Id="FastCacheRememberFleetId"|/>|Impersonate="no"
-<CustomAction Id="FastCacheRememberFleetId"|/>|Return="check"
-<CustomAction Id="FastCacheNodeCheckArguments"|/>|Execute="deferred"
-<CustomAction Id="FastCacheNodeCheckArguments"|/>|Impersonate="no"
-<CustomAction Id="FastCacheNodeCheckArguments"|/>|Return="check"
-<Custom Action="FastCacheNodeCheckArguments"|/>|Condition="FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCacheNodeCheckArguments"|/>|After="FastCacheNodeRestoreRegistration"
-<Custom Action="FastCacheRememberFirewallAllow"|/>|Condition="FASTCACHED_SELECTED = "1" OR FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCacheRememberFleetSeed"|/>|Condition="FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCacheRememberFleetSeed"|/>|!FASTCACHED_SELECTED
-<Custom Action="FastCacheRememberFleetId"|/>|Condition="FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCacheRememberFleetId"|/>|!FASTCACHED_SELECTED
-<Property Id="FASTCACHE_FIREWALL_ALLOW_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
-<Property Id="FASTCACHE_FIREWALL_ALLOW_BEFORE"|</Property>|Name="FirewallAllow"
-<CustomAction Id="FastCacheRollbackRestoreFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d "[FASTCACHE_FIREWALL_ALLOW_BEFORE]" /f /reg:64"
-<CustomAction Id="FastCacheRollbackRestoreFirewallAllow"|/>|Execute="rollback"
-<CustomAction Id="FastCacheRollbackDeleteFirewallAllow"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /f /reg:64"
-<CustomAction Id="FastCacheRollbackDeleteFirewallAllow"|/>|Execute="rollback"
-<Custom Action="FastCacheRollbackRestoreFirewallAllow"|/>|After="FastCacheNodeInstallService"
-<Custom Action="FastCacheRollbackRestoreFirewallAllow"|/>|Condition="(FASTCACHED_SELECTED = "1" OR FASTCACHE_NODE_SELECTED = "1") AND FASTCACHE_FIREWALL_ALLOW_BEFORE"
-<Custom Action="FastCacheRollbackDeleteFirewallAllow"|/>|After="FastCacheRollbackRestoreFirewallAllow"
-<Custom Action="FastCacheRollbackDeleteFirewallAllow"|/>|Condition="(FASTCACHED_SELECTED = "1" OR FASTCACHE_NODE_SELECTED = "1") AND NOT FASTCACHE_FIREWALL_ALLOW_BEFORE"
-<Custom Action="FastCacheRememberFirewallAllow"|/>|After="FastCacheRollbackDeleteFirewallAllow"
-<Property Id="FASTCACHE_FLEET_SEED_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
-<Property Id="FASTCACHE_FLEET_SEED_BEFORE"|</Property>|Name="FleetSeed"
-<CustomAction Id="FastCacheRollbackRestoreFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d "[FASTCACHE_FLEET_SEED_BEFORE]" /f /reg:64"
-<CustomAction Id="FastCacheRollbackRestoreFleetSeed"|/>|Execute="rollback"
-<CustomAction Id="FastCacheRollbackDeleteFleetSeed"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /f /reg:64"
-<CustomAction Id="FastCacheRollbackDeleteFleetSeed"|/>|Execute="rollback"
-<Custom Action="FastCacheRollbackRestoreFleetSeed"|/>|Condition="(FASTCACHE_NODE_SELECTED = "1") AND FASTCACHE_FLEET_SEED_BEFORE"
-<Custom Action="FastCacheRollbackDeleteFleetSeed"|/>|After="FastCacheRollbackRestoreFleetSeed"
-<Custom Action="FastCacheRollbackDeleteFleetSeed"|/>|Condition="(FASTCACHE_NODE_SELECTED = "1") AND NOT FASTCACHE_FLEET_SEED_BEFORE"
-<Custom Action="FastCacheRememberFleetSeed"|/>|After="FastCacheRollbackDeleteFleetSeed"
-<Property Id="FASTCACHE_FLEET_ID_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
-<Property Id="FASTCACHE_FLEET_ID_BEFORE"|</Property>|Name="FleetId"
-<CustomAction Id="FastCacheRollbackRestoreFleetId"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d "[FASTCACHE_FLEET_ID_BEFORE]" /f /reg:64"
-<CustomAction Id="FastCacheRollbackRestoreFleetId"|/>|Execute="rollback"
-<CustomAction Id="FastCacheRollbackDeleteFleetId"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FleetId /f /reg:64"
-<CustomAction Id="FastCacheRollbackDeleteFleetId"|/>|Execute="rollback"
-<Custom Action="FastCacheRollbackRestoreFleetId"|/>|After="FastCacheRememberFleetSeed"
-<Custom Action="FastCacheRollbackRestoreFleetId"|/>|Condition="(FASTCACHE_NODE_SELECTED = "1") AND FASTCACHE_FLEET_ID_BEFORE"
-<Custom Action="FastCacheRollbackDeleteFleetId"|/>|After="FastCacheRollbackRestoreFleetId"
-<Custom Action="FastCacheRollbackDeleteFleetId"|/>|Condition="(FASTCACHE_NODE_SELECTED = "1") AND NOT FASTCACHE_FLEET_ID_BEFORE"
-<Custom Action="FastCacheRememberFleetId"|/>|After="FastCacheRollbackDeleteFleetId"
-<CustomAction Id="FastCachedUndoRegistration"|/>|pace-kv.exe" --uninstall-service"
-<CustomAction Id="FastCachedUndoRegistration"|/>|Execute="rollback"
-<Custom Action="FastCachedUndoRegistration"|/>|After="FastCachedRestoreRegistrationExactly"
-<Custom Action="FastCachedUndoRegistration"|/>|Condition="FASTCACHED_SELECTED = "1" AND NOT FASTCACHED_IMAGEPATH"
-<Custom Action="FastCachedInstallService"|/>|After="FastCacheNodeSeedConfig"
-<CustomAction Id="FastCacheNodeUndoRegistration"|/>|pace-node.exe" --uninstall-service"
-<CustomAction Id="FastCacheNodeUndoRegistration"|/>|Execute="rollback"
-<Custom Action="FastCacheNodeUndoRegistration"|/>|After="FastCacheNodeRestoreRegistrationExactly"
-<Custom Action="FastCacheNodeUndoRegistration"|/>|Condition="FASTCACHE_NODE_SELECTED = "1" AND NOT FASTCACHE_NODE_IMAGEPATH"
-<CustomAction Id="FastCacheNodeRestoreRegistration"|/>|Execute="rollback"
-<Custom Action="FastCacheNodeRestoreRegistration"|/>|After="FastCacheNodeUndoRegistration"
-<Custom Action="FastCacheNodeRestoreRegistration"|/>|Condition="FASTCACHE_NODE_SELECTED = "1" AND FASTCACHE_NODE_IMAGEPATH"
-<Custom Action="FastCacheNodeInstallService"|/>|After="FastCachedStartService"
-<Custom Action="FastCacheNodeStartService"|/>|After="FastCacheNodeStopForRestart"
+<Property Id="PACE_FIREWALL_ALLOW"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FIREWALL_ALLOW"|</Property>|Name="FirewallAllow"
+<Property Id="PACE_FIREWALL_ALLOW"|</Property>|Root="HKLM"
+<Property Id="PACE_FLEET_SEED"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_SEED"|</Property>|Name="FleetSeed"
+<Property Id="PACE_FLEET_SEED"|</Property>|Root="HKLM"
+<Property Id="PACE_FLEET_ID"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_ID"|</Property>|Name="FleetId"
+<Property Id="PACE_FLEET_ID"|</Property>|Root="HKLM"
+<SetProperty Action="SaveTypedPaceFirewallAllow"|/>|Value="[PACE_FIREWALL_ALLOW]"
+<SetProperty Action="SaveTypedPaceFirewallAllow"|/>|Before="AppSearch" Sequence="both"
+<SetProperty Action="SaveTypedPaceFirewallAllow"|/>|Condition="PACE_FIREWALL_ALLOW"
+<SetProperty Action="RestoreTypedPaceFirewallAllow"|/>|Id="PACE_FIREWALL_ALLOW"
+<SetProperty Action="RestoreTypedPaceFirewallAllow"|/>|After="AppSearch" Sequence="both"
+<SetProperty Action="RestoreTypedPaceFirewallAllow"|/>|Condition="PaceFirewallAllowTyped"
+<SetProperty Action="SaveTypedPaceFleetSeed"|/>|Value="[PACE_FLEET_SEED]"
+<SetProperty Action="SaveTypedPaceFleetSeed"|/>|Before="AppSearch" Sequence="both"
+<SetProperty Action="SaveTypedPaceFleetSeed"|/>|Condition="PACE_FLEET_SEED"
+<SetProperty Action="RestoreTypedPaceFleetSeed"|/>|Id="PACE_FLEET_SEED"
+<SetProperty Action="RestoreTypedPaceFleetSeed"|/>|After="AppSearch" Sequence="both"
+<SetProperty Action="RestoreTypedPaceFleetSeed"|/>|Condition="PaceFleetSeedTyped"
+<SetProperty Action="SaveTypedPaceFleetId"|/>|Value="[PACE_FLEET_ID]"
+<SetProperty Action="SaveTypedPaceFleetId"|/>|Before="AppSearch" Sequence="both"
+<SetProperty Action="SaveTypedPaceFleetId"|/>|Condition="PACE_FLEET_ID"
+<SetProperty Action="RestoreTypedPaceFleetId"|/>|Id="PACE_FLEET_ID"
+<SetProperty Action="RestoreTypedPaceFleetId"|/>|After="AppSearch" Sequence="both"
+<SetProperty Action="RestoreTypedPaceFleetId"|/>|Condition="PaceFleetIdTyped"
+<Component Id="PaceRememberedProperties"|</Component>|Guid="87BB5EEE-8B9E-4401-9367-C86DB5061258"
+<Component Id="PaceRememberedProperties"|</Component>|Action="removeOnUninstall"
+<ComponentRef Id="PaceRememberedProperties"|/>|ComponentRef
+<CustomAction Id="PaceRememberFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d "[PACE_FIREWALL_ALLOW]" /f /reg:64"
+<CustomAction Id="PaceRememberFirewallAllow"|/>|Execute="deferred"
+<CustomAction Id="PaceRememberFirewallAllow"|/>|Impersonate="no"
+<CustomAction Id="PaceRememberFirewallAllow"|/>|Return="check"
+<CustomAction Id="PaceRememberFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d "[PACE_FLEET_SEED]" /f /reg:64"
+<CustomAction Id="PaceRememberFleetSeed"|/>|Execute="deferred"
+<CustomAction Id="PaceRememberFleetSeed"|/>|Impersonate="no"
+<CustomAction Id="PaceRememberFleetSeed"|/>|Return="check"
+<CustomAction Id="PaceRememberFleetId"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d "[PACE_FLEET_ID]" /f /reg:64"
+<CustomAction Id="PaceRememberFleetId"|/>|Execute="deferred"
+<CustomAction Id="PaceRememberFleetId"|/>|Impersonate="no"
+<CustomAction Id="PaceRememberFleetId"|/>|Return="check"
+<CustomAction Id="PaceNodeCheckArguments"|/>|Execute="deferred"
+<CustomAction Id="PaceNodeCheckArguments"|/>|Impersonate="no"
+<CustomAction Id="PaceNodeCheckArguments"|/>|Return="check"
+<Custom Action="PaceNodeCheckArguments"|/>|Condition="PACE_NODE_SELECTED = "1""
+<Custom Action="PaceNodeCheckArguments"|/>|After="PaceNodeRestoreRegistration"
+<Custom Action="PaceRememberFirewallAllow"|/>|Condition="PACE_SELECTED = "1" OR PACE_NODE_SELECTED = "1""
+<Custom Action="PaceRememberFleetSeed"|/>|Condition="PACE_NODE_SELECTED = "1""
+<Custom Action="PaceRememberFleetSeed"|/>|!PACE_SELECTED
+<Custom Action="PaceRememberFleetId"|/>|Condition="PACE_NODE_SELECTED = "1""
+<Custom Action="PaceRememberFleetId"|/>|!PACE_SELECTED
+<Property Id="PACE_FIREWALL_ALLOW_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FIREWALL_ALLOW_BEFORE"|</Property>|Name="FirewallAllow"
+<CustomAction Id="PaceRollbackRestoreFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d "[PACE_FIREWALL_ALLOW_BEFORE]" /f /reg:64"
+<CustomAction Id="PaceRollbackRestoreFirewallAllow"|/>|Execute="rollback"
+<CustomAction Id="PaceRollbackDeleteFirewallAllow"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /f /reg:64"
+<CustomAction Id="PaceRollbackDeleteFirewallAllow"|/>|Execute="rollback"
+<Custom Action="PaceRollbackRestoreFirewallAllow"|/>|After="PaceNodeInstallService"
+<Custom Action="PaceRollbackRestoreFirewallAllow"|/>|Condition="(PACE_SELECTED = "1" OR PACE_NODE_SELECTED = "1") AND PACE_FIREWALL_ALLOW_BEFORE"
+<Custom Action="PaceRollbackDeleteFirewallAllow"|/>|After="PaceRollbackRestoreFirewallAllow"
+<Custom Action="PaceRollbackDeleteFirewallAllow"|/>|Condition="(PACE_SELECTED = "1" OR PACE_NODE_SELECTED = "1") AND NOT PACE_FIREWALL_ALLOW_BEFORE"
+<Custom Action="PaceRememberFirewallAllow"|/>|After="PaceRollbackDeleteFirewallAllow"
+<Property Id="PACE_FLEET_SEED_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_SEED_BEFORE"|</Property>|Name="FleetSeed"
+<CustomAction Id="PaceRollbackRestoreFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d "[PACE_FLEET_SEED_BEFORE]" /f /reg:64"
+<CustomAction Id="PaceRollbackRestoreFleetSeed"|/>|Execute="rollback"
+<CustomAction Id="PaceRollbackDeleteFleetSeed"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /f /reg:64"
+<CustomAction Id="PaceRollbackDeleteFleetSeed"|/>|Execute="rollback"
+<Custom Action="PaceRollbackRestoreFleetSeed"|/>|Condition="(PACE_NODE_SELECTED = "1") AND PACE_FLEET_SEED_BEFORE"
+<Custom Action="PaceRollbackDeleteFleetSeed"|/>|After="PaceRollbackRestoreFleetSeed"
+<Custom Action="PaceRollbackDeleteFleetSeed"|/>|Condition="(PACE_NODE_SELECTED = "1") AND NOT PACE_FLEET_SEED_BEFORE"
+<Custom Action="PaceRememberFleetSeed"|/>|After="PaceRollbackDeleteFleetSeed"
+<Property Id="PACE_FLEET_ID_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_ID_BEFORE"|</Property>|Name="FleetId"
+<CustomAction Id="PaceRollbackRestoreFleetId"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d "[PACE_FLEET_ID_BEFORE]" /f /reg:64"
+<CustomAction Id="PaceRollbackRestoreFleetId"|/>|Execute="rollback"
+<CustomAction Id="PaceRollbackDeleteFleetId"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FleetId /f /reg:64"
+<CustomAction Id="PaceRollbackDeleteFleetId"|/>|Execute="rollback"
+<Custom Action="PaceRollbackRestoreFleetId"|/>|After="PaceRememberFleetSeed"
+<Custom Action="PaceRollbackRestoreFleetId"|/>|Condition="(PACE_NODE_SELECTED = "1") AND PACE_FLEET_ID_BEFORE"
+<Custom Action="PaceRollbackDeleteFleetId"|/>|After="PaceRollbackRestoreFleetId"
+<Custom Action="PaceRollbackDeleteFleetId"|/>|Condition="(PACE_NODE_SELECTED = "1") AND NOT PACE_FLEET_ID_BEFORE"
+<Custom Action="PaceRememberFleetId"|/>|After="PaceRollbackDeleteFleetId"
+<CustomAction Id="PaceUndoRegistration"|/>|pace-kv.exe" --uninstall-service"
+<CustomAction Id="PaceUndoRegistration"|/>|Execute="rollback"
+<Custom Action="PaceUndoRegistration"|/>|After="PaceRestoreRegistrationExactly"
+<Custom Action="PaceUndoRegistration"|/>|Condition="PACE_SELECTED = "1" AND NOT PACE_IMAGEPATH"
+<Custom Action="PaceInstallService"|/>|After="PaceNodeSeedConfig"
+<CustomAction Id="PaceNodeUndoRegistration"|/>|pace-node.exe" --uninstall-service"
+<CustomAction Id="PaceNodeUndoRegistration"|/>|Execute="rollback"
+<Custom Action="PaceNodeUndoRegistration"|/>|After="PaceNodeRestoreRegistrationExactly"
+<Custom Action="PaceNodeUndoRegistration"|/>|Condition="PACE_NODE_SELECTED = "1" AND NOT PACE_NODE_IMAGEPATH"
+<CustomAction Id="PaceNodeRestoreRegistration"|/>|Execute="rollback"
+<Custom Action="PaceNodeRestoreRegistration"|/>|After="PaceNodeUndoRegistration"
+<Custom Action="PaceNodeRestoreRegistration"|/>|Condition="PACE_NODE_SELECTED = "1" AND PACE_NODE_IMAGEPATH"
+<Custom Action="PaceNodeInstallService"|/>|After="PaceStartService"
+<Custom Action="PaceNodeStartService"|/>|After="PaceNodeStopForRestart"
 
-<SetProperty Action="SetFastCacheOwnImagePathPrefix"|/>|Value=""[INSTALL_ROOT]"
-<SetProperty Action="SetFastCacheOwnImagePathPrefix"|/>|After="CostFinalize"
-<SetProperty Action="SetFastCacheOwnImagePathPrefix"|/>|!Condition=
-<SetProperty Action="SetFastCacheOwnImagePathRawPrefix"|/>|Value="#%"[INSTALL_ROOT]"
-<SetProperty Action="SetFastCacheOwnImagePathRawPrefix"|/>|After="SetFastCacheOwnImagePathPrefix"
-<SetProperty Action="SetFastCacheOwnImagePathRawPrefix"|/>|!Condition=
+<SetProperty Action="SetPaceOwnImagePathPrefix"|/>|Value=""[INSTALL_ROOT]"
+<SetProperty Action="SetPaceOwnImagePathPrefix"|/>|After="CostFinalize"
+<SetProperty Action="SetPaceOwnImagePathPrefix"|/>|!Condition=
+<SetProperty Action="SetPaceOwnImagePathRawPrefix"|/>|Value="#%"[INSTALL_ROOT]"
+<SetProperty Action="SetPaceOwnImagePathRawPrefix"|/>|After="SetPaceOwnImagePathPrefix"
+<SetProperty Action="SetPaceOwnImagePathRawPrefix"|/>|!Condition=
 
-<SetProperty Action="ClearFastCacheNodeRegisteredHere"|/>|Value="0"
-<SetProperty Action="ClearFastCacheNodeRegisteredHere"|/>|After="SetFastCacheOwnImagePathRawPrefix"
-<SetProperty Action="ClearFastCacheNodeRegisteredHere"|/>|!Condition=
-<SetProperty Action="SetFastCacheNodeRegisteredHereQuoted"|/>|Condition="FASTCACHE_OWN_IMAGEPATH_PREFIX AND FASTCACHE_NODE_IMAGEPATH ~<< FASTCACHE_OWN_IMAGEPATH_PREFIX"
-<SetProperty Action="SetFastCacheNodeRegisteredHereQuoted"|/>|After="ClearFastCacheNodeRegisteredHere"
-<SetProperty Action="SetFastCacheNodeRegisteredHereRaw"|/>|Condition="FASTCACHE_OWN_IMAGEPATH_RAW_PREFIX AND FASTCACHE_NODE_IMAGEPATH ~<< FASTCACHE_OWN_IMAGEPATH_RAW_PREFIX"
-<SetProperty Action="SetFastCacheNodeRegisteredHereRaw"|/>|After="SetFastCacheNodeRegisteredHereQuoted"
-<SetProperty Action="ClearFastCachedRegisteredHere"|/>|Value="0"
-<SetProperty Action="ClearFastCachedRegisteredHere"|/>|After="SetFastCacheNodeRegisteredHereRaw"
-<SetProperty Action="ClearFastCachedRegisteredHere"|/>|!Condition=
-<SetProperty Action="SetFastCachedRegisteredHereQuoted"|/>|Condition="FASTCACHE_OWN_IMAGEPATH_PREFIX AND FASTCACHED_IMAGEPATH ~<< FASTCACHE_OWN_IMAGEPATH_PREFIX"
-<SetProperty Action="SetFastCachedRegisteredHereQuoted"|/>|After="ClearFastCachedRegisteredHere"
-<SetProperty Action="SetFastCachedRegisteredHereRaw"|/>|Condition="FASTCACHE_OWN_IMAGEPATH_RAW_PREFIX AND FASTCACHED_IMAGEPATH ~<< FASTCACHE_OWN_IMAGEPATH_RAW_PREFIX"
-<SetProperty Action="SetFastCachedRegisteredHereRaw"|/>|After="SetFastCachedRegisteredHereQuoted"
+<SetProperty Action="ClearPaceNodeRegisteredHere"|/>|Value="0"
+<SetProperty Action="ClearPaceNodeRegisteredHere"|/>|After="SetPaceOwnImagePathRawPrefix"
+<SetProperty Action="ClearPaceNodeRegisteredHere"|/>|!Condition=
+<SetProperty Action="SetPaceNodeRegisteredHereQuoted"|/>|Condition="PACE_OWN_IMAGEPATH_PREFIX AND PACE_NODE_IMAGEPATH ~<< PACE_OWN_IMAGEPATH_PREFIX"
+<SetProperty Action="SetPaceNodeRegisteredHereQuoted"|/>|After="ClearPaceNodeRegisteredHere"
+<SetProperty Action="SetPaceNodeRegisteredHereRaw"|/>|Condition="PACE_OWN_IMAGEPATH_RAW_PREFIX AND PACE_NODE_IMAGEPATH ~<< PACE_OWN_IMAGEPATH_RAW_PREFIX"
+<SetProperty Action="SetPaceNodeRegisteredHereRaw"|/>|After="SetPaceNodeRegisteredHereQuoted"
+<SetProperty Action="ClearPaceRegisteredHere"|/>|Value="0"
+<SetProperty Action="ClearPaceRegisteredHere"|/>|After="SetPaceNodeRegisteredHereRaw"
+<SetProperty Action="ClearPaceRegisteredHere"|/>|!Condition=
+<SetProperty Action="SetPaceRegisteredHereQuoted"|/>|Condition="PACE_OWN_IMAGEPATH_PREFIX AND PACE_IMAGEPATH ~<< PACE_OWN_IMAGEPATH_PREFIX"
+<SetProperty Action="SetPaceRegisteredHereQuoted"|/>|After="ClearPaceRegisteredHere"
+<SetProperty Action="SetPaceRegisteredHereRaw"|/>|Condition="PACE_OWN_IMAGEPATH_RAW_PREFIX AND PACE_IMAGEPATH ~<< PACE_OWN_IMAGEPATH_RAW_PREFIX"
+<SetProperty Action="SetPaceRegisteredHereRaw"|/>|After="SetPaceRegisteredHereQuoted"
 
-<SetProperty Action="ClearFastCacheNodeSelected"|/>|Value="0"
-<SetProperty Action="ClearFastCacheNodeSelected"|/>|After="MigrateFeatureStates"
-<SetProperty Action="ClearFastCacheNodeSelected"|/>|!Condition=
-<SetProperty Action="SetFastCacheNodeSelected"|/>|After="ClearFastCacheNodeSelected"
-<SetProperty Action="ClearFastCachedSelected"|/>|Value="0"
-<SetProperty Action="ClearFastCachedSelected"|/>|After="SetFastCacheNodeSelected"
-<SetProperty Action="ClearFastCachedSelected"|/>|!Condition=
-<SetProperty Action="SetFastCachedSelected"|/>|After="ClearFastCachedSelected"
+<SetProperty Action="ClearPaceNodeSelected"|/>|Value="0"
+<SetProperty Action="ClearPaceNodeSelected"|/>|After="MigrateFeatureStates"
+<SetProperty Action="ClearPaceNodeSelected"|/>|!Condition=
+<SetProperty Action="SetPaceNodeSelected"|/>|After="ClearPaceNodeSelected"
+<SetProperty Action="ClearPaceSelected"|/>|Value="0"
+<SetProperty Action="ClearPaceSelected"|/>|After="SetPaceNodeSelected"
+<SetProperty Action="ClearPaceSelected"|/>|!Condition=
+<SetProperty Action="SetPaceSelected"|/>|After="ClearPaceSelected"
 
-<Custom Action="FastCacheNodeUninstallService"|/>|NOT UPGRADINGPRODUCTCODE
+<Custom Action="PaceNodeUninstallService"|/>|NOT UPGRADINGPRODUCTCODE
 
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|bin\pace-kv.exe\"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|bin\pace-node.exe\"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|exit 1460
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|Execute="deferred"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|Impersonate="no"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|Return="check"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|Directory="System64Folder"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|!Directory="INSTALL_ROOT"
-<Custom Action="FastCacheAwaitServiceExit"|/>|Before="InstallFiles"
-<Custom Action="FastCacheAwaitServiceExit"|/>|Condition="WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|# FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|(Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").CommandLine
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|$p+=\"$d\pace-kv.exe\",\"$d\pace-node.exe\"
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|# FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]"
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|(Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").CommandLine
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|$p+=\"$d\pace-kv.exe\"
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|bin\pace-kv.exe\"
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|!pace-node
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|exit 1460
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|Return="check"
-<Custom Action="FastCachedAwaitExitForNode"|/>|After="FastCachedStopForNode"
-<Custom Action="FastCachedAwaitExitForNode"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHE_NODE_SELECTED = "1""
-<CustomAction Id="FastCachedStopForNode"|/>|/v FastCachedWasRunning
-<CustomAction Id="FastCachedStopForNode"|/>|net.exe stop FastCached"
-<CustomAction Id="FastCachedStopForNode"|/>|Return="ignore"
-<Custom Action="FastCachedStopForNode"|/>|After="FastCachedInstallService"
-<CustomAction Id="FastCachedDisableForNode"|/>|cmd.exe" /c ([System64Folder]sc.exe query FastCached >nul 2>&1 & if errorlevel 1060 if not errorlevel 1061 exit 0) &
-<CustomAction Id="FastCachedDisableForNode"|/>|& [System64Folder]sc.exe config FastCached start= disabled"
-<CustomAction Id="FastCachedDisableForNode"|/>|Execute="deferred"
-<CustomAction Id="FastCachedDisableForNode"|/>|Impersonate="no"
-<CustomAction Id="FastCachedDisableForNode"|/>|Return="check"
-<Custom Action="FastCachedDisableForNode"|/>|After="FastCachedAwaitExitForNode"
-<Custom Action="FastCachedDisableForNode"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHE_NODE_SELECTED = "1""
-<Custom Action="FastCachedStartService"|/>|After="FastCachedDisableForNode"
+<CustomAction Id="PaceAwaitServiceExit"|/>|bin\pace-kv.exe\"
+<CustomAction Id="PaceAwaitServiceExit"|/>|bin\pace-node.exe\"
+<CustomAction Id="PaceAwaitServiceExit"|/>|exit 1460
+<CustomAction Id="PaceAwaitServiceExit"|/>|Execute="deferred"
+<CustomAction Id="PaceAwaitServiceExit"|/>|Impersonate="no"
+<CustomAction Id="PaceAwaitServiceExit"|/>|Return="check"
+<CustomAction Id="PaceAwaitServiceExit"|/>|Directory="System64Folder"
+<CustomAction Id="PaceAwaitServiceExit"|/>|!Directory="INSTALL_ROOT"
+<Custom Action="PaceAwaitServiceExit"|/>|Before="InstallFiles"
+<Custom Action="PaceAwaitServiceExit"|/>|Condition="WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE"
+<CustomAction Id="PaceAwaitServiceExit"|/>|# PaceImagePath:[PACE_IMAGEPATH] PaceNodeImagePath:[PACE_NODE_IMAGEPATH]"
+<CustomAction Id="PaceAwaitServiceExit"|/>|(Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").CommandLine
+<CustomAction Id="PaceAwaitServiceExit"|/>|$p+=\"$d\pace-kv.exe\",\"$d\pace-node.exe\"
+<CustomAction Id="PaceAwaitExitForNode"|/>|# PaceImagePath:[PACE_IMAGEPATH] PaceNodeImagePath:[PACE_NODE_IMAGEPATH]"
+<CustomAction Id="PaceAwaitExitForNode"|/>|(Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").CommandLine
+<CustomAction Id="PaceAwaitExitForNode"|/>|$p+=\"$d\pace-kv.exe\"
+<CustomAction Id="PaceAwaitExitForNode"|/>|bin\pace-kv.exe\"
+<CustomAction Id="PaceAwaitExitForNode"|/>|!pace-node
+<CustomAction Id="PaceAwaitExitForNode"|/>|exit 1460
+<CustomAction Id="PaceAwaitExitForNode"|/>|Return="check"
+<Custom Action="PaceAwaitExitForNode"|/>|After="PaceStopForNode"
+<Custom Action="PaceAwaitExitForNode"|/>|Condition="PACE_SELECTED = "1" AND PACE_NODE_SELECTED = "1""
+<CustomAction Id="PaceStopForNode"|/>|/v PaceWasRunning
+<CustomAction Id="PaceStopForNode"|/>|net.exe stop FastCached"
+<CustomAction Id="PaceStopForNode"|/>|Return="ignore"
+<Custom Action="PaceStopForNode"|/>|After="PaceInstallService"
+<CustomAction Id="PaceDisableForNode"|/>|cmd.exe" /c ([System64Folder]sc.exe query FastCached >nul 2>&1 & if errorlevel 1060 if not errorlevel 1061 exit 0) &
+<CustomAction Id="PaceDisableForNode"|/>|& [System64Folder]sc.exe config FastCached start= disabled"
+<CustomAction Id="PaceDisableForNode"|/>|Execute="deferred"
+<CustomAction Id="PaceDisableForNode"|/>|Impersonate="no"
+<CustomAction Id="PaceDisableForNode"|/>|Return="check"
+<Custom Action="PaceDisableForNode"|/>|After="PaceAwaitExitForNode"
+<Custom Action="PaceDisableForNode"|/>|Condition="PACE_SELECTED = "1" AND PACE_NODE_SELECTED = "1""
+<Custom Action="PaceStartService"|/>|After="PaceDisableForNode"
 
-<CustomAction Id="FastCacheClearRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
-<CustomAction Id="FastCacheClearRollbackState"|/>|Execute="deferred"
-<Custom Action="FastCacheClearRollbackState"|/>|Before="FastCacheUndoRollbackState"
-<CustomAction Id="FastCacheClearRollbackState"|/>|Directory="System64Folder"
-<CustomAction Id="FastCacheDiscardRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
-<CustomAction Id="FastCacheDiscardRollbackState"|/>|Execute="commit"
-<CustomAction Id="FastCacheDiscardRollbackState"|/>|Directory="System64Folder"
-<CustomAction Id="FastCacheFailForTest"|/>|Execute="deferred"
-<CustomAction Id="FastCacheFailForTest"|/>|Return="check"
-<CustomAction Id="FastCacheFailForTest"|/>|exit 1603
-<CustomAction Id="FastCacheFailForTest"|/>|Impersonate="no"
-<Custom Action="FastCacheFailForTest"|/>|Before="InstallFinalize"
-Before="InstallFinalize"|/>|FASTCACHE_FAIL_FOR_TEST = "1"
-<Custom Action="FastCacheFailForTest"|/>|FASTCACHE_FAIL_FOR_TEST = "1"
-<Property Id="FASTCACHE_FAIL_FOR_TEST"|/>|Secure="yes"
-<Custom Action="FastCacheDiscardRollbackState"|/>|After="FastCacheNodeStartService"
-<CustomAction Id="FastCachedRestartAfterStop"|/>|/v FastCachedWasRunning
-<CustomAction Id="FastCachedRestartAfterStop"|/>|sc.exe start FastCached"
-<CustomAction Id="FastCachedRestartAfterStop"|/>|Execute="rollback"
-<Custom Action="FastCachedRestartAfterStop"|/>|Before="FastCacheNodeRestartAfterStop"
-<CustomAction Id="FastCachedRestartAfterStop"|/>|Directory="System64Folder"
-<Custom Action="FastCachedRestartAfterStop"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHE_NODE_SELECTED = "1""
-<CustomAction Id="FastCacheNodeRestartAfterStop"|/>|/v NodeWasRunning
-<CustomAction Id="FastCacheNodeRestartAfterStop"|/>|sc.exe start FastCacheCompileNode"
-<CustomAction Id="FastCacheNodeRestartAfterStop"|/>|Execute="rollback"
-<Custom Action="FastCacheNodeRestartAfterStop"|/>|Before="FastCacheAwaitServiceExit"
-<CustomAction Id="FastCacheNodeRestartAfterStop"|/>|Directory="System64Folder"
-<Custom Action="FastCacheUndoRollbackState"|/>|Before="FastCachedRestartAfterStop"
-<Custom Action="FastCacheNodeRestartAfterStop"|/>|Condition="FASTCACHE_NODE_SELECTED = "1""
-<CustomAction Id="FastCacheNodeStopForRestart"|/>|/v NodeWasRunning
-<CustomAction Id="FastCacheNodeStopForRestart"|/>|net.exe stop FastCacheCompileNode"
-<CustomAction Id="FastCacheNodeStopForRestart"|/>|Return="ignore"
-<Custom Action="FastCacheNodeStopForRestart"|/>|After="FastCacheForgetNodeAdvertise"
-<Custom Action="FastCacheNodeStopForRestart"|/>|Condition="FASTCACHE_NODE_SELECTED = "1""
+<CustomAction Id="PaceClearRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+<CustomAction Id="PaceClearRollbackState"|/>|Execute="deferred"
+<Custom Action="PaceClearRollbackState"|/>|Before="PaceUndoRollbackState"
+<CustomAction Id="PaceClearRollbackState"|/>|Directory="System64Folder"
+<CustomAction Id="PaceDiscardRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+<CustomAction Id="PaceDiscardRollbackState"|/>|Execute="commit"
+<CustomAction Id="PaceDiscardRollbackState"|/>|Directory="System64Folder"
+<CustomAction Id="PaceFailForTest"|/>|Execute="deferred"
+<CustomAction Id="PaceFailForTest"|/>|Return="check"
+<CustomAction Id="PaceFailForTest"|/>|exit 1603
+<CustomAction Id="PaceFailForTest"|/>|Impersonate="no"
+<Custom Action="PaceFailForTest"|/>|Before="InstallFinalize"
+Before="InstallFinalize"|/>|PACE_FAIL_FOR_TEST = "1"
+<Custom Action="PaceFailForTest"|/>|PACE_FAIL_FOR_TEST = "1"
+<Property Id="PACE_FAIL_FOR_TEST"|/>|Secure="yes"
+<Custom Action="PaceDiscardRollbackState"|/>|After="PaceNodeStartService"
+<CustomAction Id="PaceRestartAfterStop"|/>|/v PaceWasRunning
+<CustomAction Id="PaceRestartAfterStop"|/>|sc.exe start FastCached"
+<CustomAction Id="PaceRestartAfterStop"|/>|Execute="rollback"
+<Custom Action="PaceRestartAfterStop"|/>|Before="PaceNodeRestartAfterStop"
+<CustomAction Id="PaceRestartAfterStop"|/>|Directory="System64Folder"
+<Custom Action="PaceRestartAfterStop"|/>|Condition="PACE_SELECTED = "1" AND PACE_NODE_SELECTED = "1""
+<CustomAction Id="PaceNodeRestartAfterStop"|/>|/v NodeWasRunning
+<CustomAction Id="PaceNodeRestartAfterStop"|/>|sc.exe start FastCacheCompileNode"
+<CustomAction Id="PaceNodeRestartAfterStop"|/>|Execute="rollback"
+<Custom Action="PaceNodeRestartAfterStop"|/>|Before="PaceAwaitServiceExit"
+<CustomAction Id="PaceNodeRestartAfterStop"|/>|Directory="System64Folder"
+<Custom Action="PaceUndoRollbackState"|/>|Before="PaceRestartAfterStop"
+<Custom Action="PaceNodeRestartAfterStop"|/>|Condition="PACE_NODE_SELECTED = "1""
+<CustomAction Id="PaceNodeStopForRestart"|/>|/v NodeWasRunning
+<CustomAction Id="PaceNodeStopForRestart"|/>|net.exe stop FastCacheCompileNode"
+<CustomAction Id="PaceNodeStopForRestart"|/>|Return="ignore"
+<Custom Action="PaceNodeStopForRestart"|/>|After="PaceForgetNodeAdvertise"
+<Custom Action="PaceNodeStopForRestart"|/>|Condition="PACE_NODE_SELECTED = "1""
 
-<Property Id="FASTCACHED_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCached"
-<Property Id="FASTCACHED_START_BEFORE"|</Property>|Name="Start"
-<Property Id="FASTCACHE_NODE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
-<Property Id="FASTCACHE_NODE_START_BEFORE"|</Property>|Name="Start"
-<SetProperty Action="SetFastCachedStartModeBeforeAuto"|/>|Condition="FASTCACHED_START_BEFORE = "#2""
-<SetProperty Action="SetFastCachedStartModeBeforeManual"|/>|Condition="NOT (FASTCACHED_START_BEFORE = "#2")"
-<SetProperty Action="SetFastCacheNodeStartModeBeforeAuto"|/>|Condition="FASTCACHE_NODE_START_BEFORE = "#2""
-<SetProperty Action="SetFastCacheNodeStartModeBeforeManual"|/>|Condition="NOT (FASTCACHE_NODE_START_BEFORE = "#2")"
+<Property Id="PACE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCached"
+<Property Id="PACE_START_BEFORE"|</Property>|Name="Start"
+<Property Id="PACE_NODE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+<Property Id="PACE_NODE_START_BEFORE"|</Property>|Name="Start"
+<SetProperty Action="SetPaceStartModeBeforeAuto"|/>|Condition="PACE_START_BEFORE = "#2""
+<SetProperty Action="SetPaceStartModeBeforeManual"|/>|Condition="NOT (PACE_START_BEFORE = "#2")"
+<SetProperty Action="SetPaceNodeStartModeBeforeAuto"|/>|Condition="PACE_NODE_START_BEFORE = "#2""
+<SetProperty Action="SetPaceNodeStartModeBeforeManual"|/>|Condition="NOT (PACE_NODE_START_BEFORE = "#2")"
 
-<CustomAction Id="FastCachedStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64"
-<CustomAction Id="FastCachedStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCached /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64)"
-<CustomAction Id="FastCachedStashRegistration"|/>|Execute="deferred"
-<Custom Action="FastCachedStashRegistration"|/>|After="WriteRegistryValues"
-<Custom Action="FastCachedStashFromCopy"|/>|After="FastCachedStashRegistration"
-<Custom Action="FastCachedStashFromCopy"|/>|AND WIX_UPGRADE_DETECTED"
-<CustomAction Id="FastCachedStashRegistration"|/>|Directory="System64Folder"
-<Custom Action="FastCachedStashRegistration"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHED_IMAGEPATH"
-<CustomAction Id="FastCachedRestoreRegistrationExactly"|/>|Rollback\FastCached'
-<CustomAction Id="FastCachedRestoreRegistrationExactly"|/>|Invoke-CimMethod
-<CustomAction Id="FastCachedRestoreRegistrationExactly"|/>|sc.exe config FastCached start=
-<CustomAction Id="FastCachedRestoreRegistrationExactly"|/>|Execute="rollback"
-<Custom Action="FastCachedRestoreRegistrationExactly"|/>|After="FastCachedStashFromCopy"
-<Custom Action="FastCachedRestoreRegistrationExactly"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHED_IMAGEPATH"
-<CustomAction Id="FastCachedRestoreRegistration"|/>|pace-kv.exe" --install-service --service-start=[FastCachedStartModeBefore] [FastCacheFirewallAllowBeforeArgument]"
-<CustomAction Id="FastCachedRestoreRegistration"|/>|Execute="rollback"
-<Custom Action="FastCachedRestoreRegistration"|/>|After="FastCachedUndoRegistration"
-<Custom Action="FastCachedRestoreRegistration"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHED_IMAGEPATH"
-<CustomAction Id="FastCacheNodeStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64"
-<CustomAction Id="FastCacheNodeStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64)"
-<Custom Action="FastCacheNodeStashRegistration"|/>|After="FastCachedRestoreRegistration"
-<Custom Action="FastCacheNodeStashFromCopy"|/>|After="FastCacheNodeStashRegistration"
-<Custom Action="FastCacheNodeStashFromCopy"|/>|AND WIX_UPGRADE_DETECTED"
-<Component Id="FastCacheNodeRegistrationCopy"|</Component>|Condition="FASTCACHE_NODE_IMAGEPATH"
-<Component Id="FastCacheNodeRegistrationCopy"|</Component>|Value="[FASTCACHE_NODE_IMAGEPATH]"
-<Component Id="FastCachedRegistrationCopy"|</Component>|Condition="FASTCACHED_IMAGEPATH"
-<Component Id="FastCachedRegistrationCopy"|</Component>|Value="[FASTCACHED_IMAGEPATH]"
-<CustomAction Id="FastCacheNodeStashRegistration"|/>|Directory="System64Folder"
-<Custom Action="FastCacheNodeStashRegistration"|/>|Condition="FASTCACHE_NODE_SELECTED = "1" AND FASTCACHE_NODE_IMAGEPATH"
-<CustomAction Id="FastCacheNodeRestoreRegistrationExactly"|/>|Rollback\FastCacheCompileNode'
-<CustomAction Id="FastCacheNodeRestoreRegistrationExactly"|/>|sc.exe config FastCacheCompileNode start=
-<CustomAction Id="FastCacheNodeRestoreRegistrationExactly"|/>|Execute="rollback"
-<Custom Action="FastCacheNodeRestoreRegistrationExactly"|/>|After="FastCacheNodeStashFromCopy"
-<Custom Action="FastCacheNodeRestoreRegistrationExactly"|/>|Condition="FASTCACHE_NODE_SELECTED = "1" AND FASTCACHE_NODE_IMAGEPATH"
-<CustomAction Id="FastCacheNodeRestoreRegistration"|/>|--service-start=[FastCacheNodeStartModeBefore]
-<CustomAction Id="FastCacheNodeRestoreRegistration"|/>|!--service-start=auto
-<Custom Action="FastCachedUninstallService"|/>|NOT UPGRADINGPRODUCTCODE
+<CustomAction Id="PaceStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64"
+<CustomAction Id="PaceStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCached /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64)"
+<CustomAction Id="PaceStashRegistration"|/>|Execute="deferred"
+<Custom Action="PaceStashRegistration"|/>|After="WriteRegistryValues"
+<Custom Action="PaceStashFromCopy"|/>|After="PaceStashRegistration"
+<Custom Action="PaceStashFromCopy"|/>|AND WIX_UPGRADE_DETECTED"
+<CustomAction Id="PaceStashRegistration"|/>|Directory="System64Folder"
+<Custom Action="PaceStashRegistration"|/>|Condition="PACE_SELECTED = "1" AND PACE_IMAGEPATH"
+<CustomAction Id="PaceRestoreRegistrationExactly"|/>|Rollback\FastCached'
+<CustomAction Id="PaceRestoreRegistrationExactly"|/>|Invoke-CimMethod
+<CustomAction Id="PaceRestoreRegistrationExactly"|/>|sc.exe config FastCached start=
+<CustomAction Id="PaceRestoreRegistrationExactly"|/>|Execute="rollback"
+<Custom Action="PaceRestoreRegistrationExactly"|/>|After="PaceStashFromCopy"
+<Custom Action="PaceRestoreRegistrationExactly"|/>|Condition="PACE_SELECTED = "1" AND PACE_IMAGEPATH"
+<CustomAction Id="PaceRestoreRegistration"|/>|pace-kv.exe" --install-service --service-start=[PaceStartModeBefore] [PaceFirewallAllowBeforeArgument]"
+<CustomAction Id="PaceRestoreRegistration"|/>|Execute="rollback"
+<Custom Action="PaceRestoreRegistration"|/>|After="PaceUndoRegistration"
+<Custom Action="PaceRestoreRegistration"|/>|Condition="PACE_SELECTED = "1" AND PACE_IMAGEPATH"
+<CustomAction Id="PaceNodeStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64"
+<CustomAction Id="PaceNodeStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64)"
+<Custom Action="PaceNodeStashRegistration"|/>|After="PaceRestoreRegistration"
+<Custom Action="PaceNodeStashFromCopy"|/>|After="PaceNodeStashRegistration"
+<Custom Action="PaceNodeStashFromCopy"|/>|AND WIX_UPGRADE_DETECTED"
+<Component Id="PaceNodeRegistrationCopy"|</Component>|Condition="PACE_NODE_IMAGEPATH"
+<Component Id="PaceNodeRegistrationCopy"|</Component>|Value="[PACE_NODE_IMAGEPATH]"
+<Component Id="PaceRegistrationCopy"|</Component>|Condition="PACE_IMAGEPATH"
+<Component Id="PaceRegistrationCopy"|</Component>|Value="[PACE_IMAGEPATH]"
+<CustomAction Id="PaceNodeStashRegistration"|/>|Directory="System64Folder"
+<Custom Action="PaceNodeStashRegistration"|/>|Condition="PACE_NODE_SELECTED = "1" AND PACE_NODE_IMAGEPATH"
+<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|Rollback\FastCacheCompileNode'
+<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|sc.exe config FastCacheCompileNode start=
+<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|Execute="rollback"
+<Custom Action="PaceNodeRestoreRegistrationExactly"|/>|After="PaceNodeStashFromCopy"
+<Custom Action="PaceNodeRestoreRegistrationExactly"|/>|Condition="PACE_NODE_SELECTED = "1" AND PACE_NODE_IMAGEPATH"
+<CustomAction Id="PaceNodeRestoreRegistration"|/>|--service-start=[PaceNodeStartModeBefore]
+<CustomAction Id="PaceNodeRestoreRegistration"|/>|!--service-start=auto
+<Custom Action="PaceUninstallService"|/>|NOT UPGRADINGPRODUCTCODE
 ]=])
 
 # The 0-then-1 flags rule 2 is about. Each must be read by at least one condition, or
 # the rule is vacuous for it.
-set(_flagProperties FASTCACHE_NODE_SELECTED FASTCACHED_SELECTED FASTCACHE_NODE_REGISTERED_HERE
-    FASTCACHED_REGISTERED_HERE)
+set(_flagProperties PACE_NODE_SELECTED PACE_SELECTED PACE_NODE_REGISTERED_HERE
+    PACE_REGISTERED_HERE)
 
 file(READ "${_file}" _text)
 

@@ -981,12 +981,12 @@ TEST_CASE("A command line refused halfway keeps what it said before the refusal"
     // `--daemon` and `--service-name` FIRST (`BuildServiceArgv`), so they precede any token a later
     // build stops accepting -- and a parse that dropped everything on the first bad token left
     // `main` nothing to ask, so the refusal never reached the SCM: `sc start` said error 1053.
-    std::array<char const*, 3> const argv { "--daemon", "--service-name=FastCachedTest", "--no-such-flag" };
+    std::array<char const*, 3> const argv { "--daemon", "--service-name=PaceTest", "--no-such-flag" };
     Pace::CliResult cli;
     auto const flow = Pace::ParseCliInto(std::span<char const* const> { argv }, cli);
     REQUIRE_FALSE(flow.has_value());
     CHECK(cli.config.daemon);
-    CHECK(cli.config.serviceName == "FastCachedTest");
+    CHECK(cli.config.serviceName == "PaceTest");
 
     // And `ParseCli` is the same parse: it refuses the same line, and accepts the line without
     // the bad token with the same two settings.
@@ -994,5 +994,5 @@ TEST_CASE("A command line refused halfway keeps what it said before the refusal"
     auto const accepted = Pace::ParseCli(std::span<char const* const> { argv }.first(2));
     REQUIRE(accepted.has_value());
     CHECK(accepted->config.daemon);
-    CHECK(accepted->config.serviceName == "FastCachedTest");
+    CHECK(accepted->config.serviceName == "PaceTest");
 }

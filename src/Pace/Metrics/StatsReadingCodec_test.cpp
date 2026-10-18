@@ -246,7 +246,7 @@ TEST_CASE("A decoded reading states the build that captured it, not the build de
     auto const decoded = DecodeStatsReading(EncodeStatsReading(reading));
     REQUIRE(decoded.has_value());
     CHECK(decoded->version == reading.version);
-    CHECK(RenderPrometheus(*decoded).contains("fastcached_build_info{version=\"9.9.9-another \\\"build\\\"\"} 1\n"));
+    CHECK(RenderPrometheus(*decoded).contains("pace_build_info{version=\"9.9.9-another \\\"build\\\"\"} 1\n"));
     CHECK_FALSE(RenderPrometheus(*decoded).contains(std::format("version=\"{}\"", VersionString)));
 }
 
@@ -274,7 +274,7 @@ TEST_CASE("The layout digest moves when a catalogue row moves", "[metrics][lives
     CHECK(StatsReadingWire::LayoutDigest(shifted) != StatsReadingLayout);
 
     auto renamed = CounterTable;
-    renamed[0].prometheusName = "fastcached_a_series_this_build_does_not_have";
+    renamed[0].prometheusName = "pace_a_series_this_build_does_not_have";
     CHECK(StatsReadingWire::LayoutDigest(renamed) != StatsReadingLayout);
 
     // And the control: the catalogue itself digests to the published layout.

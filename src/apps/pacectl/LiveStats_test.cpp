@@ -36,7 +36,7 @@ namespace
 /// @return The identification.
 [[nodiscard]] EndpointIdentity Daemon()
 {
-    return EndpointIdentity { .kind = RemoteKind::FastcacheWireOnly,
+    return EndpointIdentity { .kind = RemoteKind::PaceWireOnly,
                               .detail = "10.0.0.4:6674 speaks 0xFC and serves no node verbs, so it is not a compile node",
                               .unreadable = false };
 }
@@ -72,7 +72,7 @@ namespace
 /// @return The identification.
 [[nodiscard]] EndpointIdentity Foreign()
 {
-    return EndpointIdentity { .kind = RemoteKind::NotFastcacheWire,
+    return EndpointIdentity { .kind = RemoteKind::NotPaceWire,
                               .detail = "10.0.0.4:6674 is not a compile node (the server closed the connection)",
                               .unreadable = false };
 }
@@ -247,7 +247,7 @@ TEST_CASE("a compile node is watched as its cache when that is named and is stil
     CHECK(named.result->server == RemoteKind::CompileNode);
     auto const daemon = Admit({ "cache" }, {}, Daemon());
     REQUIRE(daemon.result.has_value());
-    CHECK(daemon.result->server == RemoteKind::FastcacheWireOnly);
+    CHECK(daemon.result->server == RemoteKind::PaceWireOnly);
     CHECK(named.result->interval == LiveSubjectTable[static_cast<std::size_t>(LiveSubject::Cache)].defaultInterval);
 
     auto const unnamed = Admit({}, {}, CompileNode());

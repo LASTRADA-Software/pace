@@ -206,7 +206,7 @@ TEST_CASE("A loopback exchange presents nothing and mints nothing", "[cc][ticket
     Minting fix;
     CHECK_FALSE(fix.tickets.For("127.0.0.1:6674").Configured());
     CHECK_FALSE(fix.tickets.For("[::1]:6675").Configured());
-    CHECK_FALSE(fix.tickets.For("localhost:6674").Configured()); // FASTCACHE_ADDR=localhost:6674
+    CHECK_FALSE(fix.tickets.For("localhost:6674").Configured()); // PACE_ADDR=localhost:6674
     CHECK(fix.raw.seen.empty());
     CHECK(fix.said.empty());
 }

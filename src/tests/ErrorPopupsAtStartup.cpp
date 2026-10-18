@@ -24,7 +24,7 @@
 // ## Two policies
 //
 // A test executable suppresses always. A PRODUCT binary is compiled with
-// `FASTCACHED_ERROR_POPUPS_ON_REQUEST` naming an environment variable, and suppresses only
+// `PACE_ERROR_POPUPS_ON_REQUEST` naming an environment variable, and suppresses only
 // when that variable is present: a developer running a Debug `pace-kv` by hand keeps
 // the dialog and the chance to attach a debugger at the assert, while one a test fixture
 // spawns inherits the variable every registered test carries.
@@ -50,10 +50,10 @@ namespace
 /// @return True when the suppression should be installed.
 [[nodiscard]] bool SuppressionRequested() noexcept
 {
-    #if defined(FASTCACHED_ERROR_POPUPS_ON_REQUEST)
+    #if defined(PACE_ERROR_POPUPS_ON_REQUEST)
     // A size query: a present variable answers its length plus the terminator, even when
     // empty, and an absent one answers 0.
-    return ::GetEnvironmentVariableA(FASTCACHED_ERROR_POPUPS_ON_REQUEST, nullptr, 0) != 0;
+    return ::GetEnvironmentVariableA(PACE_ERROR_POPUPS_ON_REQUEST, nullptr, 0) != 0;
     #else
     return true;
     #endif

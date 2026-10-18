@@ -75,22 +75,22 @@ namespace
     /// L2 is consulted only when L1 missed. What each row answers is "how is THIS
     /// tier doing" — is the mirror populated, is the disk tier near its budget,
     /// which tier is evicting — and the cache's own totals stay on the
-    /// unlabelled `fastcached_*` series `Snapshot()` feeds.
+    /// unlabelled `pace_*` series `Snapshot()` feeds.
     ///
     /// The hit/miss split is left out entirely rather than published with that
     /// caveat: it is the number a dashboard is most likely to sum, and a cache
     /// serving every read would come out at 62%.
     constexpr std::array TierMetricTable {
-        TierMetric { .name = "fastcached_tier_items",
+        TierMetric { .name = "pace_tier_items",
                      .help = "Live entries this tier holds.",
                      .type = MetricType::Gauge,
                      .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.itemCount); } },
-        TierMetric { .name = "fastcached_tier_bytes_used",
+        TierMetric { .name = "pace_tier_bytes_used",
                      .help = "What this tier's budget counts: stored (post-compression) value bytes for the memory "
                              "tier, the on-disk footprint (pages in use x page size) for the disk tier.",
                      .type = MetricType::Gauge,
                      .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.bytesUsed); } },
-        TierMetric { .name = "fastcached_tier_bytes_limit",
+        TierMetric { .name = "pace_tier_bytes_limit",
                      .help = "This tier's configured byte budget (0 = unbounded).",
                      .type = MetricType::Gauge,
                      .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.bytesLimit); } },
@@ -98,14 +98,14 @@ namespace
         // the footprint; the file exceeds it by its free pages -- the end of the file is cut
         // at a commit, a page inside it only leaves once later writes reuse it -- so an
         // operator asking "what is this costing my disk" reads this one.
-        TierMetric { .name = "fastcached_tier_file_bytes",
+        TierMetric { .name = "pace_tier_file_bytes",
                      .help = "Length of the file backing this tier, free pages included. Exceeds "
-                             "fastcached_tier_bytes_used by those free pages until a commit cuts them off the end "
+                             "pace_tier_bytes_used by those free pages until a commit cuts them off the end "
                              "or later writes reuse them; never below it.",
                      .type = MetricType::Gauge,
                      .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.fileBytes); },
                      .fileTiersOnly = true },
-        TierMetric { .name = "fastcached_tier_evictions_total",
+        TierMetric { .name = "pace_tier_evictions_total",
                      .help = "Entries this tier dropped to stay within its budget.",
                      .type = MetricType::Counter,
                      .project = [](StorageStats const& s) noexcept { return s.evictions; } },
@@ -117,9 +117,9 @@ namespace
         // A gauge, and NOT comparable with `bytes_limit` beside it: that budget is
         // denominated in whatever bounds the tier, which for a disk tier is bytes on
         // a filesystem, while this is always resident memory.
-        TierMetric { .name = "fastcached_tier_index_bytes",
+        TierMetric { .name = "pace_tier_index_bytes",
                      .help = "Resident memory this tier spends on its key index. Always RAM, even for a disk tier, "
-                             "so it is not comparable with fastcached_tier_bytes_limit.",
+                             "so it is not comparable with pace_tier_bytes_limit.",
                      .type = MetricType::Gauge,
                      .project = [](StorageStats const& s) noexcept { return static_cast<std::uint64_t>(s.indexBytes); } },
     };
@@ -137,32 +137,32 @@ static void AppendHostMetrics(std::string& out, HostCapacity const& host)
     using enum MetricType;
 
     auto const table = std::array {
-        Metric { .name = "fastcache_node_logical_cores",
+        Metric { .name = "pace_node_logical_cores",
                  .help = "Schedulable hardware threads on this node.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.logicalCores) },
-        Metric { .name = "fastcache_node_memory_total_bytes",
+        Metric { .name = "pace_node_memory_total_bytes",
                  .help = "Physical memory, or the container ceiling when that binds first.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.totalMemoryBytes) },
-        Metric { .name = "fastcache_node_disk_capacity_bytes",
+        Metric { .name = "pace_node_disk_capacity_bytes",
                  .help = "Size of the filesystem this node compiles on.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.diskCapacityBytes) },
-        Metric { .name = "fastcache_node_disk_free_bytes",
+        Metric { .name = "pace_node_disk_free_bytes",
                  .help = "Space on that filesystem an unprivileged process may still write.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.diskFreeBytes) },
-        Metric { .name = "fastcache_node_slots_configured",
+        Metric { .name = "pace_node_slots_configured",
                  .help = "Concurrent compiles this node advertises to the scheduler.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.configuredSlots) },
-        Metric { .name = "fastcache_node_slots_busy",
+        Metric { .name = "pace_node_slots_busy",
                  .help = "Compiles running right now. Sampled, not derived from the job "
                          "counters, which are incremented separately.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.busySlots) },
-        Metric { .name = "fastcache_node_cordoned",
+        Metric { .name = "pace_node_cordoned",
                  .help = "1 while an operator has cordoned this node's worker: it takes no new "
                          "compile and finishes the running ones. 0 otherwise; a restart clears it.",
                  .type = Gauge,
@@ -189,21 +189,21 @@ static void AppendHostLoadMetrics(std::string& out, HostLoadReading const& load)
     if (load.cpu.has_value())
     {
         Append(out,
-               Metric { .name = "fastcache_node_cpu_busy_ticks_total",
+               Metric { .name = "pace_node_cpu_busy_ticks_total",
                         .help = "Host-wide CPU ticks spent doing anything but idling, compiles included. Platform "
-                                "ticks: read only as rate() of this over rate() of fastcache_node_cpu_ticks_total.",
+                                "ticks: read only as rate() of this over rate() of pace_node_cpu_ticks_total.",
                         .type = MetricType::Counter,
                         .value = load.cpu->busy });
         Append(out,
-               Metric { .name = "fastcache_node_cpu_ticks_total",
+               Metric { .name = "pace_node_cpu_ticks_total",
                         .help = "Host-wide CPU ticks accounted for at all; the denominator of "
-                                "fastcache_node_cpu_busy_ticks_total.",
+                                "pace_node_cpu_busy_ticks_total.",
                         .type = MetricType::Counter,
                         .value = load.cpu->total });
     }
     if (load.availableMemoryBytes.has_value())
         Append(out,
-               Metric { .name = "fastcache_node_memory_available_bytes",
+               Metric { .name = "pace_node_memory_available_bytes",
                         .help = "Memory a new process could actually obtain: available, not free, so the page cache "
                                 "the kernel hands back on demand counts.",
                         .type = MetricType::Gauge,
@@ -224,100 +224,100 @@ static void AppendStorageMetrics(std::string& out, StorageStats const& stats)
 
     auto const table = std::array {
         Metric {
-            .name = "fastcached_cmd_get_total", .help = "GET commands processed.", .type = Counter, .value = stats.cmdGet },
-        Metric { .name = "fastcached_cmd_set_total",
+            .name = "pace_cmd_get_total", .help = "GET commands processed.", .type = Counter, .value = stats.cmdGet },
+        Metric { .name = "pace_cmd_set_total",
                  .help = "SET-family commands processed.",
                  .type = Counter,
                  .value = stats.cmdSet },
-        Metric { .name = "fastcached_cmd_touch_total",
+        Metric { .name = "pace_cmd_touch_total",
                  .help = "TOUCH commands processed.",
                  .type = Counter,
                  .value = stats.cmdTouch },
-        Metric { .name = "fastcached_cmd_flush_total",
+        Metric { .name = "pace_cmd_flush_total",
                  .help = "FLUSH commands processed.",
                  .type = Counter,
                  .value = stats.cmdFlush },
-        Metric { .name = "fastcached_get_hits_total",
+        Metric { .name = "pace_get_hits_total",
                  .help = "GET requests that found a live entry.",
                  .type = Counter,
                  .value = stats.getHits },
-        Metric { .name = "fastcached_get_misses_total",
+        Metric { .name = "pace_get_misses_total",
                  .help = "GET requests that found nothing.",
                  .type = Counter,
                  .value = stats.getMisses },
-        Metric { .name = "fastcached_delete_hits_total",
+        Metric { .name = "pace_delete_hits_total",
                  .help = "DELETE requests that removed an entry.",
                  .type = Counter,
                  .value = stats.deleteHits },
-        Metric { .name = "fastcached_delete_misses_total",
+        Metric { .name = "pace_delete_misses_total",
                  .help = "DELETE requests with no matching key.",
                  .type = Counter,
                  .value = stats.deleteMisses },
-        Metric { .name = "fastcached_incr_hits_total",
+        Metric { .name = "pace_incr_hits_total",
                  .help = "INCR requests against a present key.",
                  .type = Counter,
                  .value = stats.incrHits },
-        Metric { .name = "fastcached_incr_misses_total",
+        Metric { .name = "pace_incr_misses_total",
                  .help = "INCR requests with no matching key.",
                  .type = Counter,
                  .value = stats.incrMisses },
-        Metric { .name = "fastcached_decr_hits_total",
+        Metric { .name = "pace_decr_hits_total",
                  .help = "DECR requests against a present key.",
                  .type = Counter,
                  .value = stats.decrHits },
-        Metric { .name = "fastcached_decr_misses_total",
+        Metric { .name = "pace_decr_misses_total",
                  .help = "DECR requests with no matching key.",
                  .type = Counter,
                  .value = stats.decrMisses },
-        Metric { .name = "fastcached_touch_hits_total",
+        Metric { .name = "pace_touch_hits_total",
                  .help = "TOUCH requests against a present key.",
                  .type = Counter,
                  .value = stats.touchHits },
-        Metric { .name = "fastcached_touch_misses_total",
+        Metric { .name = "pace_touch_misses_total",
                  .help = "TOUCH requests with no matching key.",
                  .type = Counter,
                  .value = stats.touchMisses },
-        Metric { .name = "fastcached_cas_hits_total",
+        Metric { .name = "pace_cas_hits_total",
                  .help = "CAS requests that matched and stored.",
                  .type = Counter,
                  .value = stats.casHits },
-        Metric { .name = "fastcached_cas_misses_total",
+        Metric { .name = "pace_cas_misses_total",
                  .help = "CAS requests with no matching key.",
                  .type = Counter,
                  .value = stats.casMisses },
-        Metric { .name = "fastcached_cas_badval_total",
+        Metric { .name = "pace_cas_badval_total",
                  .help = "CAS requests rejected on a token mismatch.",
                  .type = Counter,
                  .value = stats.casBadval },
-        Metric { .name = "fastcached_write_errors_total",
+        Metric { .name = "pace_write_errors_total",
                  .help = "Value writes that failed to persist (disk full, I/O error, corruption, read-only).",
                  .type = Counter,
                  .value = stats.writeErrors },
-        Metric { .name = "fastcached_evictions_total",
+        Metric { .name = "pace_evictions_total",
                  .help = "Entries evicted to stay within the memory budget.",
                  .type = Counter,
                  .value = stats.evictions },
-        Metric { .name = "fastcached_evicted_unfetched_total",
+        Metric { .name = "pace_evicted_unfetched_total",
                  .help = "Entries evicted before ever being read.",
                  .type = Counter,
                  .value = stats.evictedUnfetched },
-        Metric { .name = "fastcached_expired_unfetched_total",
+        Metric { .name = "pace_expired_unfetched_total",
                  .help = "Entries that expired before ever being read.",
                  .type = Counter,
                  .value = stats.expiredUnfetched },
-        Metric { .name = "fastcached_expirations_total",
+        Metric { .name = "pace_expirations_total",
                  .help = "Entries removed because their TTL lapsed, by a lookup, a write or the expiry cycle.",
                  .type = Counter,
                  .value = stats.expirations },
-        Metric { .name = "fastcached_items",
+        Metric { .name = "pace_items",
                  .help = "Live entries currently stored.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(stats.itemCount) },
-        Metric { .name = "fastcached_bytes_used",
+        Metric { .name = "pace_bytes_used",
                  .help = "Bytes currently stored.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(stats.bytesUsed) },
-        Metric { .name = "fastcached_bytes_limit",
+        Metric { .name = "pace_bytes_limit",
                  .help = "Configured byte budget (0 = unbounded).",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(stats.bytesLimit) },
@@ -334,7 +334,7 @@ static void AppendStorageMetrics(std::string& out, StorageStats const& stats)
 ///
 /// A tier the cache does not have contributes no line at all — not a zero. That
 /// is the rule `MetricsSnapshot::storage` is optional for, one level down: a
-/// dashboard reads `fastcached_tier_items{tier="disk"} 0` as a disk tier standing
+/// dashboard reads `pace_tier_items{tier="disk"} 0` as a disk tier standing
 /// empty, which is a different claim from a node that has no disk tier.
 /// @param out Destination.
 /// @param tiers The cache's per-tier statistics.
@@ -386,7 +386,7 @@ static void AppendConsensusMetrics(std::string& out, ConsensusStatus const& stat
     // below, which a scraper sums by -- a second gauge would be a second spelling of it.
     auto const& configuration = status.configuration;
     Append(out,
-           Metric { .name = "fastcache_node_consensus_members",
+           Metric { .name = "pace_node_consensus_members",
                     .help = "Members in the configuration this node's consensus operates under, voters and learners "
                             "alike. 0 is a reading, not an absence: the node holds no configuration, so it campaigns "
                             "in no election and grants no vote. That is the ordinary waiting state of a node that "
@@ -397,14 +397,14 @@ static void AppendConsensusMetrics(std::string& out, ConsensusStatus const& stat
                     .value = static_cast<std::uint64_t>(configuration.voters.size() + configuration.learners.size()) });
 
     Append(out,
-           Metric { .name = "fastcache_node_consensus_term",
+           Metric { .name = "pace_node_consensus_term",
                     .help = "The election term this node is operating in. A gauge rather than a counter: wiping the "
                             "state directory legitimately resets it, and a counter that resets renders as a spike.",
                     .type = Gauge,
                     .value = status.term.value });
 
     Append(out,
-           Metric { .name = "fastcache_node_consensus_commit_index",
+           Metric { .name = "pace_node_consensus_commit_index",
                     .help = "How far this node's replicated log is committed. Far behind its peers means it is being "
                             "caught up rather than participating.",
                     .type = Gauge,
@@ -418,11 +418,11 @@ static void AppendConsensusMetrics(std::string& out, ConsensusStatus const& stat
     // `# HELP` and `# TYPE` once, with the samples following: repeating them per
     // label value is what a parser rejects.
     out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n",
-                       "fastcache_node_consensus_role",
+                       "pace_node_consensus_role",
                        "What this node is playing in its cluster. Exactly one sample is 1.",
                        TypeName(Gauge));
     for (auto const& row: Consensus::RoleTable)
-        out += std::format("fastcache_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == status.role ? 1 : 0);
+        out += std::format("pace_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == status.role ? 1 : 0);
 
     // One sample per member, carrying its id and its seat. The SET rather than only its
     // size, because "which members does this node count" is the question an operator
@@ -438,13 +438,13 @@ static void AppendConsensusMetrics(std::string& out, ConsensusStatus const& stat
     if (!Consensus::Membership::IsEmpty(configuration))
     {
         out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n",
-                           "fastcache_node_consensus_member",
+                           "pace_node_consensus_member",
                            "One sample per member of the configuration this node operates under. seat is voter or "
                            "learner; only a voter is counted by a quorum.",
                            TypeName(Gauge));
         for (auto const* const set: { &configuration.voters, &configuration.learners })
             for (auto const& member: *set)
-                out += std::format("fastcache_node_consensus_member{{member=\"{}\",seat=\"{}\"}} 1\n",
+                out += std::format("pace_node_consensus_member{{member=\"{}\",seat=\"{}\"}} 1\n",
                                    member,
                                    Consensus::TraitsOf(Consensus::Membership::StandingOf(configuration, member)).name);
     }
@@ -459,11 +459,11 @@ static void AppendConsensusMetrics(std::string& out, ConsensusStatus const& stat
     if (status.knownLeader.has_value())
     {
         out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n",
-                           "fastcache_node_consensus_leader",
+                           "pace_node_consensus_leader",
                            "The member this node believes leads. Absent when it believes none does, which is what an "
                            "election in progress looks like.",
                            TypeName(Gauge));
-        out += std::format("fastcache_node_consensus_leader{{leader=\"{}\"}} 1\n", *status.knownLeader);
+        out += std::format("pace_node_consensus_leader{{leader=\"{}\"}} 1\n", *status.knownLeader);
     }
 }
 
@@ -542,7 +542,7 @@ std::string RenderPrometheus(StatsReading const& reading)
     // has an answer says anything: the daemon is the shared cache and has none.
     if (snapshot.upstreamConfigured.has_value())
         Append(out,
-               Metric { .name = "fastcache_node_upstream_configured",
+               Metric { .name = "pace_node_upstream_configured",
                         .help = "1 when this node has a shared cache to read through to, 0 when it does not. Read "
                                 "it beside the upstream store counters: those are cumulative, so a node with no "
                                 "upstream and one that has stored nothing yet both report zero.",
@@ -637,7 +637,7 @@ std::string RenderPrometheus(StatsReading const& reading)
     // something. It is NOT an alert condition: unlike a skew, a nonzero value here is the
     // healthy state of any binary that does not serve every surface.
     Append(out,
-           Metric { .name = "fastcached_metrics_surface_absent",
+           Metric { .name = "pace_metrics_surface_absent",
                     .help = "Catalogue rows belonging to surfaces this process does not serve, so they have "
                             "no writer here and are omitted rather than rendered as zero. Not a fault: a "
                             "nonzero value is the healthy state of a binary that serves only some surfaces.",
@@ -645,7 +645,7 @@ std::string RenderPrometheus(StatsReading const& reading)
                     .value = omittedBySurface });
 
     Append(out,
-           Metric { .name = "fastcached_metrics_catalogue_skew",
+           Metric { .name = "pace_metrics_catalogue_skew",
                     .help = "Catalogue rows this build's metrics sink has no slot for; nonzero means the "
                             "catalogue and the sink were compiled against different versions of the counter enum.",
                     .type = MetricType::Gauge,
@@ -661,7 +661,7 @@ std::string RenderPrometheus(StatsReading const& reading)
     // Uptime is neither the cache's nor the sink's: every process that serves
     // this endpoint has one, and a worker's is as useful as a daemon's.
     Append(out,
-           Metric { .name = "fastcached_uptime_seconds",
+           Metric { .name = "pace_uptime_seconds",
                     .help = "Seconds since the process started.",
                     .type = MetricType::Gauge,
                     .value = static_cast<std::uint64_t>(snapshot.uptime.value.count()) });

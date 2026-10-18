@@ -152,7 +152,7 @@ namespace
                  .diagnostic = std::move(diagnostic) };
     }
 
-    /// The `FASTCACHE_*` variables, in the order `--help` documents them.
+    /// The `PACE_*` variables, in the order `--help` documents them.
     ///
     /// One row per variable, each naming itself through `EnvName` so it cannot
     /// drift from what the launcher actually reads. The prose below is what a
@@ -192,7 +192,7 @@ namespace
                                 "default: a verified hit costs a whole compile.\n"
                                 "On a mismatch the FRESHLY compiled object is\n"
                                 "used and the key is named on stderr, whether or\n"
-                                "not FASTCACHE_VERBOSE is set -- a wrong object\n"
+                                "not PACE_VERBOSE is set -- a wrong object\n"
                                 "under a correct key is the one thing nobody\n"
                                 "should have to have opted in to hearing about.\n"
                                 "Which hits are sampled is decided by hashing the\n"
@@ -210,7 +210,7 @@ namespace
                                 "deadlines is a duration: a whole number and one of\n"
                                 "{duration-units}. A bare number is not one, and is ignored.\n"
                                 "\n"
-                                "Separate from FASTCACHE_TIMEOUT because they bound\n"
+                                "Separate from PACE_TIMEOUT because they bound\n"
                                 "different things and neither implies the other. This one is\n"
                                 "short on purpose: a cache that has not accepted within a\n"
                                 "second is one the build is better off without, and a name\n"
@@ -231,12 +231,12 @@ namespace
                                 "mode makes a separate manifest round-trip, so one compile\n"
                                 "against a wedged daemon can wait up to twice this before\n"
                                 "falling back. It does NOT bound a remote compile -- see\n"
-                                "FASTCACHE_DISPATCH_TIMEOUT." },
+                                "PACE_DISPATCH_TIMEOUT." },
         EnvVarSpec { .name = EnvName::DispatchTimeout,
                      .summary = "Deadline for one whole COMPILE exchange with a worker\n"
                                 "(default {dispatch-timeout}; 0s removes the bound).\n"
                                 "\n"
-                                "Separate from FASTCACHE_TIMEOUT, and far larger, because\n"
+                                "Separate from PACE_TIMEOUT, and far larger, because\n"
                                 "the two bound different shapes of conversation. A worker\n"
                                 "writes nothing until the compiler has finished, so the\n"
                                 "client waits out the entire remote compile in one read:\n"
@@ -270,7 +270,7 @@ namespace
                                 "A worker writes a five-byte progress frame every few\n"
                                 "seconds while it is compiling, so what this bounds is not\n"
                                 "how long the compile takes -- that is\n"
-                                "FASTCACHE_DISPATCH_TIMEOUT, and it stays minutes long --\n"
+                                "PACE_DISPATCH_TIMEOUT, and it stays minutes long --\n"
                                 "but how long the worker may say nothing at all. That is the\n"
                                 "one failure TCP keepalive cannot see: a machine whose\n"
                                 "kernel answers every probe while the worker process makes\n"
@@ -279,7 +279,7 @@ namespace
                                 "\n"
                                 "On expiry the launcher compiles locally and hands the lease\n"
                                 "back, exactly as it does for the total -- and its fall-back\n"
-                                "line, with FASTCACHE_VERBOSE, says which of the two ran out,\n"
+                                "line, with PACE_VERBOSE, says which of the two ran out,\n"
                                 "because 'that compile was slow' and 'that worker went quiet'\n"
                                 "are fixed in different places.\n"
                                 "\n"
@@ -308,7 +308,7 @@ namespace
                                 "build. A worker that reports a FAILED compile is retried\n"
                                 "locally before its diagnostics are believed." },
         EnvVarSpec { .name = EnvName::Token,
-                     .summary = "The password for a cache at FASTCACHE_ADDR started with\n"
+                     .summary = "The password for a cache at PACE_ADDR started with\n"
                                 "--requirepass, presented to that cache alone. A compile\n"
                                 "node needs none: this machine's node mints a machine ticket\n"
                                 "for every exchange with another machine, and a token sent\n"
@@ -317,7 +317,7 @@ namespace
                                 "no round trip: it is pipelined ahead of the real command\n"
                                 "rather than awaited." },
         EnvVarSpec { .name = EnvName::User,
-                     .summary = "Username to accompany FASTCACHE_TOKEN. Unset (the usual\n"
+                     .summary = "Username to accompany PACE_TOKEN. Unset (the usual\n"
                                 "case) authenticates against the secret alone, which is what\n"
                                 "--requirepass configures. Ignored without a token." },
         EnvVarSpec { .name = EnvName::MsvcDepsPrefix,
@@ -373,7 +373,7 @@ namespace
     constexpr std::string_view RequiredVariablesNote =
         "ADDR, SOURCE_DIR and BINARY_DIR must ALL be set to cache; any missing one makes\n"
         "the launcher run the real compiler and report\n"
-        "\"missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR\" under FASTCACHE_VERBOSE.";
+        "\"missing PACE_ADDR/SOURCE_DIR/BINARY_DIR\" under PACE_VERBOSE.";
 
     /// The promise the whole launcher is built around, and the limit of it.
     ///

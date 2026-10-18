@@ -8,18 +8,18 @@
 # postinstall-runtime.sh.in for why).
 set -u
 
-PREFIX="/@FASTCACHED_MACOS_PREFIX@"
-LABEL="@FASTCACHED_MACOS_BUNDLE_ID@"
-ACCOUNT="@FASTCACHED_MACOS_SERVICE_ACCOUNT@"
+PREFIX="/@PACE_MACOS_PREFIX@"
+LABEL="@PACE_MACOS_BUNDLE_ID@"
+ACCOUNT="@PACE_MACOS_SERVICE_ACCOUNT@"
 
-@FASTCACHED_MACOS_SEED_CONFIG@
+@PACE_MACOS_SEED_CONFIG@
 
-@FASTCACHED_MACOS_CREATE_ACCOUNT@
+@PACE_MACOS_CREATE_ACCOUNT@
 
 # macOS has no sysusers.d, so the account that packaging/linux/pace-kv.sysusers
 # declares in one line has to be built by hand -- see the shared fragment above,
 # which is also what creates the worker's account from the Runtime component.
-fastcached_create_account "$ACCOUNT" "pace-kv daemon"
+pace_create_account "$ACCOUNT" "pace-kv daemon"
 
 # The daemon's cache, and ONLY that. This used to be `chown -R ${PREFIX}/var`,
 # which also swept up ${PREFIX}/var/log -- where every system-scope service now
@@ -36,8 +36,8 @@ fastcached_create_account "$ACCOUNT" "pace-kv daemon"
 # packaged registration passes only --config: storage_path lives in the YAML, so
 # the spec has no ownedDirectories to hand over.
 mkdir -p "${PREFIX}/var" "${PREFIX}/var/log" "${PREFIX}/var/cache" || true
-if [ -n "${FASTCACHED_ACCOUNT_UID:-}" ] && [ -n "${FASTCACHED_ACCOUNT_GID:-}" ]; then
-    /usr/sbin/chown -R "${FASTCACHED_ACCOUNT_UID}:${FASTCACHED_ACCOUNT_GID}" "${PREFIX}/var/cache" || true
+if [ -n "${PACE_ACCOUNT_UID:-}" ] && [ -n "${PACE_ACCOUNT_GID:-}" ]; then
+    /usr/sbin/chown -R "${PACE_ACCOUNT_UID}:${PACE_ACCOUNT_GID}" "${PREFIX}/var/cache" || true
 fi
 
 # The daemon drops to ${ACCOUNT} before it opens its config, so the file has to
@@ -54,7 +54,7 @@ fi
 # state --install-service refuses -- mode 0640, group wheel, unreadable by the
 # daemon. Leaving the mode alone degrades to the status quo ante, which is
 # merely too permissive rather than broken, and says so.
-if [ -n "${FASTCACHED_ACCOUNT_GID:-}" ] && /usr/sbin/chown "0:${FASTCACHED_ACCOUNT_GID}" "$CONFIG" 2>/dev/null; then
+if [ -n "${PACE_ACCOUNT_GID:-}" ] && /usr/sbin/chown "0:${PACE_ACCOUNT_GID}" "$CONFIG" 2>/dev/null; then
     /bin/chmod 0640 "$CONFIG" 2>/dev/null || true
 else
     echo "pace-kv: could not give '${ACCOUNT}' ownership of ${CONFIG};" \

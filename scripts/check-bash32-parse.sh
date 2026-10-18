@@ -57,7 +57,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 selfTest=0
 # Only for the self-test, which must exercise the version gate on a host whose bash is
 # the wrong one. Never set by the real invocation.
-allowModernBash="${FASTCACHED_PARSE_ALLOW_MODERN_BASH:-0}"
+allowModernBash="${PACE_PARSE_ALLOW_MODERN_BASH:-0}"
 
 while [ $# -gt 0 ]; do
     case "${1:-}" in
@@ -220,7 +220,7 @@ RunSelfTest() {
     mkdir -p "$tmp/a/scripts"
     PlantRoots "$tmp/a"
     printf '%s\n' '#!/usr/bin/env bash' 'echo hello' > "$tmp/a/scripts/fine.sh"
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/a" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/a" 2>&1) && rc=0 || rc=$?
     if [ "$rc" -eq 0 ]; then
         Ok "case 1: a tree whose scripts all parse is accepted"
     else
@@ -234,7 +234,7 @@ RunSelfTest() {
     mkdir -p "$tmp/b/scripts"
     PlantRoots "$tmp/b"
     printf '%s\n' '#!/usr/bin/env bash' 'if [ 1 -eq 1 ]; then' 'echo unterminated' > "$tmp/b/scripts/broken.sh"
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/b" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/b" 2>&1) && rc=0 || rc=$?
     case "$out" in
         *"does not PARSE"*) : ;;
         *) Bad "case 2: an unparseable script was not named (rc=$rc)" "$out" ;;
@@ -266,7 +266,7 @@ RunSelfTest() {
         printf '%s\n' ')"'
         printf '%s\n' 'echo "$x"'
     } > "$tmp/c/scripts/apostrophe.sh"
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/c" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/c" 2>&1) && rc=0 || rc=$?
     if [ "$rc" -eq 0 ]; then
         Ok "case 4: #1096's construct parses on THIS bash -- which is why the gate below exists"
     else
@@ -293,7 +293,7 @@ RunSelfTest() {
     case "$out" in *) : ;; esac
     mkdir -p "$tmp/d/scripts"
     PlantRoots "$tmp/d"
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/d" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/d" 2>&1) && rc=0 || rc=$?
     case "$out" in
         *"the walk is"*) : ;;
         *) Bad "case 6: an empty file set was not refused (rc=$rc)" "$out" ;;
@@ -315,7 +315,7 @@ RunSelfTest() {
             ( cd "$tree" && scratch_git init -q . && scratch_git add -A ) >/dev/null 2>&1 \
                 || Bad "case 8: git could not stage the planted tree, so the git mode was not exercised"
         fi
-        out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tree" 2>&1) && rc=0 || rc=$?
+        out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tree" 2>&1) && rc=0 || rc=$?
         [ "$rc" -eq 0 ] || Bad "case $mode: a tree whose only unparseable script is third-party was refused (rc=$rc)" "$out"
         case "$out" in
             *"file set from $mode"*) : ;;
@@ -333,7 +333,7 @@ RunSelfTest() {
     mkdir -p "$tmp/noroots/scripts/lib"
     printf '%s\n' '#!/usr/bin/env bash' 'echo hello' > "$tmp/noroots/scripts/fine.sh"
     printf '%s\n' '# no root at all' > "$tmp/noroots/scripts/lib/third-party-roots.txt"
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/noroots" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/noroots" 2>&1) && rc=0 || rc=$?
     [ "$rc" -ne 0 ] || Bad "case 9: a roots file naming no root was accepted" "$out"
     case "$out" in
         *"the third-party roots of"*"could not be read"*) : ;;
@@ -359,7 +359,7 @@ RunSelfTest() {
     ( cd "$tmp/missing" && scratch_git init -q . && scratch_git add -A ) >/dev/null 2>&1 \
         || Bad "case 10: git could not stage the tree, so the index-names-it case was not built"
     rm -f "$tmp/missing/scripts/gone.sh"
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/missing" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/missing" 2>&1) && rc=0 || rc=$?
     [ "$rc" -ne 0 ] || Bad "case 10: a file the index names and the tree does not have was reported clean" "$out"
     case "$out" in
         *"UNREADABLE scripts/gone.sh"*) : ;;
@@ -381,7 +381,7 @@ RunSelfTest() {
     # that always refuses: an ordinary tree reports a zero in that same third column.
     # The column has to be PRESENT on a clean run, or nobody reading a green ever learns
     # it exists and a later regression to `|| continue` is invisible again.
-    out=$(FASTCACHED_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/a" 2>&1) && rc=0 || rc=$?
+    out=$(PACE_PARSE_ALLOW_MODERN_BASH=1 bash "$0" --root "$tmp/a" 2>&1) && rc=0 || rc=$?
     [ "$rc" -eq 0 ] || Bad "case 11: the clean tree was refused (rc=$rc)" "$out"
     case "$out" in
         *"1 script(s) parsed, 0 unparseable, 0 unreadable"*) : ;;

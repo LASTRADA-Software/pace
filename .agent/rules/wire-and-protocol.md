@@ -615,7 +615,7 @@ Every rule below has already been a bug.
   with no credential to check — and treats every *other* refusal as being about the
   credential, returning it in place of the answer to the request the caller actually
   sent. So a surface that answers AUTH with `DispatchNotPermitted` gives every
-  `FASTCACHE_TOKEN`-configured launcher a permanent 0% hit rate, reported as
+  `PACE_TOKEN`-configured launcher a permanent 0% hit rate, reported as
   `rejected`, which is indistinguishable from a cache that is merely cold. The
   launcher's own comment had already recorded this for the *daemon* — a
   pre-AUTH `pace-kv` answers `unknown-opcode` and serves the pipelined command
@@ -674,7 +674,7 @@ Every rule below has already been a bug.
   **The code itself is ONE named constant -- `Wire::UnimplementedVerb` -- that every
   surface's table and the client's tolerance spell.** #283 fixed the cache tier
   because that is what its acceptance named; the scheduler and compile ports kept
-  answering `DispatchNotPermitted` for another two weeks, so a `FASTCACHE_TOKEN`
+  answering `DispatchNotPermitted` for another two weeks, so a `PACE_TOKEN`
   client had every `LEASE` declined behind a green build and a `--requirepass` worker
   never joined the fleet at all (#340). Three tables each naming
   `ErrorCode::UnknownOpcode` would have fixed those two and left the *next* surface
@@ -774,7 +774,7 @@ Every rule below has already been a bug.
   that was `inet_pton(AF_INET)`-only (so a hostname could never work), unbounded,
   unprotected against SIGPIPE while STOREing whole object files, and **did not
   compile on POSIX at all** (issue #84). The third was invisible because
-  `FASTCACHED_BUILD_TESTCLIENT` defaults OFF and no job turned it on, so nothing
+  `PACE_BUILD_TESTCLIENT` defaults OFF and no job turned it on, so nothing
   ever discovered that two of its methods named functions that did not exist
   there. `Net/TcpClient` is now the only one. Consequences that are each
   load-bearing:
@@ -2438,7 +2438,7 @@ consequence rather than a precaution.
 - **The reclaim ceiling lives below `ReclaimLog::DefaultCapacity`, and is
   `static_assert`ed against it.** A sweep permitted to reclaim more keys at once
   than the log holds discards the `expired` events it runs to produce, and counts
-  them in `fastcached_keyspace_reclaim_events_dropped_total`. The failure would be
+  them in `pace_keyspace_reclaim_events_dropped_total`. The failure would be
   a metric nobody reads, not a symptom.
 - **A bounded sweep must resume, not restart.** Each tier keeps a cursor and
   `ShardedStorage` rotates its starting shard, because a budget smaller than the

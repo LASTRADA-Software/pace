@@ -70,9 +70,9 @@ lapses.** Everything below follows from that.
   off and leaves expiry purely access-driven, which is what the daemon did
   before it had one.
 
-  `fastcached_expiry_cycles_total` is flat when the cycle is disabled or
+  `pace_expiry_cycles_total` is flat when the cycle is disabled or
   wedged — which otherwise looks exactly like nothing having expired — and
-  `fastcached_expiry_keys_reclaimed_total` counts what it found.
+  `pace_expiry_keys_reclaimed_total` counts what it found.
 
 - **A plain `SET` over a lapsed key does not fire `expired`.** It overwrites
   the record without looking up the old one, so nothing is reclaimed — you
@@ -100,7 +100,7 @@ lapses.** Everything below follows from that.
 - When one call reclaims more keys at once than the notification buffer
   holds — a `maxmemory` shrink on a large cache is the realistic case —
   the surplus events are dropped and counted in
-  `fastcached_keyspace_reclaim_events_dropped_total`. A non-zero value
+  `pace_keyspace_reclaim_events_dropped_total`. A non-zero value
   there is the difference between "nothing expired" and "you were not told".
 
 ## Storage model differences from memcached
@@ -127,7 +127,7 @@ lapses.** Everything below follows from that.
   snapshot and, when `--metrics` is set, a Prometheus `/metrics` endpoint
   (plus a `/healthz` liveness probe) served on a dedicated HTTP port.
 - TLS termination is opt-in and only present in builds compiled with
-  `-DFASTCACHED_ENABLE_TLS=ON` (links OpenSSL). Enable at runtime with
+  `-DPACE_ENABLE_TLS=ON` (links OpenSSL). Enable at runtime with
   `--tls --tls-cert <pem> --tls-key <pem>`. The default build links no
   OpenSSL and `--tls` then exits with a clear error; run behind a
   TLS-terminating proxy in that case. Client-certificate (mutual TLS)

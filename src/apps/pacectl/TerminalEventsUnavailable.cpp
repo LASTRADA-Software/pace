@@ -5,7 +5,7 @@ namespace Pace::Cli
 {
 
 /// @file TerminalEventsUnavailable.cpp
-/// The terminal contract for a build without core-cpp's terminal UI (`FASTCACHED_BUILD_TUI=OFF`).
+/// The terminal contract for a build without core-cpp's terminal UI (`PACE_BUILD_TUI=OFF`).
 ///
 /// It refuses rather than yielding an empty stream, for the header's reason: no events would read
 /// as a quiet operator, and the fact here is that this binary cannot open a terminal.
@@ -23,7 +23,7 @@ UnstartedTerminal::~UnstartedTerminal() = default;
 
 namespace
 {
-    constexpr auto Unavailable = "this pacectl was built without the terminal UI (FASTCACHED_BUILD_TUI=OFF)";
+    constexpr auto Unavailable = "this pacectl was built without the terminal UI (PACE_BUILD_TUI=OFF)";
 } // namespace
 
 std::expected<std::unique_ptr<UnstartedTerminal>, std::string> MakeTerminalEvents(core::async::IExecutor* /*pool*/,

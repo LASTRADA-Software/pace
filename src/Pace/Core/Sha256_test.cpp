@@ -315,9 +315,9 @@ TEST_CASE("A run that states its SHA-256 engine runs that engine", "[core][sha25
     // with and without SHA-NI, so an x86 leg cannot.
     // Unset and set-but-empty are one answer here -- no engine stated -- so they fold into
     // one string before anything reads it.
-    auto const expected = ReadEnvironmentVariable("FASTCACHED_EXPECT_SHA256_ENGINE").value_or(std::string {});
+    auto const expected = ReadEnvironmentVariable("PACE_EXPECT_SHA256_ENGINE").value_or(std::string {});
     if (expected.empty())
-        SKIP("this run states no expected SHA-256 engine in FASTCACHED_EXPECT_SHA256_ENGINE");
+        SKIP("this run states no expected SHA-256 engine in PACE_EXPECT_SHA256_ENGINE");
 
     // The stated name must be one an engine answers to, or a typo in a workflow would fail
     // here as a WRONG engine and send somebody to debug the detection.

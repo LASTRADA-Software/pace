@@ -73,7 +73,7 @@ constexpr auto Samples = std::to_array<FlagSample>({
     { .flag = "--compression-min-bytes", .value = "128" },
     // `none` on every codec row, because this table asks only whether the value
     // PARSES and `Identity` is the one codec available in every build --
-    // `ParseCompression` refuses `zstd` where FASTCACHED_ENABLE_COMPRESSION is off.
+    // `ParseCompression` refuses `zstd` where PACE_ENABLE_COMPRESSION is off.
     { .flag = "--memory-compression", .value = "none" },
     { .flag = "--memory-compression-level", .value = "5" },
     { .flag = "--memory-compression-min-bytes", .value = "128" },

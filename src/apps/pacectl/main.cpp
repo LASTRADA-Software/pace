@@ -70,7 +70,7 @@ constexpr std::string_view ProgramName = "pacectl";
 ///
 /// The path is not provenance-gated: a secret reached BY PATH is the file's to protect,
 /// not the command line's, which is why `--token-file` is preferable to
-/// `$FASTCACHE_TOKEN` -- an environment variable is visible to anything that can read
+/// `$PACE_TOKEN` -- an environment variable is visible to anything that can read
 /// this process's environment.
 /// @param path The file.
 /// @return The secret, or the reason it could not be read.
@@ -593,7 +593,7 @@ int main(int argc, char* argv[])
             return ExitCodeOf(Outcome::Affirmative);
         }
         case Action::ShowVersion:
-            std::cout << ProgramName << ' ' << FASTCACHE_CLI_VERSION << '\n';
+            std::cout << ProgramName << ' ' << PACE_CLI_VERSION << '\n';
             return ExitCodeOf(Outcome::Affirmative);
         case Action::UsageError:
             return ReportUsageError(command.diagnostic);

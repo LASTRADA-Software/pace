@@ -137,7 +137,7 @@ ResolvedMarker ResolveIncludeNoteMarker(std::string_view operatorNamed, IMarkerD
     // English marker in place, so nothing about the VALUE distinguishes them -- which is
     // why the distinction has to live in the source rather than be re-derived later from
     // a string that is equal in both cases. An operator here wrote
-    // `FASTCACHE_MSVC_DEPS_PREFIX=auto` and is owed a different sentence from one who
+    // `PACE_MSVC_DEPS_PREFIX=auto` and is owed a different sentence from one who
     // wrote nothing at all.
     if (discovery != nullptr)
     {

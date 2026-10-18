@@ -38,7 +38,7 @@ namespace Pace::Cli
 /// ## The THREE refusal states, which is the whole of the design
 ///
 /// A client that reads a refusal as a binary -- worked, did not work -- gets exactly
-/// the failure this tree has already paid for twice (#283, #340): a `FASTCACHE_TOKEN`
+/// the failure this tree has already paid for twice (#283, #340): a `PACE_TOKEN`
 /// launcher took `DispatchNotPermitted` for *not implemented*, stepped over it, and
 /// earned a permanent 0% hit rate that presented as a cold cache. Correct objects,
 /// green build, no counter moving.
@@ -190,9 +190,9 @@ enum class RemoteKind : std::uint8_t
     /// a node -- and it is also what a compile node older than these verbs looks like.
     /// This client cannot tell those two apart over the wire, so it says so rather than
     /// picking one.
-    FastcacheWireOnly,
+    PaceWireOnly,
     /// Nothing recognisable came back. The port is open and is not this protocol.
-    NotFastcacheWire,
+    NotPaceWire,
     Last,
 };
 
@@ -204,7 +204,7 @@ struct RemoteKindSpec
     /// The outcome this kind ESTABLISHES, or disengaged when it establishes nothing.
     ///
     /// **A probe answer is evidence about reachability, not only text for a human.**
-    /// `ProbeRemote` reaches `CompileNode` and `FastcacheWireOnly` only when a frame came
+    /// `ProbeRemote` reaches `CompileNode` and `PaceWireOnly` only when a frame came
     /// BACK, so each of them proves the endpoint was reached and answered -- which is the
     /// one thing `Outcome::Unreachable` denies. Identifying the endpoint in an advisory
     /// and leaving the outcome alone fixes the half an operator reads by eye and leaves a
@@ -217,14 +217,14 @@ struct RemoteKindSpec
     /// node verbs already exit with when a node answers `UnimplementedVerb`, so one
     /// address does not report two codes for one fact.
     ///
-    /// `NotFastcacheWire` is disengaged, and that is a reading rather than an omission:
+    /// `NotPaceWire` is disengaged, and that is a reading rather than an omission:
     /// no frame came back, so nothing was established that the caller's own transport
     /// diagnostic does not already say, and there is nothing here to correct it with.
     std::optional<Outcome> established;
 
     /// What this kind is called where one name must stand for the endpoint: a live panel's title.
     ///
-    /// `FastcacheWireOnly` is named `pace-kv` although a node older than the operator verbs
+    /// `PaceWireOnly` is named `pace-kv` although a node older than the operator verbs
     /// classifies the same way: a title is only drawn over a granted live-stats stream, and a
     /// node that old grants none. Empty for a kind that is no fastcache at all.
     std::string_view product;
@@ -233,8 +233,8 @@ struct RemoteKindSpec
 /// What each kind establishes, one row per enumerator, in enumerator order.
 inline constexpr EnumTable<RemoteKind, RemoteKindSpec> RemoteKindTable { {
     { .kind = RemoteKind::CompileNode, .established = Outcome::Refused, .product = "pace-node" },
-    { .kind = RemoteKind::FastcacheWireOnly, .established = Outcome::Refused, .product = "pace-kv" },
-    { .kind = RemoteKind::NotFastcacheWire, .established = std::nullopt, .product = "" },
+    { .kind = RemoteKind::PaceWireOnly, .established = Outcome::Refused, .product = "pace-kv" },
+    { .kind = RemoteKind::NotPaceWire, .established = std::nullopt, .product = "" },
 } };
 
 static_assert(RowsInEnumeratorOrder(RemoteKindTable, &RemoteKindSpec::kind),

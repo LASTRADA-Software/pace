@@ -60,7 +60,7 @@ std::expected<EffectiveConfig, ConfigError> AssembleEffectiveConfig(std::filesys
 
     // The environment LAST, and only where neither of the two above named the
     // setting. Precedence is therefore CLI > file > environment > default, so a
-    // stray `FASTCACHED_METRICS_PORT` cannot outrank a `metrics_port:` an operator
+    // stray `PACE_METRICS_PORT` cannot outrank a `metrics_port:` an operator
     // wrote -- even when they wrote the compiled-in default, which the bit the file's
     // applier set is what makes distinguishable from silence.
     if (sources.metricsPortEnv.has_value() && !assembled.metricsPortExplicit)

@@ -54,7 +54,7 @@ enum class Sha256Engine : std::uint8_t
 /// SHA-256 (FIPS 180-4).
 ///
 /// Here rather than through OpenSSL because OpenSSL is **optional** in this
-/// build (`FASTCACHED_ENABLE_TLS`, off by default), while peer authentication is
+/// build (`PACE_ENABLE_TLS`, off by default), while peer authentication is
 /// not: a cluster that can only authenticate its members when TLS happens to be
 /// compiled in is a cluster that silently accepts anybody in the common
 /// configuration. `Core/Compression` reaches for a library because a codec is

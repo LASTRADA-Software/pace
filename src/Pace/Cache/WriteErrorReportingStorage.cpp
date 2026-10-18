@@ -37,7 +37,7 @@ namespace
             // whole operator-visible half of #296. It reaches this function on the
             // SADD path, because a set decode happens inside `Update` -- so while a
             // malformed client value was reported as `Corrupt`, which IS listed
-            // above, every planted blob moved `fastcached_write_errors_total` and
+            // above, every planted blob moved `pace_write_errors_total` and
             // wrote a "storage write failed" warning. An unprivileged client could
             // drive the disk-failure signal at will, on a store whose every record
             // still verified, which is the mechanism that walks an operator to

@@ -8,7 +8,7 @@
 # actually puts on a machine. Everything else under `src/apps/` is contributor
 # tooling that is built by CI and shipped to nobody.
 #
-# Nothing connected the two. `compile-cache-testclient` -- `FASTCACHED_BUILD_TESTCLIENT`
+# Nothing connected the two. `compile-cache-testclient` -- `PACE_BUILD_TESTCLIENT`
 # OFF by default, no `install()` rule, in no package -- sat on that page as the third
 # peer of `pace-cc` and `pace-node` and was published to users at
 # `/fastcached/tools/compile-cache-testclient/` for months
@@ -41,7 +41,7 @@
 #
 # ## The installed set is DERIVED, twice over
 #
-# The app directories come from `FASTCACHED_APPS` in `src/apps/CMakeLists.txt` -- the
+# The app directories come from `PACE_APPS` in `src/apps/CMakeLists.txt` -- the
 # table that gates what is built -- and whether each is installed comes from that app's
 # own `CMakeLists.txt`. Neither is restated here. A second list is not a cross-check,
 # it is a second thing to be wrong, and it drifts silently in the direction of agreeing
@@ -100,18 +100,18 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-tools-page-installed-set.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-tools-page-installed-set.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(appTable "${FASTCACHED_SOURCE_DIR}/src/apps/CMakeLists.txt")
-set(toolsPage "${FASTCACHED_SOURCE_DIR}/docs/tools/index.md")
+set(appTable "${PACE_SOURCE_DIR}/src/apps/CMakeLists.txt")
+set(toolsPage "${PACE_SOURCE_DIR}/docs/tools/index.md")
 
 foreach(required "${appTable}" "${toolsPage}")
     if(NOT EXISTS "${required}")
@@ -162,7 +162,7 @@ endfunction()
 # As above, but only while between a line matching `beginPattern` and the next line
 # matching `endPattern`.
 #
-# The app rows must be read from the `FASTCACHED_APPS` table specifically, not from
+# The app rows must be read from the `PACE_APPS` table specifically, not from
 # anything in that file shaped like `"a|b"`. Ungated, this check matched the row shape
 # anywhere in the file -- so renaming the table out from under it changed nothing, and
 # its own "the app table matched no rows" guard could never fire. That was found by the
@@ -211,7 +211,7 @@ endfunction()
 # THAT table rather than as any line in the file shaped like a row.
 file(READ "${appTable}" appTableText)
 fc_capture_block_lines("${appTableText}"
-                       "^[ \t]*set\\([ \t]*FASTCACHED_APPS([ \t]|$)"
+                       "^[ \t]*set\\([ \t]*PACE_APPS([ \t]|$)"
                        "^[ \t]*\\)[ \t]*$"
                        "^[ \t]*\"([A-Za-z0-9_.+-]+)\\|" appDirectories)
 
@@ -219,7 +219,7 @@ if(NOT appDirectories)
     message("")
     message("  No app rows were found in ${appTable}.")
     message("")
-    message("The `FASTCACHED_APPS` table is where every executable in this tree is")
+    message("The `PACE_APPS` table is where every executable in this tree is")
     message("declared, one row per app. Zero rows means the table was renamed or")
     message("restructured and this scan is no longer reading it -- which is not the same")
     message("as a tree with no apps, and must not be reported as a pass.")
@@ -231,7 +231,7 @@ list(SORT appDirectories)
 # Step two -- which of those actually install something, from each app's own rules.
 set(installed "")
 foreach(appDir IN LISTS appDirectories)
-    set(appCMake "${FASTCACHED_SOURCE_DIR}/src/apps/${appDir}/CMakeLists.txt")
+    set(appCMake "${PACE_SOURCE_DIR}/src/apps/${appDir}/CMakeLists.txt")
     if(NOT EXISTS "${appCMake}")
         message("")
         message("  The app table names `${appDir}`, but ${appCMake}")

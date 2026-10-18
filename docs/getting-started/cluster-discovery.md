@@ -24,7 +24,7 @@ id and the identity key are minted into its state directory and read back foreve
 
 | Source | What it is | Preference |
 |---|---|---|
-| `--fleet-seed` | `<host>` or `<host>:<port>`, typed at install (on Windows the installer's `FASTCACHE_FLEET_SEED`) — what reaches across a VPN, where no beacon does | first: asked before anything is decided, whatever a beacon says |
+| `--fleet-seed` | `<host>` or `<host>:<port>`, typed at install (on Windows the installer's `PACE_FLEET_SEED`) — what reaches across a VPN, where no beacon does | first: asked before anything is decided, whatever a beacon says |
 | remembered | the fleet's voters' endpoints, kept in the state directory after a join | second |
 | DNS SRV | `_fastcache._tcp.<this machine's DNS suffix>`, when the machine has one | third |
 | the LAN beacon | every node broadcasts its fleet summary every 15 seconds on every eligible interface's directed broadcast | last: anything on the segment can beacon |
@@ -78,7 +78,7 @@ The deadline lives in the leader's memory alone — at most `24h`, refused by na
 that — so a restart or a change of leader ends it. `enrollment-window-open` is raised while
 it is armed, `pacectl node` reads `auto-approve (N min left)`, `--enroll-list` marks every
 row it admitted with when it was armed, and
-`fastcache_enrollment_approvals_auto_total` counts them apart from a person's approvals.
+`pace_enrollment_approvals_auto_total` counts them apart from a person's approvals.
 A machine that asks again under the same id with a different key is never auto-approved.
 Details are under
 [enrolling a machine instead of typing it](../tools/pace-node.md#enrolling-a-machine-instead-of-typing-it).
@@ -265,7 +265,7 @@ remembered for well over a beacon interval, so a lost datagram costs nothing.
 | Attacker can… | Outcome |
 |---|---|
 | Listen to the segment | Learns that fleets exist, which endpoints serve them, their member ids and the public keys their members hold. None of that admits anybody. |
-| Send arbitrary datagrams | Can provoke a challenge, and answer it under a key of its own — which is reported and never desired. Cannot grow a table without bound: there is no challenge table, every table a beacon can grow is bounded, and a displacement is counted (`fastcache_discovery_beacons_over_bound_total`). Cannot flood the log: an unaccepted key is reported at most once a minute, with how many it stands for, and every one is counted. Cannot make a node an amplifier: no reply is larger than the datagram that provoked it, and answers are rate-limited per source. |
+| Send arbitrary datagrams | Can provoke a challenge, and answer it under a key of its own — which is reported and never desired. Cannot grow a table without bound: there is no challenge table, every table a beacon can grow is bounded, and a displacement is counted (`pace_discovery_beacons_over_bound_total`). Cannot flood the log: an unaccepted key is reported at most once a minute, with how many it stands for, and every one is counted. Cannot make a node an amplifier: no reply is larger than the datagram that provoked it, and answers are rate-limited per source. |
 | Replay a captured proof | Refused: the cookie it answers has been spent, or was issued to another address. |
 | Capture a proof and re-aim it at another endpoint | Refused: the endpoint is inside the signature. |
 | Claim a known member's id | Reported as an unknown key: the id is a label, and the key the roster holds for it is the credential. |
@@ -278,7 +278,7 @@ admitted: a new install waiting to be enrolled, or one that was removed. The war
 which, names the key whole — it verified, so only its holder could have signed it — and for
 an unknown key gives the `--cluster-admit` an operator would run if it belongs. The three
 refusals are counted apart
-(`fastcache_discovery_proofs_refused_{unknown_key,revoked_key,forged}_total`), because
+(`pace_discovery_proofs_refused_{unknown_key,revoked_key,forged}_total`), because
 their remedies are different.
 
 ### Threat model: LAN discovery is trust-on-first-use

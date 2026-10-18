@@ -65,7 +65,7 @@ JITBIT_REPO = "https://github.com/jitbit/FastCache"
 
 #: Rows whose bodies are a single operation rather than LOOKUPS_PER_ITERATION,
 #: so the normalizer must not divide them.
-SINGLE_OP_ROWS = frozenset({"FastCacheAddRemove", "MemoryCacheAddRemove"})
+SINGLE_OP_ROWS = frozenset({"PaceAddRemove", "MemoryCacheAddRemove"})
 
 #: How to describe each of our benchmark rows in the report. Adding a row to the
 #: C++ table means adding a line here; nothing else in this script changes.
@@ -97,7 +97,7 @@ def bench_binary(preset: str) -> Path:
 def build_bench(preset: str) -> None:
     """Configure with benchmarks enabled and build the benchmark target."""
     subprocess.run(
-        ["cmake", "--preset", preset, "-DFASTCACHED_BUILD_BENCHMARKS=ON"],
+        ["cmake", "--preset", preset, "-DPACE_BUILD_BENCHMARKS=ON"],
         cwd=REPO_ROOT, check=True,
     )
     subprocess.run(
@@ -313,9 +313,9 @@ def write_report(outdir: Path, environment: dict, ours: dict, theirs: dict, scal
             {
                 "environment": environment,
                 "lookups_per_iteration": LOOKUPS_PER_ITERATION,
-                "fastcached_ns_per_op": {k: per_operation(k, v) for k, v in ours.items()},
+                "pace_ns_per_op": {k: per_operation(k, v) for k, v in ours.items()},
                 "jitbit_ns_per_op": {k: per_operation(k, v) for k, v in theirs.items()},
-                "fastcached_scaling_ops_per_sec": {str(k): v for k, v in sorted(scaling.items())},
+                "pace_scaling_ops_per_sec": {str(k): v for k, v in sorted(scaling.items())},
             },
             indent=2,
         ),
@@ -336,7 +336,7 @@ def write_report(outdir: Path, environment: dict, ours: dict, theirs: dict, scal
     ]
     lines += [f"| {key} | {value} |" for key, value in environment.items()]
 
-    reference = per_operation("FastCacheLookup", theirs["FastCacheLookup"]) if "FastCacheLookup" in theirs else None
+    reference = per_operation("PaceLookup", theirs["PaceLookup"]) if "PaceLookup" in theirs else None
 
     lines += ["", "## pace-kv storage stack", "", "| Row | ns/op | vs jitbit | What it adds |", "| --- | ---: | ---: | --- |"]
     for name, body_ns in ours.items():
@@ -400,7 +400,7 @@ def main() -> int:
     environment = collect_environment(args.preset, parse_build_banner(bench_stderr))
     termviz.print_environment(environment)
 
-    reference = per_operation("FastCacheLookup", theirs["FastCacheLookup"]) if "FastCacheLookup" in theirs else None
+    reference = per_operation("PaceLookup", theirs["PaceLookup"]) if "PaceLookup" in theirs else None
     if reference:
         print(f"jitbit FastCache lookup: {reference:.2f} ns/op (this machine)\n")
 

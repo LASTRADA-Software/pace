@@ -1222,7 +1222,7 @@ TEST_CASE("A named user authenticates with its username, and the secret alone do
 
 TEST_CASE("With auth disabled a credential is accepted and ignored", "[compile-cache][handler][auth]")
 {
-    // A launcher configured with FASTCACHE_TOKEN must keep working against a
+    // A launcher configured with PACE_TOKEN must keep working against a
     // daemon that requires none — otherwise setting a token becomes a breaking
     // change against every unauthenticated daemon in a mixed fleet, which is
     // precisely the migration this feature has to survive.

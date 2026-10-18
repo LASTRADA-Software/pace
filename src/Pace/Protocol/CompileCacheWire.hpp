@@ -652,7 +652,7 @@ enum class Op : std::uint8_t
     /// An operator removes one key from the cache tier that answers
     /// ([#1276](https://github.com/LASTRADA-Software/fastcached/issues/1276)).
     ///
-    /// The case is a stored value somebody has determined is wrong -- `FASTCACHE_VERIFY`
+    /// The case is a stored value somebody has determined is wrong -- `PACE_VERIFY`
     /// naming a `WRONG OBJECT` and its key is the ordinary way to learn one -- on a
     /// `pace-node`, which speaks no RESP and therefore has no `DEL`.
     ///
@@ -1789,7 +1789,7 @@ struct OpDescriptor
 /// no credential to check -- while treating every *other* refusal as being about the
 /// credential and returning it in place of the answer to the request the caller
 /// actually sent. So a surface answering AUTH with anything else gives every
-/// `FASTCACHE_TOKEN`-configured client a permanent failure that presents as an
+/// `PACE_TOKEN`-configured client a permanent failure that presents as an
 /// endlessly cold cache or a fleet that distributes nothing, with no signal saying
 /// which.
 ///
@@ -4016,7 +4016,7 @@ using CodecList = std::vector<std::uint8_t>;
 ///
 /// KEPT: the worker entry holds it for as long as the worker heartbeats, and reads it against
 /// every lease. Not text, so only the length question reaches it, and refused and counted past it
-/// (`fastcached_dispatch_worker_registrations_field_too_long_total`) like the strings beside it.
+/// (`pace_dispatch_worker_registrations_field_too_long_total`) like the strings beside it.
 ///
 /// Sized from what a list IS: the codecs a build can produce, most-preferred first --
 /// `Cc::AvailableCodecs()`, at most the compressed codecs it tries plus `Identity`, three today.
@@ -4681,8 +4681,8 @@ static_assert((MaxLeaseExclusions * (MaxExcludedEndpointBytes + WireFields::Fiel
 /// for `unserved-toolchain`, and a worker entry what its compiler is called -- so it is bounded
 /// where it enters, apart from the frame's own `MaxControlPayload`: text a peer chose, rendered
 /// into a condition, a page and the JSON a script parses. A lease or a registration carrying a
-/// longer one is refused and counted (`fastcached_dispatch_leases_field_too_long_total`,
-/// `fastcached_dispatch_worker_registrations_field_too_long_total`), never truncated: a scheduler
+/// longer one is refused and counted (`pace_dispatch_leases_field_too_long_total`,
+/// `pace_dispatch_worker_registrations_field_too_long_total`), never truncated: a scheduler
 /// that cut it short would be a second author of what the peer said.
 ///
 /// Sized from what a label IS. `Cc::ToolchainLabel` writes the compiler's file name and one version
@@ -4751,7 +4751,7 @@ inline constexpr std::size_t MaxEndpointBytes = 254 + std::string_view { ":65535
 /// Sized from what a version IS: `Pace::VersionString`, which `cmake/Version.cmake` writes as
 /// `X.Y.Z`, as `X.Y.Z-<distance>-g<commit>` between tags and with `-dirty` on an unclean tree --
 /// under fifty bytes at any abbreviation git picks for a repository this size -- or a vendor's
-/// `-DFASTCACHED_VERSION_STRING`. The `static_assert` holding this at twice the running build's
+/// `-DPACE_VERSION_STRING`. The `static_assert` holding this at twice the running build's
 /// sits in `pace-node/WorkerTier.cpp`, where the version is put on the wire; this
 /// header may not include the generated `Version.hpp`.
 inline constexpr std::size_t MaxNodeVersionBytes = 128;

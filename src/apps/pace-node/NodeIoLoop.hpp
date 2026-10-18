@@ -199,7 +199,7 @@ class NodeIoLoop final: public IReactorHome
     /// Threaded rather than inline because `getaddrinfo` takes no timeout: a shared
     /// cache named by hostname whose resolver is wedged would otherwise park the
     /// loop carrying every local client's connection. A literal address -- which is
-    /// what `FASTCACHE_ADDR` almost always is -- never reaches a thread.
+    /// what `PACE_ADDR` almost always is -- never reaches a thread.
     core::net::ThreadedAddressResolver _resolver;
 
     std::unique_ptr<core::net::IConnector> _connector { core::net::makeConnector(_reactor, _resolver) };

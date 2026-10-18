@@ -94,7 +94,7 @@ is the reproducible lesson, since no unit test can reach either:
     last word and refuses the WHOLE command line for one unrecognised argument -- which is
     correct, since stripping an unknown one could change the generated code. An unrecognised
     `-DFOO="/abs/path"` therefore made the translation unit undispatchable, and this
-    project's own build passes `-DFASTCACHED_SOURCE_DIR`. **Every** TU compiled locally, one
+    project's own build passes `-DPACE_SOURCE_DIR`. **Every** TU compiled locally, one
     stderr line each, `dispatched 0` and `never-picked n of n` on the fleet page, and **no
     counter anywhere** -- the fleet is not refusing jobs, it is never offered any. Any
     project passing a source root, a config directory or a version string with a slash in it
@@ -132,7 +132,7 @@ is the reproducible lesson, since no unit test can reach either:
   space belongs to GCC, Clang and Microsoft and grows every release, so a denylist
   we audit against upstream forever **fails open** the day we miss one; the allowlist
   **fails safe** — an unrecognised flag costs one local compile, visible as
-  `fastcache_worker_jobs_refused_rejected_argument_total`, where a missed denylist
+  `pace_worker_jobs_refused_rejected_argument_total`, where a missed denylist
   entry was code execution. The accepted set (`AllowedArgs`) is per driver family —
   the worker knows its own compiler's family, never the client's — and refusal names
   the offending flag in `JobError::detail`, which rides the reply message to the
@@ -814,7 +814,7 @@ Consequences that are each load-bearing:
   Measured at 23.5 s of worker CPU and 84 MB returned to a client that had already
   given up (#223). `DispatchBudgets` is the split — `control` for the scheduler's
   `LEASE`/`RELEASE`, `compile` for the worker — and the two knobs are
-  `FASTCACHE_TIMEOUT` and `FASTCACHE_DISPATCH_TIMEOUT`. Four things about the
+  `PACE_TIMEOUT` and `PACE_DISPATCH_TIMEOUT`. Four things about the
   shape are load-bearing:
   - **A per-call socket ceiling is not a bound, and the seam is where that becomes
     sayable.** `SO_RCVTIMEO` bounds one `recv`, so a peer dribbling a byte before each
@@ -1174,7 +1174,7 @@ Consequences that are each load-bearing:
     without rotating anything on the others, and with symmetric keys a verifier holds the key
     that mints: Raft is all-to-all, so every key reaches every member, and every member can then
     sign as every other. Verifying without being able to mint is what a signature is.
-  - **Why Monocypher.** OpenSSL is optional here (`FASTCACHED_ENABLE_TLS`, off by default) and
+  - **Why Monocypher.** OpenSSL is optional here (`PACE_ENABLE_TLS`, off by default) and
     the launcher, which will verify signed leases, must stay free of it; hand-written curve
     arithmetic is refused when an audited, constant-time, public-domain implementation exists.
     Monocypher is two C files with no dependency and no random generator of its own -- every
@@ -1348,8 +1348,8 @@ Consequences that are each load-bearing:
   one reading zero because the event did not happen are two facts nobody can tell apart
   from a graph — which is this file's *skipped, absent, unstarted and failed are four
   states* rule, one level up. Its replacements are
-  `fastcache_worker_jobs_refused_lease_replayed_total` (the new refusal) and
-  `fastcache_worker_scheduler_term_regressions_total` (the adoption, which is not a refusal
+  `pace_worker_jobs_refused_lease_replayed_total` (the new refusal) and
+  `pace_worker_scheduler_term_regressions_total` (the adoption, which is not a refusal
   and so is deliberately not in `LeaseRefusalTable`).
 - **A worker cannot tell a scheduler RESET from a grant that arrived late, so neither the
   counter nor the line may claim it can.** Both shipped asserting the reset — the counter's
@@ -1528,8 +1528,8 @@ Consequences that are each load-bearing:
   - **A moved `0xFC` endpoint wakes the heartbeat at once** (`IEndpointMoveSink`), and the
     lease check follows the REGISTERED endpoint, not the published one, so a grant is
     honoured until the re-registration that moves it.
-  - Two counters, one per endpoint (`fastcache_node_endpoint_changes_total`,
-    `fastcache_node_raft_endpoint_changes_total`), and an Info line per move; a pinned
+  - Two counters, one per endpoint (`pace_node_endpoint_changes_total`,
+    `pace_node_raft_endpoint_changes_total`), and an Info line per move; a pinned
     literal is reported ONCE as not roaming. `EndpointResolver_test`, and `WorkerTier_test`'s
     "A worker re-registers under a moved endpoint and withdraws the old one exactly once".
 - **A fixture that carries the key and never dispatches proves only that a keyed node
@@ -1972,9 +1972,9 @@ them.** `RunCached` returned on a `FETCH` that failed at the transport, and that
 `return` sat above the call site that would dispatch — so a cache the launcher could
 not reach turned distribution off with it. Every property this repository cares
 about held while it did: the build succeeded, the object was correct, the exit code
-was zero, and one `FASTCACHE_VERBOSE` line said the cache was unavailable, which is
+was zero, and one `PACE_VERBOSE` line said the cache was unavailable, which is
 true and is not the interesting half. On a forty-machine estate a mistyped
-`FASTCACHE_ADDR` made every build local while the fleet sat idle and healthy
+`PACE_ADDR` made every build local while the fleet sat idle and healthy
 (issue #236). The rule is that **a fetch outcome decides one thing only: whether the
 daemon is worth sending a second command to** (`Cc::CacheIsServing`). It does not
 decide whether the invocation continues, because the docs put the shared cache on a
@@ -2150,7 +2150,7 @@ symptom was that they were slow.
   A node that runs consensus and serves no scheduler (`Node::RedirectsScheduling`,
   `RunsConsensus && !ServesScheduler`) knows where the leader is and used to answer every
   scheduling verb `UnimplementedVerb` instead, which a launcher reads as *this build is too old*
-  — so `FASTCACHE_SCHEDULER=127.0.0.1:6674`, the one value right on every PC whoever leads,
+  — so `PACE_SCHEDULER=127.0.0.1:6674`, the one value right on every PC whoever leads,
   dispatched nothing. `SchedulingRedirectResponder` now answers them as a follower scheduler
   does, and each half of its answer is a rule:
   - **Admission FIRST**, through the scheduler's own fold (`Distributed::CallerContextOf`): a
@@ -2369,7 +2369,7 @@ Six more about what the tier IS and who gets to see it:
   worker always offers at least one slot, so a zero there could only ever mean *a
   machine with no worker* said in the vocabulary of *a worker offering nothing*, and
   the fleet totals would put a machine that can take no work into the denominator of
-  *how busy is this fleet*. Its own `fastcache_node_slots_configured` **does** read 0,
+  *how busy is this fleet*. Its own `pace_node_slots_configured` **does** read 0,
   and that is correct rather than the same defect: a node offering no slots has a
   capacity of zero, which is a reading rather than an unmade measurement. The two
   fields answer different questions and the same word would be wrong in one of them.
@@ -2546,7 +2546,7 @@ rather than "no deadline" — every write landed and was unreadable, a cache tha
 silently stores nothing while reporting success on every write. `CacheEngine` already
 spelled it the same way, which is what makes this a drift rather than a discovery.
 
-- **`FASTCACHE_ADDR` defaults to LOOPBACK, and set-but-empty is the opt-out.** Unset
+- **`PACE_ADDR` defaults to LOOPBACK, and set-but-empty is the opt-out.** Unset
   resolves to `Cc::DefaultAddr` (`127.0.0.1:6674`), which is where `--listen-node`
   answers, so the launcher caches against a node on this machine with no
   configuration at all. Three-valued on purpose, and `EnvOr` — which collapses
@@ -2761,7 +2761,7 @@ spelled it the same way, which is what makes this a drift rather than a discover
   file that is in no test target, existing only to give four sites an
   optional-shaped `Connect` and to `SyncRun` two loops. What it bought is not
   latency: the launcher is one-shot per translation unit and has nothing to
-  interleave. It is that `getaddrinfo` takes no timeout, so `FASTCACHE_ADDR` pointing
+  interleave. It is that `getaddrinfo` takes no timeout, so `PACE_ADDR` pointing
   at a name whose resolver is wedged used to stall every translation unit in the
   build with no knob anywhere. Three things about `ReactorExchange`:
   - **One reactor per exchange, asserted rather than documented.** `IReactor::Run`
@@ -2808,7 +2808,7 @@ assertion is what fails if either rule is broken, and it is the whole soundness
 claim of the feature — an object that differs is stored under a key other machines
 then fetch.
 
-> **The launcher's `FASTCACHE_VERIFY` answers a different question with the same
+> **The launcher's `PACE_VERIFY` answers a different question with the same
 > fact**, and for a long time answered it wrongly — it compared objects with
 > `memcmp`, so every Windows hit reported a wrong object
 > ([#493](https://github.com/LASTRADA-Software/fastcached/issues/493)). This
@@ -2816,7 +2816,7 @@ then fetch.
 > somebody editing `HitVerification.cpp` opens. The launcher's copy —
 > including why `.debug$S` and `.chks64` are **not** excused there, which is the
 > opposite of the conclusion this fixture reaches from the same measurements — is
-> [`compile-cache.md`](compile-cache.md#an-object-file-is-not-a-byte-string-and-fastcache_verify-is-where-that-bites).
+> [`compile-cache.md`](compile-cache.md#an-object-file-is-not-a-byte-string-and-pace_verify-is-where-that-bites).
 > Change either and read the other: they share the facts and not the conclusions.
 
 **On Windows that assertion has to be spelled differently, and it is measured
@@ -3218,7 +3218,7 @@ during which the node served *nothing*: not its cache tier, not `/healthz`, not
   cache tier, which is the whole point; a readiness probe that went red for minutes on
   every restart would read as an outage to a supervisor and could produce a restart
   loop that never lets the walk finish. The state is visible as
-  `fastcache_worker_jobs_refused_survey_in_flight_total`, as the named wire refusal,
+  `pace_worker_jobs_refused_survey_in_flight_total`, as the named wire refusal,
   and in the ready line — which says *identifying* N toolchain(s), because printing
   the served count there would tell an operator "0 toolchain(s)" about a node that is
   starting normally.
@@ -3411,7 +3411,7 @@ reclaimer-nothing-constructs shape and the series-an-operator-was-told-to-scrape
 shape at once, and it misinforms rather than merely failing to inform. So **no
 fleet-wide aggregate of this exists and none can** until a client has a way to report
 one. The two places the fact lives are an *unconditional* stderr line -- not behind
-`FASTCACHE_VERBOSE`, because a correctness alarm and a "distribution did not help
+`PACE_VERBOSE`, because a correctness alarm and a "distribution did not help
 today" note must not share a verbosity level -- and a fixed detail string that
 `--show-stats` ranks by cause. The recorded outcome stays a MISS: the cache answered
 honestly and still stores this object, so recording `Unavailable` would blame the

@@ -4,7 +4,7 @@
 # enable + start the unit.
 set -e
 
-SERVICE="@FASTCACHED_SERVICE_NAME@"
+SERVICE="@PACE_SERVICE_NAME@"
 
 case "$1" in
     configure)
@@ -15,11 +15,11 @@ case "$1" in
         # systemd-sysusers is idempotent, so an upgrade over an existing user
         # is a no-op rather than an error.
         if [ -x /usr/bin/systemd-sysusers ] || [ -x /bin/systemd-sysusers ]; then
-            systemd-sysusers "@FASTCACHED_SYSUSERS_FILE@" >/dev/null 2>&1 || true
-            systemd-sysusers "@FASTCACHED_NODE_SYSUSERS_FILE@" >/dev/null 2>&1 || true
+            systemd-sysusers "@PACE_SYSUSERS_FILE@" >/dev/null 2>&1 || true
+            systemd-sysusers "@PACE_NODE_SYSUSERS_FILE@" >/dev/null 2>&1 || true
         fi
         if [ -x /usr/bin/systemd-tmpfiles ] || [ -x /bin/systemd-tmpfiles ]; then
-            systemd-tmpfiles --create "@FASTCACHED_TMPFILES_FILE@" >/dev/null 2>&1 || true
+            systemd-tmpfiles --create "@PACE_TMPFILES_FILE@" >/dev/null 2>&1 || true
         fi
 
 
@@ -52,8 +52,8 @@ case "$1" in
         # every later upgrade would re-assert it and would overwrite a GROUP an operator
         # had deliberately chosen. World-readable is the defect; a group arrangement is
         # a decision.
-        for _pair in "/@FASTCACHED_SYSCONF_DIR@/fastcached.yaml:pace-kv" \
-                     "/@FASTCACHED_SYSCONF_DIR@/pace-node.yaml:fastcache-node"; do
+        for _pair in "/@PACE_SYSCONF_DIR@/fastcached.yaml:pace-kv" \
+                     "/@PACE_SYSCONF_DIR@/pace-node.yaml:fastcache-node"; do
             _conf=${_pair%:*}
             _grp=${_pair##*:}
             [ -f "$_conf" ] || continue

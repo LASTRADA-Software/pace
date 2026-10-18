@@ -19,24 +19,24 @@
 #   empty                            no first-party C++ at all
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> [-DGIT_EXECUTABLE=<git>] \
 #         -P scripts/check-crypto-seam-selftest.cmake
 #
 # The verdict is `CMake Error` in the output, never the exit code.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-foreach(required IN ITEMS FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required IN ITEMS PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-crypto-seam.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-crypto-seam.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -52,8 +52,8 @@ set(failures "")
 #
 # @param name The case name and directory.
 # @param outVar Set to the tree's path.
-function(fastcached_seam_tree name outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_seam_tree name outVar)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/monocypher\n")
     file(WRITE "${tree}/src/Pace/Core/Ed25519.cpp"
@@ -71,11 +71,11 @@ endfunction()
 # assumed. A synthetic tree is otherwise a directory walk in every case.
 #
 # @param tree The tree.
-function(fastcached_stage_git tree)
+function(pace_stage_git tree)
     if(NOT GIT_EXECUTABLE)
         message(FATAL_ERROR "crypto-seam-selftest: INCONCLUSIVE -- no git to stage ${tree} with")
     endif()
-    fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+    pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
     foreach(step IN ITEMS "init;-q" "add;-A")
         execute_process(COMMAND ${scratchGit} -C "${tree}" ${step} RESULT_VARIABLE status
                         OUTPUT_QUIET ERROR_VARIABLE errors)
@@ -91,9 +91,9 @@ endfunction()
 # @param tree The tree.
 # @param expect `accept` or `refuse`.
 # @param mustSay A phrase the flattened output must contain: what says WHICH verdict fired.
-function(fastcached_seam_judge name tree expect mustSay)
+function(pace_seam_judge name tree expect mustSay)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}" -P "${check}"
         OUTPUT_VARIABLE output ERROR_VARIABLE errors RESULT_VARIABLE result)
     if(NOT result MATCHES "^[0-9]+$")
         message(FATAL_ERROR "crypto-seam-selftest: INCONCLUSIVE -- the check could not be RUN (${result})")
@@ -119,12 +119,12 @@ endfunction()
 
 set(accepted "2 of 2 permitted unit(s) seen including Monocypher, none other does")
 
-fastcached_seam_tree(clean tree)
-fastcached_seam_judge(clean "${tree}" accept "${accepted}")
+pace_seam_tree(clean tree)
+pace_seam_judge(clean "${tree}" accept "${accepted}")
 
-fastcached_seam_tree(cleanGit tree)
-fastcached_stage_git("${tree}")
-fastcached_seam_judge(cleanGit "${tree}" accept "via git ls-files")
+pace_seam_tree(cleanGit tree)
+pace_stage_git("${tree}")
+pace_seam_judge(cleanGit "${tree}" accept "via git ls-files")
 
 # Each spelling of the crossing, appended to the caller.
 foreach(spelling IN ITEMS
@@ -137,46 +137,46 @@ foreach(spelling IN ITEMS
     string(SUBSTRING "${spelling}" 0 ${bar} caseName)
     math(EXPR afterBar "${bar} + 1")
     string(SUBSTRING "${spelling}" ${afterBar} -1 directive)
-    fastcached_seam_tree(${caseName} tree)
+    pace_seam_tree(${caseName} tree)
     file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "${directive}\n")
-    fastcached_seam_judge(${caseName} "${tree}" refuse "src/Pace/Node/Caller.cpp:3: includes a Monocypher header")
+    pace_seam_judge(${caseName} "${tree}" refuse "src/Pace/Node/Caller.cpp:3: includes a Monocypher header")
 endforeach()
 
-fastcached_seam_tree(violationGit tree)
+pace_seam_tree(violationGit tree)
 file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "#include <monocypher.h>\n")
-fastcached_stage_git("${tree}")
-fastcached_seam_judge(violationGit "${tree}" refuse "via git ls-files")
+pace_stage_git("${tree}")
+pace_seam_judge(violationGit "${tree}" refuse "via git ls-files")
 
-fastcached_seam_tree(commentedOut tree)
+pace_seam_tree(commentedOut tree)
 file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "// #include <monocypher.h> is what this file must never do\n")
-fastcached_seam_judge(commentedOut "${tree}" accept "${accepted}")
+pace_seam_judge(commentedOut "${tree}" accept "${accepted}")
 
-fastcached_seam_tree(bridgeHeader tree)
+pace_seam_tree(bridgeHeader tree)
 file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "#include <Pace/Core/MonocypherBytes.hpp>\n")
-fastcached_seam_judge(bridgeHeader "${tree}" accept "${accepted}")
+pace_seam_judge(bridgeHeader "${tree}" accept "${accepted}")
 
-fastcached_seam_tree(vendoredDeclined tree)
-fastcached_seam_judge(vendoredDeclined "${tree}" accept "declined under third-party roots")
+pace_seam_tree(vendoredDeclined tree)
+pace_seam_judge(vendoredDeclined "${tree}" accept "declined under third-party roots")
 
-fastcached_seam_tree(vendoredOwned tree)
+pace_seam_tree(vendoredOwned tree)
 file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/elsewhere\n")
 file(MAKE_DIRECTORY "${tree}/vendor/elsewhere")
-fastcached_seam_judge(vendoredOwned "${tree}" refuse
+pace_seam_judge(vendoredOwned "${tree}" refuse
     "vendor/monocypher/src/optional/monocypher-ed25519.h:1: includes a Monocypher header")
 
-fastcached_seam_tree(staleNoInclude tree)
+pace_seam_tree(staleNoInclude tree)
 file(WRITE "${tree}/src/Pace/Core/X25519.cpp" "#include <Pace/Core/X25519.hpp>\n")
-fastcached_seam_judge(staleNoInclude "${tree}" refuse "STALE permitted row -- src/Pace/Core/X25519.cpp: was read")
+pace_seam_judge(staleNoInclude "${tree}" refuse "STALE permitted row -- src/Pace/Core/X25519.cpp: was read")
 
-fastcached_seam_tree(staleMissing tree)
+pace_seam_tree(staleMissing tree)
 file(REMOVE "${tree}/src/Pace/Core/Ed25519.cpp")
-fastcached_seam_judge(staleMissing "${tree}" refuse "STALE permitted row -- src/Pace/Core/Ed25519.cpp: does not exist")
+pace_seam_judge(staleMissing "${tree}" refuse "STALE permitted row -- src/Pace/Core/Ed25519.cpp: does not exist")
 
-set(tree "${FASTCACHED_SCRATCH_DIR}/empty")
+set(tree "${PACE_SCRATCH_DIR}/empty")
 file(REMOVE_RECURSE "${tree}")
 file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/monocypher\n")
 file(WRITE "${tree}/vendor/monocypher/src/optional/monocypher-ed25519.h" "#include \"monocypher.h\"\n")
-fastcached_seam_judge(empty "${tree}" refuse "matched no first-party C++ source")
+pace_seam_judge(empty "${tree}" refuse "matched no first-party C++ source")
 
 list(LENGTH failures failureCount)
 if(failureCount GREATER 0)

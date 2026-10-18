@@ -8,8 +8,8 @@
 # postinstall-runtime.sh.in for why).
 set -u
 
-PREFIX="/@FASTCACHED_MACOS_PREFIX@"
-LABEL="@FASTCACHED_MACOS_BUNDLE_ID@"
+PREFIX="/@PACE_MACOS_PREFIX@"
+LABEL="@PACE_MACOS_BUNDLE_ID@"
 
 # The system-wide daemon and a per-user agent would both bind 127.0.0.1:6674,
 # and pace-kv has no unix-socket endpoint to fall back on. productbuild

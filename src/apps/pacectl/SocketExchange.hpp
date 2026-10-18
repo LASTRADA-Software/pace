@@ -39,7 +39,7 @@ class SocketExchange final: public IExchange
     ///
     /// **An AUTH refusal that is about the SERVER rather than the credential is an
     /// advisory, not a failure.** A daemon with no password answers `AUTH` with an
-    /// error, and treating that as fatal is how a client with `FASTCACHE_TOKEN` set
+    /// error, and treating that as fatal is how a client with `PACE_TOKEN` set
     /// gets a permanent failure against a server that never needed it -- the shape
     /// that once cost a token-configured launcher a permanent 0% hit rate reading as
     /// a cold cache. A `WRONGPASS`, which *is* about the credential, is fatal. Either
@@ -333,7 +333,7 @@ struct HttpResponse
 /// get its metrics.
 ///
 /// **It presents NO credential, and that is the design rather than an omission.** The admin
-/// surface is plain HTTP on a port that can be `$FASTCACHE_ADMIN_ADDR` on any host or one
+/// surface is plain HTTP on a port that can be `$PACE_ADMIN_ADDR` on any host or one
 /// DISCOVERED on `--addr`'s host, and `--token-file`'s secret is never the credential there:
 /// `/metrics` needs none, and a node's dashboard has its own (`--dashboard-token-file`). Sent
 /// anyway, it crossed the network in the clear to whichever host the port was found on. A

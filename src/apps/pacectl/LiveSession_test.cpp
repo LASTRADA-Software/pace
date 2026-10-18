@@ -1593,7 +1593,7 @@ struct RunningSeat
 /// @return The identification.
 [[nodiscard]] EndpointIdentity CacheDaemon()
 {
-    return EndpointIdentity { .kind = RemoteKind::FastcacheWireOnly,
+    return EndpointIdentity { .kind = RemoteKind::PaceWireOnly,
                               .detail = "10.0.0.4:6674 speaks 0xFC and serves no node verbs, so it is not a compile node",
                               .unreadable = false };
 }

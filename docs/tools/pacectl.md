@@ -34,13 +34,13 @@ complaint about a flag you are no longer going to use.
 
 | | |
 |---|---|
-| Data port | `--addr=<host:port>`, `$FASTCACHE_ADDR`, default `127.0.0.1:6674` |
-| Admin surface | `--admin-addr=<host:port>`, `$FASTCACHE_ADMIN_ADDR` — **usually unnecessary**, see below |
-| Credential | `--token-file=<path>` (preferred) or `$FASTCACHE_TOKEN` |
+| Data port | `--addr=<host:port>`, `$PACE_ADDR`, default `127.0.0.1:6674` |
+| Admin surface | `--admin-addr=<host:port>`, `$PACE_ADMIN_ADDR` — **usually unnecessary**, see below |
+| Credential | `--token-file=<path>` (preferred) or `$PACE_TOKEN` |
 | Dashboard credential | `--dashboard-token-file=<path>`, presented by `fleet` and `live-stats fleet` only; no environment variable |
 | Machine ticket source | `--mint-from=<host:port>`: where this machine's node mints the ticket a node on another machine is shown; the port counts, the host is always loopback, default the dialled node's port. Connecting to it gives up after **50 ms** whatever `--connect-timeout` says — a lower value lowers it — so a machine with no node pays that, not the ~2 s Windows takes to refuse a closed loopback port |
 
-The same `$FASTCACHE_ADDR` that `pace-cc` reads, so a machine configured for
+The same `$PACE_ADDR` that `pace-cc` reads, so a machine configured for
 the launcher is already configured for this. A variable that is *set but empty*
 counts as unset, which is what a build that wants no configuration exports.
 
@@ -100,7 +100,7 @@ server_kind  pace-node
 programs; two bare version strings would read as two builds of one binary.
 
 `del` is the other. A node's cache tier holds compile results, and one somebody has
-found to be wrong — `FASTCACHE_VERIFY` names a `WRONG OBJECT` and its key — has to be
+found to be wrong — `PACE_VERIFY` names a `WRONG OBJECT` and its key — has to be
 removable from the machine that serves it. So `del` sends the node one `cache-drop` per
 key and keeps its RESP contract: it prints how many keys it removed, and exits 1 when
 that is none.
@@ -459,7 +459,7 @@ Beside them, what that worker is offering and whether anyone knows about it:
 - **`fleet-id`** and **`fleet-pin`** — the pin to paste, and the pin this node trusts by.
   `fleet-id` is `<cluster-id>@<key>[,<key>...]`: this node's cluster and the identity key of
   every voter its state records, exactly what another machine's `--fleet-id` (and the
-  installer's `FASTCACHE_FLEET_ID`) takes, so this is where an operator copies it from.
+  installer's `PACE_FLEET_ID`) takes, so this is where an operator copies it from.
   When `--fleet-id` would refuse it -- a fleet with more than 16 voters, which a pin may not
   all name -- the cell says so after the string; any 16 of those keys make a pin.
   `fleet-pin` reads `none` on a node that trusts on first use -- the answer, not an absence:
@@ -792,7 +792,7 @@ Against a node with no admin surface at all:
 ```console
 $ pacectl stats --format=kv
 source=node-metrics
-fastcached_connections_total=0
+pace_connections_total=0
 ...
 pacectl: the admin surface's /metrics endpoint was not asked: 127.0.0.1:36751 runs no admin surface. Start the node with --admin-listen to open one: it is off unless asked for, so a node without one is configured rather than broken
 ```
@@ -803,7 +803,7 @@ explicit about the difference:
 ```console
 $ pacectl stats --format=kv
 source=info
-fastcached_version=fastcached-0.2.0
+pace_version=fastcached-0.2.0
 ...
 pacectl: RESP INFO on the data port returned 7 field(s); start the daemon with its metrics listener enabled, or pass --admin-addr, for the full counter set
 pacectl: the admin surface's /metrics endpoint was not asked: no admin address is known and no 0xFC connection was opened to discover one
@@ -992,7 +992,7 @@ is sent on a `fleet` subscription only.
 ## Authentication
 
 `--requirepass` on the daemon gates the RESP surface. Present the credential with
-`--token-file` or `$FASTCACHE_TOKEN`; `--user` supplies the two-argument `AUTH`
+`--token-file` or `$PACE_TOKEN`; `--user` supplies the two-argument `AUTH`
 form, which is rarely needed. It goes to the endpoint it was configured for and to
 nothing else: a compile node checks no password (the one it may hold is what it presents
 to its own `--upstream`), and one on another machine is shown a machine ticket this
@@ -1000,7 +1000,7 @@ machine's node mints instead (`--mint-from`).
 
 A credential configured against a daemon that has **no** password is a remark,
 not a failure — the command still runs. That is deliberate: refusing would give a
-client with `$FASTCACHE_TOKEN` set a permanent failure against a server that
+client with `$PACE_TOKEN` set a permanent failure against a server that
 never needed one. A *wrong* credential, which is about the credential rather than
 the server, is fatal.
 
@@ -1029,10 +1029,10 @@ Use the RESP verbs on the same `--addr` where they cover the need — `get`, `se
 
 | | |
 |---|---|
-| `FASTCACHE_ADDR` | the cache's data port, as `host:port` |
-| `FASTCACHE_ADMIN_ADDR` | the admin surface, as `host:port` |
-| `FASTCACHE_TOKEN` | the cache's password, presented to `FASTCACHE_ADDR` only |
-| `FASTCACHE_USER` | username for the two-argument `AUTH` form |
+| `PACE_ADDR` | the cache's data port, as `host:port` |
+| `PACE_ADMIN_ADDR` | the admin surface, as `host:port` |
+| `PACE_TOKEN` | the cache's password, presented to `PACE_ADDR` only |
+| `PACE_USER` | username for the two-argument `AUTH` form |
 | `NO_COLOR` | set to anything non-empty to suppress colour. It governs the **default**, so an explicit `--color=always` still colours |
 
 Precedence is defaults, then the environment, then the command line — each

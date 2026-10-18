@@ -36,7 +36,7 @@ namespace Pace
 ///
 /// Refuses a name no codec answers to, and -- separately -- a codec this build
 /// was compiled without, because those are different mistakes with different
-/// remedies: the first is a typo, the second wants `FASTCACHED_ENABLE_COMPRESSION`.
+/// remedies: the first is a typo, the second wants `PACE_ENABLE_COMPRESSION`.
 /// @param sv The codec name: `none`, `lz4` or `zstd`.
 /// @return The codec, or why it is not one.
 [[nodiscard]] std::expected<CompressionCodec, ConfigError> ParseCompressionCodec(std::string_view sv);

@@ -51,7 +51,7 @@ inline constexpr std::chrono::milliseconds SharedSessionHangUpMargin { 1'000 };
 ///
 /// **One silence, measured from two ends, and one number.** The server sweeps a connection whose
 /// peer has not named its next verb within `FrameServer::HeaderTimeout` -- and COUNTS it, in
-/// `fastcache_frame_request_deadline_sweeps_total`, a series whose meaning is that no honest client
+/// `pace_frame_request_deadline_sweeps_total`, a series whose meaning is that no honest client
 /// appears in it. So this end closes first: the bound is DERIVED from the server's constant rather
 /// than written beside it, and a timer on the reactor closes each idle session when it runs out.
 ///

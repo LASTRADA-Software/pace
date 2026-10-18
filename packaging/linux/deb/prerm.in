@@ -4,7 +4,7 @@
 # upgrade — postinst's try-restart handles that, so the cache stays warm.
 set -e
 
-SERVICE="@FASTCACHED_SERVICE_NAME@"
+SERVICE="@PACE_SERVICE_NAME@"
 NODE_SERVICE="pace-node.service"
 NODE_SOCKET="pace-node.socket"
 

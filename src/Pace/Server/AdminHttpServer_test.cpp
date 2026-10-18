@@ -248,11 +248,11 @@ TEST_CASE("AdminHttp: GET /metrics returns Prometheus body", "[metrics][http]")
     auto const response = Exchange("GET /metrics HTTP/1.1\r\n\r\n", metrics, stats);
     REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
     REQUIRE(response.contains("Content-Type: text/plain; version=0.0.4\r\n"));
-    REQUIRE(response.contains("fastcached_cmd_get_total 42\n"));
-    REQUIRE(response.contains("fastcached_connections_total 4\n"));
-    REQUIRE(response.contains("fastcached_uptime_seconds 7\n"));
+    REQUIRE(response.contains("pace_cmd_get_total 42\n"));
+    REQUIRE(response.contains("pace_connections_total 4\n"));
+    REQUIRE(response.contains("pace_uptime_seconds 7\n"));
     // The build's version, which `live-stats cache` titles its panel with (#134).
-    REQUIRE(response.contains(std::format("fastcached_build_info{{version=\"{}\"}} 1\n", Pace::VersionString)));
+    REQUIRE(response.contains(std::format("pace_build_info{{version=\"{}\"}} 1\n", Pace::VersionString)));
 }
 
 TEST_CASE("AdminHttp: /metrics with a query string still routes", "[metrics][http]")

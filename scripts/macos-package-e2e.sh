@@ -114,10 +114,10 @@ linked_tools() {
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     [[ -r "${root}/CMakeLists.txt" ]] \
         || fail "linked_tools: cannot read ${root}/CMakeLists.txt"
-    line="$(sed -n 's/^set(FASTCACHED_MACOS_LINKED_TOOLS "\(.*\)")$/\1/p' "${root}/CMakeLists.txt")"
+    line="$(sed -n 's/^set(PACE_MACOS_LINKED_TOOLS "\(.*\)")$/\1/p' "${root}/CMakeLists.txt")"
     tools="${line%%$'\n'*}"
     [[ -n "$tools" ]] \
-        || fail "linked_tools: FASTCACHED_MACOS_LINKED_TOOLS is not set in ${root}/CMakeLists.txt, so every symlink assertion would pass vacuously"
+        || fail "linked_tools: PACE_MACOS_LINKED_TOOLS is not set in ${root}/CMakeLists.txt, so every symlink assertion would pass vacuously"
     printf '%s' "$tools"
 }
 

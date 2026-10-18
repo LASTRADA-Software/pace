@@ -15,16 +15,16 @@ cmake_minimum_required(VERSION 3.28)
 # checked without a second author. And it refuses when either scan matches nothing,
 # because an empty asset list and an empty scriptlet agree perfectly.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "check-config-permissions: FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "check-config-permissions: PACE_SOURCE_DIR must be set")
 endif()
 
-set(_assets "${FASTCACHED_SOURCE_DIR}/packaging/CMakeLists.txt")
+set(_assets "${PACE_SOURCE_DIR}/packaging/CMakeLists.txt")
 if(NOT EXISTS "${_assets}")
     message(FATAL_ERROR "check-config-permissions: cannot read ${_assets}")
 endif()
 
-# Rows look like: "linux/<name>.yaml|${FASTCACHED_SYSCONF_DIR}|config|<installed>|Runtime"
+# Rows look like: "linux/<name>.yaml|${PACE_SYSCONF_DIR}|config|<installed>|Runtime"
 file(STRINGS "${_assets}" _lines)
 set(_configs "")
 foreach(_line IN LISTS _lines)
@@ -43,8 +43,8 @@ if(_count EQUAL 0)
 endif()
 
 set(_scriptlets
-    "${FASTCACHED_SOURCE_DIR}/packaging/linux/deb/postinst.in"
-    "${FASTCACHED_SOURCE_DIR}/packaging/linux/rpm/post.in")
+    "${PACE_SOURCE_DIR}/packaging/linux/deb/postinst.in"
+    "${PACE_SOURCE_DIR}/packaging/linux/rpm/post.in")
 
 set(_missing "")
 foreach(_script IN LISTS _scriptlets)

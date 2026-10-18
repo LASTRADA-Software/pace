@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Assert that when FASTCACHE_AUTO_START's daemon dies on startup, the configure says
+# Assert that when PACE_AUTO_START's daemon dies on startup, the configure says
 # WHY and not merely with what number ([#1538](https://github.com/LASTRADA-Software/fastcached/issues/1538)).
 #
 # ## What went wrong
@@ -35,9 +35,9 @@
 # exits 3 with nothing on either stream, and that test was green throughout the defect.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<repo> -DFASTCACHED_SCRATCH_DIR=<scratch>
-#         -DFASTCACHED_CXX_COMPILER=<c++> [-DFASTCACHED_MAKE_PROGRAM=<make>]
-#         [-DFASTCACHED_GENERATOR=<gen>]
+#   cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<scratch>
+#         -DPACE_CXX_COMPILER=<c++> [-DPACE_MAKE_PROGRAM=<make>]
+#         [-DPACE_GENERATOR=<gen>]
 #         -P scripts/check-compile-cache-daemon-diagnostic.cmake
 #
 # Exit codes: 0 = both shapes reported as specified, or skipped. 1 = they did not.
@@ -49,7 +49,7 @@ cmake_minimum_required(VERSION 3.28)
 # rather than agreed to by both sides at once.
 #
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
-set(FastCachedInstallOracle
+set(PaceInstallOracle
     "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
     "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc|opt/fastcached/bin/pace-kv"
 )
@@ -62,14 +62,14 @@ set(mirrorVersion "9.8.7")
 # phrase and short enough that no CMake status line could wrap it away.
 set(loaderLine "error while loading shared libraries: libyaml-cpp.so.0.8")
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COMPILER)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CXX_COMPILER)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
 endforeach()
 
-set(fixtureDir "${FASTCACHED_SOURCE_DIR}/src/tests/compile-cache-fixture")
-set(moduleDir "${FASTCACHED_SOURCE_DIR}/cmake/portable")
+set(fixtureDir "${PACE_SOURCE_DIR}/src/tests/compile-cache-fixture")
+set(moduleDir "${PACE_SOURCE_DIR}/cmake/portable")
 if(NOT IS_DIRECTORY "${fixtureDir}")
     message(FATAL_ERROR "no fixture project at ${fixtureDir}")
 endif()
@@ -79,8 +79,8 @@ if(CMAKE_HOST_WIN32)
             "(see check-compile-cache-autoinstall.cmake's header)")
     return()
 endif()
-if(NOT EXISTS "${FASTCACHED_CXX_COMPILER}")
-    message("SKIP: no C++ compiler at ${FASTCACHED_CXX_COMPILER}, so no project can be configured")
+if(NOT EXISTS "${PACE_CXX_COMPILER}")
+    message("SKIP: no C++ compiler at ${PACE_CXX_COMPILER}, so no project can be configured")
     return()
 endif()
 find_program(hostUname NAMES uname)
@@ -92,7 +92,7 @@ endif()
 cmake_host_system_information(RESULT hostProcessor QUERY OS_PLATFORM)
 
 set(platform "")
-foreach(row IN LISTS FastCachedInstallOracle)
+foreach(row IN LISTS PaceInstallOracle)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 rowSystem)
     list(GET fields 1 rowProcessor)
@@ -109,8 +109,8 @@ if(NOT platform)
     return()
 endif()
 
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
-file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
+file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 
 # Run one configure against a mirror whose staged daemon fails as described.
 #
@@ -127,7 +127,7 @@ file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
 #                 literal, because it reads as though somebody had thought about it.
 # @param outVar Receives the configure's combined output.
 function(RunFailingStart case daemonBody addrPort outVar)
-    set(root "${FASTCACHED_SCRATCH_DIR}/${case}")
+    set(root "${PACE_SCRATCH_DIR}/${case}")
     set(stem "fastcached-${mirrorVersion}-${platform}")
     set(payloadRoot "${root}/payload")
 
@@ -169,23 +169,23 @@ function(RunFailingStart case daemonBody addrPort outVar)
     file(CREATE_LINK "${hostUname}" "${sandbox}/usr/bin/uname" COPY_ON_ERROR SYMBOLIC)
 
     set(arguments
-        "-DFASTCACHED_MODULE_DIR=${moduleDir}"
-        "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}"
+        "-DPACE_MODULE_DIR=${moduleDir}"
+        "-DCMAKE_CXX_COMPILER=${PACE_CXX_COMPILER}"
         "-DCMAKE_FIND_ROOT_PATH=${sandbox}"
         "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
-        "-DFASTCACHE_AUTO_INSTALL=ON"
-        "-DFASTCACHE_AUTO_INSTALL_DIR=${root}/stage"
-        "-DFASTCACHE_AUTO_INSTALL_REPO=fastcached-mirror"
-        "-DFASTCACHE_AUTO_INSTALL_VERSION=${mirrorVersion}"
-        "-DFASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE=file://${root}/mirror"
-        "-DFASTCACHE_AUTO_START=ON"
-        "-DFASTCACHE_AUTO_START_STORAGE_DIR=${root}/storage"
-        "-DFASTCACHE_ADDR=127.0.0.1:${addrPort}")
-    if(FASTCACHED_MAKE_PROGRAM)
-        list(APPEND arguments "-DCMAKE_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}")
+        "-DPACE_AUTO_INSTALL=ON"
+        "-DPACE_AUTO_INSTALL_DIR=${root}/stage"
+        "-DPACE_AUTO_INSTALL_REPO=fastcached-mirror"
+        "-DPACE_AUTO_INSTALL_VERSION=${mirrorVersion}"
+        "-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=file://${root}/mirror"
+        "-DPACE_AUTO_START=ON"
+        "-DPACE_AUTO_START_STORAGE_DIR=${root}/storage"
+        "-DPACE_ADDR=127.0.0.1:${addrPort}")
+    if(PACE_MAKE_PROGRAM)
+        list(APPEND arguments "-DCMAKE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}")
     endif()
-    if(FASTCACHED_GENERATOR)
-        list(APPEND arguments -G "${FASTCACHED_GENERATOR}")
+    if(PACE_GENERATOR)
+        list(APPEND arguments -G "${PACE_GENERATOR}")
     endif()
 
     execute_process(

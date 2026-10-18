@@ -470,7 +470,7 @@ namespace
         if (!stored.has_value())
             // The one arm of this surface that is about THIS MACHINE rather than
             // whoever is talking to it, and nothing counted it: the
-            // `fastcached_write_errors_total` named in `CacheMalformedValues`'s own
+            // `pace_write_errors_total` named in `CacheMalformedValues`'s own
             // history does not exist any more.
             co_return co_await ReplyRefused(
                 socket,
@@ -730,7 +730,7 @@ namespace
             socket,
             { .code = Wire::ErrorCode::StorageWriteFailed,
               .rationale = "WriteErrorReportingStorage reports a removal it could not persist as "
-                           "fastcached_write_errors_total, at the removal, where every protocol's delete is visible" },
+                           "pace_write_errors_total, at the removal, where every protocol's delete is visible" },
             {})
             ? Next::Continue
             : Next::Abort;

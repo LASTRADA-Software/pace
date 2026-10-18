@@ -38,22 +38,22 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-unique-temp-paths.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-unique-temp-paths.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
-set(helperLibrary "${FASTCACHED_SOURCE_DIR}/scripts/lib/CheckCommon.cmake")
+set(helperLibrary "${PACE_SOURCE_DIR}/scripts/lib/CheckCommon.cmake")
 if(NOT EXISTS "${helperLibrary}")
     message(FATAL_ERROR "the helper library is missing: ${helperLibrary}")
 endif()
@@ -81,8 +81,8 @@ set(subject_clean "#include <string>\nstd::string TempName() { return \"t\"; }\n
 # @param exemptionRow A row to put in a COPY of the check, or `-` to run the shipped one.
 # @param outOutput Set to the check's combined output.
 # @param outStaged Set to TRUE when the run used a staged copy of the check.
-function(fastcached_stage_and_run name seam subject exemptionRow outOutput outStaged)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/case-${name}")
+function(pace_stage_and_run name seam subject exemptionRow outOutput outStaged)
+    set(tree "${PACE_SCRATCH_DIR}/case-${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src/Pace/Core")
     file(MAKE_DIRECTORY "${tree}/src/apps/node")
@@ -108,7 +108,7 @@ function(fastcached_stage_and_run name seam subject exemptionRow outOutput outSt
     if(NOT exemptionRow STREQUAL "-")
         file(MAKE_DIRECTORY "${tree}/scripts/lib")
         file(READ "${check}" checkText)
-        string(FIND "${checkText}" "set(FastCachedRandomDeviceExemptions \"\")" tableAt)
+        string(FIND "${checkText}" "set(PaceRandomDeviceExemptions \"\")" tableAt)
         if(tableAt EQUAL -1)
             # The table was renamed or reformatted, so this case can no longer inject a row --
             # and would otherwise run the SHIPPED empty table and pass while testing nothing.
@@ -116,8 +116,8 @@ function(fastcached_stage_and_run name seam subject exemptionRow outOutput outSt
                 "case `${name}`: the exemption table declaration was not found in the check, so a "
                 "row cannot be staged. This case tests nothing until the anchor is updated.")
         endif()
-        string(REPLACE "set(FastCachedRandomDeviceExemptions \"\")"
-               "set(FastCachedRandomDeviceExemptions \"${exemptionRow}\")\nmessage(STATUS \"unique-temp-paths: STAGED-CHECK\")"
+        string(REPLACE "set(PaceRandomDeviceExemptions \"\")"
+               "set(PaceRandomDeviceExemptions \"${exemptionRow}\")\nmessage(STATUS \"unique-temp-paths: STAGED-CHECK\")"
                checkText "${checkText}")
         file(WRITE "${tree}/scripts/check-unique-temp-paths.cmake" "${checkText}")
         file(COPY "${helperLibrary}" DESTINATION "${tree}/scripts/lib")
@@ -128,7 +128,7 @@ function(fastcached_stage_and_run name seam subject exemptionRow outOutput outSt
     # A git index, so the enumeration runs in the mode CI runs it in rather than the fallback.
     # The mode is part of the check's own output and is asserted below.
     if(GIT_EXECUTABLE)
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         RESULT_VARIABLE initStatus OUTPUT_QUIET ERROR_QUIET)
         if(initStatus EQUAL 0)
@@ -137,7 +137,7 @@ function(fastcached_stage_and_run name seam subject exemptionRow outOutput outSt
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${runCheck}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${runCheck}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE status)
     set(combined "${out}${err}")
     # Flattened, because CMake wraps its diagnostics and the wrap column depends on this
@@ -175,7 +175,7 @@ foreach(row IN LISTS cases)
     list(GET fields 5 needle)
     string(REPLACE "~bar~" "|" exemptionRow "${exemptionRow}")
 
-    fastcached_stage_and_run("${name}" "${seam}" "${subject}" "${exemptionRow}" output staged)
+    pace_stage_and_run("${name}" "${seam}" "${subject}" "${exemptionRow}" output staged)
     math(EXPR ran "${ran} + 1")
 
     # The verdict, from the diagnostic channel on ONE flattened line: a check that merely WARNS

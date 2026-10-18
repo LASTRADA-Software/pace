@@ -58,7 +58,7 @@ change: the worker re-registers, presence announces, the leader re-proposes the 
 - Create: `src/Pace/Platform/RouteProbe.hpp`, `src/Pace/Platform/RouteProbe.cpp`,
   `src/Pace/Platform/RouteProbe_test.cpp`
 - Modify: `src/Pace/CMakeLists.txt` (add `Platform/RouteProbe.cpp` beside `Platform/LocalAddresses.cpp`)
-- Modify: `scripts/check-udp-opener.cmake:66-68` (second `FastCachedUdpOpenerUnits` row)
+- Modify: `scripts/check-udp-opener.cmake:66-68` (second `PaceUdpOpenerUnits` row)
 
 **Interfaces — Produces:**
 ```cpp
@@ -274,8 +274,8 @@ Behaviour:
   `WorkerTier` gets the resolver through its parts struct (`WorkerTierParts`, WorkerTier.hpp:135 area).
 - **Reload:** `ReloadBasis` gains `std::function<std::string()> routeHost`; `ReloadCandidateReader`
   calls `ApplyRouteHost(candidate, basis.routeHost ? basis.routeHost() : "")` after `ApplyHostNames`.
-- **Metrics:** two enumerators before `Last`, rows `fastcache_node_endpoint_changes_total` /
-  `fastcache_node_raft_endpoint_changes_total` (help text: "Times this node's advertised ... moved
+- **Metrics:** two enumerators before `Last`, rows `pace_node_endpoint_changes_total` /
+  `pace_node_raft_endpoint_changes_total` (help text: "Times this node's advertised ... moved
   because the address it routes from changed or a reload re-pinned it."), sole-writer rows on the
   node surface the compile node already uses for node-tier counters (find one with grep in
   `StatsReading.hpp`), and the two series in the docs metrics tables.

@@ -108,7 +108,7 @@ class LeaseCheckInForce
 ///        that binds its own port and is worth nothing for one that does not: under
 ///        socket activation the unit chose the address -- the shipped
 ///        `pace-node.socket` says `ListenStream=6676`, every interface --
-///        and a leftover `--bind=127.0.0.1` in `FASTCACHE_NODE_ARGS` is ignored while
+///        and a leftover `--bind=127.0.0.1` in `PACE_NODE_ARGS` is ignored while
 ///        still telling the table this port is local. That combination passed the
 ///        table, built the unchecked validator and served an unauthenticated compile
 ///        port to the network, with all three refusal counters reading zero: the exact

@@ -45,7 +45,7 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-node-surface-docs-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
@@ -57,14 +57,14 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-node-surface-docs.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-node-surface-docs.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -73,9 +73,9 @@ endif()
 # The paths the check reads. Spelled once here and derived into every staged
 # tree, because a path restated per case is a case that silently stops staging
 # what the check reads and passes by never being reached.
-set(FastCachedSelftestSourceRel "src/apps/pace-node/NodeSurfaces.cpp")
-set(FastCachedSelftestHeaderRel "src/apps/pace-node/NodeSurfaces.hpp")
-set(FastCachedSelftestDocRel "docs/operations/surfaces.md")
+set(PaceSelftestSourceRel "src/apps/pace-node/NodeSurfaces.cpp")
+set(PaceSelftestHeaderRel "src/apps/pace-node/NodeSurfaces.hpp")
+set(PaceSelftestDocRel "docs/operations/surfaces.md")
 
 # ---------------------------------------------------------------------------
 # The synthesised ground truth: four surfaces, three TCP and one UDP, with the
@@ -180,8 +180,8 @@ The beacon replies from --discovery-reply-port when one is set.
 # @param to The replacement.
 # @param outOutput Set to the check's combined output, whitespace collapsed.
 # @param outApplied Set to TRUE when the mutation was actually made.
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
     set(sourceText "${baseSurfaceSource}")
@@ -242,7 +242,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     # second thing to be wrong, and it would redden this fixture every time an
     # unrelated exemption row is added, which is the maintenance cost that gets
     # a fixture deleted.
-    foreach(exemptRow IN LISTS FastCachedSelftestExemptions)
+    foreach(exemptRow IN LISTS PaceSelftestExemptions)
         string(REPLACE "|" ";" exemptFields "${exemptRow}")
         list(LENGTH exemptFields exemptFieldCount)
         if(exemptFieldCount GREATER_EQUAL 2)
@@ -258,12 +258,12 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
         endif()
     endforeach()
 
-    file(WRITE "${tree}/${FastCachedSelftestSourceRel}" "${sourceText}")
-    file(WRITE "${tree}/${FastCachedSelftestHeaderRel}" "${baseSurfaceHeader}")
-    file(WRITE "${tree}/${FastCachedSelftestDocRel}" "${docText}")
+    file(WRITE "${tree}/${PaceSelftestSourceRel}" "${sourceText}")
+    file(WRITE "${tree}/${PaceSelftestHeaderRel}" "${baseSurfaceHeader}")
+    file(WRITE "${tree}/${PaceSelftestDocRel}" "${docText}")
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
     # `message(FATAL_ERROR)` word-wraps at a column that depends on how long the
@@ -287,7 +287,7 @@ endfunction()
 # contain a '|' or a ';': the first is the row separator and the second splits
 # the CMake list silently, which is how this project's own row tables have lost
 # half a sentence three times. The field count is asserted per row below.
-set(FastCachedSurfaceSelftestCases
+set(PaceSurfaceSelftestCases
     # The baseline. Every refusal below is evidence only if this passes.
     "baseline|none|-|-|node surface docs: 4 surface(s)|CMake Error"
 
@@ -402,11 +402,11 @@ file(READ "${check}" checkText)
 # none is bracketed. Where brackets ARE the data, blanking them is wrong and the
 # remedy is a list-free offset walk instead -- see `check-tsan-scope`, whose rows
 # are Catch2 tags like `[async]`.
-fastcached_split_lines_tokenised("${checkText}" checkLines)
-set(FastCachedSelftestExemptions "")
+pace_split_lines_tokenised("${checkText}" checkLines)
+set(PaceSelftestExemptions "")
 set(inExemptions FALSE)
 foreach(line IN LISTS checkLines)
-    if(line MATCHES "^set\\(FastCachedSurfaceCountExemptions")
+    if(line MATCHES "^set\\(PaceSurfaceCountExemptions")
         set(inExemptions TRUE)
         continue()
     endif()
@@ -417,16 +417,16 @@ foreach(line IN LISTS checkLines)
         break()
     endif()
     if(line MATCHES "\"([^\"]+)\"")
-        list(APPEND FastCachedSelftestExemptions "${CMAKE_MATCH_1}")
+        list(APPEND PaceSelftestExemptions "${CMAKE_MATCH_1}")
     endif()
 endforeach()
 if(NOT inExemptions)
     message(FATAL_ERROR
-        "could not find FastCachedSurfaceCountExemptions in ${check}. This fixture stages a page "
+        "could not find PaceSurfaceCountExemptions in ${check}. This fixture stages a page "
         "per exemption so the baseline can be green, and reading none would make every case below "
         "fail for a reason that has nothing to do with the rule it names.")
 endif()
-list(LENGTH FastCachedSelftestExemptions exemptionCount)
+list(LENGTH PaceSelftestExemptions exemptionCount)
 if(exemptionCount EQUAL 0)
     message(FATAL_ERROR
         "read zero exemption rows out of ${check}, so no page would be staged for them and the "
@@ -439,7 +439,7 @@ set(casesRun 0)
 # refusal to a pass must not leave a tally beside it saying otherwise.
 set(refusalCases 0)
 
-foreach(caseRow IN LISTS FastCachedSurfaceSelftestCases)
+foreach(caseRow IN LISTS PaceSurfaceSelftestCases)
     string(REPLACE "|" ";" fields "${caseRow}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -454,7 +454,7 @@ foreach(caseRow IN LISTS FastCachedSurfaceSelftestCases)
     list(GET fields 4 caseMustAppear)
     list(GET fields 5 caseMustNotAppear)
 
-    fastcached_stage_and_run("${caseName}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
+    pace_stage_and_run("${caseName}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
 
     if(NOT applied)
         list(APPEND failures
@@ -516,7 +516,7 @@ endforeach()
 
 # A table that ran no cases agrees with everything, which is the vacuous pass the
 # check under test refuses in its own subject.
-list(LENGTH FastCachedSurfaceSelftestCases caseCount)
+list(LENGTH PaceSurfaceSelftestCases caseCount)
 if(casesRun EQUAL 0)
     list(APPEND failures "no case ran at all, so this fixture asserted nothing")
 elseif(NOT casesRun EQUAL ${caseCount})

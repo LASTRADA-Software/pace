@@ -18,7 +18,7 @@ namespace Pace
 /// counters (gets, sets, hit/miss splits, evictions, capacity) come from the
 /// storage snapshot — the authoritative source — while connection-level
 /// counters come from the metrics sink. Each metric is emitted with its
-/// `# HELP` / `# TYPE` lines followed by the `fastcached_<name> <value>` sample.
+/// `# HELP` / `# TYPE` lines followed by the `pace_<name> <value>` sample.
 ///
 /// A pure function of the reading: everything it renders was captured by `CaptureStatsReading`,
 /// which is what lets a live-stats snapshot encoded from the same reading never disagree with it.

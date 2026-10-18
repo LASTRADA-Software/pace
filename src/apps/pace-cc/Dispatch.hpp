@@ -109,7 +109,7 @@ class IEndpointExchange
 /// needs the worker to say it is still there — an idle bound of seconds against a
 /// total that stays long. That is a wire change tracked as #245.
 ///
-/// It is `FASTCACHE_DISPATCH_TIMEOUT` at run time, and `pace-cc` is one
+/// It is `PACE_DISPATCH_TIMEOUT` at run time, and `pace-cc` is one
 /// process per translation unit, so the variable IS the runtime knob: the next
 /// compile reads it. Nothing has to be reloaded, and nothing has to be restarted.
 constexpr std::chrono::milliseconds DefaultDispatchTotal = CompileCacheWire::DefaultCompileLeaseTimeout;
@@ -130,7 +130,7 @@ constexpr std::chrono::milliseconds DefaultDispatchTotal = CompileCacheWire::Def
 /// one into a fleet that refuses healthy workers is a build failure rather than a
 /// support ticket.
 ///
-/// It is `FASTCACHE_DISPATCH_IDLE` at run time, and zero turns it off -- which
+/// It is `PACE_DISPATCH_IDLE` at run time, and zero turns it off -- which
 /// restores exactly the pre-#245 behaviour, one flat deadline, for an operator who
 /// would rather have that than a fleet whose workers they do not trust to pulse.
 constexpr std::chrono::milliseconds DefaultDispatchIdle = CompileCacheWire::DefaultCompileIdleTimeout;
@@ -209,7 +209,7 @@ struct DispatchBudgetKnobs
 /// gained `keepAlive` (#247). The copy silently overwrote `core::net::KeepAlive::Yes` with the
 /// control leg's `No`, so no shipped launcher has ever armed keepalive on the one
 /// exchange it exists for, and a worker whose host vanished still cost the full
-/// `FASTCACHE_DISPATCH_TIMEOUT`. Nothing could see it: the default member
+/// `PACE_DISPATCH_TIMEOUT`. Nothing could see it: the default member
 /// initializer above was the only statement of the intent, `main.cpp` is in no test
 /// target, and the docs described the unarmed behaviour, so code and prose agreed
 /// by accident.
@@ -242,7 +242,7 @@ struct DispatchBudgetKnobs
 /// the one place an operator watches. So a dispatched compile's total comes from the
 /// grant in hand, never from this process's configuration.
 ///
-/// That is why `FASTCACHE_DISPATCH_TIMEOUT` no longer decides a dispatched compile:
+/// That is why `PACE_DISPATCH_TIMEOUT` no longer decides a dispatched compile:
 /// **a client-side knob overriding the fleet's agreed bound is a worker-side override
 /// wearing a client's clothes**, and the ticket forbids one of those exactly one
 /// machine along. It stays as the fallback below and as the bound on the paths that
@@ -319,7 +319,7 @@ inline constexpr std::chrono::milliseconds HintConnectBudget { 300 };
 /// The compile leg's budget, for a dial at the grant's hint.
 ///
 /// Only `connect` differs, capped by `WithConnectAtMost`: a shorter configured connect is
-/// kept, and `FASTCACHE_CONNECT_TIMEOUT=0s` takes the cap rather than giving a stale hint the
+/// kept, and `PACE_CONNECT_TIMEOUT=0s` takes the cap rather than giving a stale hint the
 /// platform's default -- minutes, not a third of a second.
 /// @param compile The compile leg's budget as it stands for this dial.
 /// @return The same budget, with its connect ceiling at most `HintConnectBudget`.
@@ -457,8 +457,8 @@ enum class DeclineCause : std::uint8_t
     /// node's in-flight byte budget was full (on a worker, the compiles running there each
     /// hold their whole request -- raise `--compile-inflight-max`), or its listener was at its
     /// connection cap (counted on the node as
-    /// `fastcache_node_frame_connections_refused_at_capacity_total` rather than
-    /// `fastcache_worker_jobs_refused_endpoint_busy_total`, and the likelier of the two for a
+    /// `pace_node_frame_connections_refused_at_capacity_total` rather than
+    /// `pace_worker_jobs_refused_endpoint_busy_total`, and the likelier of the two for a
     /// LEASE, whose payload is kilobytes). The remedy is on that node either way, so the row
     /// names both rather than the one a compile usually meets.
     ///

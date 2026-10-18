@@ -71,7 +71,7 @@ struct ScriptedService
     {
         auto owned = std::make_unique<ScriptedServiceControlManager>(presence);
         manager = owned.get();
-        host = std::make_unique<ServiceHost>("FastCachedTest",
+        host = std::make_unique<ServiceHost>("PaceTest",
                                              std::move(owned),
                                              controls,
                                              ServiceHostOptions { .stop = TestStopPlan, .hostEvents = hostEvents },
@@ -99,7 +99,7 @@ struct ServingWhenReadyService
         auto owned = std::make_unique<ScriptedServiceControlManager>(ServiceManagerPresence::Present);
         manager = owned.get();
         host = std::make_unique<ServiceHost>(
-            "FastCachedTest",
+            "PaceTest",
             std::move(owned),
             controls,
             ServiceHostOptions { .stop = TestStopPlan, .readiness = ServiceReadiness::BodySignals, .start = plan },

@@ -373,8 +373,8 @@ struct SurfaceRow
 /// Empty, and that is the whole statement: a compile node serves none of the surfaces any
 /// counter row is attributed to. Specifically it has no cache-daemon accept path -- it
 /// constructs neither `Server` nor `ReactorServerLoop`, the only writers of
-/// `fastcached_connections_*`, and its own accept path has separate counters of its own
-/// (`fastcache_node_frame_connections_refused_at_capacity_total`). So those rows read ABSENT
+/// `pace_connections_*`, and its own accept path has separate counters of its own
+/// (`pace_node_frame_connections_refused_at_capacity_total`). So those rows read ABSENT
 /// here rather than as a plausible zero saying nothing has ever connected to this node.
 ///
 /// It lives beside `NodeSurfaceTable()` because that table is already this binary's answer to

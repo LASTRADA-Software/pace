@@ -1129,7 +1129,7 @@ TEST_CASE("NodeConfig: a system-scope job names an unprivileged account", "[node
 
 TEST_CASE("NodeConfig: the worker's launchd label is what the packaging removes", "[node][service]")
 {
-    // FASTCACHED_MACOS_NODE_LABEL in the top-level CMakeLists.txt is substituted
+    // PACE_MACOS_NODE_LABEL in the top-level CMakeLists.txt is substituted
     // into pace-uninstall.sh.in, which boots the job out and deletes its
     // plist. It has to be this string, because the uninstaller also removes the
     // binary that would otherwise answer for itself -- so a label that drifted
@@ -1145,7 +1145,7 @@ TEST_CASE("NodeConfig: the worker's launchd label is what the packaging removes"
     auto const spec = MakeNodeServiceSpec(
         std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
-    CHECK(LaunchdLabel(spec) == std::string_view { FASTCACHED_MACOS_NODE_LABEL });
+    CHECK(LaunchdLabel(spec) == std::string_view { PACE_MACOS_NODE_LABEL });
 }
 
 TEST_CASE("NodeConfig: the worker's registration survives its own parser", "[node][service]")
@@ -2816,7 +2816,7 @@ TEST_CASE("NodeConfig: the node answers where the launcher looks", "[node][cli]"
 {
     // Two programs agreeing on one constant, asserted here because that agreement is
     // the entire mechanism: it is what makes `pace-cc` find a local node with no
-    // FASTCACHE_ADDR set, and nothing else would notice if one of them moved. The
+    // PACE_ADDR set, and nothing else would notice if one of them moved. The
     // symptom of a drift is not an error — the launcher connects to a closed port,
     // falls back, and every build is silently uncached.
     //
@@ -5821,7 +5821,7 @@ TEST_CASE("No node flag can override how long a compile may take", "[node][confi
 TEST_CASE("The compression settings parse, and each names its own flag", "[node][config][compression]")
 {
     // `none` is the only codec guaranteed to exist: lz4 and zstd are behind
-    // FASTCACHED_ENABLE_COMPRESSION, so a build without them must still parse the
+    // PACE_ENABLE_COMPRESSION, so a build without them must still parse the
     // flag rather than refuse a value the table documents.
     auto const off = ParseNodeArgv({ "--memory-compression=none", "--compression=none" });
     REQUIRE(off.has_value());

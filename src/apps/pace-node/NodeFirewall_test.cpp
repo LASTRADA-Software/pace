@@ -208,17 +208,17 @@ TEST_CASE("A node's --firewall-allow scopes every rule, and --service-name names
 {
     auto cfg = Installed();
     cfg.nodeListen = "0.0.0.0:6674";
-    cfg.serviceName = "FastCacheNodeB";
+    cfg.serviceName = "PaceNodeB";
     cfg.firewallAllow = { "10.0.0.0/8", "fd00::/8" };
     cfg.discoveryAddress.clear();
 
     auto const rules = NodeFirewallRules(cfg, Program);
     REQUIRE(rules.size() == 2);
-    CHECK(rules.front().name == "FastCacheNodeB node tcp/6674");
+    CHECK(rules.front().name == "PaceNodeB node tcp/6674");
     for (auto const& rule: rules)
     {
         CAPTURE(rule.name);
-        CHECK(rule.group == "Pace: FastCacheNodeB");
+        CHECK(rule.group == "Pace: PaceNodeB");
         CHECK(rule.remoteAddresses == cfg.firewallAllow);
     }
 
@@ -227,10 +227,10 @@ TEST_CASE("A node's --firewall-allow scopes every rule, and --service-name names
     cfg.discoveryAddress = "255.255.255.255:6681";
     auto const withDiscovery = NodeFirewallRules(cfg, Program);
     CHECK(Openings(withDiscovery)
-          == std::vector<std::string> { "FastCacheNodeB node tcp/6674",
-                                        "FastCacheNodeB raft tcp/6680",
-                                        "FastCacheNodeB discovery-beacon udp/6681",
-                                        "FastCacheNodeB discovery-reply udp/any" });
+          == std::vector<std::string> { "PaceNodeB node tcp/6674",
+                                        "PaceNodeB raft tcp/6680",
+                                        "PaceNodeB discovery-beacon udp/6681",
+                                        "PaceNodeB discovery-reply udp/any" });
     for (auto const& rule: withDiscovery)
     {
         CAPTURE(rule.name);

@@ -46,7 +46,7 @@ constexpr auto ProbeProgram = std::string_view { "/opt/fastcached/bin/probe" };
 }
 
 /// The variable that opts a run into reading the machine's real firewall policy.
-constexpr auto LiveReadVariable = std::string_view { "FASTCACHED_FIREWALL_LIVE_READ" };
+constexpr auto LiveReadVariable = std::string_view { "PACE_FIREWALL_LIVE_READ" };
 
 } // namespace
 
@@ -400,7 +400,7 @@ TEST_CASE("The system firewall's rules can be listed when a run opts in", "[plat
     // pass has nothing to remove. Opt-in all the same, because the policy is machine-wide state
     // and a unit run must not depend on it; the fakes carry every decision above.
     if (Pace::ReadEnvironmentVariable(LiveReadVariable) != "1")
-        SKIP("reads the machine's firewall policy; set FASTCACHED_FIREWALL_LIVE_READ=1 to run it");
+        SKIP("reads the machine's firewall policy; set PACE_FIREWALL_LIVE_READ=1 to run it");
     auto const firewall = Pace::MakeSystemFirewall();
     if (firewall == nullptr)
         SKIP("this platform has no firewall this project manages");

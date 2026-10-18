@@ -56,7 +56,7 @@ inline constexpr std::array PersistentRefusalTable {
                                   "both, they are a version pair" },
     PersistentRefusal { .code = CompileCacheWire::ErrorCode::Unauthenticated,
                         .remedy = "the daemon requires a credential this launcher did not present; set "
-                                  "FASTCACHE_TOKEN or check the token file" },
+                                  "PACE_TOKEN or check the token file" },
 };
 
 /// Whether this refusal is one the whole build will meet.

@@ -98,7 +98,7 @@ set(_fc_cc_core
 # own <intrin.h> or <cpuid.h> on x86-64 and <sys/sysctl.h> on arm64 macOS -- no
 # windows.h. Base64 reaches the standard library alone. No vcpkg package, no OpenSSL
 # -- which is the point of having SHA-256 in this tree at all, since
-# FASTCACHED_ENABLE_TLS is off by default and peer authentication is not optional.
+# PACE_ENABLE_TLS is off by default and peer authentication is not optional.
 #
 # Core/Compression.cpp is the first of the two rows here that are NOT dependency-free
 # (Core/Ed25519.cpp, above, is the second), and it is a deliberate exception to the
@@ -121,11 +121,11 @@ set(_fc_cc_core
 # Homebrew shared zstd gets linked and `otool -L` fails the "nothing outside
 # /usr/lib" assertion.
 #
-# FASTCACHED_ENABLE_COMPRESSION=OFF stays a working configuration: the codec table
+# PACE_ENABLE_COMPRESSION=OFF stays a working configuration: the codec table
 # compiles without either library, Identity is always available, and the wire
 # negotiation falls back to it -- so such a launcher still dispatches, just without
 # compressing. That is asserted, not assumed.
-if(FASTCACHED_ENABLE_COMPRESSION)
+if(PACE_ENABLE_COMPRESSION)
     if(TARGET libzstd_static)
         set(_fc_cc_zstd libzstd_static)
     elseif(TARGET zstd::libzstd_static)
@@ -192,7 +192,7 @@ set(_fc_cc_sources
 # the launcher depends only on always-present Windows system DLLs (WS2_32,
 # KERNEL32) and needs no VC++ redistributable on build agents. On by default;
 # turn off to use the shared runtime (smaller binary, needs the redist).
-option(FASTCACHED_STATIC_LAUNCHER "Statically link the CRT into pace-cc" ON)
+option(PACE_STATIC_LAUNCHER "Statically link the CRT into pace-cc" ON)
 
 add_executable(pace-cc
     main.cpp
@@ -201,8 +201,8 @@ add_executable(pace-cc
 )
 target_include_directories(pace-cc PRIVATE "${CMAKE_SOURCE_DIR}/src")
 target_compile_definitions(pace-cc PRIVATE
-    FASTCACHE_CC_VERSION="${FASTCACHED_VERSION_STRING}")
-if(FASTCACHED_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
+    PACE_CC_VERSION="${PACE_VERSION_STRING}")
+if(PACE_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
     target_link_libraries(pace-cc PRIVATE ${_fc_cc_zstd} ${_fc_cc_lz4})
     target_compile_definitions(pace-cc PRIVATE FC_COMPRESSION_ENABLED=1)
 endif()
@@ -228,11 +228,11 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(pace-cc PRIVATE Threads::Threads)
 # core-cpp's /MT twins where this launcher takes the static CRT -- Release under
-# FASTCACHED_STATIC_LAUNCHER, per the MSVC_RUNTIME_LIBRARY property below -- and the ordinary targets
+# PACE_STATIC_LAUNCHER, per the MSVC_RUNTIME_LIBRARY property below -- and the ordinary targets
 # everywhere else. A mix is refused at link time (`/failifmismatch: RuntimeLibrary`), and the
 # daemon, which links the DLL CRT, links the ordinary ones. `core::async` is header-only, so it has
 # no twin.
-if(MSVC AND FASTCACHED_STATIC_LAUNCHER)
+if(MSVC AND PACE_STATIC_LAUNCHER)
     target_link_libraries(pace-cc PRIVATE core::async "$<IF:$<CONFIG:Debug>,core::net,core::net_mt>")
 else()
     target_link_libraries(pace-cc PRIVATE core::async core::net)
@@ -252,10 +252,10 @@ if(WIN32)
 endif()
 
 
-if(FASTCACHED_STATIC_LAUNCHER AND MSVC)
+if(PACE_STATIC_LAUNCHER AND MSVC)
     # CMP0091: MSVC_RUNTIME_LIBRARY selects /MT(d) vs /MD(d). Static so the CRT is
     # baked in and the shipped launcher needs no redistributable -- it is fetched as
-    # a bare binary by FASTCACHE_AUTO_INSTALL, onto machines that have no reason to
+    # a bare binary by PACE_AUTO_INSTALL, onto machines that have no reason to
     # carry one.
     #
     # DEBUG IS THE EXCEPTION, and it is not a preference. zstd and lz4 are CPM-built
@@ -280,14 +280,14 @@ if(FASTCACHED_STATIC_LAUNCHER AND MSVC)
 endif()
 
 install(TARGETS pace-cc
-    RUNTIME DESTINATION "${FASTCACHED_INSTALL_BINDIR}"
-    COMPONENT "${FASTCACHED_APP_COMPONENT}"
+    RUNTIME DESTINATION "${PACE_INSTALL_BINDIR}"
+    COMPONENT "${PACE_APP_COMPONENT}"
 )
 
 # Unit tests for the reusable launcher pieces (parsing, keying, statistics, and
 # the platform seams). Like the launcher itself these avoid the Pace
 # library, so the test binary stays dependency-light — Catch2 is the only extra.
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     add_executable(pace-cc-tests
         test_main.cpp
         ${_fc_cc_sources}
@@ -343,7 +343,7 @@ if(FASTCACHED_BUILD_TESTS)
         target_compile_definitions(pace-cc-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     endif()
     target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads fastcache-monocypher core::async core::net)
-    if(FASTCACHED_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
+    if(PACE_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
         target_link_libraries(pace-cc-tests PRIVATE ${_fc_cc_zstd} ${_fc_cc_lz4})
         target_compile_definitions(pace-cc-tests PRIVATE FC_COMPRESSION_ENABLED=1)
     endif()
@@ -364,7 +364,7 @@ if(FASTCACHED_BUILD_TESTS)
     # failed-assertion count, so `SKIP_RETURN_CODE 4` scored a case failing exactly four
     # assertions as *skipped* (#1128). Under the Catch2 the top-level CMakeLists pins
     # EXACTLY any failure exits 42, and `catch-skip-exit-contract` asserts it does.
-    catch_discover_tests(pace-cc-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+    catch_discover_tests(pace-cc-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
 
     # ---------------------------------------------------------------------
     # The end-to-end compile-cache test (`compile-cache-e2e`) used to be

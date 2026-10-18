@@ -260,7 +260,7 @@ struct DriverIdentityProbe
 /// the ticket projected.
 ///
 /// One arrangement note, because it cost a wrong answer first: with
-/// `FASTCACHE_ADDR`/`SOURCE_DIR`/`BINARY_DIR` unset the launcher declines before it
+/// `PACE_ADDR`/`SOURCE_DIR`/`BINARY_DIR` unset the launcher declines before it
 /// probes anything, so both binaries run one spawn and the measured saving is
 /// exactly zero. A timing run that does not set them is measuring a path on which
 /// this code never executes.

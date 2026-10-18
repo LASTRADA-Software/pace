@@ -73,12 +73,12 @@ Note where the two "the cache did not serve this" edges go. A **miss** and a
 that is the point rather than a shortcut: the cache and the scheduler are separate
 services on separate machines, so a failure of one says nothing about the other.
 Sending a miss to step 7 and a transport failure straight to step 8b is what made
-a mistyped `FASTCACHE_ADDR` turn every build on an estate local while the fleet
+a mistyped `PACE_ADDR` turn every build on an estate local while the fleet
 sat idle and healthy, with the build green throughout
 ([#236](https://github.com/LASTRADA-Software/fastcached/issues/236)). What the
 launcher does *not* do afterwards is push the result at a daemon that just failed
 to answer — step 9 is skipped in that case, so reaching step 7 costs a wrong
-`FASTCACHE_ADDR` no more connections than it cost before.
+`PACE_ADDR` no more connections than it cost before.
 
 ### 1. Identify the compiler
 
@@ -156,7 +156,7 @@ could never hit.
 
 ### 5. Look it up
 
-One request, to whatever `FASTCACHE_ADDR` names. That address is always a
+One request, to whatever `PACE_ADDR` names. That address is always a
 **cache**, never a scheduler — either a shared `pace-kv`, or a node's own tier
 on this machine. Mixing the two up is a common first mistake, and it presents as
 every compile being refused.
@@ -189,7 +189,7 @@ real and overwrites the entry rather than leaving it to mislead every later buil
 If no scheduler is configured, the real compiler runs locally. That is the whole
 of it, and it is a complete setup.
 
-If `FASTCACHE_SCHEDULER` is set, the launcher first asks that scheduler for a
+If `PACE_SCHEDULER` is set, the launcher first asks that scheduler for a
 worker, naming the toolchain fingerprint and the object key. Whatever comes back,
 the build cannot break: **every refusal ends in the local compile that would have
 happened anyway.** Refusals are named rather than lumped together, because they
@@ -345,19 +345,19 @@ Start with `pace-cc --show-stats`, which is a per-machine tally:
 A non-zero **`unavailable`** means the launcher never got an answer, so the hit
 rate is meaningless. The reasons under it name the cause. The two usual ones:
 
-- **`missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR`.** All three must be set and
-  non-empty. `FASTCACHE_ADDR` has a default (`127.0.0.1:6674`), so in practice it
+- **`missing PACE_ADDR/SOURCE_DIR/BINARY_DIR`.** All three must be set and
+  non-empty. `PACE_ADDR` has a default (`127.0.0.1:6674`), so in practice it
   is the two roots that are missing — and if you are using this project's own
   CMake module, it sets them for you.
 - **`fetch exchange failed`.** Nothing answered at that address — usually nothing
   is listening. Start the daemon or the node. Note that this is a report about the
-  *cache*: the compiles themselves were still dispatched if `FASTCACHE_SCHEDULER`
+  *cache*: the compiles themselves were still dispatched if `PACE_SCHEDULER`
   names a fleet, so a build can show 100% `unavailable` and still have been fast.
 
 ### 2. The cache is reached, but everything is a miss
 
 Then the key differs from whatever produced the entries you expected to hit. Run
-one compile with `FASTCACHE_VERBOSE=1` and read the notes. The ones that matter:
+one compile with `PACE_VERBOSE=1` and read the notes. The ones that matter:
 
 | Note | Means |
 |---|---|
@@ -373,7 +373,7 @@ on the other is a different key, and build systems add flags you never typed.
 
 ### 3. Caching works, but nothing is ever dispatched
 
-Hits and misses look normal, but no compile goes to a worker. `FASTCACHE_VERBOSE=1`
+Hits and misses look normal, but no compile goes to a worker. `PACE_VERBOSE=1`
 names the reason directly:
 
 ```
@@ -382,11 +382,11 @@ pace-cc: not dispatched (rejected (no-worker)); compiling locally
 
 Rule out the cheap thing first: **is this machine admitted to the fleet?** A client is
 admitted by the machine ticket its own node mints, so the machine needs a node running
-at `FASTCACHE_ADDR` and that node's key admitted to the cluster; otherwise every lease is
+at `PACE_ADDR` and that node's key admitted to the cluster; otherwise every lease is
 refused `not-a-member` and every compile is local, behind a perfectly green build.
 `pacectl explain-admission <machine>` on the scheduler says where it stands.
-(`FASTCACHE_TOKEN` is not the cause any more: it is sent to the cache at
-`FASTCACHE_ADDR` alone.)
+(`PACE_TOKEN` is not the cause any more: it is sent to the cache at
+`PACE_ADDR` alone.)
 
 Otherwise it is a fingerprint mismatch. Compare the two machines as above; if they
 differ, their toolchains genuinely differ, and the fix is to make them the same
@@ -394,7 +394,7 @@ rather than to loosen the match — an over-loose match produces a wrong object 
 every other machine then fetches.
 
 What is **not** a reason is the cache being down. `cache unavailable (…)` names a
-wrong or unreachable `FASTCACHE_ADDR`, and a `DISPATCHED` line follows it — see
+wrong or unreachable `PACE_ADDR`, and a `DISPATCHED` line follows it — see
 [the two edges out of step 5](#one-compile-start-to-finish).
 
 ---
@@ -586,7 +586,7 @@ translation unit being compiled anyway. A refused lease or an absent fleet makes
 that the real compiler here; a daemon that could not be reached or that refused
 does **not**, and the compile is still dispatched — see
 [the two edges out of step 5](#one-compile-start-to-finish). Run with
-`FASTCACHE_VERBOSE=1` to see which path a translation unit took.
+`PACE_VERBOSE=1` to see which path a translation unit took.
 
 ---
 

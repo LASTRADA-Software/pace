@@ -86,7 +86,7 @@ def write_json(path: Path, env: dict, comparisons: list[Comparison]) -> None:
 
 # --- Multi-target (pace-kv vs real redis/memcached) ------------------------
 
-def fastcached_speedup(by_target: dict) -> float | None:
+def pace_speedup(by_target: dict) -> float | None:
     """pace-kv throughput / best competitor throughput (>1 means pace-kv wins)."""
     fc = by_target.get("pace-kv")
     others = [r.throughput_ops_per_sec for name, r in by_target.items()
@@ -105,7 +105,7 @@ def write_multitarget_json(path: Path, env: dict, target_names: list[str], rows:
         "scenarios": [
             {
                 "name": name,
-                "fastcached_speedup_vs_best": fastcached_speedup(by_target),
+                "pace_speedup_vs_best": pace_speedup(by_target),
                 "targets": {t: (r.as_dict() if r is not None else None) for t, r in by_target.items()},
             }
             for name, by_target in rows
@@ -133,7 +133,7 @@ def write_multitarget_markdown(path: Path, env: dict, target_names: list[str], r
         for target in target_names:
             result = by_target.get(target)
             cells.append(f"{result.throughput_ops_per_sec:,.0f}" if result is not None else "—")
-        speedup = fastcached_speedup(by_target)
+        speedup = pace_speedup(by_target)
         speedup_text = f"{speedup:.2f}x" if speedup is not None else "—"
         lines.append(f"| {name} | " + " | ".join(cells) + f" | {speedup_text} |")
     lines.append("")

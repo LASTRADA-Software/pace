@@ -51,13 +51,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# The harness under test. `FASTCACHED_MUT_HARNESS` points this at a COPY, which is
+# The harness under test. `PACE_MUT_HARNESS` points this at a COPY, which is
 # what lets the matrix that proves these cases can fail neuter one guard at a time
 # without editing the tracked file. It is not a production switch and it weakens
 # nothing: the path is PRINTED on every run, because "the mode under test was not
 # the mode in use" is how `check-catch-skip-return-code`'s self-test passed six
 # green cases while CI failed. A fixture states which path it exercised.
-HARNESS = os.environ.get("FASTCACHED_MUT_HARNESS") or \
+HARNESS = os.environ.get("PACE_MUT_HARNESS") or \
     os.path.join(HERE, "mutation-harness.py")
 
 # The staged "compiler": a binary DERIVED from the source. It is the whole reason
@@ -405,8 +405,8 @@ def main():
         return 77
 
     sys.stdout.write("harness under test: %s%s\n\n"
-                     % (HARNESS, "  (FASTCACHED_MUT_HARNESS override)"
-                        if os.environ.get("FASTCACHED_MUT_HARNESS") else ""))
+                     % (HARNESS, "  (PACE_MUT_HARNESS override)"
+                        if os.environ.get("PACE_MUT_HARNESS") else ""))
     tmp = tempfile.mkdtemp(prefix="mut-harness-selftest-")
     failures = []
     try:

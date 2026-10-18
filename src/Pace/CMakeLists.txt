@@ -150,34 +150,34 @@ target_link_libraries(Pace PRIVATE $<$<PLATFORM_ID:Windows>:dnsapi> $<$<PLATFORM
 # ServiceControl's launchd install picks the system job's storage and log
 # directories under this prefix, and the installer scripts lay the payload out
 # under the same one; when the two were spelled independently, a build with a
-# non-default FASTCACHED_MACOS_PREFIX produced a plist whose StandardOutPath
+# non-default PACE_MACOS_PREFIX produced a plist whose StandardOutPath
 # pointed into a directory the package never created, so launchd could not
 # spawn the job while the installer still reported success.
 #
 # PUBLIC so ServiceControl_test.cpp asserts against the same value.
 if(APPLE)
-    target_compile_definitions(Pace PUBLIC FC_MACOS_PREFIX="/${FASTCACHED_MACOS_PREFIX}")
+    target_compile_definitions(Pace PUBLIC FC_MACOS_PREFIX="/${PACE_MACOS_PREFIX}")
 endif()
 
 # The machine-wide config directory the daemon probes when no --config is given,
 # taken from the same variable packaging/ installs the file into so the two
-# cannot drift. Defined regardless of FASTCACHED_PACKAGE_ROOT_PREFIX: a source
+# cannot drift. Defined regardless of PACE_PACKAGE_ROOT_PREFIX: a source
 # build should still find a config an operator placed in the conventional
 # location, and an absent file is a no-op. Windows resolves %ProgramData% at
 # runtime instead, so it gets no compiled-in path.
 #
 # PUBLIC so DefaultConfigPath_test.cpp asserts against the same value.
 if(APPLE)
-    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${FASTCACHED_MACOS_PREFIX}/etc")
+    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${PACE_MACOS_PREFIX}/etc")
 elseif(UNIX)
-    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${FASTCACHED_SYSCONF_DIR}")
+    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${PACE_SYSCONF_DIR}")
 endif()
 
-# Optional TLS support: compiled and linked only when FASTCACHED_ENABLE_TLS is
+# Optional TLS support: compiled and linked only when PACE_ENABLE_TLS is
 # on, so the default build pulls in no OpenSSL header and links no OpenSSL
 # symbol. FC_TLS_ENABLED is PUBLIC so dependents (the test binary) can guard
 # TLS-only tests behind the same macro.
-if(FASTCACHED_ENABLE_TLS)
+if(PACE_ENABLE_TLS)
     # The TLS socket is core-cpp's `core::net_tls` (#1596), configured with CORE_CPP_WITH_TLS by
     # the top-level CMakeLists.txt; it links OpenSSL privately, and no OpenSSL type crosses its header.
     target_link_libraries(Pace PUBLIC core::net_tls)
@@ -189,7 +189,7 @@ endif()
 # resolve whichever target each library actually exports before linking.
 # FC_COMPRESSION_ENABLED is PUBLIC so the test binary compiles the same codec
 # table (and the codec-selection tests) as the library.
-if(FASTCACHED_ENABLE_COMPRESSION)
+if(PACE_ENABLE_COMPRESSION)
     if(TARGET libzstd_static)
         set(_fc_zstd_target libzstd_static)
     elseif(TARGET zstd::libzstd_static)
@@ -197,7 +197,7 @@ if(FASTCACHED_ENABLE_COMPRESSION)
     elseif(TARGET zstd::libzstd_shared)
         set(_fc_zstd_target zstd::libzstd_shared)
     else()
-        message(FATAL_ERROR "FASTCACHED_ENABLE_COMPRESSION is ON but no zstd target was found")
+        message(FATAL_ERROR "PACE_ENABLE_COMPRESSION is ON but no zstd target was found")
     endif()
 
     if(TARGET lz4_static)
@@ -207,7 +207,7 @@ if(FASTCACHED_ENABLE_COMPRESSION)
     elseif(TARGET lz4::lz4)
         set(_fc_lz4_target lz4::lz4)
     else()
-        message(FATAL_ERROR "FASTCACHED_ENABLE_COMPRESSION is ON but no lz4 target was found")
+        message(FATAL_ERROR "PACE_ENABLE_COMPRESSION is ON but no lz4 target was found")
     endif()
 
     target_sources(Pace PRIVATE Core/Compression.cpp)
@@ -221,7 +221,7 @@ endif()
 # Header-only files surfaced for IDE indexing.
 target_sources(Pace
     PRIVATE
-        FILE_SET fastcache_public_headers
+        FILE_SET pace_public_headers
         TYPE HEADERS
         BASE_DIRS "${CMAKE_SOURCE_DIR}/src"
         FILES

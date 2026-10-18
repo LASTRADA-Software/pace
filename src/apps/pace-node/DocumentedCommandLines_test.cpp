@@ -99,7 +99,7 @@ using namespace Pace::Node;
 /// to have opinions about them would fail on every developer's box for reasons the
 /// documentation cannot fix.
 ///
-/// **This whole binary is gated on `FASTCACHED_BUILD_NODE`.** Configure with it
+/// **This whole binary is gated on `PACE_BUILD_NODE`.** Configure with it
 /// `OFF` and this check silently stops running while `node-config-reference` carries
 /// on -- so a docs-only change validated in such a tree is validated by less than it
 /// looks. That is the same shape as the sweep-scope trap in
@@ -601,11 +601,11 @@ namespace
 /// The command line the MSI runs to register the node, as `packaging/windows/service-actions.xml`
 /// spells it, with its one XML entity decoded and every `[PROPERTY]` still unformatted.
 /// @param root The repository root.
-/// @return The `ExeCommand` of the `FastCacheNodeInstallService` action.
+/// @return The `ExeCommand` of the `PaceNodeInstallService` action.
 [[nodiscard]] std::string MsiNodeInstallCommand(std::filesystem::path const& root)
 {
     auto const text = MsiFragmentText(root);
-    auto const action = text.find(R"(<CustomAction Id="FastCacheNodeInstallService")");
+    auto const action = text.find(R"(<CustomAction Id="PaceNodeInstallService")");
     REQUIRE(action != std::string::npos);
     constexpr std::string_view Attribute = R"(ExeCommand=")";
     auto const attribute = text.find(Attribute, action);
@@ -692,18 +692,18 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
     CHECK_FALSE(command.contains("--scheduler"));
     CHECK_FALSE(command.contains("--advertise"));
     CHECK_FALSE(command.contains("Advertise"));
-    CHECK_FALSE(MsiFragmentText(root).contains("FASTCACHE_NODE_ADVERTISE"));
+    CHECK_FALSE(MsiFragmentText(root).contains("PACE_NODE_ADVERTISE"));
 
     struct Shape
     {
         std::string_view what;          ///< The transaction, as an operator types it.
-        std::string_view allowArgument; ///< What `SetFastCacheFirewallAllowArgument` leaves.
+        std::string_view allowArgument; ///< What `SetPaceFirewallAllowArgument` leaves.
         std::string_view allowed;       ///< The firewall scope the install takes; empty for none.
-        std::string_view replyPort;     ///< `FASTCACHE_DISCOVERY_REPLY_PORT` after the MSI's default.
+        std::string_view replyPort;     ///< `PACE_DISCOVERY_REPLY_PORT` after the MSI's default.
         std::string_view replyRule;     ///< The discovery-reply rule the install must open.
-        std::string_view seed;          ///< `FASTCACHE_FLEET_SEED`; empty for none.
+        std::string_view seed;          ///< `PACE_FLEET_SEED`; empty for none.
         std::string_view seeded;        ///< The seed the registration must carry, normalized; empty for none.
-        std::string_view fleetId {};    ///< `FASTCACHE_FLEET_ID`, passed VERBATIM; empty for none.
+        std::string_view fleetId {};    ///< `PACE_FLEET_ID`, passed VERBATIM; empty for none.
     };
     // The package's default reply port, as the fragment's Property row spells it.
     constexpr std::string_view PackagedReplyPort = "6682";
@@ -715,14 +715,14 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
           .replyRule = "FastCacheCompileNode discovery-reply udp/6682",
           .seed = "",
           .seeded = "" },
-        { .what = "FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8",
+        { .what = "PACE_FIREWALL_ALLOW=10.0.0.0/8",
           .allowArgument = "--firewall-allow=10.0.0.0/8",
           .allowed = "10.0.0.0/8",
           .replyPort = PackagedReplyPort,
           .replyRule = "FastCacheCompileNode discovery-reply udp/6682",
           .seed = "",
           .seeded = "" },
-        { .what = "FASTCACHE_DISCOVERY_REPLY_PORT=7000",
+        { .what = "PACE_DISCOVERY_REPLY_PORT=7000",
           .allowArgument = "",
           .allowed = "",
           .replyPort = "7000",
@@ -731,7 +731,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
           .seeded = "" },
         // A machine across a VPN that no beacon reaches: the one seed the MSI passes, stored and
         // replayed in the parser's own normalized spelling, the node port added.
-        { .what = "FASTCACHE_FLEET_SEED=office-a.vpn.example",
+        { .what = "PACE_FLEET_SEED=office-a.vpn.example",
           .allowArgument = "",
           .allowed = "",
           .replyPort = PackagedReplyPort,
@@ -740,7 +740,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
           .seeded = "office-a.vpn.example:6674" },
         // A machine pinned to the one fleet it may join: the pin `pacectl node` prints, passed
         // and replayed verbatim -- it is security material, so nothing re-spells it.
-        { .what = "FASTCACHE_FLEET_ID=<cluster-id>@<key>",
+        { .what = "PACE_FLEET_ID=<cluster-id>@<key>",
           .allowArgument = "",
           .allowed = "",
           .replyPort = PackagedReplyPort,
@@ -752,7 +752,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
     // The default the shapes assume is the one the fragment declares.
     CHECK(std::filesystem::exists(root / "packaging" / "windows" / "service-actions.xml"));
     CHECK(MsiFragmentText(root).contains(
-        std::format(R"(<Property Id="FASTCACHE_DISCOVERY_REPLY_PORT" Value="{}")", PackagedReplyPort)));
+        std::format(R"(<Property Id="PACE_DISCOVERY_REPLY_PORT" Value="{}")", PackagedReplyPort)));
 
     auto const machineWide = MachineWideNodeClusterDirectory(Testing::InstallerPathProbe());
     REQUIRE(machineWide.has_value());
@@ -761,20 +761,20 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
     {
         INFO(shape.what);
         auto formatted = Formatted(command, "INSTALL_ROOT", R"(C:\Program Files\fastcached\)");
-        formatted = Formatted(std::move(formatted), "FastCacheFirewallAllowArgument", shape.allowArgument);
-        formatted = Formatted(std::move(formatted), "FASTCACHE_FIREWALL_ALLOW", shape.allowed);
+        formatted = Formatted(std::move(formatted), "PaceFirewallAllowArgument", shape.allowArgument);
+        formatted = Formatted(std::move(formatted), "PACE_FIREWALL_ALLOW", shape.allowed);
         formatted = Formatted(std::move(formatted),
-                              "FastCacheNodeDiscoveryReplyArgument",
+                              "PaceNodeDiscoveryReplyArgument",
                               std::format("--discovery-reply-port={}", shape.replyPort));
-        formatted = Formatted(std::move(formatted), "FASTCACHE_DISCOVERY_REPLY_PORT", shape.replyPort);
+        formatted = Formatted(std::move(formatted), "PACE_DISCOVERY_REPLY_PORT", shape.replyPort);
         formatted = Formatted(std::move(formatted),
-                              "FastCacheFleetSeedArgument",
+                              "PaceFleetSeedArgument",
                               shape.seed.empty() ? std::string {} : std::format("--fleet-seed={}", shape.seed));
-        formatted = Formatted(std::move(formatted), "FASTCACHE_FLEET_SEED", shape.seed);
+        formatted = Formatted(std::move(formatted), "PACE_FLEET_SEED", shape.seed);
         formatted = Formatted(std::move(formatted),
-                              "FastCacheFleetIdArgument",
+                              "PaceFleetIdArgument",
                               shape.fleetId.empty() ? std::string {} : std::format("--fleet-id={}", shape.fleetId));
-        formatted = Formatted(std::move(formatted), "FASTCACHE_FLEET_ID", shape.fleetId);
+        formatted = Formatted(std::move(formatted), "PACE_FLEET_ID", shape.fleetId);
         INFO(formatted);
         // A property this case does not format would reach the parser as text in brackets.
         REQUIRE_FALSE(formatted.contains('['));
@@ -982,8 +982,8 @@ struct MsiRememberRows
     std::vector<MsiCopy> beforeSearch;   ///< `SetProperty Before="AppSearch"`, in document order.
     std::vector<MsiRemembered> searches; ///< Each `Property`'s `RegistrySearch`.
     std::vector<MsiCopy> afterSearch;    ///< `SetProperty After="AppSearch"`, in document order.
-    std::vector<MsiRemembered> writes;   ///< What each scheduled `FastCacheRemember` action writes.
-    std::vector<MsiRemembered> forgets;  ///< What each scheduled `FastCacheForget` action deletes (no property).
+    std::vector<MsiRemembered> writes;   ///< What each scheduled `PaceRemember` action writes.
+    std::vector<MsiRemembered> forgets;  ///< What each scheduled `PaceForget` action deletes (no property).
 };
 
 /// @param text The fragment.
@@ -1010,7 +1010,7 @@ struct MsiRememberRows
                                                     .name = MsiAttribute(search, "Name") });
     // `reg.exe add <key> /v <name> /t REG_SZ /d "[PROPERTY]"`, one action per value -- counted only
     // when the execute sequence schedules it, since an action nothing runs writes nothing.
-    for (auto const& action: MsiElements(text, R"(<CustomAction Id="FastCacheRemember)", "/>"))
+    for (auto const& action: MsiElements(text, R"(<CustomAction Id="PaceRemember)", "/>"))
     {
         auto const id = MsiAttribute(action, "Id");
         if (!text.contains(std::format(R"(<Custom Action="{}")", id)))
@@ -1037,7 +1037,7 @@ struct MsiRememberRows
                             .name = after(" /v ") });
     }
     // `reg.exe delete <key> /v <name>`, one action per value an earlier package remembered.
-    for (auto const& action: MsiElements(text, R"(<CustomAction Id="FastCacheForget)", "/>"))
+    for (auto const& action: MsiElements(text, R"(<CustomAction Id="PaceForget)", "/>"))
     {
         auto const id = MsiAttribute(action, "Id");
         if (!text.contains(std::format(R"(<Custom Action="{}")", id)))
@@ -1196,14 +1196,14 @@ TEST_CASE("An MSI fleet pin the node's parser refuses fails the transaction befo
     // other. The registration is `Return="ignore"`, so its own parse refusing the pin left the OLD
     // registration -- unpinned, or under the old pin -- to be started, with the refused pin remembered
     // and replayed by every later transaction (batch 3 review, B3-1). So the node's arguments are
-    // CHECKED first, by `FastCacheNodeCheckArguments` (`Return="check"`, sequenced before every
+    // CHECKED first, by `PaceNodeCheckArguments` (`Return="check"`, sequenced before every
     // remember write; `check-wix-service-table` pins that), running the node's own parser over them.
     // Here: the check's command, formatted as Windows Installer formats it, is refused -- WHICH
     // refusal, the flag's -- and a value it accepts parses as the check and nothing else.
     std::filesystem::path const root { Pace::Testing::CheckoutSourceDir };
     auto const text = MsiFragmentText(root);
     auto const checkOf = [&](std::map<std::string, std::string> const& properties) {
-        auto const command = MsiFormattedCommand(text, "FastCacheNodeCheckArguments", properties);
+        auto const command = MsiFormattedCommand(text, "PaceNodeCheckArguments", properties);
         INFO(command);
         REQUIRE_FALSE(command.contains('['));
         auto const arguments = SplitArguments(command);
@@ -1213,16 +1213,16 @@ TEST_CASE("An MSI fleet pin the node's parser refuses fails the transaction befo
 
     // What is checked is what would be registered: the same arguments after each verb, for a
     // transaction stating every property.
-    auto const every = std::map<std::string, std::string> { { "FASTCACHE_FIREWALL_ALLOW", "10.0.0.0/8" },
-                                                            { "FASTCACHE_FLEET_SEED", "office-a.vpn.example" },
-                                                            { "FASTCACHE_FLEET_ID", std::string { FirstPin } } };
+    auto const every = std::map<std::string, std::string> { { "PACE_FIREWALL_ALLOW", "10.0.0.0/8" },
+                                                            { "PACE_FLEET_SEED", "office-a.vpn.example" },
+                                                            { "PACE_FLEET_ID", std::string { FirstPin } } };
     auto const after = [](std::string const& command, std::string_view verb) {
         auto const at = command.find(verb);
         REQUIRE(at != std::string::npos);
         return command.substr(at + verb.size());
     };
-    CHECK(after(MsiFormattedCommand(text, "FastCacheNodeCheckArguments", every), "--check-arguments")
-          == after(MsiFormattedCommand(text, "FastCacheNodeInstallService", every), "--install-service"));
+    CHECK(after(MsiFormattedCommand(text, "PaceNodeCheckArguments", every), "--check-arguments")
+          == after(MsiFormattedCommand(text, "PaceNodeInstallService", every), "--install-service"));
 
     struct Refused
     {
@@ -1231,11 +1231,11 @@ TEST_CASE("An MSI fleet pin the node's parser refuses fails the transaction befo
         std::string_view flag;     ///< The flag the refusal must name.
     };
     for (auto const& row: std::to_array<Refused>({
-             { .property = "FASTCACHE_FLEET_ID", .value = "0123456789abcdef0123456789abcdef", .flag = "--fleet-id" },
-             { .property = "FASTCACHE_FLEET_ID", .value = "office@not-a-key", .flag = "--fleet-id" },
+             { .property = "PACE_FLEET_ID", .value = "0123456789abcdef0123456789abcdef", .flag = "--fleet-id" },
+             { .property = "PACE_FLEET_ID", .value = "office@not-a-key", .flag = "--fleet-id" },
              // The seed rides the same check: the step-20 re-check's N-3 shape, where a malformed one
              // registered nothing and said so to nobody.
-             { .property = "FASTCACHE_FLEET_SEED", .value = "office-a.vpn.example:99999", .flag = "--fleet-seed" },
+             { .property = "PACE_FLEET_SEED", .value = "office-a.vpn.example:99999", .flag = "--fleet-seed" },
          }))
     {
         INFO(row.property << "=" << row.value);
@@ -1270,7 +1270,7 @@ TEST_CASE(
                      rows.writes.size()));
     // The premise, so an emptied fragment cannot pass by remembering nothing at all -- and the key the
     // actions write is the key the searches read, or nothing written is ever read back.
-    for (std::string_view const property: { "FASTCACHE_FIREWALL_ALLOW", "FASTCACHE_FLEET_SEED", "FASTCACHE_FLEET_ID" })
+    for (std::string_view const property: { "PACE_FIREWALL_ALLOW", "PACE_FLEET_SEED", "PACE_FLEET_ID" })
     {
         INFO(property);
         CHECK(std::ranges::any_of(rows.searches, [&](MsiRemembered const& row) { return row.property == property; }));
@@ -1279,10 +1279,10 @@ TEST_CASE(
 
     auto registry = MsiRegistry {};
     auto const node = [&](std::map<std::string, std::string> const& properties) {
-        return MsiFormattedCommand(text, "FastCacheNodeInstallService", properties);
+        return MsiFormattedCommand(text, "PaceNodeInstallService", properties);
     };
     auto const daemon = [&](std::map<std::string, std::string> const& properties) {
-        return MsiFormattedCommand(text, "FastCachedInstallService", properties);
+        return MsiFormattedCommand(text, "PaceInstallService", properties);
     };
     auto const parsed = [](std::string const& command) {
         INFO(command);
@@ -1297,9 +1297,9 @@ TEST_CASE(
     {
         INFO("the install states a scope, a fleet seed and a fleet pin");
         auto const installed = MsiTransact(rows,
-                                           { { "FASTCACHE_FIREWALL_ALLOW", "10.0.0.0/8" },
-                                             { "FASTCACHE_FLEET_SEED", "office-a.vpn.example" },
-                                             { "FASTCACHE_FLEET_ID", std::string { FirstPin } } },
+                                           { { "PACE_FIREWALL_ALLOW", "10.0.0.0/8" },
+                                             { "PACE_FLEET_SEED", "office-a.vpn.example" },
+                                             { "PACE_FLEET_ID", std::string { FirstPin } } },
                                            registry);
         auto const cfg = parsed(node(installed));
         CHECK(cfg.firewallAllow == std::vector<std::string> { "10.0.0.0/8" });
@@ -1321,9 +1321,9 @@ TEST_CASE(
     {
         INFO("an upgrade that states a NEW scope, seed and pin gets them");
         auto const upgraded = MsiTransact(rows,
-                                          { { "FASTCACHE_FIREWALL_ALLOW", "192.168.0.0/16" },
-                                            { "FASTCACHE_FLEET_SEED", "office-b.vpn.example" },
-                                            { "FASTCACHE_FLEET_ID", std::string { SecondPin } } },
+                                          { { "PACE_FIREWALL_ALLOW", "192.168.0.0/16" },
+                                            { "PACE_FLEET_SEED", "office-b.vpn.example" },
+                                            { "PACE_FLEET_ID", std::string { SecondPin } } },
                                           registry);
         auto const cfg = parsed(node(upgraded));
         CHECK(cfg.firewallAllow == std::vector<std::string> { "192.168.0.0/16" });
@@ -1484,22 +1484,22 @@ TEST_CASE("A failed MSI transaction puts back the remembered values and the node
         INFO("a repair stating new values fails after remembering them");
         auto registry = MsiRegistry {};
         (void) MsiTransact(rows,
-                           { { "FASTCACHE_FIREWALL_ALLOW", "10.0.0.0/8" },
-                             { "FASTCACHE_FLEET_SEED", "office-a.vpn.example" },
-                             { "FASTCACHE_FLEET_ID", std::string { FirstPin } } },
+                           { { "PACE_FIREWALL_ALLOW", "10.0.0.0/8" },
+                             { "PACE_FLEET_SEED", "office-a.vpn.example" },
+                             { "PACE_FLEET_ID", std::string { FirstPin } } },
                            registry);
         auto const found = registry;
         auto const failed = MsiTransact(rows,
-                                        { { "FASTCACHE_FIREWALL_ALLOW", "192.168.0.0/16" },
-                                          { "FASTCACHE_FLEET_SEED", "office-b.vpn.example" },
-                                          { "FASTCACHE_FLEET_ID", std::string { SecondPin } } },
+                                        { { "PACE_FIREWALL_ALLOW", "192.168.0.0/16" },
+                                          { "PACE_FLEET_SEED", "office-b.vpn.example" },
+                                          { "PACE_FLEET_ID", std::string { SecondPin } } },
                                         registry);
         REQUIRE(registry != found); // the premise: the transaction did remember something new
         rollBack(failed, registry);
         CHECK(registry == found);
 
         // And the registration the rollback makes again is the one the found values describe.
-        auto const restored = MsiFormattedCommand(text, "FastCacheNodeRestoreRegistration", failed);
+        auto const restored = MsiFormattedCommand(text, "PaceNodeRestoreRegistration", failed);
         INFO(restored);
         REQUIRE_FALSE(restored.contains('['));
         auto const arguments = SplitArguments(restored);
@@ -1520,8 +1520,8 @@ TEST_CASE("A failed MSI transaction puts back the remembered values and the node
         {
             INFO(spelled);
             auto withStart = failed;
-            withStart["FASTCACHE_NODE_START_BEFORE"] = spelled;
-            auto const again = SplitArguments(MsiFormattedCommand(text, "FastCacheNodeRestoreRegistration", withStart));
+            withStart["PACE_NODE_START_BEFORE"] = spelled;
+            auto const again = SplitArguments(MsiFormattedCommand(text, "PaceNodeRestoreRegistration", withStart));
             REQUIRE(again.size() > 1);
             auto const reparsed = ParsedFirstStart(std::span { again }.subspan(1));
             REQUIRE(reparsed.has_value());
@@ -1531,7 +1531,7 @@ TEST_CASE("A failed MSI transaction puts back the remembered values and the node
     {
         INFO("a first install fails after remembering: nothing is left remembered");
         auto registry = MsiRegistry {};
-        auto const failed = MsiTransact(rows, { { "FASTCACHE_FLEET_ID", std::string { FirstPin } } }, registry);
+        auto const failed = MsiTransact(rows, { { "PACE_FLEET_ID", std::string { FirstPin } } }, registry);
         REQUIRE_FALSE(registry.empty());
         rollBack(failed, registry);
         CHECK(registry.empty());
@@ -1554,8 +1554,8 @@ TEST_CASE("An upgrade that deselects a feature removes that feature's firewall g
         std::string_view action; ///< The fragment's custom action that removes its group.
     };
     for (auto const& [service, action]:
-         { Leftover { .service = NodeConfig {}.serviceName, .action = "FastCacheNodeDeleteLeftoverFirewall" },
-           Leftover { .service = Config {}.serviceName, .action = "FastCachedDeleteLeftoverFirewall" } })
+         { Leftover { .service = NodeConfig {}.serviceName, .action = "PaceNodeDeleteLeftoverFirewall" },
+           Leftover { .service = Config {}.serviceName, .action = "PaceDeleteLeftoverFirewall" } })
     {
         INFO(action);
         auto const elements = MsiElements(text, std::format(R"(<CustomAction Id="{}")", action), "/>");

@@ -269,7 +269,7 @@ wait_for_log "consensus: this node is now the leader" "$node_pid" "the node" "${
 # breaks every scraper an operator has pointed at it.
 metrics="$(dash_get "$admin_port" /metrics)"
 [[ "$metrics" == HTTP/1.1\ 200* ]] || fail "/metrics did not answer 200 without a credential: ${metrics%%$'\n'*}"
-[[ "$metrics" == *fastcached_* ]] || fail "/metrics answered 200 but carried no series"
+[[ "$metrics" == *pace_* ]] || fail "/metrics answered 200 but carried no series"
 
 health="$(dash_get "$admin_port" /healthz)"
 [[ "$health" == HTTP/1.1\ 200* ]] || fail "/healthz did not answer 200 without a credential"

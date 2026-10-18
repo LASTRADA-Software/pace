@@ -3,7 +3,7 @@
 # Debian post-removal: drop the enable-state symlinks and reload systemd.
 set -e
 
-SERVICE="@FASTCACHED_SERVICE_NAME@"
+SERVICE="@PACE_SERVICE_NAME@"
 # The socket is the unit an operator enables, so it is the one carrying
 # enable-state symlinks that have to be dropped here.
 NODE_SOCKET="pace-node.socket"

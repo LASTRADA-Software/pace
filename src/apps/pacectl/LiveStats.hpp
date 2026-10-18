@@ -162,8 +162,8 @@ struct LiveSubjectSpec
 inline constexpr EnumTable<LiveSubject, LiveSubjectSpec> LiveSubjectTable { {
     { .subject = LiveSubject::Cache,
       .key = "cache",
-      .inferredAt = RemoteKind::FastcacheWireOnly,
-      .servedBy = RemoteKinds::Of({ RemoteKind::FastcacheWireOnly, RemoteKind::CompileNode }),
+      .inferredAt = RemoteKind::PaceWireOnly,
+      .servedBy = RemoteKinds::Of({ RemoteKind::PaceWireOnly, RemoteKind::CompileNode }),
       .needs = "a pace-kv or a pace-node",
       .wire = CompileCacheWire::LiveSubject::Cache,
       .defaultInterval = std::chrono::milliseconds { 2000 },
@@ -335,7 +335,7 @@ struct LivePlan
 {
     LiveSubject subject { LiveSubject::Cache }; ///< What it watches.
     /// What answered admission, which a panel titled by its server names: a node's cache is not `pace-kv`.
-    RemoteKind server { RemoteKind::FastcacheWireOnly };
+    RemoteKind server { RemoteKind::PaceWireOnly };
     std::chrono::milliseconds interval {}; ///< Time between samples.
     std::size_t samples { 0 };             ///< Stop after this many; 0 means no bound.
     std::string endpoint {};               ///< What the endpoint turned out to be, in words.

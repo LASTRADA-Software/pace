@@ -205,11 +205,11 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 # reactors (#1399) -- and `[livestats]` is deliberately NOT a row: its other cases
 # drive one `TestReactor` on one thread, where ThreadSanitizer has no second thread
 # to observe, so the tag would lengthen the run and read as race coverage it is not.
-# Measured on 78582087, Linux, clang-tsan, `-DFASTCACHED_ENABLE_TLS=ON`, Catch2's own
+# Measured on 78582087, Linux, clang-tsan, `-DPACE_ENABLE_TLS=ON`, Catch2's own
 # `matching test cases` line: this expression 903, with `[livestats]` added 921 --
 # the 18 it would add are exactly its cases outside every tag here, 0 of them threaded.
 #
-# MEASURED 2026-09-11 on 9c5cc374, Linux, with `-DFASTCACHED_ENABLE_TLS=ON` --
+# MEASURED 2026-09-11 on 9c5cc374, Linux, with `-DPACE_ENABLE_TLS=ON` --
 # what the clang-tsan job passes, and the condition that decides the number:
 # without it the same commit builds 830 rather than 848, so counts taken at the
 # two settings were never comparable. Read from Catch2's OWN trailing
@@ -259,7 +259,7 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 #
 # MEASURED BEFORE THE ROW WAS ADDED, which is what #1209 asks for -- a row added
 # blind turns this job red for the next person. On 9a01737b, Linux, clang-22,
-# `-DFASTCACHED_ENABLE_TLS=ON`, `detect_deadlocks=0`:
+# `-DPACE_ENABLE_TLS=ON`, `detect_deadlocks=0`:
 #
 #     objects carrying an undefined `__tsan_init`   82 of 82
 #     whole binary, gate's own TSAN_OPTIONS         exit 0, 716 cases, 0 warnings
@@ -512,7 +512,7 @@ export TSAN_OPTIONS="halt_on_error=0 exitcode=66 print_suppressions=1 detect_dea
 # `run_bounded`'s header rejects both routes on stated grounds: job control
 # changes the calling fixture's own signal handling, and a watchdog firing after
 # `wait` reaps can signal a REUSED pid.
-TargetTimeoutSeconds="${FASTCACHE_TSAN_TIMEOUT:-900}"
+TargetTimeoutSeconds="${PACE_TSAN_TIMEOUT:-900}"
 
 # The canary's own bound, which is much tighter because the canary is a few
 # milliseconds of deliberate race and nothing else -- there is no suite behind it
@@ -1087,7 +1087,7 @@ RunTarget() {
             cat "$log"
             FailTarget "$name" "${name} did not finish within ${TargetTimeoutSeconds}s and was killed.
     Under ThreadSanitizer that is a deadlock until proven otherwise, and the last
-    case in the log above is where to start. FASTCACHE_TSAN_TIMEOUT raises the
+    case in the log above is where to start. PACE_TSAN_TIMEOUT raises the
     bound if the suite has simply grown."
             ;;
         "$E2eBoundUnstartable")

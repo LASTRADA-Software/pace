@@ -46,7 +46,7 @@
 #
 # A reload re-reads THIS FILE and nothing else -- not the command line, not the
 # environment. So a setting that is in force because you passed a flag or set
-# FASTCACHED_METRICS_PORT, and that this file does not mention, reads to the
+# PACE_METRICS_PORT, and that this file does not mention, reads to the
 # reload as a setting being changed back to its default: `systemctl reload`
 # refuses and names it.
 #
@@ -226,7 +226,7 @@
 
 # --- TLS --------------------------------------------------------------------
 #
-# Requires a build with TLS support (-DFASTCACHED_ENABLE_TLS=ON); enabling it
+# Requires a build with TLS support (-DPACE_ENABLE_TLS=ON); enabling it
 # on a build without OpenSSL is a startup error. Both paths must be readable by
 # the pace-kv user — note ProtectHome=yes and ProtectSystem=strict in the
 # unit, so keep certificates somewhere like /etc/fastcached/.

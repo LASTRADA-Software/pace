@@ -1752,8 +1752,8 @@ TEST_CASE("The trusted-owner set names the service --service-name names for a ve
           "[node][state][trust]")
 {
     auto cfg = NodeConfig {};
-    cfg.serviceName = "FastCacheCompileNodeB";
-    CHECK(NodeServiceAccountOf(cfg) == std::optional<std::string> { "NT SERVICE\\FastCacheCompileNodeB" });
+    cfg.serviceName = "PaceNodeB";
+    CHECK(NodeServiceAccountOf(cfg) == std::optional<std::string> { "NT SERVICE\\PaceNodeB" });
     // A service named otherwise is another service: its account resolves to nothing this case knows,
     // so an administrator trusts no account beyond its own and the administrators'.
     CHECK(OwnStateAccountIds(JudgingCaller::Administrator, StateUse::Inspects, cfg, &ScriptedAccountId).empty());

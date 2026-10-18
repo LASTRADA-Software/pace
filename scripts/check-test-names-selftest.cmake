@@ -33,7 +33,7 @@
 #
 # ## Every case runs a STAGED copy of the check
 #
-# `FastCachedDuplicateNameExemptions` ships with a row describing a real duplicate
+# `PaceDuplicateNameExemptions` ships with a row describing a real duplicate
 # in this repository, and the check refuses a row that no longer describes one. A
 # synthetic tree contains no such duplicate, so the shipped table is stale over
 # every tree staged here and every case would refuse for that reason instead of
@@ -50,14 +50,14 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-test-names.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-test-names.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -88,7 +88,7 @@ set(file_template_method "TEMPLATE_TEST_CASE_METHOD(Fixture, \"-cache-dir gives 
 set(file_scenario_method "SCENARIO_METHOD(Fixture, \"-cache-dir gives the node an on-disk tier\", \"[t]\")\n${body}")
 
 # An identifier in the family that the table does not name.
-set(file_unknown_macro "FASTCACHE_TEST_CASE(\"gamma stays distinct\", \"[t]\")\n${body}")
+set(file_unknown_macro "PACE_TEST_CASE(\"gamma stays distinct\", \"[t]\")\n${body}")
 
 # A macro that opens and never produces a literal within the lookahead.
 set(file_unreadable "TEST_CASE(\n    MakeName(1),\n    MakeTags(2),\n    3,\n    4,\n    5,\n    6,\n    7,\n    8,\n    9,\n    10)\n${body}")
@@ -110,8 +110,8 @@ set(file_no_cases "int Answer()\n{\n    return 42;\n}\n")
 # @param exemptionRow A row for the staged exemption table, or `-` for none.
 # @param outOutput Set to the check's combined, flattened output.
 # @param outStaged Set to TRUE when the run used the staged copy.
-function(fastcached_stage_and_run name layout exemptionRow outOutput outStaged)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/case-${name}")
+function(pace_stage_and_run name layout exemptionRow outOutput outStaged)
+    set(tree "${PACE_SCRATCH_DIR}/case-${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src")
     file(MAKE_DIRECTORY "${tree}/scripts")
@@ -139,7 +139,7 @@ function(fastcached_stage_and_run name layout exemptionRow outOutput outStaged)
     # that silently ran the shipped table would refuse every tree here as stale
     # and look like a working guard while testing nothing.
     file(READ "${check}" checkText)
-    string(FIND "${checkText}" "set(FastCachedDuplicateNameExemptions" tableAt)
+    string(FIND "${checkText}" "set(PaceDuplicateNameExemptions" tableAt)
     if(tableAt EQUAL -1)
         message(FATAL_ERROR
             "the exemption table declaration was not found in ${check}, so no case here "
@@ -164,15 +164,15 @@ function(fastcached_stage_and_run name layout exemptionRow outOutput outStaged)
     # The helper goes beside the staged copy: the check includes it by
     # `CMAKE_CURRENT_LIST_DIR`, so a copy anywhere else fails to include and every
     # case would refuse for a reason that is not its own.
-    file(COPY "${FASTCACHED_SOURCE_DIR}/scripts/lib/CheckCommon.cmake"
+    file(COPY "${PACE_SOURCE_DIR}/scripts/lib/CheckCommon.cmake"
          DESTINATION "${tree}/scripts/lib")
     file(WRITE "${tree}/scripts/check-test-names.cmake"
-         "${beforeTable}set(FastCachedDuplicateNameExemptions ${stagedRows})\n"
+         "${beforeTable}set(PaceDuplicateNameExemptions ${stagedRows})\n"
          "message(STATUS \"test-names: STAGED-CHECK\")\n"
          "${afterTable}")
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}"
                 -P "${tree}/scripts/check-test-names.cmake"
         OUTPUT_VARIABLE out ERROR_VARIABLE err)
     set(combined "${out}${err}")
@@ -241,7 +241,7 @@ foreach(row IN LISTS cases)
     list(GET fields 5 expectedCases)
     string(REPLACE "~bar~" "|" exemptionRow "${exemptionRow}")
 
-    fastcached_stage_and_run("${name}" "${layout}" "${exemptionRow}" output staged)
+    pace_stage_and_run("${name}" "${layout}" "${exemptionRow}" output staged)
     math(EXPR ran "${ran} + 1")
 
     if(NOT staged)

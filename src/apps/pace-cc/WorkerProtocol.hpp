@@ -286,7 +286,7 @@ using LeaseValidator = std::function<LeaseDecision(std::string_view leaseToken, 
 /// Told of every job this worker refused before a compiler ran, with what the refusal named.
 ///
 /// The counter a refusal moves says HOW MANY; nothing said WHICH. A node that refused 372 jobs
-/// over one argument showed `fastcache_worker_jobs_refused_rejected_argument_total 372` and named
+/// over one argument showed `pace_worker_jobs_refused_rejected_argument_total 372` and named
 /// the argument nowhere an operator could see -- not its log, not its conditions -- so the one
 /// fact the remedy needs took a reproduction to find. This is where the node learns it, at the
 /// same moment and from the same row as the counter.

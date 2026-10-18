@@ -4,7 +4,7 @@
 # writes it under, removed from the environment of every git command a fixture runs against a
 # repository it created.
 # One name per line; `#` starts a comment. Read by `scratch_git`
-# (`scripts/lib/git-scrub.sh`) and `fastcached_scratch_git` (`scripts/lib/CheckCommon.cmake`),
+# (`scripts/lib/git-scrub.sh`) and `pace_scratch_git` (`scripts/lib/CheckCommon.cmake`),
 # which refuse to run git at all when this names nothing.
 #
 # Why: a self-test's `( cd "$tree" && git init -q . )` obeys an INHERITED `GIT_DIR`. On

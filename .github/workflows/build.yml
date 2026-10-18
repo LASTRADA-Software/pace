@@ -144,7 +144,7 @@ env:
   # fail every branch and pull-request run, where no tag is reachable by design —
   # hence the expression, and hence it lives here: one value, three consumers,
   # spelled once so they cannot drift apart.
-  FASTCACHED_REQUIRE_EXACT_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && 'ON' || 'OFF' }}
+  PACE_REQUIRE_EXACT_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && 'ON' || 'OFF' }}
 
 # Six jobs below carry, in addition to whatever else gates them,
 #
@@ -651,8 +651,8 @@ jobs:
       - name: "Configure"
         if: ${{ needs.changes.outputs.code != 'false' }}
         run: >-
-          cmake --preset ${{ matrix.preset }} -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          cmake --preset ${{ matrix.preset }} -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       # The x86 leg of each preset saves; the arm64 leg, the one row naming a
       # `suffix`, only restores. Everything the combined step's post-job save
@@ -682,7 +682,7 @@ jobs:
       - name: "Test"
         if: ${{ needs.changes.outputs.code != 'false' }}
         env:
-          FASTCACHED_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
+          PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
         run: ctest --preset ${{ matrix.preset }}
 
       # The binaries the smoke jobs drive: the daemon every job starts, the launcher
@@ -838,8 +838,8 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clang-debug -DENABLE_TIDY=OFF
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       # Which translation units the sweep picks is the part of it that can fail
       # SILENTLY: it has no output of its own to be wrong in, it just sweeps too
@@ -1105,8 +1105,8 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clangcl-debug -DENABLE_TIDY=OFF
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       - name: "Self-test the sweep's scope computation"
         shell: bash
@@ -1263,8 +1263,8 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clang-debug -DENABLE_TIDY=OFF
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
-          -DFASTCACHED_BUILD_BENCHMARKS=ON -DFASTCACHED_BUILD_TESTCLIENT=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
 
       - name: "Build"
         run: cmake --build --preset clang-debug
@@ -1287,7 +1287,7 @@ jobs:
   # simply "run everything under TSan".
   #
   # SCOPE, and what it is not. WHAT RUNS is the `TARGETS` table in
-  # `scripts/tsan-gate.sh`; WHAT IS CLAIMED is `FastCachedTsanScope` in
+  # `scripts/tsan-gate.sh`; WHAT IS CLAIMED is `PaceTsanScope` in
   # `scripts/check-tsan-scope.cmake`, whose rows are directories and single
   # files. Neither list is restated here — this comment held a second copy of the
   # tag list and duly went stale, which is the defect the whole mechanism is
@@ -1336,7 +1336,7 @@ jobs:
   # So the scope is enforced rather than asserted: `ctest -R tsan-scope-hygiene`
   # runs in the DEFAULT set and fails when a scoped test carries no selected tag.
   # Widening it is two edits that check each other — the `TARGETS` table in
-  # `scripts/tsan-gate.sh` decides what RUNS, and `FastCachedTsanScope` in
+  # `scripts/tsan-gate.sh` decides what RUNS, and `PaceTsanScope` in
   # `scripts/check-tsan-scope.cmake` decides what is CLAIMED. That check reads the
   # tags out of the gate rather than keeping a copy, so the tag half needs one edit.
   #
@@ -1436,7 +1436,7 @@ jobs:
       - name: "Configure"
         run: >-
           cmake --preset clang-tsan
-          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
 
       # Only the targets the gate runs — but do not read that as "the scope makes
       # this job cheap". `PaceTest` is one binary carrying every library
@@ -1444,7 +1444,7 @@ jobs:
       # time. This job's cost is its compile.
       #
       # MEASURED on abb530ed, `cmake --preset clang-tsan
-      # -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON`, counting the
+      # -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON`, counting the
       # object files `ninja -t inputs` says each target set transitively needs:
       #
       #     every CXX compile edge this configure declares      675 (107 third-party)
@@ -1557,7 +1557,7 @@ jobs:
       # would report 0% for code the suite was never meant to reach and pull the
       # figure down while looking like rigour.
       - name: "Configure"
-        run: cmake --preset clang-coverage -DFASTCACHED_ENABLE_TLS=ON
+        run: cmake --preset clang-coverage -DPACE_ENABLE_TLS=ON
 
       - name: "Build"
         run: cmake --build --preset clang-coverage
@@ -1697,7 +1697,7 @@ jobs:
       - name: "Configure"
         run: |
           cmake --preset clang-release \
-            -DFASTCACHED_ENABLE_TLS=ON \
+            -DPACE_ENABLE_TLS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
             -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang \
             -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \
@@ -1711,7 +1711,7 @@ jobs:
       # that answered nothing SKIP every case that would have noticed (#1432).
       - name: "Test"
         env:
-          FASTCACHED_EXPECT_SHA256_ENGINE: arm-sha2
+          PACE_EXPECT_SHA256_ENGINE: arm-sha2
         run: ctest --preset clang-release
 
   # Builds the container image (which compiles with TLS on against the system
@@ -1740,7 +1740,7 @@ jobs:
             sleep 0.5
           done
           curl -fsS http://127.0.0.1:9259/healthz
-          curl -fsS http://127.0.0.1:9259/metrics | grep -q fastcached_cmd_get_total
+          curl -fsS http://127.0.0.1:9259/metrics | grep -q pace_cmd_get_total
           docker exec fc pace-kv --healthcheck
           docker rm -f fc
 
@@ -2059,7 +2059,7 @@ jobs:
         if: ${{ needs.changes.outputs.code != 'false' }}
         run: >
           cmake --preset ${{ matrix.preset }}
-          -DFASTCACHED_ENABLE_TLS=ON
+          -DPACE_ENABLE_TLS=ON
           -DALLOW_SCCACHE_FALLBACK=ON
           "-DOPENSSL_ROOT_DIR=C:/Program Files/OpenSSL"
 
@@ -2152,11 +2152,11 @@ jobs:
       - name: "Test"
         if: ${{ needs.changes.outputs.code != 'false' }}
         env:
-          FASTCACHED_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
+          PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
           # This runner is elevated, so the FileTrust ACL cases that set a directory's owner to
           # Administrators must RUN, not skip. Set, they fail closed: a runner that turns out not
           # to be elevated turns this red rather than retiring the guard silently.
-          FASTCACHED_EXPECT_ELEVATED: '1'
+          PACE_EXPECT_ELEVATED: '1'
         run: ctest --preset ${{ matrix.preset }} --output-log out/build/${{ matrix.preset }}/ctest-output.log
 
       # The other half of the bracket, and it only runs on a red.
@@ -2419,7 +2419,7 @@ jobs:
           # a skip means nothing was verified and must fail rather than pass.
           $ErrorActionPreference = 'Continue'
           & pwsh -NoProfile -File src/apps/pace-cc/run-launcher-e2e.ps1 `
-            -Fastcached out/build/cl-release/target/pace-kv.exe `
+            -PaceKv out/build/cl-release/target/pace-kv.exe `
             -Launcher out/build/cl-release/target/pace-cc.exe `
             -EditStub out/build/cl-release/target/mid-compile-edit-stub.exe `
             -Port 21714
@@ -2479,11 +2479,11 @@ jobs:
           sudo ln -sf /usr/bin/g++-14 /usr/local/bin/g++
 
       - name: "Configure"
-        # FASTCACHED_PACKAGE_ROOT_PREFIX is OFF by default so that a plain
+        # PACE_PACKAGE_ROOT_PREFIX is OFF by default so that a plain
         # `cmake --install --prefix /usr/local` stays conventional; the package
         # layout (payload rooted at /, units under usr/lib/systemd, config in
         # /etc) is opt-in and this is the job that opts in.
-        # FASTCACHED_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
+        # PACE_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
         # which is where the "only on a tag run" reasoning is written down.
         #
         # -DCPM_USE_LOCAL_PACKAGES=OFF is what makes the payload redistributable,
@@ -2492,9 +2492,9 @@ jobs:
         # libyaml-cpp-dev answers, and `YAML_BUILD_SHARED_LIBS OFF` in CMakeLists
         # is never read by anything — so the daemon links libyaml-cpp.so.0.8. The
         # .deb and .rpm survive that through SHLIBDEPS/AUTOREQ; the TGZ carries no
-        # dependency metadata at all, and the TGZ is what FASTCACHE_AUTO_INSTALL
+        # dependency metadata at all, and the TGZ is what PACE_AUTO_INSTALL
         # unpacks onto a developer's machine, where the loader kills it with 127.
-        run: cmake --preset gcc-release -DCPM_USE_LOCAL_PACKAGES=OFF -DFASTCACHED_BUILD_TESTS=OFF -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON -DFASTCACHED_REQUIRE_EXACT_VERSION=${{ env.FASTCACHED_REQUIRE_EXACT_VERSION }}
+        run: cmake --preset gcc-release -DCPM_USE_LOCAL_PACKAGES=OFF -DPACE_BUILD_TESTS=OFF -DPACE_PACKAGE_ROOT_PREFIX=ON -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442).
@@ -2552,7 +2552,7 @@ jobs:
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          deb=$(ls fastcached_*.deb)
+          deb=$(ls pace_*.deb)
           echo "== contents"; dpkg -c "$deb"
           echo "== control"; dpkg -I "$deb"
 
@@ -2649,7 +2649,7 @@ jobs:
         run: |
           set -euo pipefail
           check="$GITHUB_WORKSPACE/scripts/check-obsolete-conffiles.sh"
-          bash "$check" --deb "$(ls fastcached_*.deb)"  "$GITHUB_WORKSPACE"
+          bash "$check" --deb "$(ls pace_*.deb)"  "$GITHUB_WORKSPACE"
           bash "$check" --rpm "$(ls fastcached-*.rpm)" "$GITHUB_WORKSPACE"
 
       # The .rpm, installed where rpm is the package manager. The steps above only
@@ -2670,7 +2670,7 @@ jobs:
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          sudo apt-get install -y ./$(ls fastcached_*.deb)
+          sudo apt-get install -y ./$(ls pace_*.deb)
 
           # The postinst enables and starts the unit; it must already be up.
           sudo systemctl is-enabled pace-kv
@@ -2861,7 +2861,7 @@ jobs:
         run: |
           set -euo pipefail
           echo '# local edit that must survive' | sudo tee -a /etc/fastcached/fastcached.yaml >/dev/null
-          sudo apt-get install -y --reinstall ./$(ls fastcached_*.deb)
+          sudo apt-get install -y --reinstall ./$(ls pace_*.deb)
           sudo grep -q 'local edit that must survive' /etc/fastcached/fastcached.yaml \
             || { echo "::error::upgrade discarded the local config edit"; exit 1; }
           sudo systemctl stop pace-kv || true
@@ -2884,7 +2884,7 @@ jobs:
         with:
           name: fastcached-linux-packages
           path: |
-            out/build/gcc-release/fastcached_*.deb
+            out/build/gcc-release/pace_*.deb
             out/build/gcc-release/fastcached-*.rpm
             out/build/gcc-release/fastcached-*.tar.gz
           if-no-files-found: error
@@ -3034,7 +3034,7 @@ jobs:
         #
         # A REJECTION is not covered by this and must not be: that is Apple having
         # looked at the artefact and refused it, which is a fact about the package
-        # and is fatal on every ref. See `FASTCACHED_NOTARY_VERDICTS`.
+        # and is fatal on every ref. See `PACE_NOTARY_VERDICTS`.
         env:
           REF_TYPE: ${{ github.ref_type }}
         run: |
@@ -3088,17 +3088,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=/usr/bin/clang \
             -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-            -DFASTCACHED_BUILD_TESTS=OFF \
-            -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON \
+            -DPACE_BUILD_TESTS=OFF \
+            -DPACE_PACKAGE_ROOT_PREFIX=ON \
             -DCPM_USE_LOCAL_PACKAGES=OFF \
-            -DFASTCACHED_ENABLE_TLS=ON \
+            -DPACE_ENABLE_TLS=ON \
             -DOPENSSL_USE_STATIC_LIBS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
-            -DFASTCACHED_MACOS_SIGN_IDENTITY_APP="$IDENTITY_APP" \
-            -DFASTCACHED_MACOS_SIGN_IDENTITY_PKG="$IDENTITY_PKG" \
-            -DFASTCACHED_MACOS_NOTARIZE="$NOTARIZE" \
-            -DFASTCACHED_MACOS_NOTARY_STALL_IS_FATAL="${{ steps.notary.outputs.stall_is_fatal }}" \
-            -DFASTCACHED_REQUIRE_EXACT_VERSION=${{ env.FASTCACHED_REQUIRE_EXACT_VERSION }}
+            -DPACE_MACOS_SIGN_IDENTITY_APP="$IDENTITY_APP" \
+            -DPACE_MACOS_SIGN_IDENTITY_PKG="$IDENTITY_PKG" \
+            -DPACE_MACOS_NOTARIZE="$NOTARIZE" \
+            -DPACE_MACOS_NOTARY_STALL_IS_FATAL="${{ steps.notary.outputs.stall_is_fatal }}" \
+            -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442).
@@ -3229,7 +3229,7 @@ jobs:
         #      and claim nothing about Apple
         #
         # A verdict token this step does not know is refused rather than ignored: a
-        # row added to `FASTCACHED_NOTARY_VERDICTS` and not here must not pass
+        # row added to `PACE_NOTARY_VERDICTS` and not here must not pass
         # quietly, which is what an unguarded `*)` arm would do.
         if: ${{ !cancelled() }}
         env:
@@ -3268,7 +3268,7 @@ jobs:
               unstapled)
                 echo "::error title=Notarization ticket could not be stapled::${name}: Apple accepted the submission and the ticket could not be attached, so an offline install would fall back to an online Gatekeeper check." ;;
               *)
-                echo "::error title=Unknown notarization verdict::'${verdict}' for ${name} is in no row this step knows. A row was added to FASTCACHED_NOTARY_VERDICTS in cmake/MacOSNotarizePkg.cmake and not here."
+                echo "::error title=Unknown notarization verdict::'${verdict}' for ${name} is in no row this step knows. A row was added to PACE_NOTARY_VERDICTS in cmake/MacOSNotarizePkg.cmake and not here."
                 unknown=1 ;;
             esac
           done < "$RECORD"
@@ -3415,9 +3415,9 @@ jobs:
           toolset: "14.44"
 
       - name: "Configure"
-        # FASTCACHED_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
+        # PACE_REQUIRE_EXACT_VERSION comes from the workflow-level env: block,
         # which is where the "only on a tag run" reasoning is written down.
-        run: cmake --preset cl-release -DALLOW_SCCACHE_FALLBACK=ON -DFASTCACHED_BUILD_TESTS=OFF -DFASTCACHED_REQUIRE_EXACT_VERSION=${{ env.FASTCACHED_REQUIRE_EXACT_VERSION }}
+        run: cmake --preset cl-release -DALLOW_SCCACHE_FALLBACK=ON -DPACE_BUILD_TESTS=OFF -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442). Git Bash, because the wrapper converts its own paths for the
@@ -3485,7 +3485,7 @@ jobs:
       # same version: keeping both features (the node's registration must SURVIVE,
       # so no node property is passed), dropping pace-kv, then dropping the node
       # (each time the new product deletes the dropped feature's leftover
-      # registration). Last, a fresh install told FASTCACHED_START_SERVICE=0. Every
+      # registration). Last, a fresh install told PACE_START_SERVICE=0. Every
       # transaction is followed by the service table it must leave
       # (scripts/lib/MsiServiceTable.psm1).
       #
@@ -3512,7 +3512,7 @@ jobs:
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
           # 0.3.0's installer registers its node only with a scheduler; this one takes none, and a
           # node that serves refuses one. Its advertise property is 0.3.0's; this package has none.
-          $release030NodeProperties = @('FASTCACHE_NODE_SCHEDULER=127.0.0.1:6675', 'FASTCACHE_NODE_ADVERTISE=127.0.0.1:6674')
+          $release030NodeProperties = @('PACE_NODE_SCHEDULER=127.0.0.1:6675', 'PACE_NODE_ADVERTISE=127.0.0.1:6674')
           $fastcachedOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
           $oldSession = 'Adding UPGRADINGPRODUCTCODE property|UPGRADINGPRODUCTCODE=\{'
 
@@ -3573,7 +3573,7 @@ jobs:
 
           # Exactly 0, as every upgrade here: 0.3.0 stops its services WITHOUT waiting, and this
           # package waits for their processes to exit before it replaces a file
-          # (FastCacheAwaitServiceExit) -- 3010 was a file one of them still held, replaced at the
+          # (PaceAwaitServiceExit) -- 3010 was a file one of them still held, replaced at the
           # next boot, with the node's checked steps then running whichever binary was on the disk.
           # No property: the node registration exists and runs afterwards all the same.
           # And nothing the table did not ask for may happen DURING it, which a row read afterwards
@@ -3597,8 +3597,8 @@ jobs:
           # for -- it held 6674, which the node binds exclusively; and only then was the node
           # registered and started, both checked, so either failing fails the transaction above. And
           # what is registered now carries no --scheduler, which the node refuses at every start.
-          Assert-MsiActionOrder -Path 'upgrade.log' -Actions 'FastCacheNodeUninstallService', 'FastCacheAwaitServiceExit', `
-            'FastCachedAwaitExitForNode', 'FastCacheNodeInstallService', 'FastCacheNodeStartService'
+          Assert-MsiActionOrder -Path 'upgrade.log' -Actions 'PaceNodeUninstallService', 'PaceAwaitServiceExit', `
+            'PaceAwaitExitForNode', 'PaceNodeInstallService', 'PaceNodeStartService'
           Assert-NodeRegistrationLacks '--scheduler'
           Assert-ServiceTable -Row NodeSelected -Log 'upgrade.log'
 
@@ -3626,8 +3626,8 @@ jobs:
           New-ItemProperty -Path $installerKey -Name 'NodeAdvertise' -Value '10.8.0.7:6674' -PropertyType String -Force | Out-Null
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $newer -Log 'upgrade-newer.log' -What 'an upgrade between two builds'
           Assert-InstalledProduct $family $productOf[$newer]
-          Assert-MsiLog -Path 'upgrade-newer.log' -Present $oldSession, (Get-MsiActionRanPattern 'FastCacheForgetNodeAdvertise') `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeUninstallService'), (Get-MsiActionRanPattern 'FastCachedUninstallService')
+          Assert-MsiLog -Path 'upgrade-newer.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceForgetNodeAdvertise') `
+            -Absent (Get-MsiActionRanPattern 'PaceNodeUninstallService'), (Get-MsiActionRanPattern 'PaceUninstallService')
           Assert-ServiceTable -Row NodeSelected -Log 'upgrade-newer.log'
           if ($null -ne (Get-ItemProperty -Path $installerKey -Name 'NodeAdvertise' -ErrorAction SilentlyContinue)) {
             throw "the upgrade left the remembered NodeAdvertise value in $installerKey; nothing reads it, and the property is gone"
@@ -3640,8 +3640,8 @@ jobs:
           Invoke-Msiexec -Leaves NodeAlone -Operation '/i' -Package $first -Log 'upgrade-node-only.log' -Properties 'ADDLOCAL=CM_C_Cli,CM_C_Node' `
             -What 'an upgrade deselecting pace-kv'
           Assert-InstalledProduct $family $productOf[$first]
-          Assert-MsiLog -Path 'upgrade-node-only.log' -Present $oldSession, (Get-MsiActionRanPattern 'FastCachedDeleteLeftover') `
-            -Absent (Get-MsiActionRanPattern 'FastCachedUninstallService'), (Get-MsiActionRanPattern 'FastCacheNodeUninstallService')
+          Assert-MsiLog -Path 'upgrade-node-only.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceDeleteLeftover') `
+            -Absent (Get-MsiActionRanPattern 'PaceUninstallService'), (Get-MsiActionRanPattern 'PaceNodeUninstallService')
           Assert-ServiceTable -Row NodeAlone -Log 'upgrade-node-only.log'
 
           # Dropping the node on an upgrade, the same way round: its leftover is
@@ -3655,9 +3655,9 @@ jobs:
           Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $newer -Log 'upgrade-deselect.log' -Properties $fastcachedOnly `
             -What 'an upgrade deselecting the node'
           Assert-InstalledProduct $family $productOf[$newer]
-          Assert-MsiLog -Path 'upgrade-deselect.log' -Present $oldSession, (Get-MsiActionRanPattern 'FastCacheNodeDeleteLeftover'), `
-            (Get-MsiActionRanPattern 'FastCacheNodeDeleteLeftoverFirewall') `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeUninstallService')
+          Assert-MsiLog -Path 'upgrade-deselect.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceNodeDeleteLeftover'), `
+            (Get-MsiActionRanPattern 'PaceNodeDeleteLeftoverFirewall') `
+            -Absent (Get-MsiActionRanPattern 'PaceNodeUninstallService')
           Assert-ServiceTable -Row DaemonAlone -Log 'upgrade-deselect.log'
           Assert-FirewallGroupEmpty 'Pace: FastCacheCompileNode'
 
@@ -3666,7 +3666,7 @@ jobs:
           Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-upgraded.log'
 
           # The opt-out: pace-kv registered auto and left stopped.
-          Invoke-Msiexec -Leaves DaemonAloneUnstarted -Operation '/i' -Package $first -Log 'install-unstarted.log' -Properties $fastcachedOnly, 'FASTCACHED_START_SERVICE=0' `
+          Invoke-Msiexec -Leaves DaemonAloneUnstarted -Operation '/i' -Package $first -Log 'install-unstarted.log' -Properties $fastcachedOnly, 'PACE_START_SERVICE=0' `
             -What 'a fastcached-only install told not to start it'
           Assert-ServiceTable -Row DaemonAloneUnstarted -Log 'install-unstarted.log'
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $first -Log 'uninstall-unstarted.log' -What 'uninstalling the unstarted install'
@@ -3684,7 +3684,7 @@ jobs:
             -What 'a plain upgrade of a fastcached-only install, no ADDLOCAL'
           Assert-InstalledProduct $family $productOf[$newer]
           Assert-MsiLog -Path 'upgrade-daemon-only.log' -Present $oldSession `
-            -Absent (Get-MsiActionRanPattern 'FastCacheNodeInstallService'), (Get-MsiActionRanPattern 'FastCacheNodeStartService')
+            -Absent (Get-MsiActionRanPattern 'PaceNodeInstallService'), (Get-MsiActionRanPattern 'PaceNodeStartService')
           Assert-ServiceTable -Row DaemonAlone -Log 'upgrade-daemon-only.log'
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $newer -Log 'uninstall-daemon-only.log' -What 'uninstalling host C'
           Assert-InstalledProduct $family ''
@@ -3692,7 +3692,7 @@ jobs:
 
           # The steps below start from a clean machine: what 0.3.0 seeded, and the
           # identity key the node minted, are not what they assert about.
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
 
       # The DERIVED leg: whatever release is the latest, upgraded to this build.
       # While that is 0.3.0 the step above is this leg, and this step says so. Once
@@ -3743,7 +3743,7 @@ jobs:
             # registration carries `--scheduler`: the upgrade below, with no property, must
             # register the node again without it, or the service refuses every start.
             Invoke-Msiexec -Leaves NodeSelected -Released -Operation '/i' -Package $previous -Log 'latest.log' `
-              -Properties 'FASTCACHE_NODE_SCHEDULER=127.0.0.1:6675', 'FASTCACHE_NODE_ADVERTISE=127.0.0.1:6674' -What "installing $latest"
+              -Properties 'PACE_NODE_SCHEDULER=127.0.0.1:6675', 'PACE_NODE_ADVERTISE=127.0.0.1:6674' -What "installing $latest"
             Assert-InstalledProduct $family $previousCode
             Assert-ServiceTable -Row NodeSelected -Log 'latest.log'
 
@@ -3754,11 +3754,11 @@ jobs:
             Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $first -Log 'uninstall-latest.log' -What "uninstalling after the upgrade from $latest"
             Assert-InstalledProduct $family ''
             Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-latest.log'
-            Remove-FastCacheMachineState
+            Remove-PaceMachineState
           }
 
       # #1629: a deliberately FAILED upgrade must leave the machine exactly as it was. The shipped
-      # MSI fails last when FASTCACHE_FAIL_FOR_TEST=1, behind every other script action, so the
+      # MSI fails last when PACE_FAIL_FOR_TEST=1, behind every other script action, so the
       # rollback runs every rollback action we have. The scenario is chosen so that the upgrade
       # would CHANGE what is compared, and the last leg proves that a SUCCESSFUL run of it does:
       # N is installed fastcached-only into a custom root, and N+1 adds the node, which re-registers
@@ -3774,12 +3774,12 @@ jobs:
       # the exact restore writes it. `--log-level` is a CliParser.cpp option row that
       # BuildServiceArgv re-emits only when it was typed (`emitIfExplicit`, ServiceControl.cpp), so
       # it survives a registration round trip, and `info` is the default: the daemon starts and
-      # serves on its default binds with no new port or file. The twin FastCachedRestoreRegistration
+      # serves on its default binds with no new port or file. The twin PaceRestoreRegistration
       # runs `pace-kv.exe --install-service --service-start=<auto|manual>` plus its firewall
       # argument and nothing else, and the command line it registers is BuildServiceCommandLine of
       # THAT invocation (MakeDaemonServiceSpec), written whole by `Reapply`'s ChangeServiceConfig,
       # so it carries no `--log-level`. That the twin drops the flag is INFERRED from that code;
-      # what is MEASURED is that FastCachedInstallService, an invocation of the same shape
+      # what is MEASURED is that PaceInstallService, an invocation of the same shape
       # (`--install-service --service-start=... [firewall]`), registered N as `"<root>bin\
       # pace-kv.exe" --daemon --service-name=FastCached` and nothing more (run 37452107865's
       # snapshot of N). The last leg measures it again: a successful upgrade's ImagePath changes.
@@ -3828,7 +3828,7 @@ jobs:
           $root = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'pace-kv 1629 root\'
           $fastcachedOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
           $withNode = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher,CM_C_Node'
-          $failedHere = 'CustomAction FastCacheFailForTest returned actual error code'
+          $failedHere = 'CustomAction PaceFailForTest returned actual error code'
           $extraFlag = '--log-level=info'
 
           # What only the exact restore puts back (the header says why): a flag the twin's
@@ -3858,7 +3858,7 @@ jobs:
             Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $first -Log $Log -What 'uninstalling build N'
             Assert-InstalledProduct $family ''
             Assert-ServiceTable -Row NothingInstalled -Log $Log
-            Remove-FastCacheMachineState
+            Remove-PaceMachineState
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
           }
           # A PowerShell function returns EVERYTHING it emits, so the helpers are piped to Out-Null
@@ -3870,7 +3870,7 @@ jobs:
           # SETTLED after the snapshot: the rollback's restart of pace-kv is an unwaited sc.exe start,
           # so a restore that cannot serve crashes after msiexec exits, past the exit's judgement.
           function Invoke-FailedUpgrade([string] $Package, [string] $Log, [string] $What) {
-            Invoke-Msiexec -Expect RollsBack -Operation '/i' -Package $Package -Log $Log -Properties $withNode, 'FASTCACHE_FAIL_FOR_TEST=1' `
+            Invoke-Msiexec -Expect RollsBack -Operation '/i' -Package $Package -Log $Log -Properties $withNode, 'PACE_FAIL_FOR_TEST=1' `
               -Accept @(1603) -What $What | Out-Null
             Assert-MsiLog -Path $Log -Present $failedHere | Out-Null
             $snapshot = Get-InstallationSnapshot -UpgradeCode $family -Root $root
@@ -3893,7 +3893,7 @@ jobs:
             Write-Host "the $Tag reset reinstalled build N exactly ($($before.Count) fields)"
           }
 
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
           Install-N 'n-install.log'
           $before = Get-InstallationSnapshot -UpgradeCode $family -Root $root
           if ($before -isnot [System.Collections.Specialized.OrderedDictionary]) { throw "the snapshot before is not one ordered dictionary" }
@@ -3924,21 +3924,21 @@ jobs:
           }
           # The twin: re-registers pace-kv through its own --install-service, from what AppSearch
           # captured before the transaction, so it needs no rollback state at all.
-          $twinOff = Get-RowsSwitchedOff @('FastCachedRestoreRegistration')
+          $twinOff = Get-RowsSwitchedOff @('PaceRestoreRegistration')
 
           # Control A: the comparison sees a restore that did not run. EVERY rollback row that
           # rewrites pace-kv's registration is off:
-          #   FastCachedRestoreRegistrationExactly  the exact restore, from the rollback state;
-          #   FastCachedRestoreRegistration         its re-registration twin;
-          #   FastCachedUndoRegistration            the undo of a registration the transaction
-          #                                         CREATED -- conditioned NOT FASTCACHED_IMAGEPATH,
+          #   PaceRestoreRegistrationExactly  the exact restore, from the rollback state;
+          #   PaceRestoreRegistration         its re-registration twin;
+          #   PaceUndoRegistration            the undo of a registration the transaction
+          #                                         CREATED -- conditioned NOT PACE_IMAGEPATH,
           #                                         so already false here, and off so the claim
           #                                         holds of the package rather than of this
           #                                         scenario's properties.
-          # Not rows of this kind, so left on: FastCachedRestartAfterStop (starts the service, the
+          # Not rows of this kind, so left on: PaceRestartAfterStop (starts the service, the
           # `state` field, never the registration), Windows Installer's own StopServices rollback
-          # (FastCachedStopForFiles, Stop only), and the node's rows (FastCacheCompileNode's).
-          $allOff = Get-RowsSwitchedOff @('FastCachedRestoreRegistrationExactly', 'FastCachedRestoreRegistration', 'FastCachedUndoRegistration')
+          # (PaceStopForFiles, Stop only), and the node's rows (FastCacheCompileNode's).
+          $allOff = Get-RowsSwitchedOff @('PaceRestoreRegistrationExactly', 'PaceRestoreRegistration', 'PaceUndoRegistration')
           $control = @(Invoke-Control 'control-no-restore' "control A: every restore of pace-kv's registration switched off" $allOff.Statements $allOff.Verify)
           if (-not ($control | Where-Object { $_ -like 'service FastCached:*' })) { throw "control A did not go red on pace-kv's registration, so the comparison cannot see a restore that did not run" }
           Reset-ToN 'control-no-restore'
@@ -3954,8 +3954,8 @@ jobs:
             $elsewhere = @($control | Where-Object { $_ -notlike 'service FastCached:*' })
             $findings = @()
             if ($registration.Count) {
-              Write-Host "::error title=The exact restore is defective::with its re-registration twin switched off, FastCachedRestoreRegistrationExactly did not restore pace-kv's registration by itself; the twin was masking it"
-              $findings += "a DEFECT in FastCachedRestoreRegistrationExactly, not in this check, which must not be loosened:`n$($registration -join "`n")"
+              Write-Host "::error title=The exact restore is defective::with its re-registration twin switched off, PaceRestoreRegistrationExactly did not restore pace-kv's registration by itself; the twin was masking it"
+              $findings += "a DEFECT in PaceRestoreRegistrationExactly, not in this check, which must not be loosened:`n$($registration -join "`n")"
             }
             if ($elsewhere.Count) {
               Write-Host "::error title=Control B differs outside the exact restore's job::fields the exact restore does not write differ with only the twin switched off"
@@ -3967,16 +3967,16 @@ jobs:
           Reset-ToN 'control-exact-alone'
 
           # Control C: a discard inside the script costs the exact restore its state. The twin off as
-          # in B, and FastCacheDiscardRollbackState deferred again (commit bit cleared): B and C differ
+          # in B, and PaceDiscardRollbackState deferred again (commit bit cleared): B and C differ
           # ONLY in the discard's phase, which isolates the #1629 fix.
           # Read the shipped Type, assert the commit bit (0x200) is set, and clear it.
-          $type = [int](Get-MsiCustomActionType $newer 'FastCacheDiscardRollbackState')
-          if (-not ($type -band 0x200)) { throw "FastCacheDiscardRollbackState has Type $type, without the commit bit: the fix is not in this package" }
+          $type = [int](Get-MsiCustomActionType $newer 'PaceDiscardRollbackState')
+          if (-not ($type -band 0x200)) { throw "PaceDiscardRollbackState has Type $type, without the commit bit: the fix is not in this package" }
           $cleared = $type -band (-bnot 0x200)
           $deferredVerify = $twinOff.Verify.Clone()
-          $deferredVerify["SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action``='FastCacheDiscardRollbackState'"] = "$cleared"
+          $deferredVerify["SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action``='PaceDiscardRollbackState'"] = "$cleared"
           $control = @(Invoke-Control 'control-deferred-discard' 'control C: the twin switched off and the rollback state discarded in the script' `
-            ($twinOff.Statements + "UPDATE ``CustomAction`` SET ``Type``=$cleared WHERE ``Action``='FastCacheDiscardRollbackState'") $deferredVerify)
+            ($twinOff.Statements + "UPDATE ``CustomAction`` SET ``Type``=$cleared WHERE ``Action``='PaceDiscardRollbackState'") $deferredVerify)
           if (-not ($control | Where-Object { $_ -like 'service FastCached:*' })) { throw "control C did not go red: a discard inside the script must cost the exact restore its state" }
           Reset-ToN 'control-deferred-discard'
 
@@ -3989,7 +3989,7 @@ jobs:
           # product, and the node's firewall group. Never `binary`: the upgrade keeps N's root (see
           # the header), so the custom root's binary must still be THERE, which is asserted instead.
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $newer -Log 'succeeded-upgrade.log' -Properties $withNode -What 'the same upgrade, succeeding'
-          Assert-MsiLog -Path 'succeeded-upgrade.log' -Present (Get-MsiActionRanPattern 'FastCacheNodeStartService') -Absent (Get-MsiActionRanPattern 'FastCacheFailForTest')
+          Assert-MsiLog -Path 'succeeded-upgrade.log' -Present (Get-MsiActionRanPattern 'PaceNodeStartService') -Absent (Get-MsiActionRanPattern 'PaceFailForTest')
           $changed = @(Compare-InstallationSnapshot -Before $before -After (Get-InstallationSnapshot -UpgradeCode $family -Root $root))
           Assert-TransactionSettled
           Write-Host "a successful upgrade changes:`n  $($changed -join "`n  ")"
@@ -4006,7 +4006,7 @@ jobs:
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $newer -Log 'succeeded-uninstall.log' -What 'uninstalling after the successful upgrade'
           Assert-InstalledProduct $family ''
           Assert-ServiceTable -Row NothingInstalled -Log 'succeeded-uninstall.log'
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
           Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 
       # First the DEFAULT install, a plain /i naming no feature and no property, as
@@ -4033,7 +4033,7 @@ jobs:
           Assert-ServiceTable -Row NodeSelected -Log 'install-default.log'
           Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $msi -Log 'uninstall-default.log' -What 'uninstalling the default install'
           Assert-ServiceTable -Row NothingInstalled -Log 'uninstall-default.log'
-          Remove-FastCacheMachineState
+          Remove-PaceMachineState
 
           Invoke-Msiexec -Leaves DaemonAlone -Operation '/i' -Package $msi -Log 'install.log' `
             -Properties 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher' -What 'a fastcached-only install'
@@ -4141,7 +4141,7 @@ jobs:
           # unchanged proves nothing, so for this case alone it faces the network: `bind: 0.0.0.0`
           # in the machine-wide file, which the transaction's registration and the rollback's both
           # derive the rules from (a --bind in the command line would come back with the exact
-          # restore and never be re-derived), registered as FastCachedInstallService registers it,
+          # restore and never be re-derived), registered as PaceInstallService registers it,
           # with the remembered scope. Undone after the case, so later steps see loopback again.
           $scopeBefore = "$((Get-ItemProperty -Path 'HKLM:\SOFTWARE\fastcached\Installer' -ErrorAction SilentlyContinue).FirewallAllow)"
           $cfg = "$env:ProgramData\fastcached\fastcached.yaml"
@@ -4159,12 +4159,12 @@ jobs:
           $hold.Start()
           try {
             Invoke-Msiexec -Expect NodeCannotBind -Operation '/i' -Package $msi -Log 'add-node-refused.log' -What 'adding the node while 6674 is held' `
-              -Properties 'ADDLOCAL=CM_C_Node', 'FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8' -Accept @(1603)
+              -Properties 'ADDLOCAL=CM_C_Node', 'PACE_FIREWALL_ALLOW=10.0.0.0/8' -Accept @(1603)
           } finally {
             $hold.Stop()
           }
-          Assert-MsiLog -Path 'add-node-refused.log' -Present 'CustomAction FastCacheNodeStartService returned actual error code', `
-            (Get-MsiActionRanPattern 'FastCachedStopForNode'), (Get-MsiActionRanPattern 'FastCachedAwaitExitForNode')
+          Assert-MsiLog -Path 'add-node-refused.log' -Present 'CustomAction PaceNodeStartService returned actual error code', `
+            (Get-MsiActionRanPattern 'PaceStopForNode'), (Get-MsiActionRanPattern 'PaceAwaitExitForNode')
           Assert-ServiceTable -Row DaemonAlone -Log 'add-node-refused.log'
           $fastcachedAfter = Get-CimInstance Win32_Service -Filter "Name='FastCached'"
           if ($fastcachedAfter.PathName -cne $fastcachedBefore.PathName) {
@@ -4202,7 +4202,7 @@ jobs:
           # argument -- the pin VERBATIM, since it is security material nothing re-spells.
           $pin = '0123456789abcdef0123456789abcdef@11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo'
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $msi -Log 'scope-node.log' -What 'a repair stating a scope, a seed and a pin' `
-            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8', 'FASTCACHE_FLEET_SEED=seed.example.invalid', "FASTCACHE_FLEET_ID=$pin"
+            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'PACE_FIREWALL_ALLOW=10.0.0.0/8', 'PACE_FLEET_SEED=seed.example.invalid', "PACE_FLEET_ID=$pin"
           Assert-TransactionSettled
           Assert-NodeFirewallScope -Scope '10.0.0.0/8'
           Assert-NodeRegistrationArgument -Argument '--fleet-seed=seed.example.invalid:6674'
@@ -4222,9 +4222,9 @@ jobs:
           # node is RUNNING again (B4-6): the repair stopped it to replace its files, and only the
           # rollback's restart brings it back.
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $msi -Log 'refused-pin.log' -What 'a repair stating a pin the node refuses' `
-            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'FASTCACHE_FLEET_ID=0123456789abcdef0123456789abcdef' `
+            -Properties 'REINSTALL=ALL', 'REINSTALLMODE=vomus', 'PACE_FLEET_ID=0123456789abcdef0123456789abcdef' `
             -Accept @(1603)
-          Assert-MsiLog -Path 'refused-pin.log' -Present 'CustomAction FastCacheNodeCheckArguments returned actual error code'
+          Assert-MsiLog -Path 'refused-pin.log' -Present 'CustomAction PaceNodeCheckArguments returned actual error code'
           Assert-NodeRegistrationArgument -Argument "--fleet-id=$pin"
           $remembered = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\fastcached\Installer' -Name 'FleetId'
           if ($remembered -cne $pin) {
@@ -4240,8 +4240,8 @@ jobs:
           # is the transaction's own restart rather than a file replacement's.
           $nodeBefore = (Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'").ProcessId
           Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $msi -Log 'reseed-node.log' -What 'a feature change giving the node a new seed' `
-            -Properties 'ADDLOCAL=CM_C_Node', 'FASTCACHE_FLEET_SEED=seed2.example.invalid'
-          Assert-MsiLog -Path 'reseed-node.log' -Present (Get-MsiActionRanPattern 'FastCacheNodeStopForRestart') `
+            -Properties 'ADDLOCAL=CM_C_Node', 'PACE_FLEET_SEED=seed2.example.invalid'
+          Assert-MsiLog -Path 'reseed-node.log' -Present (Get-MsiActionRanPattern 'PaceNodeStopForRestart') `
             -Absent 'ServiceControl\(.*Name=FastCacheCompileNode'
           Assert-NodeRegistrationArgument -Argument '--fleet-seed=seed2.example.invalid:6674'
           Assert-ServiceTable -Row NodeSelected -Log 'reseed-node.log'
@@ -4400,7 +4400,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path 'target/pace-kv.exe').Path
-          $name = 'FastCachedFirewallProbe'
+          $name = 'PaceFirewallProbe'
           $group = "pace-kv: $name"
           $config = Join-Path $env:RUNNER_TEMP 'firewall-probe.yaml'
           Set-Content -LiteralPath $config -Value '# The firewall probe: named so no machine-wide configuration is read.'
@@ -4842,7 +4842,7 @@ jobs:
       # the tag produces a fallback version and packages named after a release
       # nobody cut — a defect invisible in every green job above and observable
       # only in the filenames. So the filenames are what gets asserted. The
-      # packaging jobs also configure with -DFASTCACHED_REQUIRE_EXACT_VERSION=ON
+      # packaging jobs also configure with -DPACE_REQUIRE_EXACT_VERSION=ON
       # on a tag run, which fails earlier and closer to the cause; this is the
       # backstop that no packaging change can bypass.
       #
@@ -4901,7 +4901,7 @@ jobs:
             # `fastcached-<version>` followed by a separator, not a substring test:
             # 0.1.1 would otherwise be satisfied by a 0.1.10 package.
             case "$name" in
-              fastcached-"$version"[-_.]* | fastcached_"$version"[-_.]*) ;;
+              fastcached-"$version"[-_.]* | pace_"$version"[-_.]*) ;;
               *)
                 echo "::error::$name does not carry the tag's version ($version): the build used a fallback version, so that checkout could not see the tag"
                 echo "| \`$pattern\` | $name | **wrong version** |" >> "$GITHUB_STEP_SUMMARY"
@@ -4974,7 +4974,7 @@ jobs:
           # row. The version is deliberately a wildcard — it is pinned to the tag
           # by the assertion step above, which can say so in its own words.
           files: |
-            dist/fastcached_*_amd64.deb
+            dist/pace_*_amd64.deb
             dist/fastcached-*.x86_64.rpm
             dist/fastcached-*-Linux-x86_64.tar.gz
             dist/fastcached-*-Darwin-arm64.pkg

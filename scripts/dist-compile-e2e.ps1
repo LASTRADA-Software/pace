@@ -61,7 +61,7 @@
 # architecture -- is still a failure.
 #
 # Usage:
-#   dist-compile-e2e.ps1 -Fastcached <path> -Node <path> -Launcher <path> [-Cli <path>]
+#   dist-compile-e2e.ps1 -PaceKv <path> -Node <path> -Launcher <path> [-Cli <path>]
 #                        [-EditStub <mid-compile-edit-stub>]
 #   dist-compile-e2e.ps1 -SelfTest        # the object comparison only, no build
 #
@@ -69,7 +69,7 @@
 # was missing (skip).
 
 param(
-    [string]$Fastcached = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-kv.exe",
+    [string]$PaceKv = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-kv.exe",
     [string]$Node       = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-node.exe",
     [string]$Launcher   = "$PSScriptRoot/../out/build/clangcl-debug/target/pace-cc.exe",
     # Asked for the scheduler's own record of a worker when a dispatch comes back
@@ -110,14 +110,14 @@ catch { Write-Host "dist-compile E2E FAILED: $($_.Exception.Message)"; exit 1 }
 # three binaries there would make the one check that needs no build the one check
 # that cannot run without one.
 if (-not $SelfTest) {
-    if (-not (Test-Path $Fastcached)) { Write-Host "pace-kv not found: $Fastcached; skipping"; exit $SKIP }
+    if (-not (Test-Path $PaceKv)) { Write-Host "pace-kv not found: $PaceKv; skipping"; exit $SKIP }
     if (-not (Test-Path $Node))       { Write-Host "pace-node not found: $Node; skipping"; exit $SKIP }
     if (-not (Test-Path $Launcher))   { Write-Host "pace-cc not found: $Launcher; skipping"; exit $SKIP }
 
     # Start-Process resolves a relative -FilePath against the PROCESS working
     # directory rather than PowerShell's, so a caller passing "out/build/..." would
     # get a spurious "file not found".
-    $Fastcached = (Resolve-Path $Fastcached).Path
+    $PaceKv = (Resolve-Path $PaceKv).Path
     $Node       = (Resolve-Path $Node).Path
 
 # Every node started below is SOLITARY: a fleet of its own, serving the scheduler its own
@@ -746,7 +746,7 @@ function Test-EquivalentObject([string]$reference, [string]$produced, [hashtable
 # The cache port is a PARAMETER, not read from the enclosing scope.
 #
 # It was the latter, and the isolation case below tried to override
-# $env:FASTCACHE_ADDR around the call -- which this function then clobbered on its
+# $env:PACE_ADDR around the call -- which this function then clobbered on its
 # own first line, so that case silently used the MAIN cache while talking to the
 # isolation scheduler. It would still have passed, for the wrong reason, which is
 # the failure mode every fixture here is written to avoid.
@@ -778,12 +778,12 @@ int Probe() { return static_cast<int>(std::string("x").size()); }
 function Invoke-Dispatching([string]$compiler, [string]$root, [string]$obj,
                             [string]$scheduler, [int]$cache, [string]$sourceName = "u.cpp",
                             [string[]]$extra = @()) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$cache"
-    $env:FASTCACHE_SOURCE_DIR = $root
-    $env:FASTCACHE_BINARY_DIR = (Join-Path $root "build")
-    $env:FASTCACHE_VERBOSE    = "1"
-    if ($scheduler) { $env:FASTCACHE_SCHEDULER = $scheduler }
-    else            { Remove-Item -Path "env:FASTCACHE_SCHEDULER" -ErrorAction SilentlyContinue }
+    $env:PACE_ADDR       = "127.0.0.1:$cache"
+    $env:PACE_SOURCE_DIR = $root
+    $env:PACE_BINARY_DIR = (Join-Path $root "build")
+    $env:PACE_VERBOSE    = "1"
+    if ($scheduler) { $env:PACE_SCHEDULER = $scheduler }
+    else            { Remove-Item -Path "env:PACE_SCHEDULER" -ErrorAction SilentlyContinue }
 
     $source  = Join-Path $root $sourceName
     $outFile = New-TemporaryFile
@@ -1109,9 +1109,9 @@ function Invoke-SelfTest {
 
 if ($SelfTest) { exit (Invoke-SelfTest) }
 
-# The launcher reads its whole configuration from FASTCACHE_* variables, and the calls
-# below set only the ones they mean -- so an inherited FASTCACHE_VERIFY, FASTCACHE_TOKEN
-# or FASTCACHE_NO_DIRECT would decide what a case measures. Importing the shared module
+# The launcher reads its whole configuration from PACE_* variables, and the calls
+# below set only the ones they mean -- so an inherited PACE_VERIFY, PACE_TOKEN
+# or PACE_NO_DIRECT would decide what a case measures. Importing the shared module
 # clears every one of them; this fixture draws no port through `E2EPorts.psm1`, which
 # would otherwise have imported it.
 Import-Module (Join-Path $PSScriptRoot "lib/E2EEnvironment.psm1") -Force
@@ -1197,7 +1197,7 @@ try {
         # nothing in the cache daemon can establish which node that is -- so the
         # scheduler moved to where cluster leadership lives, which is the node.
         $daemonLog = Join-Path $scratch "daemon.log"
-        $daemon = Start-Background $Fastcached @(
+        $daemon = Start-Background $PaceKv @(
             "--listen=127.0.0.1:$cachePort",
             "--storage-max-value=64M", "--log-level=info") $daemonLog
         $procs += $daemon
@@ -1668,7 +1668,7 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
         $isoDispatch = $BasePort + 4
 
         $isoDaemonLog = Join-Path $scratch "iso-daemon.log"
-        $isoDaemon = Start-Background $Fastcached @(
+        $isoDaemon = Start-Background $PaceKv @(
             "--listen=127.0.0.1:$isoCache",
             "--log-level=info") $isoDaemonLog
         $procs += $isoDaemon

@@ -399,10 +399,10 @@ struct NodeConfig
     /// Where this node serves cache verbs to its local clients; empty turns it off.
     ///
     /// Defaults to the address `pace-cc` already looks at when nobody sets
-    /// `FASTCACHE_ADDR`, which is what makes the local tier work with **no
+    /// `PACE_ADDR`, which is what makes the local tier work with **no
     /// configuration at all**: start a node, build, and the launcher finds it. The
     /// alternative — an off-by-default port an operator has to discover, and a
-    /// `FASTCACHE_ADDR` they then have to point at it — is two steps to get the
+    /// `PACE_ADDR` they then have to point at it — is two steps to get the
     /// behaviour that is the point of running the program.
     ///
     /// **The wildcard on every node** (`DefaultNodeListen`), because every node is a fleet
@@ -1760,7 +1760,7 @@ inline constexpr bool BuildServesTls = false;
 /// the clear after being told to serve TLS is one an operator believes is encrypted.
 inline constexpr std::string_view TlsUnavailableRefusal =
     "--tls-self-signed or --tls-cert was given, and this build has no TLS support (rebuild with "
-    "-DFASTCACHED_ENABLE_TLS=ON): the admin surface would be served in the clear while an operator believed it "
+    "-DPACE_ENABLE_TLS=ON): the admin surface would be served in the clear while an operator believed it "
     "was encrypted.";
 
 /// Why a worker that could verify no lease is refused, when other machines can reach it (#178).

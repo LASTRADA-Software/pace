@@ -656,7 +656,7 @@ TEST_CASE("PreprocessCommand sends MSVC preprocessed text to stdout, never to a 
     // `<base>.i` — so the launcher hashed an empty stdout and every Windows key
     // carried no content from the source at all. An edited file then re-fetched the
     // object built from the old text. Direct mode masked it (its manifest hashes
-    // the source's own bytes), so nothing failed until FASTCACHE_NO_DIRECT=1.
+    // the source's own bytes), so nothing failed until PACE_NO_DIRECT=1.
     //
     // /EP and /P are alternatives, not modifiers: /EP preprocesses to stdout, /P to
     // a file, and MSVC documents the pair as "to the file, without #line".
@@ -761,14 +761,14 @@ TEST_CASE("RemoteCompileArgs keeps the flags that change generated code")
 
 TEST_CASE("A path-valued -D is dispatchable, and the macro leaves only the worker's line")
 {
-    // #1481. This project's own build passes `-DFASTCACHED_SOURCE_DIR="<abs>"`, and an
+    // #1481. This project's own build passes `-DPACE_SOURCE_DIR="<abs>"`, and an
     // argument the dispatch walk does not recognise refuses the WHOLE command line --
     // correctly, since stripping an unknown one could change the generated code. The
     // result was that every translation unit compiled locally, with one stderr line each,
     // `dispatched 0` on the fleet page and no counter anywhere saying so. Any project
     // passing a source root, a config directory or a version string containing a slash
     // got the same silence.
-    std::vector<std::string> const argv { "g++", "-std=c++23", "-DFASTCACHED_SOURCE_DIR=\"/mnt/d/fastcached\"",
+    std::vector<std::string> const argv { "g++", "-std=c++23", "-DPACE_SOURCE_DIR=\"/mnt/d/fastcached\"",
                                           "-O2", "-c",         "a.cpp",
                                           "-o",  "a.o" };
     auto const cmd = ParseCommand(argv);
@@ -796,7 +796,7 @@ TEST_CASE("A path-valued -D is dispatchable, and the macro leaves only the worke
     // result under this program's key. A case asserting only the drop passes under
     // exactly that bug.
     auto const pp = PreprocessCommand(cmd, argv);
-    CHECK(std::ranges::contains(pp, "-DFASTCACHED_SOURCE_DIR=\"/mnt/d/fastcached\""));
+    CHECK(std::ranges::contains(pp, "-DPACE_SOURCE_DIR=\"/mnt/d/fastcached\""));
 }
 
 TEST_CASE("Both macro spellings leave the dispatched line, and an undefine is the same object")
@@ -1065,7 +1065,7 @@ TEST_CASE("RemoteCompileArgs refuses a command line it cannot fully account for"
     // #1481. The cost is not one local compile: a project passing a path-valued `-D`
     // anywhere gets NO dispatch for ANY translation unit, silently, one stderr line each,
     // with no counter to read. This repository is such a project
-    // (`-DFASTCACHED_SOURCE_DIR`), so its own build reached its own fleet never.
+    // (`-DPACE_SOURCE_DIR`), so its own build reached its own fleet never.
     //
     // A macro is safe to drop where `-isystem` and `-fplugin=` above are not, and the
     // difference is not strictness: dispatch sends PREPROCESSED text, so a definition has

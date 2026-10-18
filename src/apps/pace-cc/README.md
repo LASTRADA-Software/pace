@@ -27,7 +27,7 @@ unavailable — so it can never break a build.
 | `IProcessRunner.hpp`, `ProcessRunner.cpp` | Process-spawn seam; Windows and POSIX implementations. |
 | `EndpointDial.hpp`, `EndpointDial.cpp` | Turns `"host:port"` into a connected `ISocket`. The socket itself is the library's `Net/TcpClient`; this is only the join between `Core/HostPort` and it, which `Net` must not make itself. |
 
-Built by default (`FASTCACHED_BUILD_LAUNCHER=ON`) and installed alongside
+Built by default (`PACE_BUILD_LAUNCHER=ON`) and installed alongside
 `pace-kv`.
 
 ## Validation

@@ -399,7 +399,7 @@ the same digest from what it asked for and **refuses** a reply that does not mat
 before the object envelope is opened. There is no best-effort match and no fallback
 to using the object anyway: a mismatch means the translation unit is compiled
 locally, and the launcher says so unconditionally on stderr rather than only under
-`FASTCACHE_VERBOSE`. `pace-cc --show-stats` ranks it as a fall-back reason.
+`PACE_VERBOSE`. `pace-cc --show-stats` ranks it as a fall-back reason.
 
 It is integrity against **accident**, not against a hostile worker: the digest is
 unkeyed, so a worker that can return a wrong object can return a wrong digest just
@@ -632,7 +632,7 @@ re-gating on rotation would fail every in-flight build at the moment an operator
 rotates, which is what makes rotation something nobody dares do.
 
 Against a daemon with no credential configured, an AUTH frame is answered `Ok`
-and ignored, so setting `FASTCACHE_TOKEN` is safe in a mixed fleet. It does not
+and ignored, so setting `PACE_TOKEN` is safe in a mixed fleet. It does not
 mark the connection as verified, though — nothing was checked — so a later reload
 that enables auth gates it like any other.
 
@@ -816,7 +816,7 @@ launcher opens a fresh connection per translation unit — with only per-connect
 debouncing, one 60-hit build was measured issuing 27022 prefetches and 13969
 disk reads. A group holds at most 100 000 keys.
 
-Prefetch group membership never affects the cache key, so changing `FASTCACHE_PREFETCH_GROUP`
+Prefetch group membership never affects the cache key, so changing `PACE_PREFETCH_GROUP`
 re-groups prefetching without partitioning the cache or invalidating anything.
 
 ## Operational notes

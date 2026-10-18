@@ -79,7 +79,7 @@ set(directivePattern "^[ \t]*#[ \t]*(if|ifdef|ifndef|elif)[^\n]*(${architectureM
 
 # A GLOB, never a file list: a list is exact about the files it knows and silent
 # about the ones it does not, and silence reads identically to complete coverage.
-# Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its files,
+# Through `pace_tracked_files`, this tree's one answer to HOW a check finds its files,
 # rather than a traversal of its own: on DrvFs -- where every local gate tree takes its
 # sources from -- walking the tree and reading every file it found cost seconds a single
 # `git grep` spends in under half of one, and several lanes gating at once took this check
@@ -87,7 +87,7 @@ set(directivePattern "^[ \t]*#[ \t]*(if|ifdef|ifndef|elif)[^\n]*(${architectureM
 # it is not read at all; the count printed is still over the whole set.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 string(REPLACE "|" ";" architectureMacroNames "${architectureMacros}")
-fastcached_tracked_files("${SOURCE_DIR}"
+pace_tracked_files("${SOURCE_DIR}"
     PATHSPECS "*_test.cpp"
     GLOBS "*_test.cpp"
     FILTER "_test\\.cpp$"

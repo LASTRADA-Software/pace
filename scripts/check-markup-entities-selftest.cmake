@@ -45,25 +45,25 @@
 # inheriting it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-markup-entities-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-markup-entities.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-markup-entities.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -76,7 +76,7 @@ endif()
 # and `&gt;` contain `;`, which splits the CMake list, and `|` is the field separator.
 # That is the same hazard the check itself had, which is why the rows below spell the
 # entities through here rather than directly.
-function(fastcached_expand var)
+function(pace_expand var)
     set(text "${${var}}")
     string(REPLACE "~n~" "\n" text "${text}")
     string(REPLACE "~lb~" "[" text "${text}")
@@ -154,12 +154,12 @@ void Help(std::string& out)
 ")
 
 # ---------------------------------------------------------------------------
-function(fastcached_stage_and_run name target from to outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
 
-    fastcached_expand(from)
-    fastcached_expand(to)
+    pace_expand(from)
+    pace_expand(to)
 
     set(useGit FALSE)
     if(target MATCHES "^(.*)-git$")
@@ -172,7 +172,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     set(testText "${baseTest}")
     set(proseText "${baseProse}")
     foreach(v homeText consumerText testText proseText)
-        fastcached_expand(${v})
+        pace_expand(${v})
     endforeach()
 
     set(extraPath "")
@@ -231,7 +231,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
                 "case `${name}` asks for the git enumeration path and no git was found. "
                 "Skipping it silently would leave the mode CI actually takes untested.")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -244,7 +244,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
 
@@ -260,7 +260,7 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 #   <name>|<target>|<from>|<to>|<must ALL appear>|<must NONE appear>
-set(FastCachedMarkupCases
+set(PaceMarkupCases
     # THE ACCEPTING ARM, both enumeration modes.
     "baseline via walk|none|-|-|no duplicate escaper across && directory walk|CMake Error"
     "baseline via git|none-git|-|-|no duplicate escaper across && git ls-files|CMake Error"
@@ -316,7 +316,7 @@ set(FastCachedMarkupCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedMarkupCases)
+foreach(row IN LISTS PaceMarkupCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 6)
@@ -332,7 +332,7 @@ foreach(row IN LISTS FastCachedMarkupCases)
     list(GET fields 5 caseMustNotAppear)
 
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}" output applied)
 
     if(NOT applied)
         list(APPEND failures

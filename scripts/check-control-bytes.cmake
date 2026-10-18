@@ -43,7 +43,7 @@ cmake_minimum_required(VERSION 3.28)
 # its header used to say a NUL truncates the read.
 #
 # So the question is put to the file set as a question about bytes:
-# `fastcached_tracked_files(CONTAINING_BYTES ...)` answers which files hold any forbidden
+# `pace_tracked_files(CONTAINING_BYTES ...)` answers which files hold any forbidden
 # byte -- in git mode one `git grep -a -P` over the whole set, in a walk by reading each file
 # as HEX -- and only those files are read here, as HEX, to say which byte and where. A file
 # the answer does not name holds none; nothing about it is read, which is what keeps this
@@ -61,8 +61,8 @@ cmake_minimum_required(VERSION 3.28)
 # removes the question: a two-character token can then only match at a multiple of
 # three, which is a whole byte, so the offset and the newline count are both exact.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
@@ -72,11 +72,11 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # A row is an extension without its dot, or a whole basename for the extensionless
 # files (`.clang-tidy`, `Dockerfile`, `LICENSE`), which `get_filename_component(EXT)`
 # reads as an extension of `.clang-tidy` and which are named here instead.
-set(FastCachedControlByteExtensions
+set(PaceControlByteExtensions
     awk c cmake cpp crt h hpp html in inc json key manifest md ps1 py rtf
     service sh socket sysusers tmpfiles txt xml yaml yml)
 
-set(FastCachedControlByteNames
+set(PaceControlByteNames
     .clang-format .clang-format-ignore .clang-format-version .clang-tidy
     .clang-tidy-version .dockerignore .gitattributes .gitignore .tsan-suppressions
     Dockerfile LICENSE MANIFEST
@@ -135,28 +135,28 @@ if(NOT forbiddenCount EQUAL 31 OR NOT tokenCount EQUAL 31)
 endif()
 
 # ---------------------------------------------------------------------------
-# The files. Through `fastcached_tracked_files`, which is the one answer to HOW a check
+# The files. Through `pace_tracked_files`, which is the one answer to HOW a check
 # finds its file set, and then declined against the third-party roots -- vendored source
 # is not this repository's to hold to its byte rules, and an enumerator that had not
 # asked would refuse `vendor/` on somebody else's behalf.
-list(JOIN FastCachedControlByteExtensions "|" extensionAlternatives)
-set(escapedNames ${FastCachedControlByteNames})
+list(JOIN PaceControlByteExtensions "|" extensionAlternatives)
+set(escapedNames ${PaceControlByteNames})
 list(TRANSFORM escapedNames REPLACE "\\." "\\\\.")
 list(JOIN escapedNames "|" nameAlternatives)
 set(fileFilter "(\\.(${extensionAlternatives})|(^|/)(${nameAlternatives}))$")
 
 # Asked WITHOUT the filter, and partitioned here, so the files the allow-list turned
-# away can be COUNTED. `fastcached_tracked_files` applies `FILTER` internally and
+# away can be COUNTED. `pace_tracked_files` applies `FILTER` internally and
 # discards what it rejects, so a caller that passes one gets no denominator -- and the
 # header above promises that number, because it is the single thing that makes an
 # inclusion list defensible against its own silence: a new extension arriving in the
 # tree is invisible except as a figure that moved. Claiming it and not printing it was
 # worse than either.
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     GLOBS "*" FILES_OUT tracked MODE_OUT mode
     CONTAINING_BYTES ${forbiddenTokens} CONTAINING_OUT holding
     MISSING_OUT missing)
-fastcached_decline_third_party("${FASTCACHED_SOURCE_DIR}" tracked declined)
+pace_decline_third_party("${PACE_SOURCE_DIR}" tracked declined)
 
 set(candidates "")
 set(unlisted "")
@@ -177,7 +177,7 @@ set(findings "")
 set(scannedCount 0)
 
 foreach(relative IN LISTS candidates)
-    set(absolute "${FASTCACHED_SOURCE_DIR}/${relative}")
+    set(absolute "${PACE_SOURCE_DIR}/${relative}")
     # Asked of the file set once rather than of the filesystem per file: over DrvFs a
     # per-file `EXISTS` cost more than every other step of this check together.
     if(relative IN_LIST missing)
@@ -265,7 +265,7 @@ endforeach()
 if(scannedCount EQUAL 0)
     message(FATAL_ERROR
         "control-bytes scanned 0 file(s) of ${candidateCount} candidate(s) under "
-        "${FASTCACHED_SOURCE_DIR} (file set from ${mode}), so it is reporting on "
+        "${PACE_SOURCE_DIR} (file set from ${mode}), so it is reporting on "
         "nothing. Either the file set is empty, or the extension allow-list in "
         "${CMAKE_CURRENT_LIST_FILE} no longer matches anything this tree contains. Both "
         "make this check pass vacuously.")

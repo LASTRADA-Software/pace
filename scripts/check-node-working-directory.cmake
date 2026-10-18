@@ -110,13 +110,13 @@
 # read from this script's OUTPUT rather than from its exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-node-working-directory.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-node-working-directory.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_tracked_files`: how the cited docs are found, one answer for every check.
+# `pace_tracked_files`: how the cited docs are found, one answer for every check.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 #
 # No row may contain a ';' -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
-set(FastCachedUnitWorkingDirectories
+set(PaceUnitWorkingDirectories
     "linux/pace-node.service|yes|The compile worker. Its entire purpose is to spawn a compiler, and the prefix-map rules it builds are derived from this directory."
     "linux/pace-kv.service|no|The cache daemon. It executes nothing at all, so no prefix-map rule is ever derived from its directory and a working directory of / costs it nothing but a busy mount point."
     "linux/pace-kv-user.service|no|The per-user cache daemon. Executes nothing, exactly as the system daemon does not."
@@ -153,15 +153,15 @@ set(FastCachedUnitWorkingDirectories
 #   <path under packaging/>|<why it needs the directory handed over>
 #
 # A unit named here that does not exist is a failure, for the table above's reason.
-set(FastCachedUnitNodeStateDirectories
+set(PaceUnitNodeStateDirectories
     "linux/pace-node.service|The compile node, running as the unprivileged fastcache-node account: without StateDirectory= naming its directory it would keep the machine's identity in that account's home, / under sysusers and read-only under ProtectSystem=strict."
 )
 
 # Where the node's own name for its state directory is spelled, and the pattern that
 # reads it. Read rather than restated: a second spelling here is how the unit and the
 # binary would come to disagree with every check green.
-set(FastCachedNodeDefaultsHeader "src/apps/pace-node/NodeDefaults.hpp")
-set(FastCachedNodeStateNamePattern "NodeStateDirectoryName = \"([A-Za-z0-9._-]+)\"")
+set(PaceNodeDefaultsHeader "src/apps/pace-node/NodeDefaults.hpp")
+set(PaceNodeStateNamePattern "NodeStateDirectoryName = \"([A-Za-z0-9._-]+)\"")
 
 # One row per shipped unit whose program takes a `cache_dir` and runs under
 # ProtectSystem=strict:
@@ -169,56 +169,56 @@ set(FastCachedNodeStateNamePattern "NodeStateDirectoryName = \"([A-Za-z0-9._-]+)
 #   <path under packaging/>|<why it needs a CacheDirectory=>
 #
 # A unit named here that does not exist is a failure, for the first table's reason.
-set(FastCachedUnitNodeCacheDirectories
+set(PaceUnitNodeCacheDirectories
     "linux/pace-node.service|The compile node under ProtectSystem=strict: cache_dir has no default, and the state directory it can write is refused as one, so without CacheDirectory= a disk tier has nowhere persistent to live."
 )
 
 # Where an operator is told what to write for `cache_dir`: the reference configuration
 # they edit, and the pages. The reference is also the positive control -- it must cite
 # one, or a scan finding nothing would read as every citation agreeing.
-set(FastCachedCacheDirReference "packaging/config/pace-node.yaml")
-set(FastCachedCacheDirCitationSources "docs/*.md" "${FastCachedCacheDirReference}")
+set(PaceCacheDirReference "packaging/config/pace-node.yaml")
+set(PaceCacheDirCitationSources "docs/*.md" "${PaceCacheDirReference}")
 
 # A citation: `--cache-dir=<path>`, `--cache-dir <path>` or `cache_dir: <path>`, judged
 # only under /var/ (the blind spot above). Group 2 is the path; a sentence's closing
 # full stop is trimmed off it before it is judged.
-set(FastCachedCacheDirCitationPattern "(--cache-dir[= ]|cache_dir:[ \t]*)(/var/[A-Za-z0-9._/+-]*)")
+set(PaceCacheDirCitationPattern "(--cache-dir[= ]|cache_dir:[ \t]*)(/var/[A-Za-z0-9._/+-]*)")
 
 # systemd's own directory roots, so `RuntimeDirectory=x` is checked against the
 # path it actually creates. All are fixed for a SYSTEM unit, which every row
 # above is; a user unit's runtime root is $XDG_RUNTIME_DIR, and a row for one
 # would need this table to gain a scope column rather than these values to be
 # loosened.
-set(FastCachedRuntimeDirectoryRoot "/run")
-set(FastCachedStateDirectoryRoot "/var/lib")
-set(FastCachedCacheDirectoryRoot "/var/cache")
+set(PaceRuntimeDirectoryRoot "/run")
+set(PaceStateDirectoryRoot "/var/lib")
+set(PaceCacheDirectoryRoot "/var/cache")
 
 # `%t` is the runtime root, and is the one specifier a unit may reasonably spell
 # here. Every other `%` is refused by name rather than passed through: a specifier
 # this script cannot resolve is a value it cannot judge, and reporting on a value
 # you did not resolve is how a check comes to approve of `%h` -- the account's
 # home, which sysusers gives as `/`.
-set(FastCachedResolvableSpecifier "%t")
+set(PaceResolvableSpecifier "%t")
 
 # What an absolute path may be spelled with. Anything else is refused by name.
 # Deliberately narrow: this is a path in a file this project ships, not a path an
 # operator typed, so there is no case to accommodate. It is also what keeps a
 # value carrying a CMake list separator from being judged as though it were a
-# path -- see the substitution in fastcached_unit_directive below.
-set(FastCachedPathCharacters "^/[A-Za-z0-9._/+-]*$")
+# path -- see the substitution in pace_unit_directive below.
+set(PacePathCharacters "^/[A-Za-z0-9._/+-]*$")
 
 # ---------------------------------------------------------------------------
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
+if(NOT DEFINED PACE_SOURCE_DIR)
     message(FATAL_ERROR
-        "FASTCACHED_SOURCE_DIR is not set. Invoke this script as: cmake "
-        "-DFASTCACHED_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
+        "PACE_SOURCE_DIR is not set. Invoke this script as: cmake "
+        "-DPACE_SOURCE_DIR=<source root> -P ${CMAKE_CURRENT_LIST_FILE}")
 endif()
 
-if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/packaging")
+if(NOT EXISTS "${PACE_SOURCE_DIR}/packaging")
     message(FATAL_ERROR
-        "'${FASTCACHED_SOURCE_DIR}' has no packaging/ directory. "
-        "Is FASTCACHED_SOURCE_DIR the source root?")
+        "'${PACE_SOURCE_DIR}' has no packaging/ directory. "
+        "Is PACE_SOURCE_DIR the source root?")
 endif()
 
 # Split a "a|b|c" row into its three fields. Positional rather than named because
@@ -229,7 +229,7 @@ endif()
 # @param unitOut Set to field 1, the unit's path under packaging/.
 # @param compilesOut Set to field 2, whether the unit's program spawns a compiler.
 # @param reasonOut Set to field 3, why that answer (printed on failure).
-function(fastcached_split_unit_row row unitOut compilesOut reasonOut)
+function(pace_split_unit_row row unitOut compilesOut reasonOut)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 3)
@@ -262,7 +262,7 @@ endfunction()
 # @param content The unit file's text.
 # @param directive The directive name, e.g. WorkingDirectory.
 # @param valuesOut Set to the list of assigned values, in file order, verbatim.
-function(fastcached_unit_directive content directive valuesOut)
+function(pace_unit_directive content directive valuesOut)
     string(REPLACE ";" "<semicolon>" safe "${content}")
     string(REGEX MATCHALL "[\r\n][ \t]*${directive}[ \t]*=[^\r\n]*" assignments "\n${safe}")
     set(values "")
@@ -282,8 +282,8 @@ endfunction()
 # @param directive The directive name, e.g. CacheDirectory.
 # @param namesOut Set to the names in force, in file order.
 # @param assignedOut Set to TRUE when the directive is assigned at all, even emptily.
-function(fastcached_unit_list_in_force content directive namesOut assignedOut)
-    fastcached_unit_directive("${content}" "${directive}" declarations)
+function(pace_unit_list_in_force content directive namesOut assignedOut)
+    pace_unit_directive("${content}" "${directive}" declarations)
     set(inForce "")
     set(assignedAny FALSE)
     foreach(declaration IN LISTS declarations)
@@ -305,15 +305,15 @@ endfunction()
 #
 # @param content The unit file's text.
 # @param pathsOut Set to the list of absolute paths the unit creates.
-function(fastcached_unit_created_directories content pathsOut)
+function(pace_unit_created_directories content pathsOut)
     set(paths "")
-    foreach(pair IN ITEMS "RuntimeDirectory|${FastCachedRuntimeDirectoryRoot}"
-                          "StateDirectory|${FastCachedStateDirectoryRoot}"
-                          "CacheDirectory|${FastCachedCacheDirectoryRoot}")
+    foreach(pair IN ITEMS "RuntimeDirectory|${PaceRuntimeDirectoryRoot}"
+                          "StateDirectory|${PaceStateDirectoryRoot}"
+                          "CacheDirectory|${PaceCacheDirectoryRoot}")
         string(REPLACE "|" ";" halves "${pair}")
         list(GET halves 0 directive)
         list(GET halves 1 root)
-        fastcached_unit_directive("${content}" "${directive}" declarations)
+        pace_unit_directive("${content}" "${directive}" declarations)
         foreach(declaration IN LISTS declarations)
             # An empty assignment resets the setting, so it declares nothing and
             # must not contribute an entry of "<root>/".
@@ -334,9 +334,9 @@ endfunction()
 
 set(violations "")
 
-foreach(row IN LISTS FastCachedUnitWorkingDirectories)
-    fastcached_split_unit_row("${row}" unit compiles reason)
-    set(path "${FASTCACHED_SOURCE_DIR}/packaging/${unit}")
+foreach(row IN LISTS PaceUnitWorkingDirectories)
+    pace_split_unit_row("${row}" unit compiles reason)
+    set(path "${PACE_SOURCE_DIR}/packaging/${unit}")
 
     if(NOT EXISTS "${path}")
         list(APPEND violations
@@ -345,8 +345,8 @@ foreach(row IN LISTS FastCachedUnitWorkingDirectories)
     endif()
 
     file(READ "${path}" content)
-    fastcached_unit_directive("${content}" "WorkingDirectory" assigned)
-    fastcached_unit_created_directories("${content}" created)
+    pace_unit_directive("${content}" "WorkingDirectory" assigned)
+    pace_unit_created_directories("${content}" created)
 
     # The LAST assignment is the one in force -- systemd overrides rather than
     # accumulates for this directive -- and an empty one resets to the default,
@@ -384,7 +384,7 @@ foreach(row IN LISTS FastCachedUnitWorkingDirectories)
 
     # Resolved before anything is judged, so no rule below reports on a string
     # whose meaning it does not know.
-    string(REPLACE "${FastCachedResolvableSpecifier}" "${FastCachedRuntimeDirectoryRoot}" resolved "${value}")
+    string(REPLACE "${PaceResolvableSpecifier}" "${PaceRuntimeDirectoryRoot}" resolved "${value}")
     if(resolved MATCHES "%")
         list(APPEND violations
             "  packaging/${unit}\n      spells WorkingDirectory=${value}, which carries a specifier this check cannot resolve -- and a value nobody resolved is one nobody judged")
@@ -397,7 +397,7 @@ foreach(row IN LISTS FastCachedUnitWorkingDirectories)
         continue()
     endif()
 
-    if(NOT resolved MATCHES "${FastCachedPathCharacters}")
+    if(NOT resolved MATCHES "${PacePathCharacters}")
         list(APPEND violations
             "  packaging/${unit}\n      sets WorkingDirectory=${value}, which is not an absolute path spelled in the characters this check can judge")
         continue()
@@ -418,32 +418,32 @@ endforeach()
 
 set(stateViolations "")
 set(nodeStateName "")
-if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${FastCachedNodeDefaultsHeader}")
+if(NOT EXISTS "${PACE_SOURCE_DIR}/${PaceNodeDefaultsHeader}")
     list(APPEND stateViolations
-        "  ${FastCachedNodeDefaultsHeader}\n      does not exist, so the node's own name for its state directory was never read")
+        "  ${PaceNodeDefaultsHeader}\n      does not exist, so the node's own name for its state directory was never read")
 else()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${FastCachedNodeDefaultsHeader}" defaultsText)
-    string(REGEX MATCH "${FastCachedNodeStateNamePattern}" found "${defaultsText}")
+    file(READ "${PACE_SOURCE_DIR}/${PaceNodeDefaultsHeader}" defaultsText)
+    string(REGEX MATCH "${PaceNodeStateNamePattern}" found "${defaultsText}")
     if(found STREQUAL "")
         list(APPEND stateViolations
-            "  ${FastCachedNodeDefaultsHeader}\n      spells no NodeStateDirectoryName this check can read, so no unit could be judged against it")
+            "  ${PaceNodeDefaultsHeader}\n      spells no NodeStateDirectoryName this check can read, so no unit could be judged against it")
     else()
         set(nodeStateName "${CMAKE_MATCH_1}")
     endif()
 endif()
 
 if(NOT nodeStateName STREQUAL "")
-    foreach(row IN LISTS FastCachedUnitNodeStateDirectories)
+    foreach(row IN LISTS PaceUnitNodeStateDirectories)
         string(REPLACE "|" ";" fields "${row}")
         list(GET fields 0 unit)
-        set(path "${FASTCACHED_SOURCE_DIR}/packaging/${unit}")
+        set(path "${PACE_SOURCE_DIR}/packaging/${unit}")
         if(NOT EXISTS "${path}")
             list(APPEND stateViolations
                 "  packaging/${unit}\n      is named by the state-directory table and does not exist, so nothing was scanned")
             continue()
         endif()
         file(READ "${path}" content)
-        fastcached_unit_list_in_force("${content}" "StateDirectory" inForce assignedAny)
+        pace_unit_list_in_force("${content}" "StateDirectory" inForce assignedAny)
 
         if(NOT nodeStateName IN_LIST inForce)
             if(NOT assignedAny)
@@ -461,7 +461,7 @@ endif()
 if(NOT stateViolations STREQUAL "")
     list(JOIN stateViolations "\n" stateReport)
     set(stateRulebook "")
-    foreach(row IN LISTS FastCachedUnitNodeStateDirectories)
+    foreach(row IN LISTS PaceUnitNodeStateDirectories)
         string(REPLACE "|" ";" fields "${row}")
         list(GET fields 0 unit)
         list(GET fields 1 reason)
@@ -484,17 +484,17 @@ endif()
 
 set(cacheViolations "")
 set(createdCaches "")
-foreach(row IN LISTS FastCachedUnitNodeCacheDirectories)
+foreach(row IN LISTS PaceUnitNodeCacheDirectories)
     string(REPLACE "|" ";" fields "${row}")
     list(GET fields 0 unit)
-    set(path "${FASTCACHED_SOURCE_DIR}/packaging/${unit}")
+    set(path "${PACE_SOURCE_DIR}/packaging/${unit}")
     if(NOT EXISTS "${path}")
         list(APPEND cacheViolations
             "  packaging/${unit}\n      is named by the cache-directory table and does not exist, so nothing was scanned")
         continue()
     endif()
     file(READ "${path}" content)
-    fastcached_unit_list_in_force("${content}" "CacheDirectory" inForce assignedAny)
+    pace_unit_list_in_force("${content}" "CacheDirectory" inForce assignedAny)
     if(inForce STREQUAL "")
         if(assignedAny)
             list(APPEND cacheViolations
@@ -505,7 +505,7 @@ foreach(row IN LISTS FastCachedUnitNodeCacheDirectories)
         endif()
     endif()
     foreach(name IN LISTS inForce)
-        list(APPEND createdCaches "${FastCachedCacheDirectoryRoot}/${name}")
+        list(APPEND createdCaches "${PaceCacheDirectoryRoot}/${name}")
     endforeach()
 endforeach()
 list(JOIN createdCaches ", " createdCachesText)
@@ -513,9 +513,9 @@ if(createdCachesText STREQUAL "")
     set(createdCachesText "none")
 endif()
 
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
-    PATHSPECS ${FastCachedCacheDirCitationSources}
-    GLOBS ${FastCachedCacheDirCitationSources}
+pace_tracked_files("${PACE_SOURCE_DIR}"
+    PATHSPECS ${PaceCacheDirCitationSources}
+    GLOBS ${PaceCacheDirCitationSources}
     FILES_OUT citationSources
     MODE_OUT citationMode
     CONTAINING "cache-dir" "cache_dir"
@@ -524,16 +524,16 @@ fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
 set(citationCount 0)
 set(referenceCitations 0)
 foreach(source IN LISTS citingSources)
-    file(READ "${FASTCACHED_SOURCE_DIR}/${source}" text)
+    file(READ "${PACE_SOURCE_DIR}/${source}" text)
     # MATCHALL returns a LIST, so a ';' inside a match would split it -- the reason
-    # fastcached_unit_directive substitutes it out, and the path rule refuses the stand-in.
+    # pace_unit_directive substitutes it out, and the path rule refuses the stand-in.
     string(REPLACE ";" "<semicolon>" text "${text}")
-    string(REGEX MATCHALL "${FastCachedCacheDirCitationPattern}" citations "${text}")
+    string(REGEX MATCHALL "${PaceCacheDirCitationPattern}" citations "${text}")
     foreach(citation IN LISTS citations)
-        string(REGEX MATCH "${FastCachedCacheDirCitationPattern}" ignored "${citation}")
+        string(REGEX MATCH "${PaceCacheDirCitationPattern}" ignored "${citation}")
         string(REGEX REPLACE "[.]+$" "" cited "${CMAKE_MATCH_2}")
         math(EXPR citationCount "${citationCount} + 1")
-        if("${source}" STREQUAL "${FastCachedCacheDirReference}")
+        if("${source}" STREQUAL "${PaceCacheDirReference}")
             math(EXPR referenceCitations "${referenceCitations} + 1")
         endif()
         # The directory itself or anything under it: a store path inside it is just as writable.
@@ -552,18 +552,18 @@ foreach(source IN LISTS citingSources)
     endforeach()
 endforeach()
 
-if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${FastCachedCacheDirReference}")
+if(NOT EXISTS "${PACE_SOURCE_DIR}/${PaceCacheDirReference}")
     list(APPEND cacheViolations
-        "  ${FastCachedCacheDirReference}\n      does not exist, so the file an operator edits was never read")
+        "  ${PaceCacheDirReference}\n      does not exist, so the file an operator edits was never read")
 elseif(referenceCitations EQUAL 0)
     list(APPEND cacheViolations
-        "  ${FastCachedCacheDirReference}\n      cites no cache_dir under /var/, so the file an operator edits never says where the packaged service keeps a disk tier -- and a scan judging nothing there would read as every citation agreeing")
+        "  ${PaceCacheDirReference}\n      cites no cache_dir under /var/, so the file an operator edits never says where the packaged service keeps a disk tier -- and a scan judging nothing there would read as every citation agreeing")
 endif()
 
 if(NOT cacheViolations STREQUAL "")
     list(JOIN cacheViolations "\n" cacheReport)
     set(cacheRulebook "")
-    foreach(row IN LISTS FastCachedUnitNodeCacheDirectories)
+    foreach(row IN LISTS PaceUnitNodeCacheDirectories)
         string(REPLACE "|" ";" fields "${row}")
         list(GET fields 0 unit)
         list(GET fields 1 reason)
@@ -578,7 +578,7 @@ if(NOT cacheViolations STREQUAL "")
         "node refuses to start beside an entry there it has no row for -- so a cited path the unit "
         "does not create is a store the service cannot open, or a node that will not start.\n\n"
         "${cacheRulebook}"
-        "Cited paths were read from: ${FastCachedCacheDirCitationSources} (${citationMode}).\n"
+        "Cited paths were read from: ${PaceCacheDirCitationSources} (${citationMode}).\n"
         "The table lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
@@ -587,8 +587,8 @@ if(NOT violations STREQUAL "")
     list(JOIN violations "\n" report)
 
     set(rulebook "")
-    foreach(row IN LISTS FastCachedUnitWorkingDirectories)
-        fastcached_split_unit_row("${row}" unit compiles reason)
+    foreach(row IN LISTS PaceUnitWorkingDirectories)
+        pace_split_unit_row("${row}" unit compiles reason)
         string(APPEND rulebook "  packaging/${unit}\n      spawns a compiler: ${compiles}\n      ${reason}\n")
     endforeach()
 
@@ -611,9 +611,9 @@ endif()
 if(NOT stateViolations STREQUAL "" OR NOT cacheViolations STREQUAL "")
     return()
 endif()
-list(LENGTH FastCachedUnitWorkingDirectories unitCount)
-list(LENGTH FastCachedUnitNodeStateDirectories stateUnitCount)
-list(LENGTH FastCachedUnitNodeCacheDirectories cacheUnitCount)
+list(LENGTH PaceUnitWorkingDirectories unitCount)
+list(LENGTH PaceUnitNodeStateDirectories stateUnitCount)
+list(LENGTH PaceUnitNodeCacheDirectories cacheUnitCount)
 list(LENGTH citationSources sourceCount)
 message(STATUS "unit working directories: ${unitCount} shipped unit(s) start where they should, "
                "${stateUnitCount} hand the node its state directory, ${cacheUnitCount} create the "

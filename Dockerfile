@@ -29,8 +29,8 @@ COPY . .
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_COMPILER=g++ \
-        -DFASTCACHED_BUILD_TESTS=OFF \
-        -DFASTCACHED_ENABLE_TLS=ON \
+        -DPACE_BUILD_TESTS=OFF \
+        -DPACE_ENABLE_TLS=ON \
         -DUSE_COMPILER_CACHE=OFF \
     && cmake --build build --target pace-kv
 

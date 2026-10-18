@@ -275,7 +275,7 @@ TEST_CASE("ClassifyAgainstRoots is case-insensitive on Windows paths")
 
 TEST_CASE("ClassifyAgainstRoots matches a root spelled with forward slashes")
 {
-    // CMake exports FASTCACHE_SOURCE_DIR in its own native form (`D:/Project`) while
+    // CMake exports PACE_SOURCE_DIR in its own native form (`D:/Project`) while
     // cl emits includes with backslashes. A separator-sensitive prefix test makes
     // every project header look external, which classifies the whole manifest as
     // toolchain content and produces an empty manifest — direct mode then never
@@ -1190,7 +1190,7 @@ TEST_CASE("CanonicalSourceToken's refusal carries the path and the reason (issue
     // The refusal a real build actually meets. RecordManifest asks here first and
     // returns before BuildManifest ever runs, so a source with no token used to cost
     // a translation unit direct mode permanently while printing nothing whatsoever
-    // -- not even under FASTCACHE_VERBOSE.
+    // -- not even under PACE_VERBOSE.
     Pace::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
 
     auto const outsideRoots = CanonicalSourceToken("/elsewhere/t.cpp", layout, "/w/build");

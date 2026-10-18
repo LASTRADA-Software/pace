@@ -17,8 +17,8 @@ cmake_minimum_required(VERSION 3.28)
 # ## The tree is staged FROM the check, never from a copy of it
 #
 # This file `include()`s `check-tsan-scope.cmake` with
-# `FastCachedTsanScopeDefinitionsOnly` set, which returns before the scan, and
-# then stages one file per row of the check's own `FastCachedTsanScope` and
+# `PaceTsanScopeDefinitionsOnly` set, which returns before the scan, and
+# then stages one file per row of the check's own `PaceTsanScope` and
 # copies the real `scripts/tsan-gate.sh` and the real root `CMakeLists.txt` in
 # beside them. So a row added to the check is a row this file stages, and the
 # cases run against the tags the gate actually spells.
@@ -47,33 +47,33 @@ cmake_minimum_required(VERSION 3.28)
 # (#747, on `check-net-boundary-selftest`). It is INCONCLUSIVE here and says so.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-tsan-scope-selftest.cmake
 #
 # Exit: the verdict is the OUTPUT, not the status -- read through
 # `FAIL_REGULAR_EXPRESSION`, because a `-P` script that merely WARNS exits 0.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(FastCachedScopeCheck "${FASTCACHED_SOURCE_DIR}/scripts/check-tsan-scope.cmake")
-if(NOT EXISTS "${FastCachedScopeCheck}")
-    message(FATAL_ERROR "the check under test is missing: ${FastCachedScopeCheck}")
+set(PaceScopeCheck "${PACE_SOURCE_DIR}/scripts/check-tsan-scope.cmake")
+if(NOT EXISTS "${PaceScopeCheck}")
+    message(FATAL_ERROR "the check under test is missing: ${PaceScopeCheck}")
 endif()
 
 # Definitions only: this returns before the scan, so nothing here has to restate
 # the scope table, the gate path or the tags parsed out of it.
-set(FastCachedTsanScopeDefinitionsOnly TRUE)
-include("${FastCachedScopeCheck}")
+set(PaceTsanScopeDefinitionsOnly TRUE)
+include("${PaceScopeCheck}")
 
-if(NOT FastCachedTsanScope OR NOT FastCachedTsanScopeTags)
+if(NOT PaceTsanScope OR NOT PaceTsanScopeTags)
     message(FATAL_ERROR
-        "check-tsan-scope-selftest: including ${FastCachedScopeCheck} yielded no "
+        "check-tsan-scope-selftest: including ${PaceScopeCheck} yielded no "
         "scope table or no tags.\n"
         "Every case below stages from those, so an empty one would run twenty "
         "cases against nothing and report them all green -- which is this "
@@ -84,11 +84,11 @@ endif()
 # so the path is checked before anything is deleted. Absolute and at least two segments
 # deep: a relative one would be resolved against whatever directory ctest ran
 # this in, and `/` or `/x` is nothing a scratch tree should ever be.
-if(NOT IS_ABSOLUTE "${FASTCACHED_SCRATCH_DIR}"
-   OR NOT FASTCACHED_SCRATCH_DIR MATCHES "[^/\\]+[/\\][^/\\]+")
+if(NOT IS_ABSOLUTE "${PACE_SCRATCH_DIR}"
+   OR NOT PACE_SCRATCH_DIR MATCHES "[^/\\]+[/\\][^/\\]+")
     message(FATAL_ERROR
-        "check-tsan-scope-selftest: FASTCACHED_SCRATCH_DIR "
-        "(${FASTCACHED_SCRATCH_DIR}) must be an absolute path at least two "
+        "check-tsan-scope-selftest: PACE_SCRATCH_DIR "
+        "(${PACE_SCRATCH_DIR}) must be an absolute path at least two "
         "segments deep; this file removes it recursively.")
 endif()
 
@@ -97,7 +97,7 @@ endif()
 # CLOSED and unconditionally with a confidently worded false cause. So every case
 # below states the direction it drives, and the first one is the accepting one.
 #
-# **The synthetic tree is staged from `FastCachedTsanScope` and the REAL gate,
+# **The synthetic tree is staged from `PaceTsanScope` and the REAL gate,
 # never from a copy of either.** It is a `src/` mirroring every row of that table
 # plus a copy of `scripts/tsan-gate.sh`, so the child invocation runs the shipped
 # scope table and the shipped tag expression against files this file wrote. A
@@ -111,7 +111,7 @@ endif()
 # measured in this repository at zero matches for a `FATAL_ERROR` phrase that
 # crosses the column, with a mutation harness once calling all three of its arms
 # green while the thing it drove was red.
-list(GET FastCachedTsanScopeTags 0 selftestTag)
+list(GET PaceTsanScopeTags 0 selftestTag)
 
 set(selftestRan 0)
 set(selftestFailed 0)
@@ -119,9 +119,9 @@ set(selftestFailed 0)
 # ## One tree, staged once, restored after every case
 #
 # Every case runs against ONE tree, in which every row of the real scope table
-# exists and is covered. A case changes it only through `FastCachedWrite`,
-# `FastCachedAppend` and `FastCachedRemove`, which record the path, and
-# `FastCachedSelftestCase` restores exactly the recorded paths once the verdict
+# exists and is covered. A case changes it only through `PaceWrite`,
+# `PaceAppend` and `PaceRemove`, which record the path, and
+# `PaceSelftestCase` restores exactly the recorded paths once the verdict
 # is in. A tree per case cost 23 stagings of 13 files, and on DrvFs under a
 # gate's load that alone took this test to 116 s of its 120 s (#1423).
 # Copying a staged original per case is no cheaper there: a `file(COPY)` cost two
@@ -136,20 +136,20 @@ set(selftestFailed 0)
 #
 # What a per-case tree bought was a directory to inspect after a failure, so a
 # FAILING case copies the tree to `failed-<case>` before restoring it.
-set(tree "${FASTCACHED_SCRATCH_DIR}/tree")
-set(FastCachedTouched "")
-set(FastCachedLastCase "staging")
+set(tree "${PACE_SCRATCH_DIR}/tree")
+set(PaceTouched "")
+set(PaceLastCase "staging")
 
 # The baseline, read once. The gate and the root CMakeLists are the REAL files'
 # bytes, so the baseline exercises the real declarations: the Catch2 watermark
 # (#312) reads the root CMakeLists, and a tree without one refuses before any
 # scope case is reached.
-file(READ "${FastCachedTsanGate}" FastCachedBaselineGate)
-file(READ "${FastCachedProjectCMakeLists}" FastCachedBaselineCMakeLists)
-set(FastCachedBaselineRow "TEST_CASE(\"baseline\", \"[${selftestTag}]\")\n{\n}\n")
+file(READ "${PaceTsanGate}" PaceBaselineGate)
+file(READ "${PaceProjectCMakeLists}" PaceBaselineCMakeLists)
+set(PaceBaselineRow "TEST_CASE(\"baseline\", \"[${selftestTag}]\")\n{\n}\n")
 
 # The path a row is staged at, relative to the tree.
-function(FastCachedStagedPath row out)
+function(PaceStagedPath row out)
     if(row MATCHES "_test\.cpp$")
         set("${out}" "${row}" PARENT_SCOPE)
     else()
@@ -159,20 +159,20 @@ endfunction()
 
 # What the baseline holds at @p relative: its text in `<out>` and whether it
 # exists at all in `<out>_present`. A path no row names is absent.
-function(FastCachedBaselineOf relative out)
+function(PaceBaselineOf relative out)
     set("${out}_present" TRUE PARENT_SCOPE)
     if(relative STREQUAL "scripts/tsan-gate.sh")
-        set("${out}" "${FastCachedBaselineGate}" PARENT_SCOPE)
+        set("${out}" "${PaceBaselineGate}" PARENT_SCOPE)
         return()
     endif()
     if(relative STREQUAL "CMakeLists.txt")
-        set("${out}" "${FastCachedBaselineCMakeLists}" PARENT_SCOPE)
+        set("${out}" "${PaceBaselineCMakeLists}" PARENT_SCOPE)
         return()
     endif()
-    foreach(row IN LISTS FastCachedTsanScope)
-        FastCachedStagedPath("${row}" staged)
+    foreach(row IN LISTS PaceTsanScope)
+        PaceStagedPath("${row}" staged)
         if(relative STREQUAL staged)
-            set("${out}" "${FastCachedBaselineRow}" PARENT_SCOPE)
+            set("${out}" "${PaceBaselineRow}" PARENT_SCOPE)
             return()
         endif()
     endforeach()
@@ -182,8 +182,8 @@ endfunction()
 
 # Put one path back as the baseline holds it; a path the baseline does not have
 # is removed, so a case that CREATED a file leaves nothing behind either.
-function(FastCachedRestorePath relative)
-    FastCachedBaselineOf("${relative}" baseline)
+function(PaceRestorePath relative)
+    PaceBaselineOf("${relative}" baseline)
     if(baseline_present)
         file(WRITE "${tree}/${relative}" "${baseline}")
     else()
@@ -193,11 +193,11 @@ endfunction()
 
 # Refuse to change a path that an earlier case left changed. Asked once per path
 # per case, before its first change.
-function(FastCachedRequireBaseline relative)
-    if(relative IN_LIST FastCachedTouched)
+function(PaceRequireBaseline relative)
+    if(relative IN_LIST PaceTouched)
         return()
     endif()
-    FastCachedBaselineOf("${relative}" baseline)
+    PaceBaselineOf("${relative}" baseline)
     set(held FALSE)
     if(EXISTS "${tree}/${relative}")
         file(READ "${tree}/${relative}" actual)
@@ -210,60 +210,60 @@ function(FastCachedRequireBaseline relative)
     if(NOT held)
         message(FATAL_ERROR
             "check-tsan-scope-selftest: ${relative} is no longer at its baseline, and "
-            "the last case to run was `${FastCachedLastCase}`. That case or an earlier "
-            "one changed it without FastCachedWrite, FastCachedAppend or FastCachedRemove, "
+            "the last case to run was `${PaceLastCase}`. That case or an earlier "
+            "one changed it without PaceWrite, PaceAppend or PaceRemove, "
             "so the restore never put it back and every case since was judged on a tree "
             "it did not set up. Every change to ${tree} goes through those three.")
     endif()
 endfunction()
 
-function(FastCachedStageTree)
-    file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
-    FastCachedRestorePath("scripts/tsan-gate.sh")
-    FastCachedRestorePath("CMakeLists.txt")
-    foreach(row IN LISTS FastCachedTsanScope)
-        FastCachedStagedPath("${row}" staged)
-        FastCachedRestorePath("${staged}")
+function(PaceStageTree)
+    file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
+    PaceRestorePath("scripts/tsan-gate.sh")
+    PaceRestorePath("CMakeLists.txt")
+    foreach(row IN LISTS PaceTsanScope)
+        PaceStagedPath("${row}" staged)
+        PaceRestorePath("${staged}")
     endforeach()
 endfunction()
 
 # The only ways a case changes the tree. Exactly two arguments, because text
 # holding a `;` must arrive as ONE argument: joining an ARGN would drop it.
-function(FastCachedWrite relative text)
+function(PaceWrite relative text)
     if(NOT ARGC EQUAL 2)
-        message(FATAL_ERROR "FastCachedWrite takes a path and ONE text argument (${ARGC} given)")
+        message(FATAL_ERROR "PaceWrite takes a path and ONE text argument (${ARGC} given)")
     endif()
-    FastCachedRequireBaseline("${relative}")
+    PaceRequireBaseline("${relative}")
     file(WRITE "${tree}/${relative}" "${text}")
-    list(APPEND FastCachedTouched "${relative}")
-    set(FastCachedTouched "${FastCachedTouched}" PARENT_SCOPE)
+    list(APPEND PaceTouched "${relative}")
+    set(PaceTouched "${PaceTouched}" PARENT_SCOPE)
 endfunction()
 
-function(FastCachedAppend relative text)
+function(PaceAppend relative text)
     if(NOT ARGC EQUAL 2)
-        message(FATAL_ERROR "FastCachedAppend takes a path and ONE text argument (${ARGC} given)")
+        message(FATAL_ERROR "PaceAppend takes a path and ONE text argument (${ARGC} given)")
     endif()
-    FastCachedRequireBaseline("${relative}")
+    PaceRequireBaseline("${relative}")
     file(APPEND "${tree}/${relative}" "${text}")
-    list(APPEND FastCachedTouched "${relative}")
-    set(FastCachedTouched "${FastCachedTouched}" PARENT_SCOPE)
+    list(APPEND PaceTouched "${relative}")
+    set(PaceTouched "${PaceTouched}" PARENT_SCOPE)
 endfunction()
 
-function(FastCachedRemove relative)
-    FastCachedRequireBaseline("${relative}")
+function(PaceRemove relative)
+    PaceRequireBaseline("${relative}")
     file(REMOVE "${tree}/${relative}")
-    list(APPEND FastCachedTouched "${relative}")
-    set(FastCachedTouched "${FastCachedTouched}" PARENT_SCOPE)
+    list(APPEND PaceTouched "${relative}")
+    set(PaceTouched "${PaceTouched}" PARENT_SCOPE)
 endfunction()
 
 # One case. `expect` is `pass` or `refuse`; `needle` is a phrase that must
 # appear in the flattened output either way -- so the accepting direction
 # asserts something POSITIVE was reported and not merely that nothing was.
 # Runs against the shared tree, then restores every path the case touched.
-function(FastCachedSelftestCase which expect needle)
+function(PaceSelftestCase which expect needle)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}"
-                -P "${FastCachedScopeCheck}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}"
+                -P "${PaceScopeCheck}"
         OUTPUT_VARIABLE childOut
         ERROR_VARIABLE childErr
         RESULT_VARIABLE childStatus
@@ -310,20 +310,20 @@ function(FastCachedSelftestCase which expect needle)
     if(problem STREQUAL "")
         message("  ok   ${which}")
     else()
-        file(COPY "${tree}/" DESTINATION "${FASTCACHED_SCRATCH_DIR}/failed-${which}")
+        file(COPY "${tree}/" DESTINATION "${PACE_SCRATCH_DIR}/failed-${which}")
         message("  FAIL ${which}: ${problem} "
-                "(its tree is kept in ${FASTCACHED_SCRATCH_DIR}/failed-${which})")
+                "(its tree is kept in ${PACE_SCRATCH_DIR}/failed-${which})")
         message("       ${flat}")
         math(EXPR selftestFailed "${selftestFailed} + 1")
         set(selftestFailed "${selftestFailed}" PARENT_SCOPE)
     endif()
 
-    list(REMOVE_DUPLICATES FastCachedTouched)
-    foreach(relative IN LISTS FastCachedTouched)
-        FastCachedRestorePath("${relative}")
+    list(REMOVE_DUPLICATES PaceTouched)
+    foreach(relative IN LISTS PaceTouched)
+        PaceRestorePath("${relative}")
     endforeach()
-    set(FastCachedTouched "" PARENT_SCOPE)
-    set(FastCachedLastCase "${which}" PARENT_SCOPE)
+    set(PaceTouched "" PARENT_SCOPE)
+    set(PaceLastCase "${which}" PARENT_SCOPE)
 endfunction()
 
 # The file every mutating case reaches for: a covered file inside a scoped
@@ -335,21 +335,21 @@ set(victim "src/Pace/Consensus/Baseline_test.cpp")
 message("== check-tsan-scope-selftest")
 
 # -- the accepting direction, first, and asserting a positive report -------
-FastCachedStageTree()
-FastCachedSelftestCase("baseline-tree-is-accepted" pass "case.s. in")
+PaceStageTree()
+PaceSelftestCase("baseline-tree-is-accepted" pass "case.s. in")
 
 string(CONCAT text
     "TEST_CASE(\"a name long enough to push the tag string onto its own line\",\n"
     "          \"[${selftestTag}]\")\n{\n}\n")
-FastCachedWrite("${victim}" "${text}")
-FastCachedSelftestCase("tag-string-on-the-next-line" pass "case.s. in")
+PaceWrite("${victim}" "${text}")
+PaceSelftestCase("tag-string-on-the-next-line" pass "case.s. in")
 
 string(CONCAT text
     "TEST_CASE(\"first half of a name \"\n"
     "          \"second half of a name\",\n"
     "          \"[${selftestTag}]\")\n{\n}\n")
-FastCachedWrite("${victim}" "${text}")
-FastCachedSelftestCase("a-name-spelled-as-two-adjacent-literals" pass "case.s. in")
+PaceWrite("${victim}" "${text}")
+PaceSelftestCase("a-name-spelled-as-two-adjacent-literals" pass "case.s. in")
 
 # An UNMATCHED parenthesis, not a matched pair. A reader that counted
 # parentheses without removing the string literals first would still close a
@@ -360,51 +360,51 @@ FastCachedSelftestCase("a-name-spelled-as-two-adjacent-literals" pass "case.s. i
 string(CONCAT text
     "TEST_CASE(\"a name with an unmatched ( in it\", \"[${selftestTag}]\")\n{\n}\n"
     "TEST_CASE(\"the case behind it\", \"[somethingelse]\")\n{\n}\n")
-FastCachedWrite("${victim}" "${text}")
-FastCachedSelftestCase("an-unmatched-parenthesis-inside-a-case-name" refuse "the case behind it")
+PaceWrite("${victim}" "${text}")
+PaceSelftestCase("an-unmatched-parenthesis-inside-a-case-name" refuse "the case behind it")
 
 string(CONCAT text
     "// a comment carrying an unbalanced ] bracket\n"
     "TEST_CASE(\"ordinary\", \"[${selftestTag}]\")\n{\n}\n")
-FastCachedWrite("${victim}" "${text}")
-FastCachedSelftestCase("an-unbalanced-bracket-alone-changes-nothing" pass "case.s. in")
+PaceWrite("${victim}" "${text}")
+PaceSelftestCase("an-unbalanced-bracket-alone-changes-nothing" pass "case.s. in")
 
 # -- the refusing direction ------------------------------------------------
-FastCachedAppend("${victim}" "TEST_CASE(\"added later\", \"[somethingelse]\")\n{\n}\n")
-FastCachedSelftestCase("an-unselected-case-in-a-covered-file" refuse "added later")
+PaceAppend("${victim}" "TEST_CASE(\"added later\", \"[somethingelse]\")\n{\n}\n")
+PaceSelftestCase("an-unselected-case-in-a-covered-file" refuse "added later")
 
 string(CONCAT text
     "// a comment carrying an unbalanced ] bracket\n"
     "TEST_CASE(\"added later\", \"[somethingelse]\")\n{\n}\n")
-FastCachedAppend("${victim}" "${text}")
-FastCachedSelftestCase("a-violation-behind-an-unbalanced-bracket" refuse "added later")
+PaceAppend("${victim}" "${text}")
+PaceSelftestCase("a-violation-behind-an-unbalanced-bracket" refuse "added later")
 
 # The REPORT is text out of a source file, so it has the hazard this file is
 # about. Two case names in the current scope contain a `;`, which splits a
 # `list(APPEND)` element in two; a `[` would merge two findings into one and
 # a refusal would then name fewer cases than it found. Both characters, in
 # one name, asserted to come back WHOLE.
-FastCachedAppend("${victim}"
+PaceAppend("${victim}"
     "TEST_CASE(\"a name with a ; and an unbalanced [ in it\", \"[somethingelse]\")\n{\n}\n")
-FastCachedSelftestCase("a-finding-whose-name-holds-a-semicolon-and-a-bracket"
+PaceSelftestCase("a-finding-whose-name-holds-a-semicolon-and-a-bracket"
     refuse "a name with a ; and an unbalanced . in it")
 
-FastCachedAppend("${victim}" "TEST_CASE(\"untagged\")\n{\n}\n")
-FastCachedSelftestCase("a-case-with-no-tag-string" refuse "no tag string at all")
+PaceAppend("${victim}" "TEST_CASE(\"untagged\")\n{\n}\n")
+PaceSelftestCase("a-case-with-no-tag-string" refuse "no tag string at all")
 
-FastCachedAppend("${victim}"
+PaceAppend("${victim}"
     "TEST_CASE(\"prose about [${selftestTag}] behaviour\", \"[somethingelse]\")\n{\n}\n")
-FastCachedSelftestCase("a-name-cannot-talk-a-case-into-the-scope" refuse "prose about")
+PaceSelftestCase("a-name-cannot-talk-a-case-into-the-scope" refuse "prose about")
 
-FastCachedAppend("${victim}" "SCENARIO(\"a scenario\", \"[somethingelse]\")\n{\n}\n")
-FastCachedSelftestCase("SCENARIO-is-read-too" refuse "a scenario")
+PaceAppend("${victim}" "SCENARIO(\"a scenario\", \"[somethingelse]\")\n{\n}\n")
+PaceSelftestCase("SCENARIO-is-read-too" refuse "a scenario")
 
-FastCachedAppend("${victim}"
+PaceAppend("${victim}"
     "TEST_CASE_METHOD(Fixture, \"a fixtured case\", \"[somethingelse]\")\n{\n}\n")
-FastCachedSelftestCase("TEST_CASE_METHOD-is-read-too" refuse "a fixtured case")
+PaceSelftestCase("TEST_CASE_METHOD-is-read-too" refuse "a fixtured case")
 
-FastCachedAppend("${victim}" "TEST_CASE(\"never closed\",\n")
-FastCachedSelftestCase("a-header-that-never-closes" refuse "still open at end of file")
+PaceAppend("${victim}" "TEST_CASE(\"never closed\",\n")
+PaceSelftestCase("a-header-that-never-closes" refuse "still open at end of file")
 
 # The same fault far enough from the end of the file to hit the runaway bound
 # instead of the end-of-file arm. Two arms, because they are reported by two
@@ -414,20 +414,20 @@ set(text "TEST_CASE(\"never closed\",\n")
 foreach(filler RANGE 1 70)
     string(APPEND text "// filler line ${filler}\n")
 endforeach()
-FastCachedAppend("${victim}" "${text}")
-FastCachedSelftestCase("a-header-that-outruns-the-line-bound" refuse "has no closing")
+PaceAppend("${victim}" "${text}")
+PaceSelftestCase("a-header-that-outruns-the-line-bound" refuse "has no closing")
 
-foreach(row IN LISTS FastCachedTsanScope)
-    FastCachedStagedPath("${row}" staged)
-    FastCachedWrite("${staged}" "// no cases here\n")
+foreach(row IN LISTS PaceTsanScope)
+    PaceStagedPath("${row}" staged)
+    PaceWrite("${staged}" "// no cases here\n")
 endforeach()
-FastCachedSelftestCase("a-scope-that-holds-no-case-at-all" refuse "found no Catch2 case")
+PaceSelftestCase("a-scope-that-holds-no-case-at-all" refuse "found no Catch2 case")
 
-FastCachedRemove("${victim}")
-FastCachedSelftestCase("a-directory-row-with-no-test-files" refuse "contains no ..test.cpp files")
+PaceRemove("${victim}")
+PaceSelftestCase("a-directory-row-with-no-test-files" refuse "contains no ..test.cpp files")
 
-FastCachedRemove("src/Pace/Core/BoundedWait_test.cpp")
-FastCachedSelftestCase("a-file-row-that-does-not-exist" refuse "names neither a directory nor a file")
+PaceRemove("src/Pace/Core/BoundedWait_test.cpp")
+PaceSelftestCase("a-file-row-that-does-not-exist" refuse "names neither a directory nor a file")
 
 # -- the Catch2 watermark (#312) ------------------------------------------
 # The accepting arm is the baseline case above, which stages the real
@@ -439,30 +439,30 @@ FastCachedSelftestCase("a-file-row-that-does-not-exist" refuse "names neither a 
 # which stopped being a bump the day the watermark was raised to 3.16.1: the case then staged a
 # DOWNGRADE, the check rightly said nothing, and the arm that exists to fire never could again.
 file(READ "${tree}/CMakeLists.txt" declared)
-if(NOT FastCachedCatch2TagLabelWatermark MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+if(NOT PaceCatch2TagLabelWatermark MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
     message(FATAL_ERROR
-        "check-tsan-scope-selftest: the watermark '${FastCachedCatch2TagLabelWatermark}' is not x.y.z, "
+        "check-tsan-scope-selftest: the watermark '${PaceCatch2TagLabelWatermark}' is not x.y.z, "
         "so no version past it can be derived to stage a bump with")
 endif()
 math(EXPR pastPatch "${CMAKE_MATCH_3} + 1")
 set(pastWatermark "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${pastPatch}")
-string(REPLACE "VERSION ${FastCachedCatch2TagLabelWatermark}" "VERSION ${pastWatermark}" bumped "${declared}")
+string(REPLACE "VERSION ${PaceCatch2TagLabelWatermark}" "VERSION ${pastWatermark}" bumped "${declared}")
 if(bumped STREQUAL declared)
     message(FATAL_ERROR
         "check-tsan-scope-selftest: the staged CMakeLists.txt does not declare Catch2 at the watermark "
-        "${FastCachedCatch2TagLabelWatermark}, so replacing it staged nothing and the bump case would "
+        "${PaceCatch2TagLabelWatermark}, so replacing it staged nothing and the bump case would "
         "judge the unmodified tree")
 endif()
-FastCachedWrite("CMakeLists.txt" "${bumped}")
-FastCachedSelftestCase("a-catch2-bump-past-the-watermark" refuse "past the")
+PaceWrite("CMakeLists.txt" "${bumped}")
+PaceSelftestCase("a-catch2-bump-past-the-watermark" refuse "past the")
 
 file(READ "${tree}/CMakeLists.txt" undeclared)
 string(REPLACE "NAME Catch2" "NAME SomethingElse" undeclared "${undeclared}")
-FastCachedWrite("CMakeLists.txt" "${undeclared}")
-FastCachedSelftestCase("a-catch2-declaration-this-cannot-read" refuse "could not read a")
+PaceWrite("CMakeLists.txt" "${undeclared}")
+PaceSelftestCase("a-catch2-declaration-this-cannot-read" refuse "could not read a")
 
-FastCachedRemove("CMakeLists.txt")
-FastCachedSelftestCase("a-tree-with-no-root-CMakeLists" refuse "does not exist")
+PaceRemove("CMakeLists.txt")
+PaceSelftestCase("a-tree-with-no-root-CMakeLists" refuse "does not exist")
 
 # -- the links column (#134) ------------------------------------------------
 # Staged by editing the COPIED gate's first `|first-party"` declaration, so the rows
@@ -490,8 +490,8 @@ foreach(linksCase IN ITEMS "no-declaration" "unknown-declaration" "none-without-
         set(linksGate "${linksBefore}|none: \"${linksAfter}")
         set(linksNeedle "declares .none: . about what")
     endif()
-    FastCachedWrite("scripts/tsan-gate.sh" "${linksGate}")
-    FastCachedSelftestCase("a-row-with-${linksCase}" refuse "${linksNeedle}")
+    PaceWrite("scripts/tsan-gate.sh" "${linksGate}")
+    PaceSelftestCase("a-row-with-${linksCase}" refuse "${linksNeedle}")
 endforeach()
 
 # -- the restore itself ------------------------------------------------------
@@ -503,12 +503,12 @@ endforeach()
 # at ANY case ends the run red, and the verdicts in the middle are never taken on
 # trust. Then the restored tree must still be accepted.
 foreach(relative IN ITEMS "scripts/tsan-gate.sh" "CMakeLists.txt")
-    FastCachedRequireBaseline("${relative}")
+    PaceRequireBaseline("${relative}")
     list(APPEND expectedPaths "${relative}")
 endforeach()
-foreach(row IN LISTS FastCachedTsanScope)
-    FastCachedStagedPath("${row}" staged)
-    FastCachedRequireBaseline("${staged}")
+foreach(row IN LISTS PaceTsanScope)
+    PaceStagedPath("${row}" staged)
+    PaceRequireBaseline("${staged}")
     list(APPEND expectedPaths "${staged}")
 endforeach()
 file(GLOB_RECURSE presentPaths LIST_DIRECTORIES false RELATIVE "${tree}" "${tree}/*")
@@ -518,10 +518,10 @@ if(NOT presentPaths STREQUAL expectedPaths)
     message(FATAL_ERROR
         "check-tsan-scope-selftest: after the last case the tree holds [${presentPaths}], "
         "and the baseline stages [${expectedPaths}]. A case created or removed a file "
-        "without FastCachedWrite, FastCachedAppend or FastCachedRemove, so the cases "
+        "without PaceWrite, PaceAppend or PaceRemove, so the cases "
         "after it were judged on a tree they did not set up.")
 endif()
-FastCachedSelftestCase("the-shared-tree-accepts-again-after-every-case" pass "case.s. in")
+PaceSelftestCase("the-shared-tree-accepts-again-after-every-case" pass "case.s. in")
 
 # The count is printed because a self-test that STOPPED early must not look
 # like one that judged everything: `set -e`'s CMake equivalent is a
@@ -533,7 +533,7 @@ if(NOT selftestFailed EQUAL 0)
         "check-tsan-scope-selftest: ${selftestFailed} of ${selftestRan} "
         "case(s) failed.\n"
         "The cases are in ${CMAKE_CURRENT_LIST_FILE}; the rule they drive is in "
-        "${FastCachedScopeCheck}. Read the FAIL line before either: it says "
+        "${PaceScopeCheck}. Read the FAIL line before either: it says "
         "whether the check took the wrong DIRECTION or merely failed to REPORT "
         "the phrase the case asked for, and those are fixed in different files.")
 endif()

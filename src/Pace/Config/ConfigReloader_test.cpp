@@ -445,7 +445,7 @@ TEST_CASE("ConfigReloader: a reload keeps a flag typed at its own default", "[co
 TEST_CASE("ConfigReloader: a reload re-applies the environment fallback", "[config][reload]")
 {
     // The other half of #622, and it failed the same way for the same reason: a
-    // container that agrees on a port through `FASTCACHED_METRICS_PORT` and writes
+    // container that agrees on a port through `PACE_METRICS_PORT` and writes
     // no `metrics_port:` had every reload refused, because the candidate was built
     // from a source the environment never reached.
     auto const path = WriteYaml("reload-env", "log_level: info\n");

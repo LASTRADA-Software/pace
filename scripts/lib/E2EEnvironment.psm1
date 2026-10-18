@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The environment a PowerShell e2e fixture starts from -- the PowerShell half of
-# `e2e_scrub_fastcache_environment` in `e2e-common.sh`.
+# `e2e_scrub_pace_environment` in `e2e-common.sh`.
 #
-# The launcher, pace-kv and the node read their whole configuration from FASTCACHE_*
+# The launcher, pace-kv and the node read their whole configuration from PACE_*
 # variables, so one this process inherited decides what a fixture measures: an operator's
-# FASTCACHE_SCHEDULER dispatches each "local" compile to their fleet, whose objects name a
-# worker's scratch directory instead of the fixture's checkout, and FASTCACHE_VERIFY or
-# FASTCACHE_NO_DIRECT changes the outcome a case asserts. A fixture sets what it means and
+# PACE_SCHEDULER dispatches each "local" compile to their fleet, whose objects name a
+# worker's scratch directory instead of the fixture's checkout, and PACE_VERIFY or
+# PACE_NO_DIRECT changes the outcome a case asserts. A fixture sets what it means and
 # inherits nothing.
 #
 # IMPORTING this module clears them, so a fixture gets that by construction rather than by
 # remembering a loop: two fixtures carried their own copy, one of them wedged into the
 # middle of an unrelated comment, and the rest carried none. `E2EPorts.psm1` imports it, so
 # every fixture that draws a port is covered too. Import it BEFORE the fixture's own first
-# `$env:FASTCACHE_*` assignment -- which is what "the fixture sets what it means" requires.
+# `$env:PACE_*` assignment -- which is what "the fixture sets what it means" requires.
 
 # A variable the HARNESS reads and no server or launcher does, which an operator sets on
 # purpose and which a fixture must therefore see. None on this side today; the POSIX list
@@ -24,16 +24,16 @@ $script:InheritedKnobs = @()
 
 <#
 .SYNOPSIS
-    Remove every FASTCACHE_* variable from this process's environment, except the
+    Remove every PACE_* variable from this process's environment, except the
     harness knobs in `$InheritedKnobs`.
 #>
-function Clear-FastcacheEnvironment {
+function Clear-PaceEnvironment {
     Get-ChildItem Env: |
-        Where-Object { $_.Name -like 'FASTCACHE_*' -and $script:InheritedKnobs -notcontains $_.Name } |
+        Where-Object { $_.Name -like 'PACE_*' -and $script:InheritedKnobs -notcontains $_.Name } |
         ForEach-Object { Remove-Item -Path "Env:\$($_.Name)" -ErrorAction SilentlyContinue }
 }
 
-Clear-FastcacheEnvironment
+Clear-PaceEnvironment
 
 # ---------------------------------------------------------------------------
 # A fixture's launcher records into a state directory of the run's own
@@ -786,7 +786,7 @@ $pick
 switch (`$args[0]) {
     '--show-stats' { if ((Test-Path -LiteralPath `$log) -and (Get-Item -LiteralPath `$log).Length -gt 0) { "pace-cc statistics (`$log)" } else { "pace-cc: no statistics recorded yet (`$log)." } }
     '-z' { Remove-Item -LiteralPath `$log -ErrorAction SilentlyContinue }
-    default { if (-not `$env:FASTCACHE_NO_STATS) { New-Item -ItemType Directory -Force `$state | Out-Null; Add-Content -LiteralPath `$log ('$logLine'.Replace('@SOURCE@', `$args[-1])) } }
+    default { if (-not `$env:PACE_NO_STATS) { New-Item -ItemType Directory -Force `$state | Out-Null; Add-Content -LiteralPath `$log ('$logLine'.Replace('@SOURCE@', `$args[-1])) } }
 }
 "@
     $fixture = Join-Path $work 'fixture.ps1'
@@ -910,7 +910,7 @@ Use-E2ELauncherState $h { & $Launcher -z }'
     return $failures
 }
 
-Export-ModuleMember -Function Clear-FastcacheEnvironment, Get-E2ELauncherStatePlatform, Get-E2ELauncherStateRows,
+Export-ModuleMember -Function Clear-PaceEnvironment, Get-E2ELauncherStatePlatform, Get-E2ELauncherStateRows,
     Get-E2EUnwrappedLauncherUse, Test-E2EUnwrappedLauncherScan, Assert-E2ELauncherFixture, Enter-E2ELauncherState,
     Use-E2ELauncherState, Get-E2ELauncherStateRecordCount, Get-E2ELauncherCallerSnapshot, Get-E2ELauncherCallerDamage,
     Exit-E2ELauncherState, Test-E2ELauncherStateSeam, Get-E2ELauncherLogLayout, Get-E2ELauncherLogField,

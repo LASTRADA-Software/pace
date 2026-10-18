@@ -318,7 +318,7 @@ def main() -> int:
     if not arguments.binary.exists():
         print(
             f"SKIP: {arguments.binary} does not exist, so the banner was not checked. Build the "
-            f"`pace-bench` target (FASTCACHED_BUILD_BENCHMARKS=ON) and run this again.",
+            f"`pace-bench` target (PACE_BUILD_BENCHMARKS=ON) and run this again.",
             file=sys.stderr,
         )
         return 77

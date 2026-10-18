@@ -38,7 +38,7 @@ namespace Pace
 /// forwards to the inner storage and, when the result is a persistence-class
 /// failure, logs one `Warn` line (visible at the default level) and increments
 /// a counter surfaced through `Snapshot().writeErrors` — which the Prometheus
-/// exporter renders as `fastcached_write_errors_total`.
+/// exporter renders as `pace_write_errors_total`.
 ///
 /// Benign conditional-write outcomes (`KeyExists`/`KeyNotFound`/`CasMismatch`)
 /// and client-side rejections (`ValueTooLarge`) are **not** counted or logged:
@@ -65,7 +65,7 @@ class WriteErrorReportingStorage final: public IStorage
     /// local that outlives the decorator. A tier composed and handed back as a
     /// single `unique_ptr` -- the compile node's -- has nowhere to keep the inner
     /// alive, and that is why the node had no write-error reporting at all
-    /// (#574): it exported `fastcached_write_errors_total` and could never move
+    /// (#574): it exported `pace_write_errors_total` and could never move
     /// it, so a node whose persistent tier was failing every write looked
     /// identical, on every surface an operator watches, to a healthy one.
     ///

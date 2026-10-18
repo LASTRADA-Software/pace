@@ -20,7 +20,7 @@ A bulk string with three sections and a fixed, minimal field set:
 
 ```text
 # Server
-fastcached_version:<version>
+pace_version:<version>
 redis_version:6.0.0-fastcached
 # Memory
 used_memory:<bytes>

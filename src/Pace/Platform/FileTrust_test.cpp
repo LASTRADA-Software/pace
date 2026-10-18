@@ -619,7 +619,7 @@ TEST_CASE("FileTrust: an owner's platform id is what an account resolves to", "[
     // like. And one no service holds resolves to NOTHING, so trusting it trusts no file.
     CHECK(Pace::AccountIdOf("NT SERVICE\\TrustedInstaller")
           == std::optional<std::string> { "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464" });
-    CHECK_FALSE(Pace::AccountIdOf("NT SERVICE\\FastCacheNoServiceIsNamedThis").has_value());
+    CHECK_FALSE(Pace::AccountIdOf("NT SERVICE\\PaceNoServiceIsNamedThis").has_value());
 #else
     // POSIX names no account for this: no service runs as a per-service virtual account there.
     CHECK(owner.id == owner.name);
@@ -954,11 +954,11 @@ void TrySetOwner(std::filesystem::path const& path, wchar_t const* sid)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 }
 
-/// @return true when this run states that it is elevated (`FASTCACHED_EXPECT_ELEVATED=1`), so a
+/// @return true when this run states that it is elevated (`PACE_EXPECT_ELEVATED=1`), so a
 ///         case that needs elevation and cannot have it must FAIL rather than skip.
 [[nodiscard]] bool ExpectElevated()
 {
-    return Pace::ReadEnvironmentVariable("FASTCACHED_EXPECT_ELEVATED") == std::optional<std::string> { "1" };
+    return Pace::ReadEnvironmentVariable("PACE_EXPECT_ELEVATED") == std::optional<std::string> { "1" };
 }
 
 /// Enable `SeRestorePrivilege` so an elevated run can set an arbitrary owner.
@@ -985,12 +985,12 @@ void TrySetOwner(std::filesystem::path const& path, wchar_t const* sid)
 }
 
     /// Skip the calling case unless this process can set an object's owner to Administrators --
-    /// unless `FASTCACHED_EXPECT_ELEVATED=1`, when it FAILS instead.
+    /// unless `PACE_EXPECT_ELEVATED=1`, when it FAILS instead.
     ///
     /// `SecureDirectoryForService` sets the state directory's owner, which is a right a standard
     /// account -- even an unelevated administrator, whose Administrators SID is deny-only -- does
     /// not hold. A developer box is not elevated, so the success path and the post-apply checks
-    /// skip here and run in the `windows` job's `ctest` step, which sets `FASTCACHED_EXPECT_ELEVATED=1`.
+    /// skip here and run in the `windows` job's `ctest` step, which sets `PACE_EXPECT_ELEVATED=1`.
     /// When that is set and the process is NOT elevated the case FAILS -- fail closed, so a runner
     /// that is not elevated turns the first CI run red rather than the guard retiring silently. The
     /// read-only pre-checks (reparse, foreign owner, hard link) need no such right and run everywhere.
@@ -1000,7 +1000,7 @@ void TrySetOwner(std::filesystem::path const& path, wchar_t const* sid)
             if (!Pace::IsPrivilegedProcess())                                                                      \
             {                                                                                                           \
                 if (ExpectElevated())                                                                                   \
-                    FAIL("FASTCACHED_EXPECT_ELEVATED=1 but this process is not elevated, so the ACL cases that set an " \
+                    FAIL("PACE_EXPECT_ELEVATED=1 but this process is not elevated, so the ACL cases that set an " \
                          "owner could not run -- the runner must be elevated");                                         \
                 SKIP("setting a directory's owner to Administrators needs the privileges an install has; the windows "  \
                      "job's ctest step runs this path elevated");                                                       \
@@ -1164,14 +1164,14 @@ TEST_CASE("FileTrust: a foreign-owned entry is refused with the deletion remedy"
     // A run that states it is elevated and cannot enable it FAILS: the elevated half of this case
     // is exactly what it would otherwise skip in silence.
     if (!EnableRestorePrivilege() && ExpectElevated())
-        FAIL("FASTCACHED_EXPECT_ELEVATED=1 but SeRestorePrivilege could not be enabled, so no foreign owner can "
+        FAIL("PACE_EXPECT_ELEVATED=1 but SeRestorePrivilege could not be enabled, so no foreign owner can "
              "be planted");
     TrySetOwner(key, L"S-1-5-32-546");
     auto const owner = OwnerText(key);
     if (owner == "S-1-5-18" || owner == "S-1-5-32-544" || owner == "S-1-5-19")
     {
         if (ExpectElevated())
-            FAIL(std::format("FASTCACHED_EXPECT_ELEVATED=1 but the planted key is still owned by {}, an allowed owner",
+            FAIL(std::format("PACE_EXPECT_ELEVATED=1 but the planted key is still owned by {}, an allowed owner",
                              owner));
         SKIP("could not arrange a foreign owner for the planted key on this host");
     }

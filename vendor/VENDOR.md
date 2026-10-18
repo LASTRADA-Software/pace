@@ -70,7 +70,7 @@ is added and checked against its RFC's vectors.
 against the sha512 monocypher.org publishes, and extract the six files from the ARCHIVE (for
 instance `tar -xzOf monocypher-X.Y.Z.tar.gz monocypher-X.Y.Z/<path> > vendor/monocypher/<path>`),
 never from a checkout, whose sources carry `__git__`. Then
-`cmake -DFASTCACHED_SOURCE_DIR=<root> -DFASTCACHED_VENDOR_WRITE_MANIFEST=RESYNC -DFASTCACHED_VENDOR_RESYNC_ROOT=vendor/monocypher -P scripts/check-vendor-verbatim.cmake`,
+`cmake -DPACE_SOURCE_DIR=<root> -DPACE_VENDOR_WRITE_MANIFEST=RESYNC -DPACE_VENDOR_RESYNC_ROOT=vendor/monocypher -P scripts/check-vendor-verbatim.cmake`,
 update the table above and the row in "The copies", and run the vectors. A change goes to
 LoupVaillant/Monocypher as a pull request first; a local change would be a row below, and there is
 none.

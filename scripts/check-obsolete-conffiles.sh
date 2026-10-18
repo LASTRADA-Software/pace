@@ -5,7 +5,7 @@
 # shipping it. It does not remove the copy an older package already put on disk:
 # a package manager will not silently delete something it has classified as an
 # operator's to edit. So retiring a config file is TWO edits -- delete the asset
-# row, and add the path to FASTCACHED_PLATFORM_OBSOLETE_CONFIG -- and the second
+# row, and add the path to PACE_PLATFORM_OBSOLETE_CONFIG -- and the second
 # is the one nobody does, because the first one makes the tree look finished.
 # `compile-node.env` survived every upgrade for four releases that way (#291,
 # #383).
@@ -70,16 +70,16 @@ ListEntries() { # ListEntries <file> <variable-name>
 }
 
 # The installed path of every `config`-kind asset row, in the SAME unexpanded
-# spelling the obsolete table uses (`/${FASTCACHED_SYSCONF_DIR}/name`), so the
+# spelling the obsolete table uses (`/${PACE_SYSCONF_DIR}/name`), so the
 # two are comparable without resolving any CMake variable. Resolving would be a
 # second implementation of packaging/CMakeLists.txt's own loop.
 ShippedConfigPaths() { # ShippedConfigPaths <packaging-cmakelists>
-    ListEntries "$1" "FASTCACHED_PLATFORM_ASSETS" \
+    ListEntries "$1" "PACE_PLATFORM_ASSETS" \
         | awk -F'|' 'NF == 5 && $3 == "config" { print "/" $2 "/" $4 }'
 }
 
 ObsoletePaths() { # ObsoletePaths <packaging-cmakelists>
-    ListEntries "$1" "FASTCACHED_PLATFORM_OBSOLETE_CONFIG"
+    ListEntries "$1" "PACE_PLATFORM_OBSOLETE_CONFIG"
 }
 
 RunCheck() { # RunCheck <repo-root>
@@ -108,8 +108,8 @@ RunCheck() { # RunCheck <repo-root>
 
     # The table must EXIST even when it is empty, or "nothing is retired" and
     # "the table was deleted" read alike.
-    if ! grep -q 'FASTCACHED_PLATFORM_OBSOLETE_CONFIG' "$packaging"; then
-        refuse "check-obsolete-conffiles: $packaging declares no FASTCACHED_PLATFORM_OBSOLETE_CONFIG table"
+    if ! grep -q 'PACE_PLATFORM_OBSOLETE_CONFIG' "$packaging"; then
+        refuse "check-obsolete-conffiles: $packaging declares no PACE_PLATFORM_OBSOLETE_CONFIG table"
     fi
 
     # A path cannot be shipped and retired at once.
@@ -126,16 +126,16 @@ RunCheck() { # RunCheck <repo-root>
     # reconfigure that turns packaging off. Two writes -- the fill and the reset
     # -- is the shape packaging/CMakeLists.txt documents for its siblings.
     local writes
-    writes="$(grep -c 'set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES' "$packaging")"
+    writes="$(grep -c 'set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES' "$packaging")"
     if [[ "$writes" -lt 2 ]]; then
-        refuse "check-obsolete-conffiles: FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES is written $writes time(s)" \
+        refuse "check-obsolete-conffiles: PACE_PACKAGE_OBSOLETE_CONFIG_FILES is written $writes time(s)" \
                " -- it must also be reset on the branch that installs nothing, or a stale cache entry survives"
     fi
 
     # The flag must actually be emitted. Computing the list and never writing it
     # is silent in every build and in every test that does not open a .deb.
-    if ! grep -q 'FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES' "$generator"; then
-        refuse "check-obsolete-conffiles: $generator never reads FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES"
+    if ! grep -q 'PACE_PACKAGE_OBSOLETE_CONFIG_FILES' "$generator"; then
+        refuse "check-obsolete-conffiles: $generator never reads PACE_PACKAGE_OBSOLETE_CONFIG_FILES"
     fi
     if ! grep -q 'remove-on-upgrade' "$generator"; then
         refuse "check-obsolete-conffiles: $generator emits no remove-on-upgrade flag" \
@@ -163,17 +163,17 @@ RunCheck() { # RunCheck <repo-root>
 OperatorMark='operator edit that must survive'
 
 # The retired paths as they appear on an installed system. Only
-# FASTCACHED_SYSCONF_DIR occurs in them, and it is declared once at the top
+# PACE_SYSCONF_DIR occurs in them, and it is declared once at the top
 # level.
 ResolvedObsoletePaths() { # ResolvedObsoletePaths <repo-root>
     local root="$1"
     local sysconf obsolete path out=""
-    sysconf="$(awk '/^set\(FASTCACHED_SYSCONF_DIR/ { if (match($0, /"[^"]*"/)) print substr($0, RSTART + 1, RLENGTH - 2) }' \
+    sysconf="$(awk '/^set\(PACE_SYSCONF_DIR/ { if (match($0, /"[^"]*"/)) print substr($0, RSTART + 1, RLENGTH - 2) }' \
         "$root/CMakeLists.txt")"
     [[ -n "$sysconf" ]] || return 1
     obsolete="$(ObsoletePaths "$root/packaging/CMakeLists.txt")"
     for path in $obsolete; do
-        out="${out}${path//\$\{FASTCACHED_SYSCONF_DIR\}/$sysconf}"$'\n'
+        out="${out}${path//\$\{PACE_SYSCONF_DIR\}/$sysconf}"$'\n'
     done
     printf '%s' "$out" | sed '/^$/d'
 }
@@ -387,7 +387,7 @@ CheckPackage() { # CheckPackage <kind> <file> <repo-root>
 
     local paths
     paths="$(ResolvedObsoletePaths "$root")" \
-        || { refuse "check-obsolete-conffiles: could not read FASTCACHED_SYSCONF_DIR"; return; }
+        || { refuse "check-obsolete-conffiles: could not read PACE_SYSCONF_DIR"; return; }
     if [[ -z "$paths" ]]; then
         echo "check-obsolete-conffiles: no obsolete config files declared; nothing to verify"
         return
@@ -422,7 +422,7 @@ SelfTest() {
         mkdir -p "$d/packaging" "$d/cmake"
         printf '%s\n' "$packaging" > "$d/packaging/CMakeLists.txt"
         printf '%s\n' "$generator" > "$d/cmake/Packaging.cmake"
-        printf 'set(FASTCACHED_SYSCONF_DIR "etc/fastcached")\n' > "$d/CMakeLists.txt"
+        printf 'set(PACE_SYSCONF_DIR "etc/fastcached")\n' > "$d/CMakeLists.txt"
 
         Refusals=0
         RunCheck "$d" >/dev/null 2>&1
@@ -435,36 +435,36 @@ SelfTest() {
         fi
     }
 
-    local goodPackaging='set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG "")
-set(FASTCACHED_PLATFORM_ASSETS
-    "config/a.yaml|${FASTCACHED_SYSCONF_DIR}|config|a.yaml|Runtime"
+    local goodPackaging='set(PACE_PLATFORM_OBSOLETE_CONFIG "")
+set(PACE_PLATFORM_ASSETS
+    "config/a.yaml|${PACE_SYSCONF_DIR}|config|a.yaml|Runtime"
 )
-set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG
-    "/${FASTCACHED_SYSCONF_DIR}/gone.env"
+set(PACE_PLATFORM_OBSOLETE_CONFIG
+    "/${PACE_SYSCONF_DIR}/gone.env"
 )
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")'
-    local goodGenerator='foreach(_o IN LISTS FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES)
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")'
+    local goodGenerator='foreach(_o IN LISTS PACE_PACKAGE_OBSOLETE_CONFIG_FILES)
     list(APPEND _lines "remove-on-upgrade ${_o}")
 endforeach()'
 
     Case "a correct tree is clean" clean "$goodPackaging" "$goodGenerator"
 
     Case "a path in both tables is refused" refused \
-'set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG "")
-set(FASTCACHED_PLATFORM_ASSETS
-    "config/a.yaml|${FASTCACHED_SYSCONF_DIR}|config|a.yaml|Runtime"
+'set(PACE_PLATFORM_OBSOLETE_CONFIG "")
+set(PACE_PLATFORM_ASSETS
+    "config/a.yaml|${PACE_SYSCONF_DIR}|config|a.yaml|Runtime"
 )
-set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG
-    "/${FASTCACHED_SYSCONF_DIR}/a.yaml"
+set(PACE_PLATFORM_OBSOLETE_CONFIG
+    "/${PACE_SYSCONF_DIR}/a.yaml"
 )
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
         "$goodGenerator"
 
     Case "a generator that never emits the flag is refused" refused \
         "$goodPackaging" \
-'foreach(_o IN LISTS FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES)
+'foreach(_o IN LISTS PACE_PACKAGE_OBSOLETE_CONFIG_FILES)
     list(APPEND _lines "${_o}")
 endforeach()'
 
@@ -478,13 +478,13 @@ endforeach()'
 'file(WRITE "${OUT}/conffiles" "remove-on-upgrade /etc/hardcoded.env\n")'
 
     Case "an export written only once is refused" refused \
-"set(FASTCACHED_PLATFORM_ASSETS
-    \"config/a.yaml|\${FASTCACHED_SYSCONF_DIR}|config|a.yaml|Runtime\"
+"set(PACE_PLATFORM_ASSETS
+    \"config/a.yaml|\${PACE_SYSCONF_DIR}|config|a.yaml|Runtime\"
 )
-set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG
-    \"/\${FASTCACHED_SYSCONF_DIR}/gone.env\"
+set(PACE_PLATFORM_OBSOLETE_CONFIG
+    \"/\${PACE_SYSCONF_DIR}/gone.env\"
 )
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES \"x\" CACHE INTERNAL \"d\")" \
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES \"x\" CACHE INTERNAL \"d\")" \
         "$goodGenerator"
 
     # The two ways this check can fail to LOOK, both of which read exactly like a
@@ -493,34 +493,34 @@ set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES \"x\" CACHE INTERNAL \"d\")" \
     # A case that refuses for two independent reasons cannot show which
     # assertion it exercises, and stays green when that assertion is deleted.
     Case "a tree with no config asset row is refused, not reported clean" refused \
-'set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG "")
-set(FASTCACHED_PLATFORM_ASSETS
+'set(PACE_PLATFORM_OBSOLETE_CONFIG "")
+set(PACE_PLATFORM_ASSETS
     "linux/x.service|usr/lib/systemd/system|data|x.service|Runtime"
 )
-set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG
-    "/${FASTCACHED_SYSCONF_DIR}/gone.env"
+set(PACE_PLATFORM_OBSOLETE_CONFIG
+    "/${PACE_SYSCONF_DIR}/gone.env"
 )
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
         "$goodGenerator"
 
     Case "a tree whose obsolete table was deleted is refused" refused \
-'set(FASTCACHED_PLATFORM_ASSETS
-    "config/a.yaml|${FASTCACHED_SYSCONF_DIR}|config|a.yaml|Runtime"
+'set(PACE_PLATFORM_ASSETS
+    "config/a.yaml|${PACE_SYSCONF_DIR}|config|a.yaml|Runtime"
 )
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "x" CACHE INTERNAL "d")
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
         "$goodGenerator"
 
     # An EMPTY table is legitimate and must not be refused, or the check forces a
     # retired path to exist forever.
     Case "an empty obsolete table is clean" clean \
-'set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG "")
-set(FASTCACHED_PLATFORM_ASSETS
-    "config/a.yaml|${FASTCACHED_SYSCONF_DIR}|config|a.yaml|Runtime"
+'set(PACE_PLATFORM_OBSOLETE_CONFIG "")
+set(PACE_PLATFORM_ASSETS
+    "config/a.yaml|${PACE_SYSCONF_DIR}|config|a.yaml|Runtime"
 )
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")
-set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")
+set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "" CACHE INTERNAL "d")' \
         "$goodGenerator"
 
     echo "check-obsolete-conffiles --self-test: ${ran} cases ran, ${failures} failed"

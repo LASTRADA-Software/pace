@@ -113,7 +113,7 @@ TEST_CASE("A scheduler answers its own verbs and nothing else", "[distributed][s
         // credential, and `Cc::CacheProtocol::Exchange` tolerates exactly that code,
         // steps over the refusal and proceeds unauthenticated. Answering anything else
         // made it treat the refusal as being about the credential and return it in
-        // place of the answer to the request actually sent -- with `FASTCACHE_TOKEN`
+        // place of the answer to the request actually sent -- with `PACE_TOKEN`
         // set that declined every LEASE and compiled everything locally, a green build
         // and a fleet distributing nothing (#340).
         //
@@ -134,7 +134,7 @@ TEST_CASE("A scheduler answers its own verbs and nothing else", "[distributed][s
         CHECK(ErrorOf(fixture.protocol.Answer(auth, Insider)) == Wire::ErrorCode::DispatchNotPermitted);
         CHECK(ErrorOf(fixture.protocol.Answer(auth, Insider)) != Wire::UnimplementedVerb);
 
-        // And a bare token with no username, which is how `FASTCACHE_TOKEN` alone
+        // And a bare token with no username, which is how `PACE_TOKEN` alone
         // reaches the wire, takes the same answer.
         auto const tokenOnly = Wire::EncodeAuth(Wire::AuthRequest { .username = "", .secret = "s3cret" });
         CHECK(ErrorOf(fixture.protocol.Answer(tokenOnly, Insider)) == Wire::ErrorCode::DispatchNotPermitted);

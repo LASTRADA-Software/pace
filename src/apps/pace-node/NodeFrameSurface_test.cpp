@@ -459,7 +459,7 @@ TEST_CASE("A verb no component serves is refused as unimplemented", "[node][merg
 
     // **And none of them is counted, which was decided rather than left out** (#447).
     // Every other refusal on this listener is an event; this one is the answer ordinary
-    // traffic gets. A worker with no scheduler refuses every `AUTH` a `FASTCACHE_TOKEN`
+    // traffic gets. A worker with no scheduler refuses every `AUTH` a `PACE_TOKEN`
     // launcher sends, once per exchange for a whole build, and a node with no tier
     // refuses every local `FETCH` -- so a counter here would be dominated by a healthy
     // build and a port scan would be invisible inside it. That is this ticket's own

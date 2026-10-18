@@ -126,16 +126,16 @@ namespace
     // .agent/rules/build-and-toolchain.md gives under instruction-set extensions. cl
     // needs no attribute.
     #if defined(__GNUC__) || defined(__clang__)
-        #define FASTCACHED_SHA_NI_TARGET __attribute__((target("sha,ssse3,sse4.1")))
+        #define PACE_SHA_NI_TARGET __attribute__((target("sha,ssse3,sse4.1")))
     #else
-        #define FASTCACHED_SHA_NI_TARGET
+        #define PACE_SHA_NI_TARGET
     #endif
 
     /// One of a block's four message vectors, in the byte order SHA-256 reads.
     /// @param block The 64-byte block.
     /// @param index Which of its four 16-byte words.
     /// @return The words as one vector.
-    [[nodiscard]] FASTCACHED_SHA_NI_TARGET __m128i LoadWordsX86(std::span<std::byte const> block, std::size_t index) noexcept
+    [[nodiscard]] PACE_SHA_NI_TARGET __m128i LoadWordsX86(std::span<std::byte const> block, std::size_t index) noexcept
     {
         // SHA-256 reads its words big-endian; x86 loads them little-endian.
         __m128i const byteSwap = _mm_set_epi64x(0x0c0d0e0f08090a0bLL, 0x0405060700010203LL);
@@ -149,7 +149,7 @@ namespace
     /// and the state is held as the two lanes that instruction wants, ABEF and CDGH.
     /// @param state The running state.
     /// @param blocks A whole number of 64-byte blocks.
-    FASTCACHED_SHA_NI_TARGET void CompressBlocksX86ShaNi(State& state, std::span<std::byte const> blocks) noexcept
+    PACE_SHA_NI_TARGET void CompressBlocksX86ShaNi(State& state, std::span<std::byte const> blocks) noexcept
     {
         __m128i high {};
         __m128i low {};
@@ -201,7 +201,7 @@ namespace
         std::memcpy(std::span { state }.subspan(4).data(), &low, sizeof(low));
     }
 
-    #undef FASTCACHED_SHA_NI_TARGET
+    #undef PACE_SHA_NI_TARGET
 
     constexpr CompressBlocksFunction X86ShaNiBlocks = &CompressBlocksX86ShaNi;
 #else
@@ -216,18 +216,18 @@ namespace
     // and clang takes the feature name. cl needs no attribute, since its ARM64 intrinsics
     // are always declared and the instruction is chosen by this function's caller.
     #if defined(__clang__)
-        #define FASTCACHED_ARM_SHA2_TARGET __attribute__((target("sha2")))
+        #define PACE_ARM_SHA2_TARGET __attribute__((target("sha2")))
     #elif defined(__GNUC__)
-        #define FASTCACHED_ARM_SHA2_TARGET __attribute__((target("+sha2")))
+        #define PACE_ARM_SHA2_TARGET __attribute__((target("+sha2")))
     #else
-        #define FASTCACHED_ARM_SHA2_TARGET
+        #define PACE_ARM_SHA2_TARGET
     #endif
 
     /// One of a block's four message vectors, in the byte order SHA-256 reads.
     /// @param block The 64-byte block.
     /// @param index Which of its four 16-byte words.
     /// @return The words as one vector.
-    [[nodiscard]] FASTCACHED_ARM_SHA2_TARGET uint32x4_t LoadWordsArm(std::span<std::byte const> block,
+    [[nodiscard]] PACE_ARM_SHA2_TARGET uint32x4_t LoadWordsArm(std::span<std::byte const> block,
                                                                      std::size_t index) noexcept
     {
         std::array<std::uint8_t, 16> bytes {};
@@ -240,7 +240,7 @@ namespace
     /// `sha256su1`. Compiled only where a CI leg builds it (see `CpuFeatures`).
     /// @param state The running state.
     /// @param blocks A whole number of 64-byte blocks.
-    FASTCACHED_ARM_SHA2_TARGET void CompressBlocksArmSha2(State& state, std::span<std::byte const> blocks) noexcept
+    PACE_ARM_SHA2_TARGET void CompressBlocksArmSha2(State& state, std::span<std::byte const> blocks) noexcept
     {
         uint32x4_t abcd = vld1q_u32(state.data());
         uint32x4_t efgh = vld1q_u32(std::span { state }.subspan(4).data());
@@ -278,7 +278,7 @@ namespace
         vst1q_u32(std::span { state }.subspan(4).data(), efgh);
     }
 
-    #undef FASTCACHED_ARM_SHA2_TARGET
+    #undef PACE_ARM_SHA2_TARGET
 
     constexpr CompressBlocksFunction ArmSha2Blocks = &CompressBlocksArmSha2;
 #else

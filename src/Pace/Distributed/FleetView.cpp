@@ -2234,7 +2234,7 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
     /// Whether this fleet has been asked to compile nothing at all.
     ///
     /// Dispatch is opt-in — a client asks for a lease only when
-    /// `FASTCACHE_SCHEDULER` names a scheduler — so a node deployed as a shared
+    /// `PACE_SCHEDULER` names a scheduler — so a node deployed as a shared
     /// *cache*, which is the common case, sits in this state permanently while the
     /// machine around it compiles at full tilt. The page has to say which of the
     /// two it is looking at, because the numbers are identical and the operator's
@@ -2726,7 +2726,7 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
                            R"({} slots are registered, no compile has been handed to any of them since this )"
                            R"(scheduler took over, and none is running now &mdash; so what is drawn below is an )"
                            R"(<em>unused</em> fleet rather than an idle one. A client asks for a lease only when )"
-                           R"(<code>FASTCACHE_SCHEDULER</code> names this scheduler; without it every compile )"
+                           R"(<code>PACE_SCHEDULER</code> names this scheduler; without it every compile )"
                            R"(runs locally, this machine's own build is what loads it, and <em>compiling</em> )"
                            R"(can only ever read zero. Until then, read the numbers below as capacity nobody )"
                            R"(has asked for.</p>)",
@@ -3137,9 +3137,9 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
         // **The series name, so the page and the counters are one vocabulary.** A tile
         // and its counter are the same fact under two names, and the mapping was
         // derivable but never stated -- an operator reading `no capacity` here had to
-        // guess `fastcached_dispatch_leases_no_capacity_total` before they could grep
+        // guess `pace_dispatch_leases_no_capacity_total` before they could grep
         // for it. Worth noting that #1306 itself guessed that name wrong (it wrote
-        // `fastcache_`, which is in no tree), which is the argument for the change
+        // `pace_`, which is in no tree), which is the argument for the change
         // made by the person making it.
         //
         // Read through `DescriptorOf` rather than stored beside the row: the typed

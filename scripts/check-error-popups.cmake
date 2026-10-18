@@ -197,7 +197,7 @@ foreach(row IN LISTS rows)
                   "executable it walks: a target defined after that call, or outside the roots it "
                   "walks, is missed. Move the target or the call so the walk reaches it; only if "
                   "it must never be suppressed, state why with "
-                  "set_target_properties(${name} PROPERTIES FASTCACHED_ERROR_POPUPS \"<reason>\").")
+                  "set_target_properties(${name} PROPERTIES PACE_ERROR_POPUPS \"<reason>\").")
     endif()
 endforeach()
 
@@ -303,7 +303,7 @@ elseif(unsetCount GREATER 0)
     fc_refuse("${unsetCount} of ${testCount} registered test(s) do not set ${VARIABLE}, so a product binary "
               "any of them spawns still opens an assert dialog. cmake/ErrorPopups.cmake sets it on every "
               "add_test by a deferred walk, and a catch_discover_tests call must name "
-              "ENVIRONMENT_MODIFICATION \"\${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}\" itself. The first of them:${unset}")
+              "ENVIRONMENT_MODIFICATION \"\${PACE_ERROR_DIALOG_ENVIRONMENT}\" itself. The first of them:${unset}")
 endif()
 message("error-popups: ${testCount} registered test(s) read, ${unsetCount} without ${VARIABLE}")
 

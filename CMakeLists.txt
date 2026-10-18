@@ -10,7 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/portable")
 
 include(Version)
-GetVersionInformation(FASTCACHED_VERSION FASTCACHED_VERSION_STRING)
+GetVersionInformation(PACE_VERSION PACE_VERSION_STRING)
 
 # The oldest macOS the shipped binaries must run on. This has to precede
 # project(): CMake bakes the deployment target into the compile lines while
@@ -35,7 +35,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND NOT DEFINED ENV{MACOSX_
 endif()
 
 project(pace-kv
-    VERSION "${FASTCACHED_VERSION}"
+    VERSION "${PACE_VERSION}"
     DESCRIPTION "Fast Cache Daemon — platform-independent memcached/Redis server"
     LANGUAGES CXX
 )
@@ -62,9 +62,9 @@ include(GNUInstallDirs)
 # left `pace-kv` reporting "command not found".
 #
 # Turn it ON only to build packages:
-#   cmake -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON ... && cpack -G "DEB;RPM"
+#   cmake -DPACE_PACKAGE_ROOT_PREFIX=ON ... && cpack -G "DEB;RPM"
 # The CI packaging job does exactly that; see .github/workflows/build.yml.
-option(FASTCACHED_PACKAGE_ROOT_PREFIX "Lay out the install tree for .deb/.rpm/.pkg packaging" OFF)
+option(PACE_PACKAGE_ROOT_PREFIX "Lay out the install tree for .deb/.rpm/.pkg packaging" OFF)
 
 # The macOS package prefix. Single source of truth: it is spelled into the
 # install destinations below, into /etc/paths.d/fastcached, into the launchd
@@ -72,7 +72,7 @@ option(FASTCACHED_PACKAGE_ROOT_PREFIX "Lay out the install tree for .deb/.rpm/.p
 # shared with Homebrew, so a private /opt subtree keeps the payload trivially
 # enumerable — which is what makes an uninstaller possible at all, given that a
 # .pkg carries no removal mechanism of its own.
-set(FASTCACHED_MACOS_PREFIX "opt/fastcached"
+set(PACE_MACOS_PREFIX "opt/fastcached"
     CACHE STRING "macOS package install prefix, relative to /")
 
 # macOS package identity. Declared here rather than in packaging/ because both
@@ -90,8 +90,8 @@ set(FASTCACHED_MACOS_PREFIX "opt/fastcached"
 #
 # Never change the bundle id once released: macOS keys package receipts and
 # upgrade detection on it, the same discipline as CPACK_WIX_UPGRADE_GUID.
-set(FASTCACHED_MACOS_BUNDLE_ID       "software.lastrada.fastcached")
-set(FASTCACHED_MACOS_SERVICE_ACCOUNT "_fastcached")
+set(PACE_MACOS_BUNDLE_ID       "software.lastrada.fastcached")
+set(PACE_MACOS_SERVICE_ACCOUNT "_fastcached")
 
 # The compile worker's account, and deliberately NOT the daemon's above: a worker
 # runs a compiler on input that arrived over the network while pace-kv owns the
@@ -106,9 +106,9 @@ set(FASTCACHED_MACOS_SERVICE_ACCOUNT "_fastcached")
 # spelling of one name, across a binary, a package and a unit that never see each
 # other. `ctest -R service-accounts` fails when they drift apart, on every
 # platform -- because the failure mode is macOS-only and silent (issue #87).
-set(FASTCACHED_MACOS_NODE_ACCOUNT    "fastcache-node")
+set(PACE_MACOS_NODE_ACCOUNT    "fastcache-node")
 
-# The worker's launchd label, on the same terms as FASTCACHED_MACOS_BUNDLE_ID
+# The worker's launchd label, on the same terms as PACE_MACOS_BUNDLE_ID
 # above: LaunchdLabelPrefix + the lowercased NodeConfig::serviceName default.
 # The uninstaller needs it because it removes the binary that would otherwise
 # answer for itself, and a job left bootstrapped against a deleted executable is
@@ -117,7 +117,7 @@ set(FASTCACHED_MACOS_NODE_ACCOUNT    "fastcache-node")
 # NOT a package identifier: the installer registers no worker job (it has no
 # scheduler or toolchain to register one with), so no receipt is ever filed under
 # this name. It names only a job an operator installed by hand.
-set(FASTCACHED_MACOS_NODE_LABEL      "software.lastrada.fastcachecompilenode")
+set(PACE_MACOS_NODE_LABEL      "software.lastrada.fastcachecompilenode")
 
 # The tools symlinked into /usr/local/bin. /etc/paths.d only takes effect for
 # LOGIN shells, so these are what make the tools reachable from an already-open
@@ -128,7 +128,7 @@ set(FASTCACHED_MACOS_NODE_LABEL      "software.lastrada.fastcachecompilenode")
 # own comment records what that cost: "The uninstaller has the mirror of this
 # guard; this is the half that went missing." A tool added to one and not the
 # other is either a link nothing removes or a link nothing creates.
-set(FASTCACHED_MACOS_LINKED_TOOLS "pace-kv pace-cc pace-node pacectl")
+set(PACE_MACOS_LINKED_TOOLS "pace-kv pace-cc pace-node pacectl")
 
 # The machine-wide configuration directory. Declared here, not in packaging/,
 # for the same scoping reason as the macOS variables above: packaging/ installs
@@ -136,24 +136,24 @@ set(FASTCACHED_MACOS_LINKED_TOOLS "pace-kv pace-cc pace-node pacectl")
 # daemon's default lookup, and two sibling subdirectories cannot see each
 # other's set(). Spelled without a leading slash to match the other install
 # destinations, which are relative to CMAKE_INSTALL_PREFIX.
-set(FASTCACHED_SYSCONF_DIR "etc/fastcached"
+set(PACE_SYSCONF_DIR "etc/fastcached"
     CACHE STRING "System configuration directory, relative to /")
 
 # Install destinations for the relocatable artifacts (binaries, docs). With the
 # prefix moved to /, the ordinary FHS paths have to spell `usr/` themselves, or
 # the binaries would land in /bin and the docs in /share/doc. Outside packaging
 # these stay the plain GNUInstallDirs values.
-if(FASTCACHED_PACKAGE_ROOT_PREFIX)
+if(PACE_PACKAGE_ROOT_PREFIX)
     if(APPLE)
-        set(FASTCACHED_INSTALL_BINDIR "${FASTCACHED_MACOS_PREFIX}/bin")
-        set(FASTCACHED_INSTALL_DOCDIR "${FASTCACHED_MACOS_PREFIX}/share/doc/fastcached")
+        set(PACE_INSTALL_BINDIR "${PACE_MACOS_PREFIX}/bin")
+        set(PACE_INSTALL_DOCDIR "${PACE_MACOS_PREFIX}/share/doc/fastcached")
     else()
-        set(FASTCACHED_INSTALL_BINDIR "usr/${CMAKE_INSTALL_BINDIR}")
-        set(FASTCACHED_INSTALL_DOCDIR "usr/${CMAKE_INSTALL_DOCDIR}")
+        set(PACE_INSTALL_BINDIR "usr/${CMAKE_INSTALL_BINDIR}")
+        set(PACE_INSTALL_DOCDIR "usr/${CMAKE_INSTALL_DOCDIR}")
     endif()
 else()
-    set(FASTCACHED_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
-    set(FASTCACHED_INSTALL_DOCDIR "${CMAKE_INSTALL_DOCDIR}")
+    set(PACE_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
+    set(PACE_INSTALL_DOCDIR "${CMAKE_INSTALL_DOCDIR}")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
@@ -175,7 +175,7 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 # ----------------------------------------------------------------------------
 # Project-wide options
 
-option(FASTCACHED_BUILD_TESTS "Build unit tests" ON)
+option(PACE_BUILD_TESTS "Build unit tests" ON)
 
 # USE_COMPILER_CACHE is declared by cmake/portable/CompileCache.cmake, next to the logic
 # that reads it: a module that consumed an option it did not declare would read
@@ -187,7 +187,7 @@ option(FASTCACHED_BUILD_TESTS "Build unit tests" ON)
 # off the FC_TLS_ENABLED compile definition; when off, no OpenSSL header is
 # included and the TLS sources are not compiled. On Windows the OpenSSL package
 # is pulled in via the vcpkg manifest's "tls" feature (see vcpkg.json).
-option(FASTCACHED_ENABLE_TLS "Enable TLS support (requires OpenSSL)" OFF)
+option(PACE_ENABLE_TLS "Enable TLS support (requires OpenSSL)" OFF)
 
 # On-disk value compression is ON by default: the standard build ships zstd +
 # lz4 and the runtime default codec is zstd (admins opt out with
@@ -195,7 +195,7 @@ option(FASTCACHED_ENABLE_TLS "Enable TLS support (requires OpenSSL)" OFF)
 # fetched or linked, the codec table degrades to identity-only, and selecting
 # zstd/lz4 from config becomes a clean startup error. Our code keys off the
 # FC_COMPRESSION_ENABLED compile definition (set in src/Pace/CMakeLists.txt).
-option(FASTCACHED_ENABLE_COMPRESSION "Enable on-disk value compression (zstd + lz4)" ON)
+option(PACE_ENABLE_COMPRESSION "Enable on-disk value compression (zstd + lz4)" ON)
 
 # Tracy profiler. TRACY_ENABLE is Tracy's own gate; reusing the name means the
 # fetched client library actually emits instrumentation rather than its no-op
@@ -209,11 +209,11 @@ option(TRACY_ON_DEMAND "Tracy: only collect data while a profiler is connected" 
 # because a view nobody builds is a view nobody runs and its tests would not report -- the
 # option exists so a build that wants neither the terminal view nor a libunicode fetch can
 # say so, not as a way to keep it out of CI. It is forwarded as `CORE_CPP_WITH_TUI`.
-option(FASTCACHED_BUILD_TUI "Build core-cpp's terminal UI (pacectl live-stats)" ON)
+option(PACE_BUILD_TUI "Build core-cpp's terminal UI (pacectl live-stats)" ON)
 
 # ----------------------------------------------------------------------------
 # Where dependency sources live, decided BEFORE the compiler cache is loaded: the cache module
-# hands this location to pace-cc as its dependency root (FASTCACHE_DEPS_DIR), which is what
+# hands this location to pace-cc as its dependency root (PACE_DEPS_DIR), which is what
 # lets two machines whose caches sit in different homes share objects.
 #
 # Share fetched dependency SOURCES across build trees, per machine (#545).
@@ -242,11 +242,11 @@ option(FASTCACHED_BUILD_TUI "Build core-cpp's terminal UI (pacectl live-stats)" 
 # to configure is a worse trade than the fetch it saves.
 if(NOT DEFINED CPM_SOURCE_CACHE AND NOT DEFINED ENV{CPM_SOURCE_CACHE})
     set(_fastcachedCpmHome "")
-    if(DEFINED ENV{FASTCACHED_CPM_CACHE})
+    if(DEFINED ENV{PACE_CPM_CACHE})
         # The escape hatch, named rather than implied: a machine that wants the cache
         # somewhere else (a different volume, a RAM disk) says so without having to set
         # CPM_SOURCE_CACHE on every invocation.
-        set(_fastcachedCpmHome "$ENV{FASTCACHED_CPM_CACHE}")
+        set(_fastcachedCpmHome "$ENV{PACE_CPM_CACHE}")
     elseif(WIN32 AND DEFINED ENV{LOCALAPPDATA})
         set(_fastcachedCpmHome "$ENV{LOCALAPPDATA}/fastcached/cpm")
     elseif(DEFINED ENV{XDG_CACHE_HOME})
@@ -264,7 +264,7 @@ if(NOT DEFINED CPM_SOURCE_CACHE AND NOT DEFINED ENV{CPM_SOURCE_CACHE})
     else()
         message(STATUS
             "[CPM] no home directory found, so dependency sources are fetched into this "
-            "build tree as before; set FASTCACHED_CPM_CACHE to share them")
+            "build tree as before; set PACE_CPM_CACHE to share them")
     endif()
 endif()
 
@@ -272,7 +272,7 @@ endif()
 # Compiler caching. Loaded before any compiler invocation so that CPM-fetched
 # dependencies also get cached. CompileCache.cmake prefers our own pace-cc
 # launcher (when installed and a daemon answers, at 127.0.0.1:6674 unless
-# FASTCACHE_ADDR says otherwise), falls back to sccache and then ccache, and
+# PACE_ADDR says otherwise), falls back to sccache and then ccache, and
 # silently no-ops when none is usable or USE_COMPILER_CACHE=OFF. It also declares
 # the USE_COMPILER_CACHE option.
 
@@ -319,7 +319,7 @@ CPMAddPackage(
 )
 unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     # Bumping this is a decision somewhere else as well. The ThreadSanitizer
     # scope is a Catch2 TAG EXPRESSION in a bash table rather than a `ctest -L`
     # selection, because `catch_discover_tests` only exports tags as CTest labels
@@ -406,7 +406,7 @@ endif()
 # includes so its imported targets carry no -Werror expectations of ours. The
 # REQUIRED here means a misconfigured TLS build fails fast at configure time
 # rather than at link time.
-if(FASTCACHED_ENABLE_TLS)
+if(PACE_ENABLE_TLS)
     find_package(OpenSSL REQUIRED)
 endif()
 
@@ -423,7 +423,7 @@ endif()
 # files, installed system-wide, from a package that ships two executables.
 # add_subdirectory(EXCLUDE_FROM_ALL) drops those rules; the static libraries are
 # still built on demand because our targets link them.
-if(FASTCACHED_ENABLE_COMPRESSION)
+if(PACE_ENABLE_COMPRESSION)
     CPMAddPackage(
         NAME zstd
         GITHUB_REPOSITORY facebook/zstd
@@ -467,7 +467,7 @@ endif()
 # `CPM_USE_LOCAL_PACKAGES` is ON above, so this already tries `find_package` first
 # and falls back to the fetch -- the same one door yaml-cpp, Catch2, zstd and lz4
 # go through, rather than a second spelling of the same policy.
-if(FASTCACHED_BUILD_TUI)
+if(PACE_BUILD_TUI)
     CPMAddPackage(
         NAME libunicode
         GITHUB_REPOSITORY contour-terminal/libunicode
@@ -505,7 +505,7 @@ endif()
 # core-cpp, the shared C++23 foundation of the Contour Terminal projects (#1596): the coroutines,
 # the event loop, the sockets and TLS every tier here serves on (`core::async`, `core::net`,
 # `core::net_tls`), the clock seam, the profiling macros, and the terminal UI behind
-# `pacectl live-stats` (`core::tui`). `FASTCACHED_ENABLE_TLS` and `TRACY_ENABLE` are
+# `pacectl live-stats` (`core::tui`). `PACE_ENABLE_TLS` and `TRACY_ENABLE` are
 # forwarded, so core-cpp builds TLS exactly when this project asks for it and records zones into the
 # same Tracy client. After libunicode, which `core::tui` links, so
 # core-cpp takes the target this project already declared rather than fetching a second copy; and
@@ -517,7 +517,7 @@ endif()
 # `-DCPM_core-cpp_SOURCE=<path>`; never commit a branch.
 #
 # **The /MT twins, on MSVC only.** `pace-cc` links the static CRT in Release (its
-# FASTCACHED_STATIC_LAUNCHER) and the daemon the DLL one, so one build of core-cpp's compiled modules
+# PACE_STATIC_LAUNCHER) and the daemon the DLL one, so one build of core-cpp's compiled modules
 # cannot serve both: MSVC refuses to link /MT and /MD objects together. core-cpp builds a
 # `core::*_mt` twin of each compiled module when asked, and the launcher links those
 # (`src/apps/pace-cc/CMakeLists.txt`).
@@ -533,9 +533,9 @@ CPMAddPackage(
     SYSTEM YES
     EXCLUDE_FROM_ALL YES
     OPTIONS
-        "CORE_CPP_WITH_TUI ${FASTCACHED_BUILD_TUI}"
+        "CORE_CPP_WITH_TUI ${PACE_BUILD_TUI}"
         "CORE_CPP_WITH_IMAGES OFF"
-        "CORE_CPP_WITH_TLS ${FASTCACHED_ENABLE_TLS}"
+        "CORE_CPP_WITH_TLS ${PACE_ENABLE_TLS}"
         "CORE_CPP_WITH_TRACY ${TRACY_ENABLE}"
         "CORE_CPP_TESTING OFF"
         "CORE_CPP_MSVC_STATIC_RUNTIME_VARIANTS ${_fcCoreCppStaticRuntimeVariants}"
@@ -595,10 +595,10 @@ include(InstructionSetProbe)
 #   sanitized at all -- and a ThreadSanitizer run that instrumented this project's half of a race and
 #   not core-cpp's half would report the one and miss the other.
 if(SANITIZER_COMPILE_OPTIONS)
-    set(_fcVendorTargets ${FASTCACHED_MONOCYPHER_TARGETS})
+    set(_fcVendorTargets ${PACE_MONOCYPHER_TARGETS})
     if(NOT _fcVendorTargets)
         message(FATAL_ERROR
-            "cmake/Monocypher.cmake named no targets in FASTCACHED_MONOCYPHER_TARGETS, so the sanitizer "
+            "cmake/Monocypher.cmake named no targets in PACE_MONOCYPHER_TARGETS, so the sanitizer "
             "flags reached none of them. An empty list is this block having stopped working, not a "
             "cryptographic library that needs no instrumentation.")
     endif()
@@ -631,7 +631,7 @@ endif()
 # src/tests) can register their CTest test executables via
 # catch_discover_tests().
 
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     enable_testing()
 endif()
 
@@ -730,7 +730,7 @@ configure_file(
 # is consumed with add_subdirectory(), and a documentation check would then iterate a
 # `docs/` belonging to somebody else -- or, far more likely, throw a filesystem_error
 # for a directory that is not there.
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/CheckoutPaths.hpp.in"
         "${CMAKE_CURRENT_BINARY_DIR}/generated/tests/CheckoutPaths.hpp"
@@ -769,11 +769,11 @@ add_subdirectory(src/Pace)
 # runtime. On Windows that is the required Cli feature, so an operator deselecting a service
 # never deselects the files every feature needs; elsewhere it is the one Runtime payload.
 if(WIN32)
-    set(FASTCACHED_SHARED_COMPONENT "Cli")
+    set(PACE_SHARED_COMPONENT "Cli")
 else()
-    set(FASTCACHED_SHARED_COMPONENT "Runtime")
+    set(PACE_SHARED_COMPONENT "Runtime")
 endif()
-set_property(GLOBAL APPEND PROPERTY FASTCACHED_FIRST_PARTY_COMPONENTS "${FASTCACHED_SHARED_COMPONENT}")
+set_property(GLOBAL APPEND PROPERTY PACE_FIRST_PARTY_COMPONENTS "${PACE_SHARED_COMPONENT}")
 
 add_subdirectory(src/apps)
 
@@ -787,8 +787,8 @@ add_subdirectory(src/apps)
 install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
         "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
-    DESTINATION "${FASTCACHED_INSTALL_DOCDIR}"
-    COMPONENT "${FASTCACHED_SHARED_COMPONENT}"
+    DESTINATION "${PACE_INSTALL_DOCDIR}"
+    COMPONENT "${PACE_SHARED_COMPONENT}"
 )
 
 # ----------------------------------------------------------------------------
@@ -806,7 +806,7 @@ include(Packaging)
 # ----------------------------------------------------------------------------
 # Tests.
 
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     add_subdirectory(src/tests)
 endif()
 
@@ -817,14 +817,14 @@ endif()
 # defined after this call is a binary that keeps the host's legacy code page.
 # cmake/Utf8CodePage.cmake carries why the code page is what gets declared.
 
-fastcached_declare_utf8_code_page()
+pace_declare_utf8_code_page()
 
 # ----------------------------------------------------------------------------
 # No executable raises a modal error dialog on Windows (#1389), attached by the same
 # walk and for the same reason as the code page above. cmake/ErrorPopups.cmake, which is
 # included with the other helpers so every test registration can name its variable.
 
-fastcached_suppress_error_popups()
+pace_suppress_error_popups()
 
 # ----------------------------------------------------------------------------
 # No executable is compiled for an instruction set above its architecture's baseline
@@ -832,7 +832,7 @@ fastcached_suppress_error_popups()
 # own environment. Attached by the same walk as the two above, for the same reason.
 # cmake/InstructionSetProbe.cmake says why the build and not a test.
 
-fastcached_probe_instruction_set_baseline()
+pace_probe_instruction_set_baseline()
 
 # ----------------------------------------------------------------------------
 # The `coverage` / `coverage-clean` targets, when ENABLE_COVERAGE is on. Last in
@@ -841,5 +841,5 @@ fastcached_probe_instruction_set_baseline()
 # subdirectory added after this call is a binary left out of the report.
 
 if(ENABLE_COVERAGE)
-    fastcached_add_coverage_targets()
+    pace_add_coverage_targets()
 endif()

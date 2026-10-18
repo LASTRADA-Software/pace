@@ -35,7 +35,7 @@ std::expected<CompressionCodec, ConfigError> ParseCompressionCodec(std::string_v
     if (!Compression::IsAvailable(*codec))
         return std::unexpected(ValueError(
             ConfigErrorCode::OutOfRange,
-            std::format("codec '{}' is not available in this build (rebuild with FASTCACHED_ENABLE_COMPRESSION)", sv)));
+            std::format("codec '{}' is not available in this build (rebuild with PACE_ENABLE_COMPRESSION)", sv)));
 
     return *codec;
 }

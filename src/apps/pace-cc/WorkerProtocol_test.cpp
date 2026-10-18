@@ -552,7 +552,7 @@ TEST_CASE("A worker refuses AUTH with the one code the client steps over", "[wor
     //
     // `Cc::CacheProtocol::Exchange` tolerates exactly `Wire::UnimplementedVerb` and
     // proceeds unauthenticated -- right against a worker with no credential to check.
-    // Answered anything else, a `FASTCACHE_TOKEN`-configured worker was refused at
+    // Answered anything else, a `PACE_TOKEN`-configured worker was refused at
     // REGISTER and never joined the fleet at all (#340).
     //
     // Asserted by VALUE: the enumerator both ends name is the only thing holding this
@@ -564,7 +564,7 @@ TEST_CASE("A worker refuses AUTH with the one code the client steps over", "[wor
     REQUIRE(answer.has_value());
     CHECK(ErrorOf(Unwrap(answer)) == Wire::UnimplementedVerb);
 
-    // A bare token with no username, which is how `FASTCACHE_TOKEN` alone reaches the
+    // A bare token with no username, which is how `PACE_TOKEN` alone reaches the
     // wire, takes the same answer.
     auto const tokenOnly = Wire::EncodeAuth(Wire::AuthRequest { .username = "", .secret = "s3cret" });
     auto const bare = fix.worker.Answer(tokenOnly);
@@ -722,7 +722,7 @@ TEST_CASE("An envelope refusal's wire code and its message are one fact", "[work
         auto const* const row = DescriptorOf(counter);
         REQUIRE(row != nullptr);
         INFO("counter " << row->prometheusName);
-        CHECK(row->prometheusName.starts_with("fastcache_worker_jobs_refused_envelope_"));
+        CHECK(row->prometheusName.starts_with("pace_worker_jobs_refused_envelope_"));
     }
 }
 
@@ -1006,7 +1006,7 @@ TEST_CASE("A compile is counted from start to finish", "[worker-protocol][metric
     std::size_t refusalCounters = 0;
     for (auto const& row: Pace::CounterTable)
     {
-        if (!row.prometheusName.starts_with("fastcache_worker_jobs_refused_"))
+        if (!row.prometheusName.starts_with("pace_worker_jobs_refused_"))
             continue;
         ++refusalCounters;
         INFO("counter " << row.prometheusName);
@@ -1070,7 +1070,7 @@ TEST_CASE("A runner refusal counts as started and never as completed", "[worker-
     // Balancing the pair here is not the fix: `WorkerJobsCompleted` is the _count
     // half of a duration with `WorkerCompileMillisTotal`, so a refusal counted
     // there would drag the average compile time toward zero with jobs that never
-    // ran. In-flight is the `fastcache_node_slots_busy` gauge.
+    // ran. In-flight is the `pace_node_slots_busy` gauge.
     //
     // Asserted as an exact difference after a MIX, not after one refusal: the
     // drift is cumulative, and a single refusal cannot tell "never returns" from
@@ -2000,7 +2000,7 @@ TEST_CASE("A credentialled client reaches a worker that has no AUTH and still ge
     // the two halves actually agree, because the refusal bytes come out of the real
     // `WorkerProtocol` and go into the real `Cc::CacheProtocol::Exchange`.
     //
-    // What it regresses: with `FASTCACHE_TOKEN` set, a worker answering AUTH with
+    // What it regresses: with `PACE_TOKEN` set, a worker answering AUTH with
     // `DispatchNotPermitted` had that refusal returned in place of the answer to the
     // request the client actually sent -- so a credentialled worker was refused at
     // REGISTER and never joined the fleet at all. The machine was absent rather than

@@ -50,14 +50,14 @@ using Pace::Testing::Unwrap;
 /// ## Why it renders rather than reading `CounterTable`
 ///
 /// Reading the catalog would cover the counters and miss everything else: the
-/// storage block, the per-tier series and `fastcached_uptime_seconds` are rendered
+/// storage block, the per-tier series and `pace_uptime_seconds` are rendered
 /// from `MetricsSnapshot` and appear in no table this test could walk. Rendering the
 /// production formatter over a snapshot that has every optional part present asks
 /// the question about the actual exposition instead.
 ///
 /// ## What it does NOT cover, stated rather than left to be discovered
 ///
-/// **The `fastcache_*` series** (no `d`). Every process that serves this endpoint
+/// **The `pace_*` series** (no `d`). Every process that serves this endpoint
 /// exports every counter, so a daemon's scrape also carries the worker, node and
 /// scheduler series — flat at zero, because nothing in that binary moves them. They
 /// are `pace-node`'s and are documented on its page; documenting sixty
@@ -78,16 +78,16 @@ constexpr std::string_view DeploymentPage = "docs/operations/deployment.md";
 constexpr std::string_view MetricsHeading = "## Metrics";
 
 /// Only series in the daemon's own namespace are checked. See the note above.
-constexpr std::string_view DaemonPrefix = "fastcached_";
+constexpr std::string_view DaemonPrefix = "pace_";
 
 /// The page that carries the compile node's per-series tables.
 constexpr std::string_view NodePage = "docs/tools/pace-node.md";
 
 /// The node's namespace.
 ///
-/// It cannot collide with the daemon's despite the shared stem: `fastcached_` has a
+/// It cannot collide with the daemon's despite the shared stem: `pace_` has a
 /// `d` where this one has its separator, so no name matches both prefixes.
-constexpr std::string_view NodePrefix = "fastcache_";
+constexpr std::string_view NodePrefix = "pace_";
 
 /// A snapshot with every optional part present, so the renderer emits every line
 /// it is capable of emitting.
@@ -140,7 +140,7 @@ constexpr std::string_view NodePrefix = "fastcache_";
     return snapshot;
 }
 
-/// Every `fastcached_*` series name in a rendered exposition.
+/// Every `pace_*` series name in a rendered exposition.
 /// @param exposition Prometheus text exposition.
 /// @return The distinct series names, sorted.
 [[nodiscard]] std::set<std::string> SeriesIn(std::string_view exposition, std::string_view prefix)
@@ -162,16 +162,16 @@ constexpr std::string_view NodePrefix = "fastcache_";
     return names;
 }
 
-/// Every `fastcached_*` series name written in `text`.
+/// Every `pace_*` series name written in `text`.
 ///
 /// The tier series are written in the prose with their label
-/// (`fastcached_tier_items{tier="memory"}`), so the token ends at the first
+/// (`pace_tier_items{tier="memory"}`), so the token ends at the first
 /// character an identifier cannot carry — which is the same name the exposition
 /// emits its `# HELP` for.
 ///
 /// A token ending in `_` is a PREFIX being discussed rather than a series being
-/// documented — the page says "the `fastcached_dispatch_*` block" and "the
-/// `fastcached_` prefix" — and no series name ends that way. Dropping them is
+/// documented — the page says "the `pace_dispatch_*` block" and "the
+/// `pace_` prefix" — and no series name ends that way. Dropping them is
 /// exact rather than a heuristic: it is a property of the name, not a guess about
 /// the sentence around it.
 /// @param text Markdown to scan.
@@ -244,7 +244,7 @@ constexpr std::string_view NodePrefix = "fastcache_";
 
 } // namespace
 
-TEST_CASE("Every fastcached_ series the daemon renders is documented, and vice versa", "[metrics][docs]")
+TEST_CASE("Every pace_ series the daemon renders is documented, and vice versa", "[metrics][docs]")
 {
     std::filesystem::path const root { Pace::Testing::CheckoutSourceDir };
     auto const read = ReadWhole(root / DeploymentPage);
@@ -294,14 +294,14 @@ TEST_CASE("The daemon's two compile-cache store refusals are named on the page",
     REQUIRE(read.has_value());
     auto const& page = Unwrap(read);
 
-    CHECK(page.contains("fastcached_cache_stores_refused_foreign_generation_total"));
-    CHECK(page.contains("fastcached_cache_stores_refused_not_a_compile_value_total"));
+    CHECK(page.contains("pace_cache_stores_refused_foreign_generation_total"));
+    CHECK(page.contains("pace_cache_stores_refused_not_a_compile_value_total"));
     // And the node's twin is named beside it, or the page documents one end of a
     // two-ended question.
-    CHECK(page.contains("fastcache_node_cache_requests_refused_foreign_generation_total"));
+    CHECK(page.contains("pace_node_cache_requests_refused_foreign_generation_total"));
 }
 
-TEST_CASE("Every fastcache_ series the node renders is documented, and vice versa", "[metrics][docs]")
+TEST_CASE("Every pace_ series the node renders is documented, and vice versa", "[metrics][docs]")
 {
     // #553, the node's half of the same gap. Both directions are live drift, and
     // both are invisible: a counter exported and undocumented is one an operator
@@ -312,7 +312,7 @@ TEST_CASE("Every fastcache_ series the node renders is documented, and vice vers
     // ## Why this compares against the RENDERER and not against `MetricsCatalog`
     //
     // The ticket proposes reading the catalog. Measured, that produces a wrong
-    // answer in the dangerous direction: `fastcache_node_upstream_configured` is
+    // answer in the dangerous direction: `pace_node_upstream_configured` is
     // documented, is exported, and is **not a `CounterTable` row** -- it is rendered
     // from `MetricsSnapshot::upstreamConfigured`. It appears in `MetricsCatalog.hpp`
     // only inside another row's help text. So a scan keyed on `prometheusName`
@@ -368,6 +368,6 @@ TEST_CASE("The node's page is scanned whole, not just its tables", "[metrics][do
 
     // A series documented only in the refusal-counter table, and one documented only
     // in the cache-tier discussion. Neither is in the other's section.
-    CHECK(all.contains("fastcache_worker_jobs_refused_no_slot_total"));
-    CHECK(all.contains("fastcache_node_cache_hits_total"));
+    CHECK(all.contains("pace_worker_jobs_refused_no_slot_total"));
+    CHECK(all.contains("pace_node_cache_hits_total"));
 }

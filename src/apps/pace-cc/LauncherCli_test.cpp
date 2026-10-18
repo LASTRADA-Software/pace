@@ -294,7 +294,7 @@ TEST_CASE("every environment row is named and described")
     for (auto const& spec: LauncherEnvironment())
     {
         INFO("variable " << spec.name);
-        CHECK(spec.name.starts_with("FASTCACHE_"));
+        CHECK(spec.name.starts_with("PACE_"));
         CHECK_FALSE(spec.summary.empty());
     }
 }
@@ -318,11 +318,11 @@ TEST_CASE("the two ENVIRONMENT row groups share one column")
 {
     // They sit in one section precisely so the prose between them cannot let
     // the halves drift apart; XDG_STATE_HOME, HOME is as wide as the widest
-    // FASTCACHE_ name, so a regression here is visible immediately.
-    // Anchored on each row's own indent: FASTCACHE_ADDR is also named in the
+    // PACE_ name, so a regression here is visible immediately.
+    // Anchored on each row's own indent: PACE_ADDR is also named in the
     // prose below the rows, and a bare search would find whichever came first.
     auto const help = HelpText();
-    auto const first = Pace::Testing::DescriptionColumnOf(help, "FASTCACHE_ADDR");
+    auto const first = Pace::Testing::DescriptionColumnOf(help, "PACE_ADDR");
     auto const second = Pace::Testing::DescriptionColumnOf(help, "XDG_STATE_HOME, HOME");
     REQUIRE(first != std::string_view::npos);
     REQUIRE(second != std::string_view::npos);
@@ -337,7 +337,7 @@ TEST_CASE("the help text documents every environment variable the launcher reads
     //
     // What it could NOT catch is a row ARRIVING -- a list is exact about the names it
     // knows and silent about the ones it does not, and silence reads identically to
-    // complete coverage. `FASTCACHE_VERIFY` sat outside it for exactly that reason and
+    // complete coverage. `PACE_VERIFY` sat outside it for exactly that reason and
     // was found by accident. So the COUNT is asserted below against
     // `LauncherEnvironment().size()`, which is not tautological the way reading the
     // names from it would be: it says "this oracle knows about as many variables as
@@ -345,50 +345,50 @@ TEST_CASE("the help text documents every environment variable the launcher reads
     // ever learning what that row is called.
     auto const help = HelpText();
     auto fastcacheNames = std::size_t { 0 };
-    for (auto const* name: { "FASTCACHE_ADDR",
-                             "FASTCACHE_SOURCE_DIR",
-                             "FASTCACHE_BINARY_DIR",
-                             "FASTCACHE_PREFETCH_GROUP",
-                             "FASTCACHE_VERBOSE",
-                             "FASTCACHE_NO_STATS",
-                             "FASTCACHE_NO_DIRECT",
-                             "FASTCACHE_CONNECT_TIMEOUT",
-                             "FASTCACHE_TIMEOUT",
+    for (auto const* name: { "PACE_ADDR",
+                             "PACE_SOURCE_DIR",
+                             "PACE_BINARY_DIR",
+                             "PACE_PREFETCH_GROUP",
+                             "PACE_VERBOSE",
+                             "PACE_NO_STATS",
+                             "PACE_NO_DIRECT",
+                             "PACE_CONNECT_TIMEOUT",
+                             "PACE_TIMEOUT",
                              // Not a spelling variant of the row above it: a cache
                              // exchange and a remote compile are bounded by
                              // different things, and one knob moving both is the
                              // defect #223 records. A `contains` for the shorter
                              // name does not match the longer one, so dropping
                              // either row is caught here.
-                             "FASTCACHE_DISPATCH_TIMEOUT",
+                             "PACE_DISPATCH_TIMEOUT",
                              // Nor is THIS one a variant of the row above it, and the
                              // same `contains` argument applies in the other direction:
                              // the total bounds how long a compile may take and this
                              // bounds how long the worker may say nothing, which is the
                              // split #245 exists for. A build that documented one and
                              // read the other would read exactly like a working one.
-                             "FASTCACHE_DISPATCH_IDLE",
-                             "FASTCACHE_MAX_STORE_BYTES",
-                             "FASTCACHE_SCHEDULER",
-                             "FASTCACHE_TOKEN",
-                             "FASTCACHE_USER",
+                             "PACE_DISPATCH_IDLE",
+                             "PACE_MAX_STORE_BYTES",
+                             "PACE_SCHEDULER",
+                             "PACE_TOKEN",
+                             "PACE_USER",
                              // Was missing from this oracle while its row existed in
                              // the table, so the row could have been dropped with
                              // nothing failing -- the exact hole the oracle is for.
                              // Found while adding the row below it; a hand-kept list
                              // is exact about what it knows and silent about what it
                              // does not.
-                             "FASTCACHE_VERIFY",
+                             "PACE_VERIFY",
                              // A build that reads this and documents nothing leaves an
                              // operator no way to discover the one setting that can fix
                              // a silent under-rebuild (#700). It is also the only row
                              // here whose value an operator must copy from somewhere
                              // else, so the summary carrying the recipe is load-bearing
                              // rather than decorative -- asserted separately below.
-                             "FASTCACHE_MSVC_DEPS_PREFIX",
+                             "PACE_MSVC_DEPS_PREFIX",
                              // The third root: without it on the help page an operator
                              // reading why two machines never share has nothing to find.
-                             "FASTCACHE_DEPS_DIR",
+                             "PACE_DEPS_DIR",
                              // The three below are not the launcher's own -- they are
                              // the usual per-user state locations, documented as
                              // `UsageEntry` rows rather than `EnvVarSpec` ones -- so
@@ -400,21 +400,21 @@ TEST_CASE("the help text documents every environment variable the launcher reads
     {
         INFO("variable " << name);
         CHECK(help.contains(name));
-        if (std::string_view { name }.starts_with("FASTCACHE_"))
+        if (std::string_view { name }.starts_with("PACE_"))
             ++fastcacheNames;
     }
 
     // Counted from the loop rather than written down, so this cannot drift from the
     // list it describes -- a hand-maintained number beside a hand-maintained list is
     // two sources of truth wearing one hat.
-    INFO("oracle knows " << fastcacheNames << " FASTCACHE_* names; LauncherEnvironment() has "
+    INFO("oracle knows " << fastcacheNames << " PACE_* names; LauncherEnvironment() has "
                          << LauncherEnvironment().size());
     CHECK(fastcacheNames == LauncherEnvironment().size());
 }
 
 TEST_CASE("the help text tells an operator where to find their msvc_deps_prefix")
 {
-    // FASTCACHE_MSVC_DEPS_PREFIX is the only launcher variable whose value cannot be
+    // PACE_MSVC_DEPS_PREFIX is the only launcher variable whose value cannot be
     // invented: it has to equal a string the build already holds, and getting it
     // wrong is silent in exactly the way #700 is. So documenting the NAME is not
     // enough -- the summary has to carry the recipe, and that is a property worth an

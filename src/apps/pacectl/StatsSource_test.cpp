@@ -227,24 +227,24 @@ TEST_CASE("no attempts at all is unreachable rather than an empty success", "[cl
 
 TEST_CASE("a Prometheus body parses into numbered fields, keeping labels", "[cli][stats]")
 {
-    auto const body = std::string { "# HELP fastcached_items Items.\n"
-                                    "# TYPE fastcached_items gauge\n"
-                                    "fastcached_items 42\n"
-                                    "fastcached_tier_items{tier=\"l1\"} 7\n"
-                                    "fastcached_tier_items{tier=\"l2\"} 9\n" };
+    auto const body = std::string { "# HELP pace_items Items.\n"
+                                    "# TYPE pace_items gauge\n"
+                                    "pace_items 42\n"
+                                    "pace_tier_items{tier=\"l1\"} 7\n"
+                                    "pace_tier_items{tier=\"l2\"} 9\n" };
 
     auto const record = ParsePrometheus(body);
     REQUIRE(record.shape == Shape::Record);
-    REQUIRE(FindField(record, "fastcached_items") != nullptr);
-    CHECK(FindField(record, "fastcached_items")->value.kind == CellKind::Number);
-    CHECK(FindField(record, "fastcached_items")->value.lexical == "42");
+    REQUIRE(FindField(record, "pace_items") != nullptr);
+    CHECK(FindField(record, "pace_items")->value.kind == CellKind::Number);
+    CHECK(FindField(record, "pace_items")->value.lexical == "42");
 
     // The labels stay in the field name. Dropping them would merge two tiers into one
     // field and silently report one tier's number for the other.
-    REQUIRE(FindField(record, "fastcached_tier_items{tier=\"l1\"}") != nullptr);
-    CHECK(FindField(record, "fastcached_tier_items{tier=\"l1\"}")->value.lexical == "7");
-    REQUIRE(FindField(record, "fastcached_tier_items{tier=\"l2\"}") != nullptr);
-    CHECK(FindField(record, "fastcached_tier_items{tier=\"l2\"}")->value.lexical == "9");
+    REQUIRE(FindField(record, "pace_tier_items{tier=\"l1\"}") != nullptr);
+    CHECK(FindField(record, "pace_tier_items{tier=\"l1\"}")->value.lexical == "7");
+    REQUIRE(FindField(record, "pace_tier_items{tier=\"l2\"}") != nullptr);
+    CHECK(FindField(record, "pace_tier_items{tier=\"l2\"}")->value.lexical == "9");
 
     // The comments contributed nothing.
     CHECK(record.fields.size() == 3);
@@ -253,7 +253,7 @@ TEST_CASE("a Prometheus body parses into numbered fields, keeping labels", "[cli
 TEST_CASE("an INFO body parses, classifying numbers apart from text", "[cli][stats]")
 {
     auto const body = std::string { "# Server\r\n"
-                                    "fastcached_version:0.2.0\r\n"
+                                    "pace_version:0.2.0\r\n"
                                     "redis_version:6.0.0-fastcached\r\n"
                                     "# Memory\r\n"
                                     "used_memory:1234\r\n" };
@@ -269,7 +269,7 @@ TEST_CASE("an INFO body parses, classifying numbers apart from text", "[cli][sta
     CHECK(FindField(record, "redis_version")->value.kind == CellKind::Text);
     CHECK(FindField(record, "redis_version")->value.lexical == "6.0.0-fastcached");
 
-    CHECK(FindField(record, "fastcached_version")->value.lexical == "0.2.0");
+    CHECK(FindField(record, "pace_version")->value.lexical == "0.2.0");
     // The section headers contributed nothing.
     CHECK(record.fields.size() == 3);
 }
@@ -298,8 +298,8 @@ TEST_CASE("a NodeMetrics body reads back as the record the /metrics rung parses,
           "[cli][stats][node-metrics]")
 {
     // #1406. WHAT DISTINGUISHES: the storage figures. The counter catalogue alone -- what this body
-    // was -- carries `fastcache_worker_jobs_completed_total` too, so a case asserting only a counter
-    // passes under the defect; `fastcached_items` and `fastcached_delete_hits_total` are the half a
+    // was -- carries `pace_worker_jobs_completed_total` too, so a case asserting only a counter
+    // passes under the defect; `pace_items` and `pace_delete_hits_total` are the half a
     // node with no admin surface could not show.
     auto sink = AtomicMetricsSink {};
     sink.Increment(IMetricsSink::Counter::WorkerJobsCompleted, 12);
@@ -317,12 +317,12 @@ TEST_CASE("a NodeMetrics body reads back as the record the /metrics rung parses,
         REQUIRE(field != nullptr);
         return field->value.lexical;
     };
-    CHECK(lexicalOf("fastcached_items") == "3");
-    CHECK(lexicalOf("fastcached_delete_hits_total") == "2");
-    CHECK(lexicalOf("fastcached_delete_misses_total") == "1");
-    CHECK(lexicalOf("fastcache_worker_jobs_completed_total") == "12");
+    CHECK(lexicalOf("pace_items") == "3");
+    CHECK(lexicalOf("pace_delete_hits_total") == "2");
+    CHECK(lexicalOf("pace_delete_misses_total") == "1");
+    CHECK(lexicalOf("pace_worker_jobs_completed_total") == "12");
     // A counter is a tally, so a zero row is PRESENT.
-    CHECK(lexicalOf("fastcache_worker_jobs_started_total") == "0");
+    CHECK(lexicalOf("pace_worker_jobs_started_total") == "0");
 
     // That this is the record the node's `/metrics` route would have given is asserted against the two
     // production acquisitions on one node, in `CacheTier_test`: rendered from this same reading on both
@@ -352,7 +352,7 @@ TEST_CASE("a NodeMetrics body reads back as the record the /metrics rung parses,
         // Version 9's shape: the catalogue as `name value` pairs. Read as a reading, its leading bytes
         // are not this build's layout digest -- which is what keeps a mismatched pair of builds from
         // reporting a column of nonsense figures.
-        auto const name = std::string_view { "fastcache_worker_jobs_completed_total" };
+        auto const name = std::string_view { "pace_worker_jobs_completed_total" };
         auto const value = std::array<std::byte, 8> { std::byte { 12 } };
         auto const row = WireFields::Encode({ std::as_bytes(std::span { name }), std::span<std::byte const> { value } });
         auto const oldBody = WireFields::Encode(

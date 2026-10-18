@@ -1493,7 +1493,7 @@ write_moved_tree() {
 moved_compile() {
     local root="$1" log="$2"
     shift 2
-    env "$@" FC_EDIT_STUB_REAL="$real_compiler" FASTCACHE_SOURCE_DIR="$root" FASTCACHE_BINARY_DIR="${root}/build" \
+    env "$@" FC_EDIT_STUB_REAL="$real_compiler" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
         "$launcher" "$stub" -std=c++20 -MD -MF "${root}/build/m.d" -c "${root}/src/m.cpp" -o "${root}/build/m.o" 2> "$log"
 }
 object_says() { LC_ALL=C grep -aq "$2" "$1"; }
@@ -1523,7 +1523,7 @@ for leg in tu header; do
 
     echo "== mid-compile save (${leg}): the saved content is a MISS and builds what was saved =="
     rm -f "${root}/build/m.o"
-    moved_compile "$root" "${moved}/${leg}-2.log" FASTCACHE_E2E_CASE=moved \
+    moved_compile "$root" "${moved}/${leg}-2.log" PACE_E2E_CASE=moved \
         || { cat "${moved}/${leg}-2.log" >&2; fail "mid-compile ${leg}: the rebuild failed"; }
     cat "${moved}/${leg}-2.log"
     grep -q "pace-cc: MISS" "${moved}/${leg}-2.log" \
@@ -1534,26 +1534,26 @@ done
 echo "== mid-compile save: another checkout holding the saved content is not served the raced object =="
 other="${moved}/other"
 write_moved_tree "$other" MESSAGE_V2_NEW HEADER_V1_OLD
-moved_compile "$other" "${moved}/other.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$other" "${moved}/other.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/other.log" >&2; fail "mid-compile: the other checkout failed"; }
 object_says "${other}/build/m.o" MESSAGE_V2_NEW || fail "mid-compile: another checkout was served the raced object"
 
 echo "== control: the same stub with no save stores, records a manifest, then direct-hits =="
 control="${moved}/control"
 write_moved_tree "$control" MESSAGE_CONTROL HEADER_CONTROL
-moved_compile "$control" "${moved}/control-1.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$control" "${moved}/control-1.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/control-1.log" >&2; fail "control: the compile failed"; }
 grep -q "STORED key=" "${moved}/control-1.log" || fail "control: a quiet compile through the stub did not store"
 grep -q "MANIFEST stored key=" "${moved}/control-1.log" || fail "control: a quiet compile did not record a manifest"
 rm -f "${control}/build/m.o"
-moved_compile "$control" "${moved}/control-2.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$control" "${moved}/control-2.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/control-2.log" >&2; fail "control: the rebuild failed"; }
 grep -q "direct mode: the manifest validated" "${moved}/control-2.log" || fail "control: the rebuild was not a direct hit"
 
 echo "== control: a second checkout of the same content direct-hits the first one's manifest =="
 twin="${moved}/control-twin-deeper/tree"
 write_moved_tree "$twin" MESSAGE_CONTROL HEADER_CONTROL
-moved_compile "$twin" "${moved}/twin.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$twin" "${moved}/twin.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/twin.log" >&2; fail "control: the twin checkout failed"; }
 grep -q "direct mode: the manifest validated" "${moved}/twin.log" \
     || fail "control: cross-checkout sharing did not survive the witness"

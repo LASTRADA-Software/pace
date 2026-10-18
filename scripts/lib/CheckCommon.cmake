@@ -15,23 +15,23 @@
 # is right matters more than the ticket expected. Measured by extracting every
 # definition from `function(` to its matching `endfunction()` and hashing it:
 #
-#   fastcached_row_fields          6 copies, ONE digest -- byte-identical
-#   fastcached_split_rows          2 copies, ONE digest -- byte-identical
-#   fastcached_split_account_row   1
-#   fastcached_registration_fields 1
+#   pace_row_fields          6 copies, ONE digest -- byte-identical
+#   pace_split_rows          2 copies, ONE digest -- byte-identical
+#   pace_split_account_row   1
+#   pace_registration_fields 1
 #
 # Nine general splitters under four names, not four under three: the tree grew after
-# the ticket was filed, and three of the six `fastcached_row_fields` copies carry a
+# the ticket was filed, and three of the six `pace_row_fields` copies carry a
 # comment telling the next author to keep them byte-identical and to count the file
 # in when #495 lands. Those comments worked. Within a name there is no divergence at
 # all.
 #
 # ## The divergence is BETWEEN the names, and it is about CMake lists
 #
-# `fastcached_row_fields` walks the row with `string(FIND)` and `string(SUBSTRING)`
+# `pace_row_fields` walks the row with `string(FIND)` and `string(SUBSTRING)`
 # and builds no CMake list. The other three all hand text to CMake's list parser:
-# `fastcached_split_account_row` and `fastcached_registration_fields` through
-# `string(REPLACE "|" ";")` and `list(GET)`, and `fastcached_split_rows` by
+# `pace_split_account_row` and `pace_registration_fields` through
+# `string(REPLACE "|" ";")` and `list(GET)`, and `pace_split_rows` by
 # `list(APPEND)`ing into two parallel lists.
 #
 # The copies were then driven against each other on the awkward rows #513 names --
@@ -40,7 +40,7 @@
 # came back is not what the ticket expected, and not what this comment said before
 # it was measured:
 #
-#   row            fastcached_row_fields    fastcached_split_account_row
+#   row            pace_row_fields    pace_split_account_row
 #   a|b|c          a, b, c                  same
 #   a|b|           a, b, ""                 same
 #   a||c           a, "", c                 same
@@ -69,7 +69,7 @@
 # fourth into text that is only ever printed. But it is a behaviour change and is
 # recorded as one rather than described as a repair.
 #
-# `fastcached_split_rows` differs from `fastcached_row_fields` in the refusal WORDING
+# `pace_split_rows` differs from `pace_row_fields` in the refusal WORDING
 # alone ("Malformed row (no '|')" against "wanted 2 '|'-separated fields"), on every
 # input measured.
 #
@@ -82,7 +82,7 @@
 #
 # ## What is deliberately NOT reconciled
 #
-# `fastcached_split_rows` keeps its parallel-list OUTPUT. That shape is the one
+# `pace_split_rows` keeps its parallel-list OUTPUT. That shape is the one
 # #495 calls out -- two lists that must be kept in step by hand -- and removing it
 # means restructuring ten consumer sites across two checks that want a path list to
 # `list(FIND)` in. That is its own change, and doing it inside a consolidation would
@@ -111,7 +111,7 @@
 #
 # @param row The '|'-separated row.
 # @param ARGN Output variable names, in field order.
-function(fastcached_row_fields row)
+function(pace_row_fields row)
     list(LENGTH ARGN fieldCount)
     math(EXPR lastField "${fieldCount} - 1")
     set(rest "${row}")
@@ -135,18 +135,18 @@ endfunction()
 # Split a `"value|reason"` TABLE into two parallel lists, so a reason can be printed
 # beside the rule it explains rather than being a comment nobody reads.
 #
-# The split itself is `fastcached_row_fields`, so where the separator is and what a
+# The split itself is `pace_row_fields`, so where the separator is and what a
 # malformed row does are stated once. The parallel-list output is this function's
 # own shape and is discussed in this file's header.
 #
 # @param rows The NAME of the list variable holding the rows.
 # @param valuesOut Set to the list of first fields, in row order.
 # @param reasonsOut Set to the list of last fields, in row order.
-function(fastcached_split_rows rows valuesOut reasonsOut)
+function(pace_split_rows rows valuesOut reasonsOut)
     set(values "")
     set(reasons "")
     foreach(row IN LISTS ${rows})
-        fastcached_row_fields("${row}" rowValue rowReason)
+        pace_row_fields("${row}" rowValue rowReason)
         list(APPEND values "${rowValue}")
         list(APPEND reasons "${rowReason}")
     endforeach()
@@ -226,13 +226,13 @@ endfunction()
 # @param ARGN `MAP_TABS` to turn tabs into spaces as well. Ask for it only when the
 #        caller's pattern spells whitespace as a plain space class -- CMake's regex
 #        engine does not read `\t` inside a bracket expression.
-function(fastcached_split_lines_tokenised content linesOut)
+function(pace_split_lines_tokenised content linesOut)
     set(mapTabs FALSE)
     foreach(option IN LISTS ARGN)
         if(option STREQUAL "MAP_TABS")
             set(mapTabs TRUE)
         else()
-            message(FATAL_ERROR "fastcached_split_lines_tokenised: unknown option `${option}`")
+            message(FATAL_ERROR "pace_split_lines_tokenised: unknown option `${option}`")
         endif()
     endforeach()
     string(REPLACE "\\" " " content "${content}")
@@ -262,7 +262,7 @@ endfunction()
 #
 # @param content The file content.
 # @param linesOut Set to the content's lines, in order.
-function(fastcached_split_lines_verbatim content linesOut)
+function(pace_split_lines_verbatim content linesOut)
     string(REPLACE ";" "\\;" content "${content}")
     string(REPLACE "[" " " content "${content}")
     string(REPLACE "]" " " content "${content}")
@@ -282,7 +282,7 @@ endfunction()
 #
 # @param sourceDir The repository root.
 # @param rootsOut Set to the roots, in file order, relative to @p sourceDir.
-function(fastcached_third_party_roots sourceDir rootsOut)
+function(pace_third_party_roots sourceDir rootsOut)
     set(rootsFile "${sourceDir}/scripts/lib/third-party-roots.txt")
     if(NOT EXISTS "${rootsFile}")
         message(FATAL_ERROR
@@ -290,7 +290,7 @@ function(fastcached_third_party_roots sourceDir rootsOut)
             "from this project's own")
     endif()
     file(READ "${rootsFile}" content)
-    fastcached_split_lines_verbatim("${content}" lines)
+    pace_split_lines_verbatim("${content}" lines)
     set(roots "")
     foreach(line IN LISTS lines)
         string(REGEX REPLACE "#.*$" "" line "${line}")
@@ -315,7 +315,7 @@ function(fastcached_third_party_roots sourceDir rootsOut)
 endfunction()
 
 # Split a list of repository-relative paths into this project's own and the ones under a
-# third-party root (#1370). Refuses exactly as `fastcached_third_party_roots`, and reads the
+# third-party root (#1370). Refuses exactly as `pace_third_party_roots`, and reads the
 # roots even for an empty list.
 #
 # A PREFIX test on `<path>/` against `<root>/`, never a regex: a root is a path name, and
@@ -324,8 +324,8 @@ endfunction()
 # @param sourceDir The repository root whose roots file is read.
 # @param pathsVar The NAME of the caller's list; rewritten to the first-party paths.
 # @param declinedOut Receives the paths under a third-party root, in their original order.
-function(fastcached_decline_third_party sourceDir pathsVar declinedOut)
-    fastcached_third_party_roots("${sourceDir}" roots)
+function(pace_decline_third_party sourceDir pathsVar declinedOut)
+    pace_third_party_roots("${sourceDir}" roots)
     set(kept "")
     set(declined "")
     foreach(path IN LISTS ${pathsVar})
@@ -351,7 +351,7 @@ endfunction()
 # One line of C++ with its comments removed, carrying whether a block comment is still open.
 #
 # The ONE implementation of comment stripping for the line walks below. It was the body of
-# `fastcached_scan_code_lines` and moved out when `check-test-loops.cmake` needed the same
+# `pace_scan_code_lines` and moved out when `check-test-loops.cmake` needed the same
 # stripping over whole content rather than a per-line match: the comment-ordering defect
 # described inside has already had three copies, and a fourth would be the next.
 #
@@ -401,7 +401,7 @@ endfunction()
 # @param text The line.
 # @param quoteAt Index of the opening quote.
 # @param endOut Set to the index of the closing quote, or -1 when there is none on this line.
-function(fastcached_literal_end text quoteAt endOut)
+function(pace_literal_end text quoteAt endOut)
     string(LENGTH "${text}" length)
     math(EXPR from "${quoteAt} + 1")
     while(from LESS length)
@@ -437,7 +437,7 @@ endfunction()
 # @param strippedOut Set to what is left of the line: code only.
 # @param skipOut Set to TRUE when the whole line sits inside a block comment.
 # @param inBlockCommentOut Set to whether a block comment is still open when the line ends.
-function(fastcached_strip_comment_line line inBlockComment strippedOut skipOut inBlockCommentOut)
+function(pace_strip_comment_line line inBlockComment strippedOut skipOut inBlockCommentOut)
     # The fast path, and the reason the scan below is affordable: a line carrying neither `//`
     # nor `/*`, outside a block comment, is already code. That is almost every line of the
     # ~180k a full-tree walk reads, and it costs one regex.
@@ -529,7 +529,7 @@ function(fastcached_strip_comment_line line inBlockComment strippedOut skipOut i
         endif()
 
         # A string literal. Copy it through, closing quote included, and resume after it.
-        fastcached_literal_end("${rest}" ${first} endAt)
+        pace_literal_end("${rest}" ${first} endAt)
         if(endAt EQUAL -1)
             # It does not end on this line: a raw string's first line, or a continuation. KEEP
             # the rest as code. A reader that keeps text can only produce a finding somebody
@@ -560,12 +560,12 @@ endfunction()
 #
 # Line numbers survive because only comment TEXT is removed: a line inside a block comment
 # becomes empty rather than disappearing. List-free, for the reasons given at
-# `fastcached_scan_code_lines` below, and O(n^2) in the same way, so a caller filters on a
+# `pace_scan_code_lines` below, and O(n^2) in the same way, so a caller filters on a
 # whole-file `string(FIND)` first.
 #
 # **A line with no comment introducer is copied with its neighbours, not on its own.** Outside
 # a block comment, every whole line before the next one carrying `//` or `/*` is a line
-# `fastcached_strip_comment_line` would hand back unchanged -- its own fast path -- so the run
+# `pace_strip_comment_line` would hand back unchanged -- its own fast path -- so the run
 # is appended in ONE step, with the per-line `\r` removal done as `\r\n` to `\n` over the run.
 # Walking them one at a time cost a loop turn, a function call and two copies of the rest of
 # the file per line, and that was most of what `test-loops` spent on the tree: measured, the
@@ -574,7 +574,7 @@ endfunction()
 #
 # @param content The file content.
 # @param outVar Set to the content with comments removed and newlines preserved.
-function(fastcached_strip_comments content outVar)
+function(pace_strip_comments content outVar)
     set(code "")
     set(rest "${content}")
     set(inBlockComment FALSE)
@@ -603,7 +603,7 @@ function(fastcached_strip_comments content outVar)
             endif()
             # A line that is ONLY a line comment -- the doc comment on nearly every declaration
             # -- strips to its indentation: the `//` is the first introducer and nothing stands
-            # before it, which is what `fastcached_strip_comment_line` returns for it. Answered
+            # before it, which is what `pace_strip_comment_line` returns for it. Answered
             # here because the function CALL was the largest single cost of the walk.
             if(rest MATCHES "^([ \t]*)//")
                 string(APPEND code "${CMAKE_MATCH_1}")
@@ -628,7 +628,7 @@ function(fastcached_strip_comments content outVar)
             string(SUBSTRING "${rest}" 0 ${newline} line)
         endif()
         string(REGEX REPLACE "\r$" "" line "${line}")
-        fastcached_strip_comment_line("${line}" "${inBlockComment}" stripped skipLine inBlockComment)
+        pace_strip_comment_line("${line}" "${inBlockComment}" stripped skipLine inBlockComment)
         string(APPEND code "${stripped}")
         if(newline EQUAL -1)
             break()
@@ -652,13 +652,13 @@ endfunction()
 # comment stripping (`use:<line>`). A mention is counted BEFORE stripping, so a caller's
 # matched-nothing guard cannot be satisfied by the stripping alone.
 #
-# It was `fastcached_scan_lines` in `check-istreambuf-iterator.cmake` and moved here when
+# It was `pace_scan_lines` in `check-istreambuf-iterator.cmake` and moved here when
 # `check-ranges-seam.cmake` became its second caller: a second copy citing the first in a
 # comment vouches for its bugs without inheriting its fixes, and this one has had two.
 #
 # ## Why list-free
 #
-# The list-splitting idiom this was written instead of (`fastcached_read_lines`, before #495
+# The list-splitting idiom this was written instead of (`pace_read_lines`, before #495
 # split it into the two functions above) escaped `;` and `\`, blanked `[` and `]`, then split
 # on newlines into a CMake list -- and a line ending in a backslash still merged with the next
 # one, which its own comment claimed it prevented. Measured on CMake 3.28 with a four-line
@@ -682,7 +682,7 @@ endfunction()
 # @param content The file content.
 # @param pattern A CMake regular expression for the thing whose USE is sought.
 # @param outVar Set to a list of `mention:<line>` and `use:<line>` entries, in line order.
-function(fastcached_scan_code_lines content pattern outVar)
+function(pace_scan_code_lines content pattern outVar)
     set(hits "")
     set(rest "${content}")
     set(lineNumber 0)
@@ -704,7 +704,7 @@ function(fastcached_scan_code_lines content pattern outVar)
         endif()
 
         # Strip comments, so prose explaining the rule is not read as breaking it.
-        fastcached_strip_comment_line("${line}" "${inBlockComment}" stripped skipLine inBlockComment)
+        pace_strip_comment_line("${line}" "${inBlockComment}" stripped skipLine inBlockComment)
         if(NOT skipLine)
             if(stripped MATCHES "${pattern}")
                 list(APPEND hits "use:${lineNumber}")
@@ -741,7 +741,7 @@ endfunction()
 # @param sourceDir The directory to ask about.
 # @param outVar Set to `work-tree`, `no-git` (no git executable, or it could not be run) or
 #        `not-a-work-tree` (git answered, and the answer is no).
-function(fastcached_work_tree_state sourceDir outVar)
+function(pace_work_tree_state sourceDir outVar)
     if(NOT GIT_EXECUTABLE)
         find_package(Git QUIET)
     endif()
@@ -854,18 +854,18 @@ endfunction()
 #     all of it. A git built without PCRE cannot answer; that is SAID, and the walk's reading
 #     answers instead, so a missing feature costs time and never a verdict.
 #   * the walk reads each file as HEX, which is exact, and matches a token only at a byte
-#     boundary (see `fastcached_files_holding_bytes`).
+#     boundary (see `pace_files_holding_bytes`).
 #
 # Restricted to `00`-`7f` because that is where a byte and a code point are the same number in
 # every locale either side could be in; nothing here needs more.
-function(fastcached_tracked_files sourceDir)
+function(pace_tracked_files sourceDir)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "FILTER;FILES_OUT;MODE_OUT;CONTAINING_OUT;MISSING_OUT"
         "PATHSPECS;GLOBS;CONTAINING;CONTAINING_BYTES")
 
     foreach(required FILES_OUT MODE_OUT GLOBS)
         if(NOT arg_${required})
             message(FATAL_ERROR
-                "fastcached_tracked_files: ${required} is required. Without FILES_OUT or "
+                "pace_tracked_files: ${required} is required. Without FILES_OUT or "
                 "MODE_OUT the caller gets an answer it cannot read or cannot name; without "
                 "GLOBS it reports CLEAN over a source export that has no git index.")
         endif()
@@ -874,7 +874,7 @@ function(fastcached_tracked_files sourceDir)
         # A misspelled keyword would otherwise be dropped in silence, and dropping GLOBS or
         # FILTER WIDENS what a rule is enforced over -- the direction that reads as thorough.
         message(FATAL_ERROR
-            "fastcached_tracked_files: unrecognised argument(s) '${arg_UNPARSED_ARGUMENTS}'")
+            "pace_tracked_files: unrecognised argument(s) '${arg_UNPARSED_ARGUMENTS}'")
     endif()
 
     # `if(arg_FILTER STREQUAL "")` does NOT fire when the keyword was omitted: CMake reads an
@@ -893,10 +893,10 @@ function(fastcached_tracked_files sourceDir)
         set(hasContaining TRUE)
     endif()
     if(hasContaining AND "${arg_CONTAINING_OUT}" STREQUAL "")
-        message(FATAL_ERROR "fastcached_tracked_files: CONTAINING needs CONTAINING_OUT to answer into")
+        message(FATAL_ERROR "pace_tracked_files: CONTAINING needs CONTAINING_OUT to answer into")
     endif()
     if(NOT hasContaining AND NOT "${arg_CONTAINING_OUT}" STREQUAL "")
-        message(FATAL_ERROR "fastcached_tracked_files: CONTAINING_OUT names no CONTAINING to answer")
+        message(FATAL_ERROR "pace_tracked_files: CONTAINING_OUT names no CONTAINING to answer")
     endif()
     set(hasMissing FALSE)
     if(NOT "${arg_MISSING_OUT}" STREQUAL "")
@@ -908,7 +908,7 @@ function(fastcached_tracked_files sourceDir)
             # byte above 7f is a different number to PCRE in a UTF-8 locale: both would be a
             # needle that silently finds nothing.
             message(FATAL_ERROR
-                "fastcached_tracked_files: CONTAINING_BYTES takes two lowercase hex digits from "
+                "pace_tracked_files: CONTAINING_BYTES takes two lowercase hex digits from "
                 "00 to 7f, and '${token}' is not one")
         endif()
     endforeach()
@@ -917,7 +917,7 @@ function(fastcached_tracked_files sourceDir)
     set(pathspecArguments "")
     set(mode "")
 
-    fastcached_work_tree_state("${sourceDir}" workTreeState)
+    pace_work_tree_state("${sourceDir}" workTreeState)
     if(workTreeState STREQUAL "work-tree")
         if(arg_PATHSPECS)
             set(pathspecArguments -- ${arg_PATHSPECS})
@@ -1023,7 +1023,7 @@ function(fastcached_tracked_files sourceDir)
             list(SORT unlistable)
             list(JOIN unlistable ", " unlistableNames)
             message(FATAL_ERROR
-                "fastcached_tracked_files: cannot list a directory -- ${unlistableNames} in "
+                "pace_tracked_files: cannot list a directory -- ${unlistableNames} in "
                 "${sourceDir}: the walk finds no file inside a directory it cannot read, so every "
                 "file under it would be left out of the answer, which is a file passed. Make it "
                 "readable and ask again.")
@@ -1053,7 +1053,7 @@ function(fastcached_tracked_files sourceDir)
     # An unreadable file is told from an absent one by the DIRECTORY, not the file: `EXISTS` is
     # `access(R_OK)` on POSIX and so calls an unreadable file absent, and `file(TIMESTAMP)` answers
     # empty for both. A literal `file(GLOB)` lists names out of the directory, which needs no
-    # access to the file itself (see `fastcached_classify_unopened`).
+    # access to the file itself (see `pace_classify_unopened`).
     #
     # A MISSING-only question reads no contents, so there an unreadable file is simply PRESENT,
     # which is true; it is refused only where a verdict about its contents was asked for.
@@ -1075,7 +1075,7 @@ function(fastcached_tracked_files sourceDir)
             RESULT_VARIABLE stagedStatus)
         if(NOT stagedStatus EQUAL 0)
             message(FATAL_ERROR
-                "fastcached_tracked_files: `git ls-files -s` could not read the index of "
+                "pace_tracked_files: `git ls-files -s` could not read the index of "
                 "${sourceDir} (status ${stagedStatus}), so which files are symlinks is unknown")
         endif()
         string(REGEX MATCHALL "(^|\n)120000 [^\t\n]*\t[^\n]*" linkRows "${staged}")
@@ -1094,7 +1094,7 @@ function(fastcached_tracked_files sourceDir)
         # for the tree. Measured over DrvFs for `src/*` (903 files): 0.46 s for this, against
         # 1.60 s for `git ls-files -d`, whose `lstat`s are serial where the search is threaded.
         # The listing is untrusted like any search: stderr sends every file to be asked.
-        fastcached_git_grep_pcre("${sourceDir}" -L "(?!)" "${pathspecArguments}" "${found}"
+        pace_git_grep_pcre("${sourceDir}" -L "(?!)" "${pathspecArguments}" "${found}"
             openable openAnswered openNamed)
         list(APPEND unreadable ${openNamed})
         if(openAnswered)
@@ -1114,7 +1114,7 @@ function(fastcached_tracked_files sourceDir)
     endif()
     foreach(candidate IN LISTS askEach)
         if(NOT EXISTS "${sourceDir}/${candidate}" AND NOT candidate IN_LIST unreadable)
-            fastcached_classify_unopened("${sourceDir}" "${candidate}" why)
+            pace_classify_unopened("${sourceDir}" "${candidate}" why)
             list(APPEND ${why} "${candidate}")
         endif()
     endforeach()
@@ -1135,7 +1135,7 @@ function(fastcached_tracked_files sourceDir)
                     ERROR_VARIABLE grepError
                     RESULT_VARIABLE grepStatus
                     OUTPUT_STRIP_TRAILING_WHITESPACE)
-                fastcached_search_verdict("grep -l -F" "${sourceDir}" "${grepStatus}" "${grepError}"
+                pace_search_verdict("grep -l -F" "${sourceDir}" "${grepStatus}" "${grepError}"
                     "${found}" textAnswered textNamed)
                 list(APPEND unreadable ${textNamed})
                 if(textAnswered)
@@ -1151,11 +1151,11 @@ function(fastcached_tracked_files sourceDir)
             foreach(unjudgeable IN LISTS absent unreadable)
                 list(REMOVE_ITEM readText "${unjudgeable}")
             endforeach()
-            fastcached_files_holding_text("${sourceDir}" "${readText}" "${arg_CONTAINING}"
+            pace_files_holding_text("${sourceDir}" "${readText}" "${arg_CONTAINING}"
                 holdingText unopenedText)
             list(APPEND containing ${holdingText})
             foreach(candidate IN LISTS unopenedText)
-                fastcached_classify_unopened("${sourceDir}" "${candidate}" why)
+                pace_classify_unopened("${sourceDir}" "${candidate}" why)
                 list(APPEND ${why} "${candidate}")
             endforeach()
         endif()
@@ -1167,7 +1167,7 @@ function(fastcached_tracked_files sourceDir)
                 foreach(token IN LISTS arg_CONTAINING_BYTES)
                     string(APPEND byteClass "\\x${token}")
                 endforeach()
-                fastcached_git_grep_pcre("${sourceDir}" -l "[${byteClass}]" "${pathspecArguments}"
+                pace_git_grep_pcre("${sourceDir}" -l "[${byteClass}]" "${pathspecArguments}"
                     "${found}" grepFiles grepAnswered bytesNamed)
                 list(APPEND unreadable ${bytesNamed})
                 if(grepAnswered)
@@ -1182,11 +1182,11 @@ function(fastcached_tracked_files sourceDir)
             foreach(unjudgeable IN LISTS absent unreadable)
                 list(REMOVE_ITEM readBytes "${unjudgeable}")
             endforeach()
-            fastcached_files_holding_bytes("${sourceDir}" "${readBytes}" "${arg_CONTAINING_BYTES}"
+            pace_files_holding_bytes("${sourceDir}" "${readBytes}" "${arg_CONTAINING_BYTES}"
                 holdingBytes unopenedBytes)
             list(APPEND containing ${holdingBytes})
             foreach(candidate IN LISTS unopenedBytes)
-                fastcached_classify_unopened("${sourceDir}" "${candidate}" why)
+                pace_classify_unopened("${sourceDir}" "${candidate}" why)
                 list(APPEND ${why} "${candidate}")
             endforeach()
         endif()
@@ -1196,7 +1196,7 @@ function(fastcached_tracked_files sourceDir)
         if(unreadable)
             list(JOIN unreadable ", " unreadableNames)
             message(FATAL_ERROR
-                "fastcached_tracked_files: cannot judge a file it cannot read -- ${unreadableNames} "
+                "pace_tracked_files: cannot judge a file it cannot read -- ${unreadableNames} "
                 "in ${sourceDir}: tracked, present, and not readable by this process (its "
                 "permissions or an access list). A file left out of the answer is a file passed, so "
                 "this is refused rather than reported clean; make it readable and ask again.")
@@ -1206,7 +1206,7 @@ function(fastcached_tracked_files sourceDir)
         if(absent AND NOT hasMissing)
             list(JOIN absent ", " absentNames)
             message(FATAL_ERROR
-                "fastcached_tracked_files: cannot judge a file it cannot read -- ${absentNames} "
+                "pace_tracked_files: cannot judge a file it cannot read -- ${absentNames} "
                 "in ${sourceDir}: named by the index and not in the work tree (deleted, or a link "
                 "to nothing). A file left out of the answer is a file passed, so this is refused "
                 "rather than reported clean; restore it, or commit its removal.")
@@ -1245,7 +1245,7 @@ endfunction()
 # benign line somebody's git prints costs time, never a verdict. A file the stderr QUOTES is one
 # git could not open; naming it here is what lets a Windows access list, which `EXISTS` cannot
 # see, be refused in this seam's words rather than by a failing `file(READ)`.
-function(fastcached_search_verdict what sourceDir status stderr found outAnswered outNamed)
+function(pace_search_verdict what sourceDir status stderr found outAnswered outNamed)
     set(named "")
     string(REGEX MATCHALL "'[^'\n]+'" quoted "${stderr}")
     foreach(quote IN LISTS quoted)
@@ -1258,7 +1258,7 @@ function(fastcached_search_verdict what sourceDir status stderr found outAnswere
     if(NOT (status EQUAL 0 OR status EQUAL 1) OR NOT "${stderr}" STREQUAL "")
         string(STRIP "${stderr}" stderr)
         message(STATUS
-            "fastcached_tracked_files: `git ${what}` did not answer cleanly for ${sourceDir} "
+            "pace_tracked_files: `git ${what}` did not answer cleanly for ${sourceDir} "
             "(status ${status}: ${stderr}), so this question is answered by reading every file "
             "instead -- exact, and slower")
         set(answered FALSE)
@@ -1284,7 +1284,7 @@ endfunction()
 # directory entry that IS listed -- the middle link -- so stopping there calls it `unreadable`.
 # Bounded at 40 hops, Linux's own `MAXSYMLINKS`; a chain longer than that, or a cycle, is one the
 # kernel refuses to open with `ELOOP`, which is a link to nothing reachable -- `absent`.
-function(fastcached_classify_unopened sourceDir candidate outVar)
+function(pace_classify_unopened sourceDir candidate outVar)
     set(path "${sourceDir}/${candidate}")
     foreach(hop RANGE 1 40)
         if(NOT IS_SYMLINK "${path}")
@@ -1322,10 +1322,10 @@ endfunction()
 #
 # `LC_ALL=C` so PCRE matches bytes rather than code points. A git that cannot run the search --
 # one built without PCRE refuses `-P` -- or that says anything at all on stderr is not trusted
-# (`fastcached_search_verdict`), and the caller answers by reading instead: a missing feature
+# (`pace_search_verdict`), and the caller answers by reading instead: a missing feature
 # costs time and never a verdict, where a search that failed read as one that found nothing
 # would cost the verdict.
-function(fastcached_git_grep_pcre sourceDir listing pattern pathspecArguments found outFiles outAnswered outNamed)
+function(pace_git_grep_pcre sourceDir listing pattern pathspecArguments found outFiles outAnswered outNamed)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env LC_ALL=C
                 "${GIT_EXECUTABLE}" -C "${sourceDir}" grep ${listing} -a -P --no-color
@@ -1334,7 +1334,7 @@ function(fastcached_git_grep_pcre sourceDir listing pattern pathspecArguments fo
         ERROR_VARIABLE grepError
         RESULT_VARIABLE grepStatus
         OUTPUT_STRIP_TRAILING_WHITESPACE)
-    fastcached_search_verdict("grep ${listing} -P" "${sourceDir}" "${grepStatus}" "${grepError}"
+    pace_search_verdict("grep ${listing} -P" "${sourceDir}" "${grepStatus}" "${grepError}"
         "${found}" answered named)
     set(files "")
     if(answered AND grepStatus EQUAL 0)
@@ -1355,7 +1355,7 @@ endfunction()
 ##        The seam classifies every file in doubt BEFORE reading, so this is reached only by a
 ##        file that changed in between; neutering it turns no self-test case red, and that is
 ##        why: it is the race's guard, not a second classifier.
-function(fastcached_files_holding_text sourceDir files needles outVar outUnopened)
+function(pace_files_holding_text sourceDir files needles outVar outUnopened)
     set(holding "")
     set(unopened "")
     foreach(candidate IN LISTS files)
@@ -1385,13 +1385,13 @@ endfunction()
 ## @param tokens The bytes, as two lowercase hex digits each.
 ## @param outVar Name of the variable to receive the files that hold one, in the order given.
 ## @param outUnopened Name of the variable to receive the files that could not be opened, which
-##        the caller accounts for, as `fastcached_files_holding_text` does.
+##        the caller accounts for, as `pace_files_holding_text` does.
 #
 # A token searched in raw hex also matches ACROSS a byte boundary -- `a0 7b` contains `07` --
 # so the raw search only says where to look. A file with a raw hit is spaced, a blank after
 # every pair, and the token is searched with its blank: a three-character needle whose third
 # character is a blank can only start at a multiple of three, which is a whole byte.
-function(fastcached_files_holding_bytes sourceDir files tokens outVar outUnopened)
+function(pace_files_holding_bytes sourceDir files tokens outVar outUnopened)
     set(holding "")
     set(unopened "")
     foreach(candidate IN LISTS files)
@@ -1426,7 +1426,7 @@ endfunction()
 # ---------------------------------------------------------------------------
 # Every first-party C++ source in the repository, and HOW they were found.
 #
-# One of the questions `fastcached_tracked_files` can be asked, and the one two checks ask:
+# One of the questions `pace_tracked_files` can be asked, and the one two checks ask:
 # `check-enumerator-walks.cmake` and `check-ranges-seam.cmake`. It is NOT the question the
 # other six enumerating checks ask -- see the census on #1485 -- so it is a caller of the
 # shared machinery rather than the thing every check calls.
@@ -1438,7 +1438,7 @@ endfunction()
 # @param filesOut Set to the first-party C++ paths, relative to the root and sorted.
 # @param declinedOut Set to the third-party paths that were excluded.
 # @param modeOut Set to a human-readable name for how the files were found.
-function(fastcached_first_party_cxx sourceDir filesOut declinedOut modeOut)
+function(pace_first_party_cxx sourceDir filesOut declinedOut modeOut)
     # `\\.` and not `\.`: CMake unescapes a quoted argument BEFORE the regex engine sees it,
     # so `"\.(...)"` arrives as `.(...)` -- a dot matching ANY character. That is not a
     # near-miss: `check-apt-update.sh` then matches, because `.sh` is any-character followed
@@ -1454,13 +1454,13 @@ function(fastcached_first_party_cxx sourceDir filesOut declinedOut modeOut)
     # silent on the day it matters is worse than one that shows up as a count.
     set(cxxExtension "\\.(cpp|cc|cxx|hpp|hh|hxx|h|ipp|inl|ixx|cppm)$")
 
-    fastcached_tracked_files("${sourceDir}"
+    pace_tracked_files("${sourceDir}"
         GLOBS "*"
         FILTER "${cxxExtension}"
         FILES_OUT found
         MODE_OUT mode)
 
-    fastcached_decline_third_party("${sourceDir}" found declined)
+    pace_decline_third_party("${sourceDir}" found declined)
 
     set(${filesOut} "${found}" PARENT_SCOPE)
     set(${declinedOut} "${declined}" PARENT_SCOPE)
@@ -1473,7 +1473,7 @@ endfunction()
 # `scripts/lib/git-scrub.sh`. That file says why: an inherited `GIT_DIR` turns a fixture's
 # `git init` into a write of whatever repository it names.
 #
-#   fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+#   pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
 #   execute_process(COMMAND ${scratchGit} init -q "${tree}" ...)
 #
 # `cmake -E env --unset=...` rather than `unset(ENV{...})`, because an environment change in a
@@ -1483,10 +1483,10 @@ endfunction()
 #
 # @param gitExecutable The git to run.
 # @param outVar Set to the command prefix, a list.
-function(fastcached_scratch_git gitExecutable outVar)
+function(pace_scratch_git gitExecutable outVar)
     set(listFile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/git-scrub-variables.txt")
     if(NOT EXISTS "${listFile}")
-        message(FATAL_ERROR "fastcached_scratch_git: ${listFile} is missing, so git is NOT run unscrubbed")
+        message(FATAL_ERROR "pace_scratch_git: ${listFile} is missing, so git is NOT run unscrubbed")
     endif()
     file(STRINGS "${listFile}" lines)
     set(unsets "")
@@ -1500,12 +1500,12 @@ function(fastcached_scratch_git gitExecutable outVar)
             continue()
         endif()
         if(NOT line MATCHES "^GIT_[A-Z_]+$")
-            message(FATAL_ERROR "fastcached_scratch_git: ${listFile} names '${line}', which is not a GIT_* variable")
+            message(FATAL_ERROR "pace_scratch_git: ${listFile} names '${line}', which is not a GIT_* variable")
         endif()
         list(APPEND unsets "--unset=${line}")
     endforeach()
     if(unsets STREQUAL "")
-        message(FATAL_ERROR "fastcached_scratch_git: ${listFile} names no variable, so git is NOT run unscrubbed")
+        message(FATAL_ERROR "pace_scratch_git: ${listFile} names no variable, so git is NOT run unscrubbed")
     endif()
     set(${outVar} "${CMAKE_COMMAND};-E;env;${unsets};${gitExecutable}" PARENT_SCOPE)
 endfunction()

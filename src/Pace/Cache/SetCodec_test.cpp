@@ -312,7 +312,7 @@ namespace
 {
 /// One engine with the two decorators an operator's dashboard is actually fed from.
 ///
-/// `WriteErrorReportingStorage` is what publishes `fastcached_write_errors_total`
+/// `WriteErrorReportingStorage` is what publishes `pace_write_errors_total`
 /// and writes the "storage write failed" line, and the metrics sink is what
 /// publishes the counters. Both are here because the whole of #296 is a claim about
 /// what those two SHOW -- asserting the error code alone would leave the operator-
@@ -350,7 +350,7 @@ struct Observed
         return metrics.Read(IMetricsSink::Counter::CacheMalformedValues);
     }
 
-    /// What `fastcached_write_errors_total` would export.
+    /// What `pace_write_errors_total` would export.
     [[nodiscard]] std::uint64_t WriteErrors() const
     {
         return storage.Snapshot().writeErrors;

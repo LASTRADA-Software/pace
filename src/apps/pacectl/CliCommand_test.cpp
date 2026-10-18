@@ -535,7 +535,7 @@ TEST_CASE("the timeouts parse into their own fields", "[cli][command]")
 
 TEST_CASE("the environment seeds the defaults", "[cli][command]")
 {
-    auto const command = WithEnvironment("FASTCACHE_ADDR", "elsewhere:9999");
+    auto const command = WithEnvironment("PACE_ADDR", "elsewhere:9999");
     CHECK(command.action == Action::RunVerb);
     CHECK(command.cache.host == "elsewhere");
     CHECK(command.cache.port == 9999);
@@ -546,7 +546,7 @@ TEST_CASE("the command line beats the environment", "[cli][command]")
     // "The command line wins" is which step runs second, not a per-field merge with a
     // per-field explicit bit -- the shape this repository has shipped a flag that
     // parsed and never merged with, four times.
-    auto const seed = WithEnvironment("FASTCACHE_ADDR", "elsewhere:9999");
+    auto const seed = WithEnvironment("PACE_ADDR", "elsewhere:9999");
     std::vector<std::string> const args { "--addr=chosen:1234", "ping" };
     auto const command = ParseCommand(args, seed);
 
@@ -558,7 +558,7 @@ TEST_CASE("the environment still applies to what the command line did not name",
 {
     // The other half of the precedence rule, and the one a naive "argv overwrites
     // everything" implementation breaks.
-    auto const seed = WithEnvironment("FASTCACHE_ADDR", "elsewhere:9999");
+    auto const seed = WithEnvironment("PACE_ADDR", "elsewhere:9999");
     std::vector<std::string> const args { "--format=json", "ping" };
     auto const command = ParseCommand(args, seed);
 
@@ -570,7 +570,7 @@ TEST_CASE("a set-but-empty variable counts as unset", "[cli][command]")
 {
     // What a build that wants no configuration sets, and the launcher's own reader
     // treats it the same way.
-    auto const command = WithEnvironment("FASTCACHE_ADDR", "");
+    auto const command = WithEnvironment("PACE_ADDR", "");
     CHECK(command.cache.host == "127.0.0.1");
     CHECK(command.cache.port == 6674);
 }
@@ -579,18 +579,18 @@ TEST_CASE("a malformed address in the environment is refused, naming the variabl
 {
     // Refused rather than ignored: an operator who exported a typo would otherwise
     // reach the default and wonder why their setting did nothing.
-    auto const command = WithEnvironment("FASTCACHE_ADDR", "nonsense");
+    auto const command = WithEnvironment("PACE_ADDR", "nonsense");
     CHECK(command.action == Action::UsageError);
-    CHECK(command.diagnostic.contains("FASTCACHE_ADDR"));
+    CHECK(command.diagnostic.contains("PACE_ADDR"));
 }
 
 TEST_CASE("the credential comes from the environment", "[cli][command]")
 {
-    auto const token = WithEnvironment("FASTCACHE_TOKEN", "s3cret");
+    auto const token = WithEnvironment("PACE_TOKEN", "s3cret");
     CHECK(token.credential.secret.View() == "s3cret");
     CHECK(token.credential.Configured());
 
-    auto const user = WithEnvironment("FASTCACHE_USER", "someone");
+    auto const user = WithEnvironment("PACE_USER", "someone");
     CHECK(user.credential.username == "someone");
     // A username with no secret is not a configured credential: there is nothing to
     // present.

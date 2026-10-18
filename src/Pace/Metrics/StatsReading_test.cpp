@@ -125,29 +125,29 @@ TEST_CASE("A scrape tells a skew from a surface this process does not serve", "[
     // stopped emitting the row at all, which is the failure this case is nearest to.
     auto const everything = RenderPrometheus(sink, snapshot, EverySurface);
     INFO("the control: a process serving every surface exports the row and claims no absence");
-    REQUIRE(everything.contains("fastcached_connections_total 0\n"));
-    REQUIRE(everything.contains("fastcached_metrics_catalogue_skew 0\n"));
-    REQUIRE(everything.contains("fastcached_metrics_surface_absent 0\n"));
+    REQUIRE(everything.contains("pace_connections_total 0\n"));
+    REQUIRE(everything.contains("pace_metrics_catalogue_skew 0\n"));
+    REQUIRE(everything.contains("pace_metrics_surface_absent 0\n"));
     REQUIRE_FALSE(everything.contains("# ABSENT"));
 
     auto const node = RenderPrometheus(sink, snapshot, ServesNothingAttributed);
     INFO("node body:\n" << node);
 
     // What the bug produced, and the one line that must be gone.
-    CHECK_FALSE(node.contains("fastcached_connections_total 0\n"));
-    CHECK(node.contains("# ABSENT fastcached_connections_total"));
+    CHECK_FALSE(node.contains("pace_connections_total 0\n"));
+    CHECK(node.contains("# ABSENT pace_connections_total"));
 
     // And NOT a skew. This is the assertion the whole design rests on: reusing the one absence
     // `std::optional` could carry would have made this counter nonzero on every healthy compile
     // node, and the skew series would have stopped meaning *catalogue and sink disagree*.
-    CHECK(node.contains("fastcached_metrics_catalogue_skew 0\n"));
+    CHECK(node.contains("pace_metrics_catalogue_skew 0\n"));
     CHECK_FALSE(node.contains("# SKEW"));
 
     // DERIVED, so a row arriving does not leave this passing against a stale number -- but from
     // `AttributedCounterCount()` and NOT from `CounterSoleWriterTable.size()`, which it used to
     // be. The table holds one row per (counter, surface) pair, so the two were equal only while
     // no counter had two surfaces, and #1501 gave one of them two.
-    CHECK(node.contains(std::format("fastcached_metrics_surface_absent {}\n", AttributedCounterCount())));
+    CHECK(node.contains(std::format("pace_metrics_surface_absent {}\n", AttributedCounterCount())));
 }
 
 TEST_CASE("The reason an absence has survives the wire", "[metrics][stats-reading]")

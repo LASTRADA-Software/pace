@@ -404,7 +404,7 @@ analyse() {
     shift 2
     # The table list through the ENVIRONMENT, never `-v`: macOS's awk (the one true awk) refuses a
     # `-v` value holding a newline ("newline in string"), and the list is newline-separated.
-    FASTCACHED_RELOADABLE_TABLES="$tables" awk -v prefix="${root}/" -v opener="$TableArrayMarker" \
+    PACE_RELOADABLE_TABLES="$tables" awk -v prefix="${root}/" -v opener="$TableArrayMarker" \
         -v subjectMarker="$SubjectMarker" -v docsMarker="$DocsTableMarker" -v countMarker="$CountMarker" "
         ${TableWalk}${DocsTableRead}${CountRead}${StatedNamesRead}${SubjectRead}"'
         function out(kind, value) { printf "%s\t%s\t%s\n", kind, file, value }
@@ -414,7 +414,7 @@ analyse() {
             else keysEnd()
         }
         BEGIN {
-            n = split(ENVIRON["FASTCACHED_RELOADABLE_TABLES"], listed, "\n")
+            n = split(ENVIRON["PACE_RELOADABLE_TABLES"], listed, "\n")
             for (i = 1; i <= n; i++) if (listed[i] != "") tableAt[listed[i]] = 1
         }
         FNR == 1 {

@@ -146,7 +146,7 @@ class RootReconciler
     /// is the one grammar carrying both, so the launcher names the object path
     /// there — respelling it hands the build system back an output it never asked
     /// for, and a build whose `-o` does not share a spelling with
-    /// `FASTCACHE_BINARY_DIR` then gets a depfile Ninja rejects outright and make
+    /// `PACE_BINARY_DIR` then gets a depfile Ninja rejects outright and make
     /// matches against no rule at all.
     ///
     /// Named by VALUE rather than by position in the grammar, because position

@@ -293,7 +293,7 @@ Every rule below has already been a bug.
       a fleet only by an operator's forget, which archives the store and mints a NEW cluster id.
       (4) `--fleet-id`'s key pin closes the first join itself. The residual is a machine's very
       first boot, unpinned, on a LAN where a rogue fleet answers before any seed is configured;
-      an install-time `--fleet-seed` (`FASTCACHE_FLEET_SEED`) and `--fleet-id` are what close it.
+      an install-time `--fleet-seed` (`PACE_FLEET_SEED`) and `--fleet-id` are what close it.
     - **ONE predicate, `AdmitsFleet(pin, clusterId, signers)`**: the id compared WHOLE and one of the
       signers a pinned voter key. Asked of the summary yielded to (INSIDE `ClassifyEncounter`, a
       REQUIRED parameter, so beacon, seed, SRV and remembered routes are one decision --
@@ -412,7 +412,7 @@ Every rule below has already been a bug.
   signature alone and handed to formation rather than to the roster -- which holds
   even when somebody shares a key across fleets, which they should not.
 - **SHA-256 is implemented here because OpenSSL is optional and authentication is
-  not.** `FASTCACHED_ENABLE_TLS` is off by default, so a cluster that could only
+  not.** `PACE_ENABLE_TLS` is off by default, so a cluster that could only
   authenticate its members when TLS happened to be compiled in would silently
   accept anybody in the common configuration. `Core/Compression` reaches for a
   library because a codec is large and its output need only round-trip; a MAC is
@@ -1369,7 +1369,7 @@ and it is recorded here because the question will be asked again.
     succeeded.
     **Such a volume runs with a STATED durability gap**: a power loss there can resurrect an old
     vote or record -- PostgreSQL's `fsync_fname` precedent -- and the start probe's one warning,
-    `fastcache_state_directory_syncs_unsupported_total` and the condition row are what an operator
+    `pace_state_directory_syncs_unsupported_total` and the condition row are what an operator
     sees of it.
     - **On Windows a replace survives an open reader only with BOTH halves**: the reader opened
       with delete sharing (`FILE_SHARE_DELETE`; `_wfopen` shares none) AND the rename made with

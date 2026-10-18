@@ -41,15 +41,15 @@
 #
 # ## The three arms are this same file
 #
-# Re-invoked with `-DFASTCACHED_FATAL_EXIT_CHILD=`, rather than written to a
+# Re-invoked with `-DPACE_FATAL_EXIT_CHILD=`, rather than written to a
 # scratch directory: script mode has no binary directory, and `$ENV{TMPDIR}` is
 # `TEMP` on Windows. One file, no temporaries, identical on every platform.
 #
 # Usage:
-#   cmake [-DFASTCACHED_FATAL_EXIT_READINGS=<subject>;<ok>;<missing>] \
+#   cmake [-DPACE_FATAL_EXIT_READINGS=<subject>;<ok>;<missing>] \
 #         -P scripts/check-fatal-error-exit.cmake
 #
-#   FASTCACHED_FATAL_EXIT_READINGS  stage the three readings instead of measuring
+#   PACE_FATAL_EXIT_READINGS  stage the three readings instead of measuring
 #                                   them, so the VERDICT can be driven against a
 #                                   record. `check-fatal-error-exit-selftest`
 #                                   uses it; nothing else should.
@@ -62,10 +62,10 @@ cmake_minimum_required(VERSION 3.28)
 
 # The arms. Each is this file, re-entered; `return()` keeps the parent's body out
 # of a child's run.
-if(DEFINED FASTCACHED_FATAL_EXIT_CHILD)
-    if(FASTCACHED_FATAL_EXIT_CHILD STREQUAL "fatal")
+if(DEFINED PACE_FATAL_EXIT_CHILD)
+    if(PACE_FATAL_EXIT_CHILD STREQUAL "fatal")
         message(FATAL_ERROR "check-fatal-error-exit: the subject arm; this failure is the point")
-    elseif(FASTCACHED_FATAL_EXIT_CHILD STREQUAL "quiet")
+    elseif(PACE_FATAL_EXIT_CHILD STREQUAL "quiet")
         message(STATUS "check-fatal-error-exit: the success control ran and said nothing")
         return()
     endif()
@@ -73,7 +73,7 @@ if(DEFINED FASTCACHED_FATAL_EXIT_CHILD)
     # to `quiet` would make the SUCCESS control the thing that ran while the
     # subject reading was attributed to `fatal` -- a fourth state arriving
     # silently as a third, and in the direction that reads as a healthy machine.
-    message(FATAL_ERROR "check-fatal-error-exit: unknown child arm `${FASTCACHED_FATAL_EXIT_CHILD}`")
+    message(FATAL_ERROR "check-fatal-error-exit: unknown child arm `${PACE_FATAL_EXIT_CHILD}`")
 endif()
 
 # One reading. Runs the child and reports only its exit status; the child's own
@@ -82,13 +82,13 @@ endif()
 #
 # @param 1 outVar The variable to set to the child's exit status.
 # @param 2 script The script to run.
-# @param 3 arm    The value of FASTCACHED_FATAL_EXIT_CHILD, or "" for none.
+# @param 3 arm    The value of PACE_FATAL_EXIT_CHILD, or "" for none.
 # @param 4 requireObjection TRUE when this child is supposed to OBJECT, so an
 #          exit of 0 with nothing on the output reads `silent` rather than `0`.
 function(ReadChildExitStatus outVar script arm requireObjection)
     set(childArgs "")
     if(NOT arm STREQUAL "")
-        set(childArgs "-DFASTCACHED_FATAL_EXIT_CHILD=${arm}")
+        set(childArgs "-DPACE_FATAL_EXIT_CHILD=${arm}")
     endif()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" ${childArgs} -P "${script}"
@@ -122,11 +122,11 @@ function(ReadChildExitStatus outVar script arm requireObjection)
     set("${outVar}" "${status}" PARENT_SCOPE)
 endfunction()
 
-if(DEFINED FASTCACHED_FATAL_EXIT_READINGS)
-    set(readings "${FASTCACHED_FATAL_EXIT_READINGS}")
+if(DEFINED PACE_FATAL_EXIT_READINGS)
+    set(readings "${PACE_FATAL_EXIT_READINGS}")
     list(LENGTH readings readingCount)
     if(NOT readingCount EQUAL 3)
-        message("CMake Error: FASTCACHED_FATAL_EXIT_READINGS needs exactly three readings "
+        message("CMake Error: PACE_FATAL_EXIT_READINGS needs exactly three readings "
                 "(<subject>;<ok>;<missing>), got ${readingCount}: ${readings}")
         return()
     endif()

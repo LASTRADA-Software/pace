@@ -1021,7 +1021,7 @@ namespace
 {
 /// Root of the macOS package payload, e.g. `/opt/fastcached`.
 ///
-/// Handed down from FASTCACHED_MACOS_PREFIX by src/Pace/CMakeLists.txt
+/// Handed down from PACE_MACOS_PREFIX by src/Pace/CMakeLists.txt
 /// so the daemon's idea of its own install tree cannot drift from the one
 /// the installer actually lays down. The fallback matters for builds that
 /// compile this file outside the package configuration (a plain
@@ -1863,7 +1863,7 @@ ServiceControlResult ScmInstall(ServiceSpec const& spec, IScmCalls& calls, IDrai
     // A `Private` path is the opposite case, and it REFUSES: it holds the credential
     // the service mints at its first start, so a registration left in place is a
     // service that writes that credential where every local account can read it --
-    // and any supervisor may start it -- the MSI's `FastCacheNodeStartService` runs
+    // and any supervisor may start it -- the MSI's `PaceNodeStartService` runs
     // straight after this, and only the MSI's own check stops it. So a registration THIS call
     // created is deleted again, and one it merely re-applied is left, as it found it,
     // with the message saying which.

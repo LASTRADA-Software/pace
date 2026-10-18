@@ -41,7 +41,7 @@
 # bash 3.2: macOS ships a 2007 /bin/bash and this runs in the default ctest set.
 set -uo pipefail
 
-REPO="${FASTCACHED_REPO:-LASTRADA-Software/fastcached}"
+REPO="${PACE_REPO:-LASTRADA-Software/fastcached}"
 SkipUnavailable=77
 # A FIFTH outcome, distinct from 77 on purpose. 77 says "this ran and could not get an
 # answer"; 78 says "this never ran at all". They are fixed by different people -- an

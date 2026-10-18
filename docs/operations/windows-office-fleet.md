@@ -48,8 +48,8 @@ and `node-id` and `public-key` name A. The service logs on as `NT SERVICE\FastCa
 identity under `%ProgramData%\fastcache-node`, readable only by SYSTEM, Administrators and that
 account. The install opens the Windows Firewall, on every network profile, for the node port
 (TCP 6674), the consensus port (TCP 6680) and discovery (UDP 6681, and the reply port UDP 6682,
-which the package pins through `FASTCACHE_DISCOVERY_REPLY_PORT`).
-`FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8` narrows the remote side of every rule to one address with
+which the package pins through `PACE_DISCOVERY_REPLY_PORT`).
+`PACE_FIREWALL_ALLOW=10.0.0.0/8` narrows the remote side of every rule to one address with
 an optional prefix, so pick one prefix that covers both the office LAN and the VPN pool. The
 node is the cache: if the **pace-kv** feature is installed as well, its `FastCached` service
 is disabled and stopped, since both want port 6674 and it must not be started beside the node.
@@ -68,11 +68,11 @@ A re-registration does not restart a running node, and the pin is read at startu
 it afterwards:
 
 ```powershell
-msiexec /i fastcached.msi ADDLOCAL=CM_C_Node FASTCACHE_FLEET_ID=<fleet-id as printed>
+msiexec /i fastcached.msi ADDLOCAL=CM_C_Node PACE_FLEET_ID=<fleet-id as printed>
 Restart-Service FastCacheCompileNode
 ```
 
-Then pass the same value as `FASTCACHE_FLEET_ID` on every other install (step 2), at the least
+Then pass the same value as `PACE_FLEET_ID` on every other install (step 2), at the least
 on every machine outside the office LAN. A laptop that hears another fleet on a hotel network or
 a VPN segment, or a machine claiming the office's id under a key of its own, is then never
 asked, and is reported as `foreign-fleet-visible` instead. `pacectl node` shows the pin a
@@ -80,7 +80,7 @@ node trusts by as `fleet-pin`, which reads `none` on an unpinned node.
 
 The installer checks the value with the node's own parser before it registers or remembers
 anything. A value the node refuses **fails the whole transaction** (msiexec exits 1603, and the
-log names `FastCacheNodeCheckArguments`), leaving the registration that was there before;
+log names `PaceNodeCheckArguments`), leaving the registration that was there before;
 `pace-node --check-arguments --fleet-id=<value>` says what is wrong with it. A node
 whose state already commits it to a cluster the pin does not admit refuses to start, naming
 both: to move it to the pinned fleet, stop the service, delete `%ProgramData%\fastcache-node`
@@ -98,7 +98,7 @@ own** pin, or it admits nobody.
 **On the office LAN**, run the same MSI with the pin:
 
 ```powershell
-msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher FASTCACHE_FLEET_ID=<fleet-id>
+msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher PACE_FLEET_ID=<fleet-id>
 ```
 
 The node hears A's beacon, sees the fleet its pin names, and asks A to admit it. Until somebody
@@ -107,10 +107,10 @@ approves it, it is its own fleet of one and builds on its own; nothing waits.
 **Over the VPN**, beacons do not cross, so tell the node where to ask, by A's name:
 
 ```powershell
-msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher FASTCACHE_FLEET_ID=<fleet-id> FASTCACHE_FLEET_SEED=office-a.example.com
+msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher PACE_FLEET_ID=<fleet-id> PACE_FLEET_SEED=office-a.example.com
 ```
 
-`FASTCACHE_FLEET_SEED` is one name or `name:port` (the port defaults to 6674); a node that needs
+`PACE_FLEET_SEED` is one name or `name:port` (the port defaults to 6674); a node that needs
 more than one names them under `fleet_seed:` in its configuration file,
 `%ProgramData%\pace-node\pace-node.yaml`. An office whose PCs carry a
 DNS suffix can skip the property altogether: every node also asks DNS for
@@ -121,8 +121,8 @@ A seed is asked only while the node is alone. Once it has joined, the node remem
 fleet's endpoints in its state directory and asks the seed again only when none of them
 answers.
 
-**The MSI remembers what it was given.** `FASTCACHE_FIREWALL_ALLOW`, `FASTCACHE_FLEET_SEED` and
-`FASTCACHE_FLEET_ID` are written to `HKLM\SOFTWARE\fastcached\Installer` and read back by the
+**The MSI remembers what it was given.** `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and
+`PACE_FLEET_ID` are written to `HKLM\SOFTWARE\fastcached\Installer` and read back by the
 next repair, feature change or upgrade, so one that names none of them registers what the
 install was given; one that states a new value replaces the remembered one. An empty value
 counts as leaving the property out, so it cannot clear one: to drop a remembered value,
@@ -209,15 +209,15 @@ not reaching C, and `shared-cache-unavailable` on C when its tier will not open.
 `pace-cc` fronts every compile. For a CMake build:
 
 ```powershell
-$env:FASTCACHE_SOURCE_DIR = 'D:\src\product'
-$env:FASTCACHE_BINARY_DIR = 'D:\src\product\build'
-$env:FASTCACHE_SCHEDULER  = '127.0.0.1:6674'
+$env:PACE_SOURCE_DIR = 'D:\src\product'
+$env:PACE_BINARY_DIR = 'D:\src\product\build'
+$env:PACE_SCHEDULER  = '127.0.0.1:6674'
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=pace-cc -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc
 ```
 
-- **`FASTCACHE_SOURCE_DIR` and `FASTCACHE_BINARY_DIR`** are required: with either unset, nothing
+- **`PACE_SOURCE_DIR` and `PACE_BINARY_DIR`** are required: with either unset, nothing
   is cached. They are what lets two checkouts at different paths share an entry.
-- **`FASTCACHE_SCHEDULER` is `127.0.0.1:6674` on every PC**, this PC's own node. Once approved
+- **`PACE_SCHEDULER` is `127.0.0.1:6674` on every PC**, this PC's own node. Once approved
   that node is a learner: it schedules nothing itself, and answers a lease with `not-leader`
   naming the leader's scheduling endpoint, which the launcher follows, and the launcher
   releases the lease where it was issued. So the setting survives leadership moving to another
@@ -228,9 +228,9 @@ cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=pace-cc -DCMAKE_CXX_COM
   compiles locally. A learner older than this release refuses the lease instead of
   redirecting, and every miss compiles locally; on such a PC name A here, by the same name as
   the seed. A build tree configured through `cmake/portable/CompileCache.cmake` with A's name
-  keeps it (below); reconfigure it with `-DFASTCACHE_SCHEDULER=127.0.0.1:6674`. Any other build
+  keeps it (below); reconfigure it with `-DPACE_SCHEDULER=127.0.0.1:6674`. Any other build
   reads the variable at each compile. Unset, every miss compiles locally.
-- **`FASTCACHE_ADDR` needs no setting**: its default, `127.0.0.1:6674`, is this PC's own node,
+- **`PACE_ADDR` needs no setting**: its default, `127.0.0.1:6674`, is this PC's own node,
   which is this PC's cache and the node that mints the machine ticket every exchange with
   another machine presents.
 - **Debug information in the object: `/Z7`**, never `/Zi` or `/ZI`. `cl` with `/Zi` writes a
@@ -245,7 +245,7 @@ cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=pace-cc -DCMAKE_CXX_COM
   header (`/Yu`) is still never dispatched, for the reason above.
 
 A build of this repository through `cmake/portable/CompileCache.cmake` sets the source and
-build roots, `/Z7` and the PCH switch by itself, and reads `FASTCACHE_SCHEDULER` at **configure**
+build roots, `/Z7` and the PCH switch by itself, and reads `PACE_SCHEDULER` at **configure**
 time, baking it into the build tree; set it before the first configure. Any other project states
 all of it as above.
 
@@ -425,8 +425,8 @@ The go-live upgrade starts every machine afresh. On **every** machine, A include
 4. Install the new MSI. Installers up to 0.3.0 delete both services when they are removed, so
    the new one registers them again from scratch, carrying none of those flags. Such an installer
    remembered nothing, so this first upgrade registers only what it states: pass
-   `FASTCACHE_FIREWALL_ALLOW` and `FASTCACHE_FLEET_SEED` again here if you use them. The
-   properties `FASTCACHE_NODE_SCHEDULER` and `FASTCACHE_NODE_ADVERTISE` are no longer read; drop
+   `PACE_FIREWALL_ALLOW` and `PACE_FLEET_SEED` again here if you use them. The
+   properties `PACE_NODE_SCHEDULER` and `PACE_NODE_ADVERTISE` are no longer read; drop
    them from scripted installs. A failed upgrade puts both services back as 0.3.0 had them, unless
    rollback is disabled (the `DisableRollback` policy, or `DISABLEROLLBACK=1` on the command
    line): then both services are left unregistered, and running the upgrade again is the remedy.
@@ -461,7 +461,7 @@ assumption worth knowing about.
 
 - **An unpinned first join trusts on first use**
   ([#1609](https://github.com/LASTRADA-Software/fastcached/issues/1609)). A machine installed
-  with no `FASTCACHE_FLEET_ID` joins the fleet that proves itself first on its segment, once
+  with no `PACE_FLEET_ID` joins the fleet that proves itself first on its segment, once
   that fleet approves it. Pin every install (step 1).
 - **The shared tier holds less than its budget when its values are small**
   ([#1623](https://github.com/LASTRADA-Software/fastcached/issues/1623)). The disk store frees
@@ -494,7 +494,7 @@ assumption worth knowing about.
   asks, is not affected.
 - **One machine can hold the enrollment list full from many IPv6 addresses**
   ([#1603](https://github.com/LASTRADA-Software/fastcached/issues/1603)). The four-row bound is
-  per address, and a host may own a whole /64. `--enroll-clear` and `FASTCACHE_FIREWALL_ALLOW`
+  per address, and a host may own a whole /64. `--enroll-clear` and `PACE_FIREWALL_ALLOW`
   are the remedies today.
 - **A `cluster_dir:` in the configuration file is not secured by the install**
   ([#1604](https://github.com/LASTRADA-Software/fastcached/issues/1604)): the node then refuses

@@ -882,7 +882,7 @@ class IFrameResponder
     /// An abandoned delivery is an event on the SURFACE, not on the endpoint: the
     /// endpoint owns when the question is asked and the surface owns what it means,
     /// which is the same split every refusal in this loop already makes. A bool would
-    /// leave the endpoint incrementing `fastcache_worker_jobs_*` for whichever surface
+    /// leave the endpoint incrementing `pace_worker_jobs_*` for whichever surface
     /// happened to arm a watch, so the day a second one does it would file its events
     /// under the worker's name and nothing would say so.
     ///

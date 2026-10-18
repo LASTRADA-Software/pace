@@ -6,7 +6,7 @@
 #   1. First compile of a file is a MISS (real compiler runs, result stored).
 #   2. Second compile of the same content is a HIT (served from cache, correct
 #      object produced) — even after the object is deleted.
-#   3. A result past FASTCACHE_MAX_STORE_BYTES is skipped, and the compile still
+#   3. A result past PACE_MAX_STORE_BYTES is skipped, and the compile still
 #      succeeds — a compiler cache must never be able to fail a build. On POSIX
 #      the launcher used to stream such an object at a daemon that refuses an
 #      over-cap frame and closes, then die of SIGPIPE mid-store with the object
@@ -33,7 +33,7 @@
 #      program data -- `__FILE__`, or the builtin `std::source_location` is made
 #      of -- is NOT served into a second checkout, in either direct mode, while
 #      one that bakes none still is; the first checkout still hits its own copy;
-#      and a hit `FASTCACHE_VERIFY` rejects is logged `VERIFY-MISMATCH`, never
+#      and a hit `PACE_VERIFY` rejects is logged `VERIFY-MISMATCH`, never
 #      `HIT`. No key can see those paths -- the direct-mode key never sees the
 #      `__FILE__` expansion and `source_location` reaches no key at all -- so
 #      the launcher reads the object (apps/pace-cc/RootBinding.hpp).
@@ -85,13 +85,13 @@
 # process.
 #
 # The reason offered for the constant was real and did not support it: the launcher
-# under test reads `FASTCACHE_ADDR` from the environment and several child
+# under test reads `PACE_ADDR` from the environment and several child
 # processes inherit it, so the port must be decided BEFORE the daemon starts. That
 # is an argument for deciding it early, which drawing does.
 #
 # Its siblings were checked rather than assumed: `scripts/compile-cache-e2e.sh`
 # (the POSIX half of this same test), `scripts/dist-compile-e2e.sh` and
-# `scripts/sccache-smoke.sh` all call `free_port`, with `FASTCACHED_SMOKE_PORT` in
+# `scripts/sccache-smoke.sh` all call `free_port`, with `PACE_SMOKE_PORT` in
 # `src/tests/CMakeLists.txt` defaulting to EMPTY so the registration passes no
 # `--port`.
 #
@@ -110,7 +110,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Fastcached  = "$PSScriptRoot/../../out/build/clangcl-debug/target/pace-kv.exe",
+    [string]$PaceKv  = "$PSScriptRoot/../../out/build/clangcl-debug/target/pace-kv.exe",
     [string]$Launcher    = "$PSScriptRoot/../../out/build/clangcl-debug/target/pace-cc.exe",
     # 0 means DRAW one, which is what this fixture should always have done and what
     # every sibling already does. A constant made a run that did not reach its
@@ -160,7 +160,7 @@ $ranAnyCompiler = $false
 # would report SKIPPED on every machine that has not built the tree, which is a
 # check that does not run and does not say so.
 if (-not $SelfTestPorts) {
-    if (-not (Test-Path $Fastcached)) { Write-Host "pace-kv not found: $Fastcached; skipping"; exit $SKIP }
+    if (-not (Test-Path $PaceKv)) { Write-Host "pace-kv not found: $PaceKv; skipping"; exit $SKIP }
     if (-not (Test-Path $Launcher))   { Write-Host "pace-cc not found: $Launcher; skipping"; exit $SKIP }
 }
 
@@ -198,7 +198,7 @@ if (-not $SelfTestPorts) {
 # a path that does not exist. Everything below this is pure string work, so it is
 # left alone.
 if (-not $SelfTestPorts) {
-    $Fastcached = (Resolve-Path $Fastcached).Path
+    $PaceKv = (Resolve-Path $PaceKv).Path
     $Launcher   = (Resolve-Path $Launcher).Path
     # Only when it EXISTS: `Resolve-Path` on a missing path is a terminating error that would end
     # the whole run here, before the mid-compile-save case can report the failure itself.
@@ -243,8 +243,8 @@ foreach ($name in 'DeepTemp', 'ShallowTemp', 'MoveTemp', 'EditTemp', 'AliasTemp'
 # also drives every consuming fixture against a held port, which is the half this
 # file could not do while it was the only consumer.
 #
-# Importing it also clears every FASTCACHE_* this process inherited
-# (`scripts/lib/E2EEnvironment.psm1`): an operator's FASTCACHE_SCHEDULER would
+# Importing it also clears every PACE_* this process inherited
+# (`scripts/lib/E2EEnvironment.psm1`): an operator's PACE_SCHEDULER would
 # dispatch each "local" compile to their fleet. So nothing above sets one.
 Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EPorts.psm1") -Force
 # And imported by name as well, for the launcher-state seam: E2EPorts' own import of it
@@ -253,10 +253,10 @@ Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EEnvironment.psm1
 
 if ($SelfTestPorts) { exit (Invoke-E2EPortSelfTest) }
 
-function Start-Fastcached {
+function Start-PaceKv {
     # --storage-max-value raises the wire payload cap along with the value cap;
     # pass it explicitly so the flag stays exercised even on tiny fixtures.
-    $p = Start-Process -FilePath $Fastcached `
+    $p = Start-Process -FilePath $PaceKv `
         -ArgumentList "--bind","127.0.0.1","--port","$Port","--storage-max-value","64M" `
         -PassThru -WindowStyle Hidden
     Start-Sleep -Milliseconds 600
@@ -326,10 +326,10 @@ function Wait-LauncherProcess($process) {
 # Run the launcher once; return @{ code; stderr } and capture whether it was a
 # HIT or MISS from the verbose trace.
 function Invoke-Launcher([string]$compiler, [string]$srcRoot, [string]$buildTree, [string]$obj) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$Port"
-    $env:FASTCACHE_SOURCE_DIR = $srcRoot
-    $env:FASTCACHE_BINARY_DIR = $buildTree
-    $env:FASTCACHE_VERBOSE    = "1"
+    $env:PACE_ADDR       = "127.0.0.1:$Port"
+    $env:PACE_SOURCE_DIR = $srcRoot
+    $env:PACE_BINARY_DIR = $buildTree
+    $env:PACE_VERBOSE    = "1"
     $source = Join-Path $srcRoot "u.cpp"
     $errFile = New-TemporaryFile
     $p = Wait-LauncherProcess (Use-E2ELauncherState $launcherState {
@@ -370,10 +370,10 @@ function New-MovedInputTree([string]$root, [string]$message, [string]$headerMess
 # stub's instructions in $stubEnv, each set for the run and cleared again afterwards so none
 # can leak into the cases that follow -- Invoke-LauncherWithEnv's pattern, for several.
 function Invoke-LauncherThroughStub([string]$stub, [string]$root, [hashtable]$stubEnv) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$Port"
-    $env:FASTCACHE_SOURCE_DIR = $root
-    $env:FASTCACHE_BINARY_DIR = Join-Path $root "build"
-    $env:FASTCACHE_VERBOSE    = "1"
+    $env:PACE_ADDR       = "127.0.0.1:$Port"
+    $env:PACE_SOURCE_DIR = $root
+    $env:PACE_BINARY_DIR = Join-Path $root "build"
+    $env:PACE_VERBOSE    = "1"
     $source = Join-Path $root "src\m.cpp"
     $obj = Join-Path $root "build\m.obj"
     foreach ($name in $stubEnv.Keys) { Set-Item -Path "env:$name" -Value $stubEnv[$name] }
@@ -516,10 +516,10 @@ function New-PragmaTree([string]$root, [string]$tag) {
 # Like Invoke-Launcher, but capturing STDOUT as well: `cl` writes its diagnostics
 # there and `clang-cl` to stderr, and the replayed-diagnostics case reads both.
 function Invoke-LauncherStreams([string]$compiler, [string]$srcRoot, [string]$buildTree, [string]$obj) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$Port"
-    $env:FASTCACHE_SOURCE_DIR = $srcRoot
-    $env:FASTCACHE_BINARY_DIR = $buildTree
-    $env:FASTCACHE_VERBOSE    = "1"
+    $env:PACE_ADDR       = "127.0.0.1:$Port"
+    $env:PACE_SOURCE_DIR = $srcRoot
+    $env:PACE_BINARY_DIR = $buildTree
+    $env:PACE_VERBOSE    = "1"
     $source = Join-Path $srcRoot "u.cpp"
     $outFile = New-TemporaryFile
     $errFile = New-TemporaryFile
@@ -545,10 +545,10 @@ function Get-CompilerText($run) {
 # included -- and a compile line of relative paths, which is the shape a relative root and
 # `cl /FC` combine into. Returns the exit code and stderr.
 function Invoke-LauncherIn([string]$cwd, [string]$srcRoot, [string]$buildTree, [string[]]$compileArgs) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$Port"
-    $env:FASTCACHE_SOURCE_DIR = $srcRoot
-    $env:FASTCACHE_BINARY_DIR = $buildTree
-    $env:FASTCACHE_VERBOSE    = "1"
+    $env:PACE_ADDR       = "127.0.0.1:$Port"
+    $env:PACE_SOURCE_DIR = $srcRoot
+    $env:PACE_BINARY_DIR = $buildTree
+    $env:PACE_VERBOSE    = "1"
     $outFile = New-TemporaryFile
     $errFile = New-TemporaryFile
     $p = Wait-LauncherProcess (Use-E2ELauncherState $launcherState {
@@ -583,10 +583,10 @@ function New-BigTree([string]$root) {
 # would hang the CI job instead of reporting a regression.
 function Invoke-LauncherBounded([string]$compiler, [string]$srcRoot, [string]$buildTree,
                                 [string]$obj, [string]$sourceName, [int]$timeoutSec) {
-    $env:FASTCACHE_ADDR       = "127.0.0.1:$Port"
-    $env:FASTCACHE_SOURCE_DIR = $srcRoot
-    $env:FASTCACHE_BINARY_DIR = $buildTree
-    $env:FASTCACHE_VERBOSE    = "1"
+    $env:PACE_ADDR       = "127.0.0.1:$Port"
+    $env:PACE_SOURCE_DIR = $srcRoot
+    $env:PACE_BINARY_DIR = $buildTree
+    $env:PACE_VERBOSE    = "1"
     $source = Join-Path $srcRoot $sourceName
     $errFile = New-TemporaryFile
     # Unwaited, so the redirect is only as long as the START: the child took its copy
@@ -622,7 +622,7 @@ $DeadPeerTotalMs   = 2000
 
 # How many cache exchanges one compile can spend on a dead peer before it compiles: direct
 # mode's manifest round trip, then the object fetch. Never the STORE, which a fetch the cache
-# did not serve skips. `pace-cc --help` says the same under FASTCACHE_TIMEOUT.
+# did not serve skips. `pace-cc --help` says the same under PACE_TIMEOUT.
 $DeadPeerExchanges = 2
 
 # What ONE exchange can cost against each dead shape -- the deadline that ends it -- from which the
@@ -655,7 +655,7 @@ $DeadPeerExchanges = 2
 # Windows runs a refused dial out to CONNECT: that is Windows' SYN-retry behaviour, not this
 # launcher's. The reset's exchanges end at once. That shape has a CEILING too, (2N - 1/2) x TOTAL,
 # 7000 ms at N = 2 and TOTAL = 2000. An exchange that DOUBLED its deadline reports 2N x TOTAL =
-# 8000 (measured 8006-8017) and fails it by TOTAL / 2 = 1000 ms; one that IGNORED FASTCACHE_TIMEOUT
+# 8000 (measured 8006-8017) and fails it by TOTAL / 2 = 1000 ms; one that IGNORED PACE_TIMEOUT
 # falls back to the default total of 10000 ms per exchange and reports about 20000. A stall of up
 # to (N - 1/2) x TOTAL = 3000 ms past the floor still passes: a stall belongs to the HOST, not to a
 # leg, and the host's worst measured overrun is +1616 ms (round 9, on the refused leg; this leg's
@@ -730,12 +730,12 @@ function New-SilentListener {
 # `exchanges` the `cache exchange (...)` lines on its verbose trace.
 function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$buildTree, [string]$obj,
                                  [string]$addr, [long]$boundMs, $resetOn, [string]$state) {
-    $env:FASTCACHE_ADDR            = $addr
-    $env:FASTCACHE_SOURCE_DIR      = $srcRoot
-    $env:FASTCACHE_BINARY_DIR      = $buildTree
-    $env:FASTCACHE_VERBOSE         = "1"
-    $env:FASTCACHE_CONNECT_TIMEOUT = "${DeadPeerConnectMs}ms"
-    $env:FASTCACHE_TIMEOUT         = "${DeadPeerTotalMs}ms"
+    $env:PACE_ADDR            = $addr
+    $env:PACE_SOURCE_DIR      = $srcRoot
+    $env:PACE_BINARY_DIR      = $buildTree
+    $env:PACE_VERBOSE         = "1"
+    $env:PACE_CONNECT_TIMEOUT = "${DeadPeerConnectMs}ms"
+    $env:PACE_TIMEOUT         = "${DeadPeerTotalMs}ms"
     $errFile = New-TemporaryFile
     try {
         $source = Join-Path $srcRoot "u.cpp"
@@ -784,7 +784,7 @@ function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$b
         return @{ code = $code; stderr = $err; elapsedMs = $elapsed; timedOut = $timedOut; resets = $resets; spentMs = $spent; exchanges = $exchanges }
     } finally {
         Remove-Item $errFile -ErrorAction SilentlyContinue
-        Remove-Item Env:\FASTCACHE_CONNECT_TIMEOUT, Env:\FASTCACHE_TIMEOUT -ErrorAction SilentlyContinue
+        Remove-Item Env:\PACE_CONNECT_TIMEOUT, Env:\PACE_TIMEOUT -ErrorAction SilentlyContinue
     }
 }
 
@@ -795,9 +795,9 @@ function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$b
 # there is no dispatch budget to add.
 # Returns $true when every leg held.
 function Test-DeadPeers([string]$compiler) {
-    # The legs point FASTCACHE_ADDR at dead peers. Whatever runs after this case reads the address
+    # The legs point PACE_ADDR at dead peers. Whatever runs after this case reads the address
     # it had before, restored on every way out -- an early return included.
-    $savedAddr = $env:FASTCACHE_ADDR
+    $savedAddr = $env:PACE_ADDR
     try {
         # Under $BoundTemp, the scratch root whose cases each own a tagged subdirectory: already a
         # run tree for the launcher-state seam and already removed on every way out.
@@ -873,17 +873,17 @@ function Test-DeadPeers([string]$compiler) {
         }
         return $ok
     } finally {
-        if ($null -eq $savedAddr) { Remove-Item Env:\FASTCACHE_ADDR -ErrorAction SilentlyContinue }
-        else { $env:FASTCACHE_ADDR = $savedAddr }
+        if ($null -eq $savedAddr) { Remove-Item Env:\PACE_ADDR -ErrorAction SilentlyContinue }
+        else { $env:PACE_ADDR = $savedAddr }
     }
 }
 
 # Settled here, before the daemon starts and before anything reads
-# `FASTCACHE_ADDR`, which is the one real constraint on this fixture: the launcher
+# `PACE_ADDR`, which is the one real constraint on this fixture: the launcher
 # under test takes the address from the environment and several child processes
 # inherit it. That is a reason to decide the port EARLY, and it was mistaken for a
 # reason to make it a constant (#220).
-$Port = Get-E2EFixturePort $Port $Fastcached "pace-kv"
+$Port = Get-E2EFixturePort $Port $PaceKv "pace-kv"
 
 # Entered here, after every skip, so a skipped run leaves nothing in TEMP -- and inside
 # the `try` whose `finally` removes it, before the daemon or any compile, since it is
@@ -894,7 +894,7 @@ try {
     $launcherState = Enter-E2ELauncherState -Launcher $Launcher -Fixture $PSCommandPath `
         -RunTrees @($DeepTemp, $ShallowTemp, $MoveTemp, $EditTemp, $AliasTemp, $BoundTemp)
     Write-Host "launcher statistics isolated to $($launcherState.Log)"
-    $server = Start-Fastcached
+    $server = Start-PaceKv
 
     foreach ($cc in @("cl","clang-cl")) {
         if (-not (Get-Command $cc -ErrorAction SilentlyContinue)) { Write-Host "skip $cc (not on PATH)"; continue }
@@ -941,20 +941,20 @@ try {
         $ceilObj = Join-Path $ceilBuild "u.obj"
 
         # 1 byte, so every real object clears it without assuming a size.
-        $rCeil = Invoke-LauncherWithEnv $cc $ceilSrc $ceilBuild $ceilObj "FASTCACHE_MAX_STORE_BYTES" "1"
+        $rCeil = Invoke-LauncherWithEnv $cc $ceilSrc $ceilBuild $ceilObj "PACE_MAX_STORE_BYTES" "1"
         $oCeil = Get-Outcome $rCeil.stderr
-        $ceilExplained = $rCeil.stderr -match "FASTCACHE_MAX_STORE_BYTES"
+        $ceilExplained = $rCeil.stderr -match "PACE_MAX_STORE_BYTES"
         $ceilStored = $rCeil.stderr -match "STORED"
 
         # Nothing was written, so the next compile must MISS again. That is what
         # separates "declined the store" from "stored it and said otherwise".
         Remove-Item $ceilObj -Force -ErrorAction SilentlyContinue
-        $oCeil2 = Get-Outcome (Invoke-LauncherWithEnv $cc $ceilSrc $ceilBuild $ceilObj "FASTCACHE_MAX_STORE_BYTES" "1").stderr
+        $oCeil2 = Get-Outcome (Invoke-LauncherWithEnv $cc $ceilSrc $ceilBuild $ceilObj "PACE_MAX_STORE_BYTES" "1").stderr
 
         # And the ceiling is opt-out, so a regression leaving it permanently on
         # would surface as a TU that can never be cached.
         Remove-Item $ceilObj -Force -ErrorAction SilentlyContinue
-        $rCeilOff = Invoke-LauncherWithEnv $cc $ceilSrc $ceilBuild $ceilObj "FASTCACHE_MAX_STORE_BYTES" "0"
+        $rCeilOff = Invoke-LauncherWithEnv $cc $ceilSrc $ceilBuild $ceilObj "PACE_MAX_STORE_BYTES" "0"
 
         if ($rCeil.code -eq 0 -and $oCeil -eq "MISS" -and $ceilExplained -and -not $ceilStored `
             -and $oCeil2 -eq "MISS" -and $rCeilOff.stderr -match "STORED") {
@@ -1050,7 +1050,7 @@ try {
         # Reset per compiler: a throw in the `cl` pass would otherwise leave its
         # values in scope and let the `clang-cl` pass assert against them.
         $oEdited = "UNKNOWN"; $firstHash = "<none>"; $secondHash = "<none>"
-        $env:FASTCACHE_NO_DIRECT = "1"
+        $env:PACE_NO_DIRECT = "1"
         try {
             Set-EditedSource $editSrc 1
             $rFirst = Invoke-Launcher $cc $editSrc $editBuild $editObj
@@ -1066,7 +1066,7 @@ try {
                 if (Test-Path $editObj) { $secondHash = (Get-FileHash $editObj -Algorithm SHA256).Hash }
             }
         } finally {
-            Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+            Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
         }
 
         if ($oEdited -eq "MISS" -and $firstHash -ne $secondHash) {
@@ -1099,7 +1099,7 @@ try {
         # diagnosis it exists to serve.
         $oBefore = "UNKNOWN"; $oMoved = "UNKNOWN"; $oBack = "UNKNOWN"; $staleHit = $false
         $rBefore = $null; $rMoved = $null; $rBack = $null
-        $env:FASTCACHE_NO_DIRECT = "1"
+        $env:PACE_NO_DIRECT = "1"
         try {
             $rBefore = Invoke-Launcher $cc $moveSrc $moveBuild $moveObj
             $oBefore = Get-Outcome $rBefore.stderr
@@ -1138,7 +1138,7 @@ try {
             # this case is named for, and it reports HIT on its way to a MISS.
             if ($rBack.stderr -match "STALE HIT") { $staleHit = $true }
         } finally {
-            Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+            Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
         }
 
         if ($oBefore -eq "MISS" -and $oMoved -eq "MISS" -and -not $staleHit -and $oBack -eq "HIT") {
@@ -1198,7 +1198,7 @@ try {
         if (-not $drive) {
             Write-Host "  subst unavailable or no free drive letter; skipping ($cc)" -ForegroundColor Yellow
         } else {
-            $env:FASTCACHE_NO_DIRECT = "1"
+            $env:PACE_NO_DIRECT = "1"
             try {
                 $substSrc = Join-Path "$drive\" "src"
                 $substBuild = Join-Path "$drive\" "build"
@@ -1251,7 +1251,7 @@ try {
                     $exit = 1
                 }
             } finally {
-                Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+                Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
                 Remove-SubstDrive $drive
             }
         }
@@ -1283,7 +1283,7 @@ try {
                 $srcB = New-BoundTree $rootB $kind $tag
                 $objA = Join-Path $rootA "build\u.obj"
                 $objB = Join-Path $rootB "build\u.obj"
-                if ($direct -eq 'off') { $env:FASTCACHE_NO_DIRECT = "1" }
+                if ($direct -eq 'off') { $env:PACE_NO_DIRECT = "1" }
                 try {
                     $rA = Invoke-Launcher $cc $srcA (Join-Path $rootA "build") $objA
                     $rB = Invoke-Launcher $cc $srcB (Join-Path $rootB "build") $objB
@@ -1295,7 +1295,7 @@ try {
                     Remove-Item $objA -Force -ErrorAction SilentlyContinue
                     $rA2 = Invoke-Launcher $cc $srcA (Join-Path $rootA "build") $objA
                 } finally {
-                    Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+                    Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
                 }
                 $oA = Get-BoundOutcome $rA.stderr
                 $oB = Get-BoundOutcome $rB.stderr
@@ -1349,14 +1349,14 @@ try {
         # so moves every state variable, not only the Windows one.
         $state = Join-Path $case "state"
         New-Item -ItemType Directory -Force $state | Out-Null
-        $env:FASTCACHE_NO_DIRECT = "1"
+        $env:PACE_NO_DIRECT = "1"
         try {
             $launcherState.Root = $state
             $rA = Invoke-Launcher $cc $srcA (Join-Path $rootA "build") (Join-Path $rootA "build\u.obj")
-            $rB = Invoke-LauncherWithEnv $cc $srcB (Join-Path $rootB "build") (Join-Path $rootB "build\u.obj") "FASTCACHE_VERIFY" "1"
+            $rB = Invoke-LauncherWithEnv $cc $srcB (Join-Path $rootB "build") (Join-Path $rootB "build\u.obj") "PACE_VERIFY" "1"
         } finally {
             $launcherState.Root = $launcherState.RunRoot
-            Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+            Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
         }
         $logged = @(Get-Content (Join-Path $state "pace-cc\invocations.log") -ErrorAction SilentlyContinue | ForEach-Object { Get-E2ELauncherLogField $_ 'outcome' })
         $oB = Get-BoundOutcome $rB.stderr
@@ -1385,12 +1385,12 @@ try {
         $rootA = Join-Path $case "checkout-a"; $rootB = Join-Path $case "checkout-b"
         $srcA = New-WarnTree $rootA $tag
         $srcB = New-WarnTree $rootB $tag
-        $env:FASTCACHE_NO_DIRECT = "1"
+        $env:PACE_NO_DIRECT = "1"
         try {
             $rA = Invoke-LauncherStreams $cc $srcA (Join-Path $rootA "build") (Join-Path $rootA "build\u.obj")
             $rB = Invoke-LauncherStreams $cc $srcB (Join-Path $rootB "build") (Join-Path $rootB "build\u.obj")
         } finally {
-            Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+            Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
         }
         $textA = Get-CompilerText $rA
         $textB = Get-CompilerText $rB
@@ -1600,7 +1600,7 @@ try {
                 if (Test-Path -LiteralPath $trigger) { $msFail.Add("keyed manifest: the stub never fired, so this case tested nothing") }
                 if (-not $rKeyed.stderr.Contains("manifest recorded from the keyed content")) { $msFail.Add("keyed manifest: the raced compile recorded no manifest, so this case tests nothing") }
                 if (-not $keyedKey) { $msFail.Add("keyed manifest: the raced compile traced no MISS key") }
-                $rKeyedTwin = Invoke-LauncherThroughStub $msStub $msKeyedTwin @{ FASTCACHE_NO_DIRECT = "1" }
+                $rKeyedTwin = Invoke-LauncherThroughStub $msStub $msKeyedTwin @{ PACE_NO_DIRECT = "1" }
                 $msLogs.Add("--- keyed manifest, the v1 twin (direct mode off) ---`n$($rKeyedTwin.stderr)")
                 if (-not $keyedKey -or -not $rKeyedTwin.stderr.Contains("STORED key=$keyedKey ")) {
                     $msFail.Add("keyed manifest: the v1 twin did not store key(v1)='$keyedKey', so nothing stands behind the manifest")
@@ -1678,7 +1678,7 @@ try {
                         if ($shape -eq 'shared') { return @((Join-Path $case "shared"), (Join-Path $case "shared\build")) }
                         return @((Join-Path $root "lib"), (Join-Path $root "build"))
                     }
-                    if ($direct -eq 'off') { $env:FASTCACHE_NO_DIRECT = "1" }
+                    if ($direct -eq 'off') { $env:PACE_NO_DIRECT = "1" }
                     try {
                         # Named apart from `$rA`/`$rB`: PowerShell variable names are
                         # case-INSENSITIVE, so `$ra` would be `$rA`, overwritten by the first run.
@@ -1688,7 +1688,7 @@ try {
                         Remove-Item $objA -Force -ErrorAction SilentlyContinue
                         $rA2 = Invoke-LauncherIn $rootA $exportA[0] $exportA[1] $compileArgs
                     } finally {
-                        Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+                        Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
                     }
                     $oB = Get-BoundOutcome $rB.stderr
                     $oA2 = Get-BoundOutcome $rA2.stderr
@@ -1765,14 +1765,14 @@ try {
                     $text = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($obj)).ToLowerInvariant()
                     return $text.Contains($dir.ToLowerInvariant())
                 }
-                if ($direct -eq 'off') { $env:FASTCACHE_NO_DIRECT = "1" }
+                if ($direct -eq 'off') { $env:PACE_NO_DIRECT = "1" }
                 try {
                     $r1 = & $compile $dirs[0]
                     $r2 = & $compile $dirs[1]
                     Remove-Item (Join-Path $dirs[0].long "u.obj") -Force -ErrorAction SilentlyContinue
                     $r1again = & $compile $dirs[0]
                 } finally {
-                    Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+                    Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
                 }
                 $obj1 = Join-Path $dirs[0].long "u.obj"; $obj2 = Join-Path $dirs[1].long "u.obj"
                 $oneNamesOne = & $names $obj1 $dirs[0].short
@@ -1952,14 +1952,14 @@ try {
                         $text = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($obj)).ToLowerInvariant()
                         return $text.Contains($dir.ToLowerInvariant())
                     }
-                    if ($direct -eq 'off') { $env:FASTCACHE_NO_DIRECT = "1" }
+                    if ($direct -eq 'off') { $env:PACE_NO_DIRECT = "1" }
                     try {
                         $r1 = & $compile $dirs[0]
                         $r2 = & $compile $dirs[1]
                         Remove-Item (Join-Path $dirs[0].long "u.obj") -Force -ErrorAction SilentlyContinue
                         $r1again = & $compile $dirs[0]
                     } finally {
-                        Remove-Item Env:\FASTCACHE_NO_DIRECT -ErrorAction SilentlyContinue
+                        Remove-Item Env:\PACE_NO_DIRECT -ErrorAction SilentlyContinue
                     }
                     $obj1 = Join-Path $dirs[0].long "u.obj"; $obj2 = Join-Path $dirs[1].long "u.obj"
                     # The alias with its trailing separator, so `jx\L1` does not also match `jx\L1x`.
@@ -1992,11 +1992,11 @@ try {
         }
 
         Write-Host "=== dead peers: a cache that cannot answer leaves the compile to go on ($cc) ==="
-        $addrBefore = $env:FASTCACHE_ADDR
+        $addrBefore = $env:PACE_ADDR
         if (-not (Test-DeadPeers $cc)) { $exit = 1 }
         # Asserted, not assumed: every case after this one reads the address from the environment.
-        if ($env:FASTCACHE_ADDR -ne $addrBefore) {
-            Write-Host "  DEAD-PEER FAIL ($cc): FASTCACHE_ADDR was left at '$($env:FASTCACHE_ADDR)', not restored to '$addrBefore'" -ForegroundColor Red
+        if ($env:PACE_ADDR -ne $addrBefore) {
+            Write-Host "  DEAD-PEER FAIL ($cc): PACE_ADDR was left at '$($env:PACE_ADDR)', not restored to '$addrBefore'" -ForegroundColor Red
             $exit = 1
         }
     }
@@ -2050,7 +2050,7 @@ try {
 finally {
     if ($server) { $server | Stop-Process -Force -ErrorAction SilentlyContinue }
     Remove-Item -Recurse -Force $DeepTemp,$ShallowTemp,$MoveTemp,$EditTemp,$AliasTemp,$BoundTemp -ErrorAction SilentlyContinue
-    Remove-Item Env:\FASTCACHE_ADDR,Env:\FASTCACHE_SOURCE_DIR,Env:\FASTCACHE_BINARY_DIR,Env:\FASTCACHE_VERBOSE -ErrorAction SilentlyContinue
+    Remove-Item Env:\PACE_ADDR,Env:\PACE_SOURCE_DIR,Env:\PACE_BINARY_DIR,Env:\PACE_VERBOSE -ErrorAction SilentlyContinue
     # What the run did to the caller's logs, reported on EVERY way out -- a failure path is
     # where a leak shows -- and a failure whatever else happened.
     $callerDamage = @(Exit-E2ELauncherState $launcherState)

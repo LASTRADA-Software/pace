@@ -709,7 +709,7 @@ sed 's/^#if defined(_WIN32)$/#ifdef __APPLE__/' "${launcher_reader_dir}/branches
 printf 'int main() {}\n' > "${launcher_reader_dir}/no-body.cpp"
 # Every (file, platform) this section asks the bash reader, answered by ONE subshell that
 # sources the library once -- not a subshell per question, which on Git Bash is most of what
-# this section costs. Sourcing clears every FASTCACHE_* variable, which this check has no
+# this section costs. Sourcing clears every PACE_* variable, which this check has no
 # reason to do to itself, hence the subshell. A query's index is its line, from 0; each
 # answer line is `INDEX:row`, or `INDEX:refused`.
 launcher_stats="${source_dir}/src/apps/pace-cc/Stats.cpp"
@@ -877,7 +877,7 @@ log="${base}/pace-cc/invocations.log"
 case "${1-}" in
     --show-stats) if [ -s "$log" ]; then echo "pace-cc statistics (${log})"; else echo "pace-cc: no statistics recorded yet (${log})."; fi ;;
     -z) rm -f "$log" ;;
-    *) if [ -z "${FASTCACHE_NO_STATS-}" ]; then
+    *) if [ -z "${PACE_NO_STATS-}" ]; then
            mkdir -p "${base}/pace-cc"
            for last in "$@"; do :; done
            # Split at the marker, never `${log_line/@SOURCE@/...}`: no spelling of that replacement
@@ -895,7 +895,7 @@ FAKE
         case "$1" in
             clean) printf '%s\n' 'e2e_launcher_state_enter launcher' '"$launcher" "$workdir/a.cpp"' \
                         'e2e_launcher_state_assert_used' '"$launcher" -z' 'e2e_launcher_state_assert_caller_untouched' ;;
-            nostats) printf '%s\n' 'e2e_launcher_state_enter launcher' 'FASTCACHE_NO_STATS=1 "$launcher" "$workdir/a.cpp"' \
+            nostats) printf '%s\n' 'e2e_launcher_state_enter launcher' 'PACE_NO_STATS=1 "$launcher" "$workdir/a.cpp"' \
                         'e2e_launcher_state_assert_used --no-stats' 'e2e_launcher_state_assert_caller_untouched' ;;
             # A launcher run past the shim, and then a failure: the EXIT check must report it.
             bypass) printf '%s\n' 'real="$launcher"' 'e2e_launcher_state_enter launcher' '"$real" "$workdir/b.cpp"' 'false' ;;
@@ -903,7 +903,7 @@ FAKE
             prez) printf '%s\n' '"$launcher" -z' 'e2e_launcher_state_enter launcher' 'e2e_launcher_state_assert_caller_untouched' ;;
             # The shim's redirect stripped after the guard: the positive control must see it.
             misdirected) printf '%s\n' 'e2e_launcher_state_enter launcher' 'grep -v "^export " "$launcher" > "$workdir/shim"' \
-                        'cat "$workdir/shim" > "$launcher"' 'FASTCACHE_NO_STATS=1 "$launcher" "$workdir/c.cpp"' \
+                        'cat "$workdir/shim" > "$launcher"' 'PACE_NO_STATS=1 "$launcher" "$workdir/c.cpp"' \
                         'e2e_launcher_state_assert_used --no-stats' ;;
             # A source path holding `&`: the stand-in's record must name it exactly, which an
             # unquoted replacement under bash 5.2's `patsub_replacement` does not.

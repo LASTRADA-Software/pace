@@ -176,7 +176,7 @@ RunnerOs() {
 # unique. A field comparison, never `grep -F "<key><SEP>"`: that is a substring
 # test, and a key ending another key's text would be lent that key's legs.
 LegsOfKey() {
-    FastCachedRuleFKey="$2" awk -F"$FieldSep" '$1 == ENVIRON["FastCachedRuleFKey"] { print $2 }' <<< "$1" | sort -u
+    PaceRuleFKey="$2" awk -F"$FieldSep" '$1 == ENVIRON["PaceRuleFKey"] { print $2 }' <<< "$1" | sort -u
 }
 
 # ---------------------------------------------------------------------------
@@ -195,9 +195,9 @@ LegsOfKey() {
 # reader that ran over no program produces no rows, and rules A, C and D each
 # have their own refusal for that. Naming the cause here is what stops three
 # correct refusals pointing at a workflow that is fine.
-FastCachedWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
-FastCachedGatedAwk="$(dirname "${BASH_SOURCE[0]}")/check-gated-jobs.awk"
-for awkProgram in "$FastCachedWalkAwk" "$FastCachedGatedAwk"; do
+PaceWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
+PaceGatedAwk="$(dirname "${BASH_SOURCE[0]}")/check-gated-jobs.awk"
+for awkProgram in "$PaceWalkAwk" "$PaceGatedAwk"; do
     if [ ! -f "$awkProgram" ]; then
         echo "check-gated-jobs: missing awk program ${awkProgram}; no workflow was read, so this" >&2
         echo "  is a refusal and not a clean run. It is expected beside this script." >&2
@@ -211,7 +211,7 @@ done
 WorkflowRecords() {
     local records
     records="$(awk -v sep="$FieldSep" -v runner="$DocSubjectRunner" -v action="$CcacheAction" \
-        -f "$FastCachedWalkAwk" -f "$FastCachedGatedAwk" "$1" "$1")"
+        -f "$PaceWalkAwk" -f "$PaceGatedAwk" "$1" "$1")"
     grep -F -- "$2	" <<< "$records" | cut -f2- || true
 }
 
@@ -316,7 +316,7 @@ if [[ -z "$docSubject" ]]; then
 else
     # Read once, so a rename in the required table is a failure here rather than
     # a silent reclassification of every job as unrequired.
-    requiredFile="${FASTCACHED_REQUIRED_CONTEXTS_FILE:-scripts/check-merge-queue-contexts.sh}"
+    requiredFile="${PACE_REQUIRED_CONTEXTS_FILE:-scripts/check-merge-queue-contexts.sh}"
     requiredNames=""
     if [[ -f "$requiredFile" ]]; then
         requiredNames="$(awk '
@@ -841,7 +841,7 @@ REQ
             status=1
             return
         fi
-        out="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "$file" 2>&1)" || got=$?
+        out="$(PACE_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "$file" 2>&1)" || got=$?
         if [[ "$want" == "want-pass" && "$got" -eq 0 ]] || [[ "$want" == "want-fail" && "$got" -ne 0 ]]; then
             echo "  ok    ($want) $what"
         else
@@ -862,7 +862,7 @@ REQ
             status=1
             return
         fi
-        out="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "$file" 2>&1)" || got=$?
+        out="$(PACE_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "$file" 2>&1)" || got=$?
         if [[ "$got" -eq 0 ]]; then
             echo "  FAIL  (want-fail, exit 0) $what" >&2
             status=1
@@ -896,11 +896,11 @@ REQ
     # a baseline case at all rather than only negative ones.
     cp "$correct" "${scratch}/wf.yml"
     cases=$((cases + 1))
-    if FASTCACHED_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "${scratch}/wf.yml" >/dev/null 2>&1; then
+    if PACE_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "${scratch}/wf.yml" >/dev/null 2>&1; then
         echo "  ok    (want-pass) the correct shape passes"
     else
         echo "  FAIL  the baseline workflow does not pass; every other case is evidence of nothing" >&2
-        FASTCACHED_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "${scratch}/wf.yml" 2>&1 | sed 's/^/        /' >&2 || true
+        PACE_REQUIRED_CONTEXTS_FILE="$requiredFile" bash "$0" --workflow "${scratch}/wf.yml" 2>&1 | sed 's/^/        /' >&2 || true
         status=1
     fi
 
@@ -938,7 +938,7 @@ REQ
     : > "${scratch}/empty.sh"
     cp "$correct" "${scratch}/wf.yml"
     local out got=0
-    out="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="${scratch}/empty.sh" bash "$0" --workflow "${scratch}/wf.yml" 2>&1)" || got=$?
+    out="$(PACE_REQUIRED_CONTEXTS_FILE="${scratch}/empty.sh" bash "$0" --workflow "${scratch}/wf.yml" 2>&1)" || got=$?
     if [[ "$got" -ne 0 ]]; then
         echo "  ok    (want-fail) rule C: an empty required-context table is REFUSED, not read as 'nothing is required'"
     else
@@ -1086,14 +1086,14 @@ REQ
         rm -rf "$tree"
         mkdir -p "$tree/scripts/lib"
         cp "$0" "$tree/scripts/"
-        cp "$FastCachedGatedAwk" "$tree/scripts/"
+        cp "$PaceGatedAwk" "$tree/scripts/"
         if [[ "$target" != walk ]]; then
-            cp "$FastCachedWalkAwk" "$tree/scripts/lib/"
+            cp "$PaceWalkAwk" "$tree/scripts/lib/"
         fi
         if [[ "$expr" != omit ]]; then
             case "$target" in
-                walk)  source="$FastCachedWalkAwk"; staged="$tree/scripts/lib/workflow-walk.awk" ;;
-                gated) source="$FastCachedGatedAwk"; staged="$tree/scripts/$(basename "$FastCachedGatedAwk")" ;;
+                walk)  source="$PaceWalkAwk"; staged="$tree/scripts/lib/workflow-walk.awk" ;;
+                gated) source="$PaceGatedAwk"; staged="$tree/scripts/$(basename "$PaceGatedAwk")" ;;
                 self)  source="$0"; staged="$tree/scripts/$(basename "$0")" ;;
                 *)     echo "  FAIL  '$what' names no program this self-test can neuter: '$target'" >&2
                        status=1
@@ -1107,7 +1107,7 @@ REQ
             fi
         fi
         Generate "${scratch}/wf.yml" safe yes ungated required none all none "$knob"
-        out="$(FASTCACHED_REQUIRED_CONTEXTS_FILE="$requiredFile" \
+        out="$(PACE_REQUIRED_CONTEXTS_FILE="$requiredFile" \
             bash "$tree/scripts/$(basename "$0")" --workflow "${scratch}/wf.yml" 2>&1)" || got=$?
         if [[ "$want" == "want-pass" && "$got" -eq 0 ]] || [[ "$want" == "want-fail" && "$got" -ne 0 ]]; then
             if [[ -n "$mustSay" && "$out" != *"$mustSay"* ]]; then

@@ -31,7 +31,7 @@
 #   --requirement         Print `<package>==<version>` for pip, so no installer restates the version.
 #   --locate <site>       Print the binary path inside a `pip install --target <site>`, for this platform.
 #   --resolve             Print the analyser a LOCAL run uses, after checking it is the declared build: the binary
-#                         `FASTCACHED_CLANG_TIDY` names, or else the one installed in the default site,
+#                         `PACE_CLANG_TIDY` names, or else the one installed in the default site,
 #                         `${XDG_DATA_HOME:-$HOME/.local/share}/fastcached/clang-tidy/<version>`. The path goes to stdout
 #                         and every diagnostic to stderr, so `local-gate.sh` and `tidy-sweep.sh` ask ONE question
 #                         and a refusal names the exact install command for this machine. There is no fallback to
@@ -292,12 +292,12 @@ InstallHint() {
     site="$(DefaultSite)"
     echo "      Install the declared build ($DeclaredPackage==$DeclaredVersion) where local-gate.sh and tidy-sweep.sh look for it:"
     echo "        python3 -m pip install --target '$site' '$DeclaredPackage==$DeclaredVersion'"
-    echo "      or anywhere else, and name the binary inside it (--locate <dir> prints it) in FASTCACHED_CLANG_TIDY."
+    echo "      or anywhere else, and name the binary inside it (--locate <dir> prints it) in PACE_CLANG_TIDY."
     echo "      A host whose python3 has no pip can unzip the wheel PyPI serves for it into that directory: a wheel IS"
     echo "      that layout, and the identity check reads the same METADATA and RECORD. Restore the execute bit afterwards."
 }
 
-# Where a local run looks when FASTCACHED_CLANG_TIDY names nothing: one directory per declared version, so a declaration
+# Where a local run looks when PACE_CLANG_TIDY names nothing: one directory per declared version, so a declaration
 # that moves finds nothing rather than a stale install.
 DefaultSite() {
     printf '%s/fastcached/clang-tidy/%s' "${XDG_DATA_HOME:-${HOME:-~}/.local/share}" "$DeclaredVersion"
@@ -307,8 +307,8 @@ DefaultSite() {
 Resolve() {
     local dir="$1" exe site
     ReadDeclaration "$dir/.clang-tidy-version" >&2 || return 1
-    if [ -n "${FASTCACHED_CLANG_TIDY:-}" ]; then
-        exe="$FASTCACHED_CLANG_TIDY"
+    if [ -n "${PACE_CLANG_TIDY:-}" ]; then
+        exe="$PACE_CLANG_TIDY"
     else
         site="$(DefaultSite)"
         exe=""
@@ -320,7 +320,7 @@ Resolve() {
             fi
         done
         if [ -z "$exe" ]; then
-            echo "FAIL: no clang-tidy is installed at $site, and FASTCACHED_CLANG_TIDY names none, so there is no analyser" >&2
+            echo "FAIL: no clang-tidy is installed at $site, and PACE_CLANG_TIDY names none, so there is no analyser" >&2
             echo "      this run can identify as the declared build. There is deliberately no fallback to a clang-tidy on PATH." >&2
             InstallHint >&2
             return 1
@@ -344,7 +344,7 @@ if [ "$Mode" = "self-test" ]; then
     Self="$0"
     # No real install may decide a case: every child sees a scratch data home and no override unless a case sets one.
     export XDG_DATA_HOME="$Work/data"
-    unset FASTCACHED_CLANG_TIDY
+    unset PACE_CLANG_TIDY
     # A fixed vector rather than a digest this script computes, or the self-test agrees with itself. Chosen so the
     # digest holds a zero byte (91453e00...) and its base64url a '-': the two places a hex-to-base64url conversion
     # breaks silently. sha256 of 'fake clang-tidy 22.1.8 #1' plus a newline, encoded with Python's hashlib and base64.
@@ -384,7 +384,7 @@ if [ "$Mode" = "self-test" ]; then
         local arguments=() environment=()
         for word in "$@"; do
             case "$word" in
-                FASTCACHED_CLANG_TIDY=*|XDG_DATA_HOME=*) environment[${#environment[@]}]="$word" ;;
+                PACE_CLANG_TIDY=*|XDG_DATA_HOME=*) environment[${#environment[@]}]="$word" ;;
                 *) arguments[${#arguments[@]}]="$word" ;;
             esac
         done
@@ -508,14 +508,14 @@ if [ "$Mode" = "self-test" ]; then
     Wheel "$Work/data/fastcached/clang-tidy/22.1.8" 22.1.8 "$FakeDigest"
     Expect "--resolve: the default site holds the declared build" pass "$Work/data/fastcached/clang-tidy/22.1.8/clang_tidy/data/bin/clang-tidy" \
         --resolve "$Work/good"
-    Expect "--resolve: FASTCACHED_CLANG_TIDY names another identified wheel" pass "$Work/site-good/clang_tidy/data/bin/clang-tidy" \
-        --resolve "$Work/good" FASTCACHED_CLANG_TIDY="$Work/site-good/clang_tidy/data/bin/clang-tidy"
-    Expect "--resolve: FASTCACHED_CLANG_TIDY names a distribution's analyser" refuse "cannot be identified" \
-        --resolve "$Work/good" FASTCACHED_CLANG_TIDY="$Work/usr/bin/clang-tidy"
+    Expect "--resolve: PACE_CLANG_TIDY names another identified wheel" pass "$Work/site-good/clang_tidy/data/bin/clang-tidy" \
+        --resolve "$Work/good" PACE_CLANG_TIDY="$Work/site-good/clang_tidy/data/bin/clang-tidy"
+    Expect "--resolve: PACE_CLANG_TIDY names a distribution's analyser" refuse "cannot be identified" \
+        --resolve "$Work/good" PACE_CLANG_TIDY="$Work/usr/bin/clang-tidy"
     Expect "--resolve: nothing installed, and the refusal names the install command for that site" refuse \
         "pip install --target '$Work/empty/fastcached/clang-tidy/22.1.8' 'clang-tidy==22.1.8'" --resolve "$Work/good" XDG_DATA_HOME="$Work/empty"
     Expect "--resolve: an installed release that is not the declared one" refuse "is clang-tidy 22.1.7" \
-        --resolve "$Work/good" FASTCACHED_CLANG_TIDY="$Work/site-old/clang_tidy/data/bin/clang-tidy"
+        --resolve "$Work/good" PACE_CLANG_TIDY="$Work/site-old/clang_tidy/data/bin/clang-tidy"
 
     Expect "the shipped declaration" pass "matching CLANG_TOOLS_VERSION" "$SourceDir"
 

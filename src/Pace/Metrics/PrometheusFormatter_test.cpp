@@ -52,15 +52,15 @@ TEST_CASE("RenderPrometheus names the build it came from, once, as an info serie
 {
     AtomicMetricsSink metrics;
     auto const body = RenderPrometheus(metrics, MetricsSnapshot {});
-    auto const sample = std::format("fastcached_build_info{{version=\"{}\"}} 1\n", VersionString);
-    CHECK(body.contains("# TYPE fastcached_build_info gauge\n"));
+    auto const sample = std::format("pace_build_info{{version=\"{}\"}} 1\n", VersionString);
+    CHECK(body.contains("# TYPE pace_build_info gauge\n"));
     CHECK(body.contains(sample));
-    CHECK(Occurrences(body, "fastcached_build_info{") == 1);
+    CHECK(Occurrences(body, "pace_build_info{") == 1);
 }
 
 TEST_CASE("RenderInfoMetric escapes a label value the exposition format would misread", "[metrics][prometheus]")
 {
-    // A version string is operator-supplied text (`-DFASTCACHED_VERSION_STRING`), so a
+    // A version string is operator-supplied text (`-DPACE_VERSION_STRING`), so a
     // quote in it must not end the label early and a line feed must not start a new
     // sample.
     auto const rendered = RenderInfoMetric(
@@ -90,34 +90,34 @@ TEST_CASE("RenderPrometheus emits HELP/TYPE/value triples", "[metrics][prometheu
 
     SECTION("counter from the storage snapshot")
     {
-        CHECK(body.contains("# TYPE fastcached_cmd_get_total counter\n"));
-        CHECK(body.contains("fastcached_cmd_get_total 100\n"));
-        CHECK(body.contains("fastcached_get_hits_total 80\n"));
-        CHECK(body.contains("fastcached_get_misses_total 20\n"));
-        CHECK(body.contains("fastcached_evictions_total 3\n"));
-        CHECK(body.contains("# TYPE fastcached_write_errors_total counter\n"));
-        CHECK(body.contains("fastcached_write_errors_total 9\n"));
+        CHECK(body.contains("# TYPE pace_cmd_get_total counter\n"));
+        CHECK(body.contains("pace_cmd_get_total 100\n"));
+        CHECK(body.contains("pace_get_hits_total 80\n"));
+        CHECK(body.contains("pace_get_misses_total 20\n"));
+        CHECK(body.contains("pace_evictions_total 3\n"));
+        CHECK(body.contains("# TYPE pace_write_errors_total counter\n"));
+        CHECK(body.contains("pace_write_errors_total 9\n"));
     }
     SECTION("gauges from the storage snapshot")
     {
-        CHECK(body.contains("# TYPE fastcached_bytes_used gauge\n"));
-        CHECK(body.contains("fastcached_bytes_used 4096\n"));
-        CHECK(body.contains("fastcached_items 5\n"));
-        CHECK(body.contains("fastcached_bytes_limit 65536\n"));
+        CHECK(body.contains("# TYPE pace_bytes_used gauge\n"));
+        CHECK(body.contains("pace_bytes_used 4096\n"));
+        CHECK(body.contains("pace_items 5\n"));
+        CHECK(body.contains("pace_bytes_limit 65536\n"));
     }
     SECTION("connection counters from the sink")
     {
-        CHECK(body.contains("fastcached_connections_total 7\n"));
-        CHECK(body.contains("fastcached_connections_rejected_total 2\n"));
+        CHECK(body.contains("pace_connections_total 7\n"));
+        CHECK(body.contains("pace_connections_rejected_total 2\n"));
     }
     SECTION("uptime gauge")
     {
-        CHECK(body.contains("# TYPE fastcached_uptime_seconds gauge\n"));
-        CHECK(body.contains("fastcached_uptime_seconds 42\n"));
+        CHECK(body.contains("# TYPE pace_uptime_seconds gauge\n"));
+        CHECK(body.contains("pace_uptime_seconds 42\n"));
     }
     SECTION("every metric carries HELP text")
     {
-        CHECK(body.contains("# HELP fastcached_cmd_get_total "));
+        CHECK(body.contains("# HELP pace_cmd_get_total "));
     }
 }
 
@@ -177,8 +177,8 @@ TEST_CASE("A counter's exported name is unique", "[metrics][prometheus]")
 TEST_CASE("A process with no cache renders no cache metrics", "[metrics][prometheus]")
 {
     // `pace-node` serves this same endpoint and has no storage. A
-    // default-constructed `StorageStats` would report `fastcached_items 0` and
-    // `fastcached_bytes_limit 0` -- an empty, unbounded cache -- which a dashboard
+    // default-constructed `StorageStats` would report `pace_items 0` and
+    // `pace_bytes_limit 0` -- an empty, unbounded cache -- which a dashboard
     // reads as a fact rather than as an absence. Absent means absent.
     AtomicMetricsSink metrics;
     metrics.Increment(IMetricsSink::Counter::WorkerJobsCompleted, 3);
@@ -186,13 +186,13 @@ TEST_CASE("A process with no cache renders no cache metrics", "[metrics][prometh
     auto const body = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Uptime { 9s } });
 
-    CHECK_FALSE(body.contains("fastcached_items"));
-    CHECK_FALSE(body.contains("fastcached_bytes_limit"));
-    CHECK_FALSE(body.contains("fastcached_cmd_get_total"));
+    CHECK_FALSE(body.contains("pace_items"));
+    CHECK_FALSE(body.contains("pace_bytes_limit"));
+    CHECK_FALSE(body.contains("pace_cmd_get_total"));
 
     // What it does carry: every sink counter, and the uptime every process has.
-    CHECK(body.contains("fastcache_worker_jobs_completed_total 3\n"));
-    CHECK(body.contains("fastcached_uptime_seconds 9\n"));
+    CHECK(body.contains("pace_worker_jobs_completed_total 3\n"));
+    CHECK(body.contains("pace_uptime_seconds 9\n"));
     for (auto const& row: CounterTable)
         CHECK(body.contains(std::format("# TYPE {} ", row.prometheusName)));
 }
@@ -214,15 +214,15 @@ TEST_CASE("A compile node reports its size, and a cache daemon does not", "[metr
                                                                                     .busySlots = 3 },
                                                              .uptime = Uptime { 1s } });
 
-    CHECK(withHost.contains("# TYPE fastcache_node_logical_cores gauge"));
-    CHECK(withHost.contains("fastcache_node_logical_cores 16"));
-    CHECK(withHost.contains("fastcache_node_memory_total_bytes 68719476736"));
-    CHECK(withHost.contains("fastcache_node_disk_free_bytes 123456789"));
-    CHECK(withHost.contains("fastcache_node_slots_configured 14"));
-    CHECK(withHost.contains("fastcache_node_slots_busy 3"));
+    CHECK(withHost.contains("# TYPE pace_node_logical_cores gauge"));
+    CHECK(withHost.contains("pace_node_logical_cores 16"));
+    CHECK(withHost.contains("pace_node_memory_total_bytes 68719476736"));
+    CHECK(withHost.contains("pace_node_disk_free_bytes 123456789"));
+    CHECK(withHost.contains("pace_node_slots_configured 14"));
+    CHECK(withHost.contains("pace_node_slots_busy 3"));
     // The positive control for the `# TYPE` assertions below: a negative check
     // on a spelling nothing ever emits would pass whatever the renderer did.
-    CHECK(withHost.contains("# TYPE fastcache_node_slots_busy"));
+    CHECK(withHost.contains("# TYPE pace_node_slots_busy"));
 
     // The daemon leaves it absent rather than reporting cores it does not schedule
     // against. Absent means the series is missing, not present and zero -- a zero
@@ -235,8 +235,8 @@ TEST_CASE("A compile node reports its size, and a cache daemon does not", "[metr
     // and `contains()` cannot tell a mention from an exported series. A `# TYPE`
     // line is emitted for every rendered metric and for nothing else, so its
     // absence is the series being absent.
-    CHECK_FALSE(withoutHost.contains("# TYPE fastcache_node_logical_cores"));
-    CHECK_FALSE(withoutHost.contains("# TYPE fastcache_node_slots_busy"));
+    CHECK_FALSE(withoutHost.contains("# TYPE pace_node_logical_cores"));
+    CHECK_FALSE(withoutHost.contains("# TYPE pace_node_slots_busy"));
 }
 
 TEST_CASE("A compile node says whether its worker is cordoned, as a gauge that reads zero when it is not",
@@ -254,9 +254,9 @@ TEST_CASE("A compile node says whether its worker is cordoned, as a gauge that r
                               .uptime = Uptime { 1s } });
     };
 
-    CHECK(render(1).contains("fastcache_node_cordoned 1"));
-    CHECK(render(0).contains("fastcache_node_cordoned 0"));
-    CHECK(render(0).contains("# TYPE fastcache_node_cordoned gauge"));
+    CHECK(render(1).contains("pace_node_cordoned 1"));
+    CHECK(render(0).contains("pace_node_cordoned 0"));
+    CHECK(render(0).contains("# TYPE pace_node_cordoned gauge"));
 }
 
 TEST_CASE("A compile node reports what its machine is doing, each figure only when it was read", "[metrics][prometheus]")
@@ -273,12 +273,12 @@ TEST_CASE("A compile node reports what its machine is doing, each figure only wh
                                            .hostLoad = HostLoadReading { .cpu = CpuTicks { .busy = 4242, .total = 10000 },
                                                                          .availableMemoryBytes = 17179869184ULL },
                                            .uptime = Uptime { 1s } });
-    CHECK(both.contains("# TYPE fastcache_node_cpu_busy_ticks_total counter\n"));
-    CHECK(both.contains("fastcache_node_cpu_busy_ticks_total 4242\n"));
-    CHECK(both.contains("# TYPE fastcache_node_cpu_ticks_total counter\n"));
-    CHECK(both.contains("fastcache_node_cpu_ticks_total 10000\n"));
-    CHECK(both.contains("# TYPE fastcache_node_memory_available_bytes gauge\n"));
-    CHECK(both.contains("fastcache_node_memory_available_bytes 17179869184\n"));
+    CHECK(both.contains("# TYPE pace_node_cpu_busy_ticks_total counter\n"));
+    CHECK(both.contains("pace_node_cpu_busy_ticks_total 4242\n"));
+    CHECK(both.contains("# TYPE pace_node_cpu_ticks_total counter\n"));
+    CHECK(both.contains("pace_node_cpu_ticks_total 10000\n"));
+    CHECK(both.contains("# TYPE pace_node_memory_available_bytes gauge\n"));
+    CHECK(both.contains("pace_node_memory_available_bytes 17179869184\n"));
 
     // CPU unreadable, memory read: the CPU series are absent and the memory one is not.
     auto const noCpu =
@@ -287,9 +287,9 @@ TEST_CASE("A compile node reports what its machine is doing, each figure only wh
                                            .host = std::nullopt,
                                            .hostLoad = HostLoadReading { .cpu = std::nullopt, .availableMemoryBytes = 1024 },
                                            .uptime = Uptime { 1s } });
-    CHECK_FALSE(noCpu.contains("# TYPE fastcache_node_cpu_busy_ticks_total"));
-    CHECK_FALSE(noCpu.contains("# TYPE fastcache_node_cpu_ticks_total"));
-    CHECK(noCpu.contains("fastcache_node_memory_available_bytes 1024\n"));
+    CHECK_FALSE(noCpu.contains("# TYPE pace_node_cpu_busy_ticks_total"));
+    CHECK_FALSE(noCpu.contains("# TYPE pace_node_cpu_ticks_total"));
+    CHECK(noCpu.contains("pace_node_memory_available_bytes 1024\n"));
 
     // And the mirror, so the memory row is shown to be conditional on its own figure.
     auto const noMemory =
@@ -299,16 +299,16 @@ TEST_CASE("A compile node reports what its machine is doing, each figure only wh
                                            .hostLoad = HostLoadReading { .cpu = CpuTicks { .busy = 1, .total = 2 },
                                                                          .availableMemoryBytes = std::nullopt },
                                            .uptime = Uptime { 1s } });
-    CHECK(noMemory.contains("fastcache_node_cpu_ticks_total 2\n"));
-    CHECK_FALSE(noMemory.contains("# TYPE fastcache_node_memory_available_bytes"));
+    CHECK(noMemory.contains("pace_node_cpu_ticks_total 2\n"));
+    CHECK_FALSE(noMemory.contains("# TYPE pace_node_memory_available_bytes"));
 
     // The daemon samples no load at all and renders none of the three.
     auto const daemon = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = StorageStats {}, .host = std::nullopt, .uptime = Uptime { 1s } });
-    CHECK_FALSE(daemon.contains("# TYPE fastcache_node_cpu_"));
-    CHECK_FALSE(daemon.contains("# TYPE fastcache_node_memory_available_bytes"));
+    CHECK_FALSE(daemon.contains("# TYPE pace_node_cpu_"));
+    CHECK_FALSE(daemon.contains("# TYPE pace_node_memory_available_bytes"));
     // The positive control: the daemon's scrape is not empty.
-    CHECK(daemon.contains("# TYPE fastcached_uptime_seconds"));
+    CHECK(daemon.contains("# TYPE pace_uptime_seconds"));
 }
 
 TEST_CASE("A tiered cache renders one labelled sample per tier", "[metrics][prometheus][storage-tier]")
@@ -333,32 +333,32 @@ TEST_CASE("A tiered cache renders one labelled sample per tier", "[metrics][prom
     {
         // Every value distinct, so a row rendering its neighbour's field cannot
         // pass -- the slip a table of near-identical rows invites.
-        CHECK(body.contains("fastcached_tier_items{tier=\"memory\"} 11\n"));
-        CHECK(body.contains("fastcached_tier_items{tier=\"disk\"} 900\n"));
-        CHECK(body.contains("fastcached_tier_bytes_used{tier=\"memory\"} 2048\n"));
-        CHECK(body.contains("fastcached_tier_bytes_used{tier=\"disk\"} 1000000\n"));
-        CHECK(body.contains("fastcached_tier_bytes_limit{tier=\"memory\"} 4096\n"));
-        CHECK(body.contains("fastcached_tier_bytes_limit{tier=\"disk\"} 0\n"));
-        CHECK(body.contains("fastcached_tier_evictions_total{tier=\"memory\"} 7\n"));
-        CHECK(body.contains("fastcached_tier_evictions_total{tier=\"disk\"} 1\n"));
+        CHECK(body.contains("pace_tier_items{tier=\"memory\"} 11\n"));
+        CHECK(body.contains("pace_tier_items{tier=\"disk\"} 900\n"));
+        CHECK(body.contains("pace_tier_bytes_used{tier=\"memory\"} 2048\n"));
+        CHECK(body.contains("pace_tier_bytes_used{tier=\"disk\"} 1000000\n"));
+        CHECK(body.contains("pace_tier_bytes_limit{tier=\"memory\"} 4096\n"));
+        CHECK(body.contains("pace_tier_bytes_limit{tier=\"disk\"} 0\n"));
+        CHECK(body.contains("pace_tier_evictions_total{tier=\"memory\"} 7\n"));
+        CHECK(body.contains("pace_tier_evictions_total{tier=\"disk\"} 1\n"));
     }
     SECTION("the file's length renders for the tier with a file, and only for it")
     {
         // Beside the footprint `bytes_used` carries, so an operator sees both what the
         // budget bounds and what the filesystem is charged. The memory tier has no file,
         // and a zero there would read as an empty one.
-        CHECK(body.contains("fastcached_tier_file_bytes{tier=\"disk\"} 1310720\n"));
-        CHECK_FALSE(body.contains("fastcached_tier_file_bytes{tier=\"memory\"}"));
+        CHECK(body.contains("pace_tier_file_bytes{tier=\"disk\"} 1310720\n"));
+        CHECK_FALSE(body.contains("pace_tier_file_bytes{tier=\"memory\"}"));
     }
     SECTION("HELP and TYPE appear once per series, not once per label")
     {
         // Repeating them per label value is what a scraper rejects, and it takes
         // the whole body with it rather than the one series.
-        for (auto const& name: { "fastcached_tier_items",
-                                 "fastcached_tier_bytes_used",
-                                 "fastcached_tier_bytes_limit",
-                                 "fastcached_tier_file_bytes",
-                                 "fastcached_tier_evictions_total" })
+        for (auto const& name: { "pace_tier_items",
+                                 "pace_tier_bytes_used",
+                                 "pace_tier_bytes_limit",
+                                 "pace_tier_file_bytes",
+                                 "pace_tier_evictions_total" })
         {
             INFO("series " << name);
             auto count = 0;
@@ -377,7 +377,7 @@ TEST_CASE("A tiered cache renders one labelled sample per tier", "[metrics][prom
 TEST_CASE("A memory-only cache renders no disk tier at all", "[metrics][prometheus][storage-tier]")
 {
     // Absent is not zero, one level below the rule `MetricsSnapshot::storage`
-    // already follows: `fastcached_tier_items{tier="disk"} 0` says a disk tier is
+    // already follows: `pace_tier_items{tier="disk"} 0` says a disk tier is
     // standing empty, and a node configured without one has no such tier to be
     // empty. A dashboard cannot tell those apart from a zero.
     AtomicMetricsSink metrics;
@@ -389,21 +389,21 @@ TEST_CASE("A memory-only cache renders no disk tier at all", "[metrics][promethe
         metrics,
         MetricsSnapshot { .storage = std::nullopt, .storageTiers = tiers, .host = std::nullopt, .uptime = Uptime { 1s } });
 
-    CHECK(body.contains("fastcached_tier_items{tier=\"memory\"} 4\n"));
+    CHECK(body.contains("pace_tier_items{tier=\"memory\"} 4\n"));
     CHECK_FALSE(body.contains("tier=\"disk\""));
 }
 
 TEST_CASE("A process with no cache renders no tier series", "[metrics][prometheus][storage-tier]")
 {
     // The default `MetricsSnapshot` leaves every tier absent, so a worker that
-    // never started a cache tier emits no `fastcached_tier_*` line -- not even a
+    // never started a cache tier emits no `pace_tier_*` line -- not even a
     // `# HELP` with nothing under it, which a scraper accepts and a dashboard
     // draws as a series that has stopped reporting.
     AtomicMetricsSink metrics;
     auto const body = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Uptime { 1s } });
 
-    CHECK_FALSE(body.contains("fastcached_tier_"));
+    CHECK_FALSE(body.contains("pace_tier_"));
 }
 
 TEST_CASE("Whether a node has a shared cache is named, not inferred from a counter", "[metrics][prometheus]")
@@ -421,21 +421,21 @@ TEST_CASE("Whether a node has a shared cache is named, not inferred from a count
     // help text names this gauge, so a substring check finds it in a scrape that
     // never rendered it.
     auto const absent = RenderPrometheus(metrics, MetricsSnapshot {});
-    CHECK_FALSE(absent.contains("# TYPE fastcache_node_upstream_configured"));
+    CHECK_FALSE(absent.contains("# TYPE pace_node_upstream_configured"));
 
     auto const without = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .upstreamConfigured = false });
-    CHECK(without.contains("# TYPE fastcache_node_upstream_configured gauge"));
-    CHECK(without.contains("fastcache_node_upstream_configured 0"));
+    CHECK(without.contains("# TYPE pace_node_upstream_configured gauge"));
+    CHECK(without.contains("pace_node_upstream_configured 0"));
 
     auto const with = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .upstreamConfigured = true });
-    CHECK(with.contains("fastcache_node_upstream_configured 1"));
+    CHECK(with.contains("pace_node_upstream_configured 1"));
 
     // The counters stay exported either way -- absent is modelled in the snapshot,
     // never by dropping a counter row.
-    CHECK(absent.contains("fastcache_node_cache_upstream_store_failures_total"));
-    CHECK(without.contains("fastcache_node_cache_upstream_store_failures_total"));
+    CHECK(absent.contains("pace_node_cache_upstream_store_failures_total"));
+    CHECK(without.contains("pace_node_cache_upstream_store_failures_total"));
 }
 
 TEST_CASE("A process with no consensus renders no consensus series", "[metrics][prometheus][consensus]")
@@ -452,10 +452,10 @@ TEST_CASE("A process with no consensus renders no consensus series", "[metrics][
     auto const body = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Uptime { 1s } });
 
-    CHECK_FALSE(body.contains("fastcache_node_consensus_"));
+    CHECK_FALSE(body.contains("pace_node_consensus_"));
     // The positive control. Without it this case passes over a renderer that emits
     // nothing at all, which is a different defect wearing the same green.
-    CHECK(body.contains("fastcached_uptime_seconds 1\n"));
+    CHECK(body.contains("pace_uptime_seconds 1\n"));
 }
 
 TEST_CASE("A node that holds no configuration says so rather than vanishing", "[metrics][prometheus][consensus]")
@@ -475,23 +475,23 @@ TEST_CASE("A node that holds no configuration says so rather than vanishing", "[
     auto const body = RenderPrometheus(
         metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .consensus = ConsensusStatus {} });
 
-    CHECK(body.contains("# TYPE fastcache_node_consensus_members gauge"));
-    CHECK(body.contains("fastcache_node_consensus_members 0\n"));
-    CHECK(body.contains("fastcache_node_consensus_term 0\n"));
+    CHECK(body.contains("# TYPE pace_node_consensus_members gauge"));
+    CHECK(body.contains("pace_node_consensus_members 0\n"));
+    CHECK(body.contains("pace_node_consensus_term 0\n"));
 
     // And no member samples, because there are no members to name -- the tier rule
     // one axis over. The three unconditional series above are what make this
     // absence readable rather than indistinguishable from a process with no
     // consensus at all.
-    CHECK_FALSE(body.contains("fastcache_node_consensus_member{"));
-    CHECK_FALSE(body.contains("# TYPE fastcache_node_consensus_member gauge"));
+    CHECK_FALSE(body.contains("pace_node_consensus_member{"));
+    CHECK_FALSE(body.contains("# TYPE pace_node_consensus_member gauge"));
 
     // Nor a leader, which a node in this state legitimately does not know.
-    CHECK_FALSE(body.contains("fastcache_node_consensus_leader"));
+    CHECK_FALSE(body.contains("pace_node_consensus_leader"));
 
     // A follower in term 0 that counts nobody is what a joiner looks like, so the
     // role has to be there too or the reading is half of one.
-    CHECK(body.contains("fastcache_node_consensus_role{role=\"follower\"} 1\n"));
+    CHECK(body.contains("pace_node_consensus_role{role=\"follower\"} 1\n"));
 }
 
 TEST_CASE("A node's consensus block names every member and who leads", "[metrics][prometheus][consensus]")
@@ -514,26 +514,26 @@ TEST_CASE("A node's consensus block names every member and who leads", "[metrics
 
     // Voters AND learners: the members this node replicates with (#1449). Which of them
     // a quorum counts is the `seat` label below, not a second gauge.
-    CHECK(body.contains("fastcache_node_consensus_members 4\n"));
-    CHECK(body.contains("fastcache_node_consensus_term 4\n"));
-    CHECK(body.contains("fastcache_node_consensus_commit_index 11\n"));
+    CHECK(body.contains("pace_node_consensus_members 4\n"));
+    CHECK(body.contains("pace_node_consensus_term 4\n"));
+    CHECK(body.contains("pace_node_consensus_commit_index 11\n"));
 
     // The set, not only its size: "which members does this node count" is the
     // question asked when a cluster will not re-elect, and a count cannot answer it.
     // And since #1449 the SEAT is half that answer, since a learner is a member no
     // quorum counts -- spelled as `StandingTable` spells it.
-    CHECK(body.contains("fastcache_node_consensus_member{member=\"n1\",seat=\"voter\"} 1\n"));
-    CHECK(body.contains("fastcache_node_consensus_member{member=\"n2\",seat=\"voter\"} 1\n"));
-    CHECK(body.contains("fastcache_node_consensus_member{member=\"n3\",seat=\"voter\"} 1\n"));
-    CHECK(body.contains("fastcache_node_consensus_member{member=\"laptop\",seat=\"learner\"} 1\n"));
+    CHECK(body.contains("pace_node_consensus_member{member=\"n1\",seat=\"voter\"} 1\n"));
+    CHECK(body.contains("pace_node_consensus_member{member=\"n2\",seat=\"voter\"} 1\n"));
+    CHECK(body.contains("pace_node_consensus_member{member=\"n3\",seat=\"voter\"} 1\n"));
+    CHECK(body.contains("pace_node_consensus_member{member=\"laptop\",seat=\"learner\"} 1\n"));
     // One HELP/TYPE pair for the series, with the three samples under it: repeating
     // the header per label value is what a scraper rejects, and it is the mistake a
     // per-sample `Append` loop makes silently -- every value is present and the
     // exposition is invalid.
-    CHECK(Occurrences(body, "# TYPE fastcache_node_consensus_member gauge") == 1);
-    CHECK(Occurrences(body, "# HELP fastcache_node_consensus_member ") == 1);
+    CHECK(Occurrences(body, "# TYPE pace_node_consensus_member gauge") == 1);
+    CHECK(Occurrences(body, "# HELP pace_node_consensus_member ") == 1);
 
-    CHECK(body.contains("fastcache_node_consensus_leader{leader=\"n2\"} 1\n"));
+    CHECK(body.contains("pace_node_consensus_leader{leader=\"n2\"} 1\n"));
 }
 
 TEST_CASE("The consensus role is a state set driven by RoleTable", "[metrics][prometheus][consensus]")
@@ -559,7 +559,7 @@ TEST_CASE("The consensus role is a state set driven by RoleTable", "[metrics][pr
 
         for (auto const& row: Consensus::RoleTable)
             CHECK(body.contains(std::format(
-                "fastcache_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == subject.role ? 1 : 0)));
+                "pace_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == subject.role ? 1 : 0)));
     }
 }
 
@@ -580,9 +580,9 @@ TEST_CASE("A node in an election names no leader rather than an empty one", "[me
                                                          .term = Consensus::Term { .value = 9 },
                                                          .role = Consensus::Role::Candidate } });
 
-    CHECK_FALSE(body.contains("fastcache_node_consensus_leader"));
-    CHECK(body.contains("fastcache_node_consensus_members 2\n"));
-    CHECK(body.contains("fastcache_node_consensus_role{role=\"candidate\"} 1\n"));
+    CHECK_FALSE(body.contains("pace_node_consensus_leader"));
+    CHECK(body.contains("pace_node_consensus_members 2\n"));
+    CHECK(body.contains("pace_node_consensus_role{role=\"candidate\"} 1\n"));
 }
 
 namespace
@@ -663,7 +663,7 @@ TEST_CASE("A counter the sink has no slot for is omitted and named, never render
     // separates "the endpoint survived" from "the endpoint survived and still means
     // something": a fix that dropped every counter row, or one that rendered the
     // carried rows as zero, satisfies a name-only check and fails this one.
-    CHECK(body.contains("fastcached_uptime_seconds"));
+    CHECK(body.contains("pace_uptime_seconds"));
     CHECK(body.contains(std::format("{} 5\n", PrometheusNameOf(IMetricsSink::Counter::ConnectionsTotal))));
 
     // The machine-readable half, and the VALUE rather than the presence. A scraper
@@ -672,10 +672,10 @@ TEST_CASE("A counter the sink has no slot for is omitted and named, never render
     // down target. This is the part an alert can fire on, and asserting `1` rather
     // than "the line is there" is what separates a real count from a line that
     // always reads zero.
-    CHECK(body.contains("fastcached_metrics_catalogue_skew 1\n"));
+    CHECK(body.contains("pace_metrics_catalogue_skew 1\n"));
 
     // The control for it: the healthy render carries the same series reading zero,
     // so `> 0` is a usable alert rather than an absence somebody has to notice.
     // A zero here is a reading, not a missing line.
-    CHECK(healthyBody.contains("fastcached_metrics_catalogue_skew 0\n"));
+    CHECK(healthyBody.contains("pace_metrics_catalogue_skew 0\n"));
 }

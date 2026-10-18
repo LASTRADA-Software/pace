@@ -335,7 +335,7 @@ std::string ComputeKey(KeyInputs const& inputs)
     // rule. `manifest-v7` moves with it, in the lock-step ComputeManifestKey describes --
     // and for a second reason of its own, since direct mode is where the defect lived.
     //
-    // v8 retires every value stored before the dependency root (`FASTCACHE_DEPS_DIR`,
+    // v8 retires every value stored before the dependency root (`PACE_DEPS_DIR`,
     // `PathCanon::Layout::dependencyRoot`). This construction is unchanged and the golden
     // vector moved for the tag alone; what changed is what a value's text regions may carry
     // -- a `<DEPROOT>` span a launcher of this generation localizes and an older one would

@@ -51,7 +51,7 @@ THE TRANSFORM, stated so the diff can be read rather than trusted. Only the
 SPAWN changes; every `-D` argument, the script path, and the block's shape are
 untouched:
 
-    COMMAND ${CMAKE_COMMAND}                        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" --command --
+    COMMAND ${CMAKE_COMMAND}                        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" --command --
         "-DFOO=..."                     ->              ${CMAKE_COMMAND}
         -P ".../check-x.cmake"                          "-DFOO=..."
                                                         -P ".../check-x.cmake"
@@ -68,7 +68,7 @@ import io
 import re
 import sys
 
-WRAP = ('COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" '
+WRAP = ('COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" '
         '--command --')
 
 

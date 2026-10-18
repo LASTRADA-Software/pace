@@ -696,7 +696,7 @@ readable and silently ignored. Every rule below has already been one of them.
     EVERY action from `RemoveExistingProducts` through `WriteRegistryValues` -- the removal
     itself, `StopServices`, `DeleteServices`, `RemoveRegistryValues`, `RemoveFiles`,
     `CreateFolders`, `InstallFiles`, `WriteRegistryValues` -- where nothing that restores can run
-    yet; `FastCacheAwaitServiceExit` is the one of ours, a stated row of `ChecksBeforeTheRestores`.
+    yet; `PaceAwaitServiceExit` is the one of ours, a stated row of `ChecksBeforeTheRestores`.
     A failure there rolls an upgrade from 0.3.0 back with no service registered, and the remedy
     is to run the upgrade again.
   - **A rollback that STARTS a service is scheduled BEFORE `InstallFiles`**, and the rollback
@@ -710,7 +710,7 @@ readable and silently ignored. Every rule below has already been one of them.
     custom action runs, so a failed upgrade from 0.3.0 leaves both services unregistered. That is
     not refused: an administrator who disabled rollback opted out of it, and the runbook names
     running the upgrade again as the remedy.
-  - **The rollback state is discarded in the COMMIT phase** (`FastCacheDiscardRollbackState`,
+  - **The rollback state is discarded in the COMMIT phase** (`PaceDiscardRollbackState`,
     `Execute="commit"`), never deferred: a deferred discard runs inside the script, so any failure
     after it -- a later checked action, a standard action, the leftover deletes -- rolls back with
     the saved state already deleted and every exact restore reads a missing key and does nothing
@@ -724,7 +724,7 @@ readable and silently ignored. Every rule below has already been one of them.
     text states. The CI step `A failed upgrade restores the previous installation exactly` proves
     the behaviour end to end, with THREE controls on patched copies: (A) every rollback row that
     rewrites pace-kv's registration off -- the exact restore, its re-registration twin
-    `FastCachedRestoreRegistration` and the undo -- must differ in pace-kv's registration;
+    `PaceRestoreRegistration` and the undo -- must differ in pace-kv's registration;
     (B) only the twin off must differ in NOTHING, the exact restore working alone, and red there
     is a defect in the exact restore rather than a weak control; (C) the twin off and the discard
     deferred again must differ in pace-kv's registration. B and C differ only in the
@@ -739,9 +739,9 @@ readable and silently ignored. Every rule below has already been one of them.
     which the twin's `--install-service` does not build, so the twin alone can no longer put N
     back. With rollback DISABLED
     no commit action runs either, so the key survives that transaction; the next transaction's
-    `FastCacheClearRollbackState` empties it before it writes any.
-  - **`FASTCACHE_FAIL_FOR_TEST="1"` is a shipped, property-gated late failure**
-    (`FastCacheFailForTest`, `Before="InstallFinalize"`, so behind every other script action): it
+    `PaceClearRollbackState` empties it before it writes any.
+  - **`PACE_FAIL_FOR_TEST="1"` is a shipped, property-gated late failure**
+    (`PaceFailForTest`, `Before="InstallFinalize"`, so behind every other script action): it
     exists for the CI step that proves a failed upgrade restores the previous installation
     exactly, and it is shipped rather than built apart so CI tests the package that ships. Only
     the exact value `1` runs it; an administrator who sets it fails their own install and nothing
@@ -759,7 +759,7 @@ readable and silently ignored. Every rule below has already been one of them.
   - Deselecting a feature outside an upgrade (`REMOVE=CM_C_Node`, Settings > Apps > Modify, an
     uninstall) removes its service through its own binary, firewall rules included.
   - **A maintenance transaction resolves `INSTALL_ROOT` from the product's OWN install location**
-    (`SetFastCacheInstallRootFromInstallLocation`: when `Installed`, before `CostFinalize`, from
+    (`SetPaceInstallRootFromInstallLocation`: when `Installed`, before `CostFinalize`, from
     `Uninstall\[ProductCode]`'s `InstallLocation`). CPack's `FindInstallLocation` reads only
     `Uninstall\[WIX_UPGRADE_DETECTED]`, which is empty outside an upgrade, so a repair, a feature
     change or an uninstall of a custom root resolved the DEFAULT root. CI run 37456507637
@@ -783,17 +783,17 @@ readable and silently ignored. Every rule below has already been one of them.
   the node installed, the node is registered `auto` and started, and pace-kv stopped through
   `net stop`, which waits, and DISABLED (both would answer on 6674; below for why not `manual`);
   with pace-kv alone it
-  is `auto` and started unless `FASTCACHED_START_SERVICE=0`. The node is re-registered on EVERY
+  is `auto` and started unless `PACE_START_SERVICE=0`. The node is re-registered on EVERY
   such transaction and needs no property -- a node that serves is refused `--scheduler`, and a
   registration kept as found would replay the one an earlier package wrote and fail at every
   start -- so the OPTIONAL properties are REMEMBERED (the WiX remember-property pattern: saved
   before `AppSearch`, read back from `HKLM\SOFTWARE\fastcached\Installer`, restored, written
-  again by a deferred `FastCacheRemember*` action on every transaction that registers; a root-feature
+  again by a deferred `PaceRemember*` action on every transaction that registers; a root-feature
   component only OWNS the key, since a feature change reinstalls no component). Three of them:
-  `FASTCACHE_FIREWALL_ALLOW`, `FASTCACHE_FLEET_SEED` and `FASTCACHE_FLEET_ID` (passed VERBATIM, a pin
+  `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and `PACE_FLEET_ID` (passed VERBATIM, a pin
   being security material), each a row of `check-wix-service-table` and of the
   remember case. **The node's sequence is ONE: validate, register, remember, start**, every step
-  `Return="check"`. Validate is `FastCacheNodeCheckArguments`, the node's own `--check-arguments`
+  `Return="check"`. Validate is `PaceNodeCheckArguments`, the node's own `--check-arguments`
   over the registration's own argument list: a pin its parse refuses fails the transaction with
   nothing registered or remembered (batch 3 review, B3-1; before it the registration was
   `Return="ignore"`, so the OLD registration was started and the refused pin remembered, replayed by
@@ -809,15 +809,15 @@ readable and silently ignored. Every rule below has already been one of them.
   two properties are remembered only by a transaction that keeps the node, so nothing the check
   did not see is ever written; the `[msi]` refusal and rollback cases and the MSI job's refused
   repair assert it. Not remembering them failed OPEN: a repair that left out
-  `FASTCACHE_FIREWALL_ALLOW` opened the rules to any address. The `[msi]` remember case runs the
+  `PACE_FIREWALL_ALLOW` opened the rules to any address. The `[msi]` remember case runs the
   fragment's own rows across install, repair, upgrade and repair. **There is no advertised-endpoint
   property** (W-10): an IP literal remembered across upgrades vetoed the dial hint for good on a
   roaming laptop, so the registration carries no `--advertise`, the node advertises its own name,
-  and `FastCacheForgetNodeAdvertise` deletes the value an earlier package remembered; the MSI
+  and `PaceForgetNodeAdvertise` deletes the value an earlier package remembered; the MSI
   names no `--cluster-dir` either, since a registered value outranks the file's `cluster_dir`.
   `DocumentedCommandLines_test`'s `[msi]` case reads the `ExeCommand` out of the fragment and
   round-trips every shape, the no-property one first. The
-  inputs are `FASTCACHE_NODE_SELECTED` / `FASTCACHED_SELECTED`, derived once from the feature
+  inputs are `PACE_NODE_SELECTED` / `PACE_SELECTED`, derived once from the feature
   states after `MigrateFeatureStates`, so no condition restates the feature-state expression.
   NOT after `CostFinalize`: on a major upgrade `MigrateFeatureStates` runs later and carries the
   old product's selection over, so a state read before it is the new package's default.
@@ -840,13 +840,13 @@ readable and silently ignored. Every rule below has already been one of them.
     Restart Manager", below).
     `Invoke-Msiexec` prints every `RESTART MANAGER` line of each verbose log (up to a stated cap of
     100), and a refused judgement adds the actions from 10 s before to 5 s after each finding.
-  - **And it cost the rollback its restart.** `FastCachedStopForFiles` and
-    `FastCacheCompileNodeStopForFiles` (`Stop="both" Wait="yes"`) stop each service before its files
+  - **And it cost the rollback its restart.** `PaceStopForFiles` and
+    `PaceNodeStopForFiles` (`Stop="both" Wait="yes"`) stop each service before its files
     are replaced, and `StopServices` records a rollback start only for a service it found RUNNING.
     Restart Manager's shutdown came first, so `StopServices` found nothing to stop and a failed
     transaction had no rollback start for it (INFERRED from the order; that a failed upgrade still
     ended with FastCached running under Restart Manager was its end-of-install restart, equally
-    INFERRED). With it disabled, the OLD product's `FastCachedStopForFiles`, run inside
+    INFERRED). With it disabled, the OLD product's `PaceStopForFiles`, run inside
     `RemoveExistingProducts`, stops a running FastCached and records the start, which the rollback
     replays last, after the node's registration is undone.
   - **`Disable`, not the other two answers.** `DisableShutdown` keeps Restart Manager detecting
@@ -865,7 +865,7 @@ readable and silently ignored. Every rule below has already been one of them.
     lists it, and its file is replaced at the next boot (exit 3010). The services cannot raise it
     (no window) and are stopped before `InstallFiles`. And a MAINTENANCE transaction that removes a
     service (`REMOVE=CM_C_Node`, `/x`) now relies on the service PROCESS having exited between its
-    stop (`StopServices`, `--uninstall-service`) and `RemoveFiles`: `FastCacheAwaitServiceExit` runs
+    stop (`StopServices`, `--uninstall-service`) and `RemoveFiles`: `PaceAwaitServiceExit` runs
     on an upgrade only, and Restart Manager's shutdown at `InstallValidate` used to give that margin.
     Both show as 3010 rather than as a failure: watch "removing the node feature" and the uninstall
     legs for it.
@@ -916,7 +916,7 @@ readable and silently ignored. Every rule below has already been one of them.
   - **The node's OWN 7036s never count as "other services'"** (PR 1645): its own `stopped` with no
     `running` proves the reader reads the node's, so it is `node stopped`, the node's outcome, never
     a dead witness. Whether the restart was AWAITED decides it: a transaction that COMMITTED
-    (`$script:MsiCommittedExitCodes`) passed `FastCacheNodeStartService`, which waits for RUNNING, so
+    (`$script:MsiCommittedExitCodes`) passed `PaceNodeStartService`, which waits for RUNNING, so
     a missed `running` is the witness failing on the STATE and is refused at the exit; one that ROLLED
     BACK restarts the node with Windows Installer's own unawaited StartServices, so the exit DEFERS it
     (`7036 DEFERRED`, the transaction's `Deferred`), and the settled judgement refuses a node that
@@ -939,7 +939,7 @@ readable and silently ignored. Every rule below has already been one of them.
     product's removal out of the transaction (#1629), an immediate action runs unelevated under UAC,
     and `DisableAutomaticApplicationShutdown` is a machine POLICY. And it cannot be followed: the
     restart comes after the last action. So it is answered where it lands --
-    `FastCachedDisableForNode` (`sc config FastCached start= disabled`, `Return="check"`) leaves a
+    `PaceDisableForNode` (`sc config FastCached start= disabled`, `Return="check"`) leaves a
     start of FastCached beside the node failing at the service control manager, with no process, no
     recovery restart and no race for 6674; the 352 is that refused start, and the upgrade still exits
     0 (MEASURED: it did with the crash too). Not the binary: a bind conflict is an I/O arm, `Failed`
@@ -948,7 +948,7 @@ readable and silently ignored. Every rule below has already been one of them.
     it found. The CI leg asserts the nested shutdown line beside the judgement, so "no start" cannot
     pass for want of a restart attempt.
     - **Only a registration that EXISTS is disabled, and the disable is `Return="check"`.**
-      `FastCachedInstallService` is `Return="ignore"` on purpose, so pace-kv may be ABSENT there,
+      `PaceInstallService` is `Return="ignore"` on purpose, so pace-kv may be ABSENT there,
       which is no more startable than disabled; a checked disable of it failed the node's whole install
       over a step that was not the cause (rm-nested review, I-1). `sc.exe` answers 1060
       (ERROR_SERVICE_DOES_NOT_EXIST, MEASURED) for exactly that, and that one answer ends the action
@@ -961,7 +961,7 @@ readable and silently ignored. Every rule below has already been one of them.
       from a package whose removal still has its own Restart Manager, so accepted rather than given a
       start mode the command line would never use.
     - The RESIDUAL is pace-kv WITHOUT the node: Windows Installer's restart of a FastCached that ran
-      before the upgrade succeeds, so `FASTCACHED_START_SERVICE=0` on an upgrade from 0.3.0 leaves it
+      before the upgrade succeeds, so `PACE_START_SERVICE=0` on an upgrade from 0.3.0 leaves it
       running; harmless (nothing else wants its port), and install.md says to stop it first. Every
       package from PR 1634 on disables Restart Manager, so the hazard is an upgrade FROM 0.3.0 or
       from a build before it -- dev builds carry 0.3.0's ProductVersion, so no version range can tell.
@@ -1002,7 +1002,7 @@ readable and silently ignored. Every rule below has already been one of them.
     keeps that true: it refuses a first-party UDP opener outside its permitted rows, and a new
     row is a decision about this rule. A pinned port gets exactly that port and no
     any-port rule. The uninstall removes it with the GROUP, never by re-deriving the rules.
-    **The MSI pins it and the node does not**: `FASTCACHE_DISCOVERY_REPLY_PORT` (default `6682`,
+    **The MSI pins it and the node does not**: `PACE_DISCOVERY_REPLY_PORT` (default `6682`,
     empty for the kernel's) reaches `--discovery-reply-port`, and the rule DERIVES from the
     surface table given that flag -- never spelled in the fragment. The node's own default stays
     kernel-chosen for the multi-instance rule (#126, consensus-and-cluster.md): two co-hosted
@@ -1314,7 +1314,7 @@ readable and silently ignored. Every rule below has already been one of them.
 - **And a RELOAD rebuilds the candidate the way the START built the live
   configuration, or the command line silently stops applying.** The daemon's SIGHUP
   path was `ReadYamlConfig(path)` and nothing else, so a setting in force because
-  somebody typed a flag — or set `FASTCACHED_METRICS_PORT`, which is the same half
+  somebody typed a flag — or set `PACE_METRICS_PORT`, which is the same half
   of it — arrived at the immutability check as a setting being changed back to its
   default. **The two directions fail differently and the reloadable one is the
   dangerous one**: an immutable setting refuses the reload by name, forever, until
@@ -1449,7 +1449,7 @@ readable and silently ignored. Every rule below has already been one of them.
   generated: `BuildServiceArgv` (a `ServiceControl_test` case walks
   `CliOptions()` and requires each non-excluded flag to be emitted — the
   exclusions, `--requirepass` above all, are listed with their reasons) and the
-  launcher's `FASTCACHE_*` oracle list in `LauncherCli_test`.
+  launcher's `PACE_*` oracle list in `LauncherCli_test`.
 
 - **Which flags carry text OTHER MACHINES will read is a column of the table.**
   `ParseUtf8Text` rather than `ParseText`, and the rows in it are the ones whose

@@ -93,7 +93,7 @@ What is worth carrying past this check:
   with `1000×10,900,1100`: the walk measured `0s`, the run `+100s`, a checkpoint
   `-100s`, and the check reported `93 ms/file. That is the 'bridged and
   contended' band` at exit 0 — a band across a clock it had already watched move.
-  So `fastcached_scan_interval` takes a LABEL and files every backward step
+  So `pace_scan_interval` takes a LABEL and files every backward step
   itself, and the reporting arm reads that record rather than enumerating its
   sources. An arm that enumerates them is an arm that goes silent about the next
   interval somebody adds.
@@ -261,12 +261,12 @@ cannot start. It was diagnosed by hand from `Get-NetTCPConnection -LocalPort 217
 after surviving a rebase and presenting as a regression the rebase had caused (#220).
 
 **The reason offered for the constant was true and did not support it.** The launcher
-under test reads `FASTCACHE_ADDR` from the environment and several child processes
+under test reads `PACE_ADDR` from the environment and several child processes
 inherit it, so the port has to be decided BEFORE the daemon starts — which is an
 argument for deciding it early, and drawing does that. The fixture draws from
 20000..32000 like every sibling now, and the four were CHECKED rather than assumed:
 `compile-cache-e2e.sh` and `dist-compile-e2e.sh` call `free_port`; `sccache-smoke.sh`
-does too, and `FASTCACHED_SMOKE_PORT` defaults to EMPTY so the registration passes no
+does too, and `PACE_SMOKE_PORT` defaults to EMPTY so the registration passes no
 `--port` at all, on either platform since `sccache-smoke.ps1` drew too (#183). The
 CMake half is worth naming separately from the script half, because for a while the
 script drew and the registration passed `--port 11611` unconditionally: the draw was
@@ -1001,7 +1001,7 @@ separate authors could write this bug and no run anywhere would show it. CI sets
 `CTEST_PARALLEL_LEVEL` once in the workflow's `env:` rather than adding
 `--parallel` to each of the four `run:` lines, so an invocation added later is
 covered by construction; the gate passes `--parallel` explicitly (`getconf
-_NPROCESSORS_ONLN`, since it runs on macOS too; `FASTCACHE_GATE_JOBS` overrides).
+_NPROCESSORS_ONLN`, since it runs on macOS too; `PACE_GATE_JOBS` overrides).
 Tests that genuinely cannot share -- a daemon, a fixed port -- carry `RUN_SERIAL`,
 which `tls-smoke` was missing while every one of its neighbours had it. Measured
 on the full suite: 649s serial, 131s at `--parallel 8`, same 1965 tests; Windows
@@ -1302,7 +1302,7 @@ reverted inside one change: they fired 16 and 5 times, every hit in a PRODUCTION
 shutdown checks, `FrameEndpoint`'s drain, the bench's workers -- and the wait they ask for is
 `src/tests/BoundedWait.hpp`, which a production source cannot include. **A guard's remedy text is
 part of the guard**, so a rule whose remedy does not exist for the files it refuses is not a
-stricter rule, it is a broken one. The `rules` column of `FastCachedTestLoopScope` says which,
+stricter rule, it is a broken one. The `rules` column of `PaceTestLoopScope` says which,
 and a rule no scope row names is refused rather than left enumerated by nothing.
 
 **The 148 sites the widening found were a RATCHET, and a backlog row is a different CLAIM from an
@@ -2153,8 +2153,8 @@ CMake Error at src/tests/CMakeLists.txt:943 (add_test):
 That is #390. A block registering a test that starts a binary is guarded on
 **`TARGET x`** as well as on whatever feature makes the test interesting; the two
 conditions are independent, because a feature can be enabled while the binary it
-needs is not built. `tls-smoke` asked only `FASTCACHED_ENABLE_TLS` and the sccache
-smokes only `SCCACHE`, so `-DFASTCACHED_BUILD_DAEMON=OFF` could not be configured
+needs is not built. `tls-smoke` asked only `PACE_ENABLE_TLS` and the sccache
+smokes only `SCCACHE`, so `-DPACE_BUILD_DAEMON=OFF` could not be configured
 at all.
 
 **It was conditional on the developer's machine rather than on the tree**, which is
@@ -2173,7 +2173,7 @@ restating them, so a new app comes under the guard by existing.
 
 **The app table was not always the only place a target became optional**
 ([#1369](https://github.com/LASTRADA-Software/fastcached/issues/1369)). While the root added
-`vendor/` only under `FASTCACHED_BUILD_TUI`, every target `vendor/CMakeLists.txt` declared was
+`vendor/` only under `PACE_BUILD_TUI`, every target `vendor/CMakeLists.txt` declared was
 as optional as an app, and an unguarded `$<TARGET_FILE:fastcache-tui-linkprobe>` planted in
 `src/tests/CMakeLists.txt` passed: the check's source set had stopped describing the tree, and
 a list is exact about the files it knows and silent about the ones it does not. #1369 added a
@@ -2313,7 +2313,7 @@ them ran the code that runs in production.
   is what makes the fallback sound there and unsound in a working checkout, where a
   dependency cache lives inside the source tree.
 - **A fixture that MAKES its tree a repository writes it through `scratch_git`, never bare
-  `git`** (`scripts/lib/git-scrub.sh`; `fastcached_scratch_git` in `CheckCommon.cmake`). Every
+  `git`** (`scripts/lib/git-scrub.sh`; `pace_scratch_git` in `CheckCommon.cmake`). Every
   `git init`, `git add` and commit obeys `GIT_DIR`, `GIT_WORK_TREE` and the rest of
   `scripts/lib/git-scrub-variables.txt` when they are in the environment, and then writes the
   repository they NAME instead of the scratch tree: an exported `GIT_DIR` around a `ctest -L
@@ -2994,10 +2994,10 @@ Four checks, each with the direction it fails in:
    the launcher recorded HERE, because a launcher recording nowhere spares it too. The bash
    shim also records, for every run, the value each state variable HAD when it ran, and
    the control refuses any that does not name the run's root. A fixture whose every run
-   sets `FASTCACHE_NO_STATS=1` has no record to count — its runs write neither the log nor
+   sets `PACE_NO_STATS=1` has no record to count — its runs write neither the log nor
    the toolchain fingerprint cache, which only a dispatch or `--print-toolchain-fingerprint`
    writes — so for it that shim record IS the control: at least one run beyond the guard,
-   each with every variable at the run's root. `FASTCACHE_NO_STATS` does not gate
+   each with every variable at the run's root. `PACE_NO_STATS` does not gate
    everything, though: a PERSISTENT refusal from the daemon writes a throttle stamp
    (`refusal-*.stamp`, `RefusalNotice.cpp`, reached from `main.cpp`'s fetch path) into the
    same state directory. It is not used as the control, because `compile-cache-daemon-start`'s

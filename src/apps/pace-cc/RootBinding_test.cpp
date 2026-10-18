@@ -400,7 +400,7 @@ TEST_CASE("A relative root is made absolute against the working directory", "[la
 
 TEST_CASE("Two checkouts exporting the same RELATIVE roots get different bound keys", "[launcher][rootbinding]")
 {
-    // Measured before this: `FASTCACHE_SOURCE_DIR=.` and `FASTCACHE_BINARY_DIR=build` folded
+    // Measured before this: `PACE_SOURCE_DIR=.` and `PACE_BINARY_DIR=build` folded
     // to ONE bound key in every checkout, so a marker led the second checkout to the first
     // one's copy -- `cl /FC` printed the first one's path under `(root-bound: served from ...)`.
     IdentityResolver resolver;

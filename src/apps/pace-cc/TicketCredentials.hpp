@@ -115,7 +115,7 @@ class TicketCredentials final: public ICredentialFor
     /// @param mintFrom Where this machine's node answers `MINT-TICKET` (`TicketSourceFor`), or
     ///        nullopt when the cache address names no endpoint.
     /// @param password The one password configured; presented to @p passwordFor alone.
-    /// @param passwordFor The endpoint @p password belongs to (`FASTCACHE_ADDR`); ignored when
+    /// @param passwordFor The endpoint @p password belongs to (`PACE_ADDR`); ignored when
     ///        @p password is not configured.
     /// @param budget The caller's exchange budget; a mint runs under `MintBudget` of it -- on every
     ///        exchange this takes, since each dials with the budget's connect (`MakeTcpExchange`,

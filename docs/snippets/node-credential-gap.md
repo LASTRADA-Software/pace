@@ -8,7 +8,7 @@
     **presents** when it dials a `pace-kv` named by `--upstream`, which is the one
     surface that takes one.
 
-    A launcher sends `FASTCACHE_TOKEN` to the cache at `FASTCACHE_ADDR` and to nothing
+    A launcher sends `PACE_TOKEN` to the cache at `PACE_ADDR` and to nothing
     else; every exchange with another machine presents a ticket its own node minted for
     that exchange. A password `AUTH` that does reach a node is answered `Ok` and
     establishes nothing, so a client configured with a token is never broken by a node —

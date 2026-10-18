@@ -86,7 +86,7 @@ enum class StorageErrorCode : std::uint8_t
     ///
     /// It is also **not** a persistence failure, and that omission is load-bearing
     /// rather than incidental. `Corrupt` IS one, so a malformed set moved
-    /// `fastcached_write_errors_total` and wrote a `storage write failed` warning --
+    /// `pace_write_errors_total` and wrote a `storage write failed` warning --
     /// an unprivileged client driving the disk-failure signal at will, which is the
     /// mechanism that would actually walk an operator to deleting a healthy cache.
     /// `WriteErrorReportingStorage::IsPersistenceFailure` therefore leaves this code

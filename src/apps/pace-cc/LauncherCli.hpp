@@ -122,7 +122,7 @@ struct Command
                                         std::span<FlagSpec const> options,
                                         Action baseAction = Action::ShowStats);
 
-/// The `FASTCACHE_*` variable names, spelled once.
+/// The `PACE_*` variable names, spelled once.
 ///
 /// Both the help table and `LoadConfig()` in main.cpp name their variables
 /// through these, so the two cannot drift. That mattered the moment they were
@@ -131,7 +131,7 @@ struct Command
 /// reading names nothing sets any more — caching silently off, and no test in
 /// the default suite to say so, since only the `smoke`-labelled end-to-end
 /// script exercises the reader.
-/// Where the cache is when `FASTCACHE_ADDR` says nothing.
+/// Where the cache is when `PACE_ADDR` says nothing.
 ///
 /// Localhost, so `pace-cc` works with no configuration at all: whichever of
 /// `pace-kv` or `pace-node` a developer runs answers here, and the
@@ -144,37 +144,37 @@ struct Command
 /// per compile rather than seconds. That asymmetry is the whole argument, and it is
 /// why this default is localhost and could not be anything else.
 ///
-/// `FASTCACHE_ADDR=` (set but empty) still means *off*, which is what a build that
+/// `PACE_ADDR=` (set but empty) still means *off*, which is what a build that
 /// wants no cache at all sets — see `EnvOr`, which treats set-but-empty as unset,
 /// and `cmake/portable/CompileCache.cmake`, which passes an empty value to opt out.
 constexpr std::string_view DefaultAddr = "127.0.0.1:6674";
 
 namespace EnvName
 {
-    constexpr std::string_view Addr = "FASTCACHE_ADDR";
-    constexpr std::string_view SourceDir = "FASTCACHE_SOURCE_DIR";
-    constexpr std::string_view BinaryDir = "FASTCACHE_BINARY_DIR";
-    constexpr std::string_view DepsDir = "FASTCACHE_DEPS_DIR";
-    constexpr std::string_view PrefetchGroup = "FASTCACHE_PREFETCH_GROUP";
-    constexpr std::string_view Verbose = "FASTCACHE_VERBOSE";
-    constexpr std::string_view NoStats = "FASTCACHE_NO_STATS";
-    constexpr std::string_view NoDirect = "FASTCACHE_NO_DIRECT";
-    constexpr std::string_view Timeout = "FASTCACHE_TIMEOUT";
-    constexpr std::string_view DispatchTimeout = "FASTCACHE_DISPATCH_TIMEOUT";
-    constexpr std::string_view DispatchIdle = "FASTCACHE_DISPATCH_IDLE";
-    constexpr std::string_view ConnectTimeout = "FASTCACHE_CONNECT_TIMEOUT";
-    constexpr std::string_view MaxStoreBytes = "FASTCACHE_MAX_STORE_BYTES";
-    constexpr std::string_view Scheduler = "FASTCACHE_SCHEDULER";
-    constexpr std::string_view Token = "FASTCACHE_TOKEN";
-    constexpr std::string_view User = "FASTCACHE_USER";
-    constexpr std::string_view Verify = "FASTCACHE_VERIFY";
+    constexpr std::string_view Addr = "PACE_ADDR";
+    constexpr std::string_view SourceDir = "PACE_SOURCE_DIR";
+    constexpr std::string_view BinaryDir = "PACE_BINARY_DIR";
+    constexpr std::string_view DepsDir = "PACE_DEPS_DIR";
+    constexpr std::string_view PrefetchGroup = "PACE_PREFETCH_GROUP";
+    constexpr std::string_view Verbose = "PACE_VERBOSE";
+    constexpr std::string_view NoStats = "PACE_NO_STATS";
+    constexpr std::string_view NoDirect = "PACE_NO_DIRECT";
+    constexpr std::string_view Timeout = "PACE_TIMEOUT";
+    constexpr std::string_view DispatchTimeout = "PACE_DISPATCH_TIMEOUT";
+    constexpr std::string_view DispatchIdle = "PACE_DISPATCH_IDLE";
+    constexpr std::string_view ConnectTimeout = "PACE_CONNECT_TIMEOUT";
+    constexpr std::string_view MaxStoreBytes = "PACE_MAX_STORE_BYTES";
+    constexpr std::string_view Scheduler = "PACE_SCHEDULER";
+    constexpr std::string_view Token = "PACE_TOKEN";
+    constexpr std::string_view User = "PACE_USER";
+    constexpr std::string_view Verify = "PACE_VERIFY";
     /// Named after Ninja's own variable ON PURPOSE.
     ///
     /// The value an operator needs is sitting in their `build.ninja` under exactly
     /// this word, and the recipe is `grep msvc_deps_prefix build.ninja`. A name of
     /// our own invention would put a translation step between the value and the
     /// place it has to be copied to, which is where a copy goes wrong.
-    constexpr std::string_view MsvcDepsPrefix = "FASTCACHE_MSVC_DEPS_PREFIX";
+    constexpr std::string_view MsvcDepsPrefix = "PACE_MSVC_DEPS_PREFIX";
 } // namespace EnvName
 
 /// One environment variable the launcher reads.
@@ -194,7 +194,7 @@ struct EnvVarSpec
 /// **Anything else falls back rather than failing the compile**, for `EnvUnsigned`'s reason in
 /// `main.cpp`: a typo in a build-system variable must not break the build. That includes a bare
 /// number, which is how these variables were spelled while their names ended in `_MS` (#1402) --
-/// so the rename and the grammar arrive together, and a stale `FASTCACHE_TIMEOUT_MS` is simply
+/// so the rename and the grammar arrive together, and a stale `PACE_TIMEOUT_MS` is simply
 /// not read. Here rather than in `main.cpp`, which is in no test target.
 /// @param text The variable's value; empty when it is unset or set but empty.
 /// @param fallback What an unusable value reads as.
@@ -202,7 +202,7 @@ struct EnvVarSpec
 [[nodiscard]] std::chrono::milliseconds EnvironmentDuration(std::string_view text,
                                                             std::chrono::milliseconds fallback) noexcept;
 
-/// The `FASTCACHE_*` variables, in the order `--help` documents them.
+/// The `PACE_*` variables, in the order `--help` documents them.
 /// @return A view of the static table; never empty.
 [[nodiscard]] std::span<EnvVarSpec const> LauncherEnvironment() noexcept;
 

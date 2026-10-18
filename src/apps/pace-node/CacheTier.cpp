@@ -298,7 +298,7 @@ std::expected<std::unique_ptr<IStorage>, std::string> OpenDiskStore(DiskStoreSpe
     options.maxBytes = static_cast<std::size_t>(spec.maxBytes);
     options.maxValueBytes = DiskMaxValueBytes;
     // The EFFECTIVE codec, never the configured one. A build without
-    // `FASTCACHED_ENABLE_COMPRESSION` cannot use the default `zstd` -- and a
+    // `PACE_ENABLE_COMPRESSION` cannot use the default `zstd` -- and a
     // default is the one route past `ParseCompressionCodec`, which refuses a
     // codec an operator NAMES -- so the store would fall back to plaintext
     // while `options.compression` went on saying otherwise to everything that
@@ -330,7 +330,7 @@ std::unique_ptr<IStorage> ShareStorage(std::unique_ptr<IStorage> storage, ILogge
     // is otherwise invisible at the default log level: it never reaches the
     // trace-only TracingStorage, so a store silently does not happen. The
     // daemon has wrapped its backend in this since the counter existed; the
-    // node did not, so it exported `fastcached_write_errors_total` and could
+    // node did not, so it exported `pace_write_errors_total` and could
     // never move it, and a node whose disk tier was failing every write
     // looked identical to a healthy one on every surface an operator watches
     // (#574).
@@ -452,7 +452,7 @@ std::expected<std::unique_ptr<CacheTier>, std::string> CacheTier::Start(NodeConf
     // **The EFFECTIVE codec, through the same call the tier was built with.** A
     // report resolved separately from the store would be a second author of one
     // fact, and the two answer differently on a build without
-    // `FASTCACHED_ENABLE_COMPRESSION`: the store falls back to plaintext and the
+    // `PACE_ENABLE_COMPRESSION`: the store falls back to plaintext and the
     // configuration goes on saying `zstd`. Reporting the configured value there is
     // a confident wrong signal on the only surface that carries this at all.
     auto const memoryCodec = MemoryCompressionOf(cfg).codec;
@@ -471,7 +471,7 @@ std::expected<std::unique_ptr<CacheTier>, std::string> CacheTier::Start(NodeConf
             return;
         logger.Logf(LogLevel::Warn,
                     "{} compression is configured {} and this build has no such codec, so that tier stores "
-                    "plaintext; rebuild with FASTCACHED_ENABLE_COMPRESSION or set the codec to none",
+                    "plaintext; rebuild with PACE_ENABLE_COMPRESSION or set the codec to none",
                     half,
                     Compression::NameOf(configured));
     };

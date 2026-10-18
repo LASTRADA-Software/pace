@@ -64,7 +64,7 @@ judge() {
 # @param 1 case name  @param 2 expect pass|refuse  @param 3 substring the output must carry
 run_case() {
     cases=$((cases + 1))
-    out="$(NM="$work/nm" FASTCACHED_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
+    out="$(NM="$work/nm" PACE_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
     rc=$?
     judge "$1" "$2" "$3" "" "$rc" "$out"
 }
@@ -77,7 +77,7 @@ run_case() {
 #          carry  @param 4 substring it must NOT carry, or empty
 run_table_case() {
     cases=$((cases + 1))
-    out="$(FASTCACHED_SOURCE_DIR="$work" bash "$check" --table-only 2>&1)"
+    out="$(PACE_SOURCE_DIR="$work" bash "$check" --table-only 2>&1)"
     rc=$?
     judge "$1" "$2" "$3" "${4:-}" "$rc" "$out"
 }
@@ -150,7 +150,7 @@ commFailingFor() { # case name, the comm flag that fails, wanted refusal, the fi
     cases=$((cases + 1))
     out="$(failingFlag="$2"; comm() { [[ "$1" != "$failingFlag" ]] || return 2; command comm "$@"; }
            export -f comm; export failingFlag
-           NM="$work/nm" FASTCACHED_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
+           NM="$work/nm" PACE_SOURCE_DIR="$work" bash "$check" "$work/build" 2>&1)"
     rc=$?
     judge "$1" refuse "$3" "$4" "$rc" "$out"
 }

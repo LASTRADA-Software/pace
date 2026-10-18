@@ -423,33 +423,33 @@ TEST_CASE("ping and echo report what came back", "[cli][verbs]")
 
 TEST_CASE("info parses the payload into a record", "[cli][verbs]")
 {
-    ScriptedExchange exchange { Answers({ Bulk("# Server\r\nfastcached_version:1.2.3\r\nused_memory:9\r\n") }) };
+    ScriptedExchange exchange { Answers({ Bulk("# Server\r\npace_version:1.2.3\r\nused_memory:9\r\n") }) };
     auto const answer = Run("info", {}, exchange);
 
     CHECK(SentFrame(exchange) == std::vector<std::string> { "INFO" });
     CHECK(answer.outcome == Outcome::Affirmative);
-    REQUIRE(FindField(answer.value, "fastcached_version") != nullptr);
-    CHECK(FindField(answer.value, "fastcached_version")->value.lexical == "1.2.3");
+    REQUIRE(FindField(answer.value, "pace_version") != nullptr);
+    CHECK(FindField(answer.value, "pace_version")->value.lexical == "1.2.3");
 }
 
 TEST_CASE("info accepts a verbatim payload as well as a bulk one", "[cli][verbs]")
 {
     // A verbatim string is what INFO answers under RESP3. Accepting both costs one
     // comparison and means this does not break the day the client sends HELLO 3.
-    ScriptedExchange exchange { Answers({ Verbatim("txt:fastcached_version:1.2.3\r\n") }) };
+    ScriptedExchange exchange { Answers({ Verbatim("txt:pace_version:1.2.3\r\n") }) };
     auto const answer = Run("info", {}, exchange);
     CHECK(answer.outcome == Outcome::Affirmative);
 }
 
 TEST_CASE("version reports both ends", "[cli][verbs]")
 {
-    ScriptedExchange exchange { Answers({ Bulk("fastcached_version:9.9.9\r\nredis_version:6.0.0-fastcached\r\n") }) };
+    ScriptedExchange exchange { Answers({ Bulk("pace_version:9.9.9\r\nredis_version:6.0.0-fastcached\r\n") }) };
     auto const answer = Run("version", {}, exchange);
 
     CHECK(answer.outcome == Outcome::Affirmative);
     REQUIRE(FindField(answer.value, "client") != nullptr);
     // Compiled in, so it cannot have drifted from the build.
-    CHECK(FindField(answer.value, "client")->value.lexical == FASTCACHE_CLI_VERSION);
+    CHECK(FindField(answer.value, "client")->value.lexical == PACE_CLI_VERSION);
     REQUIRE(FindField(answer.value, "server") != nullptr);
     CHECK(FindField(answer.value, "server")->value.lexical == "9.9.9");
     CHECK(FindField(answer.value, "resp_dialect")->value.lexical == "6.0.0-fastcached");
@@ -464,7 +464,7 @@ TEST_CASE("version still reports the client half when the server cannot be reach
 
     CHECK(answer.outcome == Outcome::Unreachable);
     REQUIRE(FindField(answer.value, "client") != nullptr);
-    CHECK(FindField(answer.value, "client")->value.lexical == FASTCACHE_CLI_VERSION);
+    CHECK(FindField(answer.value, "client")->value.lexical == PACE_CLI_VERSION);
     // And the server half is absent rather than blank or zero.
     REQUIRE(FindField(answer.value, "server") != nullptr);
     CHECK(FindField(answer.value, "server")->value.kind == CellKind::Absent);
@@ -490,7 +490,7 @@ TEST_CASE("NOAUTH is a refusal that names how to supply a credential", "[cli][ve
     CHECK(answer.outcome == Outcome::Refused);
     // The bare server sentence does not say how to supply one, and this is the most
     // likely first-run failure.
-    CHECK(Mentions(answer, "FASTCACHE_TOKEN"));
+    CHECK(Mentions(answer, "PACE_TOKEN"));
 }
 
 TEST_CASE("each exchange failure maps to its own outcome", "[cli][verbs]")
@@ -535,7 +535,7 @@ TEST_CASE("stats goes through the gatherer and is refused without one", "[cli][v
         auto gatherer = ScriptedGatherer { std::vector<StatsAttempt> { StatsAttempt {
             .origin = StatsOrigin::Metrics,
             .asked = true,
-            .record = RecordValue({ Field { .name = "fastcached_items", .value = NumberCell(std::uint64_t { 3 }) } }) } } };
+            .record = RecordValue({ Field { .name = "pace_items", .value = NumberCell(std::uint64_t { 3 }) } }) } } };
         auto const answer = RunVerb(*stats, VerbContext { .resp = nullptr, .stats = &gatherer });
         CHECK(gatherer.Calls() == 1);
         CHECK(answer.outcome == Outcome::Affirmative);

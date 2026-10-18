@@ -74,7 +74,7 @@
 #                            compile being dispatched. The cache and the scheduler
 #                            are separate services on separate machines, so a
 #                            failure of one is not a failure of the other; joining
-#                            them turned a mistyped FASTCACHE_ADDR into a
+#                            them turned a mistyped PACE_ADDR into a
 #                            fleet-wide outage behind an entirely green build.
 #
 # Cases 9 to 11 — the node's own cache tier, a worker that sizes itself, and a
@@ -483,7 +483,7 @@ e2e_wait_seconds 30
 # through the shim `e2e_launcher_state_enter` (scripts/lib/e2e-common.sh) puts in
 # front of it. Before any launcher runs, and after `e2e_begin`, whose workdir holds it.
 e2e_launcher_state_enter launcher
-export FASTCACHE_VERBOSE=1
+export PACE_VERBOSE=1
 
 # --- helpers ----------------------------------------------------------------
 
@@ -861,7 +861,7 @@ start_daemon "daemon" 127.0.0.1 "$cache_port" \
     --storage-max-value=64M --log-level=info
 daemon_pid="$started_pid"
 
-export FASTCACHE_ADDR="127.0.0.1:${cache_port}"
+export PACE_ADDR="127.0.0.1:${cache_port}"
 
 # --- start the node ------------------------------------------------------------
 # One compile node. It serves the fleet's scheduler -- a first start is a cluster of
@@ -949,26 +949,26 @@ health="$(http_get 127.0.0.1 "$worker_admin_port" /healthz)" || health_status=$?
     || { printf '%s\n' "$health" >&2; fail "worker /healthz did not answer 200"; }
 
 # A worker has no cache, so the cache series must be ABSENT rather than present
-# and zero -- `fastcached_items 0` states an empty unbounded cache as a fact, and
+# and zero -- `pace_items 0` states an empty unbounded cache as a fact, and
 # a dashboard reads it as one. This is the assertion that would fail if
 # `MetricsSnapshot::storage` stopped being optional.
 before_status=0
 before="$(http_get 127.0.0.1 "$worker_admin_port" /metrics)" || before_status=$?
 [ "$before_status" -eq "$E2eHttpAnswered" ] \
     || fail "$(e2e_http_outcome "$before_status" "the worker admin endpoint's /metrics")"
-[[ "$before" == *"fastcache_worker_jobs_completed_total"* ]] \
+[[ "$before" == *"pace_worker_jobs_completed_total"* ]] \
     || { printf '%s\n' "$before" >&2; fail "worker /metrics carries no worker counters"; }
-[[ "$before" == *"fastcache_node_logical_cores"* ]] \
+[[ "$before" == *"pace_node_logical_cores"* ]] \
     || { printf '%s\n' "$before" >&2; fail "worker /metrics does not report the machine's size"; }
-[[ "$before" != *"fastcached_items"* ]] \
+[[ "$before" != *"pace_items"* ]] \
     || { printf '%s\n' "$before" >&2; fail "worker /metrics reports cache series for a process with no cache"; }
 echo "== worker serves /healthz and /metrics"
 
 # --- the project layout every case compiles in -------------------------------
 proj="${workdir}/proj"
 mkdir -p "${proj}/build"
-export FASTCACHE_SOURCE_DIR="${proj}"
-export FASTCACHE_BINARY_DIR="${proj}/build"
+export PACE_SOURCE_DIR="${proj}"
+export PACE_BINARY_DIR="${proj}/build"
 
 # --- 1 + 2: a worker's object is this machine's object, and it caches ---------
 echo "== case 1+2: byte-identical remote object, then a cache hit"
@@ -978,7 +978,7 @@ write_source "${proj}/one.cpp" "caseone"
 "$compiler" -std=c++17 -O1 -c "${proj}/one.cpp" -o "${proj}/build/reference.o" \
     || fail "the reference compile failed"
 
-export FASTCACHE_SCHEDULER="127.0.0.1:${dispatch_port}"
+export PACE_SCHEDULER="127.0.0.1:${dispatch_port}"
 
 run_launcher "${workdir}/case1.log" -std=c++17 -O1 -c "${proj}/one.cpp" -o "${proj}/build/one.o" \
     || { cat "${workdir}/case1.log" >&2; fail "the dispatched compile failed"; }
@@ -1030,13 +1030,13 @@ after_status=0
 after="$(http_get 127.0.0.1 "$worker_admin_port" /metrics)" || after_status=$?
 [ "$after_status" -eq "$E2eHttpAnswered" ] \
     || fail "$(e2e_http_outcome "$after_status" "the worker admin endpoint's /metrics after it served a compile")"
-completed="$(metric_value "$after" fastcache_worker_jobs_completed_total)"
+completed="$(metric_value "$after" pace_worker_jobs_completed_total)"
 [[ -n "$completed" && "$completed" -ge 1 ]] \
     || { printf '%s\n' "$after" >&2; fail "worker completed a compile but its jobs counter did not move"; }
-millis="$(metric_value "$after" fastcache_worker_compile_milliseconds_total)"
+millis="$(metric_value "$after" pace_worker_compile_milliseconds_total)"
 [[ -n "$millis" ]] \
     || { printf '%s\n' "$after" >&2; fail "worker reports no compile wall time"; }
-bytes="$(metric_value "$after" fastcache_worker_bytes_received_total)"
+bytes="$(metric_value "$after" pace_worker_bytes_received_total)"
 [[ -n "$bytes" && "$bytes" -ge 1 ]] \
     || { printf '%s\n' "$after" >&2; fail "worker received a job but its byte counter did not move"; }
 echo "   worker metrics moved: ${completed} job(s), ${millis}ms, ${bytes} bytes in"
@@ -1148,7 +1148,7 @@ logged="$(tail -n 1 "$(e2e_launcher_state_log)" | e2e_launcher_log_field outcome
 # raced compile was keyed on, and nothing may stand behind it.
 cat "${moved}/v1/one-moved.cpp" > "${proj}/one-moved.cpp"
 rm -f "${proj}/build/one-moved.o"
-moved_compile "${workdir}/case2b-2.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "${workdir}/case2b-2.log" PACE_E2E_CASE=moved \
     || { cat "${workdir}/case2b-2.log" >&2; fail "case 2b: the rebuild of the original content failed"; }
 cat "${workdir}/case2b-2.log"
 grep -q "pace-cc: MISS" "${workdir}/case2b-2.log" \
@@ -1188,8 +1188,8 @@ write_source "${proj}/three.cpp" "casethree"
     || fail "the case 3 reference compile failed"
 
 (
-    export FASTCACHE_ADDR="127.0.0.1:${iso_cache_port}"
-    export FASTCACHE_SCHEDULER="127.0.0.1:${iso_dispatch_port}"
+    export PACE_ADDR="127.0.0.1:${iso_cache_port}"
+    export PACE_SCHEDULER="127.0.0.1:${iso_dispatch_port}"
     run_launcher "${workdir}/case3.log" -std=c++17 -O1 -c "${proj}/three.cpp" -o "${proj}/build/three.o"
 ) || { cat "${workdir}/case3.log" >&2; fail "the compile failed when only a mismatched worker was registered"; }
 
@@ -1210,8 +1210,8 @@ write_source "${proj}/four.cpp" "casefour"
     || fail "the case 4 reference compile failed"
 
 (
-    export FASTCACHE_ADDR="127.0.0.1:${iso_cache_port}"
-    export FASTCACHE_SCHEDULER="127.0.0.1:${iso_dispatch_port}"
+    export PACE_ADDR="127.0.0.1:${iso_cache_port}"
+    export PACE_SCHEDULER="127.0.0.1:${iso_dispatch_port}"
     run_launcher "${workdir}/case4.log" -std=c++17 -O1 -c "${proj}/four.cpp" -o "${proj}/build/four.o"
 ) || { cat "${workdir}/case4.log" >&2; fail "the build did not survive every worker being dead"; }
 
@@ -1238,7 +1238,7 @@ write_source "${proj}/five.cpp" "casefive"
     # The scheduler address deliberately points at the CACHE port. An operator
     # who mixes these up must get a typed refusal and a working build, not a hang
     # and not a served job.
-    export FASTCACHE_SCHEDULER="127.0.0.1:${cache_port}"
+    export PACE_SCHEDULER="127.0.0.1:${cache_port}"
     run_launcher "${workdir}/case5.log" -std=c++17 -O1 -c "${proj}/five.cpp" -o "${proj}/build/five.o"
 ) || { cat "${workdir}/case5.log" >&2; fail "a build pointed at the wrong listener did not survive"; }
 
@@ -1283,8 +1283,8 @@ for i in 1 2 3 4; do
 done
 for i in 1 2 3 4; do
     (
-        export FASTCACHE_ADDR="127.0.0.1:${cap_cache_port}"
-        export FASTCACHE_SCHEDULER="127.0.0.1:${cap_dispatch_port}"
+        export PACE_ADDR="127.0.0.1:${cap_cache_port}"
+        export PACE_SCHEDULER="127.0.0.1:${cap_dispatch_port}"
         run_launcher "${workdir}/case6-${i}.log" -std=c++17 -O1 -c "${proj}/cap${i}.cpp" -o "${proj}/build/cap${i}.o"
     ) &
     cap_pids+=($!)
@@ -1356,7 +1356,7 @@ echo "== case 7b: a dispatched root-bound object is kept with its checkout"
 # binding the second checkout was served the first one's object.
 bound_compile() {
     local root="$1" logfile="$2"
-    FASTCACHE_SOURCE_DIR="$root" FASTCACHE_BINARY_DIR="${root}/build" \
+    PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
         run_launcher "$logfile" -std=c++17 -O1 -c "${root}/u.cpp" -o "${root}/build/u.o"
 }
 bound_a="${workdir}/bound/checkout-a"
@@ -1500,15 +1500,15 @@ write_source "${proj}/nine.cpp" "casenine"
 (
     # Pointed at the NODE, not at the shared cache. That is the whole deployment
     # this tier exists for.
-    export FASTCACHE_ADDR="127.0.0.1:${cache_node_port}"
-    unset FASTCACHE_SCHEDULER
+    export PACE_ADDR="127.0.0.1:${cache_node_port}"
+    unset PACE_SCHEDULER
     run_launcher "${workdir}/case9-store.log" -std=c++17 -O1 -c "${proj}/nine.cpp" -o "${proj}/build/nine.o"
 ) || { cat "${workdir}/case9-store.log" >&2; fail "the first compile through the node failed"; }
 
 rm -f "${proj}/build/nine.o"
 (
-    export FASTCACHE_ADDR="127.0.0.1:${cache_node_port}"
-    unset FASTCACHE_SCHEDULER
+    export PACE_ADDR="127.0.0.1:${cache_node_port}"
+    unset PACE_SCHEDULER
     run_launcher "${workdir}/case9-hit.log" -std=c++17 -O1 -c "${proj}/nine.cpp" -o "${proj}/build/nine.o"
 ) || { cat "${workdir}/case9-hit.log" >&2; fail "the second compile through the node failed"; }
 grep -q "pace-cc: HIT" "${workdir}/case9-hit.log"     || { cat "${workdir}/case9-hit.log" >&2; fail "the node did not serve a hit"; }
@@ -1519,8 +1519,8 @@ stop_and_require_exit "$tier_upstream_pid" "the shared cache" "$daemon_stop_seco
 
 rm -f "${proj}/build/nine.o"
 (
-    export FASTCACHE_ADDR="127.0.0.1:${cache_node_port}"
-    unset FASTCACHE_SCHEDULER
+    export PACE_ADDR="127.0.0.1:${cache_node_port}"
+    unset PACE_SCHEDULER
     run_launcher "${workdir}/case9-offline.log" -std=c++17 -O1 -c "${proj}/nine.cpp" -o "${proj}/build/nine.o"
 ) || { cat "${workdir}/case9-offline.log" >&2; fail "a build survived neither the hit nor the fallback"; }
 grep -q "pace-cc: HIT" "${workdir}/case9-offline.log"     || { cat "${workdir}/case9-offline.log" >&2; fail "the node went to the network for an object it held"; }
@@ -1625,14 +1625,14 @@ write_source "${proj}/eleven_b.cpp" "caseelevenb"
 
 blackhole_started=$(date +%s)
 (
-    export FASTCACHE_ADDR="127.0.0.1:${blackhole_node_port}"
-    unset FASTCACHE_SCHEDULER
+    export PACE_ADDR="127.0.0.1:${blackhole_node_port}"
+    unset PACE_SCHEDULER
     run_launcher "${workdir}/case11-a.log" -std=c++17 -O1 -c "${proj}/eleven_a.cpp" -o "${proj}/build/eleven_a.o"
 ) &
 blackhole_a=$!
 (
-    export FASTCACHE_ADDR="127.0.0.1:${blackhole_node_port}"
-    unset FASTCACHE_SCHEDULER
+    export PACE_ADDR="127.0.0.1:${blackhole_node_port}"
+    unset PACE_SCHEDULER
     run_launcher "${workdir}/case11-b.log" -std=c++17 -O1 -c "${proj}/eleven_b.cpp" -o "${proj}/build/eleven_b.o"
 ) &
 blackhole_b=$!
@@ -1662,7 +1662,7 @@ echo "   both clients were served behind an unreachable upstream (${blackhole_el
 # launcher could not reach turned off distribution as well. The docs put the
 # shared cache on a different machine from the scheduler, which makes those two
 # independent failure domains, and the less important one was load-bearing for the
-# more important one: on an estate of forty machines a mistyped FASTCACHE_ADDR
+# more important one: on an estate of forty machines a mistyped PACE_ADDR
 # sent every build local while the fleet sat idle and healthy, with a green build
 # and nothing in the log but one line about the cache.
 #
@@ -1696,8 +1696,8 @@ if port_answers 127.0.0.1 "$dead_cache_port"; then
     fail "case 12 needs ${dead_cache_port} to REFUSE a connect and something is answering on it, so the unreachable cache this case is about was never arranged and nothing below would be a statement about the launcher"
 fi
 (
-    export FASTCACHE_ADDR="127.0.0.1:${dead_cache_port}"
-    export FASTCACHE_SCHEDULER="127.0.0.1:${dispatch_port}"
+    export PACE_ADDR="127.0.0.1:${dead_cache_port}"
+    export PACE_SCHEDULER="127.0.0.1:${dispatch_port}"
     run_launcher "${workdir}/case12.log" -std=c++17 -O1 -c "${proj}/twelve.cpp" -o "${proj}/build/twelve.o"
 ) || { cat "${workdir}/case12.log" >&2; fail "the build did not survive an unreachable cache"; }
 
@@ -1812,7 +1812,7 @@ case13_at() {
     reference_comp_dir="$(comp_dir_of "$reference_dump")"
 
     (
-        export FASTCACHE_SCHEDULER="127.0.0.1:${dispatch_port}"
+        export PACE_SCHEDULER="127.0.0.1:${dispatch_port}"
         cd "$spelling" && run_launcher "${workdir}/case13-${label}.log" -std=c++17 -O1 -g \
             "-fdebug-prefix-map=${spelling}=." -c "$src" -o "${mapdir}/thirteen-${label}.o"
     ) || { cat "${workdir}/case13-${label}.log" >&2 || true; fail "the case 13 dispatched compile failed (${label})"; }
@@ -2084,7 +2084,7 @@ else
             || fail "the case 14 reference compile failed"
 
         (
-            export FASTCACHE_SCHEDULER="127.0.0.1:${dispatch_port}"
+            export PACE_SCHEDULER="127.0.0.1:${dispatch_port}"
             cd "$mapdir" && run_launcher "${workdir}/case14.log" -std=c++17 -O1 -g \
                 "-fdebug-prefix-map=${mapdir}=." "-fdebug-prefix-map=${src883_root}=/MAPPED883" \
                 -c "$src883" -o "${mapdir}/fourteen.o"

@@ -49,7 +49,7 @@
 #                         would skip wherever it ran (#1135).
 #
 #   --resolve             Which clang-format on this machine is the declared build? Prints its
-#                         path. `FASTCACHED_CLANG_FORMAT`, when set, is the only candidate and is
+#                         path. `PACE_CLANG_FORMAT`, when set, is the only candidate and is
 #                         held to the banner like any other -- an override that is not the
 #                         declared build is refused, never stepped over. Otherwise each declared
 #                         `binary:` name and then `clang-format`, and for each name EVERY match on
@@ -272,7 +272,7 @@ PrintRemedy() {
     echo "  (a wheel is a zip; the binary is clang_format/data/bin/clang-format):"
     echo "    pip download --no-deps --only-binary=:all: --platform manylinux_2_27_x86_64 clang-format==$release -d <dir>"
     echo "  Any clang-format on PATH that prints exactly 'clang-format version $release' is used; other"
-    echo "  clang-formats may stay installed, and nothing is uninstalled or re-pointed. FASTCACHED_CLANG_FORMAT"
+    echo "  clang-formats may stay installed, and nothing is uninstalled or re-pointed. PACE_CLANG_FORMAT"
     echo "  may name the binary instead, for this script and local-gate.sh -- but the format-on-edit hook reads"
     echo "  PATH only, so a build it should write with belongs on PATH."
     echo "  NOT covered: clang-tidy, which .clang-tidy-version declares on its own"
@@ -309,21 +309,21 @@ CheckInstalled() {
 Resolve() {
     local dir="$1" names name paths candidate seen probed=""
     ReadDeclaration "$dir/.clang-format-version" >&2 || return 1
-    if [ -n "${FASTCACHED_CLANG_FORMAT:-}" ]; then
+    if [ -n "${PACE_CLANG_FORMAT:-}" ]; then
         # An override is the operator's answer, so it is the only candidate: stepping over a wrong one to
         # something on PATH would format with a binary nobody named.
-        if ! command -v "$FASTCACHED_CLANG_FORMAT" >/dev/null 2>&1; then
-            echo "FAIL: FASTCACHED_CLANG_FORMAT names '$FASTCACHED_CLANG_FORMAT', which is not an executable here" >&2
+        if ! command -v "$PACE_CLANG_FORMAT" >/dev/null 2>&1; then
+            echo "FAIL: PACE_CLANG_FORMAT names '$PACE_CLANG_FORMAT', which is not an executable here" >&2
             return 1
         fi
-        BannerOf "$FASTCACHED_CLANG_FORMAT"
+        BannerOf "$PACE_CLANG_FORMAT"
         if IsDeclared "$Banner"; then
-            echo "ok: $FASTCACHED_CLANG_FORMAT (FASTCACHED_CLANG_FORMAT) is the declared build: $Banner" >&2
-            printf '%s\n' "$FASTCACHED_CLANG_FORMAT"
+            echo "ok: $PACE_CLANG_FORMAT (PACE_CLANG_FORMAT) is the declared build: $Banner" >&2
+            printf '%s\n' "$PACE_CLANG_FORMAT"
             return 0
         fi
         {
-            echo "FAIL: FASTCACHED_CLANG_FORMAT names '$FASTCACHED_CLANG_FORMAT', which is not the declared build, and an"
+            echo "FAIL: PACE_CLANG_FORMAT names '$PACE_CLANG_FORMAT', which is not the declared build, and an"
             echo "      override is not stepped over to whatever PATH holds."
             echo "      found:     ${Banner:-<no version output>}"
             printf '%s' "$DeclaredVersions" | sed 's/^/      declared:  /'
@@ -383,7 +383,7 @@ if [ "$Mode" = "self-test" ]; then
     Failed=0
     Self="$0"
     Interpreter="${BASH:-bash}"
-    # No host override may decide a case: every child sees an empty FASTCACHED_CLANG_FORMAT unless one sets it.
+    # No host override may decide a case: every child sees an empty PACE_CLANG_FORMAT unless one sets it.
     CaseOverride=""
 
     # The resolve cases must not see this host's own formatters, or a machine that has
@@ -434,13 +434,13 @@ FAKE
     # $4 = required exact stdout ("-" for any), $5 = PATH for the child ("-" for this
     # one's), rest = arguments to this script, run as a child so each case is a fresh
     # process. `none` is the resolve mode's exit 77. `CaseOverride` is the child's
-    # FASTCACHED_CLANG_FORMAT.
+    # PACE_CLANG_FORMAT.
     Expect() {
         local label="$1" want="$2" fragment="$3" stdout="$4" path="$5" status got out all
         shift 5
         Cases=$((Cases + 1))
         [ "$path" = "-" ] && path="$PATH"
-        out="$(FASTCACHED_CLANG_FORMAT="$CaseOverride" PATH="$path" "$Interpreter" "$Self" "$@" 2>"$Work/stderr")"
+        out="$(PACE_CLANG_FORMAT="$CaseOverride" PATH="$path" "$Interpreter" "$Self" "$@" 2>"$Work/stderr")"
         status=$?
         all="$out
 $(cat "$Work/stderr")"
@@ -571,13 +571,13 @@ $(cat "$Work/stderr")"
     # The override: the declared build outside PATH is used; a wrong one is refused even with the right one on PATH.
     Fake "$Work/elsewhere/clang-format" "$Pypi"
     CaseOverride="$Work/elsewhere/clang-format"
-    Expect "--resolve: FASTCACHED_CLANG_FORMAT names the declared build outside PATH" pass "(FASTCACHED_CLANG_FORMAT) is the declared build" \
+    Expect "--resolve: PACE_CLANG_FORMAT names the declared build outside PATH" pass "(PACE_CLANG_FORMAT) is the declared build" \
         "$Work/elsewhere/clang-format" "$Work/path-first:$Tools" --resolve "$Work/good"
     CaseOverride="$Work/path-first/clang-format"
-    Expect "--resolve: FASTCACHED_CLANG_FORMAT names another build, and PATH is not consulted" refuse "is not stepped over" \
+    Expect "--resolve: PACE_CLANG_FORMAT names another build, and PATH is not consulted" refuse "is not stepped over" \
         "" "$Work/path-second:$Tools" --resolve "$Work/good"
     CaseOverride="$Work/elsewhere/absent"
-    Expect "--resolve: FASTCACHED_CLANG_FORMAT names nothing" refuse "which is not an executable here" \
+    Expect "--resolve: PACE_CLANG_FORMAT names nothing" refuse "which is not an executable here" \
         "" "$Work/path-second:$Tools" --resolve "$Work/good"
     CaseOverride=""
 

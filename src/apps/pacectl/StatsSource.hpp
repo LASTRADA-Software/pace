@@ -144,7 +144,7 @@ inline constexpr std::string_view StatsSourceFieldName = "source";
 /// Parse a Prometheus exposition body into a record.
 ///
 /// Comments and type declarations are skipped; a labelled series keeps its labels in
-/// the field name (`fastcached_tier_items{tier="l1"}`), because dropping them would
+/// the field name (`pace_tier_items{tier="l1"}`), because dropping them would
 /// merge two series into one field and silently report one tier's number for another.
 /// @param body The response body.
 /// @return A record in the order the series appeared.

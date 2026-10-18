@@ -274,7 +274,7 @@ TEST_CASE("A node verb whose mint fails goes on unauthenticated and says why", "
 TEST_CASE("A client tells the three refusal states apart", "[cli][node][refusal]")
 {
     // **The whole design, and the reason this classification exists rather than a
-    // boolean.** #283/#340: a `FASTCACHE_TOKEN` launcher read `DispatchNotPermitted` as
+    // boolean.** #283/#340: a `PACE_TOKEN` launcher read `DispatchNotPermitted` as
     // *not implemented*, stepped over it, and earned a permanent 0% hit rate that read
     // as a cold cache -- correct objects, green build, no counter moving.
     CHECK(ClassifyRefusal(Wire::UnimplementedVerb) == NodeRefusalKind::Unimplemented);
@@ -458,7 +458,7 @@ TEST_CASE("A probe tells the three kinds of endpoint apart", "[cli][node][probe]
              { Wire::UnimplementedVerb, Wire::ErrorCode::NotAMember, Wire::ErrorCode::DispatchNotPermitted })
         {
             Cli::Testing::ScriptedNodeExchange node { { Refusal(code, {}) } };
-            CHECK(ProbeRemote(node) == RemoteKind::FastcacheWireOnly);
+            CHECK(ProbeRemote(node) == RemoteKind::PaceWireOnly);
         }
     }
 
@@ -466,7 +466,7 @@ TEST_CASE("A probe tells the three kinds of endpoint apart", "[cli][node][probe]
     {
         Cli::Testing::ScriptedNodeExchange node { { Cli::Testing::NodeFailure(ExchangeFailure::Transport,
                                                                               "the server closed the connection") } };
-        CHECK(ProbeRemote(node) == RemoteKind::NotFastcacheWire);
+        CHECK(ProbeRemote(node) == RemoteKind::NotPaceWire);
     }
 
     SECTION("and the probe asks node-status, not something a node might answer by accident")
@@ -501,7 +501,7 @@ TEST_CASE("An identified endpoint is explained in terms an operator can act on",
         // A confident wrong signal is worse than a vague right one. Asserted as two
         // presences, because a sentence naming only one would still contain the other's
         // first word.
-        auto const text = ExplainRemoteKind("get", "10.0.0.7:6674", RemoteKind::FastcacheWireOnly);
+        auto const text = ExplainRemoteKind("get", "10.0.0.7:6674", RemoteKind::PaceWireOnly);
         CHECK(text.contains("pace-kv"));
         CHECK(text.contains("older"));
     }
@@ -511,7 +511,7 @@ TEST_CASE("An identified endpoint is explained in terms an operator can act on",
         // The caller's own transport diagnostic already said the port did not answer.
         // A second sentence about one fault makes it read as two, so the empty string
         // here is a decision rather than a gap.
-        CHECK(ExplainRemoteKind("get", "10.0.0.7:6674", RemoteKind::NotFastcacheWire).empty());
+        CHECK(ExplainRemoteKind("get", "10.0.0.7:6674", RemoteKind::NotPaceWire).empty());
     }
 }
 
@@ -528,7 +528,7 @@ TEST_CASE("A probe's answer establishes reachability, not only a sentence", "[cl
         // values only by. WHICH refusal narrows nothing further and must not be read as
         // though it did.
         CHECK(EstablishedBy(RemoteKind::CompileNode) == Outcome::Refused);
-        CHECK(EstablishedBy(RemoteKind::FastcacheWireOnly) == Outcome::Refused);
+        CHECK(EstablishedBy(RemoteKind::PaceWireOnly) == Outcome::Refused);
     }
 
     SECTION("and an endpoint that sent no frame establishes NOTHING")
@@ -537,7 +537,7 @@ TEST_CASE("A probe's answer establishes reachability, not only a sentence", "[cl
         // nothing to correct the caller's own transport diagnostic with. This is the
         // control -- a table that answered `Refused` for every kind would pass the
         // section above and fail this one.
-        CHECK_FALSE(EstablishedBy(RemoteKind::NotFastcacheWire).has_value());
+        CHECK_FALSE(EstablishedBy(RemoteKind::NotPaceWire).has_value());
     }
 
     SECTION("and the two answers are DIFFERENT exit codes, which is the whole point")

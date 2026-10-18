@@ -10,7 +10,7 @@ launcher) — and register the daemon as a service that starts on boot.
 ### Debian / Ubuntu, Fedora / RHEL
 
 ```sh
-sudo apt install ./fastcached_<version>_<arch>.deb
+sudo apt install ./pace_<version>_<arch>.deb
 sudo dnf install ./fastcached-<version>.<arch>.rpm
 ```
 
@@ -87,27 +87,27 @@ registers the services that follow from the choice:
 | Installed | `FastCacheCompileNode` | `FastCached` |
 |---|---|---|
 | the node (with or without pace-kv) | starts with Windows, started now | disabled, stopped |
-| pace-kv without the node | — | starts with Windows, started now (pass `FASTCACHED_START_SERVICE=0` to leave it stopped) |
+| pace-kv without the node | — | starts with Windows, started now (pass `PACE_START_SERVICE=0` to leave it stopped) |
 
 The node needs no property to be registered: it finds its scheduler from the fleet it forms or
 joins (the [pace-node page](../tools/pace-node.md#macos-and-windows)
 has the details). There is no property for the address clients reach the node at: the node
 advertises the address this machine routes from and re-derives it when the network changes, so a
 renamed machine or a new VPN address needs no reinstall and no restart; an address that must be
-typed goes under `advertise:` in the node's configuration file. `FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8` is optional, and limits the
+typed goes under `advertise:` in the node's configuration file. `PACE_FIREWALL_ALLOW=10.0.0.0/8` is optional, and limits the
 firewall rules both registrations create to that remote range; left out, they admit any address. So is
-`FASTCACHE_FLEET_SEED=office-a.vpn.example`, one machine of the fleet for the node to ask when no
+`PACE_FLEET_SEED=office-a.vpn.example`, one machine of the fleet for the node to ask when no
 discovery beacon reaches it, as across a VPN; it is registered as the node's `--fleet-seed`, and a
 node that needs more than one names them under `fleet_seed:` in its configuration file. So is
-`FASTCACHE_FLEET_ID`, the one fleet the node may join, pasted as `pacectl node` prints it on a
+`PACE_FLEET_ID`, the one fleet the node may join, pasted as `pacectl node` prints it on a
 machine of that fleet (`<cluster-id>@<key>[,<key>...]`); it is registered VERBATIM as the node's
 `--fleet-id`. A value the node cannot read **fails the whole transaction** (msiexec exits 1603, and
-the log names the action `FastCacheNodeCheckArguments`; `pace-node --check-arguments
+the log names the action `PaceNodeCheckArguments`; `pace-node --check-arguments
 --fleet-id=<value>` names what is wrong with the value): the node's own parser checks
 the node's arguments before anything is remembered or registered, so a refused pin is never
 remembered, and a repair or upgrade leaves the existing registration and its remembered pin as they
 were rather than starting a node that trusts whichever fleet proves itself first. A malformed
-`FASTCACHE_FLEET_SEED` fails it the same way. So does a node registration
+`PACE_FLEET_SEED` fails it the same way. So does a node registration
 that cannot be made, or a node that does not come up serving: the service reports running only once
 the node serves (its `compile node ready` line), so a node that cannot bind its port fails the start
 rather than passing it. The node is checked, registered, remembered and started in that order, each
@@ -115,7 +115,7 @@ step failing the transaction, and every transaction that keeps the node stops an
 new pin or seed is what the running node has. A transaction that fails leaves each service as it
 found it: its registration put back exactly (command line and start type), started again if the
 transaction had stopped it while it ran, and the remembered values written back. The package also
-pins the node's discovery reply port, `FASTCACHE_DISCOVERY_REPLY_PORT=6682` unless you pass another
+pins the node's discovery reply port, `PACE_DISCOVERY_REPLY_PORT=6682` unless you pass another
 (or pass it empty), so its firewall opens UDP 6682 rather than every local UDP port. A node run by
 hand leaves that port to the kernel, because two nodes on one machine each need one of their own;
 the package installs one node per machine.
@@ -148,14 +148,14 @@ its verbose log, Windows Installer reports the refused restart as
 running: it stays stopped. Neither needs anything done. The same old removal also closes any program holding one of
 0.3.0's files without asking, for example a `pace-cc` inside a running build, as every silent
 Windows Installer removal does: finish or stop builds before upgrading. Without the node, the
-restart succeeds, so an upgrade from 0.3.0 that passes `FASTCACHED_START_SERVICE=0` still leaves
+restart succeeds, so an upgrade from 0.3.0 that passes `PACE_START_SERVICE=0` still leaves
 `FastCached` running if it was running before: stop it first (`net stop FastCached`) to have it left
 stopped. To run `FastCached` beside the node anyway, on another port, set its start type yourself
 (`sc config FastCached start= demand`); the next repair, feature change or upgrade stops it and
 disables it again.
 
 Every transaction that keeps a service registers it again, and the optional properties are
-remembered for it: `FASTCACHE_FIREWALL_ALLOW`, `FASTCACHE_FLEET_SEED` and `FASTCACHE_FLEET_ID` are written to
+remembered for it: `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and `PACE_FLEET_ID` are written to
 `HKLM\SOFTWARE\fastcached\Installer` and read back by the next repair or upgrade, so one that
 leaves them out registers what was installed. The node's two are written only by a transaction
 that keeps the node, once its parser has accepted them. (An advertised endpoint an earlier package of this
@@ -164,7 +164,7 @@ remembered one. An empty value counts as leaving the property out, so a remember
 to drop it, uninstall (which forgets the values) and install again. An installer older than this
 remembering has nothing to read back, so the first upgrade from one registers what it states: with
 no property the node is still registered and started, advertising the address this machine routes
-from (re-derived when the network changes) with its firewall rules admitting any address, so pass `FASTCACHE_FIREWALL_ALLOW` (and any other property
+from (re-derived when the network changes) with its firewall rules admitting any address, so pass `PACE_FIREWALL_ALLOW` (and any other property
 you installed with) on that upgrade to keep it.
 
 ```powershell
@@ -361,7 +361,7 @@ rooted at `/` so the units land in `/usr/lib/systemd` and the config in
 `/etc`. That is opt-in:
 
 ```sh
-cmake --preset gcc-release -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON
+cmake --preset gcc-release -DPACE_PACKAGE_ROOT_PREFIX=ON
 cmake --build --preset gcc-release --target pace-kv pace-cc
 cd out/build/gcc-release && cpack -G "DEB;RPM"
 ```

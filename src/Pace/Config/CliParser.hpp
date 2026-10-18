@@ -236,7 +236,7 @@ struct ConfigFileSetting
 
 /// Parse and range-check a TCP port (1..65535) from its decimal text. The single
 /// source of truth for port parsing, shared by the CLI flag handlers and the
-/// `FASTCACHED_METRICS_PORT` environment fallback so both accept exactly the same
+/// `PACE_METRICS_PORT` environment fallback so both accept exactly the same
 /// syntax and range.
 /// @param sv Decimal port text (no surrounding whitespace).
 /// @return The port on success, or a ConfigError describing the rejection.

@@ -317,7 +317,7 @@ struct Config
     bool metricsEnabled { false };
 
     /// Whether to terminate TLS on the cache port. Off by default. Requires a
-    /// build with `FASTCACHED_ENABLE_TLS=ON` and both `tlsCertPath`/`tlsKeyPath`
+    /// build with `PACE_ENABLE_TLS=ON` and both `tlsCertPath`/`tlsKeyPath`
     /// set; the daemon fails fast at startup otherwise.
     bool tlsEnabled { false };
 

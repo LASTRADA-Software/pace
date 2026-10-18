@@ -24,7 +24,7 @@
 #               THAT rather than report `COMMAND` as the interpreter: naming the
 #               wrong half of a real defect is #791, and it sends a maintainer to
 #               look for something that is not there
-#   nodef       the `FASTCACHED_BASH` definition removed. Every site then expands
+#   nodef       the `PACE_BASH` definition removed. Every site then expands
 #               to no interpreter, the scripts still RUN from their shebang, and
 #               every test stays green while the thing this pins is unpinned --
 #               a green suite proving nothing
@@ -38,7 +38,7 @@
 # and count as two.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-script-interpreter-selftest.cmake
 
 cmake_minimum_required(VERSION 3.28)
@@ -51,14 +51,14 @@ if(POLICY CMP0219)
     cmake_policy(SET CMP0219 NEW)
 endif()
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} must be set")
     endif()
 endforeach()
 
-set(checkScript "${FASTCACHED_SOURCE_DIR}/scripts/check-script-interpreter.cmake")
-set(realRegistrations "${FASTCACHED_SOURCE_DIR}/src/tests/CMakeLists.txt")
+set(checkScript "${PACE_SOURCE_DIR}/scripts/check-script-interpreter.cmake")
+set(realRegistrations "${PACE_SOURCE_DIR}/src/tests/CMakeLists.txt")
 foreach(needed checkScript realRegistrations)
     if(NOT EXISTS "${${needed}}")
         message(FATAL_ERROR "missing input: ${${needed}}")
@@ -68,7 +68,7 @@ endforeach()
 set(failureCount 0)
 set(caseCount 0)
 
-macro(fastcached_selftest_failed label detail)
+macro(pace_selftest_failed label detail)
     math(EXPR failureCount "${failureCount} + 1")
     message("")
     message("  FAIL  ${label}")
@@ -76,17 +76,17 @@ macro(fastcached_selftest_failed label detail)
 endmacro()
 
 # Stage the one file the check reads. `tree` is a scratch source root.
-function(fastcached_stage name outVar)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage name outVar)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src/tests")
     file(COPY "${realRegistrations}" DESTINATION "${tree}/src/tests")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
 
-function(fastcached_run tree outObjected outOutput)
+function(pace_run tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${checkScript}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${checkScript}"
         OUTPUT_VARIABLE captured
         ERROR_VARIABLE capturedErr
         RESULT_VARIABLE ignored
@@ -107,24 +107,24 @@ endfunction()
 # escapes: a macro re-parses its arguments, so an escape is consumed twice and a
 # `\(` arrives at MATCHES as a group opener that fails to compile. A literal is
 # written as `.`, which is laxer and means the same thing at both ends.
-macro(fastcached_case label tree wantSaying)
+macro(pace_case label tree wantSaying)
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_run("${tree}" _objected _output)
+    pace_run("${tree}" _objected _output)
 
     if("${wantSaying}" STREQUAL "")
         if(_objected)
-            fastcached_selftest_failed("${label}" "expected a PASS and the check objected")
+            pace_selftest_failed("${label}" "expected a PASS and the check objected")
             message("${_output}")
         else()
             message(STATUS "  ok    (want-pass) ${label}")
         endif()
     elseif(NOT _objected)
-        fastcached_selftest_failed("${label}" "expected a refusal and the check passed")
+        pace_selftest_failed("${label}" "expected a refusal and the check passed")
     elseif(NOT _output MATCHES "${wantSaying}")
-        fastcached_selftest_failed("${label}" "the refusal never says '${wantSaying}'")
+        pace_selftest_failed("${label}" "the refusal never says '${wantSaying}'")
         message("${_output}")
     elseif(NOT _output MATCHES "1 finding.s. across")
-        fastcached_selftest_failed("${label}" "refused, but not with exactly one finding")
+        pace_selftest_failed("${label}" "refused, but not with exactly one finding")
         message("${_output}")
     else()
         message(STATUS "  ok    (want-fail, one finding, attributed) ${label}")
@@ -133,7 +133,7 @@ endmacro()
 
 # One injection, asserted to have staged something. An edit that matches no
 # anchor changes nothing and reports success.
-function(fastcached_inject tree from to outOk)
+function(pace_inject tree from to outOk)
     set(file "${tree}/src/tests/CMakeLists.txt")
     file(READ "${file}" before)
     string(REPLACE "${from}" "${to}" after "${before}")
@@ -145,40 +145,40 @@ function(fastcached_inject tree from to outOk)
     endif()
 endfunction()
 
-set(oneSite "COMMAND \${FASTCACHED_BASH} \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"")
+set(oneSite "COMMAND \${PACE_BASH} \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"")
 
 # ---------------------------------------------------------------------------
 # The control: the real registration file, unmodified, must PASS.
-fastcached_stage("control" tree)
-fastcached_case("the real registration file, copied unmodified" "${tree}" "")
+pace_stage("control" tree)
+pace_case("the real registration file, copied unmodified" "${tree}" "")
 
-fastcached_stage("bare" tree)
-fastcached_inject("${tree}" "${oneSite}"
+pace_stage("bare" tree)
+pace_inject("${tree}" "${oneSite}"
                   "COMMAND bash \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("bare" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("bare" "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_case("a bare `bash` registration is refused, and named" "${tree}"
+    pace_case("a bare `bash` registration is refused, and named" "${tree}"
                     "runs a shell script as .bash. rather than")
 endif()
 
-fastcached_stage("literal" tree)
-fastcached_inject("${tree}" "${oneSite}"
+pace_stage("literal" tree)
+pace_inject("${tree}" "${oneSite}"
                   "COMMAND /bin/bash \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("literal" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("literal" "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_case("a literal `/bin/bash` is refused too -- the VARIABLE is what is pinned" "${tree}"
+    pace_case("a literal `/bin/bash` is refused too -- the VARIABLE is what is pinned" "${tree}"
                     "runs a shell script as ./bin/bash. rather than")
 endif()
 
-fastcached_stage("nointerp" tree)
-fastcached_inject("${tree}" "${oneSite}"
+pace_stage("nointerp" tree)
+pace_inject("${tree}" "${oneSite}"
                   "COMMAND \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("nointerp" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("nointerp" "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_case("a site with NO interpreter token says that, not that `COMMAND` is one" "${tree}"
+    pace_case("a site with NO interpreter token says that, not that `COMMAND` is one" "${tree}"
                     "NO interpreter token before it")
 endif()
 
@@ -190,48 +190,48 @@ endif()
 # Two cases, and the second is what makes the first mean anything. Asserting only that
 # the refusal carries the remedy passes just as well if EVERY arm carries it, and a
 # remedy on the wrong arm is the defect this ticket is about, pointed somewhere else.
-fastcached_stage("wrapped" tree)
-fastcached_inject("${tree}" "${oneSite}"
-                  "COMMAND \${FASTCACHED_BASH}
+pace_stage("wrapped" tree)
+pace_inject("${tree}" "${oneSite}"
+                  "COMMAND \${PACE_BASH}
         \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("wrapped" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("wrapped" "the injection changed nothing, so the case stages no defect")
 else()
     # The needle is the REMEDY, not the refusal: the refusal fired before this change too.
-    fastcached_case("a wrapped COMMAND is refused WITH a remedy, not a bare `cannot classify`" "${tree}"
+    pace_case("a wrapped COMMAND is refused WITH a remedy, not a bare `cannot classify`" "${tree}"
                     "put the interpreter and the checked script on ONE line")
 endif()
 
-fastcached_stage("wrappedshows" tree)
-fastcached_inject("${tree}" "${oneSite}"
-                  "COMMAND \${FASTCACHED_BASH}
+pace_stage("wrappedshows" tree)
+pace_inject("${tree}" "${oneSite}"
+                  "COMMAND \${PACE_BASH}
         \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("wrappedshows" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("wrappedshows" "the injection changed nothing, so the case stages no defect")
 else()
     # And it must QUOTE THE WHOLE COMMAND. Showing the continuation line alone is what
     # made a correct registration read as a bare invocation, so the line carrying the
     # interpreter has to appear in the refusal.
-    fastcached_case("the refusal quotes the interpreter line, not the continuation alone" "${tree}"
-                    ". COMMAND ..FASTCACHED_BASH")
+    pace_case("the refusal quotes the interpreter line, not the continuation alone" "${tree}"
+                    ". COMMAND ..PACE_BASH")
 endif()
 
 # The POSITIVE CONTROL for both: a DIFFERENT arm must not carry the wrapped-form remedy.
 # Without this, moving that sentence to every violation -- or to the shared trailer --
 # would pass both cases above while telling somebody with a genuinely token-less site to
 # go and join two lines that are already one.
-fastcached_stage("remedynotshared" tree)
-fastcached_inject("${tree}" "${oneSite}"
+pace_stage("remedynotshared" tree)
+pace_inject("${tree}" "${oneSite}"
                   "COMMAND \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("remedynotshared" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("remedynotshared" "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_run("${tree}" _objected _output)
+    pace_run("${tree}" _objected _output)
     math(EXPR caseCount "${caseCount} + 1")
     if(NOT _objected)
-        fastcached_selftest_failed("remedynotshared" "expected a refusal and the check passed")
+        pace_selftest_failed("remedynotshared" "expected a refusal and the check passed")
     elseif(_output MATCHES "put the interpreter and the checked script on ONE line")
-        fastcached_selftest_failed("remedynotshared"
+        pace_selftest_failed("remedynotshared"
             "a site that really has no interpreter token was given the WRAPPED-command remedy, which would send its author to join two lines that are already one")
         message("${_output}")
     else()
@@ -239,21 +239,21 @@ else()
     endif()
 endif()
 
-fastcached_stage("nodef" tree)
-fastcached_inject("${tree}" "set(FASTCACHED_BASH " "set(FASTCACHED_BASH_RENAMED " staged)
+pace_stage("nodef" tree)
+pace_inject("${tree}" "set(PACE_BASH " "set(PACE_BASH_RENAMED " staged)
 if(NOT staged)
-    fastcached_selftest_failed("nodef" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("nodef" "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_case("the definition removed is refused -- every site would expand to no interpreter" "${tree}"
-                    "defines no .FASTCACHED_BASH")
+    pace_case("the definition removed is refused -- every site would expand to no interpreter" "${tree}"
+                    "defines no .PACE_BASH")
 endif()
 
-fastcached_stage("empty" tree)
-fastcached_inject("${tree}" "/scripts/" "/no-such-dir/" staged)
+pace_stage("empty" tree)
+pace_inject("${tree}" "/scripts/" "/no-such-dir/" staged)
 if(NOT staged)
-    fastcached_selftest_failed("empty" "the injection changed nothing, so the case stages no defect")
+    pace_selftest_failed("empty" "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_case("a scan matching nothing is REFUSED, not read as 'all clear'" "${tree}"
+    pace_case("a scan matching nothing is REFUSED, not read as 'all clear'" "${tree}"
                     "found no script-driven test registrations")
 endif()
 
@@ -275,23 +275,23 @@ endif()
 # mutation installed -- a regression test that could not reproduce its regression, found
 # by neutering rather than by reading it.
 #
-# So this case does not go through `fastcached_case`, whose count assertion is hard-wired
+# So this case does not go through `pace_case`, whose count assertion is hard-wired
 # to one. It asserts TWO.
-fastcached_stage("semicolon" tree)
-fastcached_inject("${tree}" "${oneSite}"
+pace_stage("semicolon" tree)
+pace_inject("${tree}" "${oneSite}"
                   "COMMAND bash \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\" \; tail" stagedA)
-fastcached_inject("${tree}" "COMMAND \${FASTCACHED_BASH} \"\${CMAKE_SOURCE_DIR}/scripts/flake-rate.sh\""
+pace_inject("${tree}" "COMMAND \${PACE_BASH} \"\${CMAKE_SOURCE_DIR}/scripts/flake-rate.sh\""
                   "COMMAND bash \"\${CMAKE_SOURCE_DIR}/scripts/flake-rate.sh\"" stagedB)
 math(EXPR caseCount "${caseCount} + 1")
 if(NOT stagedA OR NOT stagedB)
-    fastcached_selftest_failed("semicolon"
+    pace_selftest_failed("semicolon"
         "an injection changed nothing (A=${stagedA} B=${stagedB}), so the case stages fewer than the two defects it needs")
 else()
-    fastcached_run("${tree}" _semiObjected _semiOutput)
+    pace_run("${tree}" _semiObjected _semiOutput)
     if(NOT _semiObjected)
-        fastcached_selftest_failed("semicolon" "expected a refusal and the check passed")
+        pace_selftest_failed("semicolon" "expected a refusal and the check passed")
     elseif(NOT _semiOutput MATCHES "2 finding.s. across")
-        fastcached_selftest_failed("semicolon"
+        pace_selftest_failed("semicolon"
             "two defects were staged, one of them on a line carrying a `;`, and the check did not report exactly two findings -- the accumulator is re-splitting stored elements (#796)")
         message("${_semiOutput}")
     else()
@@ -309,15 +309,15 @@ endif()
 # the row does not name. Without this case an exemption keyed on the FILE alone passes
 # every test in this file while readmitting a literal `/bin/bash` or a PATH-resolved
 # `bash`, which is the whole of what this check refuses.
-fastcached_stage("exempt-wrong-token" tree)
-fastcached_inject("${tree}"
-    "COMMAND \${FASTCACHED_BASH44} \"\${CMAKE_SOURCE_DIR}/scripts/tidy-sweep.sh\""
+pace_stage("exempt-wrong-token" tree)
+pace_inject("${tree}"
+    "COMMAND \${PACE_BASH44} \"\${CMAKE_SOURCE_DIR}/scripts/tidy-sweep.sh\""
     "COMMAND /bin/bash \"\${CMAKE_SOURCE_DIR}/scripts/tidy-sweep.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("exempt-wrong-token"
+    pace_selftest_failed("exempt-wrong-token"
         "the injection changed nothing -- the exempt registration is not spelled as this case expects, so it stages no defect")
 else()
-    fastcached_case("an exempt script run as a token its row does not name is refused" "${tree}"
+    pace_case("an exempt script run as a token its row does not name is refused" "${tree}"
                     "exemption names ONE permitted token")
 endif()
 
@@ -327,14 +327,14 @@ endif()
 # Injected at `oneSite`, which is registered exactly once, because the harness asserts a
 # single finding. The first version of this case rewrote `run-check.sh` and produced many
 # -- a correct refusal that failed the case for arithmetic rather than for behaviour.
-fastcached_stage("exempt-does-not-leak" tree)
-fastcached_inject("${tree}" "${oneSite}"
-    "COMMAND \${FASTCACHED_BASH44} \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
+pace_stage("exempt-does-not-leak" tree)
+pace_inject("${tree}" "${oneSite}"
+    "COMMAND \${PACE_BASH44} \"\${CMAKE_SOURCE_DIR}/scripts/ci-scope-test.sh\"" staged)
 if(NOT staged)
-    fastcached_selftest_failed("exempt-does-not-leak"
+    pace_selftest_failed("exempt-does-not-leak"
         "the injection changed nothing, so the case stages no defect")
 else()
-    fastcached_case("a NON-exempt script may not use the exempt token either" "${tree}"
+    pace_case("a NON-exempt script may not use the exempt token either" "${tree}"
                     "rather than")
 endif()
 

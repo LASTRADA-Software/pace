@@ -14,7 +14,7 @@
 #
 # For the `.deb` and the `.rpm` that is survivable: `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` and
 # `CPACK_RPM_PACKAGE_AUTOREQ` derive a dependency on the runtime package. The TGZ carries
-# no dependency metadata at ALL, and the TGZ is what `FASTCACHE_AUTO_INSTALL` unpacks
+# no dependency metadata at ALL, and the TGZ is what `PACE_AUTO_INSTALL` unpacks
 # onto a developer's machine. There the daemon dies in the dynamic loader with
 # `error while loading shared libraries: libyaml-cpp.so.0.8` and exit 127, which the
 # configure reported as `pace-kv exited immediately (127)` -- a number that reads as
@@ -174,7 +174,7 @@ CheckBinary() {
         printf '  This build resolved it with find_package instead of building it.\n'
         printf '  Configure that job with -DCPM_USE_LOCAL_PACKAGES=OFF, as the macOS\n'
         printf '  package job does. The .deb and .rpm survive it through SHLIBDEPS;\n'
-        printf '  the TGZ that FASTCACHE_AUTO_INSTALL unpacks does not (#1538).\n'
+        printf '  the TGZ that PACE_AUTO_INSTALL unpacks does not (#1538).\n'
         fail_count=$((fail_count + 1))
         return
     fi

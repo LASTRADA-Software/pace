@@ -5,20 +5,20 @@
 # be built by hand here -- and every subtlety below was a failure first, which is
 # exactly why a second account must not be a second copy of it.
 #
-# Expects: nothing. Defines: fastcached_create_account.
+# Expects: nothing. Defines: pace_create_account.
 #
-# fastcached_create_account <account> <real name>
+# pace_create_account <account> <real name>
 #   Creates <account> if it is absent, waits until getpwnam(3) can resolve it, and
-#   sets FASTCACHED_ACCOUNT_UID / FASTCACHED_ACCOUNT_GID from the record. Both are
+#   sets PACE_ACCOUNT_UID / PACE_ACCOUNT_GID from the record. Both are
 #   left EMPTY when the account could not be created or resolved; every caller
 #   tests them rather than assuming, because a postinstall must exit 0 whatever
 #   happens and an unset id would otherwise chown the wrong thing.
-fastcached_create_account() {
+pace_create_account() {
     _fc_account="$1"
     _fc_realname="$2"
 
-    FASTCACHED_ACCOUNT_UID=""
-    FASTCACHED_ACCOUNT_GID=""
+    PACE_ACCOUNT_UID=""
+    PACE_ACCOUNT_GID=""
 
     # The 200..400 band is the convention for hidden system accounts; picking the
     # next free id keeps this from colliding with another package's.
@@ -109,10 +109,10 @@ fastcached_create_account() {
     # from /Groups instead made the whole thing hostage to a group record that
     # turned out not to exist: the id came back empty, every chown was skipped, and
     # the config was left in a state the install then refused.
-    FASTCACHED_ACCOUNT_UID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" UniqueID 2>/dev/null | /usr/bin/awk '{print $2}')
-    FASTCACHED_ACCOUNT_GID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}')
+    PACE_ACCOUNT_UID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" UniqueID 2>/dev/null | /usr/bin/awk '{print $2}')
+    PACE_ACCOUNT_GID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}')
 
     # Recorded because two runs were lost to guessing at this from the outside.
-    echo "pace-kv: account ${_fc_account} uid=${FASTCACHED_ACCOUNT_UID:-<none>} gid=${FASTCACHED_ACCOUNT_GID:-<none>}" \
+    echo "pace-kv: account ${_fc_account} uid=${PACE_ACCOUNT_UID:-<none>} gid=${PACE_ACCOUNT_GID:-<none>}" \
         "group-record=$(/usr/bin/dscl . -read "/Groups/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}' || true)" >&2
 }

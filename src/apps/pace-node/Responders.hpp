@@ -1485,7 +1485,7 @@ class MergedResponder final: public IFrameResponder
     /// knob, because a launcher, a worker and a one-shot verb each name their scheduler differently.
     static constexpr std::string_view NoSchedulerHereWhy =
         "this node runs no consensus, so it schedules nothing and follows no leader to redirect you to; point the "
-        "client at a node that runs consensus -- FASTCACHE_SCHEDULER for a launcher, --scheduler for a one-shot "
+        "client at a node that runs consensus -- PACE_SCHEDULER for a launcher, --scheduler for a one-shot "
         "verb, --addr for pacectl; a worker registers where the fleet it joined says, and --fleet-seed joins "
         "one";
 
@@ -1528,7 +1528,7 @@ class MergedResponder final: public IFrameResponder
     /// omission.** Every other refusal here is an event; this one is an ANSWER that
     /// ordinary, healthy traffic produces continuously. A node runs its components
     /// independently, so a worker with no scheduler refuses every `AUTH` a
-    /// `FASTCACHE_TOKEN` launcher sends -- which is per exchange, for a whole build --
+    /// `PACE_TOKEN` launcher sends -- which is per exchange, for a whole build --
     /// and a node with no cache tier refuses every local `FETCH` the same way. Counted,
     /// the series would be dominated by a normal build and a port scan would be
     /// invisible inside it, which is the failure this ticket is about arrived at from

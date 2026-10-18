@@ -131,10 +131,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # reader moved to a file in the same change. Both are REFUSED when missing rather than letting
 # awk report a syntax error about a program it could not read -- a reader that ran over no
 # program is not a clean tree.
-FastCachedShellLexAwk="$(dirname "${BASH_SOURCE[0]}")/lib/shell-lex.awk"
-FastCachedWorkflowWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
-FastCachedStepEnvAwk="$(dirname "${BASH_SOURCE[0]}")/check-workflow-step-env.awk"
-for awkProgram in "$FastCachedShellLexAwk" "$FastCachedWorkflowWalkAwk" "$FastCachedStepEnvAwk"; do
+PaceShellLexAwk="$(dirname "${BASH_SOURCE[0]}")/lib/shell-lex.awk"
+PaceWorkflowWalkAwk="$(dirname "${BASH_SOURCE[0]}")/lib/workflow-walk.awk"
+PaceStepEnvAwk="$(dirname "${BASH_SOURCE[0]}")/check-workflow-step-env.awk"
+for awkProgram in "$PaceShellLexAwk" "$PaceWorkflowWalkAwk" "$PaceStepEnvAwk"; do
     if [ ! -f "$awkProgram" ]; then
         echo "check-workflow-step-env: missing awk program ${awkProgram}; nothing was read, so this"
         echo "                         run judged no workflow -- refused rather than reported clean"
@@ -177,11 +177,11 @@ pwsh|pwsh"
 # is used by no step any more, or its name is read by no expression any more. An opt-in list
 # of exports would read identically to complete coverage, which is why this holds only what
 # is READ -- a name nothing reads needs no row and would have to be kept correct for nothing.
-# OVERRIDABLE by `FASTCACHED_STEPENV_ACTION_EXPORTS`, and the self-test sets it EMPTY: a
+# OVERRIDABLE by `PACE_STEPENV_ACTION_EXPORTS`, and the self-test sets it EMPTY: a
 # synthetic workflow uses none of these actions and reads none of these names, so every
 # case would trip the staleness check below on a tree the case says nothing about. A case
 # that is ABOUT an export stages its own row.
-ActionExports="${FASTCACHED_STEPENV_ACTION_EXPORTS-mozilla-actions/sccache-action|SCCACHE_PATH}"
+ActionExports="${PACE_STEPENV_ACTION_EXPORTS-mozilla-actions/sccache-action|SCCACHE_PATH}"
 
 # Whether the two WHOLE-TREE claims below are being made: that at least one
 # `${{ env.NAME }}` expression was read, and that every `ActionExports` row still describes
@@ -239,10 +239,10 @@ Scan() {
     local exportRows
     Flatten exportRows "$ActionExports" ' '
     awk -v bashNames="$bashNames" -v windowsNames="$windowsNames" -v shells="$shellRows" -v remedies="$remedyRows" \
-        -v plant="$2" -v PlantName="FASTCACHED_PLANTED_READ" -v PlantExprName="FASTCACHED_PLANTED_EXPR" \
+        -v plant="$2" -v PlantName="PACE_PLANTED_READ" -v PlantExprName="PACE_PLANTED_EXPR" \
         -v exports="$exportRows" \
-        -f "${FastCachedShellLexAwk}" -f "${FastCachedWorkflowWalkAwk}" \
-        -f "${FastCachedStepEnvAwk}" "$1" "$1"
+        -f "${PaceShellLexAwk}" -f "${PaceWorkflowWalkAwk}" \
+        -f "${PaceStepEnvAwk}" "$1" "$1"
 }
 
 # Judge every workflow under @p dir; print one line per file and per refusal; return 0 clean, 1 refused.
@@ -506,7 +506,7 @@ jobs:
         run: echo "$EVENT"
       - name: "Open or update one report per unreported failure"
         run: |
-          [[ "$EVENT" == push ]] && export FASTCACHED_REPORT_ONLY_IF_NEW=1
+          [[ "$EVENT" == push ]] && export PACE_REPORT_ONLY_IF_NEW=1
           scripts/ci-report-issue.sh t b
 WF
 
@@ -1801,9 +1801,9 @@ ACTION
     # and a staged tree that omits them runs no reader at all. The check refuses that by name, so
     # this case failed loudly on the extraction rather than passing over a scan of nothing --
     # which is the whole reason that refusal is there.
-    Stage askedByTheRun scripts/lib/shell-lex.awk < "${FastCachedShellLexAwk}"
-    Stage askedByTheRun scripts/lib/workflow-walk.awk < "${FastCachedWorkflowWalkAwk}"
-    Stage askedByTheRun scripts/check-workflow-step-env.awk < "${FastCachedStepEnvAwk}"
+    Stage askedByTheRun scripts/lib/shell-lex.awk < "${PaceShellLexAwk}"
+    Stage askedByTheRun scripts/lib/workflow-walk.awk < "${PaceWorkflowWalkAwk}"
+    Stage askedByTheRun scripts/check-workflow-step-env.awk < "${PaceStepEnvAwk}"
     Stage askedByTheRun .github/workflows/wf.yml <<'WF'
 jobs:
   a:

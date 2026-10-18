@@ -81,7 +81,7 @@ inline constexpr unsigned VerificationOff = 0;
 /// @return True when this hit should be compiled again and compared.
 [[nodiscard]] bool ShouldVerifyHit(std::string_view key, unsigned rate) noexcept;
 
-/// Parse `FASTCACHE_VERIFY`.
+/// Parse `PACE_VERIFY`.
 ///
 /// @param text What the environment holds; empty or absent is off.
 /// @return The rate, or `VerificationOff` when the value names none.

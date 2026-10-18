@@ -75,7 +75,7 @@ TEST_CASE("Compression: the effective codec is one this build can actually use",
     // codec is missing, so a caller that reports the CONFIGURED value describes a
     // store that is not there. Vacuous where every codec is present -- which is every
     // build CI makes -- and the one assertion that bites on
-    // `FASTCACHED_ENABLE_COMPRESSION=OFF`, where it is the difference between
+    // `PACE_ENABLE_COMPRESSION=OFF`, where it is the difference between
     // reporting `zstd` and reporting the truth.
     for (auto const codec: AllCodecs)
         CHECK(Compression::IsAvailable(Compression::EffectiveCodec(codec)));

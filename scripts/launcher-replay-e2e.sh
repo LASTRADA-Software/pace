@@ -264,11 +264,11 @@ configure_and_build() {
     local args=(-S "$source_dir" -B "$dir" -G Ninja
                 -DCMAKE_BUILD_TYPE=Release
                 -DCMAKE_CXX_COMPILER="$compiler"
-                -DFASTCACHED_BUILD_DAEMON=OFF
-                -DFASTCACHED_BUILD_NODE=OFF
+                -DPACE_BUILD_DAEMON=OFF
+                -DPACE_BUILD_NODE=OFF
                 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
                 "-DUSE_COMPILER_CACHE=${cache}")
-    [ "$cache" = "ON" ] && args+=("-DFASTCACHE_CC=${launcher_wrapper}")
+    [ "$cache" = "ON" ] && args+=("-DPACE_CC=${launcher_wrapper}")
     cmake "${args[@]}" > "${log}.configure" 2>&1 \
         || { tail -40 "${log}.configure" >&2; fail "configure failed for ${dir}"; }
     cmake --build "$dir" --target "$target" > "${log}" 2>&1 \
@@ -279,11 +279,11 @@ configure_and_build() {
 # the environment is set for the BUILD as well as the configure, because
 # `CompileCache.cmake` proves the cache works at configure time by compiling one
 # file through it.
-export FASTCACHE_ADDR="127.0.0.1:${port}"
-export FASTCACHE_VERBOSE=1
+export PACE_ADDR="127.0.0.1:${port}"
+export PACE_VERBOSE=1
 
 echo "== control: the same target with no launcher at all"
-(unset FASTCACHE_ADDR FASTCACHE_VERBOSE
+(unset PACE_ADDR PACE_VERBOSE
  configure_and_build "${workdir}/control" OFF "${workdir}/control.build")
 grep -q "LAUNCHER = " "${workdir}/control/build.ninja" \
     && fail "the control build has a compiler launcher configured; it is not a control"

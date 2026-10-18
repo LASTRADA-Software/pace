@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# `fastcached_notarize` retries a STALL and never retries a VERDICT.
+# `pace_notarize` retries a STALL and never retries a VERDICT.
 #
 # `cmake/MacOSNotarizePkg.cmake` bounds `notarytool submit --wait` and retries it,
 # because an unbounded wait hands the ending to the runner, which answers after
@@ -24,7 +24,7 @@ set -uo pipefail
 
 refuse() { echo "CMake Error: notarize-retry: $*" >&2; }
 
-repo="${FASTCACHED_SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+repo="${PACE_SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 hook="$repo/cmake/MacOSNotarizePkg.cmake"
 [[ -f $hook ]] || { refuse "no notarize hook at '$hook'"; exit 1; }
 command -v cmake >/dev/null 2>&1 || { refuse "cmake not found"; exit 1; }
@@ -35,18 +35,18 @@ mkdir -p "$work/bin"
 : > "$work/thing.pkg"
 
 cat > "$work/drive.cmake" <<'DRIVE'
-set(CPACK_FASTCACHED_NOTARIZE ON)
-set(CPACK_FASTCACHED_BUILD_DMG OFF)
-set(CPACK_FASTCACHED_NOTARY_PROFILE "fake-profile")
+set(CPACK_PACE_NOTARIZE ON)
+set(CPACK_PACE_BUILD_DMG OFF)
+set(CPACK_PACE_NOTARY_PROFILE "fake-profile")
 set(CPACK_PACKAGE_FILES "$ENV{ART}")
 # Set only when a case NAMES them, so every case that does not exercises the
 # absent-variable arm -- which for the stall policy is the fail-closed default, and
 # that is the arm a release depends on (#1156).
 if(NOT "$ENV{STALL_FATAL}" STREQUAL "")
-    set(CPACK_FASTCACHED_NOTARY_STALL_IS_FATAL "$ENV{STALL_FATAL}")
+    set(CPACK_PACE_NOTARY_STALL_IS_FATAL "$ENV{STALL_FATAL}")
 endif()
 if(NOT "$ENV{NOTARY_BUDGET}" STREQUAL "")
-    set(CPACK_FASTCACHED_NOTARY_BUDGET "$ENV{NOTARY_BUDGET}")
+    set(CPACK_PACE_NOTARY_BUDGET "$ENV{NOTARY_BUDGET}")
 endif()
 include("$ENV{HOOK}")
 message(STATUS "DRIVER-COMPLETED")
@@ -152,7 +152,7 @@ run_case never_answers fatal "did not answer the notarization submission" 2
 # that filed #1156, two attempts spent twenty minutes to be told the same thing
 # twice.
 #
-# The budget is shrunk through `CPACK_FASTCACHED_NOTARY_BUDGET` because no
+# The budget is shrunk through `CPACK_PACE_NOTARY_BUDGET` because no
 # test can wait 600 s to watch this; that seam exists for this case and for nothing
 # else, and `cmake/Packaging.cmake` does not export it. Six seconds, so the FIRST
 # attempt still clears the minimum-attempt floor the hook derives from the budget --

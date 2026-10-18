@@ -30,14 +30,14 @@ cmake_minimum_required(VERSION 3.28)
 # would be two implementations of one rule differing only in syntax.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-test-names.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-test-names.cmake
 #
 # Exit codes: 0 = every case name was READ and survives the round trip. 1 = one
 # does not, OR one could not be read at all -- a case whose name this file cannot
 # extract is a case it does not check, which is not a pass (#1261).
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ endif()
 # `METHOD_AS_TEST_CASE` a method, `REGISTER_TEST_CASE` a function) the arguments
 # ahead of it are never string literals, so there is nothing for the match to
 # reach by mistake.
-set(FastCachedCaseMacros
+set(PaceCaseMacros
     TEST_CASE
     TEST_CASE_METHOD
     TEMPLATE_TEST_CASE
@@ -90,20 +90,20 @@ set(FastCachedCaseMacros
 
 # Any all-caps identifier opening a call. The row lookup decides what it is; this
 # only has to find the candidate.
-set(FastCachedMacroOpenPattern "^[ \t]*([A-Z][A-Z0-9_]*)[ \t]*\\(")
+set(PaceMacroOpenPattern "^[ \t]*([A-Z][A-Z0-9_]*)[ \t]*\\(")
 
 # A candidate this table does not name, but which is in the family: refused rather
 # than skipped. Deliberately NOT anchored on the whole identifier -- a wrapper
-# named `FASTCACHE_TEST_CASE` is exactly as invisible to the rows above as
+# named `PACE_TEST_CASE` is exactly as invisible to the rows above as
 # `TEMPLATE_TEST_CASE_METHOD` was.
-set(FastCachedCaseMacroFamilyPattern "(TEST_CASE|SCENARIO)")
+set(PaceCaseMacroFamilyPattern "(TEST_CASE|SCENARIO)")
 
 # How many lines past the one a macro OPENS on this will look for the case name.
 # A wrapped invocation puts it on the next line; the bound is loose because the
 # cost of a miss is a case excluded from every check in this file, and tight
 # because running off into the body would start reading string literals that are
 # not names. Exceeding it is a REFUSAL (see `unreadable` below), never a skip.
-set(FastCachedCaseNameLookahead 8)
+set(PaceCaseNameLookahead 8)
 
 # ---------------------------------------------------------------------------
 # Duplicated case names, and the ONE pair that is allowed (#729).
@@ -134,7 +134,7 @@ set(FastCachedCaseNameLookahead 8)
 # name|reason
 # Empty since #1596: its one row was the epoll and kqueue reactors' shared case name, and
 # both reactors left for core-cpp.
-set(FastCachedDuplicateNameExemptions
+set(PaceDuplicateNameExemptions
 )
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ set(FastCachedDuplicateNameExemptions
 # times as many files and walks the newlines of only the ones that hold a
 # candidate, so the run time is within noise of the narrow glob's.
 #
-# Through `fastcached_tracked_files`, which is this tree's one answer to HOW a check
+# Through `pace_tracked_files`, which is this tree's one answer to HOW a check
 # finds its file set, and not a raw `file(GLOB_RECURSE)`. The difference only became
 # load-bearing when the set widened: `*_test.cpp` was a name a stray file is unlikely
 # to carry, while every `.cpp` and `.hpp` under `src/` catches an untracked WIP file,
@@ -166,7 +166,7 @@ set(FastCachedDuplicateNameExemptions
 # developer's machine and another in CI. It also carries the MODE, which the vacuity
 # refusal below names.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/*.cpp" "src/*.hpp"
     GLOBS "src/*.cpp" "src/*.hpp"
     FILTER "\\.(cpp|hpp)$"
@@ -192,14 +192,14 @@ fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
 # quadratic in the file's size -- and the test files it walks are the largest in the tree.
 # The window is refilled only when it holds no whole line, so each line costs about its
 # window. The lines, their order and their numbers are what they were.
-set(FastCachedLineWindow 4096)
+set(PaceLineWindow 4096)
 macro(TakeLine)
     math(EXPR lineNo "${lineNo} + 1")
     string(FIND "${sourceRest}" "\n" sourceNewline)
     while(sourceNewline EQUAL -1 AND sourceTaken LESS sourceLength)
-        string(SUBSTRING "${sourceText}" ${sourceTaken} ${FastCachedLineWindow} sourceMore)
+        string(SUBSTRING "${sourceText}" ${sourceTaken} ${PaceLineWindow} sourceMore)
         string(APPEND sourceRest "${sourceMore}")
-        math(EXPR sourceTaken "${sourceTaken} + ${FastCachedLineWindow}")
+        math(EXPR sourceTaken "${sourceTaken} + ${PaceLineWindow}")
         string(FIND "${sourceRest}" "\n" sourceNewline)
     endwhile()
     if(sourceNewline EQUAL -1)
@@ -225,9 +225,9 @@ endmacro()
 macro(SkipToCandidate)
     string(FIND "${sourceRest}" "\n" skipNewline)
     while(skipNewline EQUAL -1 AND sourceTaken LESS sourceLength)
-        string(SUBSTRING "${sourceText}" ${sourceTaken} ${FastCachedLineWindow} sourceMore)
+        string(SUBSTRING "${sourceText}" ${sourceTaken} ${PaceLineWindow} sourceMore)
         string(APPEND sourceRest "${sourceMore}")
-        math(EXPR sourceTaken "${sourceTaken} + ${FastCachedLineWindow}")
+        math(EXPR sourceTaken "${sourceTaken} + ${PaceLineWindow}")
         string(FIND "${sourceRest}" "\n" skipNewline)
     endwhile()
     string(FIND "${sourceRest}" "TEST_CASE" skipAt)
@@ -280,7 +280,7 @@ foreach(source IN LISTS testSources)
     #
     # Walking newlines preserves the text exactly and costs nothing measurable --
     # 1s across all 192 sources against 1s for `file(STRINGS)`, same 2992 lines.
-    # `fastcached_tracked_files` answers in paths RELATIVE to the source directory,
+    # `pace_tracked_files` answers in paths RELATIVE to the source directory,
     # which is what a reported site wants anyway.
     set(relative "${source}")
     # A path the INDEX names and the tree does not have. Its own outcome, for the
@@ -304,7 +304,7 @@ foreach(source IN LISTS testSources)
     if(NOT "${source}" IN_LIST testSourcesHolding)
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${source}" sourceText)
+    file(READ "${PACE_SOURCE_DIR}/${source}" sourceText)
     string(REPLACE "\r\n" "\n" sourceText "${sourceText}")
     # The pre-filter that pays for the widened file set. A strict SUPERSET of what
     # the walk below can find -- no line anchor, and it sees mentions in comments and
@@ -343,16 +343,16 @@ foreach(source IN LISTS testSources)
         TakeLine()
 
         # What the REGEX argument used to do, now that the reader cannot.
-        if(NOT line MATCHES "${FastCachedMacroOpenPattern}")
+        if(NOT line MATCHES "${PaceMacroOpenPattern}")
             continue()
         endif()
         set(macroName "${CMAKE_MATCH_1}")
-        if(NOT macroName IN_LIST FastCachedCaseMacros)
+        if(NOT macroName IN_LIST PaceCaseMacros)
             # In the family and not in the table: a case-declaring macro this
             # check has never heard of. Collected and refused below rather than
             # skipped here, because a skip is indistinguishable from a file with
             # no cases in it.
-            if(macroName MATCHES "${FastCachedCaseMacroFamilyPattern}")
+            if(macroName MATCHES "${PaceCaseMacroFamilyPattern}")
                 list(APPEND unknownMacros "  ${relative}:${lineNo}: ${macroName}")
             endif()
             continue()
@@ -377,7 +377,7 @@ foreach(source IN LISTS testSources)
         set(invocation "${line}")
         # The bound as a line NUMBER rather than a second counter: `lookahead` and
         # `lineNo` were incremented on adjacent lines and could never diverge.
-        math(EXPR lookaheadLimit "${lineNo} + ${FastCachedCaseNameLookahead}")
+        math(EXPR lookaheadLimit "${lineNo} + ${PaceCaseNameLookahead}")
         while(NOT invocation MATCHES "\"([^\"]*)\""
               AND (NOT sourceRest STREQUAL "" OR sourceTaken LESS sourceLength)
               AND lineNo LESS lookaheadLimit)
@@ -428,7 +428,7 @@ endforeach()
 # agree perfectly. Refused before any verdict is drawn from them.
 if(readCount EQUAL 0 OR scannedCount EQUAL 0 OR caseCount EQUAL 0)
     message(FATAL_ERROR
-        "test-name hygiene read ${readCount} file(s) under ${FASTCACHED_SOURCE_DIR}/src "
+        "test-name hygiene read ${readCount} file(s) under ${PACE_SOURCE_DIR}/src "
         "(file set from ${fileSetMode}), walked ${scannedCount} of them, and found "
         "${caseCount} case(s), so it is reporting on nothing. Three independent ways to "
         "get here and the numbers say which: the file set named no `.cpp` or `.hpp` "
@@ -446,12 +446,12 @@ endif()
 if(NOT unknownMacros STREQUAL "")
     list(JOIN unknownMacros "\n" report)
     message(FATAL_ERROR
-        "macro(s) naming a Catch2 case that FastCachedCaseMacros does not list:\n${report}\n\n"
+        "macro(s) naming a Catch2 case that PaceCaseMacros does not list:\n${report}\n\n"
         "The identifier carries TEST_CASE or SCENARIO, so it declares cases that "
         "`catch_discover_tests` will register -- and this check has no row for it, so "
         "every one of those cases would go unchecked: not dash-checked, not counted, "
         "and invisible to duplicate detection.\n"
-        "If it declares cases, add it to FastCachedCaseMacros in "
+        "If it declares cases, add it to PaceCaseMacros in "
         "${CMAKE_CURRENT_LIST_FILE}; the case name has to be the first string literal "
         "of the invocation, as it is for every row there.\n"
         "If it does NOT declare cases, rename it so it does not read as one -- this "
@@ -479,10 +479,10 @@ if(NOT unreadable STREQUAL "")
     message(FATAL_ERROR
         "Catch2 case(s) whose name this check could not read:\n${report}\n\n"
         "The macro opens and no complete string literal follows within "
-        "${FastCachedCaseNameLookahead} line(s), so there is no name to round-trip. A "
+        "${PaceCaseNameLookahead} line(s), so there is no name to round-trip. A "
         "case this check cannot read is a case it does not check at all -- which is "
         "not a pass, and used to be silent.\n"
-        "If the name is genuinely further down, raise FastCachedCaseNameLookahead in "
+        "If the name is genuinely further down, raise PaceCaseNameLookahead in "
         "${CMAKE_CURRENT_LIST_FILE}. If the name is not a plain string literal (a "
         "macro, a concatenation), make it one: `catch_discover_tests` has to pass the "
         "expanded name back to the runner as an argument, so a name this file cannot "
@@ -498,7 +498,7 @@ foreach(nameKey IN LISTS seenKeys)
         continue()
     endif()
     set(exemptReason "")
-    foreach(row IN LISTS FastCachedDuplicateNameExemptions)
+    foreach(row IN LISTS PaceDuplicateNameExemptions)
         string(FIND "${row}" "|" bar)
         if(bar EQUAL -1)
             message(FATAL_ERROR
@@ -531,7 +531,7 @@ if(NOT duplicateReport STREQUAL "")
         "Rename one of them so each states its own subject -- the tags already "
         "differ, and the name should too.\n"
         "If the two genuinely cannot co-exist in one build (mutually exclusive "
-        "platform guards, say), add a row to FastCachedDuplicateNameExemptions in "
+        "platform guards, say), add a row to PaceDuplicateNameExemptions in "
         "${CMAKE_CURRENT_LIST_FILE} carrying the REASON. An exemption is a stated "
         "decision; leaving the duplicate is not.")
 endif()
@@ -540,7 +540,7 @@ endif()
 # exemption nobody has to keep true is a licence that outlives its argument, and
 # the next real duplicate of that name would then be waved through silently.
 set(staleExemptions "")
-foreach(row IN LISTS FastCachedDuplicateNameExemptions)
+foreach(row IN LISTS PaceDuplicateNameExemptions)
     string(FIND "${row}" "|" bar)
     string(SUBSTRING "${row}" 0 ${bar} exemptName)
     if(exemptName MATCHES "[][;|]")
@@ -556,7 +556,7 @@ endforeach()
 
 if(NOT staleExemptions STREQUAL "")
     message(FATAL_ERROR
-        "FastCachedDuplicateNameExemptions has row(s) that no longer describe a "
+        "PaceDuplicateNameExemptions has row(s) that no longer describe a "
         "duplicated case name:${staleExemptions}\n\n"
         "The duplicate was resolved, or the case was renamed or deleted. Remove the "
         "row -- a standing exemption for a name that is now unique would silently "
@@ -564,7 +564,7 @@ if(NOT staleExemptions STREQUAL "")
         "The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
-list(LENGTH FastCachedDuplicateNameExemptions exemptionCount)
+list(LENGTH PaceDuplicateNameExemptions exemptionCount)
 
 if(NOT violations STREQUAL "")
     list(JOIN violations "\n" report)
@@ -581,7 +581,7 @@ if(NOT violations STREQUAL "")
         "The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
-list(LENGTH FastCachedCaseMacros caseMacroCount)
+list(LENGTH PaceCaseMacros caseMacroCount)
 message("test-name hygiene: ${caseCount} case(s) across ${scannedCount} of ${readCount} file(s) "
         "survive the CTest round trip (file set from ${fileSetMode}), all names distinct "
         "(${caseMacroCount} case macro(s) known, ${exemptionCount} stated exemption(s))")

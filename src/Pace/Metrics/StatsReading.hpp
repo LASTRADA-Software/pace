@@ -69,7 +69,7 @@ struct HostCapacity
     /// compiles running is draining, and one with none is safe to stop. A `size_t` rather
     /// than a `bool` so the struct stays one run of 8-byte fields -- the live-stats codec's
     /// completeness check is a size comparison -- and so it renders as the 0/1 gauge an
-    /// alert (`fastcache_node_cordoned == 1 for 1d`) is written against.
+    /// alert (`pace_node_cordoned == 1 for 1d`) is written against.
     ///
     /// Without it a dashboard reads the cordoned node's free slots as capacity the fleet
     /// has, while the scheduler -- which hears the cordon in the heartbeat -- gives it none.
@@ -187,7 +187,7 @@ struct MetricsSnapshot
     ///
     /// Optional rather than a default-constructed `StorageStats`, because a
     /// worker has no storage and zeroes are not the truth about it: a scrape
-    /// reporting `fastcached_items 0` and `fastcached_bytes_limit 0` says the
+    /// reporting `pace_items 0` and `pace_bytes_limit 0` says the
     /// cache is empty and unbounded, which an alert or a dashboard will read as
     /// a fact rather than as an absence. `pace-node` runs the same
     /// `AdminHttpServer` and shares this renderer, so the alternative was a
@@ -242,7 +242,7 @@ struct MetricsSnapshot
     /// `storage`, `storageTiers` and `host` already model it.
     /// One carve-out, and it is a different QUESTION rather than a softening of
     /// this one: a row this BUILD cannot represent is omitted and counted by
-    /// `fastcached_metrics_catalogue_skew` (#1353). It is argued once, in
+    /// `pace_metrics_catalogue_skew` (#1353). It is argued once, in
     /// `.agent/rules/metrics-and-observability.md`, and nothing about it licenses
     /// dropping a row for the *does this apply to my deployment* reason above.
     ///
@@ -273,7 +273,7 @@ struct MetricsSnapshot
 /// Before [#1484](https://github.com/LASTRADA-Software/fastcached/issues/1484) a reading carried
 /// `std::optional<std::uint64_t>` per counter and every absence meant the first reason below.
 /// `RenderPrometheus` reads that absence, omits the series with a `# SKEW` marker and bumps
-/// `fastcached_metrics_catalogue_skew` -- so giving the one spelling a second reason made
+/// `pace_metrics_catalogue_skew` -- so giving the one spelling a second reason made
 /// `pace-node`, which simply has no writer for the daemon's accept counters, scrape
 /// as a build whose catalogue and sink disagree. That is a confident wrong signal replacing a
 /// vague one, and it costs the skew counter its meaning.
@@ -392,7 +392,7 @@ class CounterReading
 enum class MetricsSurface : std::uint8_t
 {
     /// The cache daemon's accept path: `Server/Server.cpp` and `Server/ReactorServerLoop.cpp`,
-    /// established by reading the tree as the only writers of `fastcached_connections_*`.
+    /// established by reading the tree as the only writers of `pace_connections_*`.
     /// `pace-node` serves none of it -- its own accept path has separate counters.
     CacheAcceptPath = 0,
 
@@ -1029,7 +1029,7 @@ static_assert(EveryCounterIsAttributed(),
 /// **Not `CounterSoleWriterTable.size()`, which is what a reader reaches for and is wrong.** The
 /// table holds one row per (counter, surface) PAIR, so its size exceeds the number of counters by
 /// however many are written from more than one component -- one today. A process serving no
-/// attributed surface reports THIS many rows absent, and `fastcached_metrics_surface_absent` was
+/// attributed surface reports THIS many rows absent, and `pace_metrics_surface_absent` was
 /// asserted against the table size while the two happened to be equal.
 ///
 /// @return The number of counters with at least one attributed surface.
@@ -1096,7 +1096,7 @@ struct StatsReading
     /// reading did not say.
     ///
     /// **In the reading rather than beside one encoding**, because a live-stats panel titles itself with it
-    /// and reads every figure from this struct: `/metrics` carrying it as `fastcached_build_info` while the
+    /// and reads every figure from this struct: `/metrics` carrying it as `pace_build_info` while the
     /// binary form carried nothing would be one fact stated by one encoding only (#134, #1399). Captured,
     /// not a constant each encoder reads, so a DECODED reading states the build that sent it rather than the
     /// build decoding it.

@@ -1939,7 +1939,7 @@ TEST_CASE("The client waits for as long as the GRANT says, not for as long as it
     {
         // Not a fallback anybody should reach -- no version-6 peer sends a zero -- but
         // the alternative is a zero budget, which fails every compile instantly. The
-        // control also states what `FASTCACHE_DISPATCH_TIMEOUT` still does: it bounds
+        // control also states what `PACE_DISPATCH_TIMEOUT` still does: it bounds
         // the legs that hold no grant, and nothing else.
         ScriptedFleet fleet;
         fleet.Serve(std::string { Scheduler }, GrantReply());
@@ -2381,7 +2381,7 @@ TEST_CASE("A hint's connect ceiling is a cap, and caps an unbounded connect too"
     std::vector<std::string> const args { "-O2" };
     struct Row
     {
-        std::chrono::milliseconds configured; ///< `FASTCACHE_CONNECT_TIMEOUT`.
+        std::chrono::milliseconds configured; ///< `PACE_CONNECT_TIMEOUT`.
         std::chrono::milliseconds atHint;     ///< What the dial at the hint gets.
     };
     auto const rows = std::to_array<Row>({

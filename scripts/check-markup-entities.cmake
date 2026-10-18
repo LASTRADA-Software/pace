@@ -60,14 +60,14 @@
 # OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-markup-entities.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-markup-entities.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # The artefact, spelled once. These are what is matched, what the matched-nothing
@@ -110,9 +110,9 @@ set(ExemptionTable
 # house splitting idiom merges a line ending in a backslash with the next one, which
 # hides the following line and drifts every line number below it. `FIND`/`SUBSTRING` is
 # immune to all four by construction. The measurement and the consequences are on
-# `fastcached_scan_code_lines` in `scripts/lib/CheckCommon.cmake`; consolidating the copies
+# `pace_scan_code_lines` in `scripts/lib/CheckCommon.cmake`; consolidating the copies
 # is #495 and is not this ticket.
-function(fastcached_scan_entities content outHits)
+function(pace_scan_entities content outHits)
     set(hits "")
     set(rest "${content}")
     set(lineNumber 0)
@@ -208,7 +208,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # has THREE values since the consolidation: a walk now says whether there was no index at all
 # or whether the index named no file matching this question.
 
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src/*.cpp" "src/*.hpp"
     GLOBS "src/*.cpp" "src/*.hpp"
     FILES_OUT sourceFiles
@@ -219,7 +219,7 @@ if(NOT sourceFiles)
     message("  No C++ source was found under src/ in this repository at all.")
     message("")
     message("That is not a clean tree, it is a scan that stopped working -- a moved")
-    message("source root, or a FASTCACHED_SOURCE_DIR pointing somewhere else.")
+    message("source root, or a PACE_SOURCE_DIR pointing somewhere else.")
     message(FATAL_ERROR "markup-entities: the scan matched no C++ sources and cannot conclude")
 endif()
 
@@ -250,11 +250,11 @@ foreach(relative IN LISTS sourceFiles)
     # `git ls-files` lists the INDEX, so a file deleted from the worktree and not yet
     # staged is still named. Reading it emits a `CMake Error` the registration would
     # score as THIS check failing, for a reason with nothing to do with markup.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${relative}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${relative}")
         continue()
     endif()
 
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
 
     set(homeAt -1)
     if(wholeFile MATCHES "${homeSignature}")
@@ -277,7 +277,7 @@ foreach(relative IN LISTS sourceFiles)
         continue()
     endif()
 
-    fastcached_scan_entities("${wholeFile}" hits)
+    pace_scan_entities("${wholeFile}" hits)
     if(NOT hits)
         continue()
     endif()

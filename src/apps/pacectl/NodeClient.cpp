@@ -139,7 +139,7 @@ RemoteKind ClassifyNodeStatusReply(std::expected<NodeReply, ExchangeError> const
         // A `0xFC` request that produced no frame at all. That covers a peer that closed
         // having sent nothing and one that sent something unreadable, and both mean the
         // same thing to the caller: whatever is on that port, it is not this protocol.
-        return RemoteKind::NotFastcacheWire;
+        return RemoteKind::NotPaceWire;
 
     if (reply->status == Wire::Status::Ok)
         return RemoteKind::CompileNode;
@@ -147,7 +147,7 @@ RemoteKind ClassifyNodeStatusReply(std::expected<NodeReply, ExchangeError> const
     // It framed a refusal, so it speaks this wire. Which refusal does NOT narrow it
     // further and must not be read as though it did -- `UnimplementedVerb` from a daemon
     // and from a pre-#431 node are the same bytes -- so every refusal lands here.
-    return RemoteKind::FastcacheWireOnly;
+    return RemoteKind::PaceWireOnly;
 }
 
 std::string ExplainRemoteKind(std::string_view verb, std::string_view endpoint, RemoteKind kind)
@@ -163,7 +163,7 @@ std::string ExplainRemoteKind(std::string_view verb, std::string_view endpoint, 
                                "--addr at a pace-kv",
                                endpoint,
                                verb);
-        case RemoteKind::FastcacheWireOnly:
+        case RemoteKind::PaceWireOnly:
             // Deliberately names BOTH possibilities rather than guessing. A confident
             // wrong signal is worse than a vague right one, and a client that announced
             // *this is your cache daemon* would send somebody debugging a daemon that
@@ -171,7 +171,7 @@ std::string ExplainRemoteKind(std::string_view verb, std::string_view endpoint, 
             return std::format("{} speaks the 0xFC compile-cache wire but answered no RESP: it is a pace-kv whose "
                                "data plane is elsewhere, or a compile node older than these verbs",
                                endpoint);
-        case RemoteKind::NotFastcacheWire:
+        case RemoteKind::NotPaceWire:
         case RemoteKind::Last:
             break;
     }

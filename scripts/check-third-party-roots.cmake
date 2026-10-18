@@ -27,7 +27,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 #
 # A file reads the roots when it CALLS a reader outside a full-line comment. The readers
 # are DERIVED from the two libraries that define them -- every public function of
-# `scripts/lib/third-party-roots.sh`, and every `fastcached_*third_party*` function of
+# `scripts/lib/third-party-roots.sh`, and every `pace_*third_party*` function of
 # `scripts/lib/CheckCommon.cmake` -- so a reader added there is recognised here without an
 # edit. Naming the data file is not reading it, and neither is sourcing the library: the
 # first version of this check accepted any mention of `third-party-roots`, which a comment
@@ -49,13 +49,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # (`check-script-check-signals.cmake`).
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-third-party-roots.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-third-party-roots.cmake
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-fastcached_third_party_roots("${FASTCACHED_SOURCE_DIR}" thirdPartyRoots)
+pace_third_party_roots("${PACE_SOURCE_DIR}" thirdPartyRoots)
 string(REPLACE ";" ", " rootsText "${thirdPartyRoots}")
 
 # The readers, derived from where they are defined. Asked of THIS check's own libraries,
@@ -63,10 +63,10 @@ string(REPLACE ";" ", " rootsText "${thirdPartyRoots}")
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/lib/third-party-roots.sh" bashReaderLines
      REGEX "^[a-z][a-z0-9_]*\\(\\)[ \t]*\\{")
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake" cmakeReaderLines
-     REGEX "^function\\([ \t]*fastcached_[a-z0-9_]*third_party[a-z0-9_]*")
+     REGEX "^function\\([ \t]*pace_[a-z0-9_]*third_party[a-z0-9_]*")
 set(readerNames "")
 foreach(readerLine IN LISTS bashReaderLines cmakeReaderLines)
-    string(REGEX MATCH "([a-z][a-z0-9_]*)[ \t]*\\(\\)|fastcached_[a-z0-9_]*third_party[a-z0-9_]*" readerName "${readerLine}")
+    string(REGEX MATCH "([a-z][a-z0-9_]*)[ \t]*\\(\\)|pace_[a-z0-9_]*third_party[a-z0-9_]*" readerName "${readerLine}")
     if(CMAKE_MATCH_1)
         set(readerName "${CMAKE_MATCH_1}")
     endif()
@@ -84,7 +84,7 @@ string(REPLACE ";" ", " readersText "${readerNames}")
 
 # A root naming no directory describes nothing, and reads exactly like one being honoured.
 foreach(root IN LISTS thirdPartyRoots)
-    if(NOT IS_DIRECTORY "${FASTCACHED_SOURCE_DIR}/${root}")
+    if(NOT IS_DIRECTORY "${PACE_SOURCE_DIR}/${root}")
         message(FATAL_ERROR
             "third-party roots: scripts/lib/third-party-roots.txt names ${root}, which is not a "
             "directory of this tree. A root that describes nothing reads exactly like one being "
@@ -98,31 +98,31 @@ endforeach()
 #
 # "Command position" is the start of a line, or after `;` `&` `|` `(` `{` `!` `$(` or a
 # shell keyword -- so a spelling quoted inside a message is not a call.
-set(FastCachedEnumeratorSpellings
+set(PaceEnumeratorSpellings
     "git-ls-files|`git ls-files` at command position with no pathspec, or with a literal pathspec naming no directory before its first `*` -- `'*.hpp'` walks every directory, `'src/*.hpp'` walks one, and a variable names a path chosen elsewhere"
-    "glob-recurse|`file(GLOB_RECURSE` over a pattern at the source root naming no literal directory -- `\${FASTCACHED_SOURCE_DIR}/*.cpp` and `\${FASTCACHED_SOURCE_DIR}/CMakeLists.txt` both walk every directory (a recursive glob needs no `*` to recurse), `\${FASTCACHED_SOURCE_DIR}/src/*` walks one, and a variable names a path chosen elsewhere"
-    "find|`find` at command position whose first path is `.` or a variable NAMED as the repository root (root, ROOT, source_dir, SOURCE_DIR, source_root, repo_root, REPO_ROOT, FASTCACHED_SOURCE_DIR) -- a name is all a line reader has, so a root passed under another name is not seen"
+    "glob-recurse|`file(GLOB_RECURSE` over a pattern at the source root naming no literal directory -- `\${PACE_SOURCE_DIR}/*.cpp` and `\${PACE_SOURCE_DIR}/CMakeLists.txt` both walk every directory (a recursive glob needs no `*` to recurse), `\${PACE_SOURCE_DIR}/src/*` walks one, and a variable names a path chosen elsewhere"
+    "find|`find` at command position whose first path is `.` or a variable NAMED as the repository root (root, ROOT, source_dir, SOURCE_DIR, source_root, repo_root, REPO_ROOT, PACE_SOURCE_DIR) -- a name is all a line reader has, so a root passed under another name is not seen"
     "grep-r|`grep` at command position with `-r` or `-R`, over `.`"
 )
 
 set(commandPosition "(^|[;&|({!]|[$][(]|[ \t](then|do|else|if|while|until|exec|time))[ \t]*")
-set(sourceRootVariables "FASTCACHED_SOURCE_DIR|CMAKE_SOURCE_DIR|PROJECT_SOURCE_DIR")
+set(sourceRootVariables "PACE_SOURCE_DIR|CMAKE_SOURCE_DIR|PROJECT_SOURCE_DIR")
 
 # ---------------------------------------------------------------------------
 # The exemptions, as data beside the roots: `<path>|<spelling>|<reason>`. The reason is
 # REQUIRED -- an exemption is a decision, and a row without one reads exactly like a row
 # somebody forgot. A row naming a file that no longer spells that enumerator is STALE and
 # refused, or the table silently outlives what it excused.
-set(exemptionsFile "${FASTCACHED_SOURCE_DIR}/scripts/lib/third-party-roots-exemptions.txt")
+set(exemptionsFile "${PACE_SOURCE_DIR}/scripts/lib/third-party-roots-exemptions.txt")
 set(exemptRows "")
 if(EXISTS "${exemptionsFile}")
     file(READ "${exemptionsFile}" exemptionsContent)
-    fastcached_split_lines_verbatim("${exemptionsContent}" exemptionLines)
+    pace_split_lines_verbatim("${exemptionsContent}" exemptionLines)
     foreach(line IN LISTS exemptionLines)
         if(line MATCHES "^[ \t]*#" OR line MATCHES "^[ \t]*$")
             continue()
         endif()
-        fastcached_row_fields("${line}" exemptPath exemptSpelling exemptReason)
+        pace_row_fields("${line}" exemptPath exemptSpelling exemptReason)
         string(STRIP "${exemptReason}" exemptReason)
         if(exemptReason STREQUAL "")
             message(FATAL_ERROR
@@ -139,9 +139,9 @@ endif()
 # itself a tree-wide enumerator.
 set(scanned "")
 foreach(directory IN ITEMS "scripts" "cmake" ".github/workflows")
-    if(IS_DIRECTORY "${FASTCACHED_SOURCE_DIR}/${directory}")
-        file(GLOB_RECURSE walked RELATIVE "${FASTCACHED_SOURCE_DIR}" LIST_DIRECTORIES false
-             "${FASTCACHED_SOURCE_DIR}/${directory}/*")
+    if(IS_DIRECTORY "${PACE_SOURCE_DIR}/${directory}")
+        file(GLOB_RECURSE walked RELATIVE "${PACE_SOURCE_DIR}" LIST_DIRECTORIES false
+             "${PACE_SOURCE_DIR}/${directory}/*")
         list(FILTER walked INCLUDE REGEX "\\.(sh|cmake|ps1|yml|yaml)$")
         list(APPEND scanned ${walked})
     endif()
@@ -156,7 +156,7 @@ endif()
 
 # Whether @p spec, one `git ls-files` pathspec, walks every directory: it names no directory
 # before its first `*` or variable.
-function(fastcached_pathspec_is_tree_wide spec outVar)
+function(pace_pathspec_is_tree_wide spec outVar)
     set(treeWide TRUE)
     if(spec MATCHES "^[^*$]*/" OR spec MATCHES "^[$]")
         set(treeWide FALSE)
@@ -166,7 +166,7 @@ endfunction()
 
 # The `git ls-files` arguments on @p rest, as tokens: cut at the first shell or CMake
 # terminator, redirections and flags dropped.
-function(fastcached_ls_files_pathspecs rest outVar)
+function(pace_ls_files_pathspecs rest outVar)
     string(REGEX REPLACE "[|;)&<>].*$" "" rest "${rest}")
     string(REGEX REPLACE "(OUTPUT_VARIABLE|RESULT_VARIABLE|ERROR_VARIABLE|WORKING_DIRECTORY|OUTPUT_STRIP_TRAILING_WHITESPACE).*$" "" rest "${rest}")
     string(REGEX REPLACE "[ \t][0-9]+$" "" rest "${rest}")
@@ -185,13 +185,13 @@ endfunction()
 set(sites "")
 set(violations "")
 set(readingFiles "")
-foreach(spellingRow IN LISTS FastCachedEnumeratorSpellings)
-    fastcached_row_fields("${spellingRow}" spellingName spellingRule)
+foreach(spellingRow IN LISTS PaceEnumeratorSpellings)
+    pace_row_fields("${spellingRow}" spellingName spellingRule)
     set("siteCount_${spellingName}" 0)
 endforeach()
 
 foreach(relative IN LISTS scanned)
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" content)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" content)
     # A call, outside a full-line comment: a comment is not a call site.
     set(readsRoots FALSE)
     string(REGEX REPLACE "(^|\n)[ \t]*#[^\n]*" "\\1" uncommented "${content}")
@@ -204,7 +204,7 @@ foreach(relative IN LISTS scanned)
         set(isCMake TRUE)
     endif()
 
-    # A CMake file may name the source root through an alias, `set(root "${FASTCACHED_SOURCE_DIR}")`.
+    # A CMake file may name the source root through an alias, `set(root "${PACE_SOURCE_DIR}")`.
     set(rootVariables "${sourceRootVariables}")
     if(isCMake)
         string(REGEX MATCHALL "set[ \t]*\\([ \t]*[A-Za-z0-9_]+[ \t]+\"[$][{](${sourceRootVariables})[}]\"[ \t]*\\)" aliasCalls "${content}")
@@ -218,7 +218,7 @@ foreach(relative IN LISTS scanned)
     # it and merge with the next line, shifting every later line number. A space after the
     # backslash keeps the lines apart and changes nothing matched here.
     string(REPLACE "\\\n" "\\ \n" content "${content}")
-    fastcached_split_lines_verbatim("${content}" lines)
+    pace_split_lines_verbatim("${content}" lines)
     list(LENGTH lines lineCount)
     set(lineNumber 0)
     foreach(line IN LISTS lines)
@@ -264,12 +264,12 @@ foreach(relative IN LISTS scanned)
             set(lsRest "${CMAKE_MATCH_4}")
         endif()
         if(lsCall)
-            fastcached_ls_files_pathspecs("${lsRest}" specs)
+            pace_ls_files_pathspecs("${lsRest}" specs)
             if(NOT specs AND (lsRest MATCHES "\\\\[ \t]*$" OR (isCMake AND NOT lsRest MATCHES "\\)")))
                 if(lineNumber LESS lineCount)
                     list(GET lines ${lineNumber} nextLine)
                 endif()
-                fastcached_ls_files_pathspecs("${nextLine}" specs)
+                pace_ls_files_pathspecs("${nextLine}" specs)
             endif()
             set(treeWide FALSE)
             list(LENGTH specs specCount)
@@ -277,7 +277,7 @@ foreach(relative IN LISTS scanned)
                 set(treeWide TRUE)
             endif()
             foreach(spec IN LISTS specs)
-                fastcached_pathspec_is_tree_wide("${spec}" specTreeWide)
+                pace_pathspec_is_tree_wide("${spec}" specTreeWide)
                 if(specTreeWide)
                     set(treeWide TRUE)
                 endif()
@@ -332,7 +332,7 @@ foreach(relative IN LISTS scanned)
             endwhile()
             set(code "${joined}")
             # find
-            if(code MATCHES "${commandPosition}find[ \t]+(\"?[$][{]?(root|ROOT|source_dir|SOURCE_DIR|source_root|repo_root|REPO_ROOT|FASTCACHED_SOURCE_DIR)[}]?\"?|\\.)([ \t]|$|\\))")
+            if(code MATCHES "${commandPosition}find[ \t]+(\"?[$][{]?(root|ROOT|source_dir|SOURCE_DIR|source_root|repo_root|REPO_ROOT|PACE_SOURCE_DIR)[}]?\"?|\\.)([ \t]|$|\\))")
                 list(APPEND found "find")
             endif()
             # grep-r
@@ -379,7 +379,7 @@ endforeach()
 
 # clang-format reads `.clang-format-ignore` for itself, so it is a second place a root must
 # be named, and the one enumerator no script here can be made to ask.
-set(formatIgnore "${FASTCACHED_SOURCE_DIR}/.clang-format-ignore")
+set(formatIgnore "${PACE_SOURCE_DIR}/.clang-format-ignore")
 set(formatIgnored "")
 if(EXISTS "${formatIgnore}")
     file(STRINGS "${formatIgnore}" formatIgnored)
@@ -394,8 +394,8 @@ endforeach()
 list(REMOVE_DUPLICATES readingFiles)
 list(LENGTH readingFiles readingCount)
 set(countsText "")
-foreach(spellingRow IN LISTS FastCachedEnumeratorSpellings)
-    fastcached_row_fields("${spellingRow}" spellingName spellingRule)
+foreach(spellingRow IN LISTS PaceEnumeratorSpellings)
+    pace_row_fields("${spellingRow}" spellingName spellingRule)
     string(APPEND countsText "\n  ${spellingName}: ${siteCount_${spellingName}} site(s) -- ${spellingRule}")
 endforeach()
 
@@ -408,7 +408,7 @@ if(violations)
     message("A tree-wide enumerator lists this repository's files without naming a directory of")
     message("its own, so it takes third-party source as first-party unless it asks. Ask: split")
     message("the list with `first_party_paths` / `third_party_paths` from")
-    message("scripts/lib/third-party-roots.sh, or `fastcached_decline_third_party` from")
+    message("scripts/lib/third-party-roots.sh, or `pace_decline_third_party` from")
     message("scripts/lib/CheckCommon.cmake, and name what was declined. Where the files it lists")
     message("truly need no such answer (it counts, or walks something that is not the")
     message("repository), add a row with the reason to scripts/lib/third-party-roots-exemptions.txt.")

@@ -153,8 +153,8 @@ namespace
 #endif
 
 // What the build system was ASKED for. A label; see the header on why no verdict reads it.
-#if defined(FASTCACHE_BENCH_BUILD_TYPE)
-    constexpr std::string_view BuildTypeLabelHere = FASTCACHE_BENCH_BUILD_TYPE;
+#if defined(PACE_BENCH_BUILD_TYPE)
+    constexpr std::string_view BuildTypeLabelHere = PACE_BENCH_BUILD_TYPE;
 #else
     constexpr std::string_view BuildTypeLabelHere = "";
 #endif
@@ -199,11 +199,11 @@ namespace
 #elif defined(_MSC_FULL_VER)
         // `_MSC_FULL_VER` is a number, and a number is not a string literal until it is
         // stringized twice: the inner expansion turns the macro into its digits.
-    #define FASTCACHE_BENCH_STRINGIZE_INNER(x) #x
-    #define FASTCACHE_BENCH_STRINGIZE(x)       FASTCACHE_BENCH_STRINGIZE_INNER(x)
-        return "MSVC " FASTCACHE_BENCH_STRINGIZE(_MSC_FULL_VER);
-    #undef FASTCACHE_BENCH_STRINGIZE
-    #undef FASTCACHE_BENCH_STRINGIZE_INNER
+    #define PACE_BENCH_STRINGIZE_INNER(x) #x
+    #define PACE_BENCH_STRINGIZE(x)       PACE_BENCH_STRINGIZE_INNER(x)
+        return "MSVC " PACE_BENCH_STRINGIZE(_MSC_FULL_VER);
+    #undef PACE_BENCH_STRINGIZE
+    #undef PACE_BENCH_STRINGIZE_INNER
 #else
         return "unknown compiler (it states no version macro this build knows)";
 #endif

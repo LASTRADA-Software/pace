@@ -436,7 +436,7 @@ TEST_CASE("A node snapshot with no load source carries no load block", "[node][a
 TEST_CASE("A scrape renders nothing for a cache the node does not have", "[node][admin][cache]")
 {
     // End to end through the renderer, because the absence has to survive it too: a
-    // `fastcached_items 0` line says the cache is empty, which is a different claim
+    // `pace_items 0` line says the cache is empty, which is a different claim
     // from a node that has none, and a dashboard reads the first as a fact.
     ScriptedHostFacts host;
     AtomicMetricsSink metrics;
@@ -449,15 +449,15 @@ TEST_CASE("A scrape renders nothing for a cache the node does not have", "[node]
                                                    std::chrono::steady_clock::now());
 
     auto const body = RenderPrometheus(metrics, provider());
-    CHECK_FALSE(body.contains("fastcached_items"));
-    CHECK_FALSE(body.contains("fastcached_bytes_limit"));
-    CHECK_FALSE(body.contains("fastcached_tier_"));
+    CHECK_FALSE(body.contains("pace_items"));
+    CHECK_FALSE(body.contains("pace_bytes_limit"));
+    CHECK_FALSE(body.contains("pace_tier_"));
     // Including the upstream question, which a node with no cache does not have:
     // a `0` here would claim it looked and found none.
-    CHECK_FALSE(body.contains("# TYPE fastcache_node_upstream_configured"));
+    CHECK_FALSE(body.contains("# TYPE pace_node_upstream_configured"));
     // And the machine is still there, so this is an absence rather than an empty
     // scrape that would pass the checks above for the wrong reason.
-    CHECK(body.contains("fastcache_node_logical_cores 4\n"));
+    CHECK(body.contains("pace_node_logical_cores 4\n"));
 }
 
 TEST_CASE("A scrape renders no consensus series for a node that runs none", "[node][admin][consensus]")
@@ -479,10 +479,10 @@ TEST_CASE("A scrape renders no consensus series for a node that runs none", "[no
                                                    std::chrono::steady_clock::now());
 
     auto const body = RenderPrometheus(metrics, provider());
-    CHECK_FALSE(body.contains("fastcache_node_consensus_"));
+    CHECK_FALSE(body.contains("pace_node_consensus_"));
     // The positive control: the scrape is not simply empty, which is what would make
     // the check above pass for the wrong reason.
-    CHECK(body.contains("fastcache_node_logical_cores 4\n"));
+    CHECK(body.contains("pace_node_logical_cores 4\n"));
 }
 
 TEST_CASE("A node that runs consensus reports what IT counts, per scrape", "[node][admin][consensus]")

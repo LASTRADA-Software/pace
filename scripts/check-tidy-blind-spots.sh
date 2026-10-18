@@ -32,7 +32,7 @@
 # A source scan cannot answer it. `#else`-less platform guards also appear at the END
 # of files that are otherwise ordinary, and a TU can go blind on a FEATURE flag rather
 # than a platform one -- `Net/TlsSocket_test.cpp` was empty without
-# `FASTCACHED_ENABLE_TLS` and analysed with it, until #1596 moved it into core-cpp.
+# `PACE_ENABLE_TLS` and analysed with it, until #1596 moved it into core-cpp.
 # Modelling the preprocessor to decide this fails the way any subtly wrong model does:
 # in the confident direction. So this asks the OBJECTS what the compiler actually emitted.
 #
@@ -141,7 +141,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/third-party-roots.sh
 . "$here/lib/third-party-roots.sh" || refuse "cannot read $here/lib/third-party-roots.sh"
 
-repo="${FASTCACHED_SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+repo="${PACE_SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 table="$repo/scripts/tidy-blind-spots.txt"
 [[ -f $table ]] || refuse "missing $table"
 
@@ -294,7 +294,7 @@ if [[ $tableOnly -eq 1 ]]; then
     exit "$rc"
 fi
 
-config="AddressSanitizer on, FASTCACHED_ENABLE_TLS on, $(uname -s)"
+config="AddressSanitizer on, PACE_ENABLE_TLS on, $(uname -s)"
 if [[ $rc -eq 0 ]]; then
     # "contribute nothing HERE", not "analysed by nothing" -- since a second leg
     # exists those are different numbers, and the one above is the smaller and the

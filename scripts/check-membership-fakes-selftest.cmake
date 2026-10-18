@@ -32,18 +32,18 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-membership-fakes.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-membership-fakes.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
-set(helperLibrary "${FASTCACHED_SOURCE_DIR}/scripts/lib/CheckCommon.cmake")
+set(helperLibrary "${PACE_SOURCE_DIR}/scripts/lib/CheckCommon.cmake")
 if(NOT EXISTS "${helperLibrary}")
     message(FATAL_ERROR "the helper library is missing: ${helperLibrary}")
 endif()
@@ -109,8 +109,8 @@ string(REPLACE ";" "" subject_parameter "${subject_parameter}")
 # @param mode `walk`, `git`, or `none` for a case that refuses before a mode is reached.
 # @param outOutput Set to the check's combined output.
 # @param outStaged Set to TRUE when the run used a staged copy of the check.
-function(fastcached_stage_and_run name fakes subject exemptionRow mode outOutput outStaged)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/case-${name}")
+function(pace_stage_and_run name fakes subject exemptionRow mode outOutput outStaged)
+    set(tree "${PACE_SCRATCH_DIR}/case-${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/src/tests")
     file(MAKE_DIRECTORY "${tree}/src/apps/node")
@@ -146,7 +146,7 @@ function(fastcached_stage_and_run name fakes subject exemptionRow mode outOutput
         endif()
         file(MAKE_DIRECTORY "${tree}/scripts/lib")
         file(READ "${check}" checkText)
-        string(FIND "${checkText}" "set(FastCachedMembershipFakeExemptions)" tableAt)
+        string(FIND "${checkText}" "set(PaceMembershipFakeExemptions)" tableAt)
         if(tableAt EQUAL -1)
             # The table was renamed or reformatted, so this case can no longer inject a row --
             # and would otherwise run the SHIPPED empty table and pass while testing nothing.
@@ -154,8 +154,8 @@ function(fastcached_stage_and_run name fakes subject exemptionRow mode outOutput
                 "case `${name}`: the exemption table declaration was not found in the check, so a "
                 "row cannot be staged. This case tests nothing until the anchor is updated.")
         endif()
-        string(REPLACE "set(FastCachedMembershipFakeExemptions)"
-               "set(FastCachedMembershipFakeExemptions \"${exemptionRow}\")\nmessage(STATUS \"membership-fakes: STAGED-CHECK\")"
+        string(REPLACE "set(PaceMembershipFakeExemptions)"
+               "set(PaceMembershipFakeExemptions \"${exemptionRow}\")\nmessage(STATUS \"membership-fakes: STAGED-CHECK\")"
                checkText "${checkText}")
         file(WRITE "${tree}/scripts/check-membership-fakes.cmake" "${checkText}")
         file(COPY "${helperLibrary}" DESTINATION "${tree}/scripts/lib")
@@ -170,7 +170,7 @@ function(fastcached_stage_and_run name fakes subject exemptionRow mode outOutput
         if(NOT GIT_EXECUTABLE)
             message(FATAL_ERROR "case `${name}`: git mode needs git, and none was found")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}"
                         RESULT_VARIABLE initStatus OUTPUT_QUIET ERROR_QUIET)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -183,7 +183,7 @@ function(fastcached_stage_and_run name fakes subject exemptionRow mode outOutput
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${runCheck}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${runCheck}"
         OUTPUT_VARIABLE runOutput
         ERROR_VARIABLE runError
         RESULT_VARIABLE runStatus)
@@ -203,7 +203,7 @@ endfunction()
 #
 # `mustAppear` needles are separated by ` && `; `~sc~` stands in for a `;` and `~bar~` for a
 # `|`, neither of which can travel literally through a `;`-separated list of `|`-split rows.
-set(FastCachedMembershipFakeCases
+set(PaceMembershipFakeCases
     # Both directions on a clean tree, and BOTH enumeration modes: the mode is part of the
     # check's output and is asserted per case, because a fixture exercising the walk while CI
     # exercises the index is a guard passing on a path nobody ships.
@@ -235,11 +235,11 @@ set(FastCachedMembershipFakeCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedMembershipFakeCases)
-    fastcached_row_fields("${row}" caseName caseFakes caseSubject caseExemption caseMode caseExpect caseMustAppear)
+foreach(row IN LISTS PaceMembershipFakeCases)
+    pace_row_fields("${row}" caseName caseFakes caseSubject caseExemption caseMode caseExpect caseMustAppear)
     math(EXPR caseCount "${caseCount} + 1")
 
-    fastcached_stage_and_run("${caseName}" "${caseFakes}" "${caseSubject}" "${caseExemption}"
+    pace_stage_and_run("${caseName}" "${caseFakes}" "${caseSubject}" "${caseExemption}"
                              "${caseMode}" output staged)
 
     # WHICH check ran, on every case that staged one. A case that silently fell back to the

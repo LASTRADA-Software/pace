@@ -12,7 +12,7 @@ namespace Pace
 
 /// Numeric version triple, MAJOR.MINOR.PATCH with no suffix (e.g. "1.2.3"),
 /// extracted at configure time. This is the value every packaging format sees.
-inline constexpr std::string_view Version = "@FASTCACHED_VERSION@";
+inline constexpr std::string_view Version = "@PACE_VERSION@";
 
 /// Full version string. Equal to Version for a build of a tagged commit;
 /// otherwise it carries the git-describe distance and commit, plus a -dirty
@@ -22,12 +22,12 @@ inline constexpr std::string_view Version = "@FASTCACHED_VERSION@";
 /// quote, so recognise them: "0.0.0-0-g<sha>" is a git work tree in which no
 /// release tag is reachable (a fresh fork, or a CI checkout whose tags were not
 /// fetched), and "0.0.0-unknown" is a build with neither a tag nor
-/// -DFASTCACHED_VERSION — an exported source tarball, or the Docker image, whose
+/// -DPACE_VERSION — an exported source tarball, or the Docker image, whose
 /// build context excludes .git/. Neither names a release.
-inline constexpr std::string_view VersionString = "@FASTCACHED_VERSION_STRING@";
+inline constexpr std::string_view VersionString = "@PACE_VERSION_STRING@";
 
 /// Full server-version banner emitted by `version` (memcached text) and
 /// `INFO` (Redis RESP).
-inline constexpr std::string_view ServerVersionBanner = "fastcached-@FASTCACHED_VERSION_STRING@";
+inline constexpr std::string_view ServerVersionBanner = "fastcached-@PACE_VERSION_STRING@";
 
 } // namespace Pace

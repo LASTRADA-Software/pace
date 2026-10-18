@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Drives `fastcached_tracked_files` in `scripts/lib/CheckCommon.cmake` over staged trees.
+# Drives `pace_tracked_files` in `scripts/lib/CheckCommon.cmake` over staged trees.
 #
 # ## Why this file exists at all
 #
@@ -41,22 +41,22 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR OR FASTCACHED_SOURCE_DIR STREQUAL "")
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR OR PACE_SOURCE_DIR STREQUAL "")
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR OR FASTCACHED_SCRATCH_DIR STREQUAL "")
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR OR PACE_SCRATCH_DIR STREQUAL "")
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(library "${FASTCACHED_SOURCE_DIR}/scripts/lib/CheckCommon.cmake")
+set(library "${PACE_SOURCE_DIR}/scripts/lib/CheckCommon.cmake")
 if(NOT EXISTS "${library}")
     message(FATAL_ERROR "the library under test is missing: ${library}")
 endif()
 include("${library}")
 
-if(NOT COMMAND fastcached_tracked_files)
+if(NOT COMMAND pace_tracked_files)
     message(FATAL_ERROR
-        "fastcached_tracked_files is not defined by ${library}. Refused rather than reported "
+        "pace_tracked_files is not defined by ${library}. Refused rather than reported "
         "as zero failures -- a self-test that could not reach its subject is not one that "
         "judged it.")
 endif()
@@ -100,7 +100,7 @@ endfunction()
 ## @param tree The directory.
 ## @param stage TRUE to `git add -A`; FALSE leaves an index that names nothing.
 function(MakeRepository tree stage)
-    fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+    pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
     execute_process(COMMAND ${scratchGit} init -q "${tree}" OUTPUT_QUIET ERROR_QUIET)
     if(stage)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
@@ -152,7 +152,7 @@ set(corpus
 set(cxxFilter "\\.(cpp|hpp)$")
 
 # ---------------------------------------------------------------------------
-# `fastcached_work_tree_state`: all THREE answers, each arranged deterministically.
+# `pace_work_tree_state`: all THREE answers, each arranged deterministically.
 #
 # Every one of them has to be REACHABLE by a fixture or the third is a branch nobody has
 # watched, and two of the three are easy to arrange only by accident. `not-a-work-tree` is the
@@ -161,30 +161,30 @@ set(cxxFilter "\\.(cpp|hpp)$")
 # asking about a repository's own `.git` DIRECTORY, which git answers `false` for while
 # succeeding. That is the state's own meaning, not a trick: inside the repository, outside the
 # work tree.
-set(probeTree "${FASTCACHED_SCRATCH_DIR}/workTreeStateProbe")
+set(probeTree "${PACE_SCRATCH_DIR}/workTreeStateProbe")
 StageTree("${probeTree}" "src/Alpha.cpp|int alpha()")
 MakeRepository("${probeTree}" TRUE)
 
-fastcached_work_tree_state("${probeTree}" probeState)
+pace_work_tree_state("${probeTree}" probeState)
 Expect("workTreeState" "a checkout" "${probeState}" "work-tree")
 
-fastcached_work_tree_state("${probeTree}/.git" probeState)
+pace_work_tree_state("${probeTree}/.git" probeState)
 Expect("workTreeState" "inside the repository, outside the work tree"
     "${probeState}" "not-a-work-tree")
 
 set(realGit "${GIT_EXECUTABLE}")
 set(GIT_EXECUTABLE "${probeTree}/no-such-git-binary")
-fastcached_work_tree_state("${probeTree}" probeState)
+pace_work_tree_state("${probeTree}" probeState)
 set(GIT_EXECUTABLE "${realGit}")
 # A git that cannot be RUN is `no-git` and not `not-a-work-tree`: a missing binary and a broken
 # one are one fact for every caller, and neither says anything about the directory.
 Expect("workTreeState" "git cannot answer" "${probeState}" "no-git")
 
 # --- 1. git, every tracked file, filtered ----------------------------------------------------
-set(tree "${FASTCACHED_SCRATCH_DIR}/gitAllTracked")
+set(tree "${PACE_SCRATCH_DIR}/gitAllTracked")
 StageTree("${tree}" ${corpus})
 MakeRepository("${tree}" TRUE)
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     GLOBS "*" FILTER "${cxxFilter}" FILES_OUT files MODE_OUT mode)
 Expect("gitAllTracked" "mode" "${mode}" "git ls-files")
 # The excluded directory names are NOT excluded on the git path, deliberately: git tracks what
@@ -194,7 +194,7 @@ Expect("gitAllTracked" "files" "${files}"
     ".cache/Cached.cpp;.claude/Agent.cpp;_deps/vendored/Dep.cpp;out/build/Stale.cpp;src/Alpha.cpp;src/Alpha.hpp;tools/Beta.cpp")
 
 # --- 2. git, narrowed by a pathspec ----------------------------------------------------------
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     PATHSPECS "src/*.cpp" "src/*.hpp"
     GLOBS "src/*.cpp" "src/*.hpp" FILES_OUT files MODE_OUT mode)
 Expect("gitPathspec" "mode" "${mode}" "git ls-files")
@@ -216,11 +216,11 @@ Expect("gitPathspec" "files" "${files}" "src/Alpha.cpp;src/Alpha.hpp")
 # `GIT_EXECUTABLE` at a path that cannot execute makes the branch deterministic and is the
 # branch a source tarball actually takes -- git absent and git unable to answer are one arm of
 # the function, by design.
-set(tree "${FASTCACHED_SCRATCH_DIR}/walkGitCannotAnswer")
+set(tree "${PACE_SCRATCH_DIR}/walkGitCannotAnswer")
 StageTree("${tree}" ${corpus})
 set(realGit "${GIT_EXECUTABLE}")
 set(GIT_EXECUTABLE "${tree}/no-such-git-binary")
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     GLOBS "*" FILTER "${cxxFilter}" FILES_OUT walkFiles MODE_OUT mode)
 set(GIT_EXECUTABLE "${realGit}")
 Expect("walkGitCannotAnswer" "mode" "${mode}" "directory walk (no git index)")
@@ -230,10 +230,10 @@ Expect("walkGitCannotAnswer" "files" "${walkFiles}" "src/Alpha.cpp;src/Alpha.hpp
 # `git init` with nothing staged. The copies this function replaced answered
 # `directory walk (no git index)` here, in a tree that HAS one, and a case asserting the mode
 # would have believed it.
-set(tree "${FASTCACHED_SCRATCH_DIR}/gitIndexNamesNothing")
+set(tree "${PACE_SCRATCH_DIR}/gitIndexNamesNothing")
 StageTree("${tree}" ${corpus})
 MakeRepository("${tree}" FALSE)
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     GLOBS "*" FILTER "${cxxFilter}" FILES_OUT files MODE_OUT mode)
 Expect("gitIndexNamesNothing" "mode" "${mode}"
     "directory walk (git index names no matching file)")
@@ -242,10 +242,10 @@ Expect("gitIndexNamesNothing" "files" "${files}" "src/Alpha.cpp;src/Alpha.hpp;to
 # --- 5. a pathspec the index cannot satisfy is the same third mode --------------------------
 # Staged, so the index is not empty -- but nothing it names matches the question. That is still
 # "the index answered and named no matching file", and it must not read as "there is no index".
-set(tree "${FASTCACHED_SCRATCH_DIR}/gitPathspecMatchesNothing")
+set(tree "${PACE_SCRATCH_DIR}/gitPathspecMatchesNothing")
 StageTree("${tree}" ${corpus})
 MakeRepository("${tree}" TRUE)
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     PATHSPECS "nowhere/*.cpp"
     GLOBS "src/*.cpp" FILES_OUT files MODE_OUT mode)
 Expect("gitPathspecMatchesNothing" "mode" "${mode}"
@@ -258,7 +258,7 @@ Expect("gitPathspecMatchesNothing" "files" "${files}" "src/Alpha.cpp")
 # legitimately skips -- so the comparison is of the part both modes are about, and a filter
 # that applied to one side only would break it.
 set(gitSrcSubset "src/Alpha.cpp;src/Alpha.hpp;tools/Beta.cpp")
-fastcached_tracked_files("${FASTCACHED_SCRATCH_DIR}/gitAllTracked"
+pace_tracked_files("${PACE_SCRATCH_DIR}/gitAllTracked"
     PATHSPECS "src/*" "tools/*"
     GLOBS "src/*" "tools/*" FILTER "${cxxFilter}" FILES_OUT gitFiles MODE_OUT gitMode)
 Expect("filterInBothModes" "git mode" "${gitMode}" "git ls-files")
@@ -268,10 +268,10 @@ Expect("filterInBothModes" "walk answer equals the git one" "${walkFiles}" "${gi
 # --- 7. no FILTER keeps everything the question named ---------------------------------------
 # Including `docs/notes.md`, which is how a caller asks about files that are not C++ --
 # `check-catch-skip-return-code.cmake` asks for `*CMakeLists.txt` this way.
-set(tree "${FASTCACHED_SCRATCH_DIR}/noFilter")
+set(tree "${PACE_SCRATCH_DIR}/noFilter")
 StageTree("${tree}" ${corpus})
 MakeRepository("${tree}" TRUE)
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     PATHSPECS "docs/*"
     GLOBS "docs/*" FILES_OUT files MODE_OUT mode)
 Expect("noFilter" "mode" "${mode}" "git ls-files")
@@ -285,7 +285,7 @@ Expect("noFilter" "files" "${files}" "docs/notes.md")
 # backslash load-bearing, so the next author cannot "simplify" it back believing the two
 # spellings equivalent. It asserts the over-broad pattern MATCHES the shell script; the
 # corrected one, exercised by every case above, does not.
-set(tree "${FASTCACHED_SCRATCH_DIR}/overBroadPattern")
+set(tree "${PACE_SCRATCH_DIR}/overBroadPattern")
 StageTree("${tree}"
     "src/Alpha.cpp|int alpha()"
     "scripts/check-apt-update.sh|#!/bin/sh")
@@ -296,11 +296,11 @@ MakeRepository("${tree}" TRUE)
 # way first and watching it fail -- so the case would have read as a refutation of the very
 # claim it was written to pin.
 set(realAlternation "(cpp|cc|cxx|hpp|hh|hxx|h|ixx|cppm)$")
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     GLOBS "*" FILTER "\.${realAlternation}" FILES_OUT overBroad MODE_OUT mode)
 Expect("overBroadPattern" "the single-backslash pattern swallows a .sh file"
     "${overBroad}" "scripts/check-apt-update.sh;src/Alpha.cpp")
-fastcached_tracked_files("${tree}"
+pace_tracked_files("${tree}"
     GLOBS "*" FILTER "\\.${realAlternation}" FILES_OUT corrected MODE_OUT mode)
 Expect("overBroadPattern" "the doubled-backslash pattern does not"
     "${corrected}" "src/Alpha.cpp")
@@ -309,7 +309,7 @@ Expect("overBroadPattern" "the doubled-backslash pattern does not"
 # The corpus bodies are the needles: `alpha` is in both src files, `beta` in tools/, and
 # `not C++` in docs/notes.md -- which the C++ FILTER must keep out of the answer even though git
 # finds it, because CONTAINING_OUT is a subset of FILES_OUT and never a second question.
-fastcached_tracked_files("${FASTCACHED_SCRATCH_DIR}/gitAllTracked"
+pace_tracked_files("${PACE_SCRATCH_DIR}/gitAllTracked"
     PATHSPECS "src/*" "tools/*" "docs/*"
     GLOBS "src/*" "tools/*" "docs/*" FILTER "${cxxFilter}"
     CONTAINING "alpha" "not C++" CONTAINING_OUT gitHolding
@@ -322,8 +322,8 @@ Expect("containingGit" "holding a needle" "${gitHolding}" "src/Alpha.cpp;src/Alp
 # The walk reads each file; git searches its index's files. Two mechanisms, one question, so the
 # case is an equality with case 9 rather than a second literal.
 set(realGit "${GIT_EXECUTABLE}")
-set(GIT_EXECUTABLE "${FASTCACHED_SCRATCH_DIR}/no-such-git-binary")
-fastcached_tracked_files("${FASTCACHED_SCRATCH_DIR}/walkGitCannotAnswer"
+set(GIT_EXECUTABLE "${PACE_SCRATCH_DIR}/no-such-git-binary")
+pace_tracked_files("${PACE_SCRATCH_DIR}/walkGitCannotAnswer"
     GLOBS "src/*" "tools/*" "docs/*" FILTER "${cxxFilter}"
     CONTAINING "alpha" "not C++" CONTAINING_OUT walkHolding
     FILES_OUT walkAll MODE_OUT walkMode)
@@ -332,7 +332,7 @@ Expect("containingWalk" "mode" "${walkMode}" "directory walk (no git index)")
 Expect("containingWalk" "holding a needle equals git's" "${walkHolding}" "${gitHolding}")
 
 # --- 11. a needle nobody holds is an EMPTY answer, and the set is still whole ---------------
-fastcached_tracked_files("${FASTCACHED_SCRATCH_DIR}/gitAllTracked"
+pace_tracked_files("${PACE_SCRATCH_DIR}/gitAllTracked"
     PATHSPECS "src/*" "tools/*"
     GLOBS "src/*" "tools/*" FILTER "${cxxFilter}"
     CONTAINING "no file says this" CONTAINING_OUT noneHolding
@@ -341,7 +341,7 @@ Expect("containingNothing" "holding a needle" "${noneHolding}" "")
 Expect("containingNothing" "files are the whole set" "${noneAll}" "${gitSrcSubset}")
 
 # --- 12. any ONE needle is enough -------------------------------------------------------------
-fastcached_tracked_files("${FASTCACHED_SCRATCH_DIR}/gitAllTracked"
+pace_tracked_files("${PACE_SCRATCH_DIR}/gitAllTracked"
     PATHSPECS "src/*" "tools/*"
     GLOBS "src/*" "tools/*" FILTER "${cxxFilter}"
     CONTAINING "no file says this" "beta" CONTAINING_OUT oneHolding
@@ -358,7 +358,7 @@ Expect("containingAnyNeedle" "holding a needle" "${oneHolding}" "tools/Beta.cpp"
 string(ASCII 7 bel)
 string(ASCII 13 cr)
 string(ASCII 26 sub)
-set(bytesTree "${FASTCACHED_SCRATCH_DIR}/bytes")
+set(bytesTree "${PACE_SCRATCH_DIR}/bytes")
 file(REMOVE_RECURSE "${bytesTree}")
 file(MAKE_DIRECTORY "${bytesTree}")
 ## Write `body` and one LF to `path` as bytes.
@@ -375,7 +375,7 @@ foreach(archive IN ITEMS "zeros|plain" "behindzeros|ring ${bel} bell")
     string(REPLACE "|" ";" archive "${archive}")
     list(GET archive 0 archiveName)
     list(GET archive 1 memberBody)
-    set(member "${FASTCACHED_SCRATCH_DIR}/member-${archiveName}")
+    set(member "${PACE_SCRATCH_DIR}/member-${archiveName}")
     WriteBytes("${member}" "${memberBody}")
     file(ARCHIVE_CREATE OUTPUT "${bytesTree}/${archiveName}.tar" PATHS "${member}" FORMAT gnutar)
     file(REMOVE "${member}")
@@ -387,7 +387,7 @@ MakeRepository("${bytesTree}" TRUE)
 ## @param outMode Name of the variable to receive MODE_OUT.
 ## @param ARGN The tokens.
 function(AskBytes outVar outMode)
-    fastcached_tracked_files("${bytesTree}" GLOBS "*" FILES_OUT all MODE_OUT mode
+    pace_tracked_files("${bytesTree}" GLOBS "*" FILES_OUT all MODE_OUT mode
         CONTAINING_BYTES ${ARGN} CONTAINING_OUT holding)
     set(${outVar} "${holding}" PARENT_SCOPE)
     set(${outMode} "${mode}" PARENT_SCOPE)
@@ -406,7 +406,7 @@ Expect("bytesGit" "a byte nobody holds" "${gitNone}" "")
 
 # --- 14. the walk reads HEX, and gives git's answers -----------------------------------------
 set(realGit "${GIT_EXECUTABLE}")
-set(GIT_EXECUTABLE "${FASTCACHED_SCRATCH_DIR}/no-such-git-binary")
+set(GIT_EXECUTABLE "${PACE_SCRATCH_DIR}/no-such-git-binary")
 AskBytes(walkBel walkBytesMode 07)
 AskBytes(walkNul walkBytesMode 00)
 AskBytes(walkLost walkBytesMode 0d 1a)
@@ -422,7 +422,7 @@ Expect("bytesWalk" "a byte nobody holds equals git's" "${walkNone}" "${gitNone}"
 # A git built without PCRE refuses `-P`; `grep.threads=-1` makes this one refuse `grep` the same
 # way while `ls-files` still answers, so the mode stays git's and only the search fails. The
 # answer must be the one a working search gives -- a failed search is not one that found nothing.
-fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
 execute_process(COMMAND ${scratchGit} -C "${bytesTree}" config grep.threads -1)
 AskBytes(fallbackBel fallbackMode 07)
 AskBytes(fallbackNul fallbackMode 00)
@@ -435,7 +435,7 @@ Expect("bytesGrepFails" "a NUL equals a working search's" "${fallbackNul}" "${gi
 # git mode lists the files it CAN open (`grep -L` with a pattern that never matches), so a file
 # deleted after `git add` is what it did not list -- and an empty file, which has no line for
 # any pattern to reach, must still count as present.
-set(missingTree "${FASTCACHED_SCRATCH_DIR}/missing")
+set(missingTree "${PACE_SCRATCH_DIR}/missing")
 file(REMOVE_RECURSE "${missingTree}")
 file(MAKE_DIRECTORY "${missingTree}")
 WriteBytes("${missingTree}/kept.txt" "ring ${bel} bell")
@@ -462,7 +462,7 @@ endif()
 ## @param outBytes Name of the variable to receive CONTAINING_OUT for byte 07.
 ## @param outMode Name of the variable to receive MODE_OUT.
 function(AskMissing outMissing outBytes outMode)
-    fastcached_tracked_files("${missingTree}" GLOBS "*" FILES_OUT all MODE_OUT mode
+    pace_tracked_files("${missingTree}" GLOBS "*" FILES_OUT all MODE_OUT mode
         MISSING_OUT missing CONTAINING_BYTES 07 CONTAINING_OUT byteHolding)
     set(${outMissing} "${missing}" PARENT_SCOPE)
     set(${outBytes} "${byteHolding}" PARENT_SCOPE)
@@ -472,7 +472,7 @@ endfunction()
 AskMissing(gitMissing gitLinkBytes gitMissingMode)
 # A literal is asked on its own, and WITH MISSING_OUT: without it the deleted file and the link
 # to nothing are refused by name (case 17), which is a different question from this one.
-fastcached_tracked_files("${missingTree}" GLOBS "*" FILES_OUT unused MODE_OUT unusedMode
+pace_tracked_files("${missingTree}" GLOBS "*" FILES_OUT unused MODE_OUT unusedMode
     CONTAINING "ring" CONTAINING_OUT gitLinkText MISSING_OUT gitTextMissing)
 Expect("missingGit" "a literal question reports the same missing files" "${gitTextMissing}" "${gitMissing}")
 Expect("missingGit" "mode" "${gitMissingMode}" "git ls-files")
@@ -495,7 +495,7 @@ execute_process(COMMAND ${scratchGit} -C "${missingTree}" config grep.threads -1
 AskMissing(fallbackMissing fallbackLinkBytes fallbackMissingMode)
 # The TEXT search fails the same way and is answered the same way -- by reading -- where it used
 # to be refused outright: any stderr makes a search untrusted, a failure included.
-fastcached_tracked_files("${missingTree}" GLOBS "*" FILES_OUT unused MODE_OUT fallbackTextMode
+pace_tracked_files("${missingTree}" GLOBS "*" FILES_OUT unused MODE_OUT fallbackTextMode
     CONTAINING "ring" CONTAINING_OUT fallbackLinkText MISSING_OUT fallbackTextMissing)
 execute_process(COMMAND ${scratchGit} -C "${missingTree}" config --unset grep.threads)
 Expect("missingGrepFails" "mode" "${fallbackMissingMode}" "git ls-files")
@@ -507,7 +507,7 @@ Expect("textGrepFails" "missing equals a working search's" "${fallbackTextMissin
 
 # In a walk every file was FOUND on disk, so only a link to nothing is missing.
 set(realGit "${GIT_EXECUTABLE}")
-set(GIT_EXECUTABLE "${FASTCACHED_SCRATCH_DIR}/no-such-git-binary")
+set(GIT_EXECUTABLE "${PACE_SCRATCH_DIR}/no-such-git-binary")
 AskMissing(walkMissing walkLinkBytes walkMissingMode)
 set(GIT_EXECUTABLE "${realGit}")
 Expect("missingWalk" "mode" "${walkMissingMode}" "directory walk (no git index)")
@@ -522,7 +522,7 @@ endif()
 # Refusals. A generated driver under `cmake -P`, because a FATAL_ERROR observed in-process
 # would end this script instead of being judged.
 
-set(driver "${FASTCACHED_SCRATCH_DIR}/refusal-driver.cmake")
+set(driver "${PACE_SCRATCH_DIR}/refusal-driver.cmake")
 
 ## Run one call that must be refused, over one tree, and require a phrase in its output.
 ## @param name The case name.
@@ -537,7 +537,7 @@ function(ExpectRefusalIn name phrase tree git arguments)
         "cmake_minimum_required(VERSION 3.20)\n"
         "set(GIT_EXECUTABLE \"${git}\")\n"
         "include(\"${library}\")\n"
-        "fastcached_tracked_files(\"${tree}\" ${arguments})\n"
+        "pace_tracked_files(\"${tree}\" ${arguments})\n"
         "message(STATUS \"the call returned, which it must not have\")\n")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -P "${driver}"
@@ -566,7 +566,7 @@ endfunction()
 ## @param phrase The phrase the flattened output must match.
 ## @param arguments The argument text after the source directory.
 function(ExpectRefusal name phrase arguments)
-    ExpectRefusalIn("${name}" "${phrase}" "${FASTCACHED_SCRATCH_DIR}/gitAllTracked" "${GIT_EXECUTABLE}"
+    ExpectRefusalIn("${name}" "${phrase}" "${PACE_SCRATCH_DIR}/gitAllTracked" "${GIT_EXECUTABLE}"
         "${arguments}")
     set(caseCount "${caseCount}" PARENT_SCOPE)
     set(failureCount "${failureCount}" PARENT_SCOPE)
@@ -601,7 +601,7 @@ ExpectRefusal("bytesAboveAscii" "two lowercase hex digits from 00 to 7f"
 # case 17a, as it was found.
 #
 # One tree per state, so a refusal names the state that caused it and no other.
-set(missingGit "${FASTCACHED_SCRATCH_DIR}/no-such-git-binary")
+set(missingGit "${PACE_SCRATCH_DIR}/no-such-git-binary")
 if(CMAKE_HOST_WIN32)
     set(unreadableHow "a deny-read access list")
 else()
@@ -621,7 +621,7 @@ function(MakeUnreadable path outBit)
     else()
         execute_process(COMMAND chmod 000 "${path}" OUTPUT_QUIET ERROR_QUIET)
     endif()
-    set(probe "${FASTCACHED_SCRATCH_DIR}/read-probe.cmake")
+    set(probe "${PACE_SCRATCH_DIR}/read-probe.cmake")
     file(WRITE "${probe}" "file(READ \"${path}\" content)\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -P "${probe}"
                     OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE readStatus)
@@ -649,7 +649,7 @@ function(MakeReadable path)
 endfunction()
 
 # 17a. Unreadable: tracked, present, and this process cannot open it.
-set(unreadableTree "${FASTCACHED_SCRATCH_DIR}/unreadable")
+set(unreadableTree "${PACE_SCRATCH_DIR}/unreadable")
 set(lockedFile "${unreadableTree}/src/Pace/Core/Endian.hpp")
 MakeReadable("${lockedFile}")
 StageTree("${unreadableTree}"
@@ -676,12 +676,12 @@ if(unreadableBit)
     ExpectRefusalIn("unreadableWalkText" "${walkLockedRefusal}" "${unreadableTree}" "${missingGit}"
         "GLOBS \"src/*\" FILES_OUT files MODE_OUT mode CONTAINING \"htonl(\" CONTAINING_OUT holding")
     # A question about PRESENCE reads no contents, so it answers: present, not missing.
-    fastcached_tracked_files("${unreadableTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+    pace_tracked_files("${unreadableTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
         MISSING_OUT unreadableMissing)
     Expect("unreadablePresence" "an unreadable file is not missing, in git mode" "${unreadableMissing}" "")
     set(realGit "${GIT_EXECUTABLE}")
     set(GIT_EXECUTABLE "${missingGit}")
-    fastcached_tracked_files("${unreadableTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+    pace_tracked_files("${unreadableTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
         MISSING_OUT unreadableWalkMissing)
     set(GIT_EXECUTABLE "${realGit}")
     Expect("unreadablePresence" "an unreadable file is not missing, in a walk" "${unreadableWalkMissing}" "")
@@ -693,7 +693,7 @@ endif()
 MakeReadable("${lockedFile}")
 
 # 17b. Deleted from the work tree: `git grep` skips it and says nothing at all.
-set(deletedTree "${FASTCACHED_SCRATCH_DIR}/deleted")
+set(deletedTree "${PACE_SCRATCH_DIR}/deleted")
 StageTree("${deletedTree}"
     "src/Kept.hpp|return ::htonl(value)"
     "src/Gone.hpp|return ::htonl(value)")
@@ -705,14 +705,14 @@ ExpectRefusalIn("deletedGitText" "${goneRefusal}" "${deletedTree}" "${GIT_EXECUT
 ExpectRefusalIn("deletedGitBytes" "${goneRefusal}" "${deletedTree}" "${GIT_EXECUTABLE}"
     "GLOBS \"src/*\" FILES_OUT files MODE_OUT mode CONTAINING_BYTES 3a CONTAINING_OUT holding")
 # Asked for, it is MISSING_OUT's answer, and the rest is still judged.
-fastcached_tracked_files("${deletedTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+pace_tracked_files("${deletedTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
     CONTAINING "htonl(" CONTAINING_OUT deletedHolding MISSING_OUT deletedMissing)
 Expect("deletedAsked" "the deleted file is missing" "${deletedMissing}" "src/Gone.hpp")
 Expect("deletedAsked" "and the file that is there is judged" "${deletedHolding}" "src/Kept.hpp")
 
 # 17c. A link to nothing: git never searches a symlink, and reading one finds nothing.
 if(linksReachable)
-    set(danglingTree "${FASTCACHED_SCRATCH_DIR}/dangling")
+    set(danglingTree "${PACE_SCRATCH_DIR}/dangling")
     StageTree("${danglingTree}" "src/Kept.hpp|return ::htonl(value)")
     file(CREATE_LINK "Nowhere.hpp" "${danglingTree}/src/Dangling.hpp" SYMBOLIC)
     # A link to THAT link: its target is a directory entry that is listed, so a classifier that
@@ -724,13 +724,13 @@ if(linksReachable)
         "GLOBS \"src/*\" FILES_OUT files MODE_OUT mode CONTAINING \"htonl(\" CONTAINING_OUT holding")
     ExpectRefusalIn("danglingWalkText" "${danglingRefusal}" "${danglingTree}" "${missingGit}"
         "GLOBS \"src/*\" FILES_OUT files MODE_OUT mode CONTAINING \"htonl(\" CONTAINING_OUT holding")
-    fastcached_tracked_files("${danglingTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+    pace_tracked_files("${danglingTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
         MISSING_OUT chainGitMissing)
     Expect("danglingChain" "a link to a link to nothing is missing, in git mode"
         "${chainGitMissing}" "src/Chained.hpp;src/Dangling.hpp")
     set(realGit "${GIT_EXECUTABLE}")
     set(GIT_EXECUTABLE "${missingGit}")
-    fastcached_tracked_files("${danglingTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+    pace_tracked_files("${danglingTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
         MISSING_OUT chainWalkMissing)
     set(GIT_EXECUTABLE "${realGit}")
     Expect("danglingChain" "a link to a link to nothing is missing, in a walk"
@@ -746,7 +746,7 @@ endif()
 # in the loop finds a listed link and calls it unreadable. A presence question, so neither is
 # refused and both mistakes show as a wrong MISSING_OUT.
 if(linksReachable)
-    set(chainTree "${FASTCACHED_SCRATCH_DIR}/chains")
+    set(chainTree "${PACE_SCRATCH_DIR}/chains")
     MakeReadable("${chainTree}/src/Target.hpp")
     StageTree("${chainTree}" "src/Target.hpp|return ::htonl(value)")
     file(CREATE_LINK "Target.hpp" "${chainTree}/src/Hop1.hpp" SYMBOLIC)
@@ -760,13 +760,13 @@ if(linksReachable)
                        "${unreadableHow} did not stop this process reading the target, so every hop "
                        "opens; the cycle half still is")
     endif()
-    fastcached_tracked_files("${chainTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+    pace_tracked_files("${chainTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
         MISSING_OUT chainsGitMissing)
     Expect("linkChains" "a cycle is missing and a chain to an unreadable file is not, in git mode"
         "${chainsGitMissing}" "src/CycleA.hpp;src/CycleB.hpp")
     set(realGit "${GIT_EXECUTABLE}")
     set(GIT_EXECUTABLE "${missingGit}")
-    fastcached_tracked_files("${chainTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
+    pace_tracked_files("${chainTree}" GLOBS "src/*" FILES_OUT unused MODE_OUT unusedMode
         MISSING_OUT chainsWalkMissing)
     set(GIT_EXECUTABLE "${realGit}")
     Expect("linkChains" "a cycle is missing and a chain to an unreadable file is not, in a walk"
@@ -784,7 +784,7 @@ if(CMAKE_HOST_WIN32)
                    "are PASSED unread: this fails OPEN here (see the seam's comment); asserted on "
                    "the POSIX legs")
 else()
-    set(unlistableTree "${FASTCACHED_SCRATCH_DIR}/unlistable")
+    set(unlistableTree "${PACE_SCRATCH_DIR}/unlistable")
     if(IS_DIRECTORY "${unlistableTree}/src/Locked")
         execute_process(COMMAND chmod 755 "${unlistableTree}/src/Locked")
     endif()

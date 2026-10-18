@@ -592,7 +592,7 @@ TEST_CASE("MemoryCompressionOf carries what the node was told", "[node][cache-ti
     CHECK(options.minBytes == 1234);
 
     // The codec is the EFFECTIVE one, so this is not `== Zstd`: on a build without
-    // `FASTCACHED_ENABLE_COMPRESSION` the tier stores plaintext and an assertion
+    // `PACE_ENABLE_COMPRESSION` the tier stores plaintext and an assertion
     // naming the configured value would fail there for being right. The level and
     // the floor above are carried verbatim, which is why they are spelled as
     // literals and this is not.
@@ -819,7 +819,7 @@ TEST_CASE("The startup line reports the codec the tier was BUILT with", "[node][
     // The report and the store read one function, so they cannot disagree about a
     // build. That is the property; what makes it worth a case is that the failure it
     // prevents is invisible everywhere else -- on a build without
-    // `FASTCACHED_ENABLE_COMPRESSION` the tier stores plaintext and a report taken
+    // `PACE_ENABLE_COMPRESSION` the tier stores plaintext and a report taken
     // from the configuration says `zstd`, with every counter normal and every object
     // correct.
     //
@@ -927,10 +927,10 @@ TEST_CASE("NodeMetrics reads back as the series the node's own /metrics route se
     // The figures that were missing from this verb, and a counter, required present on BOTH sides:
     // two empty records agree perfectly, and so do two that lost the same block.
     constexpr auto Required =
-        std::array<std::string_view, 7> { "fastcache_worker_jobs_completed_total", "fastcached_items",
-                                          "fastcached_delete_hits_total",          "fastcached_tier_items{tier=\"memory\"}",
-                                          "fastcache_node_logical_cores",          "fastcache_node_cpu_busy_ticks_total",
-                                          "fastcache_node_upstream_configured" };
+        std::array<std::string_view, 7> { "pace_worker_jobs_completed_total", "pace_items",
+                                          "pace_delete_hits_total",          "pace_tier_items{tier=\"memory\"}",
+                                          "pace_node_logical_cores",          "pace_node_cpu_busy_ticks_total",
+                                          "pace_node_upstream_configured" };
     for (auto const name: Required)
     {
         INFO(name);
@@ -947,7 +947,7 @@ TEST_CASE("NodeMetrics reads back as the series the node's own /metrics route se
         REQUIRE(ours != nullptr);
         // The uptime is read off the process clock per call, so a second acquisition can be a second
         // later: the one figure whose difference is the MOMENT asked and not the door.
-        if (field.name == "fastcached_uptime_seconds")
+        if (field.name == "pace_uptime_seconds")
             CHECK(secondsOf(field.value.lexical) <= secondsOf(ours->value.lexical));
         else
             CHECK(ours->value.lexical == field.value.lexical);

@@ -440,7 +440,7 @@ TEST_CASE("AppendRecord round-trips the dispatch axis through ParseLog")
 TEST_CASE("The log names the argument a worker refused, beside a tally that stays one row per cause")
 {
     // What an operator needs to ACT on a refused argument is which argument, and until this
-    // column existed it reached only a `FASTCACHE_VERBOSE` line: the log said "declined" with
+    // column existed it reached only a `PACE_VERBOSE` line: the log said "declined" with
     // a cause, and naming the flag took the node's counters and a bisection of a command line.
     ScopedStateDir const scoped;
     for (auto const* flag: { "-external:W0", "-fanalyzer" })
@@ -589,7 +589,7 @@ TEST_CASE("A build whose every dispatch failed says so rather than reading as an
     // is a run of perfectly honest MISSes -- the cache answered, the local compiler
     // ran, the object was stored. Before the dispatch axis existed that was the
     // ENTIRE record: the report showed a normal miss rate and said nothing at all
-    // about distribution unless somebody happened to have FASTCACHE_VERBOSE set.
+    // about distribution unless somebody happened to have PACE_VERBOSE set.
     ScopedStateDir const scoped;
     AppendDispatchRecords(5, DispatchOutcome::Unreachable, "the fleet could not be reached");
 
@@ -609,7 +609,7 @@ TEST_CASE("A launcher with no scheduler reports no fleet rather than a failed on
 {
     // The `NoUpstream` guard, in a new place. An absence counted as an event made a
     // node with no shared cache report a 100% upstream failure rate; a launcher with
-    // no FASTCACHE_SCHEDULER must not report a 100% dispatch failure rate. It has no
+    // no PACE_SCHEDULER must not report a 100% dispatch failure rate. It has no
     // fleet, so the section does not exist for it.
     ScopedStateDir const scoped;
     AppendDispatchRecords(4, DispatchOutcome::NotConfigured);

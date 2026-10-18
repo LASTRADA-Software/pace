@@ -225,7 +225,7 @@ class ConfigReloaderOf
 ///
 /// **What this used to cost, and no longer does.** The candidate was
 /// a re-read of the file alone, so a setting in force because somebody passed a
-/// flag — or set `FASTCACHED_METRICS_PORT` — and that the file did not mention
+/// flag — or set `PACE_METRICS_PORT` — and that the file did not mention
 /// arrived here as a setting being changed back to its default: refused by name for
 /// an immutable one, and for a reloadable one *published*, which is how
 /// `--max-memory=8g` became the host default at the first SIGHUP

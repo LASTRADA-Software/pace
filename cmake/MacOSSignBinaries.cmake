@@ -18,19 +18,19 @@
 # `script-check-signals`'s pass 3 rather than leaving it to be remembered.
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT CPACK_FASTCACHED_SIGN_IDENTITY_APP)
+if(NOT CPACK_PACE_SIGN_IDENTITY_APP)
     return()
 endif()
 
 # The staged tree is laid out per component; the executables all belong to
 # Runtime, but glob both shapes so a future component split does not silently
-# stop signing something. The prefix comes from FASTCACHED_MACOS_PREFIX rather
+# stop signing something. The prefix comes from PACE_MACOS_PREFIX rather
 # than being spelled here: hardcoding `opt/fastcached` made a relocated build
 # glob a path that does not exist, and the FATAL_ERROR below then turned a
 # perfectly valid configuration into an unsignable one.
 file(GLOB_RECURSE _binaries
-    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/${CPACK_FASTCACHED_MACOS_PREFIX}/bin/fastcache*"
-    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/${CPACK_FASTCACHED_MACOS_PREFIX}/bin/fastcache*"
+    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/${CPACK_PACE_MACOS_PREFIX}/bin/fastcache*"
+    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/${CPACK_PACE_MACOS_PREFIX}/bin/fastcache*"
 )
 
 if(NOT _binaries)
@@ -74,7 +74,7 @@ foreach(_binary IN LISTS _binaries)
     message(STATUS "Signing ${_binary}")
     execute_process(
         COMMAND codesign --force --timestamp --options=runtime
-                --sign "${CPACK_FASTCACHED_SIGN_IDENTITY_APP}" "${_binary}"
+                --sign "${CPACK_PACE_SIGN_IDENTITY_APP}" "${_binary}"
                 # Generous: --timestamp contacts Apple's timestamp server, so this
                 # is a NETWORK call and the one here most able to hang.
                 TIMEOUT 300

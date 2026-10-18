@@ -23,7 +23,7 @@ include(GNUInstallDirs)
 
 # The systemd unit name. Single source of truth: it names the installed unit
 # file and is substituted into every DEB/RPM scriptlet.
-set(FASTCACHED_SERVICE_NAME "pace-kv.service" CACHE STRING "systemd unit name")
+set(PACE_SERVICE_NAME "pace-kv.service" CACHE STRING "systemd unit name")
 
 # Install destinations, RELATIVE to CMAKE_INSTALL_PREFIX so that CPack (which
 # stages by pointing the prefix at a private package root) and DESTDIR builds
@@ -37,17 +37,17 @@ set(FASTCACHED_SERVICE_NAME "pace-kv.service" CACHE STRING "systemd unit name")
 #
 # usr/lib rather than CMAKE_INSTALL_LIBDIR: the latter resolves to lib64 on
 # RPM-based 64-bit systems, where systemd does not look either.
-set(FASTCACHED_SYSTEMD_SYSTEM_DIR "usr/lib/systemd/system")
-set(FASTCACHED_SYSTEMD_USER_DIR   "usr/lib/systemd/user")
-set(FASTCACHED_SYSUSERS_DIR       "usr/lib/sysusers.d")
-set(FASTCACHED_TMPFILES_DIR       "usr/lib/tmpfiles.d")
+set(PACE_SYSTEMD_SYSTEM_DIR "usr/lib/systemd/system")
+set(PACE_SYSTEMD_USER_DIR   "usr/lib/systemd/user")
+set(PACE_SYSUSERS_DIR       "usr/lib/sysusers.d")
+set(PACE_TMPFILES_DIR       "usr/lib/tmpfiles.d")
 
-# FASTCACHED_SYSCONF_DIR, FASTCACHED_MACOS_PREFIX, FASTCACHED_MACOS_BUNDLE_ID
-# and FASTCACHED_MACOS_SERVICE_ACCOUNT are declared in the top-level
+# PACE_SYSCONF_DIR, PACE_MACOS_PREFIX, PACE_MACOS_BUNDLE_ID
+# and PACE_MACOS_SERVICE_ACCOUNT are declared in the top-level
 # CMakeLists.txt and inherited here. They have to live there because
 # cmake/Packaging.cmake is include()d at that scope and reads them too — a
 # set() in this subdirectory would not propagate back up — and because
-# src/Pace/ compiles FASTCACHED_SYSCONF_DIR into the daemon's default
+# src/Pace/ compiles PACE_SYSCONF_DIR into the daemon's default
 # config lookup, so the file this directory installs and the path the daemon
 # probes for are one value.
 
@@ -55,32 +55,32 @@ set(FASTCACHED_TMPFILES_DIR       "usr/lib/tmpfiles.d")
 # rather than one no branch wrote. Only the Linux branch fills it in: a .pkg and
 # an MSI have no conffile mechanism to retire a file through, which is the same
 # reason they ship a `.default` copy instead of the live config.
-set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG "")
+set(PACE_PLATFORM_OBSOLETE_CONFIG "")
 
 # The service assets only make sense in the root-rooted package layout: their
 # destinations (usr/lib/systemd, etc/) are written assuming the payload lands
 # at /. A conventional prefixed install would scatter them to
 # <prefix>/usr/lib/systemd, where systemd never looks, so skip them entirely.
-if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
+if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     # source | destination | kind | installed-name | component
     #
     # The user unit is renamed on install: the source name disambiguates it in
     # the tree, but `systemctl --user start pace-kv` requires it to land as
     # pace-kv.service inside the user unit directory.
-    set(FASTCACHED_PLATFORM_ASSETS
-        "linux/pace-kv.service|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|pace-kv.service|Runtime"
-        "linux/pace-kv-user.service|${FASTCACHED_SYSTEMD_USER_DIR}|data|pace-kv.service|Runtime"
-        "linux/pace-kv.sysusers|${FASTCACHED_SYSUSERS_DIR}|data|fastcached.conf|Runtime"
-        "linux/pace-kv.tmpfiles|${FASTCACHED_TMPFILES_DIR}|data|fastcached.conf|Runtime"
-        "config/fastcached.yaml|${FASTCACHED_SYSCONF_DIR}|config|fastcached.yaml|Runtime"
+    set(PACE_PLATFORM_ASSETS
+        "linux/pace-kv.service|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-kv.service|Runtime"
+        "linux/pace-kv-user.service|${PACE_SYSTEMD_USER_DIR}|data|pace-kv.service|Runtime"
+        "linux/pace-kv.sysusers|${PACE_SYSUSERS_DIR}|data|fastcached.conf|Runtime"
+        "linux/pace-kv.tmpfiles|${PACE_TMPFILES_DIR}|data|fastcached.conf|Runtime"
+        "config/fastcached.yaml|${PACE_SYSCONF_DIR}|config|fastcached.yaml|Runtime"
         # The compile worker. Its socket unit is what an operator enables, so the
         # service carries no [Install] and is pulled in by the socket -- see the
         # units themselves. The account is its own rather than pace-kv's,
         # because a worker runs a compiler while pace-kv owns the cache
         # storage, and the trust model gives a worker no cache credentials at all.
-        "linux/pace-node.service|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime"
-        "linux/pace-node.socket|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|pace-node.socket|Runtime"
-        "linux/pace-node.sysusers|${FASTCACHED_SYSUSERS_DIR}|data|fastcache-node.conf|Runtime"
+        "linux/pace-node.service|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime"
+        "linux/pace-node.socket|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.socket|Runtime"
+        "linux/pace-node.sysusers|${PACE_SYSUSERS_DIR}|data|fastcache-node.conf|Runtime"
         # The worker's own configuration file, marked `config` for the reason
         # fastcached.yaml is: it is the file an operator edits to make the worker
         # work at all, and an upgrade that reset it would un-register the worker
@@ -93,14 +93,14 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
         # so the destination comes from the worker's own application name rather
         # than the daemon's. It was Linux-only for four releases and nothing said
         # so; `ctest -R config-reference-reach` is what says so now.
-        "config/pace-node.yaml|${FASTCACHED_SYSCONF_DIR}|config|pace-node.yaml|Runtime"
+        "config/pace-node.yaml|${PACE_SYSCONF_DIR}|config|pace-node.yaml|Runtime"
         #
         # What used to be here was `compile-node.env`, a shell fragment of
         # command-line arguments the unit expanded into ExecStart. It is gone
         # (#291): two mechanisms that can disagree about one setting are worse
         # than either alone, and nobody had written down which won. Removing the
         # row is what stops new packages shipping it; a copy already on disk is
-        # named in FASTCACHED_PLATFORM_OBSOLETE_CONFIG just below (#383).
+        # named in PACE_PLATFORM_OBSOLETE_CONFIG just below (#383).
     )
 
     # Config files this package USED to ship and no longer does. Dropping the
@@ -135,18 +135,18 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     # `rm_conffile` call out of maintainer scripts: there is no `preinst` in
     # this tree, rm_conffile needs one plus matching postinst and postrm arms,
     # and a preinst that fails is a package that will not install.
-    set(FASTCACHED_PLATFORM_OBSOLETE_CONFIG
-        "/${FASTCACHED_SYSCONF_DIR}/compile-node.env"
+    set(PACE_PLATFORM_OBSOLETE_CONFIG
+        "/${PACE_SYSCONF_DIR}/compile-node.env"
     )
-elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
+elseif(PACE_PACKAGE_ROOT_PREFIX AND APPLE)
     # The generated scripts are referenced from the build tree; see below.
-    set(FASTCACHED_PLATFORM_ASSETS
+    set(PACE_PLATFORM_ASSETS
         # The live fastcached.yaml is deliberately NOT here. A .pkg overwrites
         # its payload unconditionally on every install — there is no conffile or
         # %config(noreplace) equivalent — so shipping it would silently discard
         # the operator's edits on upgrade. The Runtime postinstall seeds the real
         # file from this .default copy only when it is absent.
-        "config/fastcached.yaml|${FASTCACHED_MACOS_PREFIX}/etc|data|fastcached.yaml.default|Runtime"
+        "config/fastcached.yaml|${PACE_MACOS_PREFIX}/etc|data|fastcached.yaml.default|Runtime"
         # The worker's reference, on exactly the same terms and from exactly the
         # same file the Linux package installs (#397). It shipped nowhere but
         # Linux until this row, so a macOS operator configuring a worker had no
@@ -154,24 +154,24 @@ elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
         # `requirepass:` -- which on a worker is the one place its token may live,
         # since a supervisor records launch arguments where every local account
         # can read them.
-        "config/pace-node.yaml|${FASTCACHED_MACOS_PREFIX}/etc|data|pace-node.yaml.default|Runtime"
+        "config/pace-node.yaml|${PACE_MACOS_PREFIX}/etc|data|pace-node.yaml.default|Runtime"
         "macos/paths.d.pace|etc/paths.d|data|pace|Runtime"
-        "${CMAKE_CURRENT_BINARY_DIR}/macos/pace-uninstall|${FASTCACHED_MACOS_PREFIX}/bin|program|pace-uninstall|Runtime"
+        "${CMAKE_CURRENT_BINARY_DIR}/macos/pace-uninstall|${PACE_MACOS_PREFIX}/bin|program|pace-uninstall|Runtime"
     )
 endif()
 
 # One loop installs whichever table the platform selected above. An empty table
 # (Windows, which has no asset rows of its own) simply installs nothing.
-if(FASTCACHED_PACKAGE_ROOT_PREFIX)
+if(PACE_PACKAGE_ROOT_PREFIX)
     set(_config_files "")
-    foreach(_asset IN LISTS FASTCACHED_PLATFORM_ASSETS)
+    foreach(_asset IN LISTS PACE_PLATFORM_ASSETS)
         string(REPLACE "|" ";" _fields "${_asset}")
         list(GET _fields 0 _source)
         list(GET _fields 1 _destination)
         list(GET _fields 2 _kind)
         list(GET _fields 3 _name)
         list(GET _fields 4 _component)
-        set_property(GLOBAL APPEND PROPERTY FASTCACHED_FIRST_PARTY_COMPONENTS "${_component}")
+        set_property(GLOBAL APPEND PROPERTY PACE_FIRST_PARTY_COMPONENTS "${_component}")
 
         # An absolute source is a generated file already in the build tree; a
         # relative one is shipped from this directory.
@@ -203,16 +203,16 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX)
 
     # Consumed by Packaging.cmake for the DEB conffiles list and the RPM
     # %config(noreplace) filelist.
-    set(FASTCACHED_PACKAGE_CONFIG_FILES "${_config_files}"
+    set(PACE_PACKAGE_CONFIG_FILES "${_config_files}"
         CACHE INTERNAL "Package-manager config files (never replaced on upgrade)")
 
     # Consumed by Packaging.cmake for the DEB conffiles list only; see the
     # table's own comment for why rpm needs no counterpart.
-    set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES "${FASTCACHED_PLATFORM_OBSOLETE_CONFIG}"
+    set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES "${PACE_PLATFORM_OBSOLETE_CONFIG}"
         CACHE INTERNAL "Config files older packages shipped and this one removes on upgrade")
 endif()
 
-if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
+if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
 
     # --- Maintainer scripts -------------------------------------------------
     # Generated rather than shipped verbatim so the unit name and the
@@ -220,17 +220,17 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     # truth. CPack references the configured copies in the build tree.
 
     # Absolute paths as seen on the installed system — the scriptlets run there.
-    set(FASTCACHED_SYSUSERS_FILE "/${FASTCACHED_SYSUSERS_DIR}/fastcached.conf")
+    set(PACE_SYSUSERS_FILE "/${PACE_SYSUSERS_DIR}/fastcached.conf")
     # Named separately rather than letting `systemd-sysusers` with no argument
     # apply everything on the system. Both accounts must exist or the unit that
     # needs one fails to start with "user does not exist" -- a message that says
     # nothing about which package forgot to create it.
-    set(FASTCACHED_NODE_SYSUSERS_FILE "/${FASTCACHED_SYSUSERS_DIR}/fastcache-node.conf")
-    set(FASTCACHED_TMPFILES_FILE "/${FASTCACHED_TMPFILES_DIR}/fastcached.conf")
+    set(PACE_NODE_SYSUSERS_FILE "/${PACE_SYSUSERS_DIR}/fastcache-node.conf")
+    set(PACE_TMPFILES_FILE "/${PACE_TMPFILES_DIR}/fastcached.conf")
 
-    set(FASTCACHED_SCRIPTLETS deb/postinst deb/prerm deb/postrm
+    set(PACE_SCRIPTLETS deb/postinst deb/prerm deb/postrm
                               rpm/post rpm/preun rpm/postun)
-    foreach(_script IN LISTS FASTCACHED_SCRIPTLETS)
+    foreach(_script IN LISTS PACE_SCRIPTLETS)
         get_filename_component(_script_name "${_script}" NAME)
         get_filename_component(_script_dir "${_script}" DIRECTORY)
         set(_out "${CMAKE_CURRENT_BINARY_DIR}/${_script_dir}/${_script_name}")
@@ -242,9 +242,9 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
             WORLD_READ WORLD_EXECUTE)
     endforeach()
 
-    set(FASTCACHED_SCRIPTLET_DIR "${CMAKE_CURRENT_BINARY_DIR}"
+    set(PACE_SCRIPTLET_DIR "${CMAKE_CURRENT_BINARY_DIR}"
         CACHE INTERNAL "Directory holding the configured DEB/RPM maintainer scripts")
-elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
+elseif(PACE_PACKAGE_ROOT_PREFIX AND APPLE)
     # --- Installer scripts --------------------------------------------------
     # Generated, not shipped verbatim, so the prefix, bundle identifier and
     # service-account name each have exactly one definition. The uninstaller in
@@ -255,7 +255,7 @@ elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
     # The postinstall scripts are named by CPack convention and referenced from
     # Packaging.cmake through CPACK_POSTFLIGHT_<COMPONENT>_SCRIPT; the
     # uninstaller is payload and is installed by the asset table above.
-    set(FASTCACHED_MACOS_SCRIPTS
+    set(PACE_MACOS_SCRIPTS
         "postinstall-runtime"
         "postinstall-launchagent"
         "postinstall-launchdaemon"
@@ -263,22 +263,22 @@ elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
     )
 
     # Shared shell fragment, substituted into whichever scripts declare
-    # @FASTCACHED_MACOS_SEED_CONFIG@. Config seeding has to happen in more than
+    # @PACE_MACOS_SEED_CONFIG@. Config seeding has to happen in more than
     # one postinstall — macOS does not run them in component order — and this
     # keeps that one implementation instead of a copy per component.
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/macos/seed-config.sh.inc"
-        FASTCACHED_MACOS_SEED_CONFIG)
+        PACE_MACOS_SEED_CONFIG)
 
     # The other shared fragment, on the same terms: creating a hidden account is
     # thirty lines of dscl whose every subtlety was a failure first (a colliding
     # gid, a record dscl had written but getpwnam could not yet see), and there are
     # two accounts to create from two different components. Copying it per account
     # is precisely the differ-only-by-a-constant duplication this project refuses.
-    # Substituted into whichever scripts declare @FASTCACHED_MACOS_CREATE_ACCOUNT@.
+    # Substituted into whichever scripts declare @PACE_MACOS_CREATE_ACCOUNT@.
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/macos/create-account.sh.inc"
-        FASTCACHED_MACOS_CREATE_ACCOUNT)
+        PACE_MACOS_CREATE_ACCOUNT)
 
-    foreach(_script IN LISTS FASTCACHED_MACOS_SCRIPTS)
+    foreach(_script IN LISTS PACE_MACOS_SCRIPTS)
         set(_out "${CMAKE_CURRENT_BINARY_DIR}/macos/${_script}")
         configure_file("${CMAKE_CURRENT_SOURCE_DIR}/macos/${_script}.sh.in" "${_out}" @ONLY)
         # An installer script that is not executable is skipped silently by
@@ -289,11 +289,11 @@ elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
             WORLD_READ WORLD_EXECUTE)
     endforeach()
 
-    set(FASTCACHED_MACOS_SCRIPT_DIR "${CMAKE_CURRENT_BINARY_DIR}/macos"
+    set(PACE_MACOS_SCRIPT_DIR "${CMAKE_CURRENT_BINARY_DIR}/macos"
         CACHE INTERNAL "Directory holding the configured macOS installer scripts")
 
     # Reset the Linux-only exports; see the comment in the else() branch.
-    set(FASTCACHED_SCRIPTLET_DIR ""
+    set(PACE_SCRIPTLET_DIR ""
         CACHE INTERNAL "Directory holding the configured DEB/RPM maintainer scripts")
 else()
     # EVERY export below must be written on EVERY configure, not only when the
@@ -304,16 +304,16 @@ else()
     # conffiles list names an absent path. Stated as "every" rather than a
     # count, because the count was "both" until #383 added a third and a number
     # in a comment does not move when the list does.
-    set(FASTCACHED_PACKAGE_CONFIG_FILES ""
+    set(PACE_PACKAGE_CONFIG_FILES ""
         CACHE INTERNAL "Package-manager config files (never replaced on upgrade)")
-    set(FASTCACHED_PACKAGE_OBSOLETE_CONFIG_FILES ""
+    set(PACE_PACKAGE_OBSOLETE_CONFIG_FILES ""
         CACHE INTERNAL "Config files older packages shipped and this one removes on upgrade")
-    set(FASTCACHED_SCRIPTLET_DIR ""
+    set(PACE_SCRIPTLET_DIR ""
         CACHE INTERNAL "Directory holding the configured DEB/RPM maintainer scripts")
 endif()
 
-if(NOT APPLE OR NOT FASTCACHED_PACKAGE_ROOT_PREFIX)
-    set(FASTCACHED_MACOS_SCRIPT_DIR ""
+if(NOT APPLE OR NOT PACE_PACKAGE_ROOT_PREFIX)
+    set(PACE_MACOS_SCRIPT_DIR ""
         CACHE INTERNAL "Directory holding the configured macOS installer scripts")
 endif()
 
@@ -335,8 +335,8 @@ if(WIN32)
     # Each template installs with the feature of the app that reads it, so the MSI
     # lays down a daemon template only where the daemon is selected, and a build
     # without that app installs no template for it.
-    get_property(_daemonComponent GLOBAL PROPERTY FASTCACHED_COMPONENT_OF_fastcached)
-    get_property(_nodeComponent GLOBAL PROPERTY FASTCACHED_COMPONENT_OF_pace-node)
+    get_property(_daemonComponent GLOBAL PROPERTY PACE_COMPONENT_OF_fastcached)
+    get_property(_nodeComponent GLOBAL PROPERTY PACE_COMPONENT_OF_pace-node)
     if(_daemonComponent)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/fastcached.yaml"
             DESTINATION "etc"
@@ -354,6 +354,6 @@ if(WIN32)
         )
     endif()
 
-    set(FASTCACHED_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/windows/service-actions.xml"
+    set(PACE_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/windows/service-actions.xml"
         CACHE INTERNAL "WiX patch fragment registering the pace-kv service")
 endif()

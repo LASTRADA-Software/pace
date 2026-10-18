@@ -173,7 +173,7 @@ TEST_CASE("The operator's value outranks a probe, and the probe is not even aske
 
 TEST_CASE("The discovery request is an ASK, not a prefix")
 {
-    // `FASTCACHE_MSVC_DEPS_PREFIX=auto` is how an operator opts IN to the probe, and it
+    // `PACE_MSVC_DEPS_PREFIX=auto` is how an operator opts IN to the probe, and it
     // names no prefix -- so the `Operator` row must decline it exactly as it declines an
     // unset variable, or the build would emit notes prefixed with the literal `auto`.
     //
@@ -215,7 +215,7 @@ TEST_CASE("A probe that would not say falls back to English and SAYS it was aske
     // the whole case: asked-and-declined carries the SAME string as never-asked, so a
     // build that collapsed the two passes every assertion about the value. What separates
     // them is the remedy each sends an operator to -- and reaching here means they wrote
-    // `FASTCACHE_MSVC_DEPS_PREFIX=auto`, so `override with FASTCACHE_MSVC_DEPS_PREFIX` is
+    // `PACE_MSVC_DEPS_PREFIX=auto`, so `override with PACE_MSVC_DEPS_PREFIX` is
     // advice they have already taken.
     CHECK(fromDeclined.source == MarkerSource::DiscoveryDeclined);
     CHECK(fromDeclined.source != MarkerSource::Default);

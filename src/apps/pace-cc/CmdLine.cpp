@@ -59,7 +59,7 @@ namespace
     // hashing an essentially empty stdout — a key with no content in it at all,
     // under which an edited source re-fetches the object built from the OLD text.
     // Direct mode hides it (its manifest hashes the source's bytes), so it showed
-    // up only with FASTCACHE_NO_DIRECT=1, and it dropped a stray `.i` in the
+    // up only with PACE_NO_DIRECT=1, and it dropped a stray `.i` in the
     // working directory on every probe besides.
     constexpr std::array<std::string_view, 1> MsvcPreprocess { "/EP" };
     constexpr std::array<std::string_view, 2> GnuPreprocess { "-E", "-P" };
@@ -563,7 +563,7 @@ namespace
     // Before #1481 these were unrecognised, so `CouldNameAFile` refused a path-valued
     // `-DFOO="/abs/path"` -- and with it the WHOLE command line, which is the only safe
     // answer for an argument the walk does not know. That is this project own build
-    // (`FASTCACHED_SOURCE_DIR`) and any project passing a source root, a config directory
+    // (`PACE_SOURCE_DIR`) and any project passing a source root, a config directory
     // or a version string with a slash in it: no dispatch at all, one stderr line per
     // translation unit, and no counter anywhere.
     //

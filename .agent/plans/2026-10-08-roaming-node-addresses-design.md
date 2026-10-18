@@ -151,7 +151,7 @@ authenticated-beacon desire.
 ### Visibility
 
 - Info log per change: old → new endpoint (and Raft endpoint).
-- Two counters: `fastcache_node_endpoint_changes_total`, `fastcache_node_raft_endpoint_changes_total`.
+- Two counters: `pace_node_endpoint_changes_total`, `pace_node_raft_endpoint_changes_total`.
 - (`pacectl node-status` is NOT extended: a reply field is a wire flag day.)
 
 ### Packaging and docs

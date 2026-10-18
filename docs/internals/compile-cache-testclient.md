@@ -20,7 +20,7 @@ though, so that it cannot quietly stop compiling — which is exactly what happe
 before (issue #84).
 
 ```sh
-cmake --preset clang-debug -DFASTCACHED_BUILD_TESTCLIENT=ON
+cmake --preset clang-debug -DPACE_BUILD_TESTCLIENT=ON
 cmake --build --preset clang-debug --target compile-cache-testclient
 ```
 

@@ -65,21 +65,21 @@ so adding an executable is adding a row:
 
 ```
 src/apps/
-  fastcached/               the daemon (FASTCACHED_BUILD_DAEMON, default ON)
-  pace-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER, ON) — an
+  fastcached/               the daemon (PACE_BUILD_DAEMON, default ON)
+  pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
                             args; does NOT link the Pace library (`_fc_cc_core`)
   pace-node/   the compile worker AND the peer service
-                            (FASTCACHED_BUILD_NODE, ON); may also be the scheduler, hold
+                            (PACE_BUILD_NODE, ON); may also be the scheduler, hold
                             a cache tier and run consensus — four surfaces, each off
                             unless asked for except the cache
-  pacectl/            the operator's client (FASTCACHED_BUILD_CLI, ON), INSTALLED
+  pacectl/            the operator's client (PACE_BUILD_CLI, ON), INSTALLED
                             and documented on the Tools page
   compile-cache-testclient/ low-level 0xFC probe + cross-depth validation
-                            (FASTCACHED_BUILD_TESTCLIENT, OFF, never installed, built by
+                            (PACE_BUILD_TESTCLIENT, OFF, never installed, built by
                             the linux and clang-tidy jobs)
   pace-bench/          in-process storage micro-benchmarks
-                            (FASTCACHED_BUILD_BENCHMARKS, OFF, never installed, built by
+                            (PACE_BUILD_BENCHMARKS, OFF, never installed, built by
                             the linux and clang-tidy jobs)
 ```
 
@@ -163,7 +163,7 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
 - Preprocess with line markers suppressed — `/EP` **alone** on MSVC, never `/EP /P`.
 - `/` introduces an option only on a Windows layout; on POSIX it starts a path.
 - Only machine-independent dependency paths are hashed, and a path is classified
-  by what it *resolves to*, never by its spelling. A CPM cache is a ROOT (`<DEPROOT>`, `FASTCACHE_DEPS_DIR`).
+  by what it *resolves to*, never by its spelling. A CPM cache is a ROOT (`<DEPROOT>`, `PACE_DEPS_DIR`).
 - The toolchain headers the key drops are covered by the compiler's *banner*, so every driver
   is asked for one the way it answers: `cl` has no `--version`, and bare `cl` is its probe.
 - A root and the paths a driver emits are reconciled on both sides, or neither.
@@ -214,7 +214,7 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
   (`sourceRoot`/`sourceRootReplacement`) after the directory rules; a half-filled pair is REFUSED,
   every other failure is NO RULE, and the worker's skip is `ScratchRootMappingWarnings` at STARTUP.
 - An object file is not a byte string. Every MSVC driver stamps the clock into the COFF `TimeDateStamp`, so
-  `FASTCACHE_VERIFY` cannot `memcmp` there; ELF keeps the byte comparison. Parsing never grants an excuse, it only
+  `PACE_VERIFY` cannot `memcmp` there; ELF keeps the byte comparison. Parsing never grants an excuse, it only
   says WHERE: a FRESH object that will not lay out is `Unsupported`, a SERVED one `Mismatched`. Never `/Brepro`.
 
 **[`.agent/rules/distributed-compilation.md`](.agent/rules/distributed-compilation.md)**
@@ -822,7 +822,7 @@ converting a store. Before `Cache/CowTreeStorage`, `CowTree/`.
   attempted* is an enum and not a `bool` (`NoUpstream`), fixed at the SEAM.
 - A counter is a tally, so zero is the truth about events that never happened, and absence is
   modelled in the **snapshot**. **One carve-out**: a row this BUILD cannot represent is omitted
-  and counted by `fastcached_metrics_catalogue_skew`, never rendered as a plausible zero.
+  and counted by `pace_metrics_catalogue_skew`, never rendered as a plausible zero.
 - A SECOND carve-out: a row no writer in this PROCESS could move is absent, never zero;
   `CounterSoleWriterTable` says which surface writes each (**the count is not repeated here**;
   `size()` counts PAIRS, `AttributedCounterCount()` counts counters). **Err unattributed**, and
@@ -888,7 +888,7 @@ converting a store. Before `Cache/CowTreeStorage`, `CowTree/`.
   job's asset list stays the **last** key of its `with:` mapping.
 - **A new INSTALLED binary is not one CMake row**: it needs its app-table COMPONENT (one MSI feature
   per app), three `--target` lines in `build.yml`, the macOS payload loop (not the symlink list)
-  and `FASTCACHED_MACOS_LINKED_TOOLS`; no `Package (...)` context is required. Guard: #1202.
+  and `PACE_MACOS_LINKED_TOOLS`; no `Package (...)` context is required. Guard: #1202.
 
 **[`.agent/rules/build-and-toolchain.md`](.agent/rules/build-and-toolchain.md)** —
 what differs between compilers, standard libraries, hosts and tool versions.
@@ -983,7 +983,7 @@ what differs between compilers, standard libraries, hosts and tool versions.
 - **No executable raises a modal error dialog, and the BUILD installs that, never each `main`** —
   `cmake/ErrorPopups.cmake` attaches one TU to every executable and
   `ctest -R error-popup-coverage` reads the LINK LINES. A new `catch_discover_tests` names
-  `FASTCACHED_ERROR_DIALOG_ENVIRONMENT` or the check refuses its cases (#1389).
+  `PACE_ERROR_DIALOG_ENVIRONMENT` or the check refuses its cases (#1389).
 - So a sanitizer job proves nothing until something proves the sanitizer. `scripts/tsan-gate.sh` will
   not report clean until every artefact's OWN OBJECT FILES carry an **undefined** `__tsan_init` and
   `src/tests/TsanCanary.cpp` has gone red with `.tsan-suppressions` active. A known race lives there
@@ -1081,12 +1081,12 @@ what differs between compilers, standard libraries, hosts and tool versions.
   against a count that no longer describes the tree.**
 - **Which files are this project's own is ONE answer: `scripts/lib/third-party-roots.txt`.** A
   script listing the repository's files asks it (`first_party_paths`,
-  `fastcached_decline_third_party`) and NAMES what it declined, or carries an exemption row with a
+  `pace_decline_third_party`) and NAMES what it declined, or carries an exemption row with a
   reason. `ctest -R third-party-roots`; a root is the upstream COPY (`vendor/monocypher`).
-- **And HOW a file set is found is one answer too: `fastcached_tracked_files`.** A `check-*.cmake`
+- **And HOW a file set is found is one answer too: `pace_tracked_files`.** A `check-*.cmake`
   keeps its QUESTION and never its own work-tree probe, `ls-files` call, walk fallback or copy of
-  the excluded names; `fastcached_first_party_cxx` is a CALLER, and the probe is
-  `fastcached_work_tree_state`, THREE answers. `ctest -R tracked-files-selftest`.
+  the excluded names; `pace_first_party_cxx` is a CALLER, and the probe is
+  `pace_work_tree_state`, THREE answers. `ctest -R tracked-files-selftest`.
 - **A total stated beside a table is DERIVED from it, or it is a second claim.**
   `ctest -R table-totals`. The multipliers are PARSED, not banned; the marker is MANDATORY with
   `none` as the opt-out; and the figure that describes a table is the one NEAREST it.
@@ -1324,7 +1324,7 @@ and what they may assume.
   the subshell starts — while `kill -KILL` is decisive; BOTH stay, each naming the window it closes.
 - **A fixture handed a launcher records ONLY into its run's own state directory**, through ONE seam
   (`Enter-E2ELauncherState`, `e2e_launcher_state_enter`) entered first. `ctest -R launcher-state-isolation`.
-- A fixture's git WRITE runs through `scratch_git` / `fastcached_scratch_git`, never bare `git`: an
+- A fixture's git WRITE runs through `scratch_git` / `pace_scratch_git`, never bare `git`: an
   inherited `GIT_DIR` turns a scratch `git init` into a write of the repository it names (`core.worktree`
   in the shared config). `ctest -R scratch-git`; never EXPORT `GIT_DIR` around a harness.
 - A fleet property that spans two machines needs `src/tests/FleetHarness.hpp`, whose `OnCompile`
@@ -1547,7 +1547,7 @@ Catch2, yaml-cpp, zstd and lz4 — which matters here because the work happens i
 making that a per-BRANCH cost rather than a per-machine one. `CPM_SOURCE_CACHE` defaults to
 `%LOCALAPPDATA%\fastcached\cpm` or `~/.cache/fastcached/cpm`; anything that already set it wins,
 including the environment variable CI uses to point it inside the workspace for its own cache
-action. Override with `FASTCACHED_CPM_CACHE`, and a machine where no home directory can be found
+action. Override with `PACE_CPM_CACHE`, and a machine where no home directory can be found
 simply fetches into the build tree as before. What it saves is measured, with its conditions, in
 [`.agent/rules/build-and-toolchain.md`](.agent/rules/build-and-toolchain.md) (#545).
 
@@ -1599,13 +1599,13 @@ cmake --build --preset clangcl-debug
 
 `USE_COMPILER_CACHE` (default ON, `cmake/portable/CompileCache.cmake`) fronts the compiler with
 `pace-cc` when it is on `PATH` and a daemon answers — at `127.0.0.1:6674`, or wherever
-`FASTCACHE_ADDR=host:port` points. Configure *proves* the cache works by compiling one tiny file
+`PACE_ADDR=host:port` points. Configure *proves* the cache works by compiling one tiny file
 through it, because a launcher that cannot reach its daemon still compiles fine and would
 otherwise cost every TU a failed connect in silence. Falls through to `ccache`; `sccache` sits
 above it in preference order but is never selected automatically (`ALLOW_SCCACHE_FALLBACK`,
 default OFF, #815). With either launcher active the module scan and PCH are turned off and MSVC
 debug info is forced to `/Z7`, because a hit reproduces only the object file. Full behaviour,
-including `FASTCACHE_AUTO_INSTALL`, is in
+including `PACE_AUTO_INSTALL`, is in
 [`.agent/rules/build-and-toolchain.md`](.agent/rules/build-and-toolchain.md).
 
 ## Testing

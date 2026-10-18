@@ -29,13 +29,13 @@
 
 include(ProjectTargets)
 
-set(FASTCACHED_INSTRUCTION_SET_PROBE "${CMAKE_SOURCE_DIR}/src/tests/InstructionSetBaseline.cpp")
+set(PACE_INSTRUCTION_SET_PROBE "${CMAKE_SOURCE_DIR}/src/tests/InstructionSetBaseline.cpp")
 
-function(fastcached_probe_instruction_set_baseline)
-    fastcached_collect_executables("${CMAKE_SOURCE_DIR}" executables src)
+function(pace_probe_instruction_set_baseline)
+    pace_collect_executables("${CMAKE_SOURCE_DIR}" executables src)
     set(attached 0)
     foreach(executable IN LISTS executables)
-        target_sources(${executable} PRIVATE "${FASTCACHED_INSTRUCTION_SET_PROBE}")
+        target_sources(${executable} PRIVATE "${PACE_INSTRUCTION_SET_PROBE}")
         math(EXPR attached "${attached} + 1")
     endforeach()
     # The count is printed because a walk that found nothing and a walk that attached

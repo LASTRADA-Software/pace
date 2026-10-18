@@ -27,17 +27,17 @@
 # reading and cheap to make.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-wix-fragment.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-wix-fragment.cmake
 #
 # Exit codes: 0 = every comment is legal. 1 = at least one is not.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-set(_dir "${FASTCACHED_SOURCE_DIR}/packaging/windows")
+set(_dir "${PACE_SOURCE_DIR}/packaging/windows")
 if(NOT IS_DIRECTORY "${_dir}")
     message(FATAL_ERROR "check-wix-fragment: ${_dir} is not a directory")
 endif()

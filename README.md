@@ -124,10 +124,10 @@ Point every machine that should share the cache at that one daemon.
 Three variables must **all** be set, or every compile runs uncached:
 
 ```sh
-export FASTCACHE_ADDR=127.0.0.1:6674       # the daemon
-export FASTCACHE_SOURCE_DIR=$PWD           # your checkout root
-export FASTCACHE_BINARY_DIR=$PWD/build     # your build directory
-export FASTCACHE_PREFETCH_GROUP=myproject-main     # optional: prefetch grouping
+export PACE_ADDR=127.0.0.1:6674       # the daemon
+export PACE_SOURCE_DIR=$PWD           # your checkout root
+export PACE_BINARY_DIR=$PWD/build     # your build directory
+export PACE_PREFETCH_GROUP=myproject-main     # optional: prefetch grouping
 ```
 
 `SOURCE_DIR` and `BINARY_DIR` are what make entries portable: paths under
@@ -150,7 +150,7 @@ It also works as a plain prefix for a single compile, which is the quickest way
 to check your setup:
 
 ```sh
-FASTCACHE_VERBOSE=1 pace-cc g++ -c src/a.cpp -o build/a.o
+PACE_VERBOSE=1 pace-cc g++ -c src/a.cpp -o build/a.o
 # pace-cc: MISS key=05b1b5ef9ef5135e119560a2aa140aef
 # pace-cc: STORED key=05b1b5ef9ef5135e119560a2aa140aef bytes=1427
 ```
@@ -158,9 +158,9 @@ FASTCACHE_VERBOSE=1 pace-cc g++ -c src/a.cpp -o build/a.o
 With PowerShell and MSVC:
 
 ```powershell
-$env:FASTCACHE_ADDR       = '127.0.0.1:6674'
-$env:FASTCACHE_SOURCE_DIR = $PWD
-$env:FASTCACHE_BINARY_DIR = "$PWD\build"
+$env:PACE_ADDR       = '127.0.0.1:6674'
+$env:PACE_SOURCE_DIR = $PWD
+$env:PACE_BINARY_DIR = "$PWD\build"
 
 cmake -S . -B build -G Ninja `
   -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc.exe
@@ -184,7 +184,7 @@ fall-back reasons
 ```
 
 A non-zero `unavailable` count means the cache was never reached — check
-`FASTCACHE_ADDR` and the daemon before concluding caching does not help.
+`PACE_ADDR` and the daemon before concluding caching does not help.
 
 Supported compilers: `gcc`/`g++`, `clang`/`clang++` (including versioned names
 like `g++-14`), and MSVC `cl` / `clang-cl`. The full reference — every

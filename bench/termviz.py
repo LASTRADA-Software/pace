@@ -235,7 +235,7 @@ def print_multitarget_table(target_names: list[str], rows: list) -> None:
             text = f"{result.throughput_ops_per_sec:,.0f}" if result is not None else "-"
             cells.append(text)
             plains.append(text)
-        speedup = report.fastcached_speedup(by_target)
+        speedup = report.pace_speedup(by_target)
         if speedup is None:
             cells.append("-")
             plains.append("-")

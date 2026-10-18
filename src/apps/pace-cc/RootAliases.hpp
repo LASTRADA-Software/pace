@@ -18,11 +18,11 @@ namespace Pace::Cc
 /// enumerator carries an explicit value and the order is free to change.
 enum class CheckoutPart : std::uint8_t
 {
-    /// `FASTCACHE_SOURCE_DIR`, made absolute.
+    /// `PACE_SOURCE_DIR`, made absolute.
     SourceRoot,
-    /// `FASTCACHE_BINARY_DIR`, made absolute.
+    /// `PACE_BINARY_DIR`, made absolute.
     BuildTree,
-    /// `FASTCACHE_DEPS_DIR`, made absolute: the machine's third-party source cache. An
+    /// `PACE_DEPS_DIR`, made absolute: the machine's third-party source cache. An
     /// object naming it is as machine-bound as one naming the checkout, and is bound the
     /// same way; empty names nothing, as every part does.
     DependencyRoot,

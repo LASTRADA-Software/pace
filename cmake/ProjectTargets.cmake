@@ -31,7 +31,7 @@
 #
 # Reads the build system as it stands, so every caller must run AFTER the
 # add_subdirectory() calls that define the targets.
-function(fastcached_collect_executables DIR OUT_VAR)
+function(pace_collect_executables DIR OUT_VAR)
     set(roots ${ARGN})
     if(NOT roots)
         set(roots src)
@@ -60,7 +60,7 @@ function(fastcached_collect_executables DIR OUT_VAR)
             endif()
         endforeach()
         if(inside)
-            fastcached_collect_executables("${subdirectory}" nested ${roots})
+            pace_collect_executables("${subdirectory}" nested ${roots})
             list(APPEND found ${nested})
         endif()
     endforeach()

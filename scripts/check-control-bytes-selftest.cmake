@@ -39,7 +39,7 @@
 #
 # ## Every case runs in BOTH file-set modes
 #
-# The check asks `fastcached_tracked_files` which files hold a forbidden byte, and the two modes
+# The check asks `pace_tracked_files` which files hold a forbidden byte, and the two modes
 # answer it by different mechanisms: git mode with one `git grep -a -P`, the walk by reading
 # every file as hex. A staged tree is not a git repository, so without a second pass every case
 # here would exercise the walk while CI's checkout takes git -- the shape that has already
@@ -55,15 +55,15 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
 if(NOT GIT_EXECUTABLE)
@@ -75,7 +75,7 @@ if(NOT GIT_EXECUTABLE)
         "only the walk would be the defect this file's second pass exists to catch.")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-control-bytes.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-control-bytes.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -120,7 +120,7 @@ endfunction()
 # `treeMode`, read from the caller, is `walk` for a plain directory or `git` for a repository
 # with every staged file added to its index.
 function(StageAndRun name files extensions outFlat outStaged)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/case-${treeMode}-${name}")
+    set(tree "${PACE_SCRATCH_DIR}/case-${treeMode}-${name}")
     set(gone "")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/scripts/lib")
@@ -140,7 +140,7 @@ function(StageAndRun name files extensions outFlat outStaged)
                 WriteBytes("${tree}/${relative}" "added, then deleted")
                 list(APPEND gone "${tree}/${relative}")
             elseif(body MATCHES "^@tar:(.*)$")
-                set(member "${FASTCACHED_SCRATCH_DIR}/member-${name}")
+                set(member "${PACE_SCRATCH_DIR}/member-${name}")
                 WriteBytes("${member}" "${CMAKE_MATCH_1}")
                 get_filename_component(parent "${tree}/${relative}" DIRECTORY)
                 file(MAKE_DIRECTORY "${parent}")
@@ -155,7 +155,7 @@ function(StageAndRun name files extensions outFlat outStaged)
     set(runCheck "${check}")
     if(NOT extensions STREQUAL "-")
         file(READ "${check}" checkText)
-        set(anchor "set(FastCachedControlByteExtensions")
+        set(anchor "set(PaceControlByteExtensions")
         string(FIND "${checkText}" "${anchor}" tableAt)
         if(tableAt EQUAL -1)
             message(FATAL_ERROR
@@ -171,17 +171,17 @@ function(StageAndRun name files extensions outFlat outStaged)
         # In `scripts/`, with the helper beside it: the check includes the helper by
         # `CMAKE_CURRENT_LIST_DIR`, so a copy anywhere else would fail to include and
         # this case would refuse for a reason that is not its own.
-        file(COPY "${FASTCACHED_SOURCE_DIR}/scripts/lib/CheckCommon.cmake"
+        file(COPY "${PACE_SOURCE_DIR}/scripts/lib/CheckCommon.cmake"
              DESTINATION "${tree}/scripts/lib")
         file(WRITE "${tree}/scripts/staged-check.cmake"
-             "${beforeTable}set(FastCachedControlByteExtensions ${extensions})\n"
+             "${beforeTable}set(PaceControlByteExtensions ${extensions})\n"
              "message(STATUS \"control-bytes: STAGED-CHECK\")\n"
              "${afterTable}")
         set(runCheck "${tree}/scripts/staged-check.cmake")
     endif()
 
     if(treeMode STREQUAL "git")
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}" OUTPUT_QUIET ERROR_QUIET)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A
                         RESULT_VARIABLE addStatus OUTPUT_QUIET ERROR_VARIABLE addError)
@@ -201,7 +201,7 @@ function(StageAndRun name files extensions outFlat outStaged)
     # The status is deliberately not captured -- see the header, the verdict is the
     # output.
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${runCheck}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${runCheck}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err ENCODING NONE)
     set(combined "${out}${err}")
     string(REGEX REPLACE "[\r\n]+" " " combined "${combined}")

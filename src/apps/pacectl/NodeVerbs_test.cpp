@@ -600,13 +600,13 @@ TEST_CASE("`node-metrics` reports every figure the node's reading carries", "[cl
     REQUIRE(node.Sent().size() == 1);
     CHECK(OpOf(SentFrame(node)) == static_cast<std::uint8_t>(CacheWire::Op::NodeMetrics));
 
-    CHECK(RequiredCell(answer, "fastcache_worker_jobs_completed_total").lexical == "12");
-    CHECK(RequiredCell(answer, "fastcached_items").lexical == "3");
-    CHECK(RequiredCell(answer, "fastcached_delete_hits_total").lexical == "2");
+    CHECK(RequiredCell(answer, "pace_worker_jobs_completed_total").lexical == "12");
+    CHECK(RequiredCell(answer, "pace_items").lexical == "3");
+    CHECK(RequiredCell(answer, "pace_delete_hits_total").lexical == "2");
 
     // The zero row is PRESENT, which is the property a reading of only the non-zero
     // counter cannot see.
-    CHECK(RequiredCell(answer, "fastcache_worker_jobs_started_total").lexical == "0");
+    CHECK(RequiredCell(answer, "pace_worker_jobs_started_total").lexical == "0");
 
     // And every catalogue counter is a field named by its `prometheusName`, which is what this verb's
     // counters were named before it carried a reading: a script reading `--format=kv` keys (the
@@ -866,7 +866,7 @@ TEST_CASE("A fallback is not run against an endpoint that is not a node", "[cli]
 
     SECTION("a 0xFC-only endpoint is explained, and nothing is sent")
     {
-        auto const answer = RunNodeFallback(*verb, VerbContext { .node = &node }, RemoteKind::FastcacheWireOnly, primary);
+        auto const answer = RunNodeFallback(*verb, VerbContext { .node = &node }, RemoteKind::PaceWireOnly, primary);
         CHECK(node.Sent().empty());
 
         // Reached and answered, so `Unreachable` is corrected here exactly as it is for a
@@ -881,7 +881,7 @@ TEST_CASE("A fallback is not run against an endpoint that is not a node", "[cli]
     {
         // The probe explained nothing the caller does not already know, so nothing is
         // added: one fault must not read as two.
-        auto const answer = RunNodeFallback(*verb, VerbContext { .node = &node }, RemoteKind::NotFastcacheWire, primary);
+        auto const answer = RunNodeFallback(*verb, VerbContext { .node = &node }, RemoteKind::NotPaceWire, primary);
         CHECK(node.Sent().empty());
 
         // **The CONTROL for the two cases above**, and the reason they mean anything: no
@@ -2084,7 +2084,7 @@ TEST_CASE("the stats ladder records where it asked each source, and no address f
                                                     .surface = CacheWire::WireSurface::Raft, .port = 6680 } } }),
                                   NodeFailure(ExchangeFailure::Transport, "the node-metrics verb went unanswered") },
                                 "10.0.0.4:6674" };
-    ScriptedExchange resp { Answers({ Bulk("fastcached_version:0.4.1\r\n") }) };
+    ScriptedExchange resp { Answers({ Bulk("pace_version:0.4.1\r\n") }) };
     auto gatherer =
         LadderGatherer { Endpoint {}, Endpoint { .host = "fd00::9", .port = 6379 }, DialTimeouts {}, &resp, &node };
 
@@ -2244,8 +2244,8 @@ TEST_CASE("an endpoint's identity keeps its four states apart by type", "[cli][n
     auto const node = IdentityFor(StatusReply({ .version = "0.2.0", .nodeId = {}, .uptimeSeconds = 5, .surfaces = {} }));
 
     CHECK_FALSE(notAsked.kind.has_value());
-    CHECK(silent.kind == RemoteKind::NotFastcacheWire);
-    CHECK(daemon.kind == RemoteKind::FastcacheWireOnly);
+    CHECK(silent.kind == RemoteKind::NotPaceWire);
+    CHECK(daemon.kind == RemoteKind::PaceWireOnly);
     CHECK(node.kind == RemoteKind::CompileNode);
 
     // Each answered state names the endpoint, which is what a refusal quoting it needs.
@@ -2277,7 +2277,7 @@ TEST_CASE("the identity and the probe classify every reply the same way", "[cli]
     }
 
     // And the unreadable body is still a NODE, not merely consistent with the probe: a
-    // probe and an identity that both drifted to `FastcacheWireOnly` would agree.
+    // probe and an identity that both drifted to `PaceWireOnly` would agree.
     CHECK(IdentityFor(OkWithUnreadableBody()).kind == RemoteKind::CompileNode);
 }
 
@@ -2322,10 +2322,10 @@ TEST_CASE("a compile node answers stats through the ladder's node-metrics rung",
 
     CHECK(answer.outcome == Outcome::Affirmative);
     CHECK(RequiredCell(answer, "source").lexical == "node-metrics");
-    CHECK(RequiredCell(answer, "fastcache_worker_jobs_completed_total").lexical == "12");
+    CHECK(RequiredCell(answer, "pace_worker_jobs_completed_total").lexical == "12");
     // And the cache tier's figure, which the rung's old counters-only body could not carry (#1406) --
     // so `stats` against a node reads the same fields `/metrics` would have given it.
-    CHECK(RequiredCell(answer, "fastcached_items").lexical == "3");
+    CHECK(RequiredCell(answer, "pace_items").lexical == "3");
 }
 
 TEST_CASE("a node whose description this client cannot read is a node it cannot read", "[cli][node][identity]")
@@ -2351,7 +2351,7 @@ TEST_CASE("a node-status refused on the wire version names both versions and doe
     // compile node", which is what every other refusal is worded as.
     auto const refused = IdentityFor(
         RefusalReply(CacheWire::ErrorCode::UnsupportedVersion, "unsupported wire version 8; this server speaks 6..6"));
-    CHECK(refused.kind == RemoteKind::FastcacheWireOnly);
+    CHECK(refused.kind == RemoteKind::PaceWireOnly);
     CHECK(refused.detail.contains(std::format("0xFC wire {}", static_cast<unsigned>(CacheWire::CurrentVersion))));
     CHECK(refused.detail.contains("this server speaks 6..6"));
     CHECK_FALSE(refused.detail.contains("not a compile node"));

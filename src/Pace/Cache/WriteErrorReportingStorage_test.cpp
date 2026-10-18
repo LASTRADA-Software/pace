@@ -166,7 +166,7 @@ TEST_CASE("WriteErrorReportingStorage can own the storage it reports for", "[cac
     // a local outliving the decorator. A tier composed and handed back as ONE
     // `unique_ptr` -- the compile node's -- has nowhere to keep the inner alive,
     // which is why the node had no write-error reporting at all and exported
-    // `fastcached_write_errors_total` as a counter that could never rise.
+    // `pace_write_errors_total` as a counter that could never rise.
     Pace::CapturingLogger logger;
 
     auto inner = std::make_unique<StubStorage>();

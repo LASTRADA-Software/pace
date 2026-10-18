@@ -46,10 +46,10 @@ set -uo pipefail
 # predicate alone. The two halves this tree has been bitten by are the ENUMERATION
 # answering nothing and the PATTERN being broader than its author reads it as, and only
 # one of those is a predicate.
-FastCachedRoot="${FASTCACHED_WALK_SOLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-FastCachedExemptions="${FASTCACHED_WALK_SOLE_EXEMPTIONS:-${FastCachedRoot}/scripts/check-workflow-walk-sole-exemptions.txt}"
+PaceRoot="${PACE_WALK_SOLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PaceExemptions="${PACE_WALK_SOLE_EXEMPTIONS:-${PaceRoot}/scripts/check-workflow-walk-sole-exemptions.txt}"
 # shellcheck source=scripts/lib/third-party-roots.sh
-. "${FastCachedRoot}/scripts/lib/third-party-roots.sh"
+. "${PaceRoot}/scripts/lib/third-party-roots.sh"
 
 # ---------------------------------------------------------------------------
 if [ "${1:-}" = "--self-test" ]; then
@@ -88,8 +88,8 @@ if [ "${1:-}" = "--self-test" ]; then
         local what="$1" want="$2" out got=0
         selfTestCases=$((selfTestCases + 1))
         Track
-        out="$(FASTCACHED_WALK_SOLE_ROOT="$scratch/tree" \
-               FASTCACHED_WALK_SOLE_EXEMPTIONS="$scratch/tree/exemptions.txt" \
+        out="$(PACE_WALK_SOLE_ROOT="$scratch/tree" \
+               PACE_WALK_SOLE_EXEMPTIONS="$scratch/tree/exemptions.txt" \
                bash "$me" 2>&1)" || got=$?
         case "$want" in
             want-pass)   [ "$got" -eq 0 ] && { echo "  ok    ($want) $what"; return; } ;;
@@ -205,25 +205,25 @@ Fail() { echo "  FAIL: $*" >&2; Problems=$((Problems + 1)); }
 
 # Every first-party shell script and awk program under `scripts/`, one per line, into
 # `SubjectList` -- a global rather than stdout, so it runs ONCE: returned through
-# `$(...)` it ran twice, the first time only so `FastCachedDeclined` survived the
+# `$(...)` it ran twice, the first time only so `PaceDeclined` survived the
 # subshell. Enumerated through git, which is the one answer to which files are this
 # project's: a directory walk would take a stray copy in a build tree as a subject
 # and report on a file nobody tracks.
 Subjects() {
     local tracked firstParty declined
-    tracked="$(git -C "${FastCachedRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.awk')" || return 2
+    tracked="$(git -C "${PaceRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.awk')" || return 2
     if [ -z "${tracked}" ]; then
         echo "check-workflow-walk-sole: git ls-files named no script under scripts/, which cannot be" >&2
         echo "  true. Refused rather than read as 'no script keeps a private walk'." >&2
         return 2
     fi
-    if ! firstParty="$(first_party_paths "${FastCachedRoot}" "${tracked}")"; then
+    if ! firstParty="$(first_party_paths "${PaceRoot}" "${tracked}")"; then
         echo "check-workflow-walk-sole: the third-party roots could not be read, so which files are" >&2
         echo "  this project's own is unknown. Refused." >&2
         return 2
     fi
-    declined="$(third_party_paths "${FastCachedRoot}" "${tracked}")" || return 2
-    FastCachedDeclined="$(third_party_declined_summary 'script(s)' "${declined}")"
+    declined="$(third_party_paths "${PaceRoot}" "${tracked}")" || return 2
+    PaceDeclined="$(third_party_declined_summary 'script(s)' "${declined}")"
     SubjectList="${firstParty}"
 }
 
@@ -306,8 +306,8 @@ Subjects || exit 2
 # The exemption rows: `<path><TAB><reason>`. Read before the scan, so a row for a
 # file that is not a subject at all is refused rather than quietly unused.
 ExemptPaths=""
-if [ -r "${FastCachedExemptions}" ]; then
-    ExemptPaths="$(sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "${FastCachedExemptions}" | cut -f1)"
+if [ -r "${PaceExemptions}" ]; then
+    ExemptPaths="$(sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "${PaceExemptions}" | cut -f1)"
 fi
 
 # True when @p 1 is one whole line of the newline-separated @p 2. A `case`, not a
@@ -339,7 +339,7 @@ JudgeSubject() {
 Readable=()
 while IFS= read -r subject; do
     [ -n "${subject}" ] || continue
-    [ -r "${FastCachedRoot}/${subject}" ] && Readable[${#Readable[@]}]="${FastCachedRoot}/${subject}"
+    [ -r "${PaceRoot}/${subject}" ] && Readable[${#Readable[@]}]="${PaceRoot}/${subject}"
 done <<< "${SubjectList}"
 
 Scanned=0
@@ -356,7 +356,7 @@ current=""
 currentHits=""
 while IFS=$'\t' read -r kind path rest; do
     [ -n "${kind}" ] || continue
-    subject="${path#"${FastCachedRoot}"/}"
+    subject="${path#"${PaceRoot}"/}"
     case "${kind}" in
         SCANNED)
             [ -z "${current}" ] || JudgeSubject "${current}" "${currentHits}"
@@ -398,7 +398,7 @@ if [ "${Scanned}" -eq 0 ]; then
 fi
 
 echo "check-workflow-walk-sole: enumerated via git ls-files"
-[ -z "${FastCachedDeclined:-}" ] || echo "check-workflow-walk-sole: ${FastCachedDeclined}"
+[ -z "${PaceDeclined:-}" ] || echo "check-workflow-walk-sole: ${PaceDeclined}"
 exemptCount=0
 while IFS= read -r row; do
     [ -n "${row}" ] && exemptCount=$((exemptCount + 1))

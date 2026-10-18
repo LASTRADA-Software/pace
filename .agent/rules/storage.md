@@ -48,7 +48,7 @@ record still verified.
   always "these bytes are not a well-formed value of that type".
 - **Taking the code away is half the fix; the other half is that something still
   counts.** `MalformedValue` is deliberately not a persistence failure, so it no
-  longer moves `fastcached_write_errors_total` nor writes a `storage write failed`
+  longer moves `pace_write_errors_total` nor writes a `storage write failed`
   warning -- which on its own would trade a wrong signal for **no** signal.
   `CacheMalformedValues` is the row that keeps "clients are sending nonsense"
   visible and separate from "this disk is failing".
@@ -241,7 +241,7 @@ test wanting it; and a rulebook sentence that describes where code currently liv
 is a fact with an expiry date, so it has to be searched for when the code moves.
 
 **The signals are not the same on both binaries.** `WriteErrorReportingStorage` is
-constructed only by `pace-kv`, so `fastcached_write_errors_total` and the
+constructed only by `pace-kv`, so `pace_write_errors_total` and the
 `storage write failed` warning cannot move on a compile node — its tier is wrapped
 in `ShardedStorage` and nothing else. A counter that is exported and can never rise
 is the shape the metrics rules already name, so anything written about reacting to
@@ -269,7 +269,7 @@ store: the free list is written into free pages, `Allocate` takes the lowest fre
 and each durable flush cuts the free tail (`FilePageStore::PagesInUse` states the
 relation). **Both directions:** the file is never shorter than the footprint, and longer
 by the free pages until a flush or later churn removes them --
-`fastcached_tier_file_bytes` reports the length beside `bytesUsed` so the gap is visible.
+`pace_tier_file_bytes` reports the length beside `bytesUsed` so the gap is visible.
 
 **An entry's cost is the pages its eviction frees, which for an inline value is nothing
 until its leaf empties.** The tree frees an empty leaf and never merges underfull ones,

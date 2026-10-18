@@ -5,7 +5,7 @@ A compiler launcher in the style of ccache and sccache, backed by a
 
 It fronts every compile: on a hit it writes the object file and replays the
 compiler's captured output; on a miss it has a worker compile it when
-`FASTCACHE_SCHEDULER` names one, otherwise runs the real compiler, and stores the
+`PACE_SCHEDULER` names one, otherwise runs the real compiler, and stores the
 canonicalized result. Caching is an optimization — an unreachable or broken cache
 slows a build down, it never breaks one.
 
@@ -21,7 +21,7 @@ What a build against a broken cache *does* pay is the dispatch itself: a
 translation unit that would have been a hit is now preprocessed a second time --
 dispatch sends `#line` markers, which the cache key deliberately suppresses -- and
 sent to a worker. That is the trade the fleet exists to make and it is still the
-right one, but it is not free, and it is the reason a wrong `FASTCACHE_ADDR` is
+right one, but it is not free, and it is the reason a wrong `PACE_ADDR` is
 worth fixing rather than living with.
 
 This page is the reference: every flag, every environment variable, every
@@ -116,10 +116,10 @@ cmake -S . -B build -G Ninja \
 The pace-kv build does this for itself: `cmake/portable/CompileCache.cmake` picks
 `pace-cc` up automatically whenever the binary is on `PATH` and a daemon
 answers at `127.0.0.1:6674` — at any other daemon, local or remote, when
-`FASTCACHE_ADDR` is exported when the build tree is created, at
-`-DFASTCACHE_ADDR=host:port` ahead of even that, nowhere if it is set empty — and injects `FASTCACHE_SOURCE_DIR` /
-`FASTCACHE_BINARY_DIR` from the source and binary directories, so those two need
-not be exported. It also injects `FASTCACHE_DEPS_DIR` from CPM's source cache
+`PACE_ADDR` is exported when the build tree is created, at
+`-DPACE_ADDR=host:port` ahead of even that, nowhere if it is set empty — and injects `PACE_SOURCE_DIR` /
+`PACE_BINARY_DIR` from the source and binary directories, so those two need
+not be exported. It also injects `PACE_DEPS_DIR` from CPM's source cache
 (`CPM_SOURCE_CACHE`), and with `pace-cc` as the launcher it maps `__FILE__`
 for the checkout and that cache (`-fmacro-prefix-map=<checkout>/=` and
 `-fmacro-prefix-map=<cache>/=deps/`). Together those are what let a second folder
@@ -129,15 +129,15 @@ checkout and is stored per checkout, and without the root an include directory
 into a cache under the user's home keeps that home in every key.
 
 **The configure environment seeds a build tree; it does not steer one.**
-`FASTCACHE_ADDR` and `FASTCACHE_SCHEDULER` (below) are taken from the environment
+`PACE_ADDR` and `PACE_SCHEDULER` (below) are taken from the environment
 by the configure that creates the tree's cache entry, and from then on they are
 held in the build tree's cache. Only these move a held value:
 
-- `-DFASTCACHE_ADDR=<host:port>` / `-DFASTCACHE_SCHEDULER=<host:port>`, and the
-  empty `-DFASTCACHE_ADDR=` / `-DFASTCACHE_SCHEDULER=`, which turn the cache and
+- `-DPACE_ADDR=<host:port>` / `-DPACE_SCHEDULER=<host:port>`, and the
+  empty `-DPACE_ADDR=` / `-DPACE_SCHEDULER=`, which turn the cache and
   dispatch **off** respectively. A `-D` always outranks the environment, including
   one that repeats the value the tree already holds;
-- `cmake -U FASTCACHE_ADDR` / `-U FASTCACHE_SCHEDULER`, which removes the entry,
+- `cmake -U PACE_ADDR` / `-U PACE_SCHEDULER`, which removes the entry,
   so the configure it is part of seeds it again from its own environment;
 - `cmake --fresh`, which seeds everything again.
 
@@ -145,7 +145,7 @@ A configure whose environment presents a different value does **not** apply it.
 It says so, naming the `-D` that would:
 
 ```
--- [cache] FASTCACHE_ADDR is '10.0.0.5:6674' in the environment and NOT applied: this build tree holds '127.0.0.1:6674', and the environment only seeds a tree with no FASTCACHE_ADDR entry -- -DFASTCACHE_ADDR=10.0.0.5:6674 applies it
+-- [cache] PACE_ADDR is '10.0.0.5:6674' in the environment and NOT applied: this build tree holds '127.0.0.1:6674', and the environment only seeds a tree with no PACE_ADDR entry -- -DPACE_ADDR=10.0.0.5:6674 applies it
 ```
 
 This used to be the other way round: a *change* in the environment retargeted
@@ -153,35 +153,35 @@ the entry unless it had been "changed by hand", and "by hand" was judged by
 comparing the entry with the value last applied. That comparison cannot see a
 `-D` that typed the value already held -- measured: a tree configured with
 dispatch off from one shell, reconfigured from a terminal holding
-`FASTCACHE_SCHEDULER` with `-DFASTCACHE_SCHEDULER=` to say off explicitly, came up
+`PACE_SCHEDULER` with `-DPACE_SCHEDULER=` to say off explicitly, came up
 **on**. A held value and a reported difference have no such blind spot.
 
 **Dispatch is decided at configure, and configure says which way.** Beside the
 line naming the launcher, it prints one of:
 
 ```
--- [cache] dispatch: 10.0.0.9:6674 (configured, seeded from the configure environment and held in this build tree's cache; baked into the launcher, so the build's own environment does not change it; not probed -- each compile records DISPATCHED or DECLINED in invocations.log; -DFASTCACHE_SCHEDULER= turns it off)
--- [cache] dispatch: off (no FASTCACHE_SCHEDULER in the configure environment, and this build tree now holds that; every miss compiles on this machine -- -DFASTCACHE_SCHEDULER=<host:port> turns it on)
--- [cache] dispatch: off (FASTCACHE_SCHEDULER is empty in this build tree's cache, which outranks the 10.0.0.9:6674 in the environment; every miss compiles on this machine -- -DFASTCACHE_SCHEDULER=10.0.0.9:6674 turns it on)
+-- [cache] dispatch: 10.0.0.9:6674 (configured, seeded from the configure environment and held in this build tree's cache; baked into the launcher, so the build's own environment does not change it; not probed -- each compile records DISPATCHED or DECLINED in invocations.log; -DPACE_SCHEDULER= turns it off)
+-- [cache] dispatch: off (no PACE_SCHEDULER in the configure environment, and this build tree now holds that; every miss compiles on this machine -- -DPACE_SCHEDULER=<host:port> turns it on)
+-- [cache] dispatch: off (PACE_SCHEDULER is empty in this build tree's cache, which outranks the 10.0.0.9:6674 in the environment; every miss compiles on this machine -- -DPACE_SCHEDULER=10.0.0.9:6674 turns it on)
 ```
 
 Both open with `[cache] dispatch: ` and then the endpoint or `off`, so one search
 finds the line whichever way configure decided. A value held from an earlier
 configure reads `held in this build tree's cache,
-where a -DFASTCACHE_SCHEDULER or the configure that created the tree put it`,
+where a -DPACE_SCHEDULER or the configure that created the tree put it`,
 and an environment presenting another scheduler adds `the <host:port> in the
-environment is NOT applied -- -DFASTCACHE_SCHEDULER=<host:port> retargets it`.
+environment is NOT applied -- -DPACE_SCHEDULER=<host:port> retargets it`.
 The line is **configuration, not reachability**: nothing at configure asks the
 scheduler anything, and each compile records whether it was `DISPATCHED` or
 `DECLINED` in `invocations.log`.
 
 The generated launcher carries exactly what the line says:
-`FASTCACHE_SCHEDULER=<host:port>` when dispatch is on, and `FASTCACHE_SCHEDULER=`
+`PACE_SCHEDULER=<host:port>` when dispatch is on, and `PACE_SCHEDULER=`
 (which the launcher reads as unset) when it is off. Set-but-empty and unset are
-the same thing in the environment here, unlike `FASTCACHE_ADDR`, because the
+the same thing in the environment here, unlike `PACE_ADDR`, because the
 launcher reads them the same way: neither dispatches.
 
-**So a `FASTCACHE_SCHEDULER` in the build's own environment no longer changes
+**So a `PACE_SCHEDULER` in the build's own environment no longer changes
 anything**, in either direction. That is on purpose. The launcher used to read it
 only from the environment of whatever ran the build, so a value set in one shell
 and a build started from another compiled every miss locally -- measured on a
@@ -196,13 +196,13 @@ not make that question time out. Changing the value changes every compile comman
 so the next build recompiles everything -- served from the cache, since the key does
 not include the scheduler. `ctest -R compile-cache-dispatch` pins the printed line
 against the generated launcher, in both states, across reconfigures with and
-without a `-D`, and across ninja's own regeneration; it holds `FASTCACHE_ADDR` to
+without a `-D`, and across ninja's own regeneration; it holds `PACE_ADDR` to
 the same rule. This applies only where the module chooses the launcher; a build
 that sets `CMAKE_CXX_COMPILER_LAUNCHER=pace-cc` itself still reads the
 environment at build time.
 
 "Answers" is checked, not assumed: configure compiles one tiny translation unit
-through the launcher with `FASTCACHE_VERBOSE=1` and accepts only a reported
+through the launcher with `PACE_VERBOSE=1` and accepts only a reported
 `HIT`/`MISS`, since a launcher whose daemon is down still compiles fine and would
 otherwise leave every TU paying a failed connect with nothing to show for it.
 That costs about 0.1 s against a daemon that answers, runs on every configure so
@@ -239,7 +239,7 @@ sccache gate.
 --8<-- "sccache-backend-caveat.md"
 
 The probe carries its own ten-second cap, which is what bounds a remote address
-that drops packets rather than refusing them: `FASTCACHE_TIMEOUT` bounds the
+that drops packets rather than refusing them: `PACE_TIMEOUT` bounds the
 exchange, not the TCP `connect()`, so a firewalled or vanished host otherwise
 takes the kernel's connect timeout to fail (measured at 2m30s on macOS) — once
 per configure here, but once per translation unit in a build.
@@ -248,7 +248,7 @@ per configure here, but once per translation unit in a build.
 
 All of the above assumes `pace-cc` is already on `PATH`, which on a new
 repository or a fresh machine is a manual step someone has to remember.
-`-DFASTCACHE_AUTO_INSTALL=ON` removes it: when no launcher the build could
+`-DPACE_AUTO_INSTALL=ON` removes it: when no launcher the build could
 actually use is installed — no `pace-cc`, no `ccache`, and no `sccache` that
 `-DALLOW_SCCACHE_FALLBACK=ON` has opted into — the module downloads a
 prebuilt `pace-cc` for the host's OS and architecture from the latest
@@ -268,15 +268,15 @@ and build tree on the machine shares one copy and later configures neither
 download nor ask. The release lookup is cached for a day, and honours
 `GITHUB_TOKEN` / `GH_TOKEN` where the unauthenticated limit of 60 requests an
 hour per address would otherwise be shared out among CI runners. Pinning
-`FASTCACHE_AUTO_INSTALL_VERSION` skips the lookup altogether, and pointing
-`FASTCACHE_AUTO_INSTALL_DOWNLOAD_BASE` at a mirror installs without reaching
+`PACE_AUTO_INSTALL_VERSION` skips the lookup altogether, and pointing
+`PACE_AUTO_INSTALL_DOWNLOAD_BASE` at a mirror installs without reaching
 GitHub at all.
 
 Auto-installing the launcher alone still leaves a genuinely clean machine
-uncached, since `pace-cc` has nothing to talk to: `-DFASTCACHE_AUTO_START=ON`
+uncached, since `pace-cc` has nothing to talk to: `-DPACE_AUTO_START=ON`
 additionally stages and starts a `pace-kv` daemon in the background — from
 the same release archive, persistently, off by default and independently of
-`FASTCACHE_AUTO_INSTALL` — when nothing answers at `FASTCACHE_ADDR`.
+`PACE_AUTO_INSTALL` — when nothing answers at `PACE_ADDR`.
 `cmake/portable/README.md` covers it in full, including why it defaults off in
 CI as well as on a developer machine that has not opted in.
 
@@ -294,24 +294,24 @@ This page is the prose version; if the two ever disagree, `--help` is right.
 
 | Variable | Meaning | Default |
 |----------|---------|---------|
-| `FASTCACHE_ADDR` | `host:port` of the cache — a `pace-kv`, or a `pace-node`'s `--listen-node`. Hostnames, IPv4 literals, and bracketed IPv6 (`[::1]:6674`) all resolve. Set but **empty** is the opt-out and means no caching -- but see the PowerShell note below, where that spelling does not reach the launcher. | `127.0.0.1:6674` |
-| `FASTCACHE_SOURCE_DIR` | Checkout source root, used for keying and path canonicalization. | unset — **no caching** |
-| `FASTCACHE_BINARY_DIR` | Build output root. | unset — **no caching** |
-| `FASTCACHE_DEPS_DIR` | Where this machine keeps third-party sources the build reads from **outside** the checkout — CPM's source cache. Keyed and replayed as a root of its own (`<DEPROOT>`), so two machines whose caches sit in different homes share objects; an object naming it is bound to the machine, as one naming the checkout is bound to the checkout. | unset — such paths are keyed as written, which shares only between builds keeping them in one place |
-| `FASTCACHE_PREFETCH_GROUP` | Prefetch grouping id. **Not** part of the cache key, so it never partitions the cache. | `default` |
-| `FASTCACHE_VERBOSE` | Print `HIT`/`MISS` and fall-back diagnostics to stderr. | unset (quiet) |
-| `FASTCACHE_NO_STATS` | Do not record invocations to the statistics log. | unset (recording on) |
-| `FASTCACHE_NO_DIRECT` | Disable direct mode, always preprocessing to derive the key. | unset (direct on) |
-| `FASTCACHE_CONNECT_TIMEOUT` | Deadline for *opening* a connection — name resolution included. Like the three below, a duration: a whole number and one of `ms`, `s`, `min`, `h`, `d`; a bare number is not one and is ignored. `0s` leaves the platform's own, which runs to minutes. Short on purpose: a cache that has not accepted within a second is one the build is better off without, and a wedged resolver would otherwise stall every translation unit. The mint's connect is capped below it: asking this machine's own node for a machine ticket, over loopback, gives up connecting after **50 ms** whatever this says — a lower value lowers it, and `0s` does not lift it — so a machine with no node pays about that once per compile rather than a second per exchange. `pacectl` and the node's operator verbs mint under the same bound. | `1s` |
-| `FASTCACHE_TIMEOUT` | Deadline for one **whole** exchange with the daemon — or with a scheduler's `LEASE`/`RELEASE` — from the request to the last byte of the reply. `0s` removes the bound. A daemon that accepts and then stalls, or dribbles one byte at a time, would otherwise block the compile forever. Bounds one exchange, not the whole invocation — see below — and **not** a remote compile. | `10s` |
-| `FASTCACHE_DISPATCH_TIMEOUT` | Deadline for one whole **`COMPILE`** exchange with a worker. `0s` removes the bound. Far larger than `FASTCACHE_TIMEOUT` because it bounds a different shape of conversation: a worker writes nothing until the compiler has finished, so the client waits out the entire remote compile in one read. Ten minutes because that is the scheduler's own lease timeout — waiting longer means waiting on a lease it has already reclaimed. See [Distributed compilation](../getting-started/distributed-compilation.md). | `10min` |
-| `FASTCACHE_DISPATCH_IDLE` | Deadline on **silence** during a `COMPILE` exchange. `0s` removes the bound. A worker writes a five-byte progress frame every few seconds while it is compiling, so this bounds how long it may say *nothing* rather than how long the compile may take — which is what lets it be seconds while `FASTCACHE_DISPATCH_TIMEOUT` stays minutes. It is the only thing that sees a worker whose machine answers every keepalive probe while the process makes no progress. On expiry the launcher compiles locally and hands the lease back, and its fall-back line (with `FASTCACHE_VERBOSE`) reads *stopped reporting progress* rather than *ran out of budget*. See [Distributed compilation](../getting-started/distributed-compilation.md). | `30s` |
-| `FASTCACHE_MAX_STORE_BYTES` | Largest compiled result the launcher will offer to the daemon; `0` means no limit. A bigger result is simply left uncached. Matches the daemon's `--storage-max-value` default by construction rather than by negotiation — there is no handshake, so raise **both** or the other keeps refusing. | `268435456` (256 MiB) |
-| `FASTCACHE_SCHEDULER` | `host:port` of a fleet member's `--listen-node` port: a `pace-node` that runs consensus, whether it schedules (a voter) or not (a learner). On a miss the launcher asks it for a worker and sends that worker the preprocessed translation unit. Every refusal falls back to a local compile, with one exception: `not-leader` is an instruction rather than an answer about the fleet, so the launcher retries against the endpoint the refusal names (up to two hops, then it compiles locally). This value therefore only has to be **a** member of the cluster, not the current leader, and no launcher needs re-pointing after an election. A learner schedules nothing itself but answers a lease the same way, with `not-leader` naming the leader's scheduling endpoint, so this machine's own node (`127.0.0.1:6674`) is a value that works on every machine of a fleet whoever leads; the lease is released at the scheduler that granted it. A learner that has not heard from its leader for longer than an election timeout names nobody, and the miss compiles locally. A learner older than this release refuses the lease instead, and every miss compiles locally. The workers follow the leader too: a serving node registers where its fleet's formation record says the voters answer, follows `not-leader` when it registers and heartbeats, and remembers where the leader answered, so an election re-points the whole fleet rather than just the clients. Both halves are needed: a launcher that followed the redirect while the workers did not would reach a leader whose registry they had all expired out of, and every lease would answer `no-worker`. A cache that is unreachable or refuses counts as a miss for this purpose; it does not disable dispatch. See [Distributed compilation](../getting-started/distributed-compilation.md). A build configured through `cmake/portable/CompileCache.cmake` has this decided at **configure** and baked into its launcher, so the build's own environment does not change it (see Usage). | unset — **every miss compiles locally** |
-| `FASTCACHE_TOKEN` | The password for a cache at `FASTCACHE_ADDR` started with `--requirepass`, presented **to that cache alone**. Costs no round trip — it is pipelined ahead of the real command, not awaited. Safe against a cache that requires none: such a cache accepts it and ignores it. A compile node needs none: every exchange with another machine — the scheduler, a worker, a remote cache — presents a **machine ticket** this machine's node mints for that exchange alone, over loopback at `FASTCACHE_ADDR`'s port, and a token sent there would admit nobody. | unset — **no password sent** |
-| `FASTCACHE_USER` | Username to accompany `FASTCACHE_TOKEN`. Unset (the usual case) authenticates against the secret alone, which is what `--requirepass` configures. Ignored without a token — a username on its own is a misconfiguration, not a request to authenticate, and sending an empty secret would be refused by every server that wants one. | unset |
-| `FASTCACHE_VERIFY` | Verify one hit in every N by compiling the translation unit again and comparing the objects — see [Verifying that a hit is the right object](#verifying-that-a-hit-is-the-right-object). Costs a whole compile per verified hit, so it is for CI, a nightly, or reproducing a report. `1` checks every hit. Which hits are sampled is decided by hashing the key rather than by chance, so the rate holds over a build and a translation unit that verified verifies again. A value that is not a whole number reads as **off** rather than as an error: this is a diagnostic set by hand, and refusing to compile over a typo in it would break the build it was brought in to investigate. | unset (off) |
-| `FASTCACHE_MSVC_DEPS_PREFIX` | The prefix a **dispatched** compile's synthesised `/showIncludes` notes carry — that is, this build's `msvc_deps_prefix`. Only dispatch needs it: a worker compiles preprocessed text and reports no dependencies, so the launcher writes the record itself, while a local compile emits the compiler's own notes and needs nothing here. Ninja matches the prefix **literally** and knows nothing about languages, so an English note against a localized `msvc_deps_prefix` records **no dependencies at all** for that translation unit and the next header edit does not rebuild it — see [A localized MSVC toolchain](#a-localized-msvc-toolchain). | unset — the English `Note: including file:`. Set it to `auto` to have the launcher ASK the compiler instead; see [A localized MSVC toolchain](#a-localized-msvc-toolchain) for why that is opt-in |
+| `PACE_ADDR` | `host:port` of the cache — a `pace-kv`, or a `pace-node`'s `--listen-node`. Hostnames, IPv4 literals, and bracketed IPv6 (`[::1]:6674`) all resolve. Set but **empty** is the opt-out and means no caching -- but see the PowerShell note below, where that spelling does not reach the launcher. | `127.0.0.1:6674` |
+| `PACE_SOURCE_DIR` | Checkout source root, used for keying and path canonicalization. | unset — **no caching** |
+| `PACE_BINARY_DIR` | Build output root. | unset — **no caching** |
+| `PACE_DEPS_DIR` | Where this machine keeps third-party sources the build reads from **outside** the checkout — CPM's source cache. Keyed and replayed as a root of its own (`<DEPROOT>`), so two machines whose caches sit in different homes share objects; an object naming it is bound to the machine, as one naming the checkout is bound to the checkout. | unset — such paths are keyed as written, which shares only between builds keeping them in one place |
+| `PACE_PREFETCH_GROUP` | Prefetch grouping id. **Not** part of the cache key, so it never partitions the cache. | `default` |
+| `PACE_VERBOSE` | Print `HIT`/`MISS` and fall-back diagnostics to stderr. | unset (quiet) |
+| `PACE_NO_STATS` | Do not record invocations to the statistics log. | unset (recording on) |
+| `PACE_NO_DIRECT` | Disable direct mode, always preprocessing to derive the key. | unset (direct on) |
+| `PACE_CONNECT_TIMEOUT` | Deadline for *opening* a connection — name resolution included. Like the three below, a duration: a whole number and one of `ms`, `s`, `min`, `h`, `d`; a bare number is not one and is ignored. `0s` leaves the platform's own, which runs to minutes. Short on purpose: a cache that has not accepted within a second is one the build is better off without, and a wedged resolver would otherwise stall every translation unit. The mint's connect is capped below it: asking this machine's own node for a machine ticket, over loopback, gives up connecting after **50 ms** whatever this says — a lower value lowers it, and `0s` does not lift it — so a machine with no node pays about that once per compile rather than a second per exchange. `pacectl` and the node's operator verbs mint under the same bound. | `1s` |
+| `PACE_TIMEOUT` | Deadline for one **whole** exchange with the daemon — or with a scheduler's `LEASE`/`RELEASE` — from the request to the last byte of the reply. `0s` removes the bound. A daemon that accepts and then stalls, or dribbles one byte at a time, would otherwise block the compile forever. Bounds one exchange, not the whole invocation — see below — and **not** a remote compile. | `10s` |
+| `PACE_DISPATCH_TIMEOUT` | Deadline for one whole **`COMPILE`** exchange with a worker. `0s` removes the bound. Far larger than `PACE_TIMEOUT` because it bounds a different shape of conversation: a worker writes nothing until the compiler has finished, so the client waits out the entire remote compile in one read. Ten minutes because that is the scheduler's own lease timeout — waiting longer means waiting on a lease it has already reclaimed. See [Distributed compilation](../getting-started/distributed-compilation.md). | `10min` |
+| `PACE_DISPATCH_IDLE` | Deadline on **silence** during a `COMPILE` exchange. `0s` removes the bound. A worker writes a five-byte progress frame every few seconds while it is compiling, so this bounds how long it may say *nothing* rather than how long the compile may take — which is what lets it be seconds while `PACE_DISPATCH_TIMEOUT` stays minutes. It is the only thing that sees a worker whose machine answers every keepalive probe while the process makes no progress. On expiry the launcher compiles locally and hands the lease back, and its fall-back line (with `PACE_VERBOSE`) reads *stopped reporting progress* rather than *ran out of budget*. See [Distributed compilation](../getting-started/distributed-compilation.md). | `30s` |
+| `PACE_MAX_STORE_BYTES` | Largest compiled result the launcher will offer to the daemon; `0` means no limit. A bigger result is simply left uncached. Matches the daemon's `--storage-max-value` default by construction rather than by negotiation — there is no handshake, so raise **both** or the other keeps refusing. | `268435456` (256 MiB) |
+| `PACE_SCHEDULER` | `host:port` of a fleet member's `--listen-node` port: a `pace-node` that runs consensus, whether it schedules (a voter) or not (a learner). On a miss the launcher asks it for a worker and sends that worker the preprocessed translation unit. Every refusal falls back to a local compile, with one exception: `not-leader` is an instruction rather than an answer about the fleet, so the launcher retries against the endpoint the refusal names (up to two hops, then it compiles locally). This value therefore only has to be **a** member of the cluster, not the current leader, and no launcher needs re-pointing after an election. A learner schedules nothing itself but answers a lease the same way, with `not-leader` naming the leader's scheduling endpoint, so this machine's own node (`127.0.0.1:6674`) is a value that works on every machine of a fleet whoever leads; the lease is released at the scheduler that granted it. A learner that has not heard from its leader for longer than an election timeout names nobody, and the miss compiles locally. A learner older than this release refuses the lease instead, and every miss compiles locally. The workers follow the leader too: a serving node registers where its fleet's formation record says the voters answer, follows `not-leader` when it registers and heartbeats, and remembers where the leader answered, so an election re-points the whole fleet rather than just the clients. Both halves are needed: a launcher that followed the redirect while the workers did not would reach a leader whose registry they had all expired out of, and every lease would answer `no-worker`. A cache that is unreachable or refuses counts as a miss for this purpose; it does not disable dispatch. See [Distributed compilation](../getting-started/distributed-compilation.md). A build configured through `cmake/portable/CompileCache.cmake` has this decided at **configure** and baked into its launcher, so the build's own environment does not change it (see Usage). | unset — **every miss compiles locally** |
+| `PACE_TOKEN` | The password for a cache at `PACE_ADDR` started with `--requirepass`, presented **to that cache alone**. Costs no round trip — it is pipelined ahead of the real command, not awaited. Safe against a cache that requires none: such a cache accepts it and ignores it. A compile node needs none: every exchange with another machine — the scheduler, a worker, a remote cache — presents a **machine ticket** this machine's node mints for that exchange alone, over loopback at `PACE_ADDR`'s port, and a token sent there would admit nobody. | unset — **no password sent** |
+| `PACE_USER` | Username to accompany `PACE_TOKEN`. Unset (the usual case) authenticates against the secret alone, which is what `--requirepass` configures. Ignored without a token — a username on its own is a misconfiguration, not a request to authenticate, and sending an empty secret would be refused by every server that wants one. | unset |
+| `PACE_VERIFY` | Verify one hit in every N by compiling the translation unit again and comparing the objects — see [Verifying that a hit is the right object](#verifying-that-a-hit-is-the-right-object). Costs a whole compile per verified hit, so it is for CI, a nightly, or reproducing a report. `1` checks every hit. Which hits are sampled is decided by hashing the key rather than by chance, so the rate holds over a build and a translation unit that verified verifies again. A value that is not a whole number reads as **off** rather than as an error: this is a diagnostic set by hand, and refusing to compile over a typo in it would break the build it was brought in to investigate. | unset (off) |
+| `PACE_MSVC_DEPS_PREFIX` | The prefix a **dispatched** compile's synthesised `/showIncludes` notes carry — that is, this build's `msvc_deps_prefix`. Only dispatch needs it: a worker compiles preprocessed text and reports no dependencies, so the launcher writes the record itself, while a local compile emits the compiler's own notes and needs nothing here. Ninja matches the prefix **literally** and knows nothing about languages, so an English note against a localized `msvc_deps_prefix` records **no dependencies at all** for that translation unit and the next header edit does not rebuild it — see [A localized MSVC toolchain](#a-localized-msvc-toolchain). | unset — the English `Note: including file:`. Set it to `auto` to have the launcher ASK the compiler instead; see [A localized MSVC toolchain](#a-localized-msvc-toolchain) for why that is opt-in |
 
 The statistics log is located from the usual per-user state variables rather than
 one of the launcher's own. These are read but never written:
@@ -329,45 +329,45 @@ silently disabled. Caching itself is unaffected.
 has a default and the other two do not, so in practice it is the roots that are
 missing when nothing caches — the build still succeeds, which is exactly why this
 is worth checking before concluding the cache does not help. With
-`FASTCACHE_VERBOSE` set, that case reports
-`missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR`.
+`PACE_VERBOSE` set, that case reports
+`missing PACE_ADDR/SOURCE_DIR/BINARY_DIR`.
 
 ### The empty opt-out does not work from PowerShell
 
-`export FASTCACHE_ADDR=` is a genuine set-but-empty entry on a POSIX shell, and the
-launcher reads it as the opt-out. **PowerShell cannot express it.** `$env:FASTCACHE_ADDR
-= ""` leaves the name present in PowerShell's own view -- `Test-Path Env:FASTCACHE_ADDR`
-answers `True` and `$env:FASTCACHE_ADDR` prints empty, exactly as an operator expects --
+`export PACE_ADDR=` is a genuine set-but-empty entry on a POSIX shell, and the
+launcher reads it as the opt-out. **PowerShell cannot express it.** `$env:PACE_ADDR
+= ""` leaves the name present in PowerShell's own view -- `Test-Path Env:PACE_ADDR`
+answers `True` and `$env:PACE_ADDR` prints empty, exactly as an operator expects --
 while the child process never receives the variable at all. `pace-cc` therefore sees
 it **unset**, falls back to the `127.0.0.1:6674` default, and keeps caching. Nothing
 reports this: the opt-out silently does not happen, and the one place anybody would check
 agrees that it did.
 
-`[Environment]::SetEnvironmentVariable('FASTCACHE_ADDR', '', 'Process')` behaves the same
+`[Environment]::SetEnvironmentVariable('PACE_ADDR', '', 'Process')` behaves the same
 way, so it is not a spelling problem with a workaround. From PowerShell, opt out at
-configure time instead -- `-DFASTCACHE_ADDR=` (the deliberate form, which wins over the
+configure time instead -- `-DPACE_ADDR=` (the deliberate form, which wins over the
 environment) or `-DUSE_COMPILER_CACHE=OFF` -- both of which travel as command-line
 arguments rather than through an environment block.
 
 **The CMake integration honours the same opt-out, and until
 [#372](https://github.com/LASTRADA-Software/fastcached/issues/372) it did not.**
 `cmake/portable/CompileCache.cmake` decides whether the launcher is used at all, and
-it folded a set-but-empty `FASTCACHE_ADDR` into the default -- so on a POSIX shell,
-where the spelling above *does* travel, `export FASTCACHE_ADDR=` reached the launcher
+it folded a set-but-empty `PACE_ADDR` into the default -- so on a POSIX shell,
+where the spelling above *does* travel, `export PACE_ADDR=` reached the launcher
 as an opt-out and reached the build integration as "say nothing", and the build went
 on being fronted. The two readings of one variable now agree: absent means the
 default, present-and-empty means no caching, in both -- **on the configure that
-creates the build tree's `FASTCACHE_ADDR` entry**. After that the tree holds its
+creates the build tree's `PACE_ADDR` entry**. After that the tree holds its
 address and the environment only seeds a tree with no entry, so a later
-`export FASTCACHE_ADDR=` is reported as not applied and the launcher keeps the held
-address; opt a tree that already holds one out with `-DFASTCACHE_ADDR=`. The
+`export PACE_ADDR=` is reported as not applied and the launcher keeps the held
+address; opt a tree that already holds one out with `-DPACE_ADDR=`. The
 launcher itself reads the variable at every compile only where the module did not
 choose it. Note this is why the paragraph
 above still sends a PowerShell user to `-D`: that platform's problem is that the
 variable never reaches the child at all, which no predicate on the receiving side can
 repair.
 
-`FASTCACHE_ADDR` defaults to `127.0.0.1:6674` rather than to nothing, so the
+`PACE_ADDR` defaults to `127.0.0.1:6674` rather than to nothing, so the
 launcher caches with no configuration at all against whichever of `pace-kv` or
 `pace-node` is running on this machine — the node's `--listen-node`
 defaults to the same address for exactly that reason. A *remote* default would be
@@ -392,11 +392,11 @@ none of those lines, recorded **no dependencies** for the translation unit, prin
 the notes as ordinary compiler output, and stopped rebuilding it when its headers
 changed — a wrong build under a zero exit code, which persists until someone cleans.
 
-Set `FASTCACHE_MSVC_DEPS_PREFIX` to the value your build already holds:
+Set `PACE_MSVC_DEPS_PREFIX` to the value your build already holds:
 
 ```pwsh
 Select-String msvc_deps_prefix build.ninja      # in your build directory
-$env:FASTCACHE_MSVC_DEPS_PREFIX = 'Hinweis: Einlesen der Datei:'
+$env:PACE_MSVC_DEPS_PREFIX = 'Hinweis: Einlesen der Datei:'
 ```
 
 The line that comes back is the whole assignment — `msvc_deps_prefix = Hinweis:
@@ -414,13 +414,13 @@ property of the *string*, not of any compiler's UI language.
 holds and never exports, so there are three sources and the launcher takes the first
 that answers:
 
-| `FASTCACHE_MSVC_DEPS_PREFIX` | What the launcher does |
+| `PACE_MSVC_DEPS_PREFIX` | What the launcher does |
 |---|---|
 | A prefix, e.g. `Hinweis: Einlesen der Datei:` | Uses it. This is the only source that can be right about a build the launcher cannot see: you copied it out of `build.ninja`, so you are stating a fact. |
 | `auto` | **Asks the compiler.** Writes a one-header translation unit somewhere temporary, preprocesses it with `/EP /showIncludes`, and reads the prefix back off the line that ends in the header it just wrote. Falls back to English if the compiler will not say. |
 | unset | The English `Note: including file:`, on trust. |
 
-With `FASTCACHE_VERBOSE` the launcher names the prefix it used and where it came from,
+With `PACE_VERBOSE` the launcher names the prefix it used and where it came from,
 on every dispatched compile that synthesises notes — the one line that answers *why did
 my build stop rebuilding this file*.
 
@@ -429,13 +429,13 @@ and they need different remedies:
 
 | It says | What happened | What to do |
 |---|---|---|
-| `named by FASTCACHE_MSVC_DEPS_PREFIX` | You stated the prefix. | Nothing. |
+| `named by PACE_MSVC_DEPS_PREFIX` | You stated the prefix. | Nothing. |
 | `discovered from the compiler` | `auto`, and the compiler answered. | Nothing. |
-| `the compiler was asked and did not say, so the default; name it with FASTCACHE_MSVC_DEPS_PREFIX` | `auto`, and the probe learned nothing — so this build is on English and your notes may not match. | Copy `msvc_deps_prefix` out of `build.ninja` and set it directly. |
-| `the default; override with FASTCACHE_MSVC_DEPS_PREFIX` | Nobody asked for anything; English on trust. | Nothing, unless your toolchain is localized. |
+| `the compiler was asked and did not say, so the default; name it with PACE_MSVC_DEPS_PREFIX` | `auto`, and the probe learned nothing — so this build is on English and your notes may not match. | Copy `msvc_deps_prefix` out of `build.ninja` and set it directly. |
+| `the default; override with PACE_MSVC_DEPS_PREFIX` | Nobody asked for anything; English on trust. | Nothing, unless your toolchain is localized. |
 
 The last two carry the **same prefix** and are told apart only by that line. They are
-separate because the remedy differs: *override with `FASTCACHE_MSVC_DEPS_PREFIX`* is
+separate because the remedy differs: *override with `PACE_MSVC_DEPS_PREFIX`* is
 advice already taken by whoever wrote `auto`, and telling them to do it again is a
 confident wrong answer to the one question they asked.
 
@@ -586,8 +586,8 @@ them -- the direct-mode key never sees the `__FILE__` expansion, and
 `source_location` is filled in after preprocessing -- so the launcher reads the
 **object** before storing it.
 
-An object whose program data names neither `FASTCACHE_SOURCE_DIR`,
-`FASTCACHE_BINARY_DIR`, `FASTCACHE_DEPS_DIR` nor the compile's working directory is stored and shared
+An object whose program data names neither `PACE_SOURCE_DIR`,
+`PACE_BINARY_DIR`, `PACE_DEPS_DIR` nor the compile's working directory is stored and shared
 exactly as before. One that names any of them is stored under a key that also
 folds in the directories it NAMES -- each absolute and resolved, so a relative
 export (`.`) identifies the checkout as well as an absolute one -- with a marker in
@@ -599,7 +599,7 @@ naming the build directory is not. The working directory is looked for because i
 is what `cl /FC` makes a relative path absolute against, whatever the roots say. Debug records
 (`.debug$S`, DWARF) are not counted -- see
 [Debug paths in a replayed object](#debug-paths-in-a-replayed-object) -- so a debug
-build shares as much as it did. `FASTCACHE_VERBOSE` says which it was:
+build shares as much as it did. `PACE_VERBOSE` says which it was:
 `root-bound object (it names … in .rdata (UTF-16LE)); storing it under key=…` on
 the compile that stores, and `MISS key=… (root-bound: the cached object names its build-tree; …)` or
 `HIT key=… (root-bound: served from key=…)` on the ones after it.
@@ -643,7 +643,7 @@ real, which re-stores the entry with a correct record.
 
 ### Reading the `dependency set:` line
 
-Every preprocessed compile reports, under `FASTCACHE_VERBOSE`, what became of the
+Every preprocessed compile reports, under `PACE_VERBOSE`, what became of the
 paths the driver named:
 
 ```
@@ -711,7 +711,7 @@ may still be recorded); the `detail` column says which of the two moments it mov
 the next build caches as usual. An input that could not be observed at all — unreadable when
 the key was taken — is not a race and is recorded `UNCACHEABLE` instead. `detail` carries the
 fixed sentence only, so `--show-stats` ranks one row per cause rather than one per file; the
-file itself is named on the `FASTCACHE_VERBOSE` line.
+file itself is named on the `PACE_VERBOSE` line.
 
 The two dispatch columns are the distribution axis: the
 fixed reason tallied under `why distribution did not help`, and then what to act on
@@ -719,7 +719,7 @@ about it when the reason alone does not say — the argument a worker would not 
 in the worker's own words, the ceiling a job went over, what one worker could not
 do, or the flag this launcher would not send. A decline whose peer text would only
 name an endpoint, such as a redirect chain that found no leader, leaves it empty;
-`FASTCACHE_VERBOSE` carries that. The last column is recorded and never tallied, so
+`PACE_VERBOSE` carries that. The last column is recorded and never tallied, so
 the report stays one row per cause while the log still names the flag. It is cut
 at 320 bytes between characters, holds no control character (C0, DEL or C1), and
 spells a byte that begins no UTF-8 character as `?`, since part of it is a peer's
@@ -753,7 +753,7 @@ never cached (1 translation units)
 ```
 
 The hit rate is computed over **cacheable** compiles — hits, misses, wrong objects
-(hits `FASTCACHE_VERIFY` rejected) and compiles an input moved during (`INPUTS-MOVED`),
+(hits `PACE_VERIFY` rejected) and compiles an input moved during (`INPUTS-MOVED`),
 every compile the cache was asked for — not all invocations, so an unreachable daemon does not silently look like a low hit
 rate — it is reported separately as `CACHE NOT REACHED`.
 
@@ -774,7 +774,7 @@ own — `why distribution did not help` is never merged into `fall-back reasons`
 above it.
 
 **The section appears only when there is a fleet to report on.** With no
-`FASTCACHE_SCHEDULER` set, this launcher does not distribute, and printing
+`PACE_SCHEDULER` set, this launcher does not distribute, and printing
 `dispatched: 0 (0.0%)` for it would render an absence as a total failure. So it
 prints nothing at all — as does a log written before this section existed, which
 is silent about dispatch rather than evidence of no fleet.
@@ -820,24 +820,24 @@ none of them is a caching failure.
 
 | Reason | Meaning |
 |--------|---------|
-| `the command line is not dispatchable` | `RemoteCompileArgs` found something on the line it cannot account for, so nothing was sent. Refusing costs one local compile, where stripping an unrecognised argument would change the generated code and hand back an object nobody asked for. `FASTCACHE_VERBOSE` names the offending flag, and so does the last column of the invocation log; it is deliberately not in this tally, or you would get one row per command line instead of one per cause. |
+| `the command line is not dispatchable` | `RemoteCompileArgs` found something on the line it cannot account for, so nothing was sent. Refusing costs one local compile, where stripping an unrecognised argument would change the generated code and hand back an object nobody asked for. `PACE_VERBOSE` names the offending flag, and so does the last column of the invocation log; it is deliberately not in this tally, or you would get one row per command line instead of one per cause. |
 | `the command line carries an argument no worker passes to a compiler` | An argument on the line is one every worker refuses by a fixed rule -- a sub-tool pass-through such as `-Xclang`, a plugin loader, a linker switch, a path the worker would open. `--allow-compile-arg` cannot lift these, so the launcher reads the same table the workers read and compiles locally without asking for a lease. The last column of the invocation log names the argument. |
 | `the dispatch preprocess failed` | A worker is fed a *second* preprocess, with `#line` markers that the cache key's copy suppresses, and that run failed. The key's own preprocess had already succeeded, so this is about the marker-emitting form of the command specifically. |
 | `this toolchain has no usable fingerprint` | The toolchain digest does not identify this compiler, so no worker could match it. Deliberately refused here rather than sent: a scheduler asked for an unidentifiable fingerprint answers `NoWorker`, which reads as "the fleet has nobody on your toolchain" and sends you to look at the fleet for a problem on this machine. `pace-cc --print-toolchain-fingerprint <compiler>` says what this machine computes and why it is unusable. |
 | `no worker serves this toolchain` | Nothing in the fleet carries your compiler's fingerprint. A machine is missing, or a fingerprint has drifted — upgrading the toolchain on the clients and not the workers looks exactly like this. Never read as a capacity problem: more machines of the wrong compiler change nothing. |
 | `the fleet was full of its own work` | Every matching worker was busy with this fleet's own compiles. The fleet is **too small**, which is a different purchase from the row above and from the one below -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
 | `matching workers had withdrawn their slots` | Machines that serve your toolchain had slots free on paper and were not offering them — somebody else is using them, a scratch disk is full, or a survey is in flight. The fleet is big enough and **unavailable**. |
-| `a node had no room for another request (endpoint-busy)` | A node answered `endpoint-busy`: its front door was full, for one of two reasons the launcher cannot tell apart, since both answer the same code. **Its in-flight byte budget was full** — on a worker, every compile running there holds its whole preprocessed translation unit until it answers, and together they filled the budget; raise the worker's `--compile-inflight-max`, or let it derive a larger one from more `--slots` ([how it is sized](pace-node.md#memory-what-a-compile-may-hold)). **Or its listener was at its connection cap** — the likelier cause when a scheduler refuses a lease, whose payload is kilobytes; that is a ceiling on concurrent conversations, which no byte budget changes. The node's own counters separate them: `fastcache_worker_jobs_refused_endpoint_busy_total` moves for the compile budget, `fastcache_node_frame_connections_refused_at_capacity_total` for the connection cap. A third case moves neither: a LEASE refused by the scheduler node's listener budget, which the scheduler surface deliberately leaves uncounted — a momentarily full surface is something the peer sees and retries, and summed into the scheduler's security series it would make that series unreadable. So this tally rising with neither counter beside it points at a scheduler node. Not the row above — nobody else is using the machines, and adding machines is not the remedy either. |
+| `a node had no room for another request (endpoint-busy)` | A node answered `endpoint-busy`: its front door was full, for one of two reasons the launcher cannot tell apart, since both answer the same code. **Its in-flight byte budget was full** — on a worker, every compile running there holds its whole preprocessed translation unit until it answers, and together they filled the budget; raise the worker's `--compile-inflight-max`, or let it derive a larger one from more `--slots` ([how it is sized](pace-node.md#memory-what-a-compile-may-hold)). **Or its listener was at its connection cap** — the likelier cause when a scheduler refuses a lease, whose payload is kilobytes; that is a ceiling on concurrent conversations, which no byte budget changes. The node's own counters separate them: `pace_worker_jobs_refused_endpoint_busy_total` moves for the compile budget, `pace_node_frame_connections_refused_at_capacity_total` for the connection cap. A third case moves neither: a LEASE refused by the scheduler node's listener budget, which the scheduler surface deliberately leaves uncounted — a momentarily full surface is something the peer sees and retries, and summed into the scheduler's security series it would make that series unreadable. So this tally rising with neither counter beside it points at a scheduler node. Not the row above — nobody else is using the machines, and adding machines is not the remedy either. |
 | `another client was already building this key` | Duplicate-work suppression, and **not a failure**: another client holds the lease for this exact object and this compile ran locally instead. Sixty clients missing one key after a header change is the ordinary shape of a shared cache. A high count here is the design working. |
 | `the fleet refused this client` | A credential, membership or lease refusal — the fleet would not let this client ask. Fixed where the client is configured or on the scheduler's member list, never by adding machines. |
-| `the worker refused the job` | A lease was granted and the worker then said no: a lease it would not honour, a scratch root it cannot write, a compiler it could not spawn. **One machine to go and look at**, and `FASTCACHE_VERBOSE` names it. |
+| `the worker refused the job` | A lease was granted and the worker then said no: a lease it would not honour, a scratch root it cannot write, a compiler it could not spawn. **One machine to go and look at**, and `PACE_VERBOSE` names it. |
 | `a worker would not take an argument of this compile` | The worker's allowlist has no row for a flag on this command line, which every worker of the same build refuses alike — so it is a flag this *fleet* does not dispatch, not one machine. The last column of the invocation log carries the worker's sentence naming every argument it refused, so a line needing several entries shows all of them at once. If it runs no program and names no path, add it on the workers with `--allow-compile-arg`; otherwise those compiles stay local, correctly. Until the worker had a code of its own for this it answered `malformed-frame`, and this row read as the wire disagreement below. |
 | `the job is larger than a worker accepts` | The translation unit's frame, or the size its compressed envelope declares, is over the ceiling a worker's compile surface takes. That ceiling is the worker's `--compile-request-max` (256 MiB unless raised). In a fleet that leaves it at the default, or sets it alike everywhere, every worker refuses the same unit: a property of the unit, not of one machine and not a wire disagreement. In a fleet whose workers set it differently it is one machine's setting instead, and the worker's sentence names the ceiling it applied. Either way the compile runs here, correctly, and the last column of the invocation log carries the worker's sentence naming the ceiling. |
 | `the fleet named no leader to ask` | The scheduler chain answered `NotLeader` until the redirect ceiling. Transient during an election and permanent when a fleet is misconfigured; the rate is what separates those, which is why it is not folded in with the credential refusal above. |
 | `this launcher and the fleet disagree about the wire` | A protocol, codec or framing mismatch, or a peer answering a compile with a refusal from another surface. Expected and bounded during a staggered upgrade; a count that keeps rising afterwards names a machine that never came back. Two machines of one build cannot produce it. |
 | `the fleet refused with a reason this launcher does not know` | A refusal code newer than this launcher. Upgrade `pace-cc`; the verbose line carries the code the fleet actually sent. |
 | `the fleet could not be reached` | Something past the LEASE did not answer, broke mid-reply, or ran out of budget — the scheduler's half is the four rows below, so this is usually the **worker** the lease named, and the verbose line names it. |
-| `the scheduler made no connection: its name did not resolve, it refused, or no connection completed within the connect bound` | The LEASE never reached the scheduler. If every compile shows this, check the address in `FASTCACHE_SCHEDULER` before suspecting the fleet — a wrong one, or a name that does not resolve, looks exactly like a fleet that is entirely down. Rising in bursts on a busy build, it is the scheduler node's accept queue overflowing ([#1668](https://github.com/LASTRADA-Software/fastcached/issues/1668)). |
+| `the scheduler made no connection: its name did not resolve, it refused, or no connection completed within the connect bound` | The LEASE never reached the scheduler. If every compile shows this, check the address in `PACE_SCHEDULER` before suspecting the fleet — a wrong one, or a name that does not resolve, looks exactly like a fleet that is entirely down. Rising in bursts on a busy build, it is the scheduler node's accept queue overflowing ([#1668](https://github.com/LASTRADA-Software/fastcached/issues/1668)). |
 | `the scheduler's connection broke before it answered` | The scheduler took the connection and it broke before the lease was answered — the scheduler node stopped or restarted mid-exchange. |
 | `the scheduler connected, and no answer arrived within the bound` | The connection completed and no lease answer came back in time. A completed connect is the kernel's, not proof the scheduler's loop took it, so this is a scheduler node too busy to answer — or one whose accept loop has stalled. |
 | `the scheduler stopped reporting progress` | The scheduler's progress pulses stopped mid-exchange: the node is alive at the TCP level and its answer stalled. |
@@ -874,40 +874,40 @@ not about the daemon at all.
 One reason in the table is not about the daemon **or** about a fleet declining to
 help, and it is the only one worth interrupting somebody for: `a worker answered
 about a different compile`. It is printed on stderr **whether or not
-`FASTCACHE_VERBOSE` is set**, because it means a machine in the fleet produced an
+`PACE_VERBOSE` is set**, because it means a machine in the fleet produced an
 object for work nobody asked it to do. Every other reason here is quiet unless you
 ask.
 
 | Reason | Meaning |
 |--------|---------|
-| `missing FASTCACHE_ADDR/SOURCE_DIR/BINARY_DIR` | Configuration incomplete — the cache was never contacted, and neither was a scheduler. Distribution is off here deliberately, and not merely for want of a key: `FASTCACHE_ADDR=` (set but empty) is how a build opts out of the launcher altogether, and without the two roots there is no portable key for a scheduler to suppress duplicates on. Set all three to use either. |
+| `missing PACE_ADDR/SOURCE_DIR/BINARY_DIR` | Configuration incomplete — the cache was never contacted, and neither was a scheduler. Distribution is off here deliberately, and not merely for want of a key: `PACE_ADDR=` (set but empty) is how a build opts out of the launcher altogether, and without the two roots there is no portable key for a scheduler to suppress duplicates on. Set all three to use either. |
 | `preprocess failed` | The compiler rejected the preprocess probe; the line may use an unsupported option form. |
 | `uses __TIME__/__DATE__/__TIMESTAMP__` | Deliberate: the TU is non-deterministic and would never hit. Reported as *uncacheable*, not as an error. |
-| `a command-line path is drive-relative under no root`, `a reported dependency path is drive-relative under no root` | Deliberate, and Windows-only. A path like `C:foo\bar.hpp` resolves against drive `C:`'s **own** current directory, which no cache entry records — so the launcher can neither key it (a header moved inside it would not re-key) nor check it on replay (there is no directory to `stat` it against). Caching such a compile could serve a stale dependency record under a zero exit code, so it is not cached at all. Reported as *uncacheable*, not as an error. Spell the path absolutely (`C:\foo\bar.hpp`), make it relative, or bring it under `FASTCACHE_SOURCE_DIR`/`FASTCACHE_BINARY_DIR`. The first is the rule applied to the command line, the second to what the compiler reported; `FASTCACHE_VERBOSE` names the offending path itself. |
-| `daemon does not support authentication; the configured credential was ignored` | `FASTCACHE_TOKEN` is set but the daemon predates the AUTH verb. Caching works normally — the daemon steps over the verb it does not know and serves the command — but this traffic is **not** authenticated. Said once per invocation rather than per exchange. Upgrade the daemon, or unset the token if it was not meant to apply here. |
-| `no machine ticket: this machine's node did not answer MINT-TICKET`, `... refused MINT-TICKET`, `... answered MINT-TICKET with none`, `... FASTCACHE_ADDR names no endpoint ...` | This machine's node could not mint the ticket an exchange with another machine presents, so that exchange carried none. Whether it was then refused is its audience's decision: a cache or scheduler that requires a ticket refuses it, and the reason is recorded in place of that refusal because it names the thing to fix. The node is asked over loopback at `FASTCACHE_ADDR`'s port, whatever `FASTCACHE_SCHEDULER` names: start it, or point `FASTCACHE_ADDR` at the port it listens on. `did not answer` with `it could not be reached` while a node runs on this machine is first a node that is not listening on loopback at that port — one on another port, or bound only to a non-loopback address, prints the same line; check that before anything else. A node that IS listening on loopback at that port and still prints it did not complete the loopback connect within the 50 ms cap — a node saturated by this machine's own build is the likely case, and it is not yet measured ([#1668](https://github.com/LASTRADA-Software/fastcached/issues/1668)). No setting raises that cap (`FASTCACHE_CONNECT_TIMEOUT` only lowers it). That invocation presents no ticket for the rest of its life, so a cache or scheduler that requires one refuses it and the compile runs locally; lowering the build's parallelism is the only lever until #1668 is decided, and it is an inferred one, not a measured one. The build succeeds either way; only the remote work is lost. `FASTCACHE_VERBOSE=1` says it with the endpoint and the node's own words, at most twice per invocation: once on the first failure, and once more if a later failure means the node is not asked again, since that changes what every later exchange carries. A node that did not answer is asked once per invocation and not again, under a connect bound sized for loopback rather than for the network, so a machine with no node pays about that bound, once per compile (on Linux, which refuses a closed loopback port at once, next to nothing); a cache with authentication off serves an exchange without one. |
-| `rejected (unauthenticated): ...` | The daemon requires a credential. `authentication required` means none was sent — set `FASTCACHE_TOKEN`. `authentication failed` means one was sent and was wrong. The two are deliberately different messages because they are different mistakes. Either way the build succeeds and only the caching is lost — the compile is still dispatched if `FASTCACHE_SCHEDULER` names a scheduler, and runs locally otherwise. |
-| `fetch exchange failed`, `fetch decoded malformed` | Transport or protocol trouble mid-request. Also how a `FASTCACHE_TIMEOUT` expiry surfaces: a daemon that accepted the connection and then went quiet. If these appear in bulk and each compile stalls for the full timeout first, suspect a wedged daemon rather than a flaky network. `fetch exchange failed` is also what a plainly wrong `FASTCACHE_ADDR` looks like — every compile, at once, with the fleet still doing the work. The two differ in what happens next: `fetch exchange failed` carries on and dispatches, while `fetch decoded malformed` — a daemon that answered with a value this launcher cannot read, which in practice means a mixed install — ends the invocation at a local compile. |
+| `a command-line path is drive-relative under no root`, `a reported dependency path is drive-relative under no root` | Deliberate, and Windows-only. A path like `C:foo\bar.hpp` resolves against drive `C:`'s **own** current directory, which no cache entry records — so the launcher can neither key it (a header moved inside it would not re-key) nor check it on replay (there is no directory to `stat` it against). Caching such a compile could serve a stale dependency record under a zero exit code, so it is not cached at all. Reported as *uncacheable*, not as an error. Spell the path absolutely (`C:\foo\bar.hpp`), make it relative, or bring it under `PACE_SOURCE_DIR`/`PACE_BINARY_DIR`. The first is the rule applied to the command line, the second to what the compiler reported; `PACE_VERBOSE` names the offending path itself. |
+| `daemon does not support authentication; the configured credential was ignored` | `PACE_TOKEN` is set but the daemon predates the AUTH verb. Caching works normally — the daemon steps over the verb it does not know and serves the command — but this traffic is **not** authenticated. Said once per invocation rather than per exchange. Upgrade the daemon, or unset the token if it was not meant to apply here. |
+| `no machine ticket: this machine's node did not answer MINT-TICKET`, `... refused MINT-TICKET`, `... answered MINT-TICKET with none`, `... PACE_ADDR names no endpoint ...` | This machine's node could not mint the ticket an exchange with another machine presents, so that exchange carried none. Whether it was then refused is its audience's decision: a cache or scheduler that requires a ticket refuses it, and the reason is recorded in place of that refusal because it names the thing to fix. The node is asked over loopback at `PACE_ADDR`'s port, whatever `PACE_SCHEDULER` names: start it, or point `PACE_ADDR` at the port it listens on. `did not answer` with `it could not be reached` while a node runs on this machine is first a node that is not listening on loopback at that port — one on another port, or bound only to a non-loopback address, prints the same line; check that before anything else. A node that IS listening on loopback at that port and still prints it did not complete the loopback connect within the 50 ms cap — a node saturated by this machine's own build is the likely case, and it is not yet measured ([#1668](https://github.com/LASTRADA-Software/fastcached/issues/1668)). No setting raises that cap (`PACE_CONNECT_TIMEOUT` only lowers it). That invocation presents no ticket for the rest of its life, so a cache or scheduler that requires one refuses it and the compile runs locally; lowering the build's parallelism is the only lever until #1668 is decided, and it is an inferred one, not a measured one. The build succeeds either way; only the remote work is lost. `PACE_VERBOSE=1` says it with the endpoint and the node's own words, at most twice per invocation: once on the first failure, and once more if a later failure means the node is not asked again, since that changes what every later exchange carries. A node that did not answer is asked once per invocation and not again, under a connect bound sized for loopback rather than for the network, so a machine with no node pays about that bound, once per compile (on Linux, which refuses a closed loopback port at once, next to nothing); a cache with authentication off serves an exchange without one. |
+| `rejected (unauthenticated): ...` | The daemon requires a credential. `authentication required` means none was sent — set `PACE_TOKEN`. `authentication failed` means one was sent and was wrong. The two are deliberately different messages because they are different mistakes. Either way the build succeeds and only the caching is lost — the compile is still dispatched if `PACE_SCHEDULER` names a scheduler, and runs locally otherwise. |
+| `fetch exchange failed`, `fetch decoded malformed` | Transport or protocol trouble mid-request. Also how a `PACE_TIMEOUT` expiry surfaces: a daemon that accepted the connection and then went quiet. If these appear in bulk and each compile stalls for the full timeout first, suspect a wedged daemon rather than a flaky network. `fetch exchange failed` is also what a plainly wrong `PACE_ADDR` looks like — every compile, at once, with the fleet still doing the work. The two differ in what happens next: `fetch exchange failed` carries on and dispatches, while `fetch decoded malformed` — a daemon that answered with a value this launcher cannot read, which in practice means a mixed install — ends the invocation at a local compile. |
 | `fetch decoded another generation's value` | The daemon served a value that IS a compile value, well formed, written under a canonicalization generation this build does not implement. **Ordinary during a rolling upgrade**, and not a damaged cache — which is the whole reason it is not `fetch decoded malformed`. Either direction: a producer behind this launcher reads exactly like one ahead of it. The compile happens locally, nothing is stored, and it clears once every server and launcher in the fleet are on one generation. The wire code's side of it is [`foreign-value-generation`](../protocols/compile-cache.md#error-codes). |
 | `rejected (unsupported-version): …` | The daemon answered and declined: it does not speak this launcher's wire version. **The two binaries ship together, so this means a mixed install** — an old daemon still running against a new `pace-cc`, or vice versa. The message names the range the daemon does support. Restart the daemon from the same package as the launcher. |
 | `rejected (payload-too-large): …` | The object exceeded the daemon's `--storage-max-value`. Raise it, or accept that this TU will not cache. |
 | `rejected (…)` (other codes) | The daemon refused the command and said why; see [the error-code table](../protocols/compile-cache.md#error-codes). |
 | `could not write object on hit` | The object output path was not writable. |
-| `the cached object names its <parts>; this compile's differs, or its copy was evicted; compiled this one's own` | Not a fault, and still a miss. The object stored under this key names the checkout that compiled it -- a `__FILE__` or a `std::source_location` -- so it is [not shared](#an-object-that-names-its-checkout-is-not-shared-with-another-one), and this compile built and stored its own copy, which the next compile here hits. `<parts>` is what the object names, from `source-root`, `build-tree` and `working-directory`; an object naming only the build tree or the working directory also misses from a second build directory of the SAME checkout. The reason cannot say which part differed -- this end never sees the producer's -- and neither does the `MISS` trace line under `FASTCACHE_VERBOSE`, which carries the same text. A translation unit that shows up here from every checkout is one whose source keeps it from ever being shared across them; spelling its sources relatively AND compiling without `/FC` (which MSBuild turns on by default as "Use Full Paths", and which makes `cl` write the absolute path whatever the command line said), or not baking the file name into program data, is what changes that. |
-| `a worker answered about a different compile` | **A defect somewhere in the fleet, not a fleet declining to help.** The worker's reply did not belong to the request that asked for it — see [`correlation`](../protocols/compile-cache.md#distributed-execution). The object is refused unread and the translation unit is compiled locally, so the build is correct and the caching of it is unaffected (the outcome is still a miss). This is the one reason printed unconditionally rather than only under `FASTCACHE_VERBOSE`, and the line names the worker, the correlation this client expected and the one that arrived. Accepting such a reply would store a wrong object under a correct key and serve it to every other machine that fetches it, so there is no configuration that relaxes this. If it appears at all, find the machine the line names. |
+| `the cached object names its <parts>; this compile's differs, or its copy was evicted; compiled this one's own` | Not a fault, and still a miss. The object stored under this key names the checkout that compiled it -- a `__FILE__` or a `std::source_location` -- so it is [not shared](#an-object-that-names-its-checkout-is-not-shared-with-another-one), and this compile built and stored its own copy, which the next compile here hits. `<parts>` is what the object names, from `source-root`, `build-tree` and `working-directory`; an object naming only the build tree or the working directory also misses from a second build directory of the SAME checkout. The reason cannot say which part differed -- this end never sees the producer's -- and neither does the `MISS` trace line under `PACE_VERBOSE`, which carries the same text. A translation unit that shows up here from every checkout is one whose source keeps it from ever being shared across them; spelling its sources relatively AND compiling without `/FC` (which MSBuild turns on by default as "Use Full Paths", and which makes `cl` write the absolute path whatever the command line said), or not baking the file name into program data, is what changes that. |
+| `a worker answered about a different compile` | **A defect somewhere in the fleet, not a fleet declining to help.** The worker's reply did not belong to the request that asked for it — see [`correlation`](../protocols/compile-cache.md#distributed-execution). The object is refused unread and the translation unit is compiled locally, so the build is correct and the caching of it is unaffected (the outcome is still a miss). This is the one reason printed unconditionally rather than only under `PACE_VERBOSE`, and the line names the worker, the correlation this client expected and the one that arrived. Accepting such a reply would store a wrong object under a correct key and serve it to every other machine that fetches it, so there is no configuration that relaxes this. If it appears at all, find the machine the line names. |
 | `a reported dependency path is not text this host can read`, `a captured region names a path that is not text this host can read` | Deliberate, and Windows-only. `cl.exe` writes the paths in `/showIncludes` in the **console output** code page, while this launcher's own roots arrive as UTF-8 -- so a header under a non-ASCII directory can reach it as bytes it cannot read as text. Such a path prefix-matches no root, which would key a project header as toolchain content and serve a stale object under a zero exit code, so the compile is not cached at all. Reported as *uncacheable*, not as an error. The fix is the console: `chcp 65001` makes `cl` emit UTF-8 and this stops appearing. |
-| `an input changed during the compile` | Not a fault. The file (named on the `FASTCACHE_VERBOSE` line) was saved — by an editor, a `git checkout`, a generator — while the compiler was running, so the object may describe either version of it and was not stored. In direct mode the manifest, built from the content the key was taken over, is still recorded unless recording it was declined; the `FASTCACHE_VERBOSE` line ends `manifest recorded from the keyed content` or `no manifest recorded` to say which. Recorded as `INPUTS-MOVED`. Ordinarily nothing to do: the next build compiles and caches as usual. If it recurs for files nobody edited — which here is a path named only by the build's own depfile, judged by the clock alone — see the row below for what to check. |
-| `an input changed while the key was taken` | Not a fault. The file (named on the `FASTCACHE_VERBOSE` line) changed while the launcher was reading it for the key — between the start of the invocation and the snapshot taken right after the key's preprocess — so neither the object nor the manifest was stored. Recorded as `INPUTS-MOVED`. Ordinarily nothing to do: the next build caches as usual. If it recurs for files nobody edited, the clock is the suspect rather than an editor: a share whose clock runs AHEAD of this machine's (SMB, NFS, or `/mnt/<drive>` under a WSL clock that lags the Windows host) stamps a fresh file at or after the moment the launcher fenced, and so does a filesystem with whole-second (or FAT's 2-second) stamps for a file written in that same second. Then every build reports it again, generated headers on such a share included — check the share's clock against this machine's, or move the build tree to a filesystem with fine-grained stamps. The object is never wrong there; only its caching is lost. |
-| `an input could not be observed` | The file (named on the `FASTCACHE_VERBOSE` line) could not be read or identified when the key was taken, so the launcher could not tell whether it changed during the compile and stored nothing. Recorded as *uncacheable*, because unlike a race it usually persists. Check the file's permissions, or for a tool that replaces it in place while builds run. |
+| `an input changed during the compile` | Not a fault. The file (named on the `PACE_VERBOSE` line) was saved — by an editor, a `git checkout`, a generator — while the compiler was running, so the object may describe either version of it and was not stored. In direct mode the manifest, built from the content the key was taken over, is still recorded unless recording it was declined; the `PACE_VERBOSE` line ends `manifest recorded from the keyed content` or `no manifest recorded` to say which. Recorded as `INPUTS-MOVED`. Ordinarily nothing to do: the next build compiles and caches as usual. If it recurs for files nobody edited — which here is a path named only by the build's own depfile, judged by the clock alone — see the row below for what to check. |
+| `an input changed while the key was taken` | Not a fault. The file (named on the `PACE_VERBOSE` line) changed while the launcher was reading it for the key — between the start of the invocation and the snapshot taken right after the key's preprocess — so neither the object nor the manifest was stored. Recorded as `INPUTS-MOVED`. Ordinarily nothing to do: the next build caches as usual. If it recurs for files nobody edited, the clock is the suspect rather than an editor: a share whose clock runs AHEAD of this machine's (SMB, NFS, or `/mnt/<drive>` under a WSL clock that lags the Windows host) stamps a fresh file at or after the moment the launcher fenced, and so does a filesystem with whole-second (or FAT's 2-second) stamps for a file written in that same second. Then every build reports it again, generated headers on such a share included — check the share's clock against this machine's, or move the build tree to a filesystem with fine-grained stamps. The object is never wrong there; only its caching is lost. |
+| `an input could not be observed` | The file (named on the `PACE_VERBOSE` line) could not be read or identified when the key was taken, so the launcher could not tell whether it changed during the compile and stored nothing. Recorded as *uncacheable*, because unlike a race it usually persists. Check the file's permissions, or for a tool that replaces it in place while builds run. |
 
 ## Verifying that a hit is the right object
 
 A wrong object served under a correct key is this cache's worst failure: it links,
-it usually runs, and nothing says anything. `FASTCACHE_VERIFY=<n>` makes one hit in
+it usually runs, and nothing says anything. `PACE_VERIFY=<n>` makes one hit in
 every *n* prove itself — the translation unit is compiled again and the two objects
 are compared. On a mismatch the **freshly compiled** object is the one left on disk,
 so a build that has just caught its cache is still a correct build, and the key is
-named on stderr whether or not `FASTCACHE_VERBOSE` is set.
+named on stderr whether or not `PACE_VERBOSE` is set.
 
 It costs a whole compile per verified hit, so it is off by default.
 
@@ -936,7 +936,7 @@ retrying, the other never will be:
 | Outcome | Meaning |
 |---|---|
 | *(silence)* | The cached object is the object this compiler produces. |
-| `WRONG OBJECT served for key …` | It is not. The message names what differed — a section such as `.text$mn` is stale code; `.debug$S` or `.chks64` is a foreign build path. The fresh object was used, so this build is unaffected. Find the machine that stored it. The compile is recorded as `VERIFY-MISMATCH` rather than `HIT` — in `invocations.log`, on the `FASTCACHE_VERBOSE` trace line, and as `wrong object` in `--show-stats`, which rates the hit rate against it — because the build did not use what the cache served. |
+| `WRONG OBJECT served for key …` | It is not. The message names what differed — a section such as `.text$mn` is stale code; `.debug$S` or `.chks64` is a foreign build path. The fresh object was used, so this build is unaffected. Find the machine that stored it. The compile is recorded as `VERIFY-MISMATCH` rather than `HIT` — in `invocations.log`, on the `PACE_VERBOSE` trace line, and as `wrong object` in `--show-stats`, which rates the hit rate against it — because the build did not use what the cache served. |
 | `could not verify the hit for key …` | The check did not complete: the fresh compile failed, or a file could not be read. Nothing is known about the cached object either way, and the next hit may well answer. |
 | `cannot verify hits for this toolchain …` | This build cannot lay out the object format its own compiler produced, so it can say nothing about any hit — not this one and not the next. A property of the toolchain, not a statement about your cache. |
 
@@ -1091,7 +1091,7 @@ Two things this is **not**:
   filesystem), and no common generator emits one, so in practice this costs
   nothing — but where it does fire it costs the whole TU rather than one path,
   deliberately: a partial answer here is the stale-dependency serve it exists to
-  prevent. The refusal is silent unless `FASTCACHE_VERBOSE` is set, and shows in
+  prevent. The refusal is silent unless `PACE_VERBOSE` is set, and shows in
   `--show-stats` as *uncacheable*.
 - Diagnostics-stream paths outside the include grammar are not yet localized.
 - Toolchain and system dependency paths are in neither the key nor the
@@ -1116,11 +1116,11 @@ Two things this is **not**:
   build root. The bytes stored in the cache keep the driver's own spelling.
 - Non-C/C++ inputs (for example Windows `.rc` resource files) are correctly
   classified as non-cacheable and passed through.
-- `FASTCACHE_TIMEOUT` bounds one exchange, not a whole invocation. Direct mode
+- `PACE_TIMEOUT` bounds one exchange, not a whole invocation. Direct mode
   makes a separate manifest round-trip before the object fetch, so a compile
   against a daemon that accepts and then goes silent can wait up to twice the
   timeout before falling back.
-- A dispatched compile exceeding `FASTCACHE_DISPATCH_TIMEOUT` is abandoned by
+- A dispatched compile exceeding `PACE_DISPATCH_TIMEOUT` is abandoned by
   the client, which hands the lease back and compiles locally — so the build still
   succeeds and the key is not pinned for the scheduler's lease timeout. The
   **worker** notices the client has gone and skips writing the object back, so the
@@ -1130,12 +1130,12 @@ Two things this is **not**:
   exchange dials with TCP keepalive armed, so a worker whose machine has vanished —
   powered off, unplugged, suspended, or cut off — is noticed in about 16 seconds on
   Linux and macOS and about 30 seconds on Windows, whatever the deadline is set to.
-  Raising `FASTCACHE_DISPATCH_TIMEOUT` for a slow translation unit therefore does
+  Raising `PACE_DISPATCH_TIMEOUT` for a slow translation unit therefore does
   not make hard-failure detection slower.
 - **Nor is it how long a WEDGED worker goes unnoticed.** Keepalive cannot see a
   machine whose kernel answers every probe while the process above it makes no
   progress, so the worker says so itself: a running compile writes a `Status::Progress`
-  frame every five seconds, carrying nothing, and `FASTCACHE_DISPATCH_IDLE` bounds
+  frame every five seconds, carrying nothing, and `PACE_DISPATCH_IDLE` bounds
   the silence between them at thirty seconds
   ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)). The launcher's fall-back
   line reports it as *stopped reporting progress*, which is a different remedy from *ran

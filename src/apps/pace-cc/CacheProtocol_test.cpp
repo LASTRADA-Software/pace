@@ -500,7 +500,7 @@ TEST_CASE("An unconfigured credential changes nothing on the wire")
 
 TEST_CASE("A username without a secret is not a credential")
 {
-    // FASTCACHE_USER alone is a misconfiguration, not a request to authenticate.
+    // PACE_USER alone is a misconfiguration, not a request to authenticate.
     // Sending an AUTH carrying an empty secret would be refused by every server
     // that requires one, turning a harmless typo into a build with no cache.
     Testing::ScriptedSocket client { Wire::EncodeReply(Wire::Status::Miss, {}) };

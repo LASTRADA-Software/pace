@@ -87,7 +87,7 @@ New-Item -ItemType Directory -Path $work | Out-Null
 try {
     # A header the note must name, so a matched line is provably about THIS include and
     # not some toolchain header that happens to appear.
-    $marker = 'fastcache_probe_header.h'
+    $marker = 'pace_probe_header.h'
     Set-Content -Path (Join-Path $work $marker) -Value '/* probe */' -Encoding Ascii
     Set-Content -Path (Join-Path $work 'tu.cpp') -Value @"
 #include "$marker"

@@ -97,7 +97,7 @@ enum class TicketRefusalSays : std::uint8_t
 /// It names no reason, and says where the reason can be read: on the node, by its operator.
 inline constexpr std::string_view TicketNotAdmittedMessage =
     "not admitted by this node: the machine this ticket names is not one it serves; this node's operator "
-    "can see why on the node itself (--node-status, and its fastcache_node_tickets_refused counters)";
+    "can see why on the node itself (--node-status, and its pace_node_tickets_refused counters)";
 
 /// One refusal: what it may say on the wire and the counter an operator watches, as ONE row.
 struct TicketRefusalRow

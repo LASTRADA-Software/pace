@@ -29,7 +29,7 @@ cmake_minimum_required(VERSION 3.28)
 #     harness does -- so the construct lands disproportionately in the code whose job
 #     is to decide verdicts.
 #
-# The instance that produced this check cost exactly that: `fastcached_case` in
+# The instance that produced this check cost exactly that: `pace_case` in
 # `check-corrupt-store-diagnostics-selftest.cmake` had BOTH verdict arms dead, so nine
 # cases fell through to a substring check and the two `want-pass` cases -- which pass
 # an empty substring -- asserted nothing at all.
@@ -80,23 +80,23 @@ cmake_minimum_required(VERSION 3.28)
 # these files carry ARE brackets.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-macro-bare-parameters.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-macro-bare-parameters.cmake
 #
 # Exit codes: whatever CMake gives it. The verdict is read from the OUTPUT, because
 # that is the rule every check here is registered under.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
-file(GLOB_RECURSE cmakeScripts "${FASTCACHED_SOURCE_DIR}/scripts/*.cmake")
+file(GLOB_RECURSE cmakeScripts "${PACE_SOURCE_DIR}/scripts/*.cmake")
 
 # An empty file set would report success having read nothing, which is the vacuous
 # pass this whole family of checks exists to leave behind. Two empty lists agree
 # perfectly.
 if(NOT cmakeScripts)
     message(FATAL_ERROR
-        "no scripts/*.cmake was found under ${FASTCACHED_SOURCE_DIR}; this check would "
+        "no scripts/*.cmake was found under ${PACE_SOURCE_DIR}; this check would "
         "vouch for every macro in the tree while reading none of them")
 endif()
 
@@ -121,7 +121,7 @@ foreach(scriptFile IN LISTS cmakeScripts)
     if(NOT scriptText MATCHES "(^|\n)macro\\(")
         continue()
     endif()
-    file(RELATIVE_PATH shownScript "${FASTCACHED_SOURCE_DIR}" "${scriptFile}")
+    file(RELATIVE_PATH shownScript "${PACE_SOURCE_DIR}" "${scriptFile}")
 
     set(rest "${scriptText}")
     set(lineNumber 0)

@@ -17,7 +17,7 @@
 #   third-party", which would hand every vendored file to every enumerator.
 #
 # Readers: `third_party_roots` in `scripts/lib/third-party-roots.sh`, and
-# `fastcached_third_party_roots` in `scripts/lib/CheckCommon.cmake`.
+# `pace_third_party_roots` in `scripts/lib/CheckCommon.cmake`.
 #
 # A root also has to be named in `.clang-format-ignore`, which clang-format reads for
 # itself; the check refuses a root that is missing there.

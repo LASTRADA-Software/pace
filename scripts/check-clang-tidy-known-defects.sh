@@ -698,9 +698,9 @@ Nothing here needs #$RowIssue open" "Open work" --installed "$Work/fixed" "$Work
     Expect "an empty table: --installed still refuses an analyser that is not there" "$Work/empty.sh" refuse \
         "is not an executable here" - --installed "$Work/absent" "$Work/good"
     # The empty copy's own self-test, once: nested, it skips this case, or each copy would run the next forever.
-    if [ -z "${FASTCACHED_KNOWN_DEFECTS_NESTED:-}" ]; then
-        FASTCACHED_KNOWN_DEFECTS_NESTED=1
-        export FASTCACHED_KNOWN_DEFECTS_NESTED
+    if [ -z "${PACE_KNOWN_DEFECTS_NESTED:-}" ]; then
+        PACE_KNOWN_DEFECTS_NESTED=1
+        export PACE_KNOWN_DEFECTS_NESTED
         Expect "an empty table: --self-test" "$Work/empty.sh" pass "self-test: " - --self-test "$SourceDir"
     else
         echo "self-test: nested inside another self-test, so the empty table's own self-test is not run again from here"

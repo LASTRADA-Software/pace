@@ -39,7 +39,7 @@ TEST_CASE("WindowsEventLogger: absent where there is no event log, and says so",
     // Null is the contract, not a failure: it is what lets one expression in `main`
     // choose a sink without a platform branch around it, and what keeps a foreground
     // run on any platform pointed at its terminal.
-    auto const logger = Pace::MakeWindowsEventLogger("FastCacheEventLogCase", LogLevel::Info);
+    auto const logger = Pace::MakeWindowsEventLogger("PaceEventLogCase", LogLevel::Info);
 
 #if defined(_WIN32)
     REQUIRE(logger != nullptr);

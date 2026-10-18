@@ -23,26 +23,26 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-counter-index-seam-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-counter-index-seam.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-counter-index-seam.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 
 set(failures)
@@ -61,7 +61,7 @@ constexpr std::optional<std::size_t> CounterIndex(Counter counter) { auto const 
 # @param extraPath One further file, relative to src/; empty for none.
 # @param extraBody What that file contains.
 # @param outVar Set to the tree's root.
-function(fastcached_make_tree name converter extraPath extraBody outVar)
+function(pace_make_tree name converter extraPath extraBody outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(WRITE "${tree}/src/Pace/Metrics/IMetricsSink.hpp" "${converter}")
@@ -76,9 +76,9 @@ endfunction()
 # @param outOutput Set to everything the check printed, whitespace runs collapsed -- `message()`
 #        word-wraps, so a phrase can straddle a line break (measured in check-psk-signing-seam-selftest.cmake,
 #        retired with the pre-shared key at #178).
-function(fastcached_run_check tree outObjected outOutput)
+function(pace_run_check tree outObjected outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE ignored)
     set(combined "${captured}${capturedErrors}")
     string(REGEX REPLACE "[ \t\r\n]+" " " combined "${combined}")
@@ -94,7 +94,7 @@ endfunction()
 # @param output What the check printed.
 # @param needle A phrase the refusal must contain.
 # @param why What it means when it does not.
-function(fastcached_expect_phrase label output needle why)
+function(pace_expect_phrase label output needle why)
     string(FIND "${output}" "${needle}" position)
     if(position EQUAL -1)
         set(failures ${failures} "${label}: ${why} (no `${needle}` in the output)" PARENT_SCOPE)
@@ -103,99 +103,99 @@ endfunction()
 
 # 1. Exactly the allowed conversions. Without this the check could refuse everything.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("clean" "${converterBody}" "" "" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("clean" "${converterBody}" "" "" tree)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "clean: a tree holding only the two allowed conversions was refused -- the check refuses everything")
 else()
-    fastcached_expect_phrase("clean" "${output}" "2 conversion(s) in the 1 file(s)"
+    pace_expect_phrase("clean" "${output}" "2 conversion(s) in the 1 file(s)"
         "it accepted without saying it saw the two conversions, so a pass cannot be told from a scan that read nothing")
 endif()
 
 # 2. A hand-rolled conversion elsewhere: the whole point.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("handrolled" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
+pace_make_tree("handrolled" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
     "void Capture(Reading& reading) {\n    for (auto const& row: CounterTable)\n        reading.counters[static_cast<std::size_t>(row.counter)] = 1\;\n}" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "handrolled: a counter indexed by a cast outside the converter was accepted -- the entire rule")
 else()
-    fastcached_expect_phrase("handrolled" "${output}" "Pace/Metrics/StatsReading.cpp:3:"
+    pace_expect_phrase("handrolled" "${output}" "Pace/Metrics/StatsReading.cpp:3:"
         "the refusal did not name the site as file:line, so it cannot be acted on")
-    fastcached_expect_phrase("handrolled" "${output}" "CounterIndex"
+    pace_expect_phrase("handrolled" "${output}" "CounterIndex"
         "the refusal did not say what to do instead, so the likely response is to widen the table")
 endif()
 
 # 3. A second conversion inside the allowed file.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("extra" "${converterBody}uint64_t Read(Counter counter) { return cells[static_cast<std::size_t>(counter)]\; }\n" "" "" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("extra" "${converterBody}uint64_t Read(Counter counter) { return cells[static_cast<std::size_t>(counter)]\; }\n" "" "" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "extra: a third conversion in the file allowed two was accepted -- a per-file allow without a count")
 else()
-    fastcached_expect_phrase("extra" "${output}" "is allowed 2 conversion(s) and holds 3"
+    pace_expect_phrase("extra" "${output}" "is allowed 2 conversion(s) and holds 3"
         "it refused, but not as the allowed file holding one too many, so the cause will be hunted elsewhere")
 endif()
 
 # 4. Prose is not a conversion.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("prose" "${converterBody}" "Pace/Metrics/MetricsCatalog.hpp"
+pace_make_tree("prose" "${converterBody}" "Pace/Metrics/MetricsCatalog.hpp"
     "/// Never `table[static_cast<std::size_t>(counter)]` -- see CounterIndex.\nint Answer()\; // not static_cast<int>(counter) either" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "prose: a comment spelling the cast was refused -- the rule cannot then be explained in the files it governs")
 endif()
 
 # 5. A different name that merely contains the word.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("plural" "${converterBody}" "Pace/Metrics/StatsReadingCodec.cpp"
+pace_make_tree("plural" "${converterBody}" "Pace/Metrics/StatsReadingCodec.cpp"
     "auto const bits = static_cast<std::uint32_t>(counters.size())\;" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "plural: a cast of counters.size() was refused -- the word boundary is gone, and every such site becomes an exemption")
 endif()
 
 # 6. std::to_underlying is the same conversion.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("underlying" "${converterBody}" "apps/pacectl/DashboardLoop.hpp"
+pace_make_tree("underlying" "${converterBody}" "apps/pacectl/DashboardLoop.hpp"
     "auto const index = std::to_underlying(counter)\;" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "underlying: std::to_underlying(counter) was accepted -- a second spelling of the same conversion")
 else()
-    fastcached_expect_phrase("underlying" "${output}" "apps/pacectl/DashboardLoop.hpp:1:"
+    pace_expect_phrase("underlying" "${output}" "apps/pacectl/DashboardLoop.hpp:1:"
         "the refusal did not name the site as file:line")
 endif()
 
 # 7. A test source is in scope: the next production site is written by copying it.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("testsource" "${converterBody}" "apps/pacectl/StatsSource_test.cpp"
+pace_make_tree("testsource" "${converterBody}" "apps/pacectl/StatsSource_test.cpp"
     "reading.counters[static_cast<std::size_t>(IMetricsSink::Counter::ConnectionsTotal)] = 3\;" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "testsource: a test indexing a counter table by a cast was accepted")
 endif()
 
 # 8. The allowed file holds fewer conversions than its row: a stale row.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("stale"
+pace_make_tree("stale"
     "inline constexpr std::size_t CounterCount = static_cast<std::size_t>(IMetricsSink::Counter::Last)\;\n" "" "" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "stale: the allowed file holds one conversion of two and the check passed -- a row allowing more than the file does")
 else()
-    fastcached_expect_phrase("stale" "${output}" "STALE converter row"
+    pace_expect_phrase("stale" "${output}" "STALE converter row"
         "it refused, but not as a stale row, so the cause will be hunted in the wrong place")
 endif()
 
 # 9. Nothing converts anywhere: the vacuous pass.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("none" "constexpr std::size_t Extent = EnumeratorCount<Metric>\;\n" "" "" tree)
-fastcached_run_check("${tree}" objected output)
+pace_make_tree("none" "constexpr std::size_t Extent = EnumeratorCount<Metric>\;\n" "" "" tree)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "none: nothing in the tree converts a counter and the check reported success -- it had stopped looking")
 else()
-    fastcached_expect_phrase("none" "${output}" "found NONE"
+    pace_expect_phrase("none" "${output}" "found NONE"
         "it refused, but not as a scan that matched nothing, so the reader is not told the check is broken")
 endif()
 
@@ -205,20 +205,20 @@ set(tree "${root}/nosources")
 file(REMOVE_RECURSE "${tree}")
 file(MAKE_DIRECTORY "${tree}/src/Pace")
 file(WRITE "${tree}/src/Pace/notes.txt" "no source here\n")
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "nosources: a tree holding no source this check can read was accepted")
 else()
-    fastcached_expect_phrase("nosources" "${output}" "no source file"
+    pace_expect_phrase("nosources" "${output}" "no source file"
         "it refused, but not as a walk that found no source")
 endif()
 
 # 11. A name AFTER the cast's closing parenthesis is not its operand. The overstating shape
 #     this check shipped with: an outcome indexes a table whose ROW names a counter.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("adjacent" "${converterBody}" "apps/pace-node/SharedCacheSession.cpp"
+pace_make_tree("adjacent" "${converterBody}" "apps/pace-node/SharedCacheSession.cpp"
     "    if (auto const& counter = NamedDialCounters[static_cast<std::size_t>(named.session.outcome)].counter\; counter.has_value())" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(objected)
     list(APPEND failures "adjacent: a cast of an outcome followed by a .counter member was refused -- the operand ran past the cast's closing parenthesis, and the check overstates what is wrong")
 endif()
@@ -226,18 +226,18 @@ endif()
 # 12. Balanced, not merely closed at the first `)`: a counter AFTER a nested call's closing
 #     parenthesis is still the operand, and an operand ended at the first `)` would miss it.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("nested" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
+pace_make_tree("nested" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
     "reading.counters[static_cast<std::size_t>(Base(reading) + row.counter)] = 1\;" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "nested: a counter cast through a nested call was accepted -- the operand ended at the first closing parenthesis rather than its own")
 endif()
 
 # 13. Every cast on the line is asked, not only the first.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("second" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
+pace_make_tree("second" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
     "auto const pair = static_cast<int>(outcome) + static_cast<int>(row.counter)\;" tree)
-fastcached_run_check("${tree}" objected output)
+pace_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "second: a counter cast after an unrelated cast on the same line was accepted -- only the first cast was asked")
 endif()

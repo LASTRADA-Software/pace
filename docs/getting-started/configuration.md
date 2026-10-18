@@ -149,7 +149,7 @@ From strongest to weakest:
 
 1. **Command-line flags** — `--port=7000` beats everything.
 2. **The config file** — whether named with `--config` or discovered.
-3. **Environment** — only `FASTCACHED_METRICS_PORT`, so a container's daemon
+3. **Environment** — only `PACE_METRICS_PORT`, so a container's daemon
    and its `--healthcheck` probe can agree on a port with one `-e`.
 4. **Built-in defaults.**
 

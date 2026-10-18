@@ -34,7 +34,7 @@
 
 Set-StrictMode -Version Latest
 
-# A fixture that draws a port inherits no FASTCACHE_* setting: importing this module
+# A fixture that draws a port inherits no PACE_* setting: importing this module
 # imports `E2EEnvironment.psm1`, which clears them. `-Force` so the clearing runs on
 # every import rather than only the first one in a session.
 Import-Module (Join-Path $PSScriptRoot "E2EEnvironment.psm1") -Force
@@ -462,7 +462,7 @@ $script:E2EPortConsumers = @(
         Stage = @('pace-kv.exe', 'server.crt', 'server.key')
         Argv  = {
             param($stage, $port)
-            @('-Fastcached', (Join-Path $stage 'pace-kv.exe'),
+            @('-PaceKv', (Join-Path $stage 'pace-kv.exe'),
               '-Cert',       (Join-Path $stage 'server.crt'),
               '-Key',        (Join-Path $stage 'server.key'),
               '-Port',       $port)
@@ -474,7 +474,7 @@ $script:E2EPortConsumers = @(
         Stage = @('pace-kv.exe', 'compile-cache-testclient.exe')
         Argv  = {
             param($stage, $port)
-            @('-Fastcached', (Join-Path $stage 'pace-kv.exe'),
+            @('-PaceKv', (Join-Path $stage 'pace-kv.exe'),
               '-Client',     (Join-Path $stage 'compile-cache-testclient.exe'),
               '-Port',       $port,
               '-Synthetic')
@@ -486,7 +486,7 @@ $script:E2EPortConsumers = @(
         Stage = @('pace-kv.exe', 'pace-cc.exe')
         Argv  = {
             param($stage, $port)
-            @('-Fastcached', (Join-Path $stage 'pace-kv.exe'),
+            @('-PaceKv', (Join-Path $stage 'pace-kv.exe'),
               '-Launcher',   (Join-Path $stage 'pace-cc.exe'),
               '-Port',       $port)
         }
@@ -780,7 +780,7 @@ function Invoke-E2EPortSelfTest {
 # a host this case proves the refusal fired and does NOT prove a holder was named.
 #
 # @param held a port this process is currently listening on.
-# A fixture inherits no FASTCACHE_* (`E2EEnvironment.psm1`), driven the way a fixture
+# A fixture inherits no PACE_* (`E2EEnvironment.psm1`), driven the way a fixture
 # meets it: the variable EXPORTED before the fixture imports this module, the fixture's
 # own setting assigned after, and a stand-in compile -- a child process -- that reports
 # the environment it was started with.
@@ -794,26 +794,26 @@ function Invoke-E2EEnvironmentCases {
     $probe = Join-Path $dir "compile.ps1"
     $fixture = Join-Path $dir "fixture.ps1"
     Set-Content -Path $probe -Value @'
-Get-ChildItem Env: | Where-Object { $_.Name -like 'FASTCACHE_*' } | ForEach-Object { "$($_.Name)=$($_.Value)" }
+Get-ChildItem Env: | Where-Object { $_.Name -like 'PACE_*' } | ForEach-Object { "$($_.Name)=$($_.Value)" }
 '@
     Set-Content -Path $fixture -Value @'
 param([string]$Module, [string]$Probe)
 Import-Module $Module -Force
-$env:FASTCACHE_VERBOSE = "1"
+$env:PACE_VERBOSE = "1"
 & (Get-Process -Id $PID).Path -NoProfile -File $Probe
 '@
     try {
-        $env:FASTCACHE_SCHEDULER = "staged.invalid:6674"
+        $env:PACE_SCHEDULER = "staged.invalid:6674"
         $control = @(& $pwsh -NoProfile -File $probe)
-        Expect "control: a child started here sees an exported FASTCACHE_SCHEDULER" $true `
-            ([bool]($control -contains "FASTCACHE_SCHEDULER=staged.invalid:6674"))
+        Expect "control: a child started here sees an exported PACE_SCHEDULER" $true `
+            ([bool]($control -contains "PACE_SCHEDULER=staged.invalid:6674"))
         $seen = @(& $pwsh -NoProfile -File $fixture -Module (Join-Path $PSScriptRoot "E2EPorts.psm1") -Probe $probe)
-        Expect "an inherited FASTCACHE_SCHEDULER does not reach a fixture's compile" $false `
-            ([bool]($seen | Where-Object { $_ -like "FASTCACHE_SCHEDULER=*" }))
-        Expect "the fixture's own FASTCACHE_VERBOSE, set after the import, does" $true `
-            ([bool]($seen -contains "FASTCACHE_VERBOSE=1"))
+        Expect "an inherited PACE_SCHEDULER does not reach a fixture's compile" $false `
+            ([bool]($seen | Where-Object { $_ -like "PACE_SCHEDULER=*" }))
+        Expect "the fixture's own PACE_VERBOSE, set after the import, does" $true `
+            ([bool]($seen -contains "PACE_VERBOSE=1"))
     } finally {
-        Remove-Item Env:\FASTCACHE_SCHEDULER -ErrorAction SilentlyContinue
+        Remove-Item Env:\PACE_SCHEDULER -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

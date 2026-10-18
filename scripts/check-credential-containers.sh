@@ -212,8 +212,8 @@ SourceFiles() {
 # per line -- which took this check and its self-test red on the macOS leg only.
 # $1: the file. $2: the identifiers, one per line.
 MentionLines() {
-    FASTCACHED_CREDENTIAL_IDENTIFIERS="$2" awk '
-        BEGIN { n = split(ENVIRON["FASTCACHED_CREDENTIAL_IDENTIFIERS"], id, "\n") }
+    PACE_CREDENTIAL_IDENTIFIERS="$2" awk '
+        BEGIN { n = split(ENVIRON["PACE_CREDENTIAL_IDENTIFIERS"], id, "\n") }
         /^[[:space:]]*(\/\/|\/\*|\*)/ { next }
         {
             for (i = 1; i <= n; i++)

@@ -157,7 +157,7 @@ def run_suite(
 
 
 def run_multitarget(
-    fastcached_binary: Path,
+    pace_binary: Path,
     vs_names: list[str],
     profile: str,
     storage_root: Path,
@@ -203,7 +203,7 @@ def run_multitarget(
                 storage_dir = storage_root / f"fc-{index}"
                 try:
                     by_target["pace-kv"] = run_scenario(
-                        executor, pool_size, fastcached_binary, scenario, HOST, base_port + index,
+                        executor, pool_size, pace_binary, scenario, HOST, base_port + index,
                         storage_dir, reps, warmup, seed, op_timeout,
                     )
                 except Exception as error:  # noqa: BLE001

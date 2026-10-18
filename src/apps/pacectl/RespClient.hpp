@@ -125,7 +125,7 @@ struct RespValue
 ///
 /// Shared vocabulary rather than a literal at each site: the AUTH gate reads
 /// `WrongPass` when deciding whether a refusal is fatal, and the verb handlers read
-/// `NoAuth` when deciding whether to tell the operator about `FASTCACHE_TOKEN`. Two
+/// `NoAuth` when deciding whether to tell the operator about `PACE_TOKEN`. Two
 /// files spelling the same word separately is how they come to disagree.
 namespace ErrorCode
 {
@@ -139,7 +139,7 @@ namespace ErrorCode
 ///
 /// **A peer-declared length sizes nothing until it has been checked against a bound
 /// this side chose.** The daemon is not automatically the trusted half here: this
-/// tool dials whatever `--host`/`FASTCACHE_ADDR` names, and in the fleet case an
+/// tool dials whatever `--host`/`PACE_ADDR` names, and in the fleet case an
 /// endpoint a scheduler named. Injected rather than baked in so a test can drive the
 /// refusal with three bytes instead of gigabytes.
 struct ParseLimits

@@ -5,7 +5,7 @@
   "dependencies": [],
   "features": {
     "tls": {
-      "description": "TLS support via OpenSSL (FASTCACHED_ENABLE_TLS).",
+      "description": "TLS support via OpenSSL (PACE_ENABLE_TLS).",
       "dependencies": [
         "openssl"
       ]

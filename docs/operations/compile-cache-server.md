@@ -86,7 +86,7 @@ rather than less — the budget counts the bytes a value actually occupies — a
 decompress on every read.
 
 `lz4` and `zstd` are only present when the build was configured with
-`FASTCACHED_ENABLE_COMPRESSION`. A codec you *name* on a build without them is
+`PACE_ENABLE_COMPRESSION`. A codec you *name* on a build without them is
 refused at startup; the disk half's `zstd` **default** is not, since nobody typed
 it — that tier stores plaintext instead, and a warning says so.
 
@@ -106,7 +106,7 @@ Prefetching is automatic and needs no configuration. When a FETCH hits a key
 that belongs to a group, the rest of that group is warmed into memory in the
 background, so the compiles that follow in the same build are served from RAM.
 
-Clients control the grouping with `FASTCACHE_PREFETCH_GROUP`. Since it is not
+Clients control the grouping with `PACE_PREFETCH_GROUP`. Since it is not
 part of the cache key, regrouping never invalidates anything — set it per
 project and branch (`myproject-main`) for the tightest prefetch locality.
 

@@ -26,14 +26,14 @@
 # passes its first exit, and it compiles nothing, so the stand-in's configure fails.
 #
 # The planted failure is one extra decision row the check appends when
-# FASTCACHED_DISPATCH_PLANT_DECISION_FAILURE is set; nothing else sets it.
+# PACE_DISPATCH_PLANT_DECISION_FAILURE is set; nothing else sets it.
 #
 # Verdict is read from the OUTPUT, not the exit code; see src/tests/CMakeLists.txt, which
 # registers this with FAIL_REGULAR_EXPRESSION (#565).
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CTEST_COMMAND FASTCACHED_BUILD_DIR)
+foreach(required PACE_SOURCE_DIR PACE_SCRATCH_DIR PACE_CTEST_COMMAND PACE_BUILD_DIR)
     if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
         message(FATAL_ERROR "${required} must be set (cmake -D${required}=... -P ${CMAKE_CURRENT_LIST_FILE})")
     endif()
@@ -43,7 +43,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
 # The registration's two patterns, as ctest holds them.
 execute_process(
-    COMMAND "${FASTCACHED_CTEST_COMMAND}" --test-dir "${FASTCACHED_BUILD_DIR}" --show-only=json-v1
+    COMMAND "${PACE_CTEST_COMMAND}" --test-dir "${PACE_BUILD_DIR}" --show-only=json-v1
             -R "^compile-cache-dispatch$"
     RESULT_VARIABLE listed OUTPUT_VARIABLE listing ERROR_VARIABLE listingError TIMEOUT 120)
 if(NOT listed EQUAL 0)
@@ -53,7 +53,7 @@ endif()
 string(JSON registered LENGTH "${listing}" tests)
 if(NOT registered EQUAL 1)
     message(FATAL_ERROR "check-compile-cache-dispatch-verdict: ${registered} tests named compile-cache-dispatch "
-                        "in ${FASTCACHED_BUILD_DIR}, expected exactly one")
+                        "in ${PACE_BUILD_DIR}, expected exactly one")
 endif()
 set(FAIL_REGULAR_EXPRESSION "")
 set(SKIP_REGULAR_EXPRESSION "")
@@ -77,8 +77,8 @@ foreach(property FAIL_REGULAR_EXPRESSION SKIP_REGULAR_EXPRESSION)
     endif()
 endforeach()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-compile-cache-dispatch.cmake")
-set(absentCompiler "${FASTCACHED_SCRATCH_DIR}/no-such-compiler/cl.exe")
+set(check "${PACE_SOURCE_DIR}/scripts/check-compile-cache-dispatch.cmake")
+set(absentCompiler "${PACE_SCRATCH_DIR}/no-such-compiler/cl.exe")
 
 # name | planted | compiler | verdict
 set(verdictRows
@@ -88,23 +88,23 @@ set(verdictRows
     "clean-broken-toolchain|OFF|${CMAKE_COMMAND}|Skipped"
 )
 
-set(suite "${FASTCACHED_SCRATCH_DIR}/suite")
+set(suite "${PACE_SCRATCH_DIR}/suite")
 file(REMOVE_RECURSE "${suite}")
 file(MAKE_DIRECTORY "${suite}")
 set(testfile "# Written by ${CMAKE_CURRENT_LIST_FILE}\n")
 foreach(row IN LISTS verdictRows)
-    fastcached_row_fields("${row}" name planted compiler verdict)
+    pace_row_fields("${row}" name planted compiler verdict)
     set(arguments
         "[==[${CMAKE_COMMAND}]==]"
-        "[==[-DFASTCACHED_SOURCE_DIR=${FASTCACHED_SOURCE_DIR}]==]"
-        "[==[-DFASTCACHED_SCRATCH_DIR=${FASTCACHED_SCRATCH_DIR}/${name}]==]"
-        "[==[-DFASTCACHED_CXX_COMPILER=${compiler}]==]"
-        "[==[-DFASTCACHED_DISPATCH_PLANT_DECISION_FAILURE=${planted}]==]")
-    if(FASTCACHED_GENERATOR)
-        list(APPEND arguments "[==[-DFASTCACHED_GENERATOR=${FASTCACHED_GENERATOR}]==]")
+        "[==[-DPACE_SOURCE_DIR=${PACE_SOURCE_DIR}]==]"
+        "[==[-DPACE_SCRATCH_DIR=${PACE_SCRATCH_DIR}/${name}]==]"
+        "[==[-DPACE_CXX_COMPILER=${compiler}]==]"
+        "[==[-DPACE_DISPATCH_PLANT_DECISION_FAILURE=${planted}]==]")
+    if(PACE_GENERATOR)
+        list(APPEND arguments "[==[-DPACE_GENERATOR=${PACE_GENERATOR}]==]")
     endif()
-    if(FASTCACHED_MAKE_PROGRAM)
-        list(APPEND arguments "[==[-DFASTCACHED_MAKE_PROGRAM=${FASTCACHED_MAKE_PROGRAM}]==]")
+    if(PACE_MAKE_PROGRAM)
+        list(APPEND arguments "[==[-DPACE_MAKE_PROGRAM=${PACE_MAKE_PROGRAM}]==]")
     endif()
     list(APPEND arguments "-P" "[==[${check}]==]")
     list(JOIN arguments " " commandLine)
@@ -116,7 +116,7 @@ endforeach()
 file(WRITE "${suite}/CTestTestfile.cmake" "${testfile}")
 
 execute_process(
-    COMMAND "${FASTCACHED_CTEST_COMMAND}" --test-dir "${suite}" --output-on-failure
+    COMMAND "${PACE_CTEST_COMMAND}" --test-dir "${suite}" --output-on-failure
     OUTPUT_VARIABLE ctestOutput ERROR_VARIABLE ctestError TIMEOUT 600)
 set(ctestReport "${ctestOutput}${ctestError}")
 
@@ -124,7 +124,7 @@ list(LENGTH verdictRows expectedCount)
 set(violations "")
 set(judged 0)
 foreach(row IN LISTS verdictRows)
-    fastcached_row_fields("${row}" name planted compiler verdict)
+    pace_row_fields("${row}" name planted compiler verdict)
     # One result line per test: `N/M Test #N: <name> .....   Passed` or `***Failed` / `***Skipped`.
     string(REGEX MATCH "Test +#[0-9]+: ${name} [^\n]*" resultLine "${ctestReport}")
     if(resultLine STREQUAL "")

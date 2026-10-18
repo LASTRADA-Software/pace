@@ -40,7 +40,7 @@
 #                           (`__FILE__`, `source_location`) is not served into a
 #                           second checkout in either direct mode, one naming no
 #                           path still is, the first checkout still hits its own
-#                           copy, and a hit FASTCACHE_VERIFY rejects is logged
+#                           copy, and a hit PACE_VERIFY rejects is logged
 #                           VERIFY-MISMATCH rather than HIT.
 #  11. Mid-compile save — a save DURING a compile records nothing unsound
 #                           (#1650): the compile that raced an editor's save stores
@@ -133,8 +133,8 @@ trap cleanup EXIT
 # a first compile reported as a HIT, or a second one that was not served -- with
 # nothing anywhere naming the port.
 #
-# Sourcing it also clears every FASTCACHE_* this shell inherited (an operator's
-# FASTCACHE_SCHEDULER would dispatch each "local" compile to their fleet), which is
+# Sourcing it also clears every PACE_* this shell inherited (an operator's
+# PACE_SCHEDULER would dispatch each "local" compile to their fleet), which is
 # why this fixture's own exports come AFTER it.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/e2e-common.sh"
 e2e_begin "compile-cache E2E" "$workdir"
@@ -147,8 +147,8 @@ e2e_begin "compile-cache E2E" "$workdir"
 # through the shim `e2e_launcher_state_enter` (scripts/lib/e2e-common.sh) puts in
 # front of it. Before any launcher runs, and after `e2e_begin`, whose workdir holds it.
 e2e_launcher_state_enter launcher
-export FASTCACHE_VERBOSE=1
-export FASTCACHE_PREFETCH_GROUP="e2e"
+export PACE_VERBOSE=1
+export PACE_PREFETCH_GROUP="e2e"
 
 [[ -n "$port" ]] || port="$(free_port)"
 
@@ -170,7 +170,7 @@ kill -0 "$server_pid" 2>/dev/null || {
     fail "something else is listening on port ${port}: our daemon is gone"
 }
 
-export FASTCACHE_ADDR="127.0.0.1:${port}"
+export PACE_ADDR="127.0.0.1:${port}"
 
 # --- 1 + 2: miss, then hit reproducing the object byte-identically ----------
 proj="${workdir}/proj"
@@ -185,8 +185,8 @@ cat > "${proj}/a.cpp" <<'EOF'
 int main() { return helper() + static_cast<int>(std::string{"hi"}.size()); }
 EOF
 
-export FASTCACHE_SOURCE_DIR="$proj"
-export FASTCACHE_BINARY_DIR="${proj}/build"
+export PACE_SOURCE_DIR="$proj"
+export PACE_BINARY_DIR="${proj}/build"
 
 echo "== compile 1 (expect MISS) =="
 "$launcher" "$compiler" -std=c++23 -MD -MF "${proj}/build/a.d" -c "${proj}/a.cpp" -o "${proj}/build/a.o" \
@@ -271,7 +271,7 @@ EOF
     fi
 
     rm -f "${proj}/build/a.o" "${proj}/build/a.d"
-    FASTCACHE_VERIFY=1 "$launcher" "$compiler" -std=c++23 -MD -MF "${proj}/build/a.d" \
+    PACE_VERIFY=1 "$launcher" "$compiler" -std=c++23 -MD -MF "${proj}/build/a.d" \
         -c "${proj}/a.cpp" -o "${proj}/build/a.o" 2> "${workdir}/verify.log" \
         || { cat "${workdir}/verify.log" >&2; fail "the verifying compile returned non-zero"; }
     # Only the launcher's own lines: the rest is the PLANTED value's replayed
@@ -284,7 +284,7 @@ EOF
     # A hit the verifier REJECTS is traced `VERIFY-MISMATCH`, never `HIT` -- the outcome the
     # build actually used -- so that word, on this key, is the proof the plant was served.
     grep -q "pace-cc: VERIFY-MISMATCH key=${planted_key}" "${workdir}/verify.log" \
-        || fail "the planted object was not served and rejected, so nothing was verified (a hit FASTCACHE_VERIFY rejects is VERIFY-MISMATCH)"
+        || fail "the planted object was not served and rejected, so nothing was verified (a hit PACE_VERIFY rejects is VERIFY-MISMATCH)"
     grep -q "WRONG OBJECT" "${workdir}/verify.log" \
         || fail "a wrong object was served and nothing said so"
     grep -q "$planted_key" "${workdir}/verify.log" \
@@ -301,7 +301,7 @@ EOF
     echo "   the wrong object was named, and the freshly compiled one was used"
 
     # --- 2c: the operator removes the wrong object; its manifest stays (#1276) ---
-    # The repair the case above leaves to a person: `FASTCACHE_VERIFY` named the key,
+    # The repair the case above leaves to a person: `PACE_VERIFY` named the key,
     # and CACHE-DROP takes that key away. What must follow is a MISS and a recompile,
     # never a wrong or a failed build -- and the load-bearing part is that the
     # launcher's direct-mode MANIFEST still stands, pointing at the key that is now
@@ -367,7 +367,7 @@ EOF
     # which keys differently.
     rm -f "${proj}/build/a.o" "${proj}/build/a.d" "${proj}/wrong.cpp"
 else
-    # Said out loud rather than skipped in silence: FASTCACHED_BUILD_TESTCLIENT is
+    # Said out loud rather than skipped in silence: PACE_BUILD_TESTCLIENT is
     # off by default and on for the linux and clang-tidy jobs, so a reader of a
     # local run must be told which of those they are looking at.
     echo "== SKIPPED: no --testclient built, so the planted-wrong-object case did not run =="
@@ -391,7 +391,7 @@ mkdir -p "${big}/build"
     echo "int main() { return data[0]; }"
 } > "${big}/big.cpp"
 
-export FASTCACHE_SOURCE_DIR="$big" FASTCACHE_BINARY_DIR="${big}/build"
+export PACE_SOURCE_DIR="$big" PACE_BINARY_DIR="${big}/build"
 
 "$launcher" "$compiler" -std=c++23 -O0 -c "${big}/big.cpp" -o "${big}/build/big.o" \
     2> "${workdir}/big-miss.log" || fail "large-object compile returned non-zero"
@@ -444,14 +444,14 @@ EOF
 done
 
 echo "== store from a DEEP checkout =="
-export FASTCACHE_SOURCE_DIR="$deep" FASTCACHE_BINARY_DIR="${deep}/build"
+export PACE_SOURCE_DIR="$deep" PACE_BINARY_DIR="${deep}/build"
 "$launcher" "$compiler" -std=c++23 -MD -MF "${deep}/build/t.d" -c "${deep}/t.cpp" -o "${deep}/build/t.o" \
     2> "${workdir}/deep.log" || fail "deep compile returned non-zero"
 cat "${workdir}/deep.log"
 grep -q "STORED" "${workdir}/deep.log" || fail "deep compile did not store its result"
 
 echo "== fetch from a SHALLOW checkout (expect HIT) =="
-export FASTCACHE_SOURCE_DIR="$shallow" FASTCACHE_BINARY_DIR="${shallow}/build"
+export PACE_SOURCE_DIR="$shallow" PACE_BINARY_DIR="${shallow}/build"
 "$launcher" "$compiler" -std=c++23 -MD -MF "${shallow}/build/t.d" -c "${shallow}/t.cpp" -o "${shallow}/build/t.o" \
     2> "${workdir}/shallow.log" || fail "shallow compile returned non-zero"
 cat "${workdir}/shallow.log"
@@ -490,7 +490,7 @@ echo "   depfile localized to the consuming checkout"
 # produces exactly this shape, which makes it a good deal more ordinary than a
 # symlinked or substituted root.
 #
-# `FASTCACHE_NO_DIRECT=1` throughout, so what is exercised is the OBJECT key
+# `PACE_NO_DIRECT=1` throughout, so what is exercised is the OBJECT key
 # rather than the manifest -- the manifest path would answer from recorded
 # dependencies and never reach the prefix comparison this is about.
 outer="${workdir}/nest/outer"
@@ -511,8 +511,8 @@ EOF
 
 compile_nest() {
     local root="$1" tag="$2"
-    export FASTCACHE_SOURCE_DIR="$root" FASTCACHE_BINARY_DIR="${root}/build"
-    FASTCACHE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -MD -MF "${root}/build/t.d"         -c "${root}/src/t.cpp" -o "${root}/build/t.o" 2> "${workdir}/${tag}.log"         || fail "nested-root compile ${tag} returned non-zero"
+    export PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build"
+    PACE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -MD -MF "${root}/build/t.d"         -c "${root}/src/t.cpp" -o "${root}/build/t.o" 2> "${workdir}/${tag}.log"         || fail "nested-root compile ${tag} returned non-zero"
     cat "${workdir}/${tag}.log"
 }
 
@@ -643,7 +643,7 @@ inline int answer() { return 42; }
 HDR
     write_move_source "$root" "$name" "inc/old/Hdr.hpp"
 
-    export FASTCACHE_SOURCE_DIR="$root" FASTCACHE_BINARY_DIR="${root}/build"
+    export PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build"
 
     # "MISS", not "not a HIT": a discarded stale hit reports MISS as well, and the
     # variants share a key, so this asserts the outcome rather than the route.
@@ -734,7 +734,7 @@ HDR
 }
 
 check_header_move "moved header" "movedhdr"
-check_header_move "moved header (no direct mode)" "movedhdr-nodirect" env FASTCACHE_NO_DIRECT=1
+check_header_move "moved header (no direct mode)" "movedhdr-nodirect" env PACE_NO_DIRECT=1
 
 # --- 6: an edited source must not be served the old object -------------------
 # The preprocessed text is the only key input that carries the source's CONTENT,
@@ -748,12 +748,12 @@ check_header_move "moved header (no direct mode)" "movedhdr-nodirect" env FASTCA
 # contains — which is exactly how a probe capturing nothing stayed invisible.
 edited="${workdir}/edited"
 mkdir -p "${edited}/build"
-export FASTCACHE_SOURCE_DIR="$edited" FASTCACHE_BINARY_DIR="${edited}/build"
+export PACE_SOURCE_DIR="$edited" PACE_BINARY_DIR="${edited}/build"
 cat > "${edited}/e.cpp" <<'SRC'
 int value() { return 1; }
 SRC
 echo "== edited source: first revision =="
-FASTCACHE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -c "${edited}/e.cpp" -o "${edited}/build/e.o" \
+PACE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -c "${edited}/e.cpp" -o "${edited}/build/e.o" \
     2> "${workdir}/edited-1.log" || fail "first revision returned non-zero"
 cat "${workdir}/edited-1.log"
 # The first revision must actually POPULATE. Without this the second revision's
@@ -768,7 +768,7 @@ cat > "${edited}/e.cpp" <<'SRC'
 int value() { return 2; }
 SRC
 echo "== edited source: second revision (expect MISS and a different object) =="
-FASTCACHE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -c "${edited}/e.cpp" -o "${edited}/build/e.o" \
+PACE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -c "${edited}/e.cpp" -o "${edited}/build/e.o" \
     2> "${workdir}/edited-2.log" || fail "second revision returned non-zero"
 cat "${workdir}/edited-2.log"
 grep -q "MISS" "${workdir}/edited-2.log" \
@@ -807,7 +807,7 @@ inline char const* variant() { return "relative-paths"; }
 int main() { return answer() - 42; }
 SRC
 
-export FASTCACHE_SOURCE_DIR="$reldir" FASTCACHE_BINARY_DIR="${reldir}/build"
+export PACE_SOURCE_DIR="$reldir" PACE_BINARY_DIR="${reldir}/build"
 
 # Absolute before the cd, because either may have been passed as a relative path.
 rel_launcher="$(cd "$(dirname "$launcher")" && pwd)/$(basename "$launcher")"
@@ -874,9 +874,9 @@ echo "   relative paths reach the manifest, and an edit to one re-keys"
 # without this the compile below runs `${proj}/a.cpp` under roots pointing at an
 # unrelated tree and passes for reasons that have nothing to do with the daemon
 # being unreachable.
-export FASTCACHE_SOURCE_DIR="$proj" FASTCACHE_BINARY_DIR="${proj}/build"
+export PACE_SOURCE_DIR="$proj" PACE_BINARY_DIR="${proj}/build"
 echo "== unreachable daemon must still compile =="
-FASTCACHE_ADDR="127.0.0.1:1" "$launcher" "$compiler" -std=c++23 -c "${proj}/a.cpp" -o "${proj}/build/fb.o" \
+PACE_ADDR="127.0.0.1:1" "$launcher" "$compiler" -std=c++23 -c "${proj}/a.cpp" -o "${proj}/build/fb.o" \
     2> "${workdir}/fallback.log" || fail "compile failed when the cache was unreachable"
 cat "${workdir}/fallback.log"
 [[ -f "${proj}/build/fb.o" ]] || fail "fallback compile produced no object"
@@ -893,7 +893,7 @@ cat "${workdir}/fallback.log"
 # against the live daemon, on the same monotonic clock: what a compile costs when the cache
 # works. One compile makes at most `dead_exchanges` exchanges before it gives up on the cache --
 # direct mode's manifest round trip, then the object fetch; never the STORE, which a fetch the
-# cache did not serve skips (`pace-cc --help` says the same under FASTCACHE_TIMEOUT). No
+# cache did not serve skips (`pace-cc --help` says the same under PACE_TIMEOUT). No
 # scheduler is configured, so there is no dispatch budget to add.
 #
 # What ONE exchange can cost is the deadline that ends it, which differs by shape -- the
@@ -917,7 +917,7 @@ cat "${workdir}/fallback.log"
 # less a timer's resolution -- a timer reading 0 fails it -- and a CEILING of (2N - 1/2) x TOTAL,
 # 7000 ms at N = 2 and TOTAL = 2000. An exchange that DOUBLED its deadline reports 2N x TOTAL =
 # 8000 (measured 8006-8017 by run-launcher-e2e.ps1) and fails it by TOTAL / 2 = 1000 ms; one that
-# IGNORED FASTCACHE_TIMEOUT falls back to the default total of 10000 ms per exchange and reports
+# IGNORED PACE_TIMEOUT falls back to the default total of 10000 ms per exchange and reports
 # about 20000. A stall of up to (N - 1/2) x TOTAL = 3000 ms past the floor still passes: a stall
 # belongs to the HOST, and the host's worst measured overrun is +1616 ms (round 9, on the refused
 # leg). The former (N + 1) x TOTAL, 6000 ms, tolerated a stall of 2000, only 384 above that
@@ -1004,7 +1004,7 @@ dead_compile() {
     local addr="$1" bound_ms="$2" what="$3" started
     rm -f "${dead}/build/d.o"
     started="$(dead_now_ms)"
-    FASTCACHE_ADDR="$addr" FASTCACHE_CONNECT_TIMEOUT="${dead_connect_ms}ms" FASTCACHE_TIMEOUT="${dead_total_ms}ms" \
+    PACE_ADDR="$addr" PACE_CONNECT_TIMEOUT="${dead_connect_ms}ms" PACE_TIMEOUT="${dead_total_ms}ms" \
         "$launcher" "$compiler" -std=c++23 -c "${dead}/d.cpp" -o "${dead}/build/d.o" 2> "${workdir}/dead.log" &
     dead_launch_pid=$!
     # Whole seconds for the wait, rounded UP; the millisecond bound is judged below.
@@ -1031,7 +1031,7 @@ echo "== dead peers: a cache that cannot answer leaves the compile to go on =="
 dead="${workdir}/deadproj"
 mkdir -p "${dead}/build"
 echo 'char const* tag() { return "dead-peer"; } int main() { return 0; }' > "${dead}/d.cpp"
-export FASTCACHE_SOURCE_DIR="$dead" FASTCACHE_BINARY_DIR="${dead}/build"
+export PACE_SOURCE_DIR="$dead" PACE_BINARY_DIR="${dead}/build"
 
 dead_compile "127.0.0.1:${port}" $(( 300 * 1000 )) "the baseline compile against the live daemon"
 [[ "$dead_status" -eq 0 && -f "${dead}/build/d.o" ]] \
@@ -1135,7 +1135,7 @@ echo "== a compile with no -o must pass through and still build =="
 nooutdir="${workdir}/noout"
 mkdir -p "$nooutdir"
 cp "${proj}/a.cpp" "${proj}/hdr.hpp" "$nooutdir/"
-export FASTCACHE_SOURCE_DIR="$nooutdir" FASTCACHE_BINARY_DIR="$nooutdir"
+export PACE_SOURCE_DIR="$nooutdir" PACE_BINARY_DIR="$nooutdir"
 # The compiler defaults its output to ./a.o, so this must run FROM that
 # directory; `$launcher` may be a relative path, so resolve it before the cd.
 launcher_abs="$(cd "$(dirname "$launcher")" && pwd)/$(basename "$launcher")"
@@ -1156,12 +1156,12 @@ echo "   passed through uncached, object still produced"
 # file it asked for sat complete and correct on disk (issue #68). The ceiling
 # declines before a byte moves; what must survive is the compile.
 #
-# Driven through FASTCACHE_MAX_STORE_BYTES rather than a genuinely over-cap
+# Driven through PACE_MAX_STORE_BYTES rather than a genuinely over-cap
 # object, which would mean generating and pushing 64+ MiB of fixture on every CI
 # run to assert what the ceiling asserts here in milliseconds. The socket-level
 # half -- a write to a peer that hung up reports an error instead of raising a
 # signal -- is pinned in TcpClient_test.
-echo "== a value over FASTCACHE_MAX_STORE_BYTES is skipped, and the build still succeeds =="
+echo "== a value over PACE_MAX_STORE_BYTES is skipped, and the build still succeeds =="
 ceiling="${workdir}/ceilproj"
 mkdir -p "${ceiling}/build"
 cat > "${ceiling}/c.cpp" <<'EOF'
@@ -1169,17 +1169,17 @@ cat > "${ceiling}/c.cpp" <<'EOF'
 int main() { return static_cast<int>(std::string{"ceiling"}.size()); }
 EOF
 
-export FASTCACHE_SOURCE_DIR="$ceiling" FASTCACHE_BINARY_DIR="${ceiling}/build"
+export PACE_SOURCE_DIR="$ceiling" PACE_BINARY_DIR="${ceiling}/build"
 
 # 1 byte: every real object clears it, so this needs no assumption about what
 # the compiler emitted.
-FASTCACHE_MAX_STORE_BYTES=1 "$launcher" "$compiler" -std=c++23 -c "${ceiling}/c.cpp" -o "${ceiling}/build/c.o" \
+PACE_MAX_STORE_BYTES=1 "$launcher" "$compiler" -std=c++23 -c "${ceiling}/c.cpp" -o "${ceiling}/build/c.o" \
     2> "${workdir}/ceiling-1.log" \
     || fail "compile past the store ceiling returned non-zero (the cache broke the build)"
 cat "${workdir}/ceiling-1.log"
 [[ -f "${ceiling}/build/c.o" ]] || fail "compile past the store ceiling produced no object"
 grep -q "MISS" "${workdir}/ceiling-1.log" || fail "compile past the store ceiling was not reported as a MISS"
-grep -q "FASTCACHE_MAX_STORE_BYTES" "${workdir}/ceiling-1.log" \
+grep -q "PACE_MAX_STORE_BYTES" "${workdir}/ceiling-1.log" \
     || fail "the skipped store was not explained; an operator cannot act on a silent one"
 grep -q "STORED" "${workdir}/ceiling-1.log" \
     && fail "a value over the ceiling was stored anyway"
@@ -1187,7 +1187,7 @@ grep -q "STORED" "${workdir}/ceiling-1.log" \
 # Nothing was written, so the next compile must MISS again rather than HIT. This
 # is what separates "declined the store" from "stored it and said otherwise".
 rm -f "${ceiling}/build/c.o"
-FASTCACHE_MAX_STORE_BYTES=1 "$launcher" "$compiler" -std=c++23 -c "${ceiling}/c.cpp" -o "${ceiling}/build/c.o" \
+PACE_MAX_STORE_BYTES=1 "$launcher" "$compiler" -std=c++23 -c "${ceiling}/c.cpp" -o "${ceiling}/build/c.o" \
     2> "${workdir}/ceiling-2.log" || fail "second compile past the store ceiling returned non-zero"
 grep -q "MISS" "${workdir}/ceiling-2.log" || fail "a value over the ceiling was cached after all"
 echo "   store declined, compile succeeded, nothing cached"
@@ -1195,17 +1195,17 @@ echo "   store declined, compile succeeded, nothing cached"
 # The ceiling is opt-out: with it disabled the same TU caches normally, so a
 # regression that left the check permanently on would surface here.
 rm -f "${ceiling}/build/c.o"
-FASTCACHE_MAX_STORE_BYTES=0 "$launcher" "$compiler" -std=c++23 -c "${ceiling}/c.cpp" -o "${ceiling}/build/c.o" \
+PACE_MAX_STORE_BYTES=0 "$launcher" "$compiler" -std=c++23 -c "${ceiling}/c.cpp" -o "${ceiling}/build/c.o" \
     2> "${workdir}/ceiling-3.log" || fail "compile with the store ceiling disabled returned non-zero"
 grep -q "STORED" "${workdir}/ceiling-3.log" \
-    || fail "FASTCACHE_MAX_STORE_BYTES=0 did not disable the ceiling"
+    || fail "PACE_MAX_STORE_BYTES=0 did not disable the ceiling"
 echo "   ceiling disabled by 0, as documented"
 
 # A flag that merely starts like a dropped one must not be dropped: -coverage
 # begins with -c, and eating it used to break preprocessing and force a
 # permanent, silent fallback to uncached compiles.
 echo "== a flag prefixed like a dropped flag must not break caching =="
-export FASTCACHE_SOURCE_DIR="$proj" FASTCACHE_BINARY_DIR="${proj}/build"
+export PACE_SOURCE_DIR="$proj" PACE_BINARY_DIR="${proj}/build"
 "$launcher" "$compiler" -std=c++23 -coverage -c "${proj}/a.cpp" -o "${proj}/build/cov.o" \
     2> "${workdir}/coverage.log" || fail "compile with -coverage returned non-zero"
 cat "${workdir}/coverage.log"
@@ -1265,13 +1265,13 @@ else
     # `cl` does: a build system spells everything one way, and the compiler reports
     # its dependencies resolved through the filesystem the other way. Spelling the
     # output paths the same way as the roots is not a convenience — it is what a
-    # real build does, since `-o` and FASTCACHE_BINARY_DIR come from one generator,
+    # real build does, since `-o` and PACE_BINARY_DIR come from one generator,
     # and it is what makes property (b) below testable at all.
     linkobj="${aliasroot}/link/build/alias.o"
     linkdep="${aliasroot}/link/build/alias.d"
     realsrc="${aliasroot}/real/src/a.cpp"
     realinc="${aliasroot}/real/src/inc"
-    export FASTCACHE_SOURCE_DIR="${aliasroot}/link/src" FASTCACHE_BINARY_DIR="${aliasroot}/link/build"
+    export PACE_SOURCE_DIR="${aliasroot}/link/src" PACE_BINARY_DIR="${aliasroot}/link/build"
 
     run_alias_leg() {
         local log="$1" src="$2" inc="$3" obj="$4" dep="$5"
@@ -1279,7 +1279,7 @@ else
         # TARGET is a path the compiler reported rather than one the build system
         # named. Those must be reconciled like any other dependency, so the legs
         # below can tell a rule keyed on position from one keyed on value.
-        FASTCACHE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -MD -MP -MF "$dep" \
+        PACE_NO_DIRECT=1 "$launcher" "$compiler" -std=c++23 -MD -MP -MF "$dep" \
             -I"$inc" -c "$src" -o "$obj" 2> "${workdir}/${log}" \
             || { cat "${workdir}/${log}" >&2; fail "aliased-root: compile (${log}) returned non-zero"; }
         cat "${workdir}/${log}"
@@ -1342,7 +1342,7 @@ else
     # relative layout, so it must reach leg A's entry. Before the fix the two
     # spellings keyed apart and this MISSed.
     rm -f "${aliasroot}/real/build/alias.o"
-    export FASTCACHE_SOURCE_DIR="${aliasroot}/real/src" FASTCACHE_BINARY_DIR="${aliasroot}/real/build"
+    export PACE_SOURCE_DIR="${aliasroot}/real/src" PACE_BINARY_DIR="${aliasroot}/real/build"
     run_alias_leg "alias-c.log" "$realsrc" "$realinc" \
         "${aliasroot}/real/build/alias.o" "${aliasroot}/real/build/alias.d"
     # Anchored: the launcher prints "STALE HIT (...); recompiling" on its way to a
@@ -1361,7 +1361,7 @@ else
     # then adds one of its own, so the replayed rule target reads `/x/build//a.o`
     # -- rejected by Ninja, matched against no rule by make.
     rm -f "$linkobj" "$linkdep"
-    export FASTCACHE_SOURCE_DIR="${aliasroot}/link/src/" FASTCACHE_BINARY_DIR="${aliasroot}/link/build/"
+    export PACE_SOURCE_DIR="${aliasroot}/link/src/" PACE_BINARY_DIR="${aliasroot}/link/build/"
     run_alias_leg "alias-d.log" "$realsrc" "$realinc" "$linkobj" "$linkdep"
     # Asserted BEFORE the target comparison, and not merely for completeness: a
     # trimmed root keys identically to leg A, so this must HIT. If it ever misses,
@@ -1387,7 +1387,7 @@ else
     realobj="${aliasroot}/real/build/alias-e.o"
     realdep="${aliasroot}/real/build/alias-e.d"
     rm -f "$realobj" "$realdep"
-    export FASTCACHE_SOURCE_DIR="${aliasroot}/link/src" FASTCACHE_BINARY_DIR="${aliasroot}/link/build"
+    export PACE_SOURCE_DIR="${aliasroot}/link/src" PACE_BINARY_DIR="${aliasroot}/link/build"
     run_alias_leg "alias-e1.log" "$realsrc" "$realinc" "$realobj" "$realdep"
     e_compiled_target="$(head -n 1 "$realdep" | sed 's/:.*//')"
     [[ -n "$e_compiled_target" ]] || fail "aliased-root: leg E compile wrote no depfile rule"
@@ -1413,13 +1413,13 @@ else
     # spelling reaches the manifest KEY but the raw one reaches the manifest
     # BUILDER, the builder refuses (the source lies under neither root as written)
     # and direct mode is permanently, silently dead on exactly the hosts this
-    # section exists for -- reported only under FASTCACHE_VERBOSE, which a build
+    # section exists for -- reported only under PACE_VERBOSE, which a build
     # does not set.
     directsrc="${aliasroot}/real/src/a.cpp"
     directobj="${aliasroot}/link/build/direct.o"
     directdep="${aliasroot}/link/build/direct.d"
     rm -f "$directobj" "$directdep"
-    export FASTCACHE_SOURCE_DIR="${aliasroot}/link/src" FASTCACHE_BINARY_DIR="${aliasroot}/link/build"
+    export PACE_SOURCE_DIR="${aliasroot}/link/src" PACE_BINARY_DIR="${aliasroot}/link/build"
 
     run_direct_leg() {
         local log="$1"
@@ -1445,7 +1445,7 @@ fi
 # A translation unit that bakes its own path into program data -- `__FILE__`, or the
 # builtin `std::source_location` is made of -- must not be served into a second
 # checkout, in either direct mode, while one that bakes none still is; the checkout
-# that stored a root-bound copy must still hit it; and a hit FASTCACHE_VERIFY rejects
+# that stored a root-bound copy must still hit it; and a hit PACE_VERIFY rejects
 # is logged VERIFY-MISMATCH, never HIT. No key can see those paths: the direct-mode
 # key never sees the `__FILE__` expansion and `source_location` reaches no key at
 # all, so the launcher reads the OBJECT (apps/pace-cc/RootBinding.hpp). Before
@@ -1480,7 +1480,7 @@ write_bound_tree() {
 bound_compile() {
     local root="$1" log="$2" flag="$3"
     shift 3
-    env "$@" FASTCACHE_SOURCE_DIR="$root" FASTCACHE_BINARY_DIR="${root}/build" \
+    env "$@" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
         "$launcher" "$compiler" -std=c++20 ${flag:+"$flag"} -MD -MF "${root}/build/u.d" \
         -c "${root}/src/u.cpp" -o "${root}/build/u.o" 2> "$log"
 }
@@ -1503,8 +1503,8 @@ check_root_bound() {
     b="${dir}/checkout-b"
     write_bound_tree "$a" "$kind" "rootbound-${kind}-${direct}"
     write_bound_tree "$b" "$kind" "rootbound-${kind}-${direct}"
-    no_direct="FASTCACHE_E2E_CASE=rootbound"
-    [[ "$direct" == off ]] && no_direct="FASTCACHE_NO_DIRECT=1"
+    no_direct="PACE_E2E_CASE=rootbound"
+    [[ "$direct" == off ]] && no_direct="PACE_NO_DIRECT=1"
 
     bound_compile "$a" "${dir}/a.log" "" "$no_direct" || fail "root-bound ${kind}/${direct}: checkout a failed to compile"
     bound_compile "$b" "${dir}/b.log" "" "$no_direct" || fail "root-bound ${kind}/${direct}: checkout b failed to compile"
@@ -1577,8 +1577,8 @@ for debug in off on; do
         flag="-g"
         want=VERIFY-MISMATCH
     fi
-    bound_compile "${dir}/checkout-a" "${dir}/a.log" "$flag" FASTCACHE_NO_DIRECT=1 || fail "verify ${debug}: a failed"
-    bound_compile "${dir}/checkout-b" "${dir}/b.log" "$flag" FASTCACHE_NO_DIRECT=1 FASTCACHE_VERIFY=1 \
+    bound_compile "${dir}/checkout-a" "${dir}/a.log" "$flag" PACE_NO_DIRECT=1 || fail "verify ${debug}: a failed"
+    bound_compile "${dir}/checkout-b" "${dir}/b.log" "$flag" PACE_NO_DIRECT=1 PACE_VERIFY=1 \
         || fail "verify ${debug}: b failed"
     ob="$(bound_outcome "${dir}/b.log")"
     logged="$(tail -n 1 "$(e2e_launcher_state_log)" | e2e_launcher_log_field outcome)"
@@ -1633,7 +1633,7 @@ write_moved_tree() {
 moved_compile() {
     local root="$1" log="$2"
     shift 2
-    env "$@" FC_EDIT_STUB_REAL="$real_compiler" FASTCACHE_SOURCE_DIR="$root" FASTCACHE_BINARY_DIR="${root}/build" \
+    env "$@" FC_EDIT_STUB_REAL="$real_compiler" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
         "$launcher" "$stub" -std=c++20 -MD -MF "${root}/build/m.d" -c "${root}/src/m.cpp" -o "${root}/build/m.o" 2> "$log"
 }
 # `LC_ALL=C`, or macOS's grep matches nothing on an object's non-UTF-8 bytes.
@@ -1673,7 +1673,7 @@ for leg in tu header; do
 
     echo "== mid-compile save (${leg}): the saved content is a MISS and builds what was saved =="
     rm -f "${root}/build/m.o"
-    moved_compile "$root" "${moved}/${leg}-2.log" FASTCACHE_E2E_CASE=moved \
+    moved_compile "$root" "${moved}/${leg}-2.log" PACE_E2E_CASE=moved \
         || { cat "${moved}/${leg}-2.log" >&2; fail "mid-compile ${leg}: the rebuild failed"; }
     cat "${moved}/${leg}-2.log"
     grep -q "pace-cc: MISS" "${moved}/${leg}-2.log" \
@@ -1689,7 +1689,7 @@ for leg in tu header; do
     echo "== mid-compile save (${leg}): another checkout holding the saved content is not served the raced object =="
     other="${moved}/${leg}-other"
     cp -R "${moved}/${leg}-v2" "$other"
-    moved_compile "$other" "${moved}/${leg}-other.log" FASTCACHE_E2E_CASE=moved \
+    moved_compile "$other" "${moved}/${leg}-other.log" PACE_E2E_CASE=moved \
         || { cat "${moved}/${leg}-other.log" >&2; fail "mid-compile ${leg}: the other checkout failed"; }
     object_says "${other}/build/m.o" "$want" || fail "mid-compile ${leg}: another checkout was served the raced object"
 done
@@ -1715,12 +1715,12 @@ grep -q "manifest recorded from the keyed content" "${moved}/keyed-1.log" \
     || { cat "${moved}/keyed-1.log"; fail "keyed manifest: the raced compile recorded no manifest, so this case tests nothing"; }
 keyed_key="$(sed -n 's/^pace-cc: MISS key=\([^ ]*\).*/\1/p' "${moved}/keyed-1.log")"
 [[ -n "$keyed_key" ]] || { cat "${moved}/keyed-1.log"; fail "keyed manifest: the raced compile traced no MISS key"; }
-moved_compile "${moved}/keyed-v1-twin" "${moved}/keyed-twin.log" FASTCACHE_NO_DIRECT=1 \
+moved_compile "${moved}/keyed-v1-twin" "${moved}/keyed-twin.log" PACE_NO_DIRECT=1 \
     || { cat "${moved}/keyed-twin.log" >&2; fail "keyed manifest: the v1 twin failed"; }
 grep -q "STORED key=${keyed_key} " "${moved}/keyed-twin.log" \
     || { cat "${moved}/keyed-twin.log"; fail "keyed manifest: the v1 twin did not store key(v1)=${keyed_key}, so nothing stands behind the manifest"; }
 rm -f "${keyed}/build/m.o"
-moved_compile "$keyed" "${moved}/keyed-2.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$keyed" "${moved}/keyed-2.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/keyed-2.log" >&2; fail "keyed manifest: the saved content's build failed"; }
 cat "${moved}/keyed-2.log"
 grep -q "pace-cc: MISS" "${moved}/keyed-2.log" \
@@ -1730,14 +1730,14 @@ object_says "${keyed}/build/m.o" MESSAGE_V2_NEW_keyed || fail "keyed manifest: t
 echo "== control: the same stub with no save stores, records a manifest, then direct-hits =="
 control="${moved}/control"
 write_moved_tree "$control" MESSAGE_CONTROL HEADER_CONTROL
-moved_compile "$control" "${moved}/control-1.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$control" "${moved}/control-1.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/control-1.log" >&2; fail "control: the compile failed"; }
 grep -q "STORED key=" "${moved}/control-1.log" \
     || { cat "${moved}/control-1.log"; fail "control: a quiet compile through the stub did not store"; }
 grep -q "MANIFEST stored key=" "${moved}/control-1.log" \
     || { cat "${moved}/control-1.log"; fail "control: a quiet compile did not record a manifest"; }
 rm -f "${control}/build/m.o"
-moved_compile "$control" "${moved}/control-2.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$control" "${moved}/control-2.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/control-2.log" >&2; fail "control: the rebuild failed"; }
 grep -q "direct mode: the manifest validated" "${moved}/control-2.log" \
     || { cat "${moved}/control-2.log"; fail "control: the rebuild was not a direct hit"; }
@@ -1745,7 +1745,7 @@ grep -q "direct mode: the manifest validated" "${moved}/control-2.log" \
 echo "== control: a second checkout of the same content direct-hits the first one's manifest =="
 twin="${moved}/control-twin-deeper/tree"
 write_moved_tree "$twin" MESSAGE_CONTROL HEADER_CONTROL
-moved_compile "$twin" "${moved}/twin.log" FASTCACHE_E2E_CASE=moved \
+moved_compile "$twin" "${moved}/twin.log" PACE_E2E_CASE=moved \
     || { cat "${moved}/twin.log" >&2; fail "control: the twin checkout failed"; }
 grep -q "direct mode: the manifest validated" "${moved}/twin.log" \
     || { cat "${moved}/twin.log"; fail "control: cross-checkout sharing did not survive the witness"; }
@@ -1783,12 +1783,12 @@ kill -0 "$auth_pid" 2>/dev/null || {
 }
 
 (
-    export FASTCACHE_ADDR="127.0.0.1:${authport}"
-    export FASTCACHE_SOURCE_DIR="$authdir"
-    export FASTCACHE_BINARY_DIR="${authdir}/build"
+    export PACE_ADDR="127.0.0.1:${authport}"
+    export PACE_SOURCE_DIR="$authdir"
+    export PACE_BINARY_DIR="${authdir}/build"
 
     # (a) + (b): no credential at all.
-    unset FASTCACHE_TOKEN
+    unset PACE_TOKEN
     "$launcher" "$compiler" -c "${authdir}/a.cpp" -o "${authdir}/build/none.o" \
         > "${workdir}/auth-none.log" 2>&1 \
         || fail "a refused credential broke the build; the cache must never be load-bearing"
@@ -1799,14 +1799,14 @@ kill -0 "$auth_pid" 2>/dev/null || {
     # (a): a WRONG credential must be refused too, and distinguishably. "failed"
     # and "required" are different operator problems -- a bad token versus no
     # token -- and a single message for both is a support ticket either way.
-    FASTCACHE_TOKEN=not-the-secret "$launcher" "$compiler" -c "${authdir}/a.cpp" -o "${authdir}/build/wrong.o" \
+    PACE_TOKEN=not-the-secret "$launcher" "$compiler" -c "${authdir}/a.cpp" -o "${authdir}/build/wrong.o" \
         > "${workdir}/auth-wrong.log" 2>&1 \
         || fail "a wrong credential broke the build"
     grep -q "authentication failed" "${workdir}/auth-wrong.log" \
         || { cat "${workdir}/auth-wrong.log" >&2; fail "a wrong credential was not reported as a failed authentication"; }
 
     # (c): the right credential caches as usual -- miss, then hit.
-    export FASTCACHE_TOKEN=e2e-s3cret
+    export PACE_TOKEN=e2e-s3cret
     "$launcher" "$compiler" -c "${authdir}/a.cpp" -o "${authdir}/build/ok.o" \
         > "${workdir}/auth-miss.log" 2>&1 \
         || fail "an authenticated compile failed"

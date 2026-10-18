@@ -72,7 +72,7 @@
 # opening several reports once is proportionate, because master is broken.
 #
 # The comment storm #774 fears is answered at the OTHER end: the workflow passes
-# `FASTCACHED_REPORT_ONLY_IF_NEW` for a push, so a context that goes on failing on
+# `PACE_REPORT_ONLY_IF_NEW` for a push, so a context that goes on failing on
 # every subsequent push updates nothing. A push report is a TRANSITION -- this
 # context started failing -- and the second failure is not a new fact.
 #
@@ -174,7 +174,7 @@ ReasonFor() {
 # provenance of the list and the `gh api` call that reads the live one.
 #
 # Overridable only so the selftest can stage a table; production passes nothing.
-RequiredContextsFile="${FASTCACHED_REQUIRED_CONTEXTS_FILE:-scripts/check-merge-queue-contexts.sh}"
+RequiredContextsFile="${PACE_REQUIRED_CONTEXTS_FILE:-scripts/check-merge-queue-contexts.sh}"
 
 ReadRequiredContexts() {
     [[ -f "$RequiredContextsFile" ]] \

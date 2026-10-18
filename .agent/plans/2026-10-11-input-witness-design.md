@@ -149,7 +149,7 @@ All of it lives in the launcher's own `_fc_cc_sources`, so it is in `pace-cc-tes
   - It is not `Miss`, which claims *compiled and stored*.
   - It is not `Uncacheable`, which claims a permanent property of the TU.
 - `outcomeDetail` is the verdict's fixed sentence, never the path, so `--show-stats` ranks one
-  row per cause (Ruling 12); the path is on the `FASTCACHE_VERBOSE` line. The report gets a row for the token,
+  row per cause (Ruling 12); the path is on the `PACE_VERBOSE` line. The report gets a row for the token,
   documentation included.
 
 ## Data flow in `RunCached`
@@ -205,7 +205,7 @@ Why each row is sound:
 
 ## What the operator sees
 
-- **Under `FASTCACHE_VERBOSE`:**
+- **Under `PACE_VERBOSE`:**
   `pace-cc: an input changed during the compile: <path>; compiled, not stored`. For
   `MovedDuringCompile` in direct mode the manifest is recorded FIRST and the line then says
   what happened (Ruling 15): `; manifest recorded from the keyed content`, or `; no manifest

@@ -11,7 +11,7 @@ namespace Pace::Cc
 
 /// Deciding whether two object files are the same compile, when the bytes differ.
 ///
-/// `FASTCACHE_VERIFY` compared object files with a `memcmp`, which is exactly right
+/// `PACE_VERIFY` compared object files with a `memcmp`, which is exactly right
 /// on ELF and can never succeed on Windows: every MSVC-family driver stamps the wall
 /// clock into the COFF header, and a cached object was produced earlier than the
 /// fresh compile it is checked against **by construction**. So the one instrument

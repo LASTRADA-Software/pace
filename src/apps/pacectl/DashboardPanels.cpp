@@ -201,7 +201,7 @@ namespace
     // Titled by what answered: a daemon's cache and a node's are one panel (#1399). `title` is the name before a
     // session states one, spelled by the same table that names the server.
     constexpr auto CacheSpec =
-        PanelSpec { .title = RemoteKindTable[static_cast<std::size_t>(RemoteKind::FastcacheWireOnly)].product,
+        PanelSpec { .title = RemoteKindTable[static_cast<std::size_t>(RemoteKind::PaceWireOnly)].product,
                     .rates = CacheRates,
                     .levels = CacheLevels,
                     .tierColumns = CacheTierColumns,

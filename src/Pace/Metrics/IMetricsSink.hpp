@@ -283,7 +283,7 @@ class IMetricsSink
         /// as the commonest setup failure, so the most misconfigured machine reads
         /// the highest load, forever, while idle.
         ///
-        /// **In-flight is `fastcache_node_slots_busy`**, a gauge sampled at scrape
+        /// **In-flight is `pace_node_slots_busy`**, a gauge sampled at scrape
         /// time. That is not a workaround invented for this: `PrometheusFormatter`
         /// had already declined to derive it from these two, because they are
         /// incremented by different components and a scrape landing between them
@@ -729,7 +729,7 @@ class IMetricsSink
         /// the frame ceiling that fires on a real node, which is why it is a row at
         /// all -- the merged `0xFC` listener asks the component owning the verb, and
         /// until #491 the cache's answer moved nothing, so an operator alerting on
-        /// `fastcache_worker_frames_refused_payload_too_large_total` watched a flat
+        /// `pace_worker_frames_refused_payload_too_large_total` watched a flat
         /// graph while the port was being hammered (#326's scenario, one surface
         /// over).
         ///
@@ -888,7 +888,7 @@ class IMetricsSink
         ///
         /// **Its own counter because the alternative is a lie or a silence.** These
         /// used to be reported as `StorageErrorCode::Corrupt`, so a client planting a
-        /// malformed set moved `fastcached_write_errors_total` and wrote a "storage
+        /// malformed set moved `pace_write_errors_total` and wrote a "storage
         /// write failed" line -- an unprivileged client driving the disk-failure
         /// signal on a healthy store. Taking the code away without adding this would
         /// have traded a wrong signal for no signal at all: the operator would then
@@ -896,7 +896,7 @@ class IMetricsSink
         ///
         /// Read it as "clients are sending malformed sets or streams", never as a
         /// statement about the disk -- what says the disk is failing is
-        /// `fastcached_write_errors_total` beside a `Corrupt` in the log, and this
+        /// `pace_write_errors_total` beside a `Corrupt` in the log, and this
         /// counter exists precisely so those two never share a line again.
         ///
         /// Both the read and the write path count here: a malformed value is found by
@@ -980,7 +980,7 @@ class IMetricsSink
         /// Not a refusal of the client's making, and the only one of this surface's
         /// arms that is about THIS machine rather than about whoever is talking to
         /// it: a full disk, a read-only mount, a backend that has stopped accepting
-        /// writes. Nothing else counted it -- `fastcached_write_errors_total` is
+        /// writes. Nothing else counted it -- `pace_write_errors_total` is
         /// named in this file's own history and no longer exists.
         CacheStoresFailed,
 
@@ -1149,7 +1149,7 @@ class IMetricsSink
         /// the list cannot act on, and `Pending` would keep the machine polling for an answer
         /// that cannot come. Expected once after a forget of a machine that is still running;
         /// a steady rate is a removed machine nobody stopped, which is worth the same attention
-        /// as `fastcache_raft_peer_connections_refused_revoked_key_total` on the peer wire.
+        /// as `pace_raft_peer_connections_refused_revoked_key_total` on the peer wire.
         EnrollmentRequestsRefusedRevokedKey,
 
         /// ENROLL requests refused because their signature does not verify under the key they ask

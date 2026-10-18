@@ -48,13 +48,13 @@ Human-readable by default, machine-readable on request:
 ```sh
 $ pacectl stats
 source                    info
-fastcached_version        fastcached-0.2.0
+pace_version        fastcached-0.2.0
 used_memory               94
 maxmemory                 8589934592
 total_commands_processed  6
 ...
 $ pacectl stats --format=json
-{"source":"info","fastcached_version":"fastcached-0.2.0","used_memory":94,...}
+{"source":"info","pace_version":"fastcached-0.2.0","used_memory":94,...}
 $ pacectl stats --format=tsv
 ```
 

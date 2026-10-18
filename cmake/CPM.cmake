@@ -55,7 +55,7 @@ file(DOWNLOAD
     "${CPM_DOWNLOAD_URL}"
     "${CPM_DOWNLOAD_LOCATION}"
     EXPECTED_HASH "SHA256=${CPM_HASH_SUM}"
-    INACTIVITY_TIMEOUT "${FASTCACHED_FETCH_SILENCE_SECONDS}"
+    INACTIVITY_TIMEOUT "${PACE_FETCH_SILENCE_SECONDS}"
     STATUS cpmDownloadStatus
 )
 # The status carries the reason, and the message repeats it rather than

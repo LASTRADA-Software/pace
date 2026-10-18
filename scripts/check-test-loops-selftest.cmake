@@ -32,25 +32,25 @@
 # asserts its mutation actually LANDED before any verdict is drawn from it.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-test-loops-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-# `fastcached_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
+# `pace_scratch_git`: the fixture's own git runs with the inherited `GIT_DIR` and its
 # kin removed, or under an exported `GIT_DIR` its `git init` writes THAT repository.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-test-loops.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-test-loops.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -286,8 +286,8 @@ set(daemonMainFile
 
 # ---------------------------------------------------------------------------
 # Stage a tree, apply one mutation, run the check, return its collapsed output.
-function(fastcached_stage_and_run name target from to backlog outOutput outApplied)
-    set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
+function(pace_stage_and_run name target from to backlog outOutput outApplied)
+    set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     # `-nested`: the tree sits one level inside a git repository whose index knows none of
     # it -- how ctest stages every walk case, under a build directory in the checkout.
@@ -386,7 +386,7 @@ function(fastcached_stage_and_run name target from to backlog outOutput outAppli
                 "case `${name}` needs a git repository around its tree and no git was found. Skipping "
                 "it would leave the arrangement ctest actually runs every walk case in untested")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${nestedIn}" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE outerStatus)
         if(NOT outerStatus EQUAL 0)
             message(FATAL_ERROR "case `${name}` could not create the repository around its tree (init=${outerStatus})")
@@ -399,7 +399,7 @@ function(fastcached_stage_and_run name target from to backlog outOutput outAppli
                 "case `${name}` asks for the git enumeration path and no git was found. Skipping it "
                 "would leave the mode CI actually takes untested")
         endif()
-        fastcached_scratch_git("${GIT_EXECUTABLE}" scratchGit)
+        pace_scratch_git("${GIT_EXECUTABLE}" scratchGit)
         execute_process(COMMAND ${scratchGit} init -q "${tree}" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE initStatus)
         execute_process(COMMAND ${scratchGit} -C "${tree}" add -A OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE addStatus)
         if(NOT initStatus EQUAL 0 OR NOT addStatus EQUAL 0)
@@ -425,8 +425,8 @@ function(fastcached_stage_and_run name target from to backlog outOutput outAppli
     endif()
 
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}"
-                "-DFASTCACHED_TEST_LOOPS_BACKLOG=${backlogPath}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}"
+                "-DPACE_TEST_LOOPS_BACKLOG=${backlogPath}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
     # `message(FATAL_ERROR)` word-wraps at a column that depends on the scratch path's
@@ -447,7 +447,7 @@ endfunction()
 # The backlog field is the rows to stage, `~bar~`-separated and `~n~` between rows; `-` is an
 # empty table and `absent` is no file at all. It is the last field because almost every case
 # wants none, and a default that reads as `-` is one a row cannot forget to state.
-set(FastCachedTestLoopCases
+set(PaceTestLoopCases
     # The baseline, in both enumeration modes. Every refusal below is evidence only if
     # these pass -- and they pass only while every exemption row still matches its site.
     "baseline via walk|none|-|-|no new C-style loop && directory walk (no git index) && 23 exempted site(s) in 17 row(s) && backlog: empty|CMake Error|-"
@@ -516,14 +516,14 @@ set(FastCachedTestLoopCases
     #
     # The scope rows for `src/*.cpp` and `src/*.hpp` are what these exercise. Before #1452 a
     # production source was in no scope row at all, so every one of these passed vacuously.
-    "a production loop with no backlog row|newfile|src/Pace/Core/Prod.cpp|void F()~n~{~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~}~n~|src/Pace/Core/Prod.cpp:3: a C-style for loop && A site nobody has decided about yet belongs in FastCachedTestLoopBacklog|-|-"
+    "a production loop with no backlog row|newfile|src/Pace/Core/Prod.cpp|void F()~n~{~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~}~n~|src/Pace/Core/Prod.cpp:3: a C-style for loop && A site nobody has decided about yet belongs in PaceTestLoopBacklog|-|-"
     # The ACCEPTING direction. A ratchet that refused its own rows would look like a working
     # one on any tree that still has sites -- and the shipped backlog is EMPTY since #1452, so
     # this case is now the only thing that exercises a row being honoured at all.
     "a production loop its backlog row records|newfile|src/Pace/Core/Prod.cpp|void F()~n~{~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~}~n~|no new C-style loop && backlog: 1 site(s) across 1 file(s) are waiting on #1452|CMake Error|loop~bar~src/Pace/Core/Prod.cpp~bar~1~bar~#1452"
     # One MORE than the row records: a new site arriving in a file that already has some, which
     # is the likeliest way one arrives at all.
-    "one more loop than the backlog records|newfile|src/Pace/Core/Prod.cpp|void F()~n~{~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~}~n~|2 loop site(s) here, and FastCachedTestLoopBacklog records 1 for #1452 && this is a NEW site|-|loop~bar~src/Pace/Core/Prod.cpp~bar~1~bar~#1452"
+    "one more loop than the backlog records|newfile|src/Pace/Core/Prod.cpp|void F()~n~{~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~}~n~|2 loop site(s) here, and PaceTestLoopBacklog records 1 for #1452 && this is a NEW site|-|loop~bar~src/Pace/Core/Prod.cpp~bar~1~bar~#1452"
     # One FEWER: a conversion that did not come off the backlog. The non-obvious direction, and
     # without it the number a fixed site left behind is room for the next arrival.
     "one fewer loop than the backlog records|newfile|src/Pace/Core/Prod.cpp|void F()~n~{~n~    for (int i = 0~sc~ i < 3~sc~ ++i)~n~        Use(i)~sc~~n~}~n~|the row records 2, the scan finds 1 && the ratchet, and it only turns one way|-|loop~bar~src/Pace/Core/Prod.cpp~bar~2~bar~#1452"
@@ -559,7 +559,7 @@ set(FastCachedTestLoopCases
 set(failures "")
 set(caseCount 0)
 
-foreach(row IN LISTS FastCachedTestLoopCases)
+foreach(row IN LISTS PaceTestLoopCases)
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 7)
@@ -576,7 +576,7 @@ foreach(row IN LISTS FastCachedTestLoopCases)
     list(GET fields 6 caseBacklog)
 
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}"
+    pace_stage_and_run("${caseCount}" "${caseTarget}" "${caseFrom}" "${caseTo}"
                              "${caseBacklog}" output applied)
 
     if(NOT applied)

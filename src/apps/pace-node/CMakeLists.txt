@@ -118,20 +118,20 @@ target_include_directories(pace-node PRIVATE
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc")
 target_link_libraries(pace-node PRIVATE Pace)
 target_compile_definitions(pace-node PRIVATE
-    FASTCACHE_NODE_VERSION="${FASTCACHED_VERSION_STRING}")
+    PACE_NODE_VERSION="${PACE_VERSION_STRING}")
 if(WIN32)
     target_link_libraries(pace-node PRIVATE ws2_32)
 endif()
 
 install(TARGETS pace-node
-    RUNTIME DESTINATION "${FASTCACHED_INSTALL_BINDIR}"
-    COMPONENT "${FASTCACHED_APP_COMPONENT}"
+    RUNTIME DESTINATION "${PACE_INSTALL_BINDIR}"
+    COMPONENT "${PACE_APP_COMPONENT}"
 )
 
 # The node's own unit tests. AdminEndpoint and SchedulerEndpoint are
 # the only sources here that the launcher's test binary does not already cover --
 # and each of the last two lives outside main.cpp precisely so that it can be.
-if(FASTCACHED_BUILD_TESTS)
+if(PACE_BUILD_TESTS)
     add_executable(pace-node-tests
         "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/test_main.cpp"
         AdminEndpoint.cpp
@@ -324,7 +324,7 @@ if(FASTCACHED_BUILD_TESTS)
     # comes from <tests/CheckoutPaths.hpp>, included by the cases that read it, so the
     # checkout's path stays out of every other unit's cache key.
     target_compile_definitions(pace-node-tests PRIVATE
-        FASTCACHED_MACOS_NODE_LABEL="${FASTCACHED_MACOS_NODE_LABEL}")
+        PACE_MACOS_NODE_LABEL="${PACE_MACOS_NODE_LABEL}")
     if(WIN32)
         target_link_libraries(pace-node-tests PRIVATE ws2_32)
     endif()
@@ -335,5 +335,5 @@ if(FASTCACHED_BUILD_TESTS)
     # count. On 3.6.0 the exit code was the failure count, and a case failing four
     # assertions was scored *skipped* (#1128). `catch-skip-return-code` requires the
     # property, and `catch-skip-exit-contract` that it still means what it says.
-    catch_discover_tests(pace-node-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+    catch_discover_tests(pace-node-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
 endif()

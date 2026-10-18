@@ -84,9 +84,9 @@ if(ENABLE_SANITIZER_ADDRESS OR ENABLE_SANITIZER_UNDEFINED OR ENABLE_SANITIZER_TH
         "not both.")
 endif()
 
-if(NOT FASTCACHED_BUILD_TESTS)
+if(NOT PACE_BUILD_TESTS)
     message(FATAL_ERROR
-        "[Coverage] ENABLE_COVERAGE needs FASTCACHED_BUILD_TESTS=ON -- the coverage target "
+        "[Coverage] ENABLE_COVERAGE needs PACE_BUILD_TESTS=ON -- the coverage target "
         "measures what the test suite reaches, and there is no suite to run.")
 endif()
 
@@ -156,7 +156,7 @@ foreach(tool IN ITEMS profdata cov)
 
     if(NOT "${CMAKE_MATCH_1}" STREQUAL "${COVERAGE_CLANG_MAJOR}")
         # Drop the cache entry before failing, the same way CompileCache.cmake
-        # unsets FASTCACHE_CC. find_program() caches what it found, and the cache
+        # unsets PACE_CC. find_program() caches what it found, and the cache
         # outlives a FATAL_ERROR -- so without this, someone who reads the
         # message, installs llvm-${COVERAGE_CLANG_MAJOR} and re-runs cmake gets
         # the identical failure from the stale entry, with nothing to suggest the
@@ -274,17 +274,17 @@ message(STATUS "[Coverage] Clang ${COVERAGE_CLANG_MAJOR} source-based instrument
 add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
 add_link_options(-fprofile-instr-generate)
 
-# Call once, after every add_subdirectory() -- fastcached_collect_executables()
+# Call once, after every add_subdirectory() -- pace_collect_executables()
 # reads the build system as it stands, so a target added later is a target left
 # out of the report. The walk itself lives in cmake/ProjectTargets.cmake, shared
 # with cmake/Utf8CodePage.cmake, which needs the same list for the same reason:
 # both are wrong in silence when it is incomplete.
-function(fastcached_add_coverage_targets)
-    fastcached_collect_executables("${CMAKE_SOURCE_DIR}" executables)
+function(pace_add_coverage_targets)
+    pace_collect_executables("${CMAKE_SOURCE_DIR}" executables)
 
     if(NOT executables)
         message(FATAL_ERROR
-            "[Coverage] no executables found under src/. fastcached_add_coverage_targets() "
+            "[Coverage] no executables found under src/. pace_add_coverage_targets() "
             "must be called after the add_subdirectory() calls that define them.")
     endif()
 

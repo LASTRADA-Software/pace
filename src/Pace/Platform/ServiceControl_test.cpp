@@ -372,7 +372,7 @@ TEST_CASE("ServiceControl: the launchd label is reverse-DNS and lowercased", "[p
     Pace::Config cfg {};
     REQUIRE(Pace::LaunchdLabel(SpecFor("pace-kv", cfg)) == "software.lastrada.fastcached");
 
-    cfg.serviceName = "FastCachedSmoke";
+    cfg.serviceName = "PaceSmoke";
     REQUIRE(Pace::LaunchdLabel(SpecFor("pace-kv", cfg)) == "software.lastrada.fastcachedsmoke");
 }
 
@@ -398,8 +398,8 @@ TEST_CASE("ServiceControl: the SCM logon identity is named, not implied", "[plat
 
     // It follows --service-name, because that is what the SCM derives it from: a
     // fixed string here would name an identity a renamed service does not have.
-    worker.serviceName = "FastCacheCompileNodeSmoke";
-    REQUIRE(Unwrap(Pace::WindowsLogonName(worker)) == "NT SERVICE\\FastCacheCompileNodeSmoke");
+    worker.serviceName = "PaceNodeSmoke";
+    REQUIRE(Unwrap(Pace::WindowsLogonName(worker)) == "NT SERVICE\\PaceNodeSmoke");
 }
 
 TEST_CASE("ServiceControl: a system job's log directory is its own", "[platform][service][launchd]")
@@ -1464,7 +1464,7 @@ TEST_CASE("ServiceControl: every flag that can reach a registration does, one ro
     // One row's stimulus is a property of the BUILD rather than a literal, so the
     // table below is `const` and not `constexpr`. `--memory-compression` defaults to
     // `none`, and every other value it accepts is a codec
-    // `FASTCACHED_ENABLE_COMPRESSION` compiled in -- `ParseCompression` refuses one
+    // `PACE_ENABLE_COMPRESSION` compiled in -- `ParseCompression` refuses one
     // that is not, so a literal `zstd` would fail this sweep on a supported
     // configuration for a reason that has nothing to do with a registration. Asked
     // of the codec table, which is the question `ParseCompression` itself asks.

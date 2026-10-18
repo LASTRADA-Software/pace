@@ -105,7 +105,7 @@ PresentedCredential TicketCredentials::MintedCredential(std::string_view audienc
     if (_remembered.has_value())
         return PresentedCredential { .credential = {}, .missing = _remembered };
     if (!_mintFrom.has_value())
-        return Failed(MintFailure::NoSource, "FASTCACHE_ADDR for the launcher, --listen-node for a node");
+        return Failed(MintFailure::NoSource, "PACE_ADDR for the launcher, --listen-node for a node");
 
     // Presented with NO credential: the mint is admitted as this machine, by the connection.
     auto outcome = _exchange.Exchange(*_mintFrom, Wire::EncodeMintTicketRequest(audience), Credential {}, _budget);

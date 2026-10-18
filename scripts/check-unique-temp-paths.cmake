@@ -31,7 +31,7 @@
 # `Core/IRandomSource.hpp`, whose own comment owns the 32-bit `result_type` question. Anywhere
 # else under `src/` is refused, or carries an exemption row with its reason.
 #
-# Comments are stripped first (`fastcached_strip_comments`), because the four files this rule
+# Comments are stripped first (`pace_strip_comments`), because the four files this rule
 # was written for now EXPLAIN it in prose and a reader that counted those would refuse the
 # very tree it had just fixed. Its blind spot is the shared stripper's: an introducer inside a
 # string literal. That direction is a false GREEN and is accepted here for a stated reason --
@@ -53,8 +53,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "unique-temp-paths: FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "unique-temp-paths: PACE_SOURCE_DIR must be set")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
@@ -62,8 +62,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # ---------------------------------------------------------------------------
 # The one file the platform entropy source may be reached from. Overridable ONLY so the
 # self-test can stage a tree; a real run never sets it, and the default is the claim.
-if(NOT DEFINED FASTCACHED_RANDOM_SEAM)
-    set(FASTCACHED_RANDOM_SEAM "src/Pace/Core/IRandomSource.hpp")
+if(NOT DEFINED PACE_RANDOM_SEAM)
+    set(PACE_RANDOM_SEAM "src/Pace/Core/IRandomSource.hpp")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -72,15 +72,15 @@ endif()
 # Empty today, and that is the point: the five sites this check was written for all had a
 # better answer available. A row here is a claim that a caller needs the platform device
 # rather than the seam, and it has to say why.
-set(FastCachedRandomDeviceExemptions "")
+set(PaceRandomDeviceExemptions "")
 
 # ---------------------------------------------------------------------------
 # The positive anchor. A scan whose pattern has stopped matching reads exactly like a clean
 # tree, so the legitimate use must be FOUND before anything is enumerated.
-set(seamPath "${FASTCACHED_SOURCE_DIR}/${FASTCACHED_RANDOM_SEAM}")
+set(seamPath "${PACE_SOURCE_DIR}/${PACE_RANDOM_SEAM}")
 if(NOT EXISTS "${seamPath}")
     message("")
-    message("  ${FASTCACHED_RANDOM_SEAM} is not there.")
+    message("  ${PACE_RANDOM_SEAM} is not there.")
     message("")
     message("That file is where this check's own pattern is proved to match. Without it a")
     message("clean report would mean only that nothing was read.")
@@ -88,12 +88,12 @@ if(NOT EXISTS "${seamPath}")
 endif()
 
 file(READ "${seamPath}" seamWhole)
-fastcached_strip_comments("${seamWhole}" seamCode)
+pace_strip_comments("${seamWhole}" seamCode)
 string(REGEX MATCHALL "std::random_device" seamHits "${seamCode}")
 list(LENGTH seamHits seamCount)
 if(seamCount EQUAL 0)
     message("")
-    message("  The pattern `std::random_device` matched nothing in ${FASTCACHED_RANDOM_SEAM}.")
+    message("  The pattern `std::random_device` matched nothing in ${PACE_RANDOM_SEAM}.")
     message("")
     message("That file is the one place the platform device is meant to be read, so either it")
     message("has stopped reading it -- in which case this check should be deleted rather than")
@@ -106,7 +106,7 @@ message(STATUS "unique-temp-paths: the seam reads the device in ${seamCount} pla
 # ---------------------------------------------------------------------------
 # The file set: every first-party C++ source and header under src/, asked through the shared
 # machinery so the walk fallback, the exclusions and the work-tree probe are not another copy.
-fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+pace_tracked_files("${PACE_SOURCE_DIR}"
     PATHSPECS "src"
     GLOBS "src/*.cpp" "src/**/*.cpp" "src/*.hpp" "src/**/*.hpp"
     FILTER "\\.(cpp|hpp)$"
@@ -133,7 +133,7 @@ endif()
 # ---------------------------------------------------------------------------
 # The exemption rows, parsed before the scan so a malformed row fails loudly rather than
 # silently exempting nothing.
-fastcached_split_rows(FastCachedRandomDeviceExemptions exemptPaths exemptReasons)
+pace_split_rows(PaceRandomDeviceExemptions exemptPaths exemptReasons)
 list(LENGTH exemptPaths exemptionCount)
 set(exemptionsUsed "")
 
@@ -142,7 +142,7 @@ set(exemptionsUsed "")
 set(violations "")
 set(readCount 0)
 foreach(relative IN LISTS sourceFiles)
-    if(relative STREQUAL FASTCACHED_RANDOM_SEAM)
+    if(relative STREQUAL PACE_RANDOM_SEAM)
         continue()
     endif()
 
@@ -155,8 +155,8 @@ foreach(relative IN LISTS sourceFiles)
     if(NOT "${relative}" IN_LIST sourcesHolding)
         continue()
     endif()
-    file(READ "${FASTCACHED_SOURCE_DIR}/${relative}" wholeFile)
-    fastcached_strip_comments("${wholeFile}" code)
+    file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
+    pace_strip_comments("${wholeFile}" code)
 
     string(REGEX MATCHALL "std::random_device" hits "${code}")
     list(LENGTH hits hitCount)
@@ -217,7 +217,7 @@ if(violations)
     message("                    the operating system's generator, whose failure is a refusal.")
     message("")
     message("If a caller genuinely needs the platform device, add a row to")
-    message("`FastCachedRandomDeviceExemptions` in this file saying why.")
+    message("`PaceRandomDeviceExemptions` in this file saying why.")
     list(LENGTH violations violationCount)
     message(FATAL_ERROR "unique-temp-paths: ${violationCount} file(s) read std::random_device outside the seam")
 endif()

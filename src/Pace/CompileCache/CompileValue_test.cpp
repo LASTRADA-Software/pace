@@ -815,7 +815,7 @@ constexpr std::array ConformanceCorpus {
                       //
                       // The consumer is deliberately ENGLISH rather than a mirror of
                       // the producer: that is #700's peer edge, where a machine
-                      // setting FASTCACHE_MSVC_DEPS_PREFIX made previously-healthy
+                      // setting PACE_MSVC_DEPS_PREFIX made previously-healthy
                       // differently-localized peers under-rebuild. Both marker
                       // columns are asserted, so a row that stopped rewriting on
                       // EITHER side is a failure and not a quieter pass.

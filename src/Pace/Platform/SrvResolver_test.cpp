@@ -276,9 +276,9 @@ TEST_CASE("The system resolver finds a real SRV record when one is named", "[pla
     // The positive direction, which the `.invalid` case cannot give: a resolver that failed every
     // lookup would pass that one. Opt-in, because it needs a network and a record that exists,
     // and no name this repository could write down is guaranteed to stay both.
-    auto const name = ReadEnvironmentVariable("FASTCACHE_TEST_SRV_NAME").value_or(std::string {});
+    auto const name = ReadEnvironmentVariable("PACE_TEST_SRV_NAME").value_or(std::string {});
     if (name.empty())
-        SKIP("FASTCACHE_TEST_SRV_NAME is not set: name an SRV record that exists (e.g. _imaps._tcp.gmail.com) "
+        SKIP("PACE_TEST_SRV_NAME is not set: name an SRV record that exists (e.g. _imaps._tcp.gmail.com) "
              "to check the system resolver finds one");
 
     auto const answer = MakeSystemSrvResolver()->Lookup(name);

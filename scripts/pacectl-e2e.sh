@@ -42,7 +42,7 @@ readonly SKIP=77
 [[ -n "$FASTCACHED" && -x "$FASTCACHED" ]] || { echo "pace-kv not found: '$FASTCACHED'; skipping"; exit "$SKIP"; }
 [[ -n "$CLI" && -x "$CLI" ]] || { echo "pacectl not found: '$CLI'; skipping"; exit "$SKIP"; }
 
-# The node is OPTIONAL: `FASTCACHED_BUILD_NODE` can be off, and the eight cases that
+# The node is OPTIONAL: `PACE_BUILD_NODE` can be off, and the eight cases that
 # need no node are worth running anyway. Cases 11-13 announce that they were skipped
 # rather than passing silently -- a green run that quietly covered less is the shape
 # this repository keeps paying for.
@@ -382,7 +382,7 @@ run_cli get anything
 # The server answered and declined. That is `refused` (4), not unreachable (3) and
 # not a miss (1) -- three different problems with three different fixes.
 expect_status 4 "an unauthenticated read"
-expect_stderr "FASTCACHE_TOKEN" "the refusal says how to supply a credential"
+expect_stderr "PACE_TOKEN" "the refusal says how to supply a credential"
 
 tokenFile="$WORK/token"
 printf 's3cret\n' > "$tokenFile"

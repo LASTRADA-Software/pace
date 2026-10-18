@@ -44,7 +44,7 @@ struct ConfigSources
     /// life of the process and a reload runs on the signal thread.
     std::vector<std::string> args {};
 
-    /// `FASTCACHED_METRICS_PORT`, already parsed, or nothing when it is unset,
+    /// `PACE_METRICS_PORT`, already parsed, or nothing when it is unset,
     /// empty or unusable.
     ///
     /// A resolved VALUE rather than a reader, and that is the point rather than a
@@ -117,7 +117,7 @@ class EffectiveConfig
 /// refused by the walk that applies the rest.
 ///
 /// The environment is last, and gated on the ASSEMBLED explicit bit:
-/// `FASTCACHED_METRICS_PORT` applies only when neither the command line nor the file
+/// `PACE_METRICS_PORT` applies only when neither the command line nor the file
 /// NAMED `metrics_port`, so a stray variable can never outrank a port an operator
 /// wrote down — even when they wrote the compiled-in default.
 ///
@@ -154,7 +154,7 @@ class EffectiveConfig
 
 /// Why TLS is refused on a build that has no TLS support.
 inline constexpr std::string_view DaemonTlsUnavailableRefusal =
-    "--tls requested but this build has no TLS support (rebuild with -DFASTCACHED_ENABLE_TLS=ON)";
+    "--tls requested but this build has no TLS support (rebuild with -DPACE_ENABLE_TLS=ON)";
 
 /// Why TLS is refused without both halves of its material.
 inline constexpr std::string_view DaemonTlsMaterialRefusal = "--tls requires both --tls-cert and --tls-key";

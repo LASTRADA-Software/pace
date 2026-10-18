@@ -1925,7 +1925,7 @@ namespace
     core::async::Task<bool> HandleInfo(core::net::ISocket* socket, CacheEngine* engine, RespVersion resp)
     {
         auto const stats = engine->Snapshot();
-        auto const body = std::format("# Server\r\nfastcached_version:{}\r\nredis_version:6.0.0-fastcached\r\n"
+        auto const body = std::format("# Server\r\npace_version:{}\r\nredis_version:6.0.0-fastcached\r\n"
                                       "# Memory\r\nused_memory:{}\r\nmaxmemory:{}\r\n"
                                       "# Stats\r\ntotal_commands_processed:{}\r\nkeyspace_hits:{}\r\nkeyspace_misses:{}\r\n",
                                       RedisRespHandler::ServerVersion(),

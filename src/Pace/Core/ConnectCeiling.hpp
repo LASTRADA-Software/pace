@@ -15,7 +15,7 @@ namespace Pace
 ///
 /// Capped rather than replaced: an operator who set a SHORTER connect timeout keeps it. A
 /// non-positive connect is `core::net::DialOptions`' spelling of *leave the platform default in
-/// place*, which may be minutes, so it takes the ceiling too -- or `FASTCACHE_CONNECT_TIMEOUT=0s`
+/// place*, which may be minutes, so it takes the ceiling too -- or `PACE_CONNECT_TIMEOUT=0s`
 /// would give the dial the cap exists for the longest wait of all. Every cap asks this, whatever it
 /// caps -- an exchange budget (`Cc::WithConnectAtMost`) or a dial's own timeouts (`pacectl`'s
 /// mint) -- so the non-positive rule is written once.

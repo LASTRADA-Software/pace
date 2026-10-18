@@ -1156,7 +1156,7 @@ AdminEndpoint::AdminEndpoint(std::unique_ptr<BlockingListener> listener,
     _surfaces { surfaces },
     _server { std::make_unique<AdminHttpServer>(
         // `_surfaces`: what this node's configuration makes it serve. It has no cache-daemon
-        // accept path whatever the flags say, so the `fastcached_connections_*` rows read
+        // accept path whatever the flags say, so the `pace_connections_*` rows read
         // ABSENT on its `/metrics` rather than as a zero saying nothing has ever connected to
         // it (#1484) -- and since #1501 the same holds for every other surface it does not
         // run, so `--slots=0` reads `-` on the worker rows rather than a quiet zero.

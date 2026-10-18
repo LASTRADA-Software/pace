@@ -32,7 +32,7 @@ namespace Pace::Cc
 /// `if`s wrapped in a loop.
 enum class MarkerSource : std::uint8_t
 {
-    /// `FASTCACHE_MSVC_DEPS_PREFIX`. First because it is the only source that can be
+    /// `PACE_MSVC_DEPS_PREFIX`. First because it is the only source that can be
     /// RIGHT about a build this launcher cannot see: the value lives in `build.ninja`
     /// as `msvc_deps_prefix`, and an operator who copied it there is stating a fact,
     /// not expressing a preference.
@@ -44,7 +44,7 @@ enum class MarkerSource : std::uint8_t
     /// Asked, and the compiler did not say. The VALUE is the English default, and that
     /// is exactly why this is not `Default`: the two carry the same string and send an
     /// operator to opposite places. Reaching here means somebody wrote
-    /// `FASTCACHE_MSVC_DEPS_PREFIX=auto`, so *override with FASTCACHE_MSVC_DEPS_PREFIX*
+    /// `PACE_MSVC_DEPS_PREFIX=auto`, so *override with PACE_MSVC_DEPS_PREFIX*
     /// is advice they have already taken -- a confident wrong remedy, told to the one
     /// operator who opted in. Their remedy is to name the prefix outright.
     ///
@@ -80,11 +80,11 @@ struct MarkerSourceRow
 /// The last two rows carry the SAME marker and differ only in the remedy, which is the
 /// whole reason they are separate rows.
 inline constexpr EnumTable<MarkerSource, MarkerSourceRow> MarkerSourceTable { {
-    { .source = MarkerSource::Operator, .label = "named by FASTCACHE_MSVC_DEPS_PREFIX" },
+    { .source = MarkerSource::Operator, .label = "named by PACE_MSVC_DEPS_PREFIX" },
     { .source = MarkerSource::Discovered, .label = "discovered from the compiler" },
     { .source = MarkerSource::DiscoveryDeclined,
-      .label = "the compiler was asked and did not say, so the default; name it with FASTCACHE_MSVC_DEPS_PREFIX" },
-    { .source = MarkerSource::Default, .label = "the default; override with FASTCACHE_MSVC_DEPS_PREFIX" },
+      .label = "the compiler was asked and did not say, so the default; name it with PACE_MSVC_DEPS_PREFIX" },
+    { .source = MarkerSource::Default, .label = "the default; override with PACE_MSVC_DEPS_PREFIX" },
 } };
 
 static_assert(RowsInEnumeratorOrder(MarkerSourceTable, &MarkerSourceRow::source),
@@ -100,13 +100,13 @@ static_assert(RowsInEnumeratorOrder(MarkerSourceTable, &MarkerSourceRow::source)
 // reads. A `static_assert` rather than a runtime check: this is a *do something*
 // obligation, so it belongs to the type system.
 static_assert(MarkerSourceTable[static_cast<std::size_t>(MarkerSource::Operator)].label.contains(EnvName::MsvcDepsPrefix),
-              "the Operator row's label must name FASTCACHE_MSVC_DEPS_PREFIX as EnvName spells it");
+              "the Operator row's label must name PACE_MSVC_DEPS_PREFIX as EnvName spells it");
 static_assert(MarkerSourceTable[static_cast<std::size_t>(MarkerSource::Default)].label.contains(EnvName::MsvcDepsPrefix),
-              "the Default row's label must name FASTCACHE_MSVC_DEPS_PREFIX as EnvName spells it -- it is the remedy "
+              "the Default row's label must name PACE_MSVC_DEPS_PREFIX as EnvName spells it -- it is the remedy "
               "an operator is told to apply");
 static_assert(
     MarkerSourceTable[static_cast<std::size_t>(MarkerSource::DiscoveryDeclined)].label.contains(EnvName::MsvcDepsPrefix),
-    "the DiscoveryDeclined row's label must name FASTCACHE_MSVC_DEPS_PREFIX as EnvName spells it -- it is the "
+    "the DiscoveryDeclined row's label must name PACE_MSVC_DEPS_PREFIX as EnvName spells it -- it is the "
     "remedy for the operator who asked for discovery and did not get it");
 
 // The two English-default rows must not read alike. They carry the same MARKER, so the
@@ -200,7 +200,7 @@ class IMarkerDiscovery
     [[nodiscard]] virtual std::optional<std::string> Discover() = 0;
 };
 
-/// What `FASTCACHE_MSVC_DEPS_PREFIX` is set to when it asks for discovery.
+/// What `PACE_MSVC_DEPS_PREFIX` is set to when it asks for discovery.
 ///
 /// A sentinel VALUE rather than a second variable, because the two settings answer one
 /// question -- *what prefix do this build's notes carry* -- and a build has one answer.
@@ -216,7 +216,7 @@ inline constexpr std::string_view MarkerDiscoveryRequest = "auto";
 /// because each source asks a different question and a loop over the table would only
 /// wrap three `if`s in an indirection.
 ///
-/// @param operatorNamed What `FASTCACHE_MSVC_DEPS_PREFIX` named; empty for unset, since
+/// @param operatorNamed What `PACE_MSVC_DEPS_PREFIX` named; empty for unset, since
 ///        an empty prefix is not one Ninja could match a note against, and empty also for
 ///        `MarkerDiscoveryRequest`, which names no prefix but asks for one.
 /// @param discovery The probe, or nullptr when this invocation must not spawn one.
@@ -239,7 +239,7 @@ inline constexpr std::string_view MarkerDiscoveryRequest = "auto";
 /// build", paid on CACHE HITS too, where the whole value of the hit is that no compiler
 /// ran. On an English install it would pay that to rediscover
 /// `PathCanon::IncludeNoteMarker`, which is what the default already says. So the
-/// operator asks for it, by setting `FASTCACHE_MSVC_DEPS_PREFIX` to
+/// operator asks for it, by setting `PACE_MSVC_DEPS_PREFIX` to
 /// `MarkerDiscoveryRequest`, and a build that does is one whose notes are not English.
 ///
 /// **Spawned in the build's OWN environment**, unlike every other probe in this

@@ -183,7 +183,7 @@ TEST_CASE("A node with no flags listens on the wildcard node port and the raft p
     CHECK(served == std::vector<std::string_view> { "node", "raft", "discovery" });
 
     // The default an operator reads off the startup line: the wildcard, on the port
-    // `pace-cc` looks for when nobody sets `FASTCACHE_ADDR`.
+    // `pace-cc` looks for when nobody sets `PACE_ADDR`.
     auto const node = RowFor(NodeSurface::Node).Resolve(cfg);
     REQUIRE(node.size() == 1);
     CHECK(node.front().host == "0.0.0.0");

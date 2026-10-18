@@ -226,7 +226,7 @@ namespace
           .arity = Arity::Value,
           .operand = "=<host:port>",
           .apply = AssignEndpoint<&Command::cache>(),
-          .description = "the cache's data port (default {addr}, or $FASTCACHE_ADDR)" },
+          .description = "the cache's data port (default {addr}, or $PACE_ADDR)" },
         { .primary = "--admin-addr",
           .arity = Arity::Value,
           .operand = "=<host:port>",
@@ -259,7 +259,7 @@ namespace
           .operand = "=<path>",
           .apply = AssignFrom<&Command::tokenFile, ParseText>(),
           .description = "read the credential from this file rather than\n"
-                         "$FASTCACHE_TOKEN, which is visible in the environment" },
+                         "$PACE_TOKEN, which is visible in the environment" },
         { .primary = "--dashboard-token-file",
           .arity = Arity::Value,
           .operand = "=<path>",
@@ -344,13 +344,13 @@ namespace
 
     /// The environment variables, in the order `--help` documents them.
     constexpr auto Environment = std::to_array<EnvVarSpec>({
-        { .name = "FASTCACHE_ADDR",
+        { .name = "PACE_ADDR",
           .summary = "the cache's data port, as host:port. The same variable\n"
                      "pace-cc reads, so a machine configured for one is\n"
                      "configured for both. Set but empty means 'use the default'" },
-        { .name = "FASTCACHE_ADMIN_ADDR", .summary = "the admin surface, as host:port; see --admin-addr" },
-        { .name = "FASTCACHE_TOKEN", .summary = "the credential to present. --token-file is preferable" },
-        { .name = "FASTCACHE_USER", .summary = "username for the two-argument AUTH form" },
+        { .name = "PACE_ADMIN_ADDR", .summary = "the admin surface, as host:port; see --admin-addr" },
+        { .name = "PACE_TOKEN", .summary = "the credential to present. --token-file is preferable" },
+        { .name = "PACE_USER", .summary = "username for the two-argument AUTH form" },
         { .name = "NO_COLOR",
           .summary = "set to anything non-empty to suppress colour. It governs the\n"
                      "DEFAULT, so an explicit --color=always still colours, which\n"
@@ -548,12 +548,12 @@ void ApplyEnvironment(Command& command, std::optional<std::string> (*lookup)(std
         target = Endpoint { .host = parsed->first, .port = parsed->second };
     };
 
-    endpoint("FASTCACHE_ADDR", command.cache);
-    endpoint("FASTCACHE_ADMIN_ADDR", command.admin);
+    endpoint("PACE_ADDR", command.cache);
+    endpoint("PACE_ADMIN_ADDR", command.admin);
 
-    if (auto const token = value("FASTCACHE_TOKEN"); token.has_value())
+    if (auto const token = value("PACE_TOKEN"); token.has_value())
         command.credential.secret = SecureString { *token };
-    if (auto const user = value("FASTCACHE_USER"); user.has_value())
+    if (auto const user = value("PACE_USER"); user.has_value())
         command.credential.username = *user;
 }
 

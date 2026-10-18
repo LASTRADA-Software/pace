@@ -8,7 +8,7 @@
 # `ctest` timeout cannot say which of its known conditions a reader is looking
 # at, so the check narrates its measured per-file cost once a run is already
 # slow, and ctest captures the output of a test it kills. The figures and the
-# conditions they were taken under live in `FastCachedSccacheScanCostBands` in
+# conditions they were taken under live in `PaceSccacheScanCostBands` in
 # the check itself -- pointed at, never copied here, which is the rule this
 # whole change exists to enforce.
 #
@@ -46,21 +46,21 @@
 # reports failure through its OUTPUT rather than an exit code.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-sccache-backend-caveat-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-sccache-backend-caveat.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-sccache-backend-caveat.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
@@ -70,22 +70,22 @@ endif()
 # case table below, because a literal spelled in six rows and again in a guard
 # that claims to validate it is the "two numbers that agree today" shape this
 # change argues against everywhere else.
-set(FastCachedSelftestCorpusFiles 24)
-set(FastCachedSelftestCheckpointEvery 5)
-set(FastCachedSelftestBudgetSeconds 180)
+set(PaceSelftestCorpusFiles 24)
+set(PaceSelftestCheckpointEvery 5)
+set(PaceSelftestBudgetSeconds 180)
 
 # A budget the check must REFUSE: below twice its narration threshold, so a run
 # killed at it could be killed having explained nothing. Positive, so it is the
 # relationship being refused rather than the value.
-set(FastCachedSelftestCrampedBudgetSeconds 15)
+set(PaceSelftestCrampedBudgetSeconds 15)
 
 # The narration threshold and budget the QUIET case runs with, and the reason they
 # are its own pair rather than the shared ones above (#1142).
 #
 # The quiet case asserts that the check narrates NOTHING. Narration starts once a run
-# has already taken `FASTCACHED_SCAN_NARRATE_AFTER` seconds, so with the shipped
+# has already taken `PACE_SCAN_NARRATE_AFTER` seconds, so with the shipped
 # default of 10 that assertion was a bet on this host completing the synthesised scan --
-# 26 files, `FastCachedSelftestCorpusFiles` of filler plus the README and the snippet --
+# 26 files, `PaceSelftestCorpusFiles` of filler plus the README and the snippet --
 # in under ten seconds. Idle it takes about one; under `ctest --parallel 32` with another
 # build on the box it crosses ten, the check narrates TRUTHFULLY, and the case reads a
 # correct narration as a failure. Measured: 0 failures in 10 standalone runs at
@@ -108,7 +108,7 @@ set(FastCachedSelftestCrampedBudgetSeconds 15)
 # check's own refusal says "lower the narration threshold or raise the budget, and keep
 # them moving together", which is the instruction it gives whoever trips it.
 #
-# They are a separate pair rather than a raise of `FastCachedSelftestBudgetSeconds`
+# They are a separate pair rather than a raise of `PaceSelftestBudgetSeconds`
 # because that constant is shared by three other cases whose behaviour has no reason to
 # move with this one.
 #
@@ -130,8 +130,8 @@ set(FastCachedSelftestCrampedBudgetSeconds 15)
 # constant twice is how a fixture ends up with a number nobody can justify and everybody
 # trusts, and a case that tests less but never lies is worth more than one that tests more
 # and flakes.
-set(FastCachedSelftestQuietNarrateAfterSeconds 3600)
-set(FastCachedSelftestQuietBudgetSeconds 7200)
+set(PaceSelftestQuietNarrateAfterSeconds 3600)
+set(PaceSelftestQuietBudgetSeconds 7200)
 
 # ---------------------------------------------------------------------------
 # The synthesised tree.
@@ -141,8 +141,8 @@ set(FastCachedSelftestQuietBudgetSeconds 7200)
 # scan roots are deliberately absent rather than mirrored -- a mirror of that
 # table would be a second copy that silently stops matching, and their absence
 # reaches only the verdict, which nothing here asserts on.
-set(tree "${FASTCACHED_SCRATCH_DIR}/tree")
-file(REMOVE_RECURSE "${FASTCACHED_SCRATCH_DIR}")
+set(tree "${PACE_SCRATCH_DIR}/tree")
+file(REMOVE_RECURSE "${PACE_SCRATCH_DIR}")
 file(MAKE_DIRECTORY "${tree}/docs")
 
 # One recommendation carrying its caveat, so the check is not additionally
@@ -156,7 +156,7 @@ file(WRITE "${tree}/README.md"
 # The rest of the corpus: ordinary prose naming nothing, which is what nearly
 # every file in the real tree is. They exist to be READ, because reading them is
 # the cost this check reports on.
-foreach(index RANGE 1 ${FastCachedSelftestCorpusFiles})
+foreach(index RANGE 1 ${PaceSelftestCorpusFiles})
     file(WRITE "${tree}/docs/filler-${index}.md" "Ordinary documentation, naming no backend variable.\n")
 endforeach()
 
@@ -167,10 +167,10 @@ endforeach()
 # its own subject.
 file(GLOB_RECURSE builtFiles LIST_DIRECTORIES false "${tree}/*")
 list(LENGTH builtFiles builtFileCount)
-if(builtFileCount LESS_EQUAL ${FastCachedSelftestCheckpointEvery})
+if(builtFileCount LESS_EQUAL ${PaceSelftestCheckpointEvery})
     message(FATAL_ERROR
         "the synthesised tree holds ${builtFileCount} file(s), which is not more than the "
-        "${FastCachedSelftestCheckpointEvery}-file checkpoint interval the cases use -- no "
+        "${PaceSelftestCheckpointEvery}-file checkpoint interval the cases use -- no "
         "checkpoint could fall inside it, so every narration case below would pass by being "
         "unreachable rather than by working.")
 endif()
@@ -191,7 +191,7 @@ set(failures "")
 # @param epoch A SOURCE_DATE_EPOCH value to run under, or "-" for none.
 # @param extraArgs Space-separated extra `-D` arguments, or "-" for none.
 # @param outOutput Set to the check's combined stdout and stderr, whitespace collapsed.
-function(fastcached_run_caveat_check epoch extraArgs outOutput)
+function(pace_run_caveat_check epoch extraArgs outOutput)
     set(command "${CMAKE_COMMAND}")
     if(NOT epoch STREQUAL "-")
         # `execute_process` has no ENVIRONMENT option on this project's minimum
@@ -206,7 +206,7 @@ function(fastcached_run_caveat_check epoch extraArgs outOutput)
     endif()
 
     execute_process(
-        COMMAND ${command} "-DFASTCACHED_SOURCE_DIR=${tree}" ${extraArgsList} -P "${check}"
+        COMMAND ${command} "-DPACE_SOURCE_DIR=${tree}" ${extraArgsList} -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors)
     set(combined "${captured}${capturedErrors}")
     string(REGEX REPLACE "[ \t\r\n]+" " " combined "${combined}")
@@ -236,13 +236,13 @@ endfunction()
 # reads the clock at the run start, at the walk start, once per scan root at the
 # walk's narration point, and once at the walk end. Spelling that as a literal run
 # of `1000`s would be two numbers that agree today: add a row to
-# `FastCachedSccacheScanRoots` and the step lands on the directory walk instead,
+# `PaceSccacheScanRoots` and the step lands on the directory walk instead,
 # and the case fails naming an interval that is not its subject.
 #
 # A parse that matched nothing is a REFUSAL, not a zero -- an empty root list would
 # silently produce a readings string that steps in the wrong place. The opening
 # pattern is anchored at BOTH ends: unanchored, it also matched a renamed
-# `FastCachedSccacheScanRootsRenamed`, so the derivation read a table the check
+# `PaceSccacheScanRootsRenamed`, so the derivation read a table the check
 # no longer consults and this refusal could not fire. The control caught that,
 # which is what a control is for.
 file(STRINGS "${check}" checkSourceLines)
@@ -256,38 +256,38 @@ foreach(line IN LISTS checkSourceLines)
         if(line MATCHES "^ +\"")
             math(EXPR scanRootRows "${scanRootRows} + 1")
         endif()
-    elseif(line MATCHES "^set\\(FastCachedSccacheScanRoots$")
+    elseif(line MATCHES "^set\\(PaceSccacheScanRoots$")
         set(inRootTable TRUE)
     endif()
 endforeach()
 if(scanRootRows EQUAL 0)
     message(FATAL_ERROR
-        "read no rows from FastCachedSccacheScanRoots in ${check}, so the READ-phase case's "
+        "read no rows from PaceSccacheScanRoots in ${check}, so the READ-phase case's "
         "clock readings cannot be derived. The table moved or was renamed; a hand-written run "
         "of readings here would step on whichever interval the count happened to land on.")
 endif()
 
 # run start + walk start + one per root + walk end.
 math(EXPR readingsBeforeReadPhase "3 + ${scanRootRows}")
-set(FastCachedSelftestReadPhaseReadings "")
+set(PaceSelftestReadPhaseReadings "")
 foreach(unused RANGE 1 ${readingsBeforeReadPhase})
-    string(APPEND FastCachedSelftestReadPhaseReadings "1000,")
+    string(APPEND PaceSelftestReadPhaseReadings "1000,")
 endforeach()
 # Then back, then forward again: the step is on a checkpoint, and the whole run
 # and the walk both still measure forwards.
-string(APPEND FastCachedSelftestReadPhaseReadings "900,1100")
+string(APPEND PaceSelftestReadPhaseReadings "900,1100")
 
-set(FastCachedSccacheSelftestCases
-    "narrates once a run is slow|-|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=${FastCachedSelftestCheckpointEvery} -DFASTCACHED_SCAN_CLOCK_READINGS=1000,1000 -DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSelftestBudgetSeconds}|still scanning --  && file(s) after  &&  ms/file, so the whole scan needs |narrated nothing"
-    "quiet below the narration threshold, and reports headroom against the budget|-|-DFASTCACHED_SCAN_NARRATE_AFTER=${FastCachedSelftestQuietNarrateAfterSeconds} -DFASTCACHED_SCAN_CLOCK_READINGS=1000,1000 -DFASTCACHED_SCAN_PROGRESS_EVERY=${FastCachedSelftestCheckpointEvery} -DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSelftestQuietBudgetSeconds}|walked  &&  ms/file. That is the ' && % of the ${FastCachedSelftestQuietBudgetSeconds}s budget|still scanning && No budget was given"
-    "reports no headroom when given no budget|-|-DFASTCACHED_SCAN_PROGRESS_EVERY=${FastCachedSelftestCheckpointEvery} -DFASTCACHED_SCAN_CLOCK_READINGS=1000,1000|walked  &&  ms/file. That is the ' && No budget was given|% of the"
-    "a frozen clock is its own outcome, never speed|1700000000|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=${FastCachedSelftestCheckpointEvery} -DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSelftestBudgetSeconds}|Cost NOT MEASURED && SOURCE_DATE_EPOCH is set| ms/file && still scanning"
-    "a checkpoint wider than the corpus reports that it explained nothing|-|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=100000 -DFASTCACHED_SCAN_CLOCK_READINGS=1000,1000 -DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSelftestBudgetSeconds}|narrated nothing|still scanning"
-    "a budget too close to the narration threshold is refused before scanning|-|-DFASTCACHED_SCAN_BUDGET_SECONDS=${FastCachedSelftestCrampedBudgetSeconds}|at least twice the narration threshold|walked "
-    "a clock that steps backwards is its own outcome, never a band|-|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=100000 -DFASTCACHED_SCAN_CLOCK_READINGS=1000,900|Cost NOT MEASURED: the wall clock went BACKWARDS && No band is reported|ms/file. That is the '"
-    "the same seam stepping forwards still reports a band and its narration|-|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=100000 -DFASTCACHED_SCAN_CLOCK_READINGS=900,1000|ms/file. That is the ' && narrated nothing|Cost NOT MEASURED"
-    "a step inside the WALK is caught even though the whole run still measures forwards|-|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=100000 -DFASTCACHED_SCAN_CLOCK_READINGS=100,200,150|Cost NOT MEASURED: the wall clock went BACKWARDS during the directory walk|ms/file. That is the '"
-    "a step inside the READ phase is caught even though the walk and the whole run both measure forwards|-|-DFASTCACHED_SCAN_NARRATE_AFTER=0 -DFASTCACHED_SCAN_PROGRESS_EVERY=${FastCachedSelftestCheckpointEvery} -DFASTCACHED_SCAN_CLOCK_READINGS=${FastCachedSelftestReadPhaseReadings}|Cost NOT MEASURED: the wall clock went BACKWARDS during a progress checkpoint && Progress narration DID fire|ms/file. That is the '"
+set(PaceSccacheSelftestCases
+    "narrates once a run is slow|-|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=${PaceSelftestCheckpointEvery} -DPACE_SCAN_CLOCK_READINGS=1000,1000 -DPACE_SCAN_BUDGET_SECONDS=${PaceSelftestBudgetSeconds}|still scanning --  && file(s) after  &&  ms/file, so the whole scan needs |narrated nothing"
+    "quiet below the narration threshold, and reports headroom against the budget|-|-DPACE_SCAN_NARRATE_AFTER=${PaceSelftestQuietNarrateAfterSeconds} -DPACE_SCAN_CLOCK_READINGS=1000,1000 -DPACE_SCAN_PROGRESS_EVERY=${PaceSelftestCheckpointEvery} -DPACE_SCAN_BUDGET_SECONDS=${PaceSelftestQuietBudgetSeconds}|walked  &&  ms/file. That is the ' && % of the ${PaceSelftestQuietBudgetSeconds}s budget|still scanning && No budget was given"
+    "reports no headroom when given no budget|-|-DPACE_SCAN_PROGRESS_EVERY=${PaceSelftestCheckpointEvery} -DPACE_SCAN_CLOCK_READINGS=1000,1000|walked  &&  ms/file. That is the ' && No budget was given|% of the"
+    "a frozen clock is its own outcome, never speed|1700000000|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=${PaceSelftestCheckpointEvery} -DPACE_SCAN_BUDGET_SECONDS=${PaceSelftestBudgetSeconds}|Cost NOT MEASURED && SOURCE_DATE_EPOCH is set| ms/file && still scanning"
+    "a checkpoint wider than the corpus reports that it explained nothing|-|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=100000 -DPACE_SCAN_CLOCK_READINGS=1000,1000 -DPACE_SCAN_BUDGET_SECONDS=${PaceSelftestBudgetSeconds}|narrated nothing|still scanning"
+    "a budget too close to the narration threshold is refused before scanning|-|-DPACE_SCAN_BUDGET_SECONDS=${PaceSelftestCrampedBudgetSeconds}|at least twice the narration threshold|walked "
+    "a clock that steps backwards is its own outcome, never a band|-|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=100000 -DPACE_SCAN_CLOCK_READINGS=1000,900|Cost NOT MEASURED: the wall clock went BACKWARDS && No band is reported|ms/file. That is the '"
+    "the same seam stepping forwards still reports a band and its narration|-|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=100000 -DPACE_SCAN_CLOCK_READINGS=900,1000|ms/file. That is the ' && narrated nothing|Cost NOT MEASURED"
+    "a step inside the WALK is caught even though the whole run still measures forwards|-|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=100000 -DPACE_SCAN_CLOCK_READINGS=100,200,150|Cost NOT MEASURED: the wall clock went BACKWARDS during the directory walk|ms/file. That is the '"
+    "a step inside the READ phase is caught even though the walk and the whole run both measure forwards|-|-DPACE_SCAN_NARRATE_AFTER=0 -DPACE_SCAN_PROGRESS_EVERY=${PaceSelftestCheckpointEvery} -DPACE_SCAN_CLOCK_READINGS=${PaceSelftestReadPhaseReadings}|Cost NOT MEASURED: the wall clock went BACKWARDS during a progress checkpoint && Progress narration DID fire|ms/file. That is the '"
 )
 
 # EVERY case here pins the clock, and that is not tidiness.
@@ -362,13 +362,13 @@ set(FastCachedSccacheSelftestCases
 # one loop over a table rather than two blocks differing in a `NOT`.
 #
 #   <field holding the ' && '-separated needles>|<TRUE if they must appear>|<what the failure line says>
-set(FastCachedSccacheSelftestPolarities
+set(PaceSccacheSelftestPolarities
     "caseWanted|TRUE|did not say"
     "caseUnwanted|FALSE|said, and must not have"
 )
 
 set(caseNames "")
-foreach(row IN LISTS FastCachedSccacheSelftestCases)
+foreach(row IN LISTS PaceSccacheSelftestCases)
     # No field here contains a '|', so a plain split is enough and the general
     # row splitter (whose contract is that only the LAST field may) would be a
     # third byte-identical copy of a function for a table this file authors.
@@ -385,7 +385,7 @@ foreach(row IN LISTS FastCachedSccacheSelftestCases)
     list(GET caseFields 3 caseWanted)
     list(GET caseFields 4 caseUnwanted)
 
-    fastcached_run_caveat_check("${caseEpoch}" "${caseArgs}" output)
+    pace_run_caveat_check("${caseEpoch}" "${caseArgs}" output)
     list(APPEND caseNames "${caseName}")
 
     # A case that produced NOTHING satisfies every `must not appear` needle
@@ -405,7 +405,7 @@ foreach(row IN LISTS FastCachedSccacheSelftestCases)
       the check WARNED, and a warning changes meaning silently. Nothing in this table reads a verdict, so this case would have passed without this line")
     endif()
 
-    foreach(polarityRow IN LISTS FastCachedSccacheSelftestPolarities)
+    foreach(polarityRow IN LISTS PaceSccacheSelftestPolarities)
         string(REPLACE "|" ";" polarityFields "${polarityRow}")
         list(GET polarityFields 0 needleField)
         list(GET polarityFields 1 mustAppear)

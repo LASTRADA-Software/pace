@@ -495,7 +495,7 @@ namespace
     }
 
     /// Whether the cache was ASKED for this compile's object, which is what a hit rate is rated
-    /// against: a hit, a miss, a hit `FASTCACHE_VERIFY` rejected (the cache answered, wrongly),
+    /// against: a hit, a miss, a hit `PACE_VERIFY` rejected (the cache answered, wrongly),
     /// and a compile an input moved during (the cache was asked and did not hit). Not a compile
     /// the launcher refused to key, nor one whose cache could not be reached.
     ///
@@ -528,7 +528,7 @@ namespace
         std::uint64_t unavailable {};
         std::uint64_t exitCodes {};      ///< Records that carry an exit code at all.
         std::uint64_t compilesFailed {}; ///< Of those, a non-zero one.
-        /// Hits `FASTCACHE_VERIFY` rejected; see `Outcome::VerifyMismatch`.
+        /// Hits `PACE_VERIFY` rejected; see `Outcome::VerifyMismatch`.
         std::uint64_t verifyMismatches {};
         /// Compiles an input changed during; see `Outcome::InputsMoved`.
         std::uint64_t inputsMoved {};
@@ -1105,7 +1105,7 @@ namespace
                 << Colorize("CACHE NOT REACHED", palette.bad, palette.reset) << ")\n";
         if (tally.verifyMismatches > 0)
             out << "  wrong object : " << Colorize(std::to_string(tally.verifyMismatches), palette.bad, palette.reset)
-                << "  (hits FASTCACHE_VERIFY rejected -- " << Colorize("WRONG OBJECT SERVED", palette.bad, palette.reset)
+                << "  (hits PACE_VERIFY rejected -- " << Colorize("WRONG OBJECT SERVED", palette.bad, palette.reset)
                 << "; the fresh compile was used)\n";
 
         if (!tally.reasons.empty())

@@ -49,8 +49,8 @@ cmake_minimum_required(VERSION 3.28)
 # why merging them would break whichever family it did not choose, silently.
 include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # One row per site allowed to SET the variable: the file, how many assignments it
@@ -101,7 +101,7 @@ set(totalAssignments 0)
 set(scanFiles "")
 set(scanHolding "")
 foreach(root IN LISTS vslangScanRoots)
-    set(resolvedRoot "${FASTCACHED_SOURCE_DIR}/${root}")
+    set(resolvedRoot "${PACE_SOURCE_DIR}/${root}")
     if(NOT IS_DIRECTORY "${resolvedRoot}")
         list(APPEND missingRoots "  ${root}: named in the scan table and not present")
         continue()
@@ -110,20 +110,20 @@ foreach(root IN LISTS vslangScanRoots)
     # what `check-glob-traversals` refuses (#502) and what caught this scan on its
     # first run.
     #
-    # Through `fastcached_tracked_files`, this tree's one answer to HOW a check finds its files,
+    # Through `pace_tracked_files`, this tree's one answer to HOW a check finds its files,
     # rather than a traversal of its own: on DrvFs -- where every local gate tree takes its
     # sources from -- walking the tree and reading every file it found cost seconds a single
     # `git grep` spends in under half of one, and several lanes gating at once took this check
     # past its budget. CONTAINING names the literal every match must contain, so a file without
     # it is not read at all; the count printed is still over the whole set.
-    fastcached_tracked_files("${FASTCACHED_SOURCE_DIR}"
+    pace_tracked_files("${PACE_SOURCE_DIR}"
         PATHSPECS "${root}/"
         GLOBS "${root}/*"
         FILTER "^${root}/.*[.](cpp|hpp)$"
         CONTAINING "VSLANG" CONTAINING_OUT rootHolding
         FILES_OUT rootFiles MODE_OUT rootMode)
-    list(TRANSFORM rootFiles PREPEND "${FASTCACHED_SOURCE_DIR}/")
-    list(TRANSFORM rootHolding PREPEND "${FASTCACHED_SOURCE_DIR}/")
+    list(TRANSFORM rootFiles PREPEND "${PACE_SOURCE_DIR}/")
+    list(TRANSFORM rootHolding PREPEND "${PACE_SOURCE_DIR}/")
     list(APPEND scanFiles ${rootFiles})
     list(APPEND scanHolding ${rootHolding})
 endforeach()
@@ -131,7 +131,7 @@ endforeach()
 # --- count assignments per file ----------------------------------------------
 set(sitesWithAssignments "")
 foreach(sourceFile IN LISTS scanFiles)
-    file(RELATIVE_PATH relativePath "${FASTCACHED_SOURCE_DIR}" "${sourceFile}")
+    file(RELATIVE_PATH relativePath "${PACE_SOURCE_DIR}" "${sourceFile}")
 
     # Tests may construct the assignment; that is how the rule is exercised.
     if(relativePath MATCHES "_test\\.cpp$" OR relativePath MATCHES "TestUtils\\.hpp$"
@@ -160,7 +160,7 @@ foreach(sourceFile IN LISTS scanFiles)
         continue()
     endif()
     file(READ "${sourceFile}" _vslangText)
-    fastcached_split_lines_tokenised("${_vslangText}" matchedLines)
+    pace_split_lines_tokenised("${_vslangText}" matchedLines)
     list(FILTER matchedLines INCLUDE REGEX "${vslangAssignmentPattern}")
     list(LENGTH matchedLines matchCount)
     if(matchCount EQUAL 0)
@@ -213,7 +213,7 @@ foreach(row IN LISTS vslangAllowedSites)
     # absolute, which it always is -- so this arm could never fire, and a renamed
     # file was reported as "stopped asking for English", sending the reader hunting
     # for a deleted assignment inside a file that is no longer there.
-    if(NOT EXISTS "${FASTCACHED_SOURCE_DIR}/${rowPath}")
+    if(NOT EXISTS "${PACE_SOURCE_DIR}/${rowPath}")
         list(APPEND missingRoots "  ${rowPath}: named in the allow table and not present")
         continue()
     endif()
@@ -231,7 +231,7 @@ foreach(row IN LISTS vslangEnglishEntryPoints)
     list(GET rowFields 2 helperAllowed)
     list(GET rowFields 3 helperReason)
 
-    set(resolvedHelper "${FASTCACHED_SOURCE_DIR}/${helperPath}")
+    set(resolvedHelper "${PACE_SOURCE_DIR}/${helperPath}")
     if(NOT EXISTS "${resolvedHelper}")
         list(APPEND missingRoots "  ${helperPath}: named in the English-helper table and not present")
         continue()
@@ -255,7 +255,7 @@ foreach(row IN LISTS vslangEnglishEntryPoints)
     # to 14 while it still passed. Same shape, different corpus, opposite verdict --
     # which is why exposure is judged per (reader, file, surviving lines).
     file(READ "${resolvedHelper}" _vslangText)
-    fastcached_split_lines_tokenised("${_vslangText}" helperLines)
+    pace_split_lines_tokenised("${_vslangText}" helperLines)
     list(FILTER helperLines INCLUDE REGEX "${helperName}")
     list(LENGTH helperLines helperCount)
     if(NOT helperCount EQUAL helperAllowed)

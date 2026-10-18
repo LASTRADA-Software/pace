@@ -3,7 +3,7 @@
 # A `cmake -P` check that MUST be seen to WARN.
 #
 # Sibling of `script-check-canary.cmake`, which covers the `CMake Error` half of
-# `FASTCACHED_SCRIPT_CHECK_FAILED`. This covers the `CMake Warning` half, added by
+# `PACE_SCRIPT_CHECK_FAILED`. This covers the `CMake Warning` half, added by
 # #517 so that no script check may emit CMake warnings.
 #
 # That guard is silent forever on a clean tree, which is exactly the shape of a

@@ -26,8 +26,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 #     No target "pace-kv"
 #
 # That is #390. Two blocks were guarded on their own feature -- `tls-smoke` on
-# `FASTCACHED_ENABLE_TLS`, the sccache smokes on `SCCACHE` -- and on nothing
-# else, so `-DFASTCACHED_BUILD_DAEMON=OFF` refused to generate. The two
+# `PACE_ENABLE_TLS`, the sccache smokes on `SCCACHE` -- and on nothing
+# else, so `-DPACE_BUILD_DAEMON=OFF` refused to generate. The two
 # conditions are independent: a feature can be enabled while the binary it needs
 # is not built.
 #
@@ -49,14 +49,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # belongs, and it is added after `src/apps` so every guard there is real.
 #
 # Which targets are optional is READ from `src/apps/CMakeLists.txt`, never
-# restated here. That file's `FASTCACHED_APPS` table is the one place an app and
+# restated here. That file's `PACE_APPS` table is the one place an app and
 # the option gating it are written down, and a second copy is not a cross-check
 # -- it is a second thing to be wrong. A new app therefore arrives under this
 # guard by existing, without anyone remembering to add it.
 #
 # The app table was not always the only place a target became optional. From #1369
 # until #1596 the ROOT `CMakeLists.txt` added `vendor/` only under
-# `FASTCACHED_BUILD_TUI`, and a SECOND reader, with its own completeness argument, read
+# `PACE_BUILD_TUI`, and a SECOND reader, with its own completeness argument, read
 # the targets that directory declared. #1596 moved that code to core-cpp and the gated
 # directory went with it, so the reader and its floor went too -- the floor said so
 # itself. A directory gated that way again brings the reader back, from git history.
@@ -66,18 +66,18 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # implementations of one rule differing only in syntax.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -P scripts/check-target-file-guards.cmake
+#   cmake -DPACE_SOURCE_DIR=<dir> -P scripts/check-target-file-guards.cmake
 #
 # Exit codes: 0 = every optional target is asked about before it is named.
 # 1 = at least one is not.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
 
 # ---------------------------------------------------------------------------
 # The optional targets, read from the app table rather than listed again.
-set(appTable "${FASTCACHED_SOURCE_DIR}/src/apps/CMakeLists.txt")
+set(appTable "${PACE_SOURCE_DIR}/src/apps/CMakeLists.txt")
 if(NOT EXISTS "${appTable}")
     message(FATAL_ERROR "the app table is missing: ${appTable}")
 endif()
@@ -103,8 +103,8 @@ endif()
 # #509 fixed this file's OTHER reader and left this one, because that change was
 # scoped to the splitter that led to it rather than to every reader in the file.
 file(READ "${appTable}" appTableContent)
-fastcached_split_lines_verbatim("${appTableContent}" appRows)
-list(FILTER appRows INCLUDE REGEX "^[ \t]*\"[A-Za-z0-9_-]+\\|FASTCACHED_BUILD_")
+pace_split_lines_verbatim("${appTableContent}" appRows)
+list(FILTER appRows INCLUDE REGEX "^[ \t]*\"[A-Za-z0-9_-]+\\|PACE_BUILD_")
 set(optionalTargets "")
 foreach(row IN LISTS appRows)
     if(row MATCHES "\"([A-Za-z0-9_-]+)\\|")
@@ -124,7 +124,7 @@ endif()
 # check from five optional targets to one, `optionalTargets` was still non-empty
 # and every assertion below still passed: 1 is not 0.
 #
-# So assert COMPLETENESS, not presence. `FASTCACHED_BUILD_<NAME>` appears exactly
+# So assert COMPLETENESS, not presence. `PACE_BUILD_<NAME>` appears exactly
 # once per row, and `string(REGEX MATCHALL)` over the RAW bytes never passes
 # through CMake's list parser -- the matches themselves contain no brackets, so
 # that count survives whatever the rest of the file contains. It is derived from
@@ -133,7 +133,7 @@ endif()
 #
 # This is what makes the check robust against the NEXT blinding mechanism rather
 # than only against brackets. Any reader defect that drops rows now fails here.
-string(REGEX MATCHALL "FASTCACHED_BUILD_[A-Z_]+" appTableOptionTokens "${appTableContent}")
+string(REGEX MATCHALL "PACE_BUILD_[A-Z_]+" appTableOptionTokens "${appTableContent}")
 list(REMOVE_DUPLICATES appTableOptionTokens)
 list(LENGTH appTableOptionTokens appTableOptionCount)
 list(LENGTH optionalTargets optionalTargetsFound)
@@ -169,7 +169,7 @@ endforeach()
 #   pushed nothing and let the matching `endif()` pop the frame ENCLOSING it.
 # - A condition spelled across lines is a frame too: lines are accumulated until the
 #   parentheses balance. This tree has one (src/tests/CMakeLists.txt, `_fc_caveat_msvc_like`).
-function(fastcached_step_frames line framesVar pendingVar codeOut conditionOut unbalancedOut)
+function(pace_step_frames line framesVar pendingVar codeOut conditionOut unbalancedOut)
     set(frames "${${framesVar}}")
     set(pending "${${pendingVar}}")
     set(condition "")
@@ -228,7 +228,7 @@ function(fastcached_step_frames line framesVar pendingVar codeOut conditionOut u
     set(${unbalancedOut} ${unbalanced} PARENT_SCOPE)
 endfunction()
 
-set(rootFile "${FASTCACHED_SOURCE_DIR}/CMakeLists.txt")
+set(rootFile "${PACE_SOURCE_DIR}/CMakeLists.txt")
 if(NOT EXISTS "${rootFile}")
     message(FATAL_ERROR "the root CMakeLists.txt is missing: ${rootFile}")
 endif()
@@ -238,7 +238,7 @@ set(checkedTargets ${optionalTargets})
 # ---------------------------------------------------------------------------
 # Every file that may register a test. A file this does not scan is a hole that
 # reports green.
-file(GLOB_RECURSE cmakeFiles "${FASTCACHED_SOURCE_DIR}/src/*CMakeLists.txt")
+file(GLOB_RECURSE cmakeFiles "${PACE_SOURCE_DIR}/src/*CMakeLists.txt")
 list(APPEND cmakeFiles "${rootFile}")
 list(REMOVE_DUPLICATES cmakeFiles)
 
@@ -247,7 +247,7 @@ set(referenceCount 0)
 set(guardedCount 0)
 
 foreach(cmakeFile IN LISTS cmakeFiles)
-    file(RELATIVE_PATH relative "${FASTCACHED_SOURCE_DIR}" "${cmakeFile}")
+    file(RELATIVE_PATH relative "${PACE_SOURCE_DIR}" "${cmakeFile}")
 
     # Read and split by hand rather than with `file(STRINGS)`. That command
     # returns a LIST, so a line containing a semicolon -- which several comments
@@ -287,7 +287,7 @@ foreach(cmakeFile IN LISTS cmakeFiles)
     # without building a CMake list at all, which is the fix to copy if a pattern
     # here ever needs a bracket.
     file(READ "${cmakeFile}" content)
-    fastcached_split_lines_verbatim("${content}" lines)
+    pace_split_lines_verbatim("${content}" lines)
 
     # The directory an app is defined in is added only when that app's option is
     # on, so inside `src/apps/<t>/` the target `<t>` exists by construction and
@@ -316,7 +316,7 @@ foreach(cmakeFile IN LISTS cmakeFiles)
         # The frame walker, so a trailing comment, a condition spelled across lines
         # and an upper-case `IF` are followed alike. Losing track is reported once
         # per file, where it happened.
-        fastcached_step_frames("${line}" frames pending ignoredCode ignoredCondition unbalanced)
+        pace_step_frames("${line}" frames pending ignoredCode ignoredCondition unbalanced)
         if(unbalanced AND NOT lostTrack)
             set(lostTrack TRUE)
             list(APPEND violations

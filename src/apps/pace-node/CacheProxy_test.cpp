@@ -265,7 +265,7 @@ TEST_CASE("A node refuses AUTH with the one code the launcher steps over", "[nod
     // compile for the life of the process is a miss reported as `rejected`.
     //
     // So the code is not cosmetic and it is not "more accurate as
-    // `DispatchNotPermitted`": with that code, every `FASTCACHE_TOKEN`-configured
+    // `DispatchNotPermitted`": with that code, every `PACE_TOKEN`-configured
     // launcher pointed at a node had a permanent 0% hit rate, presenting exactly as
     // a cache that is merely cold. This asserts the value, not the category.
     Fixture fix;
@@ -273,7 +273,7 @@ TEST_CASE("A node refuses AUTH with the one code the launcher steps over", "[nod
     auto const auth = Wire::EncodeAuth(Wire::AuthRequest { .username = "bob", .secret = "s3cret" });
     CHECK(ErrorOf(core::async::syncRun(fix.proxy.Answer(auth))) == Wire::ErrorCode::UnknownOpcode);
 
-    // And an empty username, which is how a bare `FASTCACHE_TOKEN` with no user
+    // And an empty username, which is how a bare `PACE_TOKEN` with no user
     // reaches the wire, takes the same answer.
     auto const tokenOnly = Wire::EncodeAuth(Wire::AuthRequest { .username = "", .secret = "s3cret" });
     CHECK(ErrorOf(core::async::syncRun(fix.proxy.Answer(tokenOnly))) == Wire::ErrorCode::UnknownOpcode);
@@ -613,7 +613,7 @@ TEST_CASE("(#491) the cache tier counts a version skew and an undecodable body",
     SECTION("and the AUTH refusal a token-configured launcher gets every exchange moves nothing")
     {
         // Deliberately uncounted, and the arm where a counter would be actively
-        // harmful: a `FASTCACHE_TOKEN` launcher sends AUTH once per exchange for a
+        // harmful: a `PACE_TOKEN` launcher sends AUTH once per exchange for a
         // whole build, so the series would be dominated by healthy traffic and a port
         // scan invisible inside it. The wire code still has to be exactly right --
         // `unimplemented-verb` is the one refusal `Cc::CacheProtocol` steps over

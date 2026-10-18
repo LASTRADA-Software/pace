@@ -358,7 +358,7 @@ struct DiskStoreSpec
 /// what this tier will store under, never what the configuration asked for. Being
 /// the one place the decision is made is what lets the startup line read its report
 /// from here instead of authoring a second answer that disagrees on a build without
-/// `FASTCACHED_ENABLE_COMPRESSION`.
+/// `PACE_ENABLE_COMPRESSION`.
 /// @param cfg The node configuration.
 /// @return The options to hand `InMemoryLruStorage::SetCompression`.
 [[nodiscard]] InMemoryLruStorage::CompressionOptions MemoryCompressionOf(NodeConfig const& cfg);

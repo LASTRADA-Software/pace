@@ -35,24 +35,24 @@ cmake_minimum_required(VERSION 3.28)
 # reported INCONCLUSIVE, by name, and never folded into pass or fail.
 #
 # Usage:
-#   cmake -DFASTCACHED_SOURCE_DIR=<dir> -DFASTCACHED_SCRATCH_DIR=<dir> \
+#   cmake -DPACE_SOURCE_DIR=<dir> -DPACE_SCRATCH_DIR=<dir> \
 #         -P scripts/check-corrupt-store-diagnostics-selftest.cmake
 #
 # Exit codes: 0 always. The verdict is the presence of `CMake Error` in the output.
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "PACE_SOURCE_DIR must be set")
 endif()
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    message(FATAL_ERROR "FASTCACHED_SCRATCH_DIR must be set")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    message(FATAL_ERROR "PACE_SCRATCH_DIR must be set")
 endif()
 
-set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-corrupt-store-diagnostics.cmake")
+set(check "${PACE_SOURCE_DIR}/scripts/check-corrupt-store-diagnostics.cmake")
 if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(root "${FASTCACHED_SCRATCH_DIR}")
+set(root "${PACE_SCRATCH_DIR}")
 file(REMOVE_RECURSE "${root}")
 set(failures "")
 set(inconclusive "")
@@ -70,7 +70,7 @@ set(realNodeMain "logger.Logf(LogLevel::Error, \"{}\; refusing to start\", cache
 set(realPage "# Corrupt store\n\nSome prose about what to do.\n\n```\nfailed to open storage '/var/lib/fastcached/cache': StorageError(code=Corrupt system=0 context=FilePageStore::Open)\n```\n\n```\n--cache-dir cannot open /var/cache/fastcache-node/objects.cow: StorageError(code=Corrupt system=0 context=FilePageStore::Open)\; refusing to start\n```\n\nWith `--storage-shards` the message says `failed to open shard '<path>'` and\nnames the one file that is damaged.\n")
 
 # $1 = case name, then five source overrides and the page. Empty means "as real".
-function(fastcached_make_tree name pageText storageError cowTree daemon cacheTier nodeMain outVar)
+function(pace_make_tree name pageText storageError cowTree daemon cacheTier nodeMain outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/docs/operations")
@@ -93,9 +93,9 @@ endfunction()
 # a missing interpreter, a `noexec` mount. That is INCONCLUSIVE and is reported as
 # itself: folding it into `objected` would make a killed process read as the rule
 # firing, which is #747 exactly.
-function(fastcached_run_check tree outVerdict outOutput)
+function(pace_run_check tree outVerdict outOutput)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${check}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${check}"
         OUTPUT_VARIABLE captured ERROR_VARIABLE capturedErrors RESULT_VARIABLE result)
     set(combined "${captured}${capturedErrors}")
     set(${outOutput} "${combined}" PARENT_SCOPE)
@@ -116,9 +116,9 @@ endfunction()
 
 # $1 = description, $2 = want-pass|want-refuse, $3 = tree, $4 = substring the
 # refusal must contain (optional).
-macro(fastcached_case what want tree expect)
+macro(pace_case what want tree expect)
     math(EXPR caseCount "${caseCount} + 1")
-    fastcached_run_check("${tree}" verdict output)
+    pace_run_check("${tree}" verdict output)
     if(verdict STREQUAL "inconclusive")
         list(APPEND inconclusive "  ${what}")
     # `"${want}"`, not a bare `want`. This is a MACRO, so its parameters are not
@@ -142,62 +142,62 @@ endmacro()
 
 # ---------------------------------------------------------------------------
 # 1. The baseline. Every case below is evidence only if this passes.
-fastcached_make_tree("baseline" "${realPage}" "${realStorageError}" "${realCowTree}"
+pace_make_tree("baseline" "${realPage}" "${realStorageError}" "${realCowTree}"
                      "${realDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("the shipped shape passes" "want-pass" "${tree}" "")
+pace_case("the shipped shape passes" "want-pass" "${tree}" "")
 
 # 2. Rewording the prose AROUND a quote is free. This is the false-positive
 #    guard, and without it the check is the change-detector #633 warns against.
 string(REPLACE "Some prose about what to do." "Entirely different prose, rewritten." rewordedPage "${realPage}")
-fastcached_make_tree("wording" "${rewordedPage}" "${realStorageError}" "${realCowTree}"
+pace_make_tree("wording" "${rewordedPage}" "${realStorageError}" "${realCowTree}"
                      "${realDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("rewording the prose around a quote is not a violation" "want-pass" "${tree}" "")
+pace_case("rewording the prose around a quote is not a violation" "want-pass" "${tree}" "")
 
 # 3. The shard path dropped from the daemon's composer. #633's claim (2), and the
 #    field-level assertion: the `'{}'` is what carries the damaged file's name.
 string(REPLACE "failed to open {} '{}'" "failed to open {}" strippedDaemon "${realDaemon}")
-fastcached_make_tree("shardPath" "${realPage}" "${realStorageError}" "${realCowTree}"
+pace_make_tree("shardPath" "${realPage}" "${realStorageError}" "${realCowTree}"
                      "${strippedDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("dropping the quoted path from the daemon's composer is refused" "want-refuse" "${tree}" "failed to open")
+pace_case("dropping the quoted path from the daemon's composer is refused" "want-refuse" "${tree}" "failed to open")
 
 # 4. The `shard` argument gone. Same composer, the variant that names one file.
 string(REPLACE "\"shard\"" "\"chunk\"" renamedWhat "${realDaemon}")
-fastcached_make_tree("shardWhat" "${realPage}" "${realStorageError}" "${realCowTree}"
+pace_make_tree("shardWhat" "${realPage}" "${realStorageError}" "${realCowTree}"
                      "${renamedWhat}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("renaming the `shard` what-argument is refused" "want-refuse" "${tree}" "shard")
+pace_case("renaming the `shard` what-argument is refused" "want-refuse" "${tree}" "shard")
 
 # 5. The node's suffix, composed in a THIRD file. A check reading only the tier
 #    would miss this entirely.
 string(REPLACE "refusing to start" "giving up" strippedSuffix "${realNodeMain}")
-fastcached_make_tree("suffix" "${realPage}" "${realStorageError}" "${realCowTree}"
+pace_make_tree("suffix" "${realPage}" "${realStorageError}" "${realCowTree}"
                      "${realDaemon}" "${realCacheTier}" "${strippedSuffix}" tree)
-fastcached_case("losing the node's `refusing to start` suffix is refused" "want-refuse" "${tree}" "refusing to start")
+pace_case("losing the node's `refusing to start` suffix is refused" "want-refuse" "${tree}" "refusing to start")
 
 # 6. The context token renamed. The one an operator matches against.
 string(REPLACE "\"FilePageStore::Open\"" "\"PageStore::Open\"" renamedContext "${realCowTree}")
-fastcached_make_tree("context" "${realPage}" "${realStorageError}" "${renamedContext}"
+pace_make_tree("context" "${realPage}" "${realStorageError}" "${renamedContext}"
                      "${realDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("renaming the context token is refused" "want-refuse" "${tree}" "FilePageStore::Open")
+pace_case("renaming the context token is refused" "want-refuse" "${tree}" "FilePageStore::Open")
 
 # 7. The rendering itself changed. Here the WHOLE format string is the assertion,
 #    deliberately -- the rendering IS the page's verbatim quote.
 string(REPLACE "StorageError(code={} system={} context={})" "StorageError(code={} ctx={})" renamedRendering "${realStorageError}")
-fastcached_make_tree("rendering" "${realPage}" "${renamedRendering}" "${realCowTree}"
+pace_make_tree("rendering" "${realPage}" "${renamedRendering}" "${realCowTree}"
                      "${realDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("changing the StorageError rendering is refused" "want-refuse" "${tree}" "StorageError(code=")
+pace_case("changing the StorageError rendering is refused" "want-refuse" "${tree}" "StorageError(code=")
 
 # 8. A diagnostic the fragment table does not cover. An uncovered quote is the
 #    silent gap this check exists to close, so it is refused rather than skipped.
 string(REPLACE "Some prose about what to do."
        "```\nfailed to open the widget registry: WidgetError(code=Missing)\n```" extraPage "${realPage}")
-fastcached_make_tree("uncovered" "${extraPage}" "${realStorageError}" "${realCowTree}"
+pace_make_tree("uncovered" "${extraPage}" "${realStorageError}" "${realCowTree}"
                      "${realDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("a quoted diagnostic no row covers is refused" "want-refuse" "${tree}" "no fragment row covers")
+pace_case("a quoted diagnostic no row covers is refused" "want-refuse" "${tree}" "no fragment row covers")
 
 # 9. A page quoting nothing. Two empty lists agree perfectly.
-fastcached_make_tree("vacuous" "# Corrupt store\n\nJust prose now.\n" "${realStorageError}" "${realCowTree}"
+pace_make_tree("vacuous" "# Corrupt store\n\nJust prose now.\n" "${realStorageError}" "${realCowTree}"
                      "${realDaemon}" "${realCacheTier}" "${realNodeMain}" tree)
-fastcached_case("a page that quotes no diagnostic at all is refused" "want-refuse" "${tree}" "NO quoted diagnostic")
+pace_case("a page that quotes no diagnostic at all is refused" "want-refuse" "${tree}" "NO quoted diagnostic")
 
 # ---------------------------------------------------------------------------
 # INCONCLUSIVE is reported as itself and never as a pass. A run that could not

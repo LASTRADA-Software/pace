@@ -15,21 +15,21 @@
 # `CMake Warning`.
 cmake_minimum_required(VERSION 3.20)
 
-if(NOT DEFINED FASTCACHED_SOURCE_DIR)
-    message(FATAL_ERROR "check-staged-stub-spawns-selftest: FASTCACHED_SOURCE_DIR is required")
+if(NOT DEFINED PACE_SOURCE_DIR)
+    message(FATAL_ERROR "check-staged-stub-spawns-selftest: PACE_SOURCE_DIR is required")
 endif()
 
-set(checker "${FASTCACHED_SOURCE_DIR}/scripts/check-staged-stub-spawns.cmake")
+set(checker "${PACE_SOURCE_DIR}/scripts/check-staged-stub-spawns.cmake")
 # OUTSIDE the repository. A fixture's scratch directory inside the tree changes
 # what it tests -- the staged trees would be enumerated by every other scan while
 # they exist -- and leaves artefacts under `scripts/` if a case aborts.
-if(NOT DEFINED FASTCACHED_SCRATCH_DIR)
-    set(FASTCACHED_SCRATCH_DIR "$ENV{TMPDIR}")
+if(NOT DEFINED PACE_SCRATCH_DIR)
+    set(PACE_SCRATCH_DIR "$ENV{TMPDIR}")
 endif()
-if(NOT FASTCACHED_SCRATCH_DIR)
-    set(FASTCACHED_SCRATCH_DIR "/tmp")
+if(NOT PACE_SCRATCH_DIR)
+    set(PACE_SCRATCH_DIR "/tmp")
 endif()
-set(scratch "${FASTCACHED_SCRATCH_DIR}/staged-stub-spawns-selftest")
+set(scratch "${PACE_SCRATCH_DIR}/staged-stub-spawns-selftest")
 file(REMOVE_RECURSE "${scratch}")
 
 set(ran 0)
@@ -44,7 +44,7 @@ function(Expect what tree want phrase)
     math(EXPR ran "${ran} + 1")
     set(ran "${ran}" PARENT_SCOPE)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DFASTCACHED_SOURCE_DIR=${tree}" -P "${checker}"
+        COMMAND "${CMAKE_COMMAND}" "-DPACE_SOURCE_DIR=${tree}" -P "${checker}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE rc)
     set(text "${out}${err}")
     # CMake WRAPS its diagnostics, so a phrase can exist in the output and in no
@@ -85,13 +85,13 @@ endfunction()
 function(Stage tree body row)
     file(REMOVE_RECURSE "${tree}")
     file(MAKE_DIRECTORY "${tree}/scripts/lib")
-    configure_file("${FASTCACHED_SOURCE_DIR}/scripts/lib/CheckCommon.cmake"
+    configure_file("${PACE_SOURCE_DIR}/scripts/lib/CheckCommon.cmake"
                    "${tree}/scripts/lib/CheckCommon.cmake" COPYONLY)
-    # The roots file too: `fastcached_decline_third_party` refuses outright without
+    # The roots file too: `pace_decline_third_party` refuses outright without
     # it, which would fail every case for one shared wrong reason rather than on
     # its own merits -- and the accepting case would then "refuse" correctly by
     # accident.
-    configure_file("${FASTCACHED_SOURCE_DIR}/scripts/lib/third-party-roots.txt"
+    configure_file("${PACE_SOURCE_DIR}/scripts/lib/third-party-roots.txt"
                    "${tree}/scripts/lib/third-party-roots.txt" COPYONLY)
     file(WRITE "${tree}/scripts/candidate.cmake" "${body}")
     # The checker with its table replaced. The real table is read out of the file

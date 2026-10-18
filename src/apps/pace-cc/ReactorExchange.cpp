@@ -149,7 +149,7 @@ namespace
             // this coroutine parked on a read nobody will ever complete; closing
             // completes it, so the task reaches its own end and frees its own frame.
             //
-            // An unbounded budget arms NOTHING, which is what `FASTCACHE_TIMEOUT=0s`
+            // An unbounded budget arms NOTHING, which is what `PACE_TIMEOUT=0s`
             // has always been documented to mean. That rule now lives in
             // `core::net::armSocketDeadline`, which the node's upstream shares (#248) -- it was
             // implemented here and again in `RemoteUpstream`, and only one of the two
