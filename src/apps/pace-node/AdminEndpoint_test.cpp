@@ -1305,7 +1305,7 @@ TEST_CASE("A node started with no configuration keeps its history in the state d
     // this node has, and every other state file lives there. Asked of the typed flag alone, the
     // history went nowhere -- memory-only, on exactly the install that names nothing.
     NodeConfig cfg;
-    cfg.stateDirectory = NodeStateDirectoryChoice { .path = "/home/user/.local/state/fastcache-node",
+    cfg.stateDirectory = NodeStateDirectoryChoice { .path = "/home/user/.local/state/pace-node",
                                                     .origin = StateDirectoryOrigin::PerUser };
     auto const paths = HistoryPaths::For(cfg);
     for (auto const& path: { paths.fleet, paths.node, paths.received })

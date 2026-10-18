@@ -155,7 +155,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Where a build tree goes when the root is on a protocol filesystem (#1227). The local disk
 # of whoever runs the gate, keyed per worktree below -- never shared between trees.
-gate_build_home="${PACE_GATE_BUILD_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/fastcached/gate}"
+gate_build_home="${PACE_GATE_BUILD_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/pace/gate}"
 cd "$repo_root" || exit 1
 
 # The status a usage error exits with. Defined here because the argument loop below

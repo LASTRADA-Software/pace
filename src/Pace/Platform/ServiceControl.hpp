@@ -604,7 +604,7 @@ struct ServiceStartRow
 /// the name the job appears under in System Settings → Login Items.
 ///
 /// @param spec Service to label; only `serviceName` is used.
-/// @return e.g. `software.lastrada.fastcached`.
+/// @return e.g. `software.lastrada.pace-kv`.
 [[nodiscard]] std::string LaunchdLabel(ServiceSpec const& spec);
 
 /// Absolute path of the plist file backing a job in @p scope.

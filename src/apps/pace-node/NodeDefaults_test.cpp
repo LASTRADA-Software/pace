@@ -112,11 +112,11 @@ TEST_CASE("The default cluster dir is the platform's machine-wide state director
     REQUIRE(directory.has_value());
     CHECK(Unwrap(directory).origin == StateDirectoryOrigin::MachineWide);
 #if defined(_WIN32)
-    CHECK(Unwrap(directory).path == std::filesystem::path { "C:\\ProgramData\\fastcache-node" });
+    CHECK(Unwrap(directory).path == std::filesystem::path { "C:\\ProgramData\\pace-node" });
 #elif defined(__APPLE__)
-    CHECK(Unwrap(directory).path == std::filesystem::path { "/Library/Application Support/fastcache-node" });
+    CHECK(Unwrap(directory).path == std::filesystem::path { "/Library/Application Support/pace-node" });
 #else
-    CHECK(Unwrap(directory).path == std::filesystem::path { "/var/lib/fastcache-node" });
+    CHECK(Unwrap(directory).path == std::filesystem::path { "/var/lib/pace-node" });
 #endif
 }
 
@@ -129,16 +129,16 @@ TEST_CASE("An unprivileged node keeps its identity in the account's own state di
     REQUIRE(directory.has_value());
     CHECK(Unwrap(directory).origin == StateDirectoryOrigin::PerUser);
 #if defined(_WIN32)
-    CHECK(Unwrap(directory).path == std::filesystem::path { "C:\\Users\\dev\\AppData\\Local\\fastcache-node" });
+    CHECK(Unwrap(directory).path == std::filesystem::path { "C:\\Users\\dev\\AppData\\Local\\pace-node" });
 #else
-    CHECK(Unwrap(directory).path == std::filesystem::path { "/home/dev/.state/fastcache-node" });
+    CHECK(Unwrap(directory).path == std::filesystem::path { "/home/dev/.state/pace-node" });
 
     // And without XDG_STATE_HOME, the basedir specification's own fallback.
     auto environment = EveryBase();
     environment.erase("XDG_STATE_HOME");
     auto const fallback = DefaultNodeClusterDirectory(ScriptedConfigPathProbe { environment, Privilege::Unprivileged });
     REQUIRE(fallback.has_value());
-    CHECK(Unwrap(fallback).path == std::filesystem::path { "/home/dev/.local/state/fastcache-node" });
+    CHECK(Unwrap(fallback).path == std::filesystem::path { "/home/dev/.local/state/pace-node" });
 #endif
 }
 
@@ -148,7 +148,7 @@ TEST_CASE("A service manager's state directory wins, and only one named for this
     // this row the machine's service would take the per-user default. A child inherits the
     // variable, so an entry named for some other service is not this node's.
     auto environment = EveryBase();
-    environment.emplace(ServiceStateDirectoryVariable, "/var/lib/other:/var/lib/fastcache-node");
+    environment.emplace(ServiceStateDirectoryVariable, "/var/lib/other:/var/lib/pace-node");
     auto const handedOver = DefaultNodeClusterDirectory(ScriptedConfigPathProbe { environment, Privilege::Unprivileged });
     REQUIRE(handedOver.has_value());
 
@@ -162,7 +162,7 @@ TEST_CASE("A service manager's state directory wins, and only one named for this
     CHECK(Unwrap(handedOver).origin == StateDirectoryOrigin::PerUser);
 #else
     CHECK(Unwrap(handedOver).origin == StateDirectoryOrigin::ServiceManager);
-    CHECK(Unwrap(handedOver).path == std::filesystem::path { "/var/lib/fastcache-node" });
+    CHECK(Unwrap(handedOver).path == std::filesystem::path { "/var/lib/pace-node" });
 #endif
 }
 
@@ -200,7 +200,7 @@ TEST_CASE("A default cluster dir whose base the environment does not name is abs
         ScriptedConfigPathProbe { { { "XDG_STATE_HOME", ".state" }, { "HOME", "/home/dev" } }, Privilege::Unprivileged };
     auto const fallback = DefaultNodeClusterDirectory(relativeState);
     REQUIRE(fallback.has_value());
-    CHECK(Unwrap(fallback).path == std::filesystem::path { "/home/dev/.local/state/fastcache-node" });
+    CHECK(Unwrap(fallback).path == std::filesystem::path { "/home/dev/.local/state/pace-node" });
     auto const relativeHome =
         ScriptedConfigPathProbe { { { "XDG_STATE_HOME", ".state" }, { "HOME", "dev" } }, Privilege::Unprivileged };
     CHECK_FALSE(DefaultNodeClusterDirectory(relativeHome).has_value());
@@ -816,7 +816,7 @@ TEST_CASE("A service registration owns the machine-wide state directory and hand
                                             .privacy = PathPrivacy::Private,
                                             .credentialFiles = { std::filesystem::path { NodeKeyFileName } } }));
 #if defined(_WIN32)
-    CHECK(Unwrap(machineWide) == std::filesystem::path { R"(C:\ProgramData\fastcache-node)" });
+    CHECK(Unwrap(machineWide) == std::filesystem::path { R"(C:\ProgramData\pace-node)" });
     CHECK_FALSE(ServiceManagerHandsOverStateDirectory());
     CHECK(spec.serviceAccountEnvironment.empty());
 #else
@@ -846,12 +846,12 @@ TEST_CASE("A service registration owns the machine-wide state directory and hand
 
     // And the plist carries the pairs beside the account.
     auto withEnvironment = spec;
-    withEnvironment.serviceAccount = "fastcache-node";
-    withEnvironment.serviceAccountEnvironment = { { "STATE_DIRECTORY", "/Library/Application Support/fastcache-node" } };
+    withEnvironment.serviceAccount = "pace-node";
+    withEnvironment.serviceAccountEnvironment = { { "STATE_DIRECTORY", "/Library/Application Support/pace-node" } };
     auto const plist = BuildLaunchdPlist(withEnvironment, ServiceScope::System, std::filesystem::path { "/tmp" });
     CHECK(plist.contains("<key>EnvironmentVariables</key>"));
     CHECK(
-        plist.contains("<key>STATE_DIRECTORY</key>\n        <string>/Library/Application Support/fastcache-node</string>"));
+        plist.contains("<key>STATE_DIRECTORY</key>\n        <string>/Library/Application Support/pace-node</string>"));
 }
 
 #if !defined(_WIN32)
@@ -893,7 +893,7 @@ TEST_CASE("A service registration's defaulted state directory loses its group an
     // The chain from the registration to the mode, on the platform the Windows run cannot see:
     // the spec marks the machine-wide directory Private, the handover routes a Private path to its
     // seclusion, and the POSIX seclusion is `chmod go-rwx`. The real directory is
-    // /var/lib/fastcache-node, which a suite run unprivileged cannot touch, so the spec's own
+    // /var/lib/pace-node, which a suite run unprivileged cannot touch, so the spec's own
     // entry is re-pointed at a scratch directory and keeps every other field.
     auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" },
                                           Testing::FirstStart(NodeConfig {}),
@@ -905,7 +905,7 @@ TEST_CASE("A service registration's defaulted state directory loses its group an
 
     Testing::ScratchDirectory const scratch { "node-default-state-mode" };
     auto entry = *owned;
-    entry.path = scratch.Path() / "fastcache-node";
+    entry.path = scratch.Path() / "pace-node";
     std::filesystem::create_directories(entry.path);
     std::filesystem::permissions(entry.path, std::filesystem::perms::all, std::filesystem::perm_options::replace);
 

@@ -263,8 +263,8 @@ struct Config
     /// Optional pidfile path (POSIX daemon mode only).
     std::string pidfile {};
 
-    /// Windows service name; defaults to FastCached.
-    std::string serviceName { "FastCached" };
+    /// Windows service name; defaults to pace-kv.
+    std::string serviceName { "pace-kv" };
 
     /// Shared authentication secret (redis `requirepass` style). Empty (the
     /// default) means authentication is disabled and every client is served

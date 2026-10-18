@@ -23,13 +23,13 @@ systemctl status pace-kv
 journalctl -u pace-kv -f
 ```
 
-Configuration lives in `/etc/fastcached/fastcached.yaml`, which is where
+Configuration lives in `/etc/pace/pace-kv.yaml`, which is where
 pace-kv looks when it is started without `--config`. It ships fully
 commented with every setting at its default, and is marked as a package
 config file, so local edits survive upgrades.
 
 ```sh
-sudoedit /etc/fastcached/fastcached.yaml
+sudoedit /etc/pace/pace-kv.yaml
 sudo systemctl restart pace-kv
 ```
 
@@ -59,19 +59,19 @@ customise it, just drop a config where pace-kv already looks — no unit
 override needed:
 
 ```sh
-mkdir -p ~/.config/fastcached
-cp /etc/fastcached/fastcached.yaml ~/.config/fastcached/fastcached.yaml
+mkdir -p ~/.config/pace
+cp /etc/pace/pace-kv.yaml ~/.config/pace/pace-kv.yaml
 systemctl --user restart pace-kv
 ```
 
 That file is the *only* one any pace-kv you start yourself will read:
-`/etc/fastcached/fastcached.yaml` describes the system service, whose cache only
+`/etc/pace/pace-kv.yaml` describes the system service, whose cache only
 the service account can write, so an unprivileged instance passes over it
 entirely rather than inheriting settings it cannot act on. Your own copy is
 therefore the whole configuration of a personal cache, not an overlay on the
 machine-wide one.
 
-State goes to `~/.local/state/fastcached`. Add `loginctl enable-linger
+State goes to `~/.local/state/pace-kv`. Add `loginctl enable-linger
 $USER` if you want it running while you are not logged in.
 
 ### Windows
@@ -84,7 +84,7 @@ Run the MSI and choose what this machine runs: **pace-kv** (the cache daemon),
 worker), and the command-line client, which is always installed. The installer
 registers the services that follow from the choice:
 
-| Installed | `FastCacheCompileNode` | `FastCached` |
+| Installed | `pace-node` | `pace-kv` |
 |---|---|---|
 | the node (with or without pace-kv) | starts with Windows, started now | disabled, stopped |
 | pace-kv without the node | — | starts with Windows, started now (pass `PACE_START_SERVICE=0` to leave it stopped) |
@@ -120,43 +120,43 @@ pins the node's discovery reply port, `PACE_DISCOVERY_REPLY_PORT=6682` unless yo
 hand leaves that port to the kernel, because two nodes on one machine each need one of their own;
 the package installs one node per machine.
 
-A silent install names its features: `msiexec /i fastcached.msi /qn ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher`.
-Changing the selection later (Settings > Apps > Modify, or `msiexec /i fastcached.msi ADDLOCAL=CM_C_Node`
+A silent install names its features: `msiexec /i pace.msi /qn ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher`.
+Changing the selection later (Settings > Apps > Modify, or `msiexec /i pace.msi ADDLOCAL=CM_C_Node`
 and `REMOVE=CM_C_Node`) re-applies the table. An upgrade applies it too: it keeps the registration
 of every feature that stays installed, and removes the registration of a feature it no longer
 installs.
 
 **Upgrading from 0.3.0 or earlier is the exception.** Those installers delete both services when
 they are removed, and a major upgrade removes the old version first. The new installer registers
-`FastCached` and the node again from the table, the node with no property needed. It waits for
+`pace-kv` and the node again from the table, the node with no property needed. It waits for
 0.3.0's service processes to exit before it replaces a file (0.3.0 stops them without waiting), so
 the upgrade needs no restart. **A failed upgrade from 0.3.0 does not restore 0.3.0's services**:
 the rollback puts 0.3.0's files back, but 0.3.0's own uninstall deleted its registrations before
 this installer ran, so they come back as this installer registers them, which 0.3.0's binaries may
 refuse. Run the upgrade again once its cause is fixed, or reinstall 0.3.0.
 
-`FastCached` is **disabled** beside the node, not merely manual, because an upgrade from 0.3.0 or
+`pace-kv` is **disabled** beside the node, not merely manual, because an upgrade from 0.3.0 or
 earlier tries to start it after the upgrade has finished. Those installers let Windows Installer's
-Restart Manager stop a running `FastCached` while they are removed, and Windows Installer starts it
+Restart Manager stop a running `pace-kv` while they are removed, and Windows Installer starts it
 again by name once the whole upgrade is over, after everything this installer does; this installer
 turns Restart Manager off for itself, but cannot for the old one's removal. Beside the node that
 start would fail on port 6674 and repeat under the service's recovery policy, so the start type is
 disabled and the start fails before any process runs. The upgrade still succeeds. Near the end of
 its verbose log, Windows Installer reports the refused restart as
 `RESTART MANAGER: Failed while restarting applications. Error: 352`, followed by the line
-`Previously shut down applications have been restarted.`, which does not mean `FastCached` is
+`Previously shut down applications have been restarted.`, which does not mean `pace-kv` is
 running: it stays stopped. Neither needs anything done. The same old removal also closes any program holding one of
 0.3.0's files without asking, for example a `pace-cc` inside a running build, as every silent
 Windows Installer removal does: finish or stop builds before upgrading. Without the node, the
 restart succeeds, so an upgrade from 0.3.0 that passes `PACE_START_SERVICE=0` still leaves
-`FastCached` running if it was running before: stop it first (`net stop FastCached`) to have it left
-stopped. To run `FastCached` beside the node anyway, on another port, set its start type yourself
-(`sc config FastCached start= demand`); the next repair, feature change or upgrade stops it and
+`pace-kv` running if it was running before: stop it first (`net stop pace-kv`) to have it left
+stopped. To run `pace-kv` beside the node anyway, on another port, set its start type yourself
+(`sc config pace-kv start= demand`); the next repair, feature change or upgrade stops it and
 disables it again.
 
 Every transaction that keeps a service registers it again, and the optional properties are
 remembered for it: `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and `PACE_FLEET_ID` are written to
-`HKLM\SOFTWARE\fastcached\Installer` and read back by the next repair or upgrade, so one that
+`HKLM\SOFTWARE\Pace\Installer` and read back by the next repair or upgrade, so one that
 leaves them out registers what was installed. The node's two are written only by a transaction
 that keeps the node, once its parser has accepted them. (An advertised endpoint an earlier package of this
 installer remembered there is forgotten by the next transaction, and that registration carries none.) A transaction that states a new value replaces the
@@ -168,19 +168,19 @@ from (re-derived when the network changes) with its firewall rules admitting any
 you installed with) on that upgrade to keep it.
 
 ```powershell
-sc.exe query FastCached
-sc.exe start FastCached
+sc.exe query pace-kv
+sc.exe start pace-kv
 ```
 
-Configuration lives in `C:\ProgramData\fastcached\fastcached.yaml`, which the
+Configuration lives in `C:\ProgramData\pace\pace-kv.yaml`, which the
 service reads at every start. The installer seeds it from the
-`etc\fastcached.yaml.default` template beside the executables, but only when
+`etc\pace-kv.yaml.default` template beside the executables, but only when
 nothing is there yet — so an upgrade never discards your edits. Edit it from an
 elevated editor and restart:
 
 ```powershell
-sc.exe stop FastCached
-sc.exe start FastCached
+sc.exe stop pace-kv
+sc.exe start pace-kv
 ```
 
 Uninstalling removes the services and leaves your configuration in place.
@@ -197,14 +197,14 @@ stays, inert, since it names a program that is no longer installed. What each bi
 
 Open the `.dmg` and run the `.pkg` inside it (the `.pkg` is also published
 on its own — the disk image is only a convenience). Both executables land
-in `/opt/fastcached/bin`.
+in `/opt/pace/bin`.
 
 The installer asks how you want pace-kv to start:
 
 | Choice | Runs as | Starts | Plist |
 |---|---|---|---|
-| **Start at login** (default) | you | your next login | `~/Library/LaunchAgents/software.lastrada.fastcached.plist` |
-| **Start at boot, system-wide** | `_fastcached` | boot | `/Library/LaunchDaemons/software.lastrada.fastcached.plist` |
+| **Start at login** (default) | you | your next login | `~/Library/LaunchAgents/software.lastrada.pace-kv.plist` |
+| **Start at boot, system-wide** | `_pace-kv` | boot | `/Library/LaunchDaemons/software.lastrada.pace-kv.plist` |
 
 They are alternatives, not additions. Both would listen on the same
 address, and pace-kv has no unix-socket endpoint to fall back on, so if
@@ -212,14 +212,14 @@ you select the system-wide service it wins and the per-user agent is
 skipped. Selecting neither installs the tools without starting anything.
 
 ```sh
-launchctl print gui/$UID/software.lastrada.fastcached      # per-user
-sudo launchctl print system/software.lastrada.fastcached   # system-wide
+launchctl print gui/$UID/software.lastrada.pace-kv      # per-user
+sudo launchctl print system/software.lastrada.pace-kv   # system-wide
 ```
 
 Restart it after editing the config:
 
 ```sh
-launchctl kickstart -k gui/$UID/software.lastrada.fastcached
+launchctl kickstart -k gui/$UID/software.lastrada.pace-kv
 ```
 
 You can also register the service by hand at any time, which is how you
@@ -235,42 +235,42 @@ invoking account*, so running it under `sudo` would register one for root —
 started by nobody's login and invisible to your own `--uninstall-service`.
 That combination is refused rather than guessed at.
 
-The system scope runs as the `_fastcached` account, which only the installer
+The system scope runs as the `_pace-kv` account, which only the installer
 package creates — on a tarball or source install that command tells you so
 instead of registering a job that could never start.
 
 **Open a new terminal window after installing.** The package adds
-`/opt/fastcached/bin` to the system `PATH` via `/etc/paths.d/fastcached`,
+`/opt/pace/bin` to the system `PATH` via `/etc/paths.d/pace`,
 and macOS only reads that when a *login* shell starts — an already-open
 terminal never sees it, and neither does fish, which does not read
 `/etc/profile`. Both tools are also symlinked into `/usr/local/bin`, which
 is on the stock `PATH` everywhere, so in practice they work straight away.
 
-The **system daemon** reads `/opt/fastcached/etc/fastcached.yaml`. Your edits
-survive upgrades: only the `fastcached.yaml.default` beside it is replaced,
+The **system daemon** reads `/opt/pace/etc/pace-kv.yaml`. Your edits
+survive upgrades: only the `pace-kv.yaml.default` beside it is replaced,
 and the live file is seeded from it just once, when it is absent. The
-installer sets it to mode `0640` owned `root:_fastcached`, so the daemon can
+installer sets it to mode `0640` owned `root:_pace-kv`, so the daemon can
 read it and other accounts cannot — which is what makes it a safe home for
 `requirepass:`.
 
 The **per-user agent** normally does not read that file. The installer sets it
-to `0640` owned `root:_fastcached`, so an agent running as you cannot read it
+to `0640` owned `root:_pace-kv`, so an agent running as you cannot read it
 and falls through to per-user defaults, with its cache under
-`~/Library/Caches/fastcached`. That is deliberate: the file describes the system
+`~/Library/Caches/pace-kv`. That is deliberate: the file describes the system
 daemon, whose cache lives under the package prefix and is writable only by the
 service account, so an agent pointed at it would have nowhere to write.
 
 Give the agent a configuration of its own by putting one where it looks first:
 
 ```sh
-mkdir -p ~/.config/fastcached
-cp /opt/fastcached/etc/fastcached.yaml.default ~/.config/fastcached/fastcached.yaml
-launchctl kickstart -k gui/$UID/software.lastrada.fastcached
+mkdir -p ~/.config/pace
+cp /opt/pace/etc/pace-kv.yaml.default ~/.config/pace/pace-kv.yaml
+launchctl kickstart -k gui/$UID/software.lastrada.pace-kv
 ```
 
 One exception: `storage_path:` in that file will *not* move the agent's cache.
 Registering a user agent with no `--config` bakes
-`--storage=~/Library/Caches/fastcached/cache` into its `ProgramArguments`, and a
+`--storage=~/Library/Caches/pace-kv/cache` into its `ProgramArguments`, and a
 launch argument outranks the file for the life of the registration. Everything
 else in the file applies normally. To choose the cache location, name the file
 at registration time instead:
@@ -286,14 +286,14 @@ file and restarting the job actually changes where the cache lives.
 To remove everything:
 
 ```sh
-sudo /opt/fastcached/bin/pace-uninstall
+sudo /opt/pace/bin/pace-uninstall
 ```
 
 A `.pkg` has no built-in uninstaller — `pkgutil --forget` only drops the
 receipt and deletes nothing — so that script ships as part of the package.
-It stops and unregisters the launchd jobs, removes `/opt/fastcached`, the
-`PATH` entry and the symlinks, deletes the `_fastcached` and
-`fastcache-node` accounts, and forgets the receipts. Your own cache and
+It stops and unregisters the launchd jobs, removes `/opt/pace`, the
+`PATH` entry and the symlinks, deletes the `_pace-kv` and
+`pace-node` accounts, and forgets the receipts. Your own cache and
 logs under `~/Library` are left alone.
 
 Apple Silicon only. On an Intel Mac, build from source.
@@ -406,7 +406,7 @@ directory: `pace-kv` and `pace-cc`. The daemon runs in the
 foreground and listens on `127.0.0.1:6674` by default:
 
 ```sh
-./fastcached
+./pace-kv
 ```
 
 A `--help` flag prints the full configuration surface.
@@ -425,7 +425,7 @@ releases defaulted to memcached's 11211, which implied a protocol the daemon
 never restricted itself to and collided with a real memcached on the same host.
 
 Clients that cannot be re-pointed keep working: bind their port alongside ours
-rather than instead of it. In `/etc/fastcached/fastcached.yaml`:
+rather than instead of it. In `/etc/pace/pace-kv.yaml`:
 
 ```yaml
 listen:

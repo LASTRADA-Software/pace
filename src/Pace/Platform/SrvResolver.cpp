@@ -375,7 +375,7 @@ namespace
             request.QueryName = wideName->c_str();
             request.QueryType = DNS_TYPE_SRV;
             // TREAT_AS_FQDN: the name is complete as asked. Without it an NXDOMAIN sends the client
-            // down the suffix search list, asking `_fastcache._tcp.corp.example.<suffix>` for every
+            // down the suffix search list, asking `_pace._tcp.corp.example.<suffix>` for every
             // suffix -- names nobody published, each spending time inside the deadline.
             request.QueryOptions = DNS_QUERY_STANDARD | DNS_QUERY_TREAT_AS_FQDN;
             request.pQueryCompletionCallback = &OnQueryCompleted;

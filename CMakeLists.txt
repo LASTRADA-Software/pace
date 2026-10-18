@@ -51,7 +51,7 @@ include(GNUInstallDirs)
 # hardcoded to / by CPack, and the launchd plists and /etc/paths.d entry sit at
 # fixed absolute locations outside any prefix. Note that this is why the prefix
 # must stay `/` there too — pointing CPACK_PACKAGING_INSTALL_PREFIX at
-# /opt/fastcached would work for the binaries, but an absolute install
+# /opt/pace would work for the binaries, but an absolute install
 # DESTINATION for /Library/LaunchDaemons then escapes the staging tree and
 # writes to the build host's real filesystem.
 #
@@ -67,12 +67,12 @@ include(GNUInstallDirs)
 option(PACE_PACKAGE_ROOT_PREFIX "Lay out the install tree for .deb/.rpm/.pkg packaging" OFF)
 
 # The macOS package prefix. Single source of truth: it is spelled into the
-# install destinations below, into /etc/paths.d/fastcached, into the launchd
+# install destinations below, into /etc/paths.d/pace, into the launchd
 # plists, and into the uninstaller. macOS has no FHS to follow and /usr/local is
 # shared with Homebrew, so a private /opt subtree keeps the payload trivially
 # enumerable — which is what makes an uninstaller possible at all, given that a
 # .pkg carries no removal mechanism of its own.
-set(PACE_MACOS_PREFIX "opt/fastcached"
+set(PACE_MACOS_PREFIX "opt/pace"
     CACHE STRING "macOS package install prefix, relative to /")
 
 # macOS package identity. Declared here rather than in packaging/ because both
@@ -90,8 +90,8 @@ set(PACE_MACOS_PREFIX "opt/fastcached"
 #
 # Never change the bundle id once released: macOS keys package receipts and
 # upgrade detection on it, the same discipline as CPACK_WIX_UPGRADE_GUID.
-set(PACE_MACOS_BUNDLE_ID       "software.lastrada.fastcached")
-set(PACE_MACOS_SERVICE_ACCOUNT "_fastcached")
+set(PACE_MACOS_BUNDLE_ID       "software.lastrada.pace-kv")
+set(PACE_MACOS_SERVICE_ACCOUNT "_pace-kv")
 
 # The compile worker's account, and deliberately NOT the daemon's above: a worker
 # runs a compiler on input that arrived over the network while pace-kv owns the
@@ -101,12 +101,12 @@ set(PACE_MACOS_SERVICE_ACCOUNT "_fastcached")
 #
 # Spelled exactly as that sysusers file and as MakeNodeServiceSpec's
 # `.serviceAccount` spell it, rather than following the macOS `_`-prefix
-# convention `_fastcached` does. The prefix's job is to keep the account out of
+# convention `_pace-kv` does. The prefix's job is to keep the account out of
 # the login window, which `IsHidden 1` already does; what it would cost is a third
 # spelling of one name, across a binary, a package and a unit that never see each
 # other. `ctest -R service-accounts` fails when they drift apart, on every
 # platform -- because the failure mode is macOS-only and silent (issue #87).
-set(PACE_MACOS_NODE_ACCOUNT    "fastcache-node")
+set(PACE_MACOS_NODE_ACCOUNT    "pace-node")
 
 # The worker's launchd label, on the same terms as PACE_MACOS_BUNDLE_ID
 # above: LaunchdLabelPrefix + the lowercased NodeConfig::serviceName default.
@@ -117,7 +117,7 @@ set(PACE_MACOS_NODE_ACCOUNT    "fastcache-node")
 # NOT a package identifier: the installer registers no worker job (it has no
 # scheduler or toolchain to register one with), so no receipt is ever filed under
 # this name. It names only a job an operator installed by hand.
-set(PACE_MACOS_NODE_LABEL      "software.lastrada.fastcachecompilenode")
+set(PACE_MACOS_NODE_LABEL      "software.lastrada.pace-node")
 
 # The tools symlinked into /usr/local/bin. /etc/paths.d only takes effect for
 # LOGIN shells, so these are what make the tools reachable from an already-open
@@ -136,7 +136,7 @@ set(PACE_MACOS_LINKED_TOOLS "pace-kv pace-cc pace-node pacectl")
 # daemon's default lookup, and two sibling subdirectories cannot see each
 # other's set(). Spelled without a leading slash to match the other install
 # destinations, which are relative to CMAKE_INSTALL_PREFIX.
-set(PACE_SYSCONF_DIR "etc/fastcached"
+set(PACE_SYSCONF_DIR "etc/pace"
     CACHE STRING "System configuration directory, relative to /")
 
 # Install destinations for the relocatable artifacts (binaries, docs). With the
@@ -146,7 +146,7 @@ set(PACE_SYSCONF_DIR "etc/fastcached"
 if(PACE_PACKAGE_ROOT_PREFIX)
     if(APPLE)
         set(PACE_INSTALL_BINDIR "${PACE_MACOS_PREFIX}/bin")
-        set(PACE_INSTALL_DOCDIR "${PACE_MACOS_PREFIX}/share/doc/fastcached")
+        set(PACE_INSTALL_DOCDIR "${PACE_MACOS_PREFIX}/share/doc/pace")
     else()
         set(PACE_INSTALL_BINDIR "usr/${CMAKE_INSTALL_BINDIR}")
         set(PACE_INSTALL_DOCDIR "usr/${CMAKE_INSTALL_DOCDIR}")
@@ -241,24 +241,24 @@ option(PACE_BUILD_TUI "Build core-cpp's terminal UI (pacectl live-stats)" ON)
 # as before. A dependency cache is an optimisation, and an optimisation that can refuse
 # to configure is a worse trade than the fetch it saves.
 if(NOT DEFINED CPM_SOURCE_CACHE AND NOT DEFINED ENV{CPM_SOURCE_CACHE})
-    set(_fastcachedCpmHome "")
+    set(_paceCpmHome "")
     if(DEFINED ENV{PACE_CPM_CACHE})
         # The escape hatch, named rather than implied: a machine that wants the cache
         # somewhere else (a different volume, a RAM disk) says so without having to set
         # CPM_SOURCE_CACHE on every invocation.
-        set(_fastcachedCpmHome "$ENV{PACE_CPM_CACHE}")
+        set(_paceCpmHome "$ENV{PACE_CPM_CACHE}")
     elseif(WIN32 AND DEFINED ENV{LOCALAPPDATA})
-        set(_fastcachedCpmHome "$ENV{LOCALAPPDATA}/fastcached/cpm")
+        set(_paceCpmHome "$ENV{LOCALAPPDATA}/pace/cpm")
     elseif(DEFINED ENV{XDG_CACHE_HOME})
-        set(_fastcachedCpmHome "$ENV{XDG_CACHE_HOME}/fastcached/cpm")
+        set(_paceCpmHome "$ENV{XDG_CACHE_HOME}/pace/cpm")
     elseif(DEFINED ENV{HOME})
-        set(_fastcachedCpmHome "$ENV{HOME}/.cache/fastcached/cpm")
+        set(_paceCpmHome "$ENV{HOME}/.cache/pace/cpm")
     endif()
-    if(NOT _fastcachedCpmHome STREQUAL "")
+    if(NOT _paceCpmHome STREQUAL "")
         # `file(TO_CMAKE_PATH)` because `%LOCALAPPDATA%` arrives with backslashes, and
         # CPM splices this into paths it later quotes.
-        file(TO_CMAKE_PATH "${_fastcachedCpmHome}" _fastcachedCpmHome)
-        set(CPM_SOURCE_CACHE "${_fastcachedCpmHome}" CACHE PATH
+        file(TO_CMAKE_PATH "${_paceCpmHome}" _paceCpmHome)
+        set(CPM_SOURCE_CACHE "${_paceCpmHome}" CACHE PATH
             "Shared source cache for CPM dependencies (#545)")
         message(STATUS "[CPM] sharing dependency sources via ${CPM_SOURCE_CACHE}")
     else()
@@ -779,7 +779,7 @@ add_subdirectory(src/apps)
 
 # ----------------------------------------------------------------------------
 # Installation of the project docs, under the standard GNUInstallDirs prefix
-# (share/doc/fastcached/). Each executable installs itself into bin/ from its
+# (share/doc/pace/). Each executable installs itself into bin/ from its
 # own subdirectory. The Pace/CowTree static libraries and headers are
 # intentionally not installed: they PUBLIC-link an un-installed CPM yaml-cpp,
 # so exporting a consumable SDK is out of scope.

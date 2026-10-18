@@ -105,9 +105,9 @@ class DnsMessage
 };
 
 /// The name every response here answers.
-constexpr auto QueryName = std::string_view { "_fastcache._tcp.corp.example" };
+constexpr auto QueryName = std::string_view { "_pace._tcp.corp.example" };
 
-/// Where `corp.example` starts inside the question's name: past `_fastcache` and `_tcp`.
+/// Where `corp.example` starts inside the question's name: past `_pace` and `_tcp`.
 constexpr std::uint16_t CorpExampleOffset = DnsMessage::QuestionNameOffset + 11 + 5;
 
 /// Header flags: a recursive answer with RCODE 0, the same flagged TC, and two failures.
@@ -239,21 +239,21 @@ TEST_CASE("The scripted resolver answers what it was scripted and counts every q
 {
     auto resolver = Testing::ScriptedSrvResolver {};
     auto const target = SrvTarget { .host = "office-a.corp.example", .port = 6674, .priority = 10, .weight = 5 };
-    resolver.Answer("_fastcache._tcp.corp.example", std::vector<SrvTarget> { target });
-    resolver.Answer("_fastcache._tcp.empty.example", std::unexpected { SrvFailureOf(SrvLookupFault::NoAnswer) });
+    resolver.Answer("_pace._tcp.corp.example", std::vector<SrvTarget> { target });
+    resolver.Answer("_pace._tcp.empty.example", std::unexpected { SrvFailureOf(SrvLookupFault::NoAnswer) });
     ISrvResolver const& seam = resolver;
     CHECK(resolver.Asked() == 0);
 
-    auto const found = seam.Lookup("_fastcache._tcp.corp.example");
+    auto const found = seam.Lookup("_pace._tcp.corp.example");
     REQUIRE(found.has_value());
     CHECK(Unwrap(found) == std::vector<SrvTarget> { target });
 
-    auto const empty = seam.Lookup("_fastcache._tcp.empty.example");
+    auto const empty = seam.Lookup("_pace._tcp.empty.example");
     REQUIRE_FALSE(empty.has_value());
     CHECK(empty.error().fault == SrvLookupFault::NoAnswer);
 
     // A name nothing scripted does not exist, as a real resolver would say.
-    auto const unknown = seam.Lookup("_fastcache._tcp.elsewhere.example");
+    auto const unknown = seam.Lookup("_pace._tcp.elsewhere.example");
     REQUIRE_FALSE(unknown.has_value());
     CHECK(unknown.error().fault == SrvLookupFault::NoSuchName);
 
@@ -267,7 +267,7 @@ TEST_CASE("The system resolver answers a name that cannot exist with a fault and
     // `.invalid` is reserved (RFC 6761), so this is NXDOMAIN on a host with a resolver and a
     // resolver failure on one without; either is a fault, which is all this case can assert
     // everywhere. The case below is the positive direction.
-    auto const answer = resolver->Lookup("_fastcache._tcp.fastcache-nonexistent.invalid");
+    auto const answer = resolver->Lookup("_pace._tcp.fastcache-nonexistent.invalid");
     CHECK_FALSE(answer.has_value());
 }
 
@@ -392,7 +392,7 @@ TEST_CASE("A compressed target name is expanded from the message it points back 
 TEST_CASE("A CNAME, another type, another class and another section are skipped", "[platform][formation][srv][dns]")
 {
     auto cname = DnsMessage {};
-    cname.Name("_fastcache._tcp.elsewhere.example");
+    cname.Name("_pace._tcp.elsewhere.example");
     // Every skipped record but the A record carries RDATA that WOULD read as an SRV target, so
     // each is skipped by the filter it names and by nothing else.
     auto const message = Response(FlagsNoError, 5, 1)
@@ -586,7 +586,7 @@ TEST_CASE("A DNS client list yields only the SRV records of its answer section",
     auto officeA = std::wstring { L"office-a.corp.example" };
     auto officeB = std::wstring { L"office-b.corp.example" };
     auto root = std::wstring { L"." };
-    auto alias = std::wstring { L"_fastcache._tcp.elsewhere.example" };
+    auto alias = std::wstring { L"_pace._tcp.elsewhere.example" };
     auto records = std::array {
         CnameRecordOf(DnsSectionAnswer, alias),          // a CNAME the name led through
         SrvRecordOf(DnsSectionAnswer, officeA, 6674),    // the one target
@@ -716,7 +716,7 @@ TEST_CASE("One predicate decides which SRV targets a node would dial", "[platfor
     for (auto const& [host, dialable]: {
              Row { .host = "office-a.corp.example", .dialable = true },
              Row { .host = "office-a", .dialable = true },
-             Row { .host = "_fastcache._tcp.corp.example", .dialable = true },
+             Row { .host = "_pace._tcp.corp.example", .dialable = true },
              Row { .host = "A-1.b_2.EXAMPLE", .dialable = true },
              Row { .host = label63 + ".example", .dialable = true },
              Row { .host = name253, .dialable = true },

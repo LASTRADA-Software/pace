@@ -25,13 +25,13 @@
 
 set -uo pipefail
 
-FASTCACHED=""
+PACE_KV=""
 CLI=""
 NODE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --pace-kv) FASTCACHED="$2"; shift 2 ;;
+        --pace-kv) PACE_KV="$2"; shift 2 ;;
         --cli)        CLI="$2";        shift 2 ;;
         --node)       NODE="$2";       shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 readonly SKIP=77
-[[ -n "$FASTCACHED" && -x "$FASTCACHED" ]] || { echo "pace-kv not found: '$FASTCACHED'; skipping"; exit "$SKIP"; }
+[[ -n "$PACE_KV" && -x "$PACE_KV" ]] || { echo "pace-kv not found: '$PACE_KV'; skipping"; exit "$SKIP"; }
 [[ -n "$CLI" && -x "$CLI" ]] || { echo "pacectl not found: '$CLI'; skipping"; exit "$SKIP"; }
 
 # The node is OPTIONAL: `PACE_BUILD_NODE` can be off, and the eight cases that
@@ -87,7 +87,7 @@ start_daemon() {
     port="$(free_port)"
     metricsPort="$(free_port)"
     local log="$WORK/daemon-$port.log"
-    "$FASTCACHED" --config "$EMPTY_CONFIG" --port="$port" \
+    "$PACE_KV" --config "$EMPTY_CONFIG" --port="$port" \
         --metrics --metrics-port="$metricsPort" "$@" > "$log" 2>&1 &
     local pid=$!
     wait_for_port 127.0.0.1 "$port" "$pid" "pace-kv" "$log"

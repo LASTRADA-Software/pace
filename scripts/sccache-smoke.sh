@@ -184,7 +184,7 @@ export SCCACHE_NO_DAEMON=0
 workdir="$(mktemp -d)"
 src="${workdir}/hello.cpp"
 obj="${workdir}/hello.o"
-daemon_log="${workdir}/fastcached.log"
+daemon_log="${workdir}/pace-kv.log"
 # sccache's own server log, for the half of a failure the daemon cannot see: a
 # lookup that sccache abandoned, timed out or could not decode reaches the daemon
 # as an ordinary GET, or not at all. Debug, because a miss is not an error to it.

@@ -9,4 +9,4 @@
 # would be running as the identity that can rewrite every cached object.
 #
 # Type User                  ID  GECOS                    Home directory  Shell
-u      fastcache-node        -   "fastcache compile node" /               -
+u      pace-node        -   "Pace compile node" /               -

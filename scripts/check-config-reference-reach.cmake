@@ -98,7 +98,7 @@ endforeach()
 # reference ships with nothing in force. Every setting is a comment showing its
 # default, so there is no live value -- and therefore no live absolute PATH, which
 # is the only thing in these files that could be platform-specific. Measured at the
-# commit that added this check: 0 live lines of 285 in fastcached.yaml and 0 of 296
+# commit that added this check: 0 live lines of 285 in pace-kv.yaml and 0 of 296
 # in pace-node.yaml, so the rule holds today and an ordinary edit
 # breaks it.
 #

@@ -1857,8 +1857,8 @@ stops being one — the same confound that cost #493 a re-run.
     `pace-node.service` set no `WorkingDirectory=`, so systemd started the
     worker in `/` and the case above was not a corner but the ordinary Linux install
     ([#674](https://github.com/LASTRADA-Software/fastcached/issues/674)). It now names
-    one, and names one the unit itself CREATES — `RuntimeDirectory=fastcache-node`,
-    `WorkingDirectory=/run/fastcache-node` — because a `WorkingDirectory=` pointing at a
+    one, and names one the unit itself CREATES — `RuntimeDirectory=pace-node`,
+    `WorkingDirectory=/run/pace-node` — because a `WorkingDirectory=` pointing at a
     path nothing creates fails the service at every boot under `ProtectSystem=strict`,
     which is a worse outcome than the defect. `/run` rather than `/tmp`: a worker
     directory that CONTAINS a client's build directory drops the rule exactly as `/`

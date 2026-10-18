@@ -5,7 +5,7 @@ Start pace-kv and round-trip a value with the client that ships beside it.
 ## 1. Run the daemon
 
 ```sh
-./fastcached
+./pace-kv
 ```
 
 It listens on `127.0.0.1:6674` — pace-kv's own port. The number selects no

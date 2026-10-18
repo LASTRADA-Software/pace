@@ -220,7 +220,7 @@ pace-node \
     --listen-node=0.0.0.0:6674 \
     --advertise=worker-01.internal:6674 \
     --fleet-open \
-    --cluster-dir=/var/lib/fastcache-node \
+    --cluster-dir=/var/lib/pace-node \
     --toolchain=/usr/bin/g++
 ```
 
@@ -690,7 +690,7 @@ pace-node \
     --listen-node=6677 --cache-memory=8g \
     --upstream=build-cache.internal:6674 \
     --advertise=worker-01.internal:6677 \
-    --cluster-dir=/var/lib/fastcache-node \
+    --cluster-dir=/var/lib/pace-node \
     --toolchain=/usr/bin/g++
 ```
 
@@ -733,7 +733,7 @@ B+tree:
 | Configuration | What you get |
 |---|---|
 | `--cache-memory=8g` (the default is 25% of RAM, within `512m`–`8g`) | Memory only. Fast, and gone at restart. |
-| `--cache-dir=/var/cache/fastcache-node` | Both halves: the memory tier in front of a store that survives a restart. |
+| `--cache-dir=/var/cache/pace-node` | Both halves: the memory tier in front of a store that survives a restart. |
 | `--cache-memory=0 --cache-dir=…` | Disk only. |
 | `--cache-memory=0` and no `--cache-dir` | **No tier at all**, which is what a node that only compiles for others wants. |
 
@@ -790,7 +790,7 @@ server that is usually right; on somebody's workstation it usually is not.
     second node pointed at one directory refuses to start and says so:
 
     ```
-    --cache-dir cannot open /var/cache/fastcache-node/objects.cow: another process
+    --cache-dir cannot open /var/cache/pace-node/objects.cow: another process
     already has this cache open. A --cache-dir belongs to one node; give this one a
     path of its own.
     ```
@@ -883,7 +883,7 @@ without the codec reads `none` here rather than claiming a compression it is not
 doing:
 
 ```console
-local cache tier (memory 36G zstd, disk 36G zstd at /var/cache/fastcache-node, upstream none)
+local cache tier (memory 36G zstd, disk 36G zstd at /var/cache/pace-node, upstream none)
 ```
 
 ### `--upstream` may be empty
@@ -1344,7 +1344,7 @@ is known. `--raft-self` takes a HOST, `auto`, or nothing -- never `host:port`, a
 
 ```sh
 # The whole of a first node
-pace-node --raft-self=10.0.0.1 --cluster-dir=/var/lib/fastcache-node/cluster ...
+pace-node --raft-self=10.0.0.1 --cluster-dir=/var/lib/pace-node/cluster ...
 ```
 
 **An admission has to name a node by the id it actually has**, because every Raft
@@ -1355,7 +1355,7 @@ or out of its `--cluster-dir`:
 
 ```sh
 grep 'node identity' /var/log/pace-node.log
-cat /var/lib/fastcache-node/cluster/node-id
+cat /var/lib/pace-node/cluster/node-id
 ```
 
 Nothing answers "what is your id" over a port today. If typing ids about is what your
@@ -1513,7 +1513,7 @@ as unreadable and prints the command that hands it over,
 node-id n1
 public-key 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo
 cluster-admit n1=10.0.0.1:6680@11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo
-state-directory C:\ProgramData\fastcache-node (machine-wide: this process runs privileged, so it is the machine's own node)
+state-directory C:\ProgramData\pace-node (machine-wide: this process runs privileged, so it is the machine's own node)
 ```
 
 The `cluster-admit` line is the value `--cluster-admit` takes to admit this node with its
@@ -1860,7 +1860,7 @@ admit it under the identity key it minted into its state directory, and polls un
 somebody decides, serving its own cluster of one meanwhile:
 
 ```sh
-pace-node --fleet-seed=10.0.0.1:6675 --cluster-dir=/var/lib/fastcache-node
+pace-node --fleet-seed=10.0.0.1:6675 --cluster-dir=/var/lib/pace-node
 ```
 
 It asks **as a learner**, the one role a machine joins as: approved, it applies the fleet's
@@ -2577,23 +2577,23 @@ The package ships a socket-activated unit. Enable the **socket**, not the
 service:
 
 ```sh
-sudoedit /etc/fastcached/pace-node.yaml   # scheduler, advertise and
+sudoedit /etc/pace/pace-node.yaml   # scheduler, advertise and
                                                        # cluster_dir; the compilers
                                                        # are discovered
 sudo systemctl enable --now pace-node.socket
 ```
 
-`cluster_dir: /var/lib/fastcache-node` is the one to know about: the unit creates
+`cluster_dir: /var/lib/pace-node` is the one to know about: the unit creates
 that directory for the worker (`StateDirectory=`), it is where the worker keeps the
 identity key it proves to its scheduler, and a worker naming a scheduler without one
 refuses to start. Its first start mints the key; admit it as
 [the node proof section says](#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
 
-A disk tier goes in `cache_dir: /var/cache/fastcache-node`, which the unit creates
+A disk tier goes in `cache_dir: /var/cache/pace-node`, which the unit creates
 for the worker too (`CacheDirectory=`). It cannot go under the state directory: the
 unit runs with `ProtectSystem=strict`, so those two are the only persistent
 directories it can write, and the node refuses to start beside an entry in its state
-directory that it did not write — `/var/lib/fastcache-node/cache` is refused with
+directory that it did not write — `/var/lib/pace-node/cache` is refused with
 *this build keeps no entry by that name*.
 
 The unit's `ExecStart` names that file, and the shipped copy is every setting
@@ -2608,7 +2608,7 @@ Its **mode is not checked**: anyone who can write it decides what this worker
 runs and which compilers it serves. The package installs it `0644 root:root`, so
 keep it writable only by root
 ([#384](https://github.com/LASTRADA-Software/fastcached/issues/384)) — and
-tighten it to `0640 root:fastcache-node` if you put a `requirepass:` in it, since
+tighten it to `0640 root:pace-node` if you put a `requirepass:` in it, since
 the default is readable by every local account.
 
 Socket activation means systemd owns the port: it answers from boot, so a client
@@ -2642,7 +2642,7 @@ in the configuration file still wins. **Coming from 0.4.0**, which refused to st
 under activation without one: if you added a literal address only to get past that
 refusal, remove it, or the node stays pinned to it and does not follow the network.
 
-The service runs as its own `fastcache-node` account, deliberately not
+The service runs as its own `pace-node` account, deliberately not
 `pace-kv`'s: a worker runs a compiler on input that arrived over the network,
 while `pace-kv` owns the cache storage, and sharing an account would let a
 compromised compile rewrite every cached object.
@@ -2820,9 +2820,9 @@ scheduler authenticates a worker by — that is the worker's proven identity key
 but a secret on a readable command line is exposed all the same.
 
 Where it goes instead is the configuration file: `requirepass:` in
-`/etc/fastcached/pace-node.yaml`, which the worker reads at every
+`/etc/pace/pace-node.yaml`, which the worker reads at every
 start and which is not a world-readable command line — mode `0640
-root:fastcache-node` for a file that holds one. Where `--install-service` is the
+root:pace-node` for a file that holds one. Where `--install-service` is the
 registration mechanism, pass `--config=<path>` alongside it: what gets baked into
 the launch arguments is then the path, not the secret.
 
@@ -2835,7 +2835,7 @@ writes and the path the worker reads cannot drift apart.
 
 **macOS scope.** `--service-scope=user` registers a LaunchAgent that runs as
 you, which is the per-developer case. `--service-scope=system` registers a
-LaunchDaemon that runs as the unprivileged `fastcache-node` account — the same
+LaunchDaemon that runs as the unprivileged `pace-node` account — the same
 one the Linux unit uses — because a system job with no account named runs as
 *root*, and this process compiles input that arrived over the network.
 
@@ -2851,15 +2851,15 @@ its own command line with `unrecognised argument` at every start. Everything the
 worker needs is on the `--install-service` command line itself.
 
 **Windows** registers an SCM service and leaves it stopped (`sc start
-FastCacheCompileNode`). It starts with Windows from then on; `--service-start=manual`
+pace-node`). It starts with Windows from then on; `--service-start=manual`
 registers it to wait for somebody to start it instead. The start mode is decided by
 the install and is not part of the command line the service runs with, so changing it
-means running `--install-service` again. The default service name is `FastCacheCompileNode`, not
-the daemon's `FastCached`, so a machine can run both without one install
+means running `--install-service` again. The default service name is `pace-node`, not
+the daemon's `pace-kv`, so a machine can run both without one install
 displacing the other.
 
-It logs on as the **virtual account** `NT SERVICE\FastCacheCompileNode`, for the
-reason the macOS job runs as `fastcache-node`: told no account, the SCM would use
+It logs on as the **virtual account** `NT SERVICE\pace-node`, for the
+reason the macOS job runs as `pace-node`: told no account, the SCM would use
 LocalSystem, and a process that compiles input arriving over the network should
 not have the machine. The SCM derives that account from the service name and
 creates it itself — there is nothing to create and no password to keep.
@@ -2878,7 +2878,7 @@ port (`discovery-reply udp/any`), since the kernel chooses the port and no port-
 can name it. That rule exposes only the UDP sockets this program opens, which is discovery
 alone. One inbound rule each, admitting this program running as this service, on every network
 profile (a VPN adapter is usually *Public*). They sit in the group `pace-kv:
-FastCacheCompileNode`, and the install line lists them. Narrow the remote side with
+pace-node`, and the install line lists them. Narrow the remote side with
 `--firewall-allow=10.0.0.0/8` (IPv4 or IPv6, repeatable; `/0` is refused — leave the
 flag out to allow any address). Running `--install-service` again replaces the
 group, so a surface you have since moved to loopback loses its rule. A rule the
@@ -2892,16 +2892,16 @@ What an installer cannot guess is a machine of the fleet to ask when no beacon r
 and the one fleet this machine may join; both are optional:
 
 ```
-msiexec /i fastcached.msi PACE_FLEET_SEED=office-a.vpn.example PACE_FLEET_ID=<cluster-id>@<key>
+msiexec /i pace.msi PACE_FLEET_SEED=office-a.vpn.example PACE_FLEET_ID=<cluster-id>@<key>
 ```
 
 Select the **pace-node** feature (silently: `ADDLOCAL=CM_C_Cli,CM_C_Node` on a
 first install, `ADDLOCAL=CM_C_Node` to add it to one that is there). On a
-machine that also runs pace-kv, the MSI disables `FastCached` and stops it,
+machine that also runs pace-kv, the MSI disables `pace-kv` and stops it,
 because both would answer on 6674. Every transaction that keeps the node -- a repair, a
 feature change, an upgrade -- registers it again, and the optional properties are
 remembered for it: `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and `PACE_FLEET_ID` are kept under
-`HKLM\SOFTWARE\fastcached\Installer` and read back unless the transaction states a new
+`HKLM\SOFTWARE\Pace\Installer` and read back unless the transaction states a new
 value, so a repair that leaves them out keeps the firewall scope rather than opening the
 rules to any address. Registering again is also what clears the `--scheduler` an earlier
 package registered, which a node that serves now refuses, and the `--advertise` an earlier
@@ -2933,7 +2933,7 @@ sockets sharing it), so two nodes on one machine need two ports, which a kernel-
 gives them with no configuration -- and the package installs one node per machine. The state directory is
 not a property and not an argument either: the registration names no `--cluster-dir`,
 which would outrank a `cluster_dir:` in the configuration file for the life of the
-service, and the node takes its service default, `%ProgramData%\fastcache-node`, where
+service, and the node takes its service default, `%ProgramData%\pace-node`, where
 the cluster admits the identity key the worker mints on its first start.
 
 That key is how the machine proves itself to the fleet, so the install gives the
@@ -3529,7 +3529,7 @@ the network.
 
 ```sh
 pace-node --advertise worker-01.internal:6674 \
-                       --cluster-dir /var/lib/fastcache-node \
+                       --cluster-dir /var/lib/pace-node \
                        --admin-listen 6677
 curl -s localhost:6677/healthz     # 200 while every surface accepts; 503 naming any that stopped
 curl -s localhost:6677/metrics     # Prometheus exposition
@@ -3995,8 +3995,8 @@ pace-node --advertise 10.0.0.1:6675 \
                        --listen-node 6675 \
                        --listen-raft 6680 --raft-self 10.0.0.1 \
                        --admin-listen 6677 \
-                       --dashboard --dashboard-token-file /etc/fastcached/dashboard.token
-curl -s -u ":$(cat /etc/fastcached/dashboard.token)" localhost:6677/fleet.json | jq .
+                       --dashboard --dashboard-token-file /etc/pace/dashboard.token
+curl -s -u ":$(cat /etc/pace/dashboard.token)" localhost:6677/fleet.json | jq .
 ```
 
 ![The fleet dashboard, served by the leader](fleet-dashboard.png)
@@ -4009,8 +4009,8 @@ table below was reachable from a browser and from nowhere else. `/fleet.txt` is 
 third walk over the same column tables, emitting tab-separated text:
 
 ```sh
-curl -s -u ":$(cat /etc/fastcached/dashboard.token)" localhost:6677/fleet.txt
-curl -s -u ":$(cat /etc/fastcached/dashboard.token)" \
+curl -s -u ":$(cat /etc/pace/dashboard.token)" localhost:6677/fleet.txt
+curl -s -u ":$(cat /etc/pace/dashboard.token)" \
      "localhost:6677/fleet.txt?section=workers" | cut -f1,2
 ```
 
@@ -4301,9 +4301,9 @@ Each chart is **its own resource** rather than being inlined, so a browser cache
 it:
 
 ```sh
-curl -s -u ":$(cat /etc/fastcached/dashboard.token)" \
+curl -s -u ":$(cat /etc/pace/dashboard.token)" \
      "localhost:6677/fleet/chart/refusals.svg?range=7d" > refusals.svg
-curl -s -u ":$(cat /etc/fastcached/dashboard.token)" \
+curl -s -u ":$(cat /etc/pace/dashboard.token)" \
      "localhost:6677/fleet/series.json?range=24h" | jq .
 ```
 
@@ -4361,7 +4361,7 @@ obtain first:
 ```sh
 # An encrypted dashboard on an internal network, with no certificate to obtain:
 pace-node ... --admin-listen 0.0.0.0:6677 \
-                       --dashboard --dashboard-token-file /etc/fastcached/dashboard.token \
+                       --dashboard --dashboard-token-file /etc/pace/dashboard.token \
                        --tls-self-signed
 ```
 
@@ -4463,7 +4463,7 @@ the build stays green while that translation unit silently stops being distribut
 `--allow-compile-arg` (`allow_compile_arg:` in the file) adds a spelling, repeatably:
 
 ```sh
-pace-node --cluster-dir=/var/lib/fastcache-node \
+pace-node --cluster-dir=/var/lib/pace-node \
     --allow-compile-arg=-fanalyzer \
     --allow-compile-arg=/Qvec-report:2
 ```

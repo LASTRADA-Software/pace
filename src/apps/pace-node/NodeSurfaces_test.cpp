@@ -491,7 +491,7 @@ TEST_CASE("The worksheet and the install and the start refuse a cross-flag rule 
             "--dashboard",
             R"(--dashboard-token-file=D:\.token)",
             "--cache-disk=68719476736",
-            R"(--cache-dir=C:\ProgramData\fastcache-node\cache)",
+            R"(--cache-dir=C:\ProgramData\pace-node\cache)",
         };
     };
 
@@ -532,7 +532,7 @@ TEST_CASE("The worksheet and the install and the start refuse a cross-flag rule 
         // (`NodeServiceRejection`), since a service's working directory is not the installing shell's.
         auto corrected = line("--listen-raft=0.0.0.0:6680");
         corrected.push_back("--raft-self=10.0.0.5");
-        corrected.push_back(R"(--cluster-dir=C:\ProgramData\fastcache-node\cluster)");
+        corrected.push_back(R"(--cluster-dir=C:\ProgramData\pace-node\cluster)");
         auto const verdicts = judge(corrected);
         INFO(verdicts.start.value_or("<none>"));
         INFO(verdicts.install.value_or("<none>"));

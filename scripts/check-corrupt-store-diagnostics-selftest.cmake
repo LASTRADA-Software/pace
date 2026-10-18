@@ -67,7 +67,7 @@ set(realCacheTier "return std::unexpected { std::format(\"cannot open {}: {}\", 
 set(realNodeMain "logger.Logf(LogLevel::Error, \"{}\; refusing to start\", cacheTierOrRefusal.error())\;\n")
 
 # The page, as the real one quotes it: two fenced diagnostics and one inline.
-set(realPage "# Corrupt store\n\nSome prose about what to do.\n\n```\nfailed to open storage '/var/lib/fastcached/cache': StorageError(code=Corrupt system=0 context=FilePageStore::Open)\n```\n\n```\n--cache-dir cannot open /var/cache/fastcache-node/objects.cow: StorageError(code=Corrupt system=0 context=FilePageStore::Open)\; refusing to start\n```\n\nWith `--storage-shards` the message says `failed to open shard '<path>'` and\nnames the one file that is damaged.\n")
+set(realPage "# Corrupt store\n\nSome prose about what to do.\n\n```\nfailed to open storage '/var/lib/pace-kv/cache': StorageError(code=Corrupt system=0 context=FilePageStore::Open)\n```\n\n```\n--cache-dir cannot open /var/cache/pace-node/objects.cow: StorageError(code=Corrupt system=0 context=FilePageStore::Open)\; refusing to start\n```\n\nWith `--storage-shards` the message says `failed to open shard '<path>'` and\nnames the one file that is damaged.\n")
 
 # $1 = case name, then five source overrides and the page. Empty means "as real".
 function(pace_make_tree name pageText storageError cowTree daemon cacheTier nodeMain outVar)

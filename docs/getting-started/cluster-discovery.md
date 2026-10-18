@@ -26,7 +26,7 @@ id and the identity key are minted into its state directory and read back foreve
 |---|---|---|
 | `--fleet-seed` | `<host>` or `<host>:<port>`, typed at install (on Windows the installer's `PACE_FLEET_SEED`) — what reaches across a VPN, where no beacon does | first: asked before anything is decided, whatever a beacon says |
 | remembered | the fleet's voters' endpoints, kept in the state directory after a join | second |
-| DNS SRV | `_fastcache._tcp.<this machine's DNS suffix>`, when the machine has one | third |
+| DNS SRV | `_pace._tcp.<this machine's DNS suffix>`, when the machine has one | third |
 | the LAN beacon | every node broadcasts its fleet summary every 15 seconds on every eligible interface's directed broadcast | last: anything on the segment can beacon |
 
 The three seed sources are dialled in `SeedSourceTable`'s order — remembered, then

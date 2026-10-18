@@ -32,7 +32,7 @@
 #   --locate <site>       Print the binary path inside a `pip install --target <site>`, for this platform.
 #   --resolve             Print the analyser a LOCAL run uses, after checking it is the declared build: the binary
 #                         `PACE_CLANG_TIDY` names, or else the one installed in the default site,
-#                         `${XDG_DATA_HOME:-$HOME/.local/share}/fastcached/clang-tidy/<version>`. The path goes to stdout
+#                         `${XDG_DATA_HOME:-$HOME/.local/share}/pace/clang-tidy/<version>`. The path goes to stdout
 #                         and every diagnostic to stderr, so `local-gate.sh` and `tidy-sweep.sh` ask ONE question
 #                         and a refusal names the exact install command for this machine. There is no fallback to
 #                         a clang-tidy on PATH: that is the analyser this file cannot identify.

@@ -37,11 +37,11 @@ case "$1" in
         # ([#861](https://github.com/LASTRADA-Software/fastcached/issues/861)).
         #
         # DIFFERENT groups, not one: `pace-kv.service` runs as `pace-kv` and
-        # `pace-node.service` as `fastcache-node`, and
+        # `pace-node.service` as `pace-node`, and
         # `pace-node.sysusers` states that sharing an account would let a
         # compromised compile rewrite every cached object. A shared group is that hole
         # one notch weaker. `pace-node.yaml` already documents
-        # `0640 root:fastcache-node` as the intent; the packaging never did it.
+        # `0640 root:pace-node` as the intent; the packaging never did it.
         #
         # Repaired ONLY when the file is CURRENTLY WORLD-readable, so an
         # operator who narrowed it further is left alone -- the same upgrade rule #741
@@ -52,8 +52,8 @@ case "$1" in
         # every later upgrade would re-assert it and would overwrite a GROUP an operator
         # had deliberately chosen. World-readable is the defect; a group arrangement is
         # a decision.
-        for _pair in "/@PACE_SYSCONF_DIR@/fastcached.yaml:pace-kv" \
-                     "/@PACE_SYSCONF_DIR@/pace-node.yaml:fastcache-node"; do
+        for _pair in "/@PACE_SYSCONF_DIR@/pace-kv.yaml:pace-kv" \
+                     "/@PACE_SYSCONF_DIR@/pace-node.yaml:pace-node"; do
             _conf=${_pair%:*}
             _grp=${_pair##*:}
             [ -f "$_conf" ] || continue

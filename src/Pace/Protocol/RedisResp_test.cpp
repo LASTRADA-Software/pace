@@ -273,7 +273,7 @@ TEST_CASE("RESP: HELLO 3 negotiates RESP3 and replies a map", "[protocol][resp]"
     // RESP3 map header for the 6 server fields, with proto reported as 3.
     REQUIRE(out.starts_with("%6\r\n"));
     REQUIRE(out.contains("$5\r\nproto\r\n:3\r\n"));
-    REQUIRE(out.contains("$6\r\nserver\r\n$10\r\nfastcached\r\n"));
+    REQUIRE(out.contains("$6\r\nserver\r\n$7\r\npace-kv\r\n"));
 }
 
 TEST_CASE("RESP: HELLO 2 replies a flat array with proto 2", "[protocol][resp]")
@@ -2797,7 +2797,7 @@ TEST_CASE("RESP3 HELLO: bare HELLO is a RESP2 map by default", "[protocol][resp3
     RespFixture fix;
     auto const out = Exchange(fix, "*1\r\n$5\r\nHELLO\r\n");
     REQUIRE(out.starts_with("*12\r\n"
-                            "$6\r\nserver\r\n$10\r\nfastcached\r\n"
+                            "$6\r\nserver\r\n$7\r\npace-kv\r\n"
                             "$7\r\nversion\r\n"));
     REQUIRE(out.ends_with("$5\r\nproto\r\n:2\r\n"
                           "$2\r\nid\r\n:1\r\n"
@@ -2887,7 +2887,7 @@ TEST_CASE("RESP3: HELLO map renders 6 fields in stable order", "[protocol][resp3
     auto const out = Exchange(fix, "*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n");
 
     constexpr std::string_view ExpectedPrefix = "%6\r\n"
-                                                "$6\r\nserver\r\n$10\r\nfastcached\r\n"
+                                                "$6\r\nserver\r\n$7\r\npace-kv\r\n"
                                                 "$7\r\nversion\r\n";
     // After the version bulk header `$<len>\r\n<banner>\r\n` comes the rest
     // of the map in fixed order: proto, id, mode, role.

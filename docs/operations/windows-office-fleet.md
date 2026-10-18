@@ -34,9 +34,9 @@ see step 5).
 ## 1. Install A first
 
 On A, run the MSI and select **pace-node** (silently:
-`msiexec /i fastcached.msi /qn ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher`). Pass no property.
+`msiexec /i pace.msi /qn ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher`). Pass no property.
 
-The `FastCacheCompileNode` service starts at once. With no fleet to join, A founds one: it is
+The `pace-node` service starts at once. With no fleet to join, A founds one: it is
 a cluster of one, leads it, schedules for it and works for it. Check:
 
 ```powershell
@@ -44,14 +44,14 @@ pacectl node
 ```
 
 `scheduler-role` reads `leader`, `leader` reads `this node`, `consensus-standing` reads `voter`,
-and `node-id` and `public-key` name A. The service logs on as `NT SERVICE\FastCacheCompileNode` and keeps its
-identity under `%ProgramData%\fastcache-node`, readable only by SYSTEM, Administrators and that
+and `node-id` and `public-key` name A. The service logs on as `NT SERVICE\pace-node` and keeps its
+identity under `%ProgramData%\pace-node`, readable only by SYSTEM, Administrators and that
 account. The install opens the Windows Firewall, on every network profile, for the node port
 (TCP 6674), the consensus port (TCP 6680) and discovery (UDP 6681, and the reply port UDP 6682,
 which the package pins through `PACE_DISCOVERY_REPLY_PORT`).
 `PACE_FIREWALL_ALLOW=10.0.0.0/8` narrows the remote side of every rule to one address with
 an optional prefix, so pick one prefix that covers both the office LAN and the VPN pool. The
-node is the cache: if the **pace-kv** feature is installed as well, its `FastCached` service
+node is the cache: if the **pace-kv** feature is installed as well, its `pace-kv` service
 is disabled and stopped, since both want port 6674 and it must not be started beside the node.
 
 ### Pin the fleet
@@ -68,8 +68,8 @@ A re-registration does not restart a running node, and the pin is read at startu
 it afterwards:
 
 ```powershell
-msiexec /i fastcached.msi ADDLOCAL=CM_C_Node PACE_FLEET_ID=<fleet-id as printed>
-Restart-Service FastCacheCompileNode
+msiexec /i pace.msi ADDLOCAL=CM_C_Node PACE_FLEET_ID=<fleet-id as printed>
+Restart-Service pace-node
 ```
 
 Then pass the same value as `PACE_FLEET_ID` on every other install (step 2), at the least
@@ -83,7 +83,7 @@ anything. A value the node refuses **fails the whole transaction** (msiexec exit
 log names `PaceNodeCheckArguments`), leaving the registration that was there before;
 `pace-node --check-arguments --fleet-id=<value>` says what is wrong with it. A node
 whose state already commits it to a cluster the pin does not admit refuses to start, naming
-both: to move it to the pinned fleet, stop the service, delete `%ProgramData%\fastcache-node`
+both: to move it to the pinned fleet, stop the service, delete `%ProgramData%\pace-node`
 and start it again.
 
 **The pin guards the JOIN.** Once a PC has joined, it follows the fleet's own agreed state, as
@@ -98,7 +98,7 @@ own** pin, or it admits nobody.
 **On the office LAN**, run the same MSI with the pin:
 
 ```powershell
-msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher PACE_FLEET_ID=<fleet-id>
+msiexec /i pace.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher PACE_FLEET_ID=<fleet-id>
 ```
 
 The node hears A's beacon, sees the fleet its pin names, and asks A to admit it. Until somebody
@@ -107,14 +107,14 @@ approves it, it is its own fleet of one and builds on its own; nothing waits.
 **Over the VPN**, beacons do not cross, so tell the node where to ask, by A's name:
 
 ```powershell
-msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher PACE_FLEET_ID=<fleet-id> PACE_FLEET_SEED=office-a.example.com
+msiexec /i pace.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher PACE_FLEET_ID=<fleet-id> PACE_FLEET_SEED=office-a.example.com
 ```
 
 `PACE_FLEET_SEED` is one name or `name:port` (the port defaults to 6674); a node that needs
 more than one names them under `fleet_seed:` in its configuration file,
-`%ProgramData%\pace-node\pace-node.yaml`. An office whose PCs carry a
+`%ProgramData%\pace\pace-node.yaml`. An office whose PCs carry a
 DNS suffix can skip the property altogether: every node also asks DNS for
-`_fastcache._tcp.<its DNS suffix>`, so one SRV record whose target is A (port 6674) reaches
+`_pace._tcp.<its DNS suffix>`, so one SRV record whose target is A (port 6674) reaches
 every PC, at home included, once its VPN hands out that suffix.
 
 A seed is asked only while the node is alone. Once it has joined, the node remembers its
@@ -122,7 +122,7 @@ fleet's endpoints in its state directory and asks the seed again only when none 
 answers.
 
 **The MSI remembers what it was given.** `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and
-`PACE_FLEET_ID` are written to `HKLM\SOFTWARE\fastcached\Installer` and read back by the
+`PACE_FLEET_ID` are written to `HKLM\SOFTWARE\Pace\Installer` and read back by the
 next repair, feature change or upgrade, so one that names none of them registers what the
 install was given; one that states a new value replaces the remembered one. An empty value
 counts as leaving the property out, so it cannot clear one: to drop a remembered value,
@@ -182,7 +182,7 @@ The fleet's shared cache is a member, named by its **id** in one replicated sett
    always on, so it may work as hard as it can: set `node_class: dedicated` in its
    configuration file, and `shared_cache_disk:` to the disk space you give the shared tier (the
    default is `64g`; `0` grows as needed). The budget is what the store occupies on disk, with
-   compressed values at their compressed size. Run `Restart-Service FastCacheCompileNode` after
+   compressed values at their compressed size. Run `Restart-Service pace-node` after
    editing the file.
 2. Approve it (step 3). Note its `node-id`, from the `--enroll-list` row or from
    `pacectl node` on C.
@@ -196,7 +196,7 @@ Every node then reads through to C after a local miss and offers it what it stor
 C's recorded key before it sends anything, and presents no secret. Moving C, forgetting it, or
 naming another machine reaches every node from the cluster's state, with nothing to edit and
 nothing to restart. An unreachable C is a miss, never an error. C keeps the tier under its state
-directory (`%ProgramData%\fastcache-node\shared-cache`), which the install already secured, so
+directory (`%ProgramData%\pace-node\shared-cache`), which the install already secured, so
 it needs no directory of its own.
 
 `pacectl node` on any PC shows where its shared cache comes from (`shared-cache`), which
@@ -265,7 +265,7 @@ Each node's own cache is in memory, a quarter of its RAM within 512 MiB to 8 GiB
 `cache_disk:` caps it at what the store occupies on disk, compressed values at their compressed
 size. The service account must be able to write that directory, and beyond the state directory
 the install grants it only what its own command line names, which on an MSI install is nothing:
-grant `NT SERVICE\FastCacheCompileNode` modify rights on it yourself. Most PCs need no disk
+grant `NT SERVICE\pace-node` modify rights on it yourself. Most PCs need no disk
 tier: C's shared tier is the fleet's disk.
 
 ### One Visual Studio, everywhere
@@ -336,7 +336,7 @@ This removes the machine from the cluster and revokes the key it was admitted un
 node, with no restart anywhere: its launchers and its node are refused from then on, from any
 address. The key is never admitted again; the machine falls back to a fleet of its own and does
 not ask again. To bring the same PC back, stop its service, delete its
-`%ProgramData%\fastcache-node` (it mints a new identity at its next start), start it, and
+`%ProgramData%\pace-node` (it mints a new identity at its next start), start it, and
 approve it again. Forgetting A, the only voter, is refused: promote another voter first.
 
 ### Two fleets that should be one
@@ -410,13 +410,13 @@ after one that moves the cache key misses once everywhere.
 
 The go-live upgrade starts every machine afresh. On **every** machine, A included:
 
-1. `Stop-Service FastCacheCompileNode`.
-2. **Delete `%ProgramData%\fastcache-node`.** It holds the old identity key, which every local
+1. `Stop-Service pace-node`.
+2. **Delete `%ProgramData%\pace-node`.** It holds the old identity key, which every local
    account could read: treat it as disclosed. The new install refuses a key other accounts could
    read rather than securing it, and the new node refuses one at startup. Deleting the directory
    also clears the old consensus state, formation record and roster file, which the new build
    would refuse to read.
-3. In `%ProgramData%\pace-node\pace-node.yaml`, remove every key the
+3. In `%ProgramData%\pace\pace-node.yaml`, remove every key the
    new build refuses: `scheduler`, the admission-by-address keys `fleet_member`,
    `scheduler_token_file`, `cluster_admit_client` and `cluster_forget_client`, the cluster-shape
    keys `raft_peer`, `raft_join`, `cluster_id` and `serve_scheduler`, and the principal-mode

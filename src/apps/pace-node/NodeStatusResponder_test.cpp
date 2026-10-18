@@ -1579,9 +1579,9 @@ TEST_CASE("A node reports where it keeps its identity, and why there", "[node][n
     CHECK_FALSE(none.stateDirectoryReason.has_value());
 
     Fixture named { {}, clock };
-    named.cfg.clusterDir = "/srv/fastcache-node";
+    named.cfg.clusterDir = "/srv/pace-node";
     auto const runtime = named.status.Describe().runtime;
-    CHECK(runtime.stateDirectory == std::optional { std::filesystem::path { "/srv/fastcache-node" }.string() });
+    CHECK(runtime.stateDirectory == std::optional { std::filesystem::path { "/srv/pace-node" }.string() });
     CHECK(runtime.stateDirectoryReason
           == std::optional { std::string { DescribeStateDirectoryOrigin(StateDirectoryOrigin::Named) } });
 

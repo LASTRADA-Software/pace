@@ -233,7 +233,7 @@ try {
         # the node's raw with `#%`, and both with a space in the path, as a custom one may have.
         $oldBin = Join-Path $scratch 'Old Custom Root\fastcached\bin'
         New-Item -ItemType Directory -Force -Path $oldBin | Out-Null
-        $knownProperties['PACE_IMAGEPATH'] = '"' + (Join-Path $oldBin 'pace-kv.exe') + '" --daemon --service-name=FastCached'
+        $knownProperties['PACE_IMAGEPATH'] = '"' + (Join-Path $oldBin 'pace-kv.exe') + '" --daemon --service-name=pace-kv'
         $knownProperties['PACE_NODE_IMAGEPATH'] = '#%"' + (Join-Path $oldBin 'pace-node.exe') + '" --daemon'
         try {
             $oldTarget = Format-Target $action.ExeCommand
@@ -354,9 +354,9 @@ if ($null -eq $clear -or $clear.ExeCommand -notmatch 'reg\.exe"?\s+delete\s+HKLM
     $coverageRows = @(
         @{ Owned = ($rollbackKey.Substring(0, $rollbackKey.LastIndexOf('\'))).ToLowerInvariant(); Covers = $true },
         @{ Owned = $rollbackKey.ToUpperInvariant(); Covers = $true },
-        @{ Owned = "$rollbackKey\FastCached"; Covers = $true },
+        @{ Owned = "$rollbackKey\pace-kv"; Covers = $true },
         @{ Owned = "${rollbackKey}Elsewhere"; Covers = $false },
-        @{ Owned = 'SOFTWARE\fastcached\Installer'; Covers = $false }
+        @{ Owned = 'SOFTWARE\Pace\Installer'; Covers = $false }
     )
     foreach ($row in $coverageRows) {
         if ((Test-RegistryKeyCovers $row.Owned $rollbackKey) -ne $row.Covers) {
@@ -469,7 +469,7 @@ if ($failures.Count -eq $failuresBeforeStarters) {
 # lines, so a new one is a finding rather than invisible; each deferred one is a row with its reason.
 #
 # THE BLIND SPOT, and the direction it fails in: the derivation recognises ONE spelling, `reg.exe
-# delete HKLM\SOFTWARE\fastcached\InstallerRollback` naming the whole key, the way every deleter in the
+# delete HKLM\SOFTWARE\Pace\InstallerRollback` naming the whole key, the way every deleter in the
 # fragment writes it today. A deleter spelled any other way -- PowerShell's Remove-Item, the
 # `HKEY_LOCAL_MACHINE\` form, a quoted key path, a delete of a SUBKEY, or a <RemoveRegistryKey>
 # element -- is not in the set at all, so this step fails OPEN for it: a deferred discard written
@@ -479,7 +479,7 @@ $DeferredStateDeleters = @{
     PaceClearRollbackState  = 'empties the state BEFORE this transaction writes any, so an earlier transaction''s copy is never restored'
     PaceRemoveRollbackState = 'an uninstall that is not an upgrade''s removal: no restore is armed in that transaction'
 }
-$deleters = @($actions | Where-Object { $_.ExeCommand -match 'reg\.exe"?\s+delete\s+HKLM\\SOFTWARE\\fastcached\\InstallerRollback(\s|$)' })
+$deleters = @($actions | Where-Object { $_.ExeCommand -match 'reg\.exe"?\s+delete\s+HKLM\\SOFTWARE\\Pace\\InstallerRollback(\s|$)' })
 if ($deleters.Count -eq 0) { Fail 'no action deletes the rollback state, so step 11 judged nothing' }
 $failuresBeforeDiscard = $failures.Count
 foreach ($action in $deleters) {
@@ -581,7 +581,7 @@ if ($failures.Count -eq $failuresBeforeMaintenanceRoot) {
 # 13. Windows Installer's Restart Manager takes no part in a transaction. A silent install otherwise
 # ALWAYS uses it: at InstallValidate it shuts down a service holding a file the transaction replaces,
 # and at the end of the install it starts that service again, whatever the service table decided. CI
-# MEASURED on PR 1634 that the upgrade from 0.3.0 started FastCached after the table had made it manual
+# MEASURED on PR 1634 that the upgrade from 0.3.0 started pace-kv after the table had made it manual
 # and stopped it for the node, that it crash-looped on the port the node holds, and that a recovery
 # restart took that port during a later transaction, which failed with 1603. Its printed log then
 # MEASURED whose session that was: the OLD package's removal, nested in the upgrade, while this
@@ -621,13 +621,13 @@ if ($null -eq $disable) {
 } else {
     $disableTarget = Format-Target $disable.ExeCommand
     $absent = 'PaceAbsent' + [guid]::NewGuid().ToString('N').Substring(0, 12)
-    $queries = [regex]::Matches($disableTarget, '\bquery FastCached\b').Count
-    $configs = [regex]::Matches($disableTarget, '\bconfig FastCached\b').Count
+    $queries = [regex]::Matches($disableTarget, '\bquery pace-kv\b').Count
+    $configs = [regex]::Matches($disableTarget, '\bconfig pace-kv\b').Count
     if ($queries -ne 1 -or $configs -ne 1) {
-        Fail "PaceDisableForNode spells 'query FastCached' $queries time(s) and 'config FastCached' $configs time(s); this step swaps exactly one of each, so it cannot run the command: $disableTarget"
+        Fail "PaceDisableForNode spells 'query pace-kv' $queries time(s) and 'config pace-kv' $configs time(s); this step swaps exactly one of each, so it cannot run the command: $disableTarget"
     } else {
         $swap = { param([string] $queried, [string] $configured)
-            $disableTarget -replace '\bquery FastCached\b', "query $queried" -replace '\bconfig FastCached\b', "config $configured" }
+            $disableTarget -replace '\bquery pace-kv\b', "query $queried" -replace '\bconfig pace-kv\b', "config $configured" }
         $whenAbsent = Start-Target (& $swap $absent $absent) $system64
         if ($whenAbsent -ne 0) {
             Fail "PaceDisableForNode exited $whenAbsent for a service that is not registered; it must exit 0, or a refused pace-kv registration (Return=`"ignore`") fails the node's whole install and rolls it back, naming this action rather than the refusal"

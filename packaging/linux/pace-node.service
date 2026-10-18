@@ -18,7 +18,7 @@
 #     systemctl edit pace-node
 
 [Unit]
-Description=fastcache compile worker
+Description=Pace compile worker
 Documentation=https://github.com/LASTRADA-Software/fastcached
 Requires=pace-node.socket
 After=pace-node.socket network-online.target
@@ -57,7 +57,7 @@ Type=simple
 # worker can establish for itself. It surveys the machine at startup and serves
 # what it finds; `toolchain:` narrows that, and `toolchain_discovery: false`
 # turns it off.
-ExecStart=/usr/bin/pace-node --config=/etc/fastcached/pace-node.yaml
+ExecStart=/usr/bin/pace-node --config=/etc/pace/pace-node.yaml
 
 # SIGHUP re-reads the config file. The binary has handled it since #291 and this
 # unit never offered it, so `systemctl reload pace-node` answered
@@ -97,8 +97,8 @@ RestartSec=1
 # SIXTH, the fifth restart typed right after a start, that the default limit refuses.
 RestartPreventExitStatus=78
 
-User=fastcache-node
-Group=fastcache-node
+User=pace-node
+Group=pace-node
 
 # A directory of this worker's OWN, and deliberately not `/`.
 #
@@ -134,11 +134,11 @@ Group=fastcache-node
 #
 # 0700 rather than the 0755 default. Nothing but this worker has any business in
 # it, and UMask=0077 below says the same thing about what it writes.
-RuntimeDirectory=fastcache-node
+RuntimeDirectory=pace-node
 RuntimeDirectoryMode=0700
-WorkingDirectory=/run/fastcache-node
+WorkingDirectory=/run/pace-node
 
-# The node's STATE directory, /var/lib/fastcache-node, which `cluster_dir:` names.
+# The node's STATE directory, /var/lib/pace-node, which `cluster_dir:` names.
 #
 # It is where the node keeps WHO IT IS -- its identity key and its id (#178) -- and
 # every worker needs one: a worker proves that key on every connection to its
@@ -148,25 +148,25 @@ WorkingDirectory=/run/fastcache-node
 # cluster has to admit again each time. Under ProtectSystem=strict nothing else is
 # writable, so without this line the setting the configuration asks for could not
 # work. 0700 for the key's sake.
-StateDirectory=fastcache-node
+StateDirectory=pace-node
 StateDirectoryMode=0700
 
-# The node's DISK CACHE directory, /var/cache/fastcache-node, for `cache_dir:`.
+# The node's DISK CACHE directory, /var/cache/pace-node, for `cache_dir:`.
 #
 # `cache_dir` has no default -- a disk tier is a resource an operator names -- so
 # this line turns nothing on. What it gives the setting is somewhere to point.
 # Under ProtectSystem=strict the only persistent directories this unit can write
 # are the ones it declares, and the state directory above is not a candidate: the
 # node keeps its identity there and refuses to start beside an entry it has no row
-# for, so `cache_dir: /var/lib/fastcache-node/cache` ends the start with "this
+# for, so `cache_dir: /var/lib/pace-node/cache` ends the start with "this
 # build keeps no entry by that name". Without this line the path the reference
-# configuration and the docs name, /var/cache/fastcache-node, is read-only to the
+# configuration and the docs name, /var/cache/pace-node, is read-only to the
 # service, and a disk tier was reachable only through a drop-in.
 #
 # CacheDirectory= because a compile cache is regenerable by definition, which is
 # what /var/cache is for -- and so a backup of /var/lib does not carry 20 GiB of
 # objects the fleet can rebuild. 0700 for the reason UMask=0077 is set below.
-CacheDirectory=fastcache-node
+CacheDirectory=pace-node
 CacheDirectoryMode=0700
 
 # --- Hardening -------------------------------------------------------------

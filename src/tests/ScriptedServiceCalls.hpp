@@ -25,7 +25,7 @@ namespace Pace::Testing
 /// succeeding, so a case states only the answer it is about.
 struct ScmScript
 {
-    std::filesystem::path executable { "C:/Program Files/fastcached/bin/pace-kv.exe" }; ///< Empty: unknown.
+    std::filesystem::path executable { "C:/Program Files/Pace/bin/pace-kv.exe" }; ///< Empty: unknown.
     std::optional<std::uint32_t> openManagerError {}; ///< `OpenSCManager`'s error, if it fails.
     std::optional<std::uint32_t> createError {};      ///< `CreateService`'s error, if it fails.
     std::optional<std::uint32_t> reapplyError {};     ///< Re-applying an existing registration's error, if it fails.

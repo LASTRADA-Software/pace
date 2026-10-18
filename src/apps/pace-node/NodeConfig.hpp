@@ -630,10 +630,10 @@ struct NodeConfig
 
     /// The name the platform's supervisor keys this worker's registration on.
     ///
-    /// Distinct from the daemon's `FastCached` by default, because the two are
+    /// Distinct from the daemon's `pace-kv` by default, because the two are
     /// separate services that a machine may well run both of -- sharing a name
     /// would make installing one silently displace the other.
-    std::string serviceName { "FastCacheCompileNode" };
+    std::string serviceName { "pace-node" };
 
     /// `--firewall-allow` scopes: the remote addresses the firewall rules `--install-service`
     /// creates admit; empty admits any address. Install-time only, never replayed into the

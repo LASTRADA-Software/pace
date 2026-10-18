@@ -324,7 +324,7 @@ pace-node \
     --listen-node=0.0.0.0:6674 \
     --advertise=worker-01.internal:6674 \
     --fleet-open \
-    --cluster-dir=/var/lib/fastcache-node
+    --cluster-dir=/var/lib/pace-node
 ```
 
 **A worker joins the scheduler's fleet as a LEARNER, and that is the only way a machine
@@ -412,8 +412,8 @@ of it is on
 [the node's own page](../tools/pace-node.md#a-cache-of-its-own).
 
 On Linux the package ships a socket-activated unit; put the settings in
-`/etc/fastcached/pace-node.yaml` — every key is one flag, spelled
-with underscores, and a worker needs `cluster_dir: /var/lib/fastcache-node`, the
+`/etc/pace/pace-node.yaml` — every key is one flag, spelled
+with underscores, and a worker needs `cluster_dir: /var/lib/pace-node`, the
 state directory the unit creates for its identity key — and enable the **socket**:
 
 ```sh
@@ -796,7 +796,7 @@ hostname, endpoint, software version, capacity and cache, plus charts of the las
 pace-node ... \
     --listen-node=6675 \
     --admin-listen=6677 \
-    --dashboard --dashboard-token-file=/etc/fastcached/dashboard.token
+    --dashboard --dashboard-token-file=/etc/pace/dashboard.token
 ```
 
 Only the **leader** answers it in full; anyone else replies `503` naming the

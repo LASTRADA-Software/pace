@@ -187,7 +187,7 @@ TEST_CASE("No eligible interface is said by name with the remedy, once, and its 
     // And the remedy for a machine no beacon can leave at all, which naming an address does not
     // help: the fleet is reached by a seed or by DNS, which need no broadcast link.
     CHECK(Lines(logger, LogLevel::Warn, "--fleet-seed=<host[:port]>") == 1);
-    CHECK(Lines(logger, LogLevel::Warn, "DNS SRV record, _fastcache._tcp.<domain>") == 1);
+    CHECK(Lines(logger, LogLevel::Warn, "DNS SRV record, _pace._tcp.<domain>") == 1);
 
     clock.advance(Interval);
     CHECK(destinations.Destinations().empty());

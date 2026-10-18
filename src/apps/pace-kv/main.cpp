@@ -304,7 +304,7 @@ struct StorageBackendBundle
 ///
 /// Windows only: this is where the identity changed. The POSIX services already
 /// ran unprivileged and their packaging hands their directories over, and naming
-/// an account here would have to guess between the macOS `_fastcached` and the
+/// an account here would have to guess between the macOS `_pace-kv` and the
 /// Linux `pace-kv` -- and would be wrong for a foreground run under either.
 ///
 /// And on Windows only when this process IS that service. The probe proves that

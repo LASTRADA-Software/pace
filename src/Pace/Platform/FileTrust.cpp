@@ -331,7 +331,7 @@ namespace
     ///
     /// `FILE_READ_DATA` is the one that matters; the two generic masks include it
     /// and are what an inherited entry is usually spelled with -- the packaged
-    /// `%ProgramData%\fastcached` list grants `BUILTIN\Users` `0x1200a9`, which
+    /// `%ProgramData%\pace` list grants `BUILTIN\Users` `0x1200a9`, which
     /// is `FILE_GENERIC_READ|FILE_GENERIC_EXECUTE`, so a scan for the bare bit
     /// alone would miss the very entry this exists to find.
     constexpr DWORD ReadingRights = FILE_READ_DATA | GENERIC_READ | GENERIC_ALL;
@@ -745,7 +745,7 @@ bool IsPrivilegedProcess()
     // From then the shipped Windows service answered false here, so
     // `ResolveDefaultConfigPath` skipped every `ConfigScope::System` row and the
     // daemon silently ran on built-in defaults: `requirepass` placed in
-    // `%ProgramData%\fastcached\fastcached.yaml` was not in force, and nothing was
+    // `%ProgramData%\pace\pace-kv.yaml` was not in force, and nothing was
     // logged ([#860](https://github.com/LASTRADA-Software/fastcached/issues/860)).
     //
     // **Widening the LOOKUP does not widen TRUST.** The single caller uses this
@@ -915,7 +915,7 @@ bool SecureSecretFileForServices(std::filesystem::path const& file)
 #else
     // Group as well as other. A group grant is only safe where an administrator
     // chose the group -- which is a packaging decision (the macOS postinstall
-    // chowns to `_fastcached` and chmods 0640) and not something this call can
+    // chowns to `_pace-kv` and chmods 0640) and not something this call can
     // guess a name for, so it hands back a file with no delegation at all and
     // lets the package add one.
     if (!RemovePermissions(file, std::filesystem::perms::group_all | std::filesystem::perms::others_all))

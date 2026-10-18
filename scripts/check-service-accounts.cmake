@@ -13,8 +13,8 @@
 #   * the uninstaller that REMOVES it again.
 #
 # Each of those has already been the odd one out. Issue #87 is the missing
-# creator: `pace-node` named `fastcache-node` and the macOS package
-# created only `_fastcached`, so a system-scope worker install was refused on the
+# creator: `pace-node` named `pace-node` and the macOS package
+# created only `_pace-kv`, so a system-scope worker install was refused on the
 # one platform that ships the binary. A missing remover is quieter still -- a
 # stale account makes the next install pick a DIFFERENT uid, silently orphaning
 # the state directory the old one owned.
@@ -117,8 +117,8 @@ function(pace_read_file path contentOut foundOut)
 endfunction()
 
 # Every account name a C++ source spells as a literal, in either shape this tree
-# uses: the daemon's `constexpr ... DaemonServiceAccount = "_fastcached"` and the
-# worker's designated initialiser `.serviceAccount = "fastcache-node"`. Both end
+# uses: the daemon's `constexpr ... DaemonServiceAccount = "_pace-kv"` and the
+# worker's designated initialiser `.serviceAccount = "pace-node"`. Both end
 # in `erviceAccount = "<name>"`, which is what this matches -- either case of the
 # leading S, because one shape is a type-scoped constant and the other a member.
 #

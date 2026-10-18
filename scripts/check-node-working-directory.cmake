@@ -61,7 +61,7 @@
 # directives with the same parser. The compile node keeps its identity key in a state
 # directory, and when no `--cluster-dir` names one it takes the platform's default --
 # machine-wide for a PRIVILEGED process, the account's own otherwise. The packaged unit
-# runs as `User=fastcache-node`, which is not privileged and whose home sysusers gives
+# runs as `User=pace-node`, which is not privileged and whose home sysusers gives
 # as `/`, so left to itself the machine's service would keep its identity under
 # `/.local/state`, which `ProtectSystem=strict` leaves read-only. What makes it the
 # machine's directory is `StateDirectory=<name>`: systemd creates it and hands the
@@ -83,7 +83,7 @@
 # already declares is not one: the node keeps its identity there and refuses to start
 # beside an entry it has no row for ("this build keeps no entry by that name"). The unit
 # shipped without a `CacheDirectory=` while the docs told operators to write
-# `cache_dir: /var/cache/fastcache-node`, a path the service could not write -- so the
+# `cache_dir: /var/cache/pace-node`, a path the service could not write -- so the
 # packaged disk tier was reachable only through a drop-in, and the obvious workaround,
 # a directory inside the state directory, stopped the node.
 #
@@ -154,7 +154,7 @@ set(PaceUnitWorkingDirectories
 #
 # A unit named here that does not exist is a failure, for the table above's reason.
 set(PaceUnitNodeStateDirectories
-    "linux/pace-node.service|The compile node, running as the unprivileged fastcache-node account: without StateDirectory= naming its directory it would keep the machine's identity in that account's home, / under sysusers and read-only under ProtectSystem=strict."
+    "linux/pace-node.service|The compile node, running as the unprivileged pace-node account: without StateDirectory= naming its directory it would keep the machine's identity in that account's home, / under sysusers and read-only under ProtectSystem=strict."
 )
 
 # Where the node's own name for its state directory is spelled, and the pattern that

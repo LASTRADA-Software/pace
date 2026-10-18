@@ -40,7 +40,7 @@ NODE_ACCOUNT="@PACE_MACOS_NODE_ACCOUNT@"
 # somebody's fork sooner or later, and an account for a worker that was never
 # shipped is a system account nobody can explain.
 if [ -x "${PREFIX}/bin/pace-node" ]; then
-    pace_create_account "$NODE_ACCOUNT" "fastcache compile node"
+    pace_create_account "$NODE_ACCOUNT" "Pace compile node"
 fi
 
 # State directory for the system LaunchDaemon. Created here rather than shipped

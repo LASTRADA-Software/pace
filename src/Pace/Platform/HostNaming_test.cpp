@@ -48,7 +48,7 @@ TEST_CASE("A placeholder domain is refused as this machine's name, by name", "[p
     // vague right answer, and the declined name is kept so a log line can say what was refused.
     auto const wsl = JudgeHostNaming("DarkLeon.localdomain", "localdomain");
     CHECK(wsl.fqdn == "DarkLeon");
-    CHECK(wsl.suffix.empty()); // and no SRV query against `_fastcache._tcp.localdomain`
+    CHECK(wsl.suffix.empty()); // and no SRV query against `_pace._tcp.localdomain`
     CHECK(wsl.declined == "DarkLeon.localdomain");
 
     // ASCII case and a root dot do not hide it, and `localhost` is the same placeholder.

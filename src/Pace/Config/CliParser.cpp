@@ -699,7 +699,7 @@ namespace
           .description = "macOS only: which launchd domain --install-service acts on.\n"
                          "user (default) = a LaunchAgent in ~/Library/LaunchAgents, started at\n"
                          "login as you; system = a LaunchDaemon in /Library/LaunchDaemons,\n"
-                         "started at boot as _fastcached (needs sudo)" },
+                         "started at boot as _pace-kv (needs sudo)" },
         // Targets the CliResult for `--service-scope`'s reason: how the supervisor
         // starts the registration is the supervisor's record, never the daemon's.
         { .primary = "--service-start",
@@ -750,7 +750,7 @@ namespace
           .operand = "=<name>",
           .apply = AssignFrom<&Config::serviceName, ParseText>(),
           .explicitBit = &CliResult::serviceNameExplicit,
-          .description = "Windows service name (default FastCached)" },
+          .description = "Windows service name (default pace-kv)" },
         { .primary = "--help",
           .alias = "-h",
           .select = SelectOutcome<&CliResult::outcome, CliOutcome::ShowHelp>(),

@@ -15,8 +15,8 @@
 # the box. To customise it, just put a file where pace-kv already looks — no
 # unit override needed:
 #
-#     mkdir -p ~/.config/fastcached
-#     cp /etc/fastcached/fastcached.yaml ~/.config/fastcached/fastcached.yaml
+#     mkdir -p ~/.config/pace
+#     cp /etc/pace/pace-kv.yaml ~/.config/pace/pace-kv.yaml
 #     systemctl --user restart pace-kv
 #
 # ExecStart deliberately passes no --config, and must not start doing so.
@@ -25,8 +25,8 @@
 # Restart=on-failure then respawned it once a second until the start limit
 # tripped — an out-of-the-box restart loop instead of a working daemon.
 # Leaving the flag off gets the file above when it exists, because the daemon's
-# own lookup probes $XDG_CONFIG_HOME/fastcached/fastcached.yaml (then ~/.config)
-# and simply skips what is absent. It will NOT pick up /etc/fastcached: that one
+# own lookup probes $XDG_CONFIG_HOME/pace/pace-kv.yaml (then ~/.config)
+# and simply skips what is absent. It will NOT pick up /etc/pace: that one
 # describes the system daemon, and only a process running as root reads it — so
 # an admin configuring the system service cannot accidentally point every user
 # instance on the host at a cache directory it has no access to.
@@ -41,13 +41,13 @@ Type=simple
 
 # %S is $XDG_STATE_HOME (~/.local/state); %E would be $XDG_CONFIG_HOME.
 #
-# A config at %E/fastcached/fastcached.yaml is picked up with no override at
+# A config at %E/pace/pace-kv.yaml is picked up with no override at
 # all. Use `systemctl --user edit pace-kv` only for settings that have to be
 # on the command line, or to name a config file somewhere else entirely:
 #
 #     [Service]
 #     ExecStart=
-#     ExecStart=/usr/bin/pace-kv --config=%h/elsewhere/fastcached.yaml
+#     ExecStart=/usr/bin/pace-kv --config=%h/elsewhere/pace-kv.yaml
 ExecStart=/usr/bin/pace-kv
 ExecReload=/bin/kill -HUP $MAINPID
 
@@ -69,7 +69,7 @@ RestartSec=1
 # SIXTH, the fifth restart typed right after a start, that the default limit refuses.
 RestartPreventExitStatus=78
 
-# Creates %S/fastcached (~/.local/state/fastcached) for storage_path.
+# Creates %S/pace-kv (~/.local/state/pace-kv) for storage_path.
 StateDirectory=pace-kv
 StateDirectoryMode=0750
 

@@ -150,7 +150,7 @@ endif()
 
 set(SourceLayouts
     # This project's own: a checkout and a per-user CPM cache in the home directory.
-    "/co/src|/home/u/.cache/fastcached/cpm|/co/src/=,/home/u/.cache/fastcached/cpm/=deps/"
+    "/co/src|/home/u/.cache/pace/cpm|/co/src/=,/home/u/.cache/pace/cpm/=deps/"
     # No dependency cache: the source rule alone.
     "/co/src||/co/src/="
     # A cache INSIDE the checkout: both rules, the cache's last so it wins.

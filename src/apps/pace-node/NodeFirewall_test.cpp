@@ -37,9 +37,9 @@ namespace
 /// An absolute path on this host, since the cases that apply their rules need one: a rule whose
 /// program is not absolute is refused before the firewall is touched.
 #if defined(_WIN32)
-inline std::filesystem::path const Program { "C:/Program Files/fastcached/bin/pace-node.exe" };
+inline std::filesystem::path const Program { "C:/Program Files/Pace/bin/pace-node.exe" };
 #else
-inline std::filesystem::path const Program { "/opt/fastcached/bin/pace-node" };
+inline std::filesystem::path const Program { "/opt/pace/bin/pace-node" };
 #endif
 
 /// A node as `--install-service` sees it. `main` applies the formation record before any early
@@ -82,10 +82,10 @@ TEST_CASE("A zero-config node's install opens its node and raft ports and both d
     // hears every beacon and completes no handshake.
     auto const rules = NodeFirewallRules(Installed(), Program);
     CHECK(Openings(rules)
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674",
-                                        "FastCacheCompileNode raft tcp/6680",
-                                        "FastCacheCompileNode discovery-beacon udp/6681",
-                                        "FastCacheCompileNode discovery-reply udp/any" });
+          == std::vector<std::string> { "pace-node node tcp/6674",
+                                        "pace-node raft tcp/6680",
+                                        "pace-node discovery-beacon udp/6681",
+                                        "pace-node discovery-reply udp/any" });
 }
 
 TEST_CASE("A node opens every surface that faces the network, each on its own protocol", "[node][firewall]")
@@ -97,15 +97,15 @@ TEST_CASE("A node opens every surface that faces the network, each on its own pr
 
     auto const rules = NodeFirewallRules(cfg, Program);
     CHECK(Openings(rules)
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674",
-                                        "FastCacheCompileNode raft tcp/6680",
-                                        "FastCacheCompileNode discovery-beacon udp/6681",
-                                        "FastCacheCompileNode discovery-reply udp/6682" });
+          == std::vector<std::string> { "pace-node node tcp/6674",
+                                        "pace-node raft tcp/6680",
+                                        "pace-node discovery-beacon udp/6681",
+                                        "pace-node discovery-reply udp/6682" });
     for (auto const& rule: rules)
     {
-        CHECK(rule.group == FirewallGroupFor("FastCacheCompileNode"));
+        CHECK(rule.group == FirewallGroupFor("pace-node"));
         CHECK(rule.program == Program);
-        CHECK(rule.serviceName == "FastCacheCompileNode");
+        CHECK(rule.serviceName == "pace-node");
         CHECK(rule.remoteAddresses.empty());
     }
 }
@@ -122,10 +122,10 @@ TEST_CASE("A node's kernel-chosen discovery reply port is opened by program, on 
 
     auto const rules = NodeFirewallRules(cfg, Program);
     CHECK(Openings(rules)
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674",
-                                        "FastCacheCompileNode raft tcp/6680",
-                                        "FastCacheCompileNode discovery-beacon udp/6681",
-                                        "FastCacheCompileNode discovery-reply udp/any" });
+          == std::vector<std::string> { "pace-node node tcp/6674",
+                                        "pace-node raft tcp/6680",
+                                        "pace-node discovery-beacon udp/6681",
+                                        "pace-node discovery-reply udp/any" });
     REQUIRE(rules.size() == 4);
 
     // The beacon keeps its port; only the reply socket is any-port, and still the program's
@@ -135,12 +135,12 @@ TEST_CASE("A node's kernel-chosen discovery reply port is opened by program, on 
     CHECK(reply.protocol == FirewallProtocol::Udp);
     CHECK(reply.localPort == FirewallLocalPort { .kind = FirewallPortKind::Any, .number = 0 });
     CHECK(reply.program == Program);
-    CHECK(reply.serviceName == "FastCacheCompileNode");
-    CHECK(reply.group == FirewallGroupFor("FastCacheCompileNode"));
+    CHECK(reply.serviceName == "pace-node");
+    CHECK(reply.group == FirewallGroupFor("pace-node"));
 
     // And the firewall takes it: an any-port rule passes the checks a port-0 rule fails.
     Testing::RecordingFirewall firewall;
-    auto const applied = ApplyServiceFirewall(firewall, FirewallGroupFor("FastCacheCompileNode"), rules);
+    auto const applied = ApplyServiceFirewall(firewall, FirewallGroupFor("pace-node"), rules);
     REQUIRE(applied.has_value());
     CHECK(applied->added == 4);
 }
@@ -154,10 +154,10 @@ TEST_CASE("A node's named discovery reply port gets that one port and no any-por
 
     auto const rules = NodeFirewallRules(cfg, Program);
     CHECK(Openings(rules)
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674",
-                                        "FastCacheCompileNode raft tcp/6680",
-                                        "FastCacheCompileNode discovery-beacon udp/6681",
-                                        "FastCacheCompileNode discovery-reply udp/6690" });
+          == std::vector<std::string> { "pace-node node tcp/6674",
+                                        "pace-node raft tcp/6680",
+                                        "pace-node discovery-beacon udp/6681",
+                                        "pace-node discovery-reply udp/6690" });
     CHECK(
         std::ranges::none_of(rules, [](FirewallRule const& rule) { return rule.localPort.kind == FirewallPortKind::Any; }));
 }
@@ -173,7 +173,7 @@ TEST_CASE("A node without discovery opens neither discovery rule", "[node][firew
     cfg.discoveryReplyPort = 6690;
 
     CHECK(Openings(NodeFirewallRules(cfg, Program))
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674", "FastCacheCompileNode raft tcp/6680" });
+          == std::vector<std::string> { "pace-node node tcp/6674", "pace-node raft tcp/6680" });
 }
 
 TEST_CASE("A node's uninstall removes the any-port discovery reply rule with the rest", "[node][firewall]")
@@ -194,7 +194,7 @@ TEST_CASE("A node's uninstall removes the any-port discovery reply rule with the
     REQUIRE(installed.ExitCode() == 0);
     auto const opened = firewall.NamesInGroup(FirewallGroupFor(cfg.serviceName));
     REQUIRE(opened.has_value());
-    CHECK(std::ranges::count(Testing::Unwrap(opened), std::string { "FastCacheCompileNode discovery-reply udp/any" }) == 1);
+    CHECK(std::ranges::count(Testing::Unwrap(opened), std::string { "pace-node discovery-reply udp/any" }) == 1);
 
     auto const removed =
         WithRemovalFirewall(ServiceControlResult { .outcome = ServiceControlOutcome::Removed, .message = "removed" },
@@ -246,7 +246,7 @@ TEST_CASE("A node opens its raft port and not an admin port left at its loopback
     cfg.raftListen = "6690";       // a bare port binds raft's wildcard default: a rule
     cfg.discoveryAddress.clear();  // discovery off, so the raft row is the only one left
 
-    CHECK(Openings(NodeFirewallRules(cfg, Program)) == std::vector<std::string> { "FastCacheCompileNode raft tcp/6690" });
+    CHECK(Openings(NodeFirewallRules(cfg, Program)) == std::vector<std::string> { "pace-node raft tcp/6690" });
 }
 
 TEST_CASE("A node bound to the IPv6 wildcard opens its port", "[node][firewall]")
@@ -259,7 +259,7 @@ TEST_CASE("A node bound to the IPv6 wildcard opens its port", "[node][firewall]"
 
     auto const rules = NodeFirewallRules(cfg, Program);
     CHECK(Openings(rules)
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674", "FastCacheCompileNode admin tcp/9464" });
+          == std::vector<std::string> { "pace-node node tcp/6674", "pace-node admin tcp/9464" });
     for (auto const& rule: rules)
         CHECK(rule.bindHost == "::");
 }
@@ -328,10 +328,10 @@ class ScriptedFormationReader final: public IKeptFormationReader
 /// The four rules a zero-config node's service opens.
 [[nodiscard]] std::vector<std::string> ZeroConfigOpenings()
 {
-    return { "FastCacheCompileNode node tcp/6674",
-             "FastCacheCompileNode raft tcp/6680",
-             "FastCacheCompileNode discovery-beacon udp/6681",
-             "FastCacheCompileNode discovery-reply udp/any" };
+    return { "pace-node node tcp/6674",
+             "pace-node raft tcp/6680",
+             "pace-node discovery-beacon udp/6681",
+             "pace-node discovery-reply udp/any" };
 }
 
 } // namespace
@@ -339,7 +339,7 @@ class ScriptedFormationReader final: public IKeptFormationReader
 TEST_CASE("An install whose formation record was held opens what the service will, once it secured the directory",
           "[node][firewall][install]")
 {
-    // The 0.3.0 upgrade: the old MSI's %ProgramData%\fastcache-node inherits a grant that lets
+    // The 0.3.0 upgrade: the old MSI's %ProgramData%\pace-node inherits a grant that lets
     // other accounts write in it, so `main` HELD the record and left the configuration unshaped --
     // and an unshaped configuration runs no consensus, so rules derived from it open the node port
     // alone. The registration secures the directory; the rules are derived after it.
@@ -375,7 +375,7 @@ TEST_CASE("An install whose formation record was held opens what the service wil
 
     // The control: the same configuration's own rules, the derivation the install used to make.
     CHECK(Openings(NodeFirewallRules(unshaped, Program))
-          == std::vector<std::string> { "FastCacheCompileNode node tcp/6674" });
+          == std::vector<std::string> { "pace-node node tcp/6674" });
 }
 
 TEST_CASE("An install whose formation record cannot be read after securing is refused, and opens nothing",
@@ -398,7 +398,7 @@ TEST_CASE("An install whose formation record cannot be read after securing is re
         },
         Installed(),
         Program,
-        "FastCacheCompileNode",
+        "pace-node",
         formation,
         &firewall);
 
@@ -466,7 +466,7 @@ TEST_CASE("An install refused after its registration removes the registration it
             },
             Installed(),
             Program,
-            "FastCacheCompileNode",
+            "pace-node",
             formation,
             &firewall);
         INFO(result.message);
@@ -516,7 +516,7 @@ TEST_CASE("An install refused after its registration removes the registration it
             },
             refusedByRules,
             Program,
-            "FastCacheCompileNode",
+            "pace-node",
             readable,
             &firewall);
         INFO(result.message);
@@ -540,7 +540,7 @@ TEST_CASE("A failed registration reads no formation and opens nothing", "[node][
         [] { return ServiceControlResult { .outcome = ServiceControlOutcome::Failed, .message = "not asked" }; },
         Installed(),
         Program,
-        "FastCacheCompileNode",
+        "pace-node",
         formation,
         &firewall);
 
@@ -653,7 +653,7 @@ TEST_CASE("An install reads the formation record in exactly the directory its re
                                             .credentialFiles = { std::filesystem::path { NodeKeyFileName } } }));
     auto const opened = firewall.NamesInGroup(FirewallGroupFor(registration.serviceName));
     REQUIRE(opened.has_value());
-    CHECK(std::ranges::contains(Testing::Unwrap(opened), std::string { "FastCacheCompileNode raft tcp/6680" }));
+    CHECK(std::ranges::contains(Testing::Unwrap(opened), std::string { "pace-node raft tcp/6680" }));
 
     // The other direction, where the case can write into the registration's directory: a record
     // there that cannot be read refuses the install, naming that record and not the file's.
@@ -711,7 +711,7 @@ TEST_CASE("An install over a founder's state directory is judged by the key that
     CHECK(removals == 0);
     auto const opened = firewall.NamesInGroup(FirewallGroupFor(NodeConfig {}.serviceName));
     REQUIRE(opened.has_value());
-    CHECK(std::ranges::contains(Testing::Unwrap(opened), std::string { "FastCacheCompileNode raft tcp/6680" }));
+    CHECK(std::ranges::contains(Testing::Unwrap(opened), std::string { "pace-node raft tcp/6680" }));
 
     // Pinned under another key, the install is refused as the start is, naming the key it holds,
     // and the registration it created is removed again.

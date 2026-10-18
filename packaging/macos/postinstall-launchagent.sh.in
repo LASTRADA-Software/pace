@@ -42,7 +42,7 @@ esac
 
 UID_OF_USER=$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null) || exit 0
 
-# No --config, deliberately. The packaged ${PREFIX}/etc/fastcached.yaml
+# No --config, deliberately. The packaged ${PREFIX}/etc/pace-kv.yaml
 # describes the *system* daemon: its cache lives under the package prefix and is
 # owned by the service account, which a per-user agent cannot write. Pointing
 # the agent at that file would either break its storage or, with a --storage

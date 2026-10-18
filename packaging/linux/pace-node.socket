@@ -17,7 +17,7 @@
 # enables the worker. `systemctl enable --now pace-node.socket`.
 
 [Unit]
-Description=fastcache compile worker socket
+Description=Pace compile worker socket
 Documentation=https://github.com/LASTRADA-Software/fastcached
 
 # The node SUPERSEDES the plain daemon on this machine, as it does under the Windows

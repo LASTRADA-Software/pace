@@ -16,9 +16,9 @@ if [ "$1" -eq 0 ]; then
     # path, and an operator may have bind-mounted a volume onto it. Recursing
     # into a mountpoint or a symlink on an ordinary erase would destroy data the
     # package never installed.
-    if [ -d /var/lib/fastcached ] && [ ! -L /var/lib/fastcached ] \
-       && ! mountpoint -q /var/lib/fastcached 2>/dev/null; then
-        rm -rf /var/lib/fastcached
+    if [ -d /var/lib/pace-kv ] && [ ! -L /var/lib/pace-kv ] \
+       && ! mountpoint -q /var/lib/pace-kv 2>/dev/null; then
+        rm -rf /var/lib/pace-kv
     fi
 fi
 

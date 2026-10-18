@@ -422,7 +422,7 @@ SelfTest() {
         mkdir -p "$d/packaging" "$d/cmake"
         printf '%s\n' "$packaging" > "$d/packaging/CMakeLists.txt"
         printf '%s\n' "$generator" > "$d/cmake/Packaging.cmake"
-        printf 'set(PACE_SYSCONF_DIR "etc/fastcached")\n' > "$d/CMakeLists.txt"
+        printf 'set(PACE_SYSCONF_DIR "etc/pace")\n' > "$d/CMakeLists.txt"
 
         Refusals=0
         RunCheck "$d" >/dev/null 2>&1

@@ -344,7 +344,7 @@ TEST_CASE("the help text documents every environment variable the launcher reads
     // the launcher has", and a new row with no entry here fails without the oracle
     // ever learning what that row is called.
     auto const help = HelpText();
-    auto fastcacheNames = std::size_t { 0 };
+    auto paceNames = std::size_t { 0 };
     for (auto const* name: { "PACE_ADDR",
                              "PACE_SOURCE_DIR",
                              "PACE_BINARY_DIR",
@@ -401,15 +401,15 @@ TEST_CASE("the help text documents every environment variable the launcher reads
         INFO("variable " << name);
         CHECK(help.contains(name));
         if (std::string_view { name }.starts_with("PACE_"))
-            ++fastcacheNames;
+            ++paceNames;
     }
 
     // Counted from the loop rather than written down, so this cannot drift from the
     // list it describes -- a hand-maintained number beside a hand-maintained list is
     // two sources of truth wearing one hat.
-    INFO("oracle knows " << fastcacheNames << " PACE_* names; LauncherEnvironment() has "
+    INFO("oracle knows " << paceNames << " PACE_* names; LauncherEnvironment() has "
                          << LauncherEnvironment().size());
-    CHECK(fastcacheNames == LauncherEnvironment().size());
+    CHECK(paceNames == LauncherEnvironment().size());
 }
 
 TEST_CASE("the help text tells an operator where to find their msvc_deps_prefix")

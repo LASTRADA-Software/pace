@@ -279,7 +279,7 @@ TEST_CASE("DefaultConfigPath: a candidate that exists but cannot be read is skip
     REQUIRE(paths.size() >= 2);
 
     // Only the last one is readable. This is the macOS LaunchAgent case: the
-    // system config is mode 0640 root:_fastcached, and a per-user daemon has to
+    // system config is mode 0640 root:_pace-kv, and a per-user daemon has to
     // fall through it rather than fail to start.
     probe.MakeReadable(paths.back());
 
@@ -554,21 +554,21 @@ TEST_CASE("DefaultConfigPath: the platform's locations are the ones the packagin
     };
 
 #if defined(_WIN32)
-    REQUIRE(lists("%ProgramData%\\fastcached\\fastcached.yaml"));
-    REQUIRE(lists("%APPDATA%\\fastcached\\fastcached.yaml"));
+    REQUIRE(lists("%ProgramData%\\pace\\pace-kv.yaml"));
+    REQUIRE(lists("%APPDATA%\\pace\\pace-kv.yaml"));
 #else
     // FC_SYSCONF_DIR is handed down from CMake, from the same variable that
     // decides where packaging/ installs the file.
-    REQUIRE(lists(FC_SYSCONF_DIR "/fastcached.yaml"));
-    REQUIRE(lists("~/.config/fastcached/fastcached.yaml"));
+    REQUIRE(lists(FC_SYSCONF_DIR "/pace-kv.yaml"));
+    REQUIRE(lists("~/.config/pace/pace-kv.yaml"));
 #endif
 }
 
 TEST_CASE("SeedConfigFile: writes the template when the destination is absent", "[config][seed]")
 {
     TempDir const dir { "seed-writes" };
-    auto const source = dir / "fastcached.yaml.default";
-    auto const destination = dir / "live" / "fastcached.yaml";
+    auto const source = dir / "pace-kv.yaml.default";
+    auto const destination = dir / "live" / "pace-kv.yaml";
     WriteFile(source, "#port: 6674\n");
 
     auto const result = SeedConfigFile(source, destination, DirectoryPolicy::Inherit);
@@ -581,8 +581,8 @@ TEST_CASE("SeedConfigFile: writes the template when the destination is absent", 
 TEST_CASE("SeedConfigFile: leaves an existing destination untouched", "[config][seed]")
 {
     TempDir const dir { "seed-keeps" };
-    auto const source = dir / "fastcached.yaml.default";
-    auto const destination = dir / "fastcached.yaml";
+    auto const source = dir / "pace-kv.yaml.default";
+    auto const destination = dir / "pace-kv.yaml";
     WriteFile(source, "#port: 6674\n");
     WriteFile(destination, "port: 7777 # operator edit\n");
 
@@ -598,10 +598,10 @@ TEST_CASE("SeedConfigFile: leaves an existing destination untouched", "[config][
 TEST_CASE("SeedConfigFile: reports a missing template rather than creating an empty config", "[config][seed]")
 {
     TempDir const dir { "seed-missing" };
-    auto const result = SeedConfigFile(dir / "absent.default", dir / "fastcached.yaml", DirectoryPolicy::Inherit);
+    auto const result = SeedConfigFile(dir / "absent.default", dir / "pace-kv.yaml", DirectoryPolicy::Inherit);
     REQUIRE(!result.has_value());
     REQUIRE(result.error().code == ConfigErrorCode::FileNotFound);
-    REQUIRE(!std::filesystem::exists(dir / "fastcached.yaml"));
+    REQUIRE(!std::filesystem::exists(dir / "pace-kv.yaml"));
 }
 
 TEST_CASE("SeedConfigFile: AdministratorsOnly either secures the directory or refuses to seed", "[config][seed][trust]")
@@ -620,8 +620,8 @@ TEST_CASE("SeedConfigFile: AdministratorsOnly either secures the directory or re
     // second.
     TempDir const dir { "seed-secures" };
 
-    auto const source = dir / "fastcached.yaml.default";
-    auto const destination = dir / "live" / "fastcached.yaml";
+    auto const source = dir / "pace-kv.yaml.default";
+    auto const destination = dir / "live" / "pace-kv.yaml";
     WriteFile(source, "#port: 6674\n");
 
     auto const result = SeedConfigFile(source, destination, DirectoryPolicy::AdministratorsOnly);
@@ -661,8 +661,8 @@ TEST_CASE("SeedConfigFile: an upgrade repairs a config an older installer left w
     // Keeping its CONTENT is the rule; keeping its PERMISSIONS is the bug.
     TempDir const dir { "seed-repairs" };
 
-    auto const source = dir / "fastcached.yaml.default";
-    auto const destination = dir / "live" / "fastcached.yaml";
+    auto const source = dir / "pace-kv.yaml.default";
+    auto const destination = dir / "live" / "pace-kv.yaml";
     WriteFile(source, "#port: 6674\n");
     std::filesystem::create_directories(destination.parent_path());
 
@@ -683,7 +683,7 @@ TEST_CASE("SeedConfigFile: an upgrade repairs a config an older installer left w
     //    config as unattributable -- a different refusal, with a different
     //    message, reached long before any permission is looked at.
     //  - Securing the PARENT is what puts the inheritable `BUILTIN\Users` read on
-    //    it that `%ProgramData%\fastcached` carries, so the file created NEXT
+    //    it that `%ProgramData%\pace` carries, so the file created NEXT
     //    inherits it. That inheritance IS the state #741 repairs, and it can only
     //    be arranged before the file exists.
     REQUIRE(Pace::SecureDirectoryForAdministrators(dir.Path()));
@@ -738,8 +738,8 @@ TEST_CASE("SeedConfigFile: a config already sitting in a loose directory is repo
     REQUIRE(::chmod(dir.Path().string().c_str(), 0777) == 0);
 #endif
 
-    auto const source = dir / "fastcached.yaml.default";
-    auto const destination = dir / "fastcached.yaml";
+    auto const source = dir / "pace-kv.yaml.default";
+    auto const destination = dir / "pace-kv.yaml";
     WriteFile(source, "#port: 6674\n");
     WriteFile(destination, "storage_path: /somewhere/an/attacker/chose\n");
 
@@ -759,7 +759,7 @@ TEST_CASE("SystemConfigPathProbe: readability means an ordinary file this accoun
     Pace::SystemConfigPathProbe const probe;
     TempDir const dir { "readable" };
 
-    auto const file = dir / "fastcached.yaml";
+    auto const file = dir / "pace-kv.yaml";
     WriteFile(file, "port: 6674\n");
     REQUIRE(probe.IsReadableFile(file));
 
@@ -784,9 +784,9 @@ TEST_CASE("SystemConfigPathProbe: a file this account may not read is not readab
 
     // The macOS LaunchAgent case in miniature, and the whole reason the test is
     // readability rather than existence: the system config is mode 0640
-    // root:_fastcached, so an agent running as the operator has to fall through
+    // root:_pace-kv, so an agent running as the operator has to fall through
     // it rather than fail to start.
-    auto const file = dir / "fastcached.yaml";
+    auto const file = dir / "pace-kv.yaml";
     WriteFile(file, "port: 6674\n");
     REQUIRE(::chmod(file.string().c_str(), 0) == 0);
 
@@ -817,7 +817,7 @@ TEST_CASE("SystemConfigPathProbe: a directory a standard account can write is no
     REQUIRE(::chmod(squat.Path().string().c_str(), 0777) == 0);
 #endif
 
-    auto const planted = squat / "fastcached.yaml";
+    auto const planted = squat / "pace-kv.yaml";
     WriteFile(planted, "port: 6674\n");
     REQUIRE(probe.IsReadableFile(planted));
 

@@ -5,7 +5,7 @@
 #
 # ## What went wrong
 #
-# `_fc_auto_start_fastcached` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
+# `_fc_auto_start_pace_kv` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
 # and reported `pace-kv exited immediately (${_rc})`. The commonest failure there is a
 # dynamic loader that cannot resolve a library, which answers **127** — a number that
 # reads as *not found* for a binary CMake has just staged and knows the path of. The one
@@ -51,7 +51,7 @@ cmake_minimum_required(VERSION 3.28)
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
 set(PaceInstallOracle
     "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc|opt/fastcached/bin/pace-kv"
+    "Darwin|arm64|Darwin-arm64|opt/pace/bin/pace-cc|opt/pace/bin/pace-kv"
 )
 
 # Deliberately not a version that exists, so a bug that reached the real GitHub anyway

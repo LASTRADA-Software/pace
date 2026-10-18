@@ -712,21 +712,21 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
           .allowArgument = "",
           .allowed = "",
           .replyPort = PackagedReplyPort,
-          .replyRule = "FastCacheCompileNode discovery-reply udp/6682",
+          .replyRule = "pace-node discovery-reply udp/6682",
           .seed = "",
           .seeded = "" },
         { .what = "PACE_FIREWALL_ALLOW=10.0.0.0/8",
           .allowArgument = "--firewall-allow=10.0.0.0/8",
           .allowed = "10.0.0.0/8",
           .replyPort = PackagedReplyPort,
-          .replyRule = "FastCacheCompileNode discovery-reply udp/6682",
+          .replyRule = "pace-node discovery-reply udp/6682",
           .seed = "",
           .seeded = "" },
         { .what = "PACE_DISCOVERY_REPLY_PORT=7000",
           .allowArgument = "",
           .allowed = "",
           .replyPort = "7000",
-          .replyRule = "FastCacheCompileNode discovery-reply udp/7000",
+          .replyRule = "pace-node discovery-reply udp/7000",
           .seed = "",
           .seeded = "" },
         // A machine across a VPN that no beacon reaches: the one seed the MSI passes, stored and
@@ -735,7 +735,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
           .allowArgument = "",
           .allowed = "",
           .replyPort = PackagedReplyPort,
-          .replyRule = "FastCacheCompileNode discovery-reply udp/6682",
+          .replyRule = "pace-node discovery-reply udp/6682",
           .seed = "office-a.vpn.example",
           .seeded = "office-a.vpn.example:6674" },
         // A machine pinned to the one fleet it may join: the pin `pacectl node` prints, passed
@@ -744,7 +744,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
           .allowArgument = "",
           .allowed = "",
           .replyPort = PackagedReplyPort,
-          .replyRule = "FastCacheCompileNode discovery-reply udp/6682",
+          .replyRule = "pace-node discovery-reply udp/6682",
           .seed = "",
           .seeded = "",
           .fleetId = "0123456789abcdef0123456789abcdef@11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo" },
@@ -760,7 +760,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
     for (auto const& shape: Shapes)
     {
         INFO(shape.what);
-        auto formatted = Formatted(command, "INSTALL_ROOT", R"(C:\Program Files\fastcached\)");
+        auto formatted = Formatted(command, "INSTALL_ROOT", R"(C:\Program Files\Pace\)");
         formatted = Formatted(std::move(formatted), "PaceFirewallAllowArgument", shape.allowArgument);
         formatted = Formatted(std::move(formatted), "PACE_FIREWALL_ALLOW", shape.allowed);
         formatted = Formatted(std::move(formatted),
@@ -1116,7 +1116,7 @@ using MsiRegistry = std::map<std::pair<std::string, std::string>, std::string>;
 }
 
 /// Whether a `SetProperty` row of the fragment DERIVES a value a command is formatted with: an
-/// argument row (`SetFastCache...Argument`) or the start type a restore registers.
+/// argument row (`SetPace...Argument`) or the start type a restore registers.
 /// @param id The row's Id.
 /// @return Whether `MsiFormattedCommand` derives it.
 [[nodiscard]] bool MsiDerivedProperty(std::string_view id)
@@ -1161,7 +1161,7 @@ using MsiRegistry = std::map<std::pair<std::string, std::string>, std::string>;
         command.replace(at, Quote.size(), "\"");
         at = command.find(Quote, at + 1);
     }
-    command = Formatted(std::move(command), "INSTALL_ROOT", R"(C:\Program Files\fastcached\)");
+    command = Formatted(std::move(command), "INSTALL_ROOT", R"(C:\Program Files\Pace\)");
     // Every property the transaction knows, the derived arguments included; one it never set is empty.
     for (auto const& [name, held]: properties)
         command = Formatted(std::move(command), name, held);
@@ -1355,10 +1355,10 @@ TEST_CASE(
         // laptop, an IP literal that vetoed every dial hint at every upgrade. Nothing reads it now,
         // and the first transaction forgets it: the value is gone and the registration carries none.
         INFO("an upgrade over a machine an earlier package left an advertised endpoint on forgets it");
-        auto earlier = MsiRegistry { { { R"(HKLM\SOFTWARE\fastcached\Installer)", "NodeAdvertise" }, "10.8.0.7:6674" } };
+        auto earlier = MsiRegistry { { { R"(HKLM\SOFTWARE\Pace\Installer)", "NodeAdvertise" }, "10.8.0.7:6674" } };
         REQUIRE_FALSE(rows.forgets.empty());
         auto const upgraded = MsiTransact(rows, {}, earlier);
-        CHECK_FALSE(earlier.contains({ R"(HKLM\SOFTWARE\fastcached\Installer)", "NodeAdvertise" }));
+        CHECK_FALSE(earlier.contains({ R"(HKLM\SOFTWARE\Pace\Installer)", "NodeAdvertise" }));
         auto const cfg = parsed(node(upgraded));
         CHECK_FALSE(cfg.advertiseExplicit);
         CHECK_FALSE(node(upgraded).contains("--advertise"));

@@ -46,24 +46,24 @@ namespace
     /// deliberately can see: the startup banner names the file that was chosen.
 #if defined(_WIN32)
     constexpr auto Candidates = std::to_array<ConfigCandidate>({
-        { .display = "%APPDATA%\\{app}\\{app}.yaml",
+        { .display = "%APPDATA%\\pace\\{app}.yaml",
           .baseVar = "APPDATA",
-          .suffix = "{app}\\{app}.yaml",
+          .suffix = "pace\\{app}.yaml",
           .scope = ConfigScope::User },
-        { .display = "%ProgramData%\\{app}\\{app}.yaml",
+        { .display = "%ProgramData%\\pace\\{app}.yaml",
           .baseVar = "ProgramData",
-          .suffix = "{app}\\{app}.yaml",
+          .suffix = "pace\\{app}.yaml",
           .scope = ConfigScope::System },
     });
 #else
     constexpr auto Candidates = std::to_array<ConfigCandidate>({
-        { .display = "$XDG_CONFIG_HOME/{app}/{app}.yaml",
+        { .display = "$XDG_CONFIG_HOME/pace/{app}.yaml",
           .baseVar = "XDG_CONFIG_HOME",
-          .suffix = "{app}/{app}.yaml",
+          .suffix = "pace/{app}.yaml",
           .scope = ConfigScope::User },
-        { .display = "~/.config/{app}/{app}.yaml",
+        { .display = "~/.config/pace/{app}.yaml",
           .baseVar = "HOME",
-          .suffix = ".config/{app}/{app}.yaml",
+          .suffix = ".config/pace/{app}.yaml",
           .scope = ConfigScope::User },
         { .display = FC_SYSCONF_DIR "/{app}.yaml",
           .baseVar = "",

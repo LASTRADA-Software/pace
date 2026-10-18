@@ -47,7 +47,7 @@ readonly SKIP=77
 [[ -n "$pace_kv" && -x "$pace_kv" ]] || { echo "pace-kv not found: '$pace_kv'; skipping"; exit "$SKIP"; }
 
 readonly SERVICE_NAME="PaceE2E"
-readonly LABEL="software.lastrada.fastcachede2e"
+readonly LABEL="software.lastrada.pacee2e"
 readonly PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
 # GitHub's macOS runners have a logged-in user but not always a full Aqua

@@ -63,12 +63,12 @@
 # Started without --config, pace-kv reads the first of these that exists and
 # it can read, so this file is found with no flag at all:
 #
-#   Linux    $XDG_CONFIG_HOME/fastcached/fastcached.yaml (then ~/.config/...)
-#            /etc/fastcached/fastcached.yaml
-#   macOS    $XDG_CONFIG_HOME/fastcached/fastcached.yaml (then ~/.config/...)
-#            /opt/fastcached/etc/fastcached.yaml
-#   Windows  %APPDATA%\fastcached\fastcached.yaml
-#            %ProgramData%\fastcached\fastcached.yaml
+#   Linux    $XDG_CONFIG_HOME/pace/pace-kv.yaml (then ~/.config/...)
+#            /etc/pace/pace-kv.yaml
+#   macOS    $XDG_CONFIG_HOME/pace/pace-kv.yaml (then ~/.config/...)
+#            /opt/pace/etc/pace-kv.yaml
+#   Windows  %APPDATA%\pace\pace-kv.yaml
+#            %ProgramData%\pace\pace-kv.yaml
 #
 # The per-user file wins, so a personal cache can be configured without root
 # and without editing the machine-wide file. `pace-kv --help` prints the
@@ -157,14 +157,14 @@
 #
 # Per platform, the conventional location:
 #
-#   Linux    /var/lib/fastcached/cache
+#   Linux    /var/lib/pace-kv/cache
 #            created and owned by the service (systemd StateDirectory=).
-#   Windows  $ProgramData/fastcached/cache
-#            beside the fastcached.yaml the installer seeds in the same
+#   Windows  $ProgramData/pace/cache
+#            beside the pace-kv.yaml the installer seeds in the same
 #            directory, and writable by the service account.
-#   macOS    /opt/fastcached/var/cache
+#   macOS    /opt/pace/var/cache
 #
-#storage_path: /var/lib/fastcached/cache
+#storage_path: /var/lib/pace-kv/cache
 
 # Shard count for the on-disk tier. Default (unset) is min(16, CPU count) for a
 # directory-shaped storage_path, or 1 for a single file.
@@ -229,10 +229,10 @@
 # Requires a build with TLS support (-DPACE_ENABLE_TLS=ON); enabling it
 # on a build without OpenSSL is a startup error. Both paths must be readable by
 # the pace-kv user — note ProtectHome=yes and ProtectSystem=strict in the
-# unit, so keep certificates somewhere like /etc/fastcached/.
+# unit, so keep certificates somewhere like /etc/pace/.
 #tls: false
-#tls_cert: /etc/fastcached/server.crt
-#tls_key: /etc/fastcached/server.key
+#tls_cert: /etc/pace/server.crt
+#tls_key: /etc/pace/server.key
 
 # Multiple listeners in one process, e.g. plaintext on a private interface and
 # TLS on a public one. Each is `host:port`, exactly as `--listen` and

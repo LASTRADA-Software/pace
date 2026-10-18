@@ -146,7 +146,7 @@ def parse_build_banner(stderr: str) -> dict[str, str]:
     return facts
 
 
-def run_fastcached(binary: Path, samples: int) -> tuple[dict[str, float], str]:
+def run_pace_kv(binary: Path, samples: int) -> tuple[dict[str, float], str]:
     """Run the Catch2 benchmarks and return ({row name: nanoseconds per body}, stderr).
 
     Catch2's XML reporter emits one ``<BenchmarkResults>`` per row with a
@@ -182,7 +182,7 @@ SCALING_LINE = re.compile(r"^SCALING threads=(\d+) ops_per_sec=(\d+)", re.MULTIL
 def run_scaling(binary: Path) -> dict[int, float]:
     """Run the thread-scaling benchmark and return {thread count: ops/sec}.
 
-    A separate invocation from :func:`run_fastcached` because this tier reports
+    A separate invocation from :func:`run_pace_kv` because this tier reports
     in its own lines rather than through Catch2's timing harness: it measures aggregate
     throughput over a fixed wall-clock window across N threads, which is not a
     per-iteration mean and so has no ``<BenchmarkResults>`` to parse. Single
@@ -387,7 +387,7 @@ def main() -> int:
         print(f"benchmark binary not found: {binary}", file=sys.stderr)
         return 1
 
-    ours, bench_stderr = run_fastcached(binary, args.samples)
+    ours, bench_stderr = run_pace_kv(binary, args.samples)
     scaling = {} if args.no_scaling else run_scaling(binary)
 
     theirs: dict[str, float] = {}

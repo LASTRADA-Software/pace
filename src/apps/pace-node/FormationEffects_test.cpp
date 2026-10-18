@@ -134,7 +134,7 @@ TEST_CASE("An archive that fails at start refuses the start and names what it co
 {
     Testing::InMemoryFormationStore store;
     Testing::RecordingArchiver archiver;
-    archiver.FailArchives("cannot move /var/lib/fastcache-node/raft-log: permission denied");
+    archiver.FailArchives("cannot move /var/lib/pace-node/raft-log: permission denied");
 
     auto const resumed = ResumeFormation(InterruptedDissolve(), store, archiver);
     REQUIRE_FALSE(resumed.has_value());

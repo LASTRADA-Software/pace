@@ -121,10 +121,10 @@ TEST_CASE("CliParser: --log-everything absent leaves the explicit-override flag 
 
 TEST_CASE("CliParser: --storage parses into Config::storagePath", "[config][cli][storage]")
 {
-    auto const args = std::array<char const*, 1> { "--storage=/var/lib/fastcached/cache.cow" };
+    auto const args = std::array<char const*, 1> { "--storage=/var/lib/pace-kv/cache.cow" };
     auto const result = Pace::ParseCli(std::span<char const* const> { args });
     REQUIRE(result.has_value());
-    REQUIRE(result->config.storagePath == "/var/lib/fastcached/cache.cow");
+    REQUIRE(result->config.storagePath == "/var/lib/pace-kv/cache.cow");
 }
 
 TEST_CASE("CliParser: --storage-durability parses each mode", "[config][cli][storage]")
@@ -651,11 +651,11 @@ TEST_CASE("CliParser: --help qualifies its sccache examples with the MSVC caveat
 
 TEST_CASE("CliParser: --seed-config parses and selects the seeding action", "[config][cli]")
 {
-    std::array<char const*, 1> const argv { "--seed-config=/tmp/fastcached.yaml.default" };
+    std::array<char const*, 1> const argv { "--seed-config=/tmp/pace-kv.yaml.default" };
     auto const parsed = Pace::ParseCli(std::span<char const* const> { argv });
     REQUIRE(parsed.has_value());
     REQUIRE(parsed->outcome == Pace::CliOutcome::SeedConfig);
-    REQUIRE(parsed->seedConfigTemplate == "/tmp/fastcached.yaml.default");
+    REQUIRE(parsed->seedConfigTemplate == "/tmp/pace-kv.yaml.default");
 
     // The template describes an installation step, not the daemon, so it must
     // not leak into the config that a service registration bakes in.
@@ -668,11 +668,11 @@ TEST_CASE("CliParser: --migrate-storage selects the conversion and keeps parsing
     // follow it, so a flag that stopped the parse would convert whatever the
     // defaults name rather than what the operator typed -- and on a sharded
     // layout that is a different set of files entirely.
-    std::array<char const*, 3> const argv { "--migrate-storage", "--storage=/var/lib/fastcached", "--storage-shards=4" };
+    std::array<char const*, 3> const argv { "--migrate-storage", "--storage=/var/lib/pace-kv", "--storage-shards=4" };
     auto const parsed = Pace::ParseCli(std::span<char const* const> { argv });
     REQUIRE(parsed.has_value());
     REQUIRE(parsed->outcome == Pace::CliOutcome::MigrateStorage);
-    REQUIRE(parsed->config.storagePath == "/var/lib/fastcached");
+    REQUIRE(parsed->config.storagePath == "/var/lib/pace-kv");
     REQUIRE(parsed->config.storageShards == 4);
 }
 
@@ -916,7 +916,7 @@ TEST_CASE("Each outcome says whether the serving rules judge it and whether it i
           .outcome = Pace::CliOutcome::HealthCheck,
           .judged = false,
           .reader = Pace::ExitReader::Prober },
-        { .argv = { "--seed-config=/tmp/fastcached.yaml.default" },
+        { .argv = { "--seed-config=/tmp/pace-kv.yaml.default" },
           .outcome = Pace::CliOutcome::SeedConfig,
           .judged = false,
           .reader = Pace::ExitReader::Operator },

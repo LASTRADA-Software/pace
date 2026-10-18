@@ -32,7 +32,7 @@ set(PACE_SERVICE_NAME "pace-kv.service" CACHE STRING "systemd unit name")
 # The packages set CPACK_PACKAGING_INSTALL_PREFIX=/ (see cmake/Packaging.cmake)
 # so these resolve to the only locations that work: systemd reads units from
 # /usr/lib/systemd, and config must be in /etc — under the conventional /usr
-# prefix the config would land at /usr/etc/fastcached, where nothing looks.
+# prefix the config would land at /usr/etc/pace, where nothing looks.
 # That is also why `usr/` is spelled explicitly below.
 #
 # usr/lib rather than CMAKE_INSTALL_LIBDIR: the latter resolves to lib64 on
@@ -70,9 +70,9 @@ if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     set(PACE_PLATFORM_ASSETS
         "linux/pace-kv.service|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-kv.service|Runtime"
         "linux/pace-kv-user.service|${PACE_SYSTEMD_USER_DIR}|data|pace-kv.service|Runtime"
-        "linux/pace-kv.sysusers|${PACE_SYSUSERS_DIR}|data|fastcached.conf|Runtime"
-        "linux/pace-kv.tmpfiles|${PACE_TMPFILES_DIR}|data|fastcached.conf|Runtime"
-        "config/fastcached.yaml|${PACE_SYSCONF_DIR}|config|fastcached.yaml|Runtime"
+        "linux/pace-kv.sysusers|${PACE_SYSUSERS_DIR}|data|pace-kv.conf|Runtime"
+        "linux/pace-kv.tmpfiles|${PACE_TMPFILES_DIR}|data|pace-kv.conf|Runtime"
+        "config/pace-kv.yaml|${PACE_SYSCONF_DIR}|config|pace-kv.yaml|Runtime"
         # The compile worker. Its socket unit is what an operator enables, so the
         # service carries no [Install] and is pulled in by the socket -- see the
         # units themselves. The account is its own rather than pace-kv's,
@@ -80,9 +80,9 @@ if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
         # storage, and the trust model gives a worker no cache credentials at all.
         "linux/pace-node.service|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime"
         "linux/pace-node.socket|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.socket|Runtime"
-        "linux/pace-node.sysusers|${PACE_SYSUSERS_DIR}|data|fastcache-node.conf|Runtime"
+        "linux/pace-node.sysusers|${PACE_SYSUSERS_DIR}|data|pace-node.conf|Runtime"
         # The worker's own configuration file, marked `config` for the reason
-        # fastcached.yaml is: it is the file an operator edits to make the worker
+        # pace-kv.yaml is: it is the file an operator edits to make the worker
         # work at all, and an upgrade that reset it would un-register the worker
         # silently. The unit's ExecStart names this exact path.
         #
@@ -141,12 +141,12 @@ if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
 elseif(PACE_PACKAGE_ROOT_PREFIX AND APPLE)
     # The generated scripts are referenced from the build tree; see below.
     set(PACE_PLATFORM_ASSETS
-        # The live fastcached.yaml is deliberately NOT here. A .pkg overwrites
+        # The live pace-kv.yaml is deliberately NOT here. A .pkg overwrites
         # its payload unconditionally on every install — there is no conffile or
         # %config(noreplace) equivalent — so shipping it would silently discard
         # the operator's edits on upgrade. The Runtime postinstall seeds the real
         # file from this .default copy only when it is absent.
-        "config/fastcached.yaml|${PACE_MACOS_PREFIX}/etc|data|fastcached.yaml.default|Runtime"
+        "config/pace-kv.yaml|${PACE_MACOS_PREFIX}/etc|data|pace-kv.yaml.default|Runtime"
         # The worker's reference, on exactly the same terms and from exactly the
         # same file the Linux package installs (#397). It shipped nowhere but
         # Linux until this row, so a macOS operator configuring a worker had no
@@ -220,13 +220,13 @@ if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     # truth. CPack references the configured copies in the build tree.
 
     # Absolute paths as seen on the installed system — the scriptlets run there.
-    set(PACE_SYSUSERS_FILE "/${PACE_SYSUSERS_DIR}/fastcached.conf")
+    set(PACE_SYSUSERS_FILE "/${PACE_SYSUSERS_DIR}/pace-kv.conf")
     # Named separately rather than letting `systemd-sysusers` with no argument
     # apply everything on the system. Both accounts must exist or the unit that
     # needs one fails to start with "user does not exist" -- a message that says
     # nothing about which package forgot to create it.
-    set(PACE_NODE_SYSUSERS_FILE "/${PACE_SYSUSERS_DIR}/fastcache-node.conf")
-    set(PACE_TMPFILES_FILE "/${PACE_TMPFILES_DIR}/fastcached.conf")
+    set(PACE_NODE_SYSUSERS_FILE "/${PACE_SYSUSERS_DIR}/pace-node.conf")
+    set(PACE_TMPFILES_FILE "/${PACE_TMPFILES_DIR}/pace-kv.conf")
 
     set(PACE_SCRIPTLETS deb/postinst deb/prerm deb/postrm
                               rpm/post rpm/preun rpm/postun)
@@ -324,33 +324,44 @@ if(WIN32)
     # instead needs a per-file component with a registry keypath and
     # NeverOverwrite, which the CPack WiX generator does not expose through the
     # patch fragment. So the live config lives OUTSIDE the payload, at
-    # %ProgramData%\fastcached\fastcached.yaml, and a custom action seeds it from
+    # %ProgramData%\pace\pace-kv.yaml, and a custom action seeds it from
     # this template only when it is absent (see windows/service-actions.xml).
     # That is the same seed-once rule the macOS .pkg uses, and it is what lets
     # operator edits survive an upgrade.
     #
-    # etc/ mirrors the macOS layout (<prefix>/etc/fastcached.yaml.default) so
+    # etc/ mirrors the macOS layout (<prefix>/etc/pace-kv.yaml.default) so
     # both packages spell the template's home the same way.
     #
     # Each template installs with the feature of the app that reads it, so the MSI
     # lays down a daemon template only where the daemon is selected, and a build
     # without that app installs no template for it.
-    get_property(_daemonComponent GLOBAL PROPERTY PACE_COMPONENT_OF_fastcached)
-    get_property(_nodeComponent GLOBAL PROPERTY PACE_COMPONENT_OF_pace-node)
-    if(_daemonComponent)
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/fastcached.yaml"
+    #
+    # The component is the property src/apps/CMakeLists.txt sets for the app's DIRECTORY, read once
+    # per app here and refused when a built app has none: a misspelt name reads as "not built",
+    # and `PACE_COMPONENT_OF_pace_kv` -- read where nothing sets it -- shipped an MSI with no daemon
+    # template, so its seed had nothing to copy. The install rules below stay literal, one per
+    # template, because check-config-reference-reach reads them.
+    foreach(_app IN ITEMS pace-kv pace-node)
+        get_property(_templateComponent_${_app} GLOBAL PROPERTY "PACE_COMPONENT_OF_${_app}")
+        if(TARGET ${_app} AND NOT _templateComponent_${_app})
+            message(FATAL_ERROR "packaging: ${_app} is built but PACE_COMPONENT_OF_${_app} is not set, "
+                                "so its configuration template would not be packaged")
+        endif()
+    endforeach()
+    if(_templateComponent_pace-kv)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/pace-kv.yaml"
             DESTINATION "etc"
-            RENAME "fastcached.yaml.default"
-            COMPONENT "${_daemonComponent}"
+            RENAME "pace-kv.yaml.default"
+            COMPONENT "${_templateComponent_pace-kv}"
         )
     endif()
     # The worker's reference, same terms, same source file (#397). Seeded by the
     # same custom action, which takes the pair rather than one hardcoded name.
-    if(_nodeComponent)
+    if(_templateComponent_pace-node)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/pace-node.yaml"
             DESTINATION "etc"
             RENAME "pace-node.yaml.default"
-            COMPONENT "${_nodeComponent}"
+            COMPONENT "${_templateComponent_pace-node}"
         )
     endif()
 

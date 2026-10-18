@@ -76,7 +76,7 @@ class ScriptedNodeKeyGuard final: public Node::INodeKeyFileGuard
     /// platform id @p id -- how a case states WHICH account wrote a file, so the trusted-owner set
     /// (`Node::OwnStateAccountsGuard`) is judged by the production fold over a scripted identity.
     /// @param name The entry's file name.
-    /// @param owner The owner as an operator reads it (`NT SERVICE\FastCacheCompileNode`).
+    /// @param owner The owner as an operator reads it (`NT SERVICE\pace-node`).
     /// @param id The owner as the platform identifies it (a SID's string form).
     void OwnedBy(std::filesystem::path name, std::string owner, std::string id)
     {

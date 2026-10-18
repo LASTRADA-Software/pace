@@ -237,7 +237,7 @@ TEST_CASE("Seeds are the remembered endpoints, then the typed ones, then the SRV
                 .has_value());
     auto const typed = std::vector<std::string> { "desk:6674" };
     Testing::ScriptedSrvResolver srv;
-    srv.Answer("_fastcache._tcp.corp.example",
+    srv.Answer("_pace._tcp.corp.example",
                std::vector { SrvTarget { .host = "build.corp.example", .port = 6674, .priority = 0, .weight = 0 } });
 
     auto const seeds = SeedsNow(endpoints, typed, srv, "corp.example");

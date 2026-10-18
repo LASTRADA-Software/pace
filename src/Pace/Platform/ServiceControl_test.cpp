@@ -117,7 +117,7 @@ TEST_CASE("ServiceControl: a command line that named nothing registers nothing",
     // the host-derived ones.
     Pace::CliResult const cli {};
     auto const cmd = CommandLineFor(std::filesystem::path { "pace-kv" }, cli);
-    REQUIRE(cmd == "\"fastcached\" --daemon --service-name=FastCached");
+    REQUIRE(cmd == "\"fastcached\" --daemon --service-name=pace-kv");
 }
 
 TEST_CASE("ServiceControl: the executable path is always quoted", "[platform][service]")
@@ -261,7 +261,7 @@ namespace
 /// The plist a default config produces in @p scope, for the assertions below.
 [[nodiscard]] std::string PlistFor(Pace::Config const& cfg, ServiceScope scope)
 {
-    return BuildLaunchdPlist(SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, cfg), scope, "/tmp/logs");
+    return BuildLaunchdPlist(SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, cfg), scope, "/tmp/logs");
 }
 } // namespace
 
@@ -292,8 +292,8 @@ TEST_CASE("ServiceControl: argv element 0 is the executable", "[platform][servic
 {
     Pace::Config const cfg {};
     auto const argv =
-        BuildServiceArgv(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, AsTyped(cfg), EmitDaemonFlag::No);
-    REQUIRE(argv.front() == "/opt/fastcached/bin/pace-kv");
+        BuildServiceArgv(std::filesystem::path { "/opt/pace/bin/pace-kv" }, AsTyped(cfg), EmitDaemonFlag::No);
+    REQUIRE(argv.front() == "/opt/pace/bin/pace-kv");
 }
 
 TEST_CASE("ServiceControl: an unset path flag is omitted rather than absolutized", "[platform][service][launchd]")
@@ -370,10 +370,10 @@ TEST_CASE("ServiceControl: a registered duration is read back by the daemon as t
 TEST_CASE("ServiceControl: the launchd label is reverse-DNS and lowercased", "[platform][service][launchd]")
 {
     Pace::Config cfg {};
-    REQUIRE(Pace::LaunchdLabel(SpecFor("pace-kv", cfg)) == "software.lastrada.fastcached");
+    REQUIRE(Pace::LaunchdLabel(SpecFor("pace-kv", cfg)) == "software.lastrada.pace-kv");
 
     cfg.serviceName = "PaceSmoke";
-    REQUIRE(Pace::LaunchdLabel(SpecFor("pace-kv", cfg)) == "software.lastrada.fastcachedsmoke");
+    REQUIRE(Pace::LaunchdLabel(SpecFor("pace-kv", cfg)) == "software.lastrada.pacesmoke");
 }
 
 TEST_CASE("ServiceControl: the SCM logon identity is named, not implied", "[platform][service][scm]")
@@ -384,17 +384,17 @@ TEST_CASE("ServiceControl: the SCM logon identity is named, not implied", "[plat
     Pace::Config const cfg {};
     auto const daemon = SpecFor("pace-kv", cfg);
     REQUIRE(daemon.windowsLogon == Pace::WindowsLogonAccount::VirtualAccount);
-    REQUIRE(Unwrap(Pace::WindowsLogonName(daemon)) == "NT SERVICE\\FastCached");
+    REQUIRE(Unwrap(Pace::WindowsLogonName(daemon)) == "NT SERVICE\\pace-kv");
 
     // A virtual account is derived from the service name by the SCM itself, so the
     // spelling has to match the name exactly or the service logs on as nobody.
     Pace::ServiceSpec worker {};
-    worker.serviceName = "FastCacheCompileNode";
+    worker.serviceName = "pace-node";
     worker.windowsLogon = Pace::WindowsLogonAccount::VirtualAccount;
 
     auto const name = Pace::WindowsLogonName(worker);
     REQUIRE(name.has_value());
-    REQUIRE(Unwrap(name) == "NT SERVICE\\FastCacheCompileNode");
+    REQUIRE(Unwrap(name) == "NT SERVICE\\pace-node");
 
     // It follows --service-name, because that is what the SCM derives it from: a
     // fixed string here would name an identity a renamed service does not have.
@@ -409,19 +409,19 @@ TEST_CASE("ServiceControl: a system job's log directory is its own", "[platform]
     // One shared directory meant each install chowned the other's to itself:
     // registering the worker took the daemon's, and a package reinstall took it
     // back.
-    auto const daemon = Pace::DefaultLogDirectory("software.lastrada.fastcached", ServiceScope::System, "/Users/jo");
+    auto const daemon = Pace::DefaultLogDirectory("software.lastrada.pace-kv", ServiceScope::System, "/Users/jo");
     auto const worker =
-        Pace::DefaultLogDirectory("software.lastrada.fastcachecompilenode", ServiceScope::System, "/Users/jo");
+        Pace::DefaultLogDirectory("software.lastrada.pace-node", ServiceScope::System, "/Users/jo");
 
     REQUIRE(daemon != worker);
-    REQUIRE(daemon.filename() == "software.lastrada.fastcached");
+    REQUIRE(daemon.filename() == "software.lastrada.pace-kv");
     // A machine-wide job must not reach into anybody's home directory.
     REQUIRE(!daemon.string().contains("/Users/jo"));
 
     // A per-user agent is not chowned and its files are already label-named, so
     // it keeps the flat directory an operator may have open in `tail -f`.
-    auto const agent = Pace::DefaultLogDirectory("software.lastrada.fastcached", ServiceScope::User, "/Users/jo");
-    REQUIRE(agent == std::filesystem::path { "/Users/jo" } / "Library/Logs/fastcached");
+    auto const agent = Pace::DefaultLogDirectory("software.lastrada.pace-kv", ServiceScope::User, "/Users/jo");
+    REQUIRE(agent == std::filesystem::path { "/Users/jo" } / "Library/Logs/pace-kv");
 }
 
 TEST_CASE("ServiceControl: scope defaults are filled in for a file-configured service", "[platform][service][launchd]")
@@ -446,7 +446,7 @@ TEST_CASE("ServiceControl: scope defaults are filled in for a file-configured se
         // which is the point -- while the separator between home and it is left
         // to the platform, because this case runs everywhere and only macOS
         // renders it with a slash.
-        auto const expected = std::filesystem::path { "/Users/jo" } / "Library/Caches/fastcached/cache";
+        auto const expected = std::filesystem::path { "/Users/jo" } / "Library/Caches/pace-kv/cache";
         REQUIRE(std::ranges::contains(filled.arguments, std::format("--storage={}", expected.string())));
         REQUIRE(std::ranges::contains(filled.ownedPaths, expected, &Pace::OwnedPath::path));
     }
@@ -457,7 +457,7 @@ TEST_CASE("ServiceControl: scope defaults are filled in for a file-configured se
         // --config would pin the cache location and make every later storage_path
         // edit a silent no-op.
         Pace::CliResult named {};
-        named.config.configPath = "/etc/fastcached/fastcached.yaml";
+        named.config.configPath = "/etc/pace/pace-kv.yaml";
         auto const filled = WithScopeDefaults(SpecFor("pace-kv", named), ServiceScope::User, "/Users/jo", {});
 
         REQUIRE(std::ranges::none_of(filled.arguments, [](std::string const& a) { return a.starts_with("--storage="); }));
@@ -484,12 +484,12 @@ TEST_CASE("ServiceControl: scope defaults are filled in for a file-configured se
     SECTION("a system daemon is pointed at the packaged config")
     {
         auto const filled =
-            WithScopeDefaults(spec, ServiceScope::System, "/Users/jo", "/opt/fastcached/etc/fastcached.yaml");
+            WithScopeDefaults(spec, ServiceScope::System, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
 
-        REQUIRE(std::ranges::contains(filled.arguments, "--config=/opt/fastcached/etc/fastcached.yaml"));
+        REQUIRE(std::ranges::contains(filled.arguments, "--config=/opt/pace/etc/pace-kv.yaml"));
         // ServiceAccountReadDenial validates this, so leaving it empty would
         // demote an install-time error to a silent fall-through to defaults.
-        REQUIRE(filled.configPath == "/opt/fastcached/etc/fastcached.yaml");
+        REQUIRE(filled.configPath == "/opt/pace/etc/pace-kv.yaml");
     }
 
     SECTION("an absent packaged config points launchd at nothing")
@@ -544,7 +544,7 @@ TEST_CASE("ServiceControl: each scope default is accepted on its own", "[platfor
 
         for (auto const scope: { ServiceScope::User, ServiceScope::System })
         {
-            auto const filled = WithScopeDefaults(spec, scope, "/Users/jo", "/opt/fastcached/etc/fastcached.yaml");
+            auto const filled = WithScopeDefaults(spec, scope, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
             auto const carries = [&filled](std::string_view flag) {
                 return std::ranges::any_of(filled.arguments,
                                            [flag](std::string const& arg) { return arg.starts_with(flag); });
@@ -589,7 +589,7 @@ TEST_CASE("ServiceControl: each scope default is accepted on its own", "[platfor
 
             for (auto const scope: { ServiceScope::User, ServiceScope::System })
             {
-                auto const filled = WithScopeDefaults(spec, scope, "/Users/jo", "/opt/fastcached/etc/fastcached.yaml");
+                auto const filled = WithScopeDefaults(spec, scope, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
                 CHECK(std::ranges::none_of(filled.arguments,
                                            [&row](std::string const& arg) { return arg.starts_with(row.flag); }));
             }
@@ -614,7 +614,7 @@ TEST_CASE("ServiceControl: each scope default is accepted on its own", "[platfor
 
         for (auto const scope: { ServiceScope::User, ServiceScope::System })
         {
-            auto const filled = WithScopeDefaults(spec, scope, "/Users/jo", "/opt/fastcached/etc/fastcached.yaml");
+            auto const filled = WithScopeDefaults(spec, scope, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
             CHECK(filled.arguments.empty());
             CHECK(filled.configPath.empty());
             CHECK(filled.ownedPaths.empty());
@@ -654,7 +654,7 @@ TEST_CASE("ServiceControl: a service that keeps no files is given no path flags"
 
     for (auto const scope: { ServiceScope::User, ServiceScope::System })
     {
-        auto const filled = WithScopeDefaults(argvOnly, scope, "/Users/jo", "/opt/fastcached/etc/fastcached.yaml");
+        auto const filled = WithScopeDefaults(argvOnly, scope, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
 
         CHECK(filled.arguments.empty());
         CHECK(filled.configPath.empty());
@@ -668,8 +668,8 @@ TEST_CASE("ServiceControl: the plist path follows the scope", "[platform][servic
     auto const user = Pace::LaunchdPlistPath(SpecFor("pace-kv", cfg), ServiceScope::User, "/Users/jo");
     auto const system = Pace::LaunchdPlistPath(SpecFor("pace-kv", cfg), ServiceScope::System, "/Users/jo");
 
-    REQUIRE(user == std::filesystem::path { "/Users/jo/Library/LaunchAgents/software.lastrada.fastcached.plist" });
-    REQUIRE(system == std::filesystem::path { "/Library/LaunchDaemons/software.lastrada.fastcached.plist" });
+    REQUIRE(user == std::filesystem::path { "/Users/jo/Library/LaunchAgents/software.lastrada.pace-kv.plist" });
+    REQUIRE(system == std::filesystem::path { "/Library/LaunchDaemons/software.lastrada.pace-kv.plist" });
     // The system daemon is machine-wide; a home directory must not leak into it.
     REQUIRE(!system.string().contains("/Users/jo"));
 }
@@ -739,7 +739,7 @@ TEST_CASE("ServiceControl: only the system job runs as the service account", "[p
 {
     Pace::Config const cfg {};
     REQUIRE(PlistFor(cfg, ServiceScope::System).contains("<key>UserName</key>"));
-    REQUIRE(PlistFor(cfg, ServiceScope::System).contains("_fastcached"));
+    REQUIRE(PlistFor(cfg, ServiceScope::System).contains("_pace-kv"));
     // A LaunchAgent already runs as the logged-in user; naming a UserName it
     // cannot assume makes launchd refuse the job.
     REQUIRE(!PlistFor(cfg, ServiceScope::User).contains("<key>UserName</key>"));
@@ -803,7 +803,7 @@ namespace
 /// @return The spec.
 [[nodiscard]] Pace::ServiceSpec SpecCarrying(std::string bytes)
 {
-    auto spec = SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, Pace::Config {});
+    auto spec = SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, Pace::Config {});
     spec.arguments = std::vector<std::string> { std::move(bytes) };
     return spec;
 }
@@ -880,12 +880,12 @@ TEST_CASE("ServiceControl: the account name is escaped like every other text nod
     // escaping at all, so it was a second route to the malformed document the rest of
     // this function's escaping exists to prevent. `serviceAccount` is a FIELD rather
     // than the constant it used to be -- its own comment says a second binary may
-    // want a different one -- so "the daemon's account is always `_fastcached`" was
+    // want a different one -- so "the daemon's account is always `_pace-kv`" was
     // never a property of the function.
     //
     // WHAT DISTINGUISHES: `&` is the byte whose unescaped presence makes the document
     // malformed, and under the defect it appeared raw.
-    auto spec = SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, Pace::Config {});
+    auto spec = SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, Pace::Config {});
     spec.serviceAccount = "cache&co";
     auto const plist = Pace::BuildLaunchdPlist(spec, ServiceScope::System, "/tmp/logs");
 
@@ -952,7 +952,7 @@ TEST_CASE("ServiceControl: a code point only XML forbids is refused for launchd 
     // that only asserted the launchd refusal passes under the defect, and so does one
     // that only asserts the bytes are valid UTF-8 -- they are.
     Pace::Config cfg {};
-    auto spec = SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, cfg);
+    auto spec = SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, cfg);
     spec.displayName = "Fast\x0b"
                        "Cache";
     REQUIRE(Pace::IsValidUtf8(spec.displayName)); // the premise: this is text.
@@ -990,7 +990,7 @@ TEST_CASE("ServiceControl: a refusal names WHICH launch argument carries the byt
     // WHAT DISTINGUISHES: the bad byte is in the THIRD argument, so a refusal naming
     // no index reads identically whichever argument carries it.
     Pace::Config cfg {};
-    auto spec = SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, cfg);
+    auto spec = SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, cfg);
     spec.arguments = std::vector<std::string> { "--port=11211", "--threads=4", "--storage=/var/db/f\x01i", "--metrics" };
 
     auto const rejection = Pace::LaunchdTextRejection(spec);
@@ -1080,12 +1080,12 @@ TEST_CASE("ServiceControl: security-relevant flags reach the supervisor", "[plat
     // to survive the trip, or the success message is a lie.
     Pace::Config cfg {};
     cfg.tlsEnabled = true;
-    cfg.tlsCertPath = "/etc/fastcached/server.crt";
-    cfg.tlsKeyPath = "/etc/fastcached/server.key";
+    cfg.tlsCertPath = "/etc/pace/server.crt";
+    cfg.tlsKeyPath = "/etc/pace/server.key";
     cfg.metricsEnabled = true;
     cfg.metricsBindAddress = "0.0.0.0";
     cfg.metricsPort = 9999;
-    cfg.pidfile = "/var/run/fastcached.pid";
+    cfg.pidfile = "/var/run/pace-kv.pid";
     cfg.notifyKeyspaceEvents = "KEA";
 
     auto const argv = BuildServiceArgv(std::filesystem::path { "pace-kv" }, AsTyped(cfg), EmitDaemonFlag::No);
@@ -1102,9 +1102,9 @@ TEST_CASE("ServiceControl: security-relevant flags reach the supervisor", "[plat
         return std::filesystem::absolute(path).string();
     };
 
-    REQUIRE(has(std::format("--tls-cert={}", absolute("/etc/fastcached/server.crt"))));
-    REQUIRE(has(std::format("--tls-key={}", absolute("/etc/fastcached/server.key"))));
-    REQUIRE(has(std::format("--pidfile={}", absolute("/var/run/fastcached.pid"))));
+    REQUIRE(has(std::format("--tls-cert={}", absolute("/etc/pace/server.crt"))));
+    REQUIRE(has(std::format("--tls-key={}", absolute("/etc/pace/server.key"))));
+    REQUIRE(has(std::format("--pidfile={}", absolute("/var/run/pace-kv.pid"))));
     REQUIRE(has("--metrics-bind=0.0.0.0"));
     REQUIRE(has("--metrics-port=9999"));
     REQUIRE(has("--notify-keyspace-events=KEA"));
@@ -1159,10 +1159,10 @@ TEST_CASE("ServiceControl: dropping a password is reported, not silent", "[platf
     // installer-seeded YAML does not — so accepting the combination was the
     // silent drop under another name. The operator was told their password had
     // been registered and got a daemon serving with no authentication at all.
-    cfg.configPath = "/opt/fastcached/etc/fastcached.yaml";
+    cfg.configPath = "/opt/pace/etc/pace-kv.yaml";
     auto const withConfig = Pace::InlineCredentialRejection(SpecFor("pace-kv", cfg));
     REQUIRE(withConfig.has_value());
-    REQUIRE(withConfig.value_or("").contains("/opt/fastcached/etc/fastcached.yaml"));
+    REQUIRE(withConfig.value_or("").contains("/opt/pace/etc/pace-kv.yaml"));
 
     // And a config with no secret at all is never in the way.
     REQUIRE(!Pace::InlineCredentialRejection(SpecFor("pace-kv", Pace::Config {})).has_value());
@@ -1222,8 +1222,8 @@ TEST_CASE("ServiceControl: a value ending in a backslash survives quoting", "[pl
     // token: the argument ran on and swallowed every later flag into itself.
     // std::filesystem::absolute readily produces such a path for a directory.
     Pace::Config cfg {};
-    cfg.storagePath = R"(C:\Program Files\fastcached\cache\)";
-    cfg.pidfile = R"(C:\run\fastcached.pid)";
+    cfg.storagePath = R"(C:\Program Files\Pace\cache\)";
+    cfg.pidfile = R"(C:\run\pace-kv.pid)";
 
     auto const cmd = CommandLineFor(std::filesystem::path { "pace-kv" }, cfg);
 
@@ -1260,7 +1260,7 @@ TEST_CASE("ServiceControl: a service name that escapes its directory is refused"
     // A deny-list, not an allow-list: the SCM has accepted spaces and
     // punctuation since forever, and breaking those registrations to fix a
     // traversal only separators can express would be a poor trade.
-    REQUIRE(!rejects("FastCached"));
+    REQUIRE(!rejects("pace-kv"));
     REQUIRE(!rejects("My Cache"));
     REQUIRE(!rejects("fastcached-2"));
 }
@@ -1501,7 +1501,7 @@ TEST_CASE("ServiceControl: every flag that can reach a registration does, one ro
     // One per value row, and every one differs from that row's default -- which is
     // what makes "the token moved" mean "this line reads this row's field".
     auto const TypedValues = std::to_array<Typed>({
-        { .flag = "--config", .value = "fastcached.yaml" },
+        { .flag = "--config", .value = "pace-kv.yaml" },
         { .flag = "--bind", .value = "0.0.0.0" },
         { .flag = "--port", .value = "6000" },
         // Clamped to [512m, 8g], so 128m is below every reachable default.
@@ -1532,7 +1532,7 @@ TEST_CASE("ServiceControl: every flag that can reach a registration does, one ro
         { .flag = "--storage-shards", .value = "7" },
         { .flag = "--expiry-interval", .value = "250ms" },
         { .flag = "--expiry-scan", .value = "64" },
-        { .flag = "--pidfile", .value = "fastcached.pid" },
+        { .flag = "--pidfile", .value = "pace-kv.pid" },
         { .flag = "--service-name", .value = "MyCache" },
     });
 
@@ -1972,7 +1972,7 @@ TEST_CASE("ServiceControl: --service-start round-trips through its spelling, and
 TEST_CASE("ServiceControl: a manual job's plist does not run at load, and an automatic one does",
           "[platform][service][launchd][service-start]")
 {
-    auto spec = SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, Pace::CliResult {});
+    auto spec = SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, Pace::CliResult {});
     REQUIRE(spec.startMode == Pace::ServiceStart::Auto);
     CHECK(BuildLaunchdPlist(spec, ServiceScope::System, "/tmp/logs").contains("<key>RunAtLoad</key>\n    <true/>"));
 
@@ -2010,7 +2010,7 @@ TEST_CASE("ServiceControl: a manual system job is not kept alive unconditionally
     constexpr std::string_view Unconditional = "<key>KeepAlive</key>\n    <true/>";
     constexpr std::string_view OnCrash = "<key>KeepAlive</key>\n    <dict>\n        <key>Crashed</key>\n        <true/>";
 
-    auto spec = SpecFor(std::filesystem::path { "/opt/fastcached/bin/pace-kv" }, Pace::CliResult {});
+    auto spec = SpecFor(std::filesystem::path { "/opt/pace/bin/pace-kv" }, Pace::CliResult {});
     auto const automatic = BuildLaunchdPlist(spec, ServiceScope::System, "/tmp/logs");
     CHECK_FALSE(automatic.contains(Unconditional));
     CHECK(automatic.contains(OnCrash));
@@ -2229,8 +2229,8 @@ TEST_CASE("ServiceControl: a registration still being deleted is waited out, and
         // Sleeps at 0, 7, 14, 21 and 28 s; at 35 s the 30 s ceiling has passed.
         REQUIRE(registration.deletionWaited.has_value());
         CHECK(Unwrap(registration.deletionWaited) == std::chrono::seconds { 35 });
-        CHECK(Pace::ScmRegistrationFailureMessage(registration, "FastCached")
-              == "service 'FastCached' was still being deleted after 35.0 s; stop the process that holds it and "
+        CHECK(Pace::ScmRegistrationFailureMessage(registration, "pace-kv")
+              == "service 'pace-kv' was still being deleted after 35.0 s; stop the process that holds it and "
                  "run the install again");
     }
 }
@@ -2249,8 +2249,8 @@ TEST_CASE("ServiceControl: a re-apply the SCM answers 'being deleted' did not wa
     CHECK_FALSE(registration.deletionWaited.has_value());
     CHECK(wait.Sleeps() == 0);
 
-    auto const message = Pace::ScmRegistrationFailureMessage(registration, "FastCached");
-    CHECK(message == "service 'FastCached' is being deleted; stop the process that holds it and run the install again");
+    auto const message = Pace::ScmRegistrationFailureMessage(registration, "pace-kv");
+    CHECK(message == "service 'pace-kv' is being deleted; stop the process that holds it and run the install again");
     CHECK_FALSE(message.contains("after"));
 }
 
@@ -2265,7 +2265,7 @@ TEST_CASE("ServiceControl: an install refused for any other reason is reported, 
         CHECK(registration.outcome == Pace::ScmRegistrationOutcome::Failed);
         CHECK(registrar.CreateCalls() == 1);
         CHECK(registrar.ReapplyCalls() == 0);
-        CHECK(Pace::ScmRegistrationFailureMessage(registration, "FastCached")
+        CHECK(Pace::ScmRegistrationFailureMessage(registration, "pace-kv")
               == "access denied registering the service; run from an elevated (Administrator) prompt");
     }
 
@@ -2277,8 +2277,8 @@ TEST_CASE("ServiceControl: an install refused for any other reason is reported, 
         CHECK(registrar.CreateCalls() == 1);
         CHECK(registrar.ReapplyCalls() == 0);
         CHECK_FALSE(registration.deletionWaited.has_value());
-        CHECK(Pace::ScmRegistrationFailureMessage(registration, "FastCached")
-              == "registering service 'FastCached' failed (error 1078)");
+        CHECK(Pace::ScmRegistrationFailureMessage(registration, "pace-kv")
+              == "registering service 'pace-kv' failed (error 1078)");
     }
 }
 
@@ -2287,15 +2287,15 @@ TEST_CASE("ServiceControl: a re-applied service is told to restart, a created on
     using Pace::ScmInstallSuccessMessage;
     using Pace::ScmRegistrationOutcome;
 
-    CHECK(ScmInstallSuccessMessage(ScmRegistrationOutcome::Created, "FastCached", "auto-start", "")
-          == "installed service 'FastCached' (auto-start); start it now with: sc start FastCached");
+    CHECK(ScmInstallSuccessMessage(ScmRegistrationOutcome::Created, "pace-kv", "auto-start", "")
+          == "installed service 'pace-kv' (auto-start); start it now with: sc start pace-kv");
 
     auto const reapplied =
-        ScmInstallSuccessMessage(ScmRegistrationOutcome::Reapplied, "FastCached", "manual start", "\nwarning: x");
+        ScmInstallSuccessMessage(ScmRegistrationOutcome::Reapplied, "pace-kv", "manual start", "\nwarning: x");
     CHECK(reapplied
-          == "updated the registration of service 'FastCached' (manual start); it takes effect at the service's next "
-             "start -- if it is running, restart it with: net stop FastCached && net start FastCached, otherwise "
-             "start it with: sc start FastCached\nwarning: x");
+          == "updated the registration of service 'pace-kv' (manual start); it takes effect at the service's next "
+             "start -- if it is running, restart it with: net stop pace-kv && net start pace-kv, otherwise "
+             "start it with: sc start pace-kv\nwarning: x");
     CHECK_FALSE(reapplied.contains("start it now"));
 }
 
@@ -2363,9 +2363,9 @@ TEST_CASE("ServiceControl: a shared path that cannot be handed over warns and a 
     using Pace::PathPrivacy;
     using Call = ScriptedHandover::Call;
 
-    auto const cache = std::filesystem::path { "C:/ProgramData/fastcache-node/cache" };
-    auto const state = std::filesystem::path { "C:/ProgramData/fastcache-node" };
-    auto const later = std::filesystem::path { "C:/ProgramData/fastcache-node/later" };
+    auto const cache = std::filesystem::path { "C:/ProgramData/pace-node/cache" };
+    auto const state = std::filesystem::path { "C:/ProgramData/pace-node" };
+    auto const later = std::filesystem::path { "C:/ProgramData/pace-node/later" };
     auto const paths = std::to_array<OwnedPath>({
         { .path = cache, .privacy = PathPrivacy::Shared, .credentialFiles = {} },
         { .path = state, .privacy = PathPrivacy::Private, .credentialFiles = { std::filesystem::path { "node-key" } } },
@@ -2419,10 +2419,10 @@ TEST_CASE("ServiceControl: a refused install says what became of the registratio
     using Pace::RefusedRegistration;
 
     constexpr std::string_view Refusal = "the state directory could not be given an access list of its own";
-    auto const notMade = RefusedInstallMessage(Refusal, "FastCacheCompileNode", RefusedRegistration::NotMade);
-    auto const removed = RefusedInstallMessage(Refusal, "FastCacheCompileNode", RefusedRegistration::Removed);
-    auto const notRemoved = RefusedInstallMessage(Refusal, "FastCacheCompileNode", RefusedRegistration::NotRemoved);
-    auto const kept = RefusedInstallMessage(Refusal, "FastCacheCompileNode", RefusedRegistration::Kept);
+    auto const notMade = RefusedInstallMessage(Refusal, "pace-node", RefusedRegistration::NotMade);
+    auto const removed = RefusedInstallMessage(Refusal, "pace-node", RefusedRegistration::Removed);
+    auto const notRemoved = RefusedInstallMessage(Refusal, "pace-node", RefusedRegistration::NotRemoved);
+    auto const kept = RefusedInstallMessage(Refusal, "pace-node", RefusedRegistration::Kept);
 
     for (auto const& message: { notMade, removed, notRemoved, kept })
     {
@@ -2434,7 +2434,7 @@ TEST_CASE("ServiceControl: a refused install says what became of the registratio
     CHECK(removed.contains("was removed again"));
     // The one outcome that leaves the operator something to do by hand names the command.
     CHECK(notRemoved.contains("could NOT be removed"));
-    CHECK(notRemoved.contains("sc delete FastCacheCompileNode"));
+    CHECK(notRemoved.contains("sc delete pace-node"));
     CHECK(kept.contains("left in place"));
 
     CHECK(std::ranges::none_of(std::array { removed, notRemoved, kept },
@@ -2447,7 +2447,7 @@ TEST_CASE("ServiceControl: a refused install says what became of the registratio
 TEST_CASE("ServiceControl: pace-kv opens its non-loopback listeners and, with --metrics, its admin port",
           "[platform][service][firewall]")
 {
-    auto const program = std::filesystem::path { "C:/Program Files/fastcached/bin/pace-kv.exe" };
+    auto const program = std::filesystem::path { "C:/Program Files/Pace/bin/pace-kv.exe" };
 
     Pace::Config loopback {};
     CHECK(Pace::DaemonFirewallRules(loopback, program, {}).empty());
@@ -2457,8 +2457,8 @@ TEST_CASE("ServiceControl: pace-kv opens its non-loopback listeners and, with --
     open.port = 6674;
     auto const single = Pace::DaemonFirewallRules(open, program, { "10.0.0.0/8" });
     REQUIRE(single.size() == 1);
-    CHECK(single.front().name == "FastCached cache tcp/6674");
-    CHECK(single.front().group == "Pace: FastCached");
+    CHECK(single.front().name == "pace-kv cache tcp/6674");
+    CHECK(single.front().group == "Pace: pace-kv");
     CHECK(single.front().remoteAddresses == std::vector<std::string> { "10.0.0.0/8" });
 
     Pace::Config listeners {};
@@ -2469,8 +2469,8 @@ TEST_CASE("ServiceControl: pace-kv opens its non-loopback listeners and, with --
     listeners.metricsPort = 9464;
     auto const several = Pace::DaemonFirewallRules(listeners, program, {});
     REQUIRE(several.size() == 2);
-    CHECK(several[0].name == "FastCached cache tcp/6690");
-    CHECK(several[1].name == "FastCached metrics tcp/9464");
+    CHECK(several[0].name == "pace-kv cache tcp/6690");
+    CHECK(several[1].name == "pace-kv metrics tcp/9464");
 }
 
 namespace
@@ -2478,9 +2478,9 @@ namespace
 
 /// An absolute path on this host: the firewall refuses a rule whose program is not one.
 #if defined(_WIN32)
-constexpr auto FirewallProgram = std::string_view { "C:/Program Files/fastcached/bin/pace-kv.exe" };
+constexpr auto FirewallProgram = std::string_view { "C:/Program Files/Pace/bin/pace-kv.exe" };
 #else
-constexpr auto FirewallProgram = std::string_view { "/opt/fastcached/bin/pace-kv" };
+constexpr auto FirewallProgram = std::string_view { "/opt/pace/bin/pace-kv" };
 #endif
 
 /// A daemon named @p serviceName listening on the wildcard, so its registration opens one rule.
@@ -2627,7 +2627,7 @@ TEST_CASE("ServiceControl: a bracketed loopback bind opens nothing, and one boun
     wildcard.binds = { Pace::BindConfig { .address = "[::]", .port = 6690, .tls = false } };
     auto const opened = Pace::DaemonFirewallRules(wildcard, FirewallProgram, {});
     REQUIRE(opened.size() == 1);
-    CHECK(opened.front().name == "FastCached cache tcp/6690");
+    CHECK(opened.front().name == "pace-kv cache tcp/6690");
 
     // A NAME is not loopback, `localhost` included: the rule is opened, and the note says why.
     auto named = OpenDaemon("Probe");
@@ -2733,7 +2733,7 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
         { .why = "the service already exists, and its registration is re-applied",
           .script = ScmScript { .createError = Pace::ScmErrorServiceExists },
           .ending = CommandEnding::Completed,
-          .says = "updated the registration of service 'FastCached'" },
+          .says = "updated the registration of service 'pace-kv'" },
         { .why = "the service already exists, and re-applying is refused to this account",
           .script =
               ScmScript { .createError = Pace::ScmErrorServiceExists, .reapplyError = Pace::ScmErrorAccessDenied },
@@ -2746,11 +2746,11 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
         { .why = "the service could not be created",
           .script = ScmScript { .createError = 1057 },
           .ending = CommandEnding::Failed,
-          .says = "registering service 'FastCached' failed (error 1057)" },
+          .says = "registering service 'pace-kv' failed (error 1057)" },
         { .why = "every call succeeded",
           .script = ScmScript {},
           .ending = CommandEnding::Completed,
-          .says = "installed service 'FastCached' (auto-start)" },
+          .says = "installed service 'pace-kv' (auto-start)" },
         { .why = "the restart policy was refused, and the registration stands",
           .script = ScmScript { .recoveryError = Pace::ScmErrorAccessDenied },
           .ending = CommandEnding::Completed,
@@ -2785,7 +2785,7 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
         { .why = "no such service is installed",
           .script = ScmScript { .openError = Pace::ScmErrorServiceDoesNotExist },
           .ending = CommandEnding::Declined,
-          .says = "no service named 'FastCached' is installed" },
+          .says = "no service named 'pace-kv' is installed" },
         { .why = "opening the service is refused to this account",
           .script = ScmScript { .openError = Pace::ScmErrorAccessDenied },
           .ending = CommandEnding::Declined,
@@ -2801,7 +2801,7 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
         { .why = "every call succeeded",
           .script = ScmScript {},
           .ending = CommandEnding::Completed,
-          .says = "uninstalled service 'FastCached'" },
+          .says = "uninstalled service 'pace-kv'" },
     };
     for (auto const& verdict: removals)
     {
@@ -2880,7 +2880,7 @@ TEST_CASE("A registration says whether it created the service or re-applied one 
     Pace::Testing::ScriptedScmCalls existing { ScmScript { .createError = Pace::ScmErrorServiceExists } };
     CHECK(Pace::ScmInstall(spec, existing).outcome == ServiceControlOutcome::Reapplied);
 
-    auto const job = RegistrableSpec("/opt/fastcached/bin/pace-kv");
+    auto const job = RegistrableSpec("/opt/pace/bin/pace-kv");
     Pace::Testing::ScriptedLaunchdCalls newJob { LaunchdScript {} };
     CHECK(Pace::LaunchdInstall(job, Pace::ServiceScope::User, newJob).outcome == ServiceControlOutcome::Created);
     Pace::Testing::ScriptedLaunchdCalls oldJob { LaunchdScript { .jobFileExists = true } };
@@ -2906,7 +2906,7 @@ TEST_CASE("An SCM install a private path refuses deletes the registration it cre
     using Pace::Testing::ScmScript;
     auto spec = RegistrableSpec("C:/fastcached/pace-kv.exe");
     spec.ownedPaths.push_back(Pace::OwnedPath {
-        .path = "C:/ProgramData/fastcached/state", .privacy = Pace::PathPrivacy::Private, .credentialFiles = {} });
+        .path = "C:/ProgramData/pace/state", .privacy = Pace::PathPrivacy::Private, .credentialFiles = {} });
 
     Pace::Testing::ScriptedScmCalls created { ScmScript { .secludeDenial = "the list would not apply" } };
     auto const refused = Pace::ScmInstall(spec, created);
@@ -3024,7 +3024,7 @@ TEST_CASE("A launchd registration declines on a decision and fails on a call tha
     for (auto const& verdict: installs)
     {
         INFO(verdict.why);
-        auto spec = RegistrableSpec("/opt/fastcached/bin/pace-kv");
+        auto spec = RegistrableSpec("/opt/pace/bin/pace-kv");
         if (!verdict.knowsItsExecutable)
             spec.exePath.clear();
         Pace::Testing::ScriptedLaunchdCalls calls { verdict.script };
@@ -3071,7 +3071,7 @@ TEST_CASE("A launchd registration declines on a decision and fails on a call tha
         INFO(verdict.why);
         Pace::Testing::ScriptedLaunchdCalls calls { verdict.script };
         auto const result =
-            Pace::LaunchdUninstall(RegistrableSpec("/opt/fastcached/bin/pace-kv"), verdict.scope, calls);
+            Pace::LaunchdUninstall(RegistrableSpec("/opt/pace/bin/pace-kv"), verdict.scope, calls);
         INFO(result.message);
         CHECK(result.Ending() == verdict.ending);
         CHECK(result.message.contains(verdict.says));
@@ -3084,7 +3084,7 @@ TEST_CASE("A launchd registration boots a previous job out of every domain befor
     // The domain a job landed in was decided when it was installed, so the teardown asks every
     // candidate, and loads into the first domain launchd knows -- here `gui/501`.
     Pace::Testing::ScriptedLaunchdCalls calls { Pace::Testing::LaunchdScript {} };
-    auto const spec = RegistrableSpec("/opt/fastcached/bin/pace-kv");
+    auto const spec = RegistrableSpec("/opt/pace/bin/pace-kv");
     REQUIRE(Pace::LaunchdInstall(spec, Pace::ServiceScope::User, calls).Ending()
             == Pace::CommandEnding::Completed);
     auto const label = Pace::LaunchdLabel(spec);

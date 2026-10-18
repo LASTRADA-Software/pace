@@ -83,7 +83,7 @@ set(catch2 "_deps/catch2-build/src/libCatch2d.a")
 # 1. The ordinary tree: the anchor links Catch2 and carries the guard, and a product binary
 #    that links no Catch2 is not asked about at all.
 fc_edge(anchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${catch2}")
-fc_edge(product pace-kv Debug "src/apps/pace-kv/CMakeFiles/fastcached.dir/main.cpp.o | libPace.a")
+fc_edge(product pace-kv Debug "src/apps/pace-kv/CMakeFiles/pace-kv.dir/main.cpp.o | libPace.a")
 fc_case("covered anchor, product binary ignored" "${anchor}${product}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 2. A second test binary links Catch2 and lacks the guard: refused, by name.

@@ -3822,7 +3822,7 @@ TEST_CASE("The consensus address rides the runtime record's variable arity, in b
     sent.roster = NodeRosterFields { .version = 9, .voters = 3, .revoked = 1 };
     sent.enrollment = WireEnrollmentState::AutoApprove;
     sent.enrollmentAutoApproveSecondsLeft = 600;
-    sent.stateDirectory = "/var/lib/fastcache-node";
+    sent.stateDirectory = "/var/lib/pace-node";
     sent.stateDirectoryReason = "machine-wide: this process runs privileged";
     sent.sharedCache = SharedCacheStatusFields { .source = WireSharedCacheSource::Setting,
                                                  .machineId = "cache-c",

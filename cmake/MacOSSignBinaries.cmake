@@ -25,12 +25,12 @@ endif()
 # The staged tree is laid out per component; the executables all belong to
 # Runtime, but glob both shapes so a future component split does not silently
 # stop signing something. The prefix comes from PACE_MACOS_PREFIX rather
-# than being spelled here: hardcoding `opt/fastcached` made a relocated build
+# than being spelled here: hardcoding `opt/pace` made a relocated build
 # glob a path that does not exist, and the FATAL_ERROR below then turned a
 # perfectly valid configuration into an unsignable one.
 file(GLOB_RECURSE _binaries
-    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/${CPACK_PACE_MACOS_PREFIX}/bin/fastcache*"
-    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/${CPACK_PACE_MACOS_PREFIX}/bin/fastcache*"
+    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/*/${CPACK_PACE_MACOS_PREFIX}/bin/pace*"
+    "${CPACK_TEMPORARY_INSTALL_DIRECTORY}/${CPACK_PACE_MACOS_PREFIX}/bin/pace*"
 )
 
 if(NOT _binaries)

@@ -602,16 +602,16 @@ TEST_CASE("the dashboard credential is its own file, and no environment variable
     // #1399 D4. WHAT DISTINGUISHES: the path lands in `dashboardTokenFile` and in NOTHING the data port presents --
     // one flag standing in for the other would hand the password to whoever may watch the fleet -- and the
     // control is `--token-file`, which lands in `tokenFile` and leaves the dashboard's path empty.
-    auto const dashboard = Parse({ "--dashboard-token-file=/etc/fastcached/dashboard.token", "live-stats", "fleet" });
+    auto const dashboard = Parse({ "--dashboard-token-file=/etc/pace/dashboard.token", "live-stats", "fleet" });
     CHECK(dashboard.action == Action::RunVerb);
-    CHECK(dashboard.dashboardTokenFile == "/etc/fastcached/dashboard.token");
+    CHECK(dashboard.dashboardTokenFile == "/etc/pace/dashboard.token");
     CHECK(dashboard.tokenFile.empty());
     CHECK_FALSE(dashboard.credential.Configured());
     // Read by `main`, never here: the parse holds the path and no secret.
     CHECK(dashboard.dashboardToken.empty());
 
-    auto const data = Parse({ "--token-file=/etc/fastcached/requirepass", "live-stats", "fleet" });
-    CHECK(data.tokenFile == "/etc/fastcached/requirepass");
+    auto const data = Parse({ "--token-file=/etc/pace/requirepass", "live-stats", "fleet" });
+    CHECK(data.tokenFile == "/etc/pace/requirepass");
     CHECK(data.dashboardTokenFile.empty());
 
     // No variable spells it: the environment's lesser route is not offered to a new secret.

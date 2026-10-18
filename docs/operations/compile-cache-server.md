@@ -40,7 +40,7 @@ Without `--storage` the cache is memory-only and evaporates on restart, which
 for a compile cache usually means throwing away hours of compiles.
 
 ```sh
-pace-kv --storage=/var/lib/fastcached/cache.cow \
+pace-kv --storage=/var/lib/pace-kv/cache.cow \
            --max-memory=8g
 ```
 
@@ -59,7 +59,7 @@ For a shared cache serving many builders concurrently:
 
 ```sh
 pace-kv --bind=0.0.0.0 \
-           --storage=/var/lib/fastcached/cache \
+           --storage=/var/lib/pace-kv/cache \
            --storage-shards=16 \
            --threads=16 \
            --requirepass=<secret> \
@@ -94,7 +94,7 @@ Both codecs are on the startup banner, and both name what the store will actuall
 do rather than what was asked for:
 
 ```console
-... storage=/var/lib/fastcached/store.cow durability=batched compression=zstd memory-compression=none max-value=256M ...
+... storage=/var/lib/pace-kv/store.cow durability=batched compression=zstd memory-compression=none max-value=256M ...
 ```
 
 Without `--storage` there is no on-disk tier for a codec to describe, so that

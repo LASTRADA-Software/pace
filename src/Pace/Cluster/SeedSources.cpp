@@ -52,7 +52,7 @@ std::string SrvQueryName(std::string_view dnsSuffix)
 {
     if (dnsSuffix.empty())
         return {};
-    return std::format("_fastcache._tcp.{}", dnsSuffix);
+    return std::format("_pace._tcp.{}", dnsSuffix);
 }
 
 std::vector<SeedCandidate> OrderSeeds(std::span<std::string const> remembered,

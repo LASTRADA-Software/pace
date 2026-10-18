@@ -414,7 +414,7 @@ ServiceSpec MakeDaemonServiceSpec(std::filesystem::path const& exePath, CliResul
     // spec, rather than beside the launchd code that used to hardcode it: which
     // account a service runs as is a property of the service, and a second
     // binary registering itself may well want a different one.
-    constexpr std::string_view DaemonServiceAccount = "_fastcached";
+    constexpr std::string_view DaemonServiceAccount = "_pace-kv";
 
     // EmitDaemonFlag::No, and the flag carried separately: the spec has to be
     // able to answer both supervisors, and only the SCM wants backgrounding.
@@ -450,7 +450,7 @@ ServiceSpec MakeDaemonServiceSpec(std::filesystem::path const& exePath, CliResul
                          .startMode = cli.serviceStart,
                          .configPath = cfg.configPath,
                          // Where the daemon's own files are looked up: a machine-wide
-                         // fastcached.yaml it probes at every start, and a per-user
+                         // pace-kv.yaml it probes at every start, and a per-user
                          // cache under this name. It no longer says anything about
                          // which flags the parser takes -- that is the set above.
                          .applicationName = std::string { DaemonApplicationName },
@@ -467,7 +467,7 @@ ServiceSpec MakeDaemonServiceSpec(std::filesystem::path const& exePath, CliResul
                          //
                          // How it READS it has moved. This used to say the account
                          // "can already read what it needs" because the
-                         // %ProgramData%\fastcached list grants BUILTIN\Users read
+                         // %ProgramData%\pace list grants BUILTIN\Users read
                          // and a virtual account is an Authenticated User -- true,
                          // and it was also the reason `requirepass:` in that file
                          // was readable by every local account (#741). The seeded
@@ -782,7 +782,7 @@ std::optional<std::string> ServiceRegistrationRejection(ServiceSpec const& spec,
 std::string BuildServiceCommandLine(ServiceSpec const& spec)
 {
     // The executable path is always quoted so an install directory containing
-    // spaces (e.g. "C:\Program Files\fastcached") tokenizes correctly.
+    // spaces (e.g. "C:\Program Files\Pace") tokenizes correctly.
     std::string out = std::format("\"{}\"", spec.exePath.string());
 
     // The SCM is the supervisor that wants backgrounding, so this is where the
@@ -1019,7 +1019,7 @@ namespace
 
 namespace
 {
-/// Root of the macOS package payload, e.g. `/opt/fastcached`.
+/// Root of the macOS package payload, e.g. `/opt/pace`.
 ///
 /// Handed down from PACE_MACOS_PREFIX by src/Pace/CMakeLists.txt
 /// so the daemon's idea of its own install tree cannot drift from the one
@@ -1030,7 +1030,7 @@ namespace
 #if defined(FC_MACOS_PREFIX)
     constexpr std::string_view MacOsPrefix = FC_MACOS_PREFIX;
 #else
-    constexpr std::string_view MacOsPrefix = "/opt/fastcached";
+    constexpr std::string_view MacOsPrefix = "/opt/pace";
 #endif
 
 } // namespace
@@ -1053,7 +1053,7 @@ std::optional<std::string> WindowsLogonName(ServiceSpec const& spec)
 std::filesystem::path DefaultLogDirectory(std::string_view label, ServiceScope scope, std::filesystem::path const& home)
 {
     if (scope == ServiceScope::User)
-        return home / "Library/Logs/fastcached";
+        return home / "Library/Logs/pace-kv";
     return std::filesystem::path { MacOsPrefix } / "var/log" / label;
 }
 
@@ -1453,7 +1453,7 @@ ServiceSpec WithScopeDefaults(ServiceSpec spec,
     // passes a config file owns the storage path in it.
     //
     // System scope gets no storage default at all: its config file is always
-    // the package's `<prefix>/etc/fastcached.yaml`, so there is nothing to
+    // the package's `<prefix>/etc/pace-kv.yaml`, so there is nothing to
     // default. That clause is the row's `scope` column now.
     //
     // The `--config` spelling is read off the CONFIG default's own row rather
@@ -1479,7 +1479,7 @@ ServiceSpec WithScopeDefaults(ServiceSpec spec,
     // candidate its startup lookup probes -- so registering it is a choice,
     // not a necessity, and it is made for two reasons. ServiceAccountReadDenial
     // validates `configPath`, so leaving it empty would demote "the
-    // _fastcached account cannot read the config" from an install-time error
+    // _pace-kv account cannot read the config" from an install-time error
     // to a silent fall-through to built-in defaults. And a system job whose
     // HOME resolves somewhere real would otherwise prefer a per-user file
     // over the machine-wide one, which is backwards for a daemon.
@@ -2135,7 +2135,7 @@ ServiceControlResult LaunchdInstall(ServiceSpec const& spec, ServiceScope scope,
     // Looked up under the SPEC's application name, not the daemon's. Hardcoding
     // the daemon's meant a worker registration was handed the daemon's config
     // file -- a file it cannot parse, and, once the package tightens that file to
-    // 0640 root:_fastcached, one the worker's own account cannot even read, so the
+    // 0640 root:_pace-kv, one the worker's own account cannot even read, so the
     // install was refused for a reason that had nothing to do with the worker.
     // A service that names no application looks nothing up.
     auto const packagedConfig =
@@ -2429,7 +2429,7 @@ namespace
     ///
     /// @param target Path to grant access to; created as a directory when absent
     ///        and not named as a file.
-    /// @param account Trustee name, e.g. `NT SERVICE\FastCacheCompileNode`. It
+    /// @param account Trustee name, e.g. `NT SERVICE\pace-node`. It
     ///        resolves only once the service exists, so call this after
     ///        CreateService.
     /// @return An explanatory message on failure, else nullopt.

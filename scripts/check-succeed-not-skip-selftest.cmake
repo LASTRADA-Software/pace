@@ -156,8 +156,8 @@ endfunction()
 # @param needle The phrase that must appear.
 # @param complaint What to record when it does not.
 macro(pace_expect_text output needle complaint)
-    string(FIND "${output}" "${needle}" fastcachedNeedlePosition)
-    if(fastcachedNeedlePosition EQUAL -1)
+    string(FIND "${output}" "${needle}" paceKvNeedlePosition)
+    if(paceKvNeedlePosition EQUAL -1)
         list(APPEND failures "${complaint}")
     endif()
 endmacro()

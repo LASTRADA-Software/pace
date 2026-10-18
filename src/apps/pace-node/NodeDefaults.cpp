@@ -53,7 +53,7 @@ namespace
     /// **The service manager's row comes first on POSIX**, because the shipped systemd unit runs
     /// as an unprivileged account whose home is `/`: without it the machine-wide service would
     /// take the PER-USER row and keep its identity under `/.local/state`, which
-    /// `ProtectSystem=strict` refuses. `StateDirectory=fastcache-node` is what makes systemd hand
+    /// `ProtectSystem=strict` refuses. `StateDirectory=pace-node` is what makes systemd hand
     /// over `STATE_DIRECTORY`, and a launchd registration states the same variable. Windows has
     /// no such convention and needs none: a service's token carries the service SID, which
     /// `IsPrivilegedProcess` counts.

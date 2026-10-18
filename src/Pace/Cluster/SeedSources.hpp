@@ -33,7 +33,7 @@ enum class SeedSource : std::uint8_t
 {
     Remembered,    ///< An endpoint kept from a past join; see `FleetEndpoints.hpp`.
     FleetSeedFlag, ///< `--fleet-seed`, as the operator typed it.
-    DnsSrv,        ///< `_fastcache._tcp.<suffix>`, sorted by priority then weight.
+    DnsSrv,        ///< `_pace._tcp.<suffix>`, sorted by priority then weight.
     Last,
 };
 
@@ -76,7 +76,7 @@ struct SeedCandidate
 
 /// The SRV name a fleet answers under, for a given DNS suffix.
 /// @param dnsSuffix The primary DNS suffix; empty when this machine has none.
-/// @return `_fastcache._tcp.<dnsSuffix>`, or empty when @p dnsSuffix is empty -- no domain
+/// @return `_pace._tcp.<dnsSuffix>`, or empty when @p dnsSuffix is empty -- no domain
 ///         means no SRV query is made at all, rather than one made against a bare label.
 [[nodiscard]] std::string SrvQueryName(std::string_view dnsSuffix);
 

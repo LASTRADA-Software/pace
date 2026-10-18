@@ -64,7 +64,7 @@ below).
 
 | What | Refused as | Step |
 |---|---|---|
-| A state directory whose `node-key` other accounts can read (an older install) | the identity-key refusal (`Exposed`), naming the file | Delete the state directory (`%ProgramData%\fastcache-node` on Windows). The key counts as disclosed. The node mints a new identity; forget the old id with `--cluster-forget`. |
+| A state directory whose `node-key` other accounts can read (an older install) | the identity-key refusal (`Exposed`), naming the file | Delete the state directory (`%ProgramData%\pace-node` on Windows). The key counts as disclosed. The node mints a new identity; forget the old id with `--cluster-forget`. |
 | A Raft snapshot older than state version 10, a log entry older than command version 6, or one holding a retired command kind (3, 4 or 6) | `UnsupportedFormatVersion` (the held state's start refusal), or the retired kind by name, naming the directory | Move `raft-state`, `raft-log` and `raft-snapshot` aside ([the consensus state directory](#the-consensus-state-directory)) |
 | `<cluster-dir>/roster` left behind | an entry this build keeps nothing for | Delete that file alone ([signed leases](#signed-leases-checked-against-the-state-each-node-applied)) |
 | A formation record below format 7 (builds of this branch only; no release wrote one) | `UnsupportedFormatVersion` | Move `formation` aside. The node re-forms as a new solitary cluster: re-enroll it. |

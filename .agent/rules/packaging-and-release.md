@@ -12,12 +12,12 @@ installer pane, the version derivation, or the release job's asset list.
 
 - **The package payload is rooted at `/`, not `/usr`.** `/etc` cannot sit under
   a `/usr` prefix, so `PACE_INSTALL_BINDIR`/`DOCDIR` spell their own
-  `usr/` (and `opt/fastcached/` on macOS). A relative destination for the units
+  `usr/` (and `opt/pace/` on macOS). A relative destination for the units
   would put them where systemd never looks — and on macOS an *absolute*
   `install(DESTINATION)` escapes CPack's staging tree and writes to the build
   host's real filesystem.
 - **Neither a macOS `.pkg` nor an MSI has a conffile mechanism.** Both overwrite
-  their payload on every install, so on both the live `fastcached.yaml` is
+  their payload on every install, so on both the live `pace-kv.yaml` is
   deliberately not payload: only a `.default` template ships, and it is copied to
   the real location exactly once, when nothing is there. macOS does this in the
   Runtime postinstall (`seed-config.sh.inc`), Windows in a custom action running

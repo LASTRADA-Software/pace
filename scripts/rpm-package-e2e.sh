@@ -14,8 +14,8 @@
 #
 # And neither package started the compile worker with a disk tier, which is how
 # #1674 shipped: the unit's ProtectSystem=strict left the documented
-# `cache_dir: /var/cache/fastcache-node` read-only, and the node refused to start
-# ("--cache-dir cannot create /var/cache/fastcache-node: Read-only file system").
+# `cache_dir: /var/cache/pace-node` read-only, and the node refused to start
+# ("--cache-dir cannot create /var/cache/pace-node: Read-only file system").
 # Reproduced in exactly this container against the 0.5.0 .rpm, which is what the
 # worker leg below is for.
 #
@@ -33,8 +33,8 @@
 #   boot      with BOTH enabled, a boot comes up with the node's socket holding
 #             6674 and pace-kv inactive;
 #   worker    the socket activates pace-node with a memory AND a disk
-#             tier at /var/cache/fastcache-node, the service adopts the socket,
-#             runs as fastcache-node, opens its store there, and stops cleanly.
+#             tier at /var/cache/pace-node, the service adopts the socket,
+#             runs as pace-node, opens its store there, and stops cleanly.
 #   upgrade   a reinstall keeps an operator's edit to a %config(noreplace) file.
 #   removal   `dnf remove` takes the units away and leaves no enablement symlink.
 #
@@ -62,8 +62,8 @@ base_image="${2:-quay.io/fedora/fedora:44}"
 [[ -n "$rpm_path" && -f "$rpm_path" ]] || { echo "usage: $0 <fastcached-*.rpm> [base-image]" >&2; exit 1; }
 command -v docker >/dev/null || { echo "rpm-package-e2e: docker is required and was not found" >&2; exit 1; }
 
-readonly NODE_ACCOUNT="fastcache-node"
-readonly NODE_CACHE_DIR="/var/cache/fastcache-node"
+readonly NODE_ACCOUNT="pace-node"
+readonly NODE_CACHE_DIR="/var/cache/pace-node"
 # ONE port, on purpose: both serve this machine's builds where every local client
 # looks, and the node's socket takes it from the daemon (#1676).
 readonly DAEMON_PORT=6674
@@ -160,17 +160,17 @@ grep -q STORED "${workdir}/round-trip.txt" && grep -q hello "${workdir}/round-tr
 
 # %post restricts the machine-wide config to the service account (#861); this is the
 # INSTALLED result, which a scan of the scriptlet source cannot see.
-config_mode="$(in_container stat -c '%a %U:%G' /etc/fastcached/fastcached.yaml)"
+config_mode="$(in_container stat -c '%a %U:%G' /etc/pace/pace-kv.yaml)"
 [[ "$config_mode" == "640 root:pace-kv" ]] \
-    || fail "/etc/fastcached/fastcached.yaml is '${config_mode}', expected '640 root:pace-kv'"
-in_container runuser -u pace-kv -- test -r /etc/fastcached/fastcached.yaml \
+    || fail "/etc/pace/pace-kv.yaml is '${config_mode}', expected '640 root:pace-kv'"
+in_container runuser -u pace-kv -- test -r /etc/pace/pace-kv.yaml \
     || fail "the pace-kv account cannot read its own config"
 
 # A reload that applies, asserted by its own log line rather than by the unit still
 # being up afterwards -- a SIGHUP nothing handled leaves it up as well.
-in_container grep -q '^#log_level: info' /etc/fastcached/fastcached.yaml \
-    || fail "the shipped fastcached.yaml no longer contains '#log_level: info'; update this script"
-in_container sed -i 's/^#log_level: info/log_level: debug/' /etc/fastcached/fastcached.yaml
+in_container grep -q '^#log_level: info' /etc/pace/pace-kv.yaml \
+    || fail "the shipped pace-kv.yaml no longer contains '#log_level: info'; update this script"
+in_container sed -i 's/^#log_level: info/log_level: debug/' /etc/pace/pace-kv.yaml
 in_container systemctl reload pace-kv
 daemon_reloaded() {
     journal_to pace-kv "${workdir}/daemon.log"
@@ -192,7 +192,7 @@ echo "== pace-node with cache_dir ${NODE_CACHE_DIR}"
 # its stop, which would fail the clean-stop assertion for a reason that is not the
 # package's.
 in_container bash -c "printf 'toolchain:\n  - /usr/bin/g++\ncache_memory: 64m\ncache_disk: 256m\ncache_dir: ${NODE_CACHE_DIR}\n' \
-    > /etc/fastcached/pace-node.yaml"
+    > /etc/pace/pace-node.yaml"
 
 # Who holds a port, as one line per listener: the process names ss reports for it.
 # @param 1 port
@@ -268,11 +268,11 @@ in_container systemctl stop pace-node.socket
 
 # --- 4. an upgrade keeps the operator's edits ---------------------------------
 echo "== dnf reinstall keeps a local edit"
-in_container bash -c "echo '# local edit that must survive' >> /etc/fastcached/fastcached.yaml"
+in_container bash -c "echo '# local edit that must survive' >> /etc/pace/pace-kv.yaml"
 in_container dnf -y reinstall "/root/${rpm_name}" > "${workdir}/dnf-reinstall.log" 2>&1 \
     || { cat "${workdir}/dnf-reinstall.log" >&2; fail "dnf could not reinstall ${rpm_name}"; }
-in_container grep -q 'local edit that must survive' /etc/fastcached/fastcached.yaml \
-    || fail "a reinstall discarded the local edit to fastcached.yaml"
+in_container grep -q 'local edit that must survive' /etc/pace/pace-kv.yaml \
+    || fail "a reinstall discarded the local edit to pace-kv.yaml"
 
 # --- 5. removal deregisters ---------------------------------------------------
 echo "== dnf remove"

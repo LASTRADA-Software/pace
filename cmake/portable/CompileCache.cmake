@@ -683,7 +683,7 @@ endif()
 #   _fc_asset_<id>_exe           staged launcher's filename
 #   _fc_asset_<id>_daemon_member path to the daemon inside the same archive,
 #                                staged only when PACE_AUTO_START asks
-#                                for it — see _fc_auto_start_fastcached below
+#                                for it — see _fc_auto_start_pace_kv below
 #   _fc_asset_<id>_daemon_exe    staged daemon's filename
 set(_fc_asset_rows linux_x86_64 darwin_arm64 windows_amd64)
 
@@ -700,16 +700,16 @@ set(_fc_asset_darwin_arm64_system "Darwin")
 set(_fc_asset_darwin_arm64_arch arm64 aarch64)
 set(_fc_asset_darwin_arm64_platform "Darwin-arm64")
 set(_fc_asset_darwin_arm64_ext "tar.gz")
-set(_fc_asset_darwin_arm64_member "opt/fastcached/bin/pace-cc")
+set(_fc_asset_darwin_arm64_member "opt/pace/bin/pace-cc")
 set(_fc_asset_darwin_arm64_exe "pace-cc")
-set(_fc_asset_darwin_arm64_daemon_member "opt/fastcached/bin/pace-kv")
+set(_fc_asset_darwin_arm64_daemon_member "opt/pace/bin/pace-kv")
 set(_fc_asset_darwin_arm64_daemon_exe "pace-kv")
 
 # The Windows archive is a plain ZIP rather than the MSI beside it: an installer
 # is not something this can open, and the launcher is one self-contained file
 # with no VC++ redistributable behind it. Its interior differs from the two
 # above because the Windows package is the only one not rooted at /, so its
-# binaries sit at the conventional bin/ rather than usr/bin or opt/fastcached.
+# binaries sit at the conventional bin/ rather than usr/bin or opt/pace.
 set(_fc_asset_windows_amd64_system "Windows")
 set(_fc_asset_windows_amd64_arch AMD64 x86_64 x64)
 set(_fc_asset_windows_amd64_platform "Windows-AMD64")
@@ -1231,7 +1231,7 @@ function(_fc_daemon_answering addr outVar)
     file(MAKE_DIRECTORY "${_dir}")
     set(_src "${_dir}/portcheck.cpp")
     if(NOT EXISTS "${_src}")
-        file(WRITE "${_src}" "int fastcachePortCheck() { return 0; }\n")
+        file(WRITE "${_src}" "int pacePortCheck() { return 0; }\n")
     endif()
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
         set(_args /nologo /c "${_src}" "/Fo${_dir}/portcheck.obj")
@@ -1263,7 +1263,7 @@ endfunction()
 # configure, exactly like _fc_auto_install_pace_cc: every failure is one
 # status line and a fall-through to the probe finding no daemon, which is the
 # behaviour without PACE_AUTO_START at all.
-function(_fc_auto_start_fastcached)
+function(_fc_auto_start_pace_kv)
     _fc_daemon_answering("${PACE_ADDR}" _answering)
     if(_answering)
         # Ours from an earlier configure, or a pre-existing daemon started by
@@ -1370,7 +1370,7 @@ function(_fc_auto_start_fastcached)
         # machine reboots or a human kills it), and for a test that needs to
         # clean one up without a PID execute_process never hands back, since
         # --daemon double-forks.
-        set(_pidfile "${PACE_AUTO_START_STORAGE_DIR}/fastcached.pid")
+        set(_pidfile "${PACE_AUTO_START_STORAGE_DIR}/pace-kv.pid")
         execute_process(
             COMMAND "${_staged}" --daemon ${_daemonArgs} "--pidfile=${_pidfile}"
             RESULT_VARIABLE _rc
@@ -1460,7 +1460,7 @@ if(USE_COMPILER_CACHE
    AND PACE_AUTO_START
    AND PACE_CC
    AND PACE_ADDR)
-    _fc_auto_start_fastcached()
+    _fc_auto_start_pace_kv()
 endif()
 
 # Ask pace-cc itself whether the cache works, by compiling one tiny
@@ -1484,7 +1484,7 @@ function(_fc_probe_pace_cc outVar reasonVar)
     # Both the file and its content are fixed, so the probe itself is a cache
     # hit from the second configure onwards — which exercises FETCH rather than
     # just STORE, and costs less than the first run.
-    file(WRITE "${_src}" "int fastcacheProbe() { return 0; }\n")
+    file(WRITE "${_src}" "int paceProbe() { return 0; }\n")
 
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
         set(_args /nologo /c "${_src}" "/Fo${_dir}/probe.obj")

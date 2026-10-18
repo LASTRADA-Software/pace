@@ -15,7 +15,7 @@
 
 /// @file SrvResolver.hpp
 /// A DNS SRV lookup, behind a seam: how a node that is not on the office LAN finds the fleet
-/// across a VPN, through `_fastcache._tcp.<domain>` (`Cluster/SeedSources.hpp`).
+/// across a VPN, through `_pace._tcp.<domain>` (`Cluster/SeedSources.hpp`).
 ///
 /// A lookup that fails, times out or finds nothing answers NO targets and a `SrvLookupFault` the
 /// caller can log; it never throws. And it is only ever asked a name: a machine with no DNS
@@ -139,7 +139,7 @@ class ISrvResolver
     ///
     /// **Precondition: @p name is not empty.** No name is no query -- the caller says so itself
     /// rather than asking and reading the fault as the answer.
-    /// @param name The SRV owner name, e.g. `_fastcache._tcp.corp.example`.
+    /// @param name The SRV owner name, e.g. `_pace._tcp.corp.example`.
     /// @return The usable targets in the order the resolver gave them (never empty), or why
     ///         there are none.
     [[nodiscard]] virtual std::expected<std::vector<SrvTarget>, SrvLookupFailure> Lookup(std::string_view name) const = 0;

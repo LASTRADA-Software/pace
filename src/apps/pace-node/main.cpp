@@ -2422,8 +2422,8 @@ int main(int argc, char** argv)
     // the remedy is to delete the file and there is nothing else to report.
     if (ReadEnvironmentVariable("PACE_NODE_ARGS").has_value())
         std::cerr << "pace-node: PACE_NODE_ARGS is set and is no longer read; this worker is "
-                     "configured by --config=<file> (see /etc/fastcached/pace-node.yaml). Delete "
-                     "the leftover /etc/fastcached/compile-node.env and put those settings in the YAML file.\n";
+                     "configured by --config=<file> (see /etc/pace/pace-node.yaml). Delete "
+                     "the leftover /etc/pace/compile-node.env and put those settings in the YAML file.\n";
 
     // The file the operator named, or else whichever platform default is actually
     // there. `EffectiveConfigPath` owns that rule -- a named path is strict and a

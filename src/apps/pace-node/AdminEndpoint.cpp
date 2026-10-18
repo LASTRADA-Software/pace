@@ -1057,7 +1057,7 @@ std::expected<AdminSurface, NodeRefusal> StartAdminSurfaceOrExplain(NodeConfig c
         // "localhost": a certificate a browser shows an operator names what it belongs to.
         auto created = cfg.tlsSelfSigned
                            ? core::net::makeSelfSignedServerContext(core::net::SelfSignedOptions {
-                                 .commonName = "fastcache-node", .subjectNames = SelfSignedSubjectNames(cfg, host) })
+                                 .commonName = "pace-node", .subjectNames = SelfSignedSubjectNames(cfg, host) })
                            : core::net::makeTlsServerContextFromFiles(cfg.tlsCertFile, cfg.tlsKeyFile);
         if (!created.has_value())
             return std::unexpected { Refusal(

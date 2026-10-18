@@ -37,7 +37,7 @@ cmake_minimum_required(VERSION 3.28)
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
 set(PaceInstallOracle
     "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc|opt/fastcached/bin/pace-kv"
+    "Darwin|arm64|Darwin-arm64|opt/pace/bin/pace-cc|opt/pace/bin/pace-kv"
 )
 
 # Deliberately not a version that exists, so a bug that reached the real
@@ -170,7 +170,7 @@ if(NOT configureResult EQUAL 0)
 endif()
 
 # The fake pace-kv answers --version and nothing else, so the poll loop in
-# _fc_auto_start_fastcached never actually observes it listening — real
+# _fc_auto_start_pace_kv never actually observes it listening — real
 # connectivity needs a real daemon, which is check-compile-cache-daemon-start's
 # job. This configure is still expected to report having tried, and to have
 # fallen through cleanly rather than failing.
@@ -180,7 +180,7 @@ if(mentionedPaceKv EQUAL -1)
 endif()
 
 set(expectedLauncher "${stageDir}/${mirrorVersion}/${platform}/pace-cc")
-set(expectedDaemon "${stageDir}/${mirrorVersion}/${platform}/fastcached")
+set(expectedDaemon "${stageDir}/${mirrorVersion}/${platform}/pace-kv")
 
 if(NOT EXISTS "${expectedLauncher}")
     file(GLOB_RECURSE staged "${stageDir}/*")

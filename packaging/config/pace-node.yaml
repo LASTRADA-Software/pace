@@ -54,14 +54,14 @@
 # Started without --config, this worker reads the first of these that exists and
 # it can read, so this file is found with no flag at all:
 #
-#   POSIX    $XDG_CONFIG_HOME/pace-node/pace-node.yaml
-#            ~/.config/pace-node/pace-node.yaml
+#   POSIX    $XDG_CONFIG_HOME/pace/pace-node.yaml
+#            ~/.config/pace/pace-node.yaml
 #            <sysconfdir>/pace-node.yaml
-#   Windows  %APPDATA%\pace-node\pace-node.yaml
-#            %ProgramData%\pace-node\pace-node.yaml
+#   Windows  %APPDATA%\pace\pace-node.yaml
+#            %ProgramData%\pace\pace-node.yaml
 #
 # where <sysconfdir> is the directory this build was packaged for -- on Linux
-# that is /etc/fastcached, which is where this very file is installed.
+# that is /etc/pace, which is where this very file is installed.
 #
 # The per-user rows apply to an unprivileged run. A run as root takes every row,
 # and requires each to be one only an administrator could have written, so
@@ -226,13 +226,13 @@
 # (--enroll-approve) or names it in --cluster-admit.
 #
 # Unless given: the machine's directory for a privileged process or a service
-# -- %ProgramData%\fastcache-node, /var/lib/fastcache-node or
-# /Library/Application Support/fastcache-node -- and the account's own for a
-# node started by hand (%LOCALAPPDATA%\fastcache-node, or
-# ~/.local/state/fastcache-node). On Linux the packaged service creates and owns
-# /var/lib/fastcache-node (systemd StateDirectory=) and is handed it;
+# -- %ProgramData%\pace-node, /var/lib/pace-node or
+# /Library/Application Support/pace-node -- and the account's own for a
+# node started by hand (%LOCALAPPDATA%\pace-node, or
+# ~/.local/state/pace-node). On Linux the packaged service creates and owns
+# /var/lib/pace-node (systemd StateDirectory=) and is handed it;
 # --print-surfaces and --node-status name which one a node chose, and why.
-#cluster_dir: /var/lib/fastcache-node
+#cluster_dir: /var/lib/pace-node
 
 # announce this node on the segment and listen for peers here. Unless given,
 # beacons go to every up interface's directed broadcast on port 6681, VPN-type
@@ -256,7 +256,7 @@
 # a machine in the fleet to ask, across a VPN where no beacon reaches;
 # repeatable. A name or name:port (the node port, 6674, when none). Tried
 # after the fleet this node remembers and before DNS SRV
-# _fastcache._tcp.<domain>. Asked only while this node is alone; a fleet it
+# _pace._tcp.<domain>. Asked only while this node is alone; a fleet it
 # finds is joined by approval.
 #fleet_seed:
 #  - <host>
@@ -340,7 +340,7 @@
 # path, enforced: the store is claimed exclusively, so a second node sharing
 # it refuses to start.
 #
-# Under the packaged Linux service, cache_dir: /var/cache/fastcache-node. The
+# Under the packaged Linux service, cache_dir: /var/cache/pace-node. The
 # unit creates it for the service account (CacheDirectory=); ProtectSystem=strict
 # leaves nothing else persistent writable but the state directory, and that is
 # not a place for it -- the node refuses to start beside an entry there it did
@@ -397,7 +397,7 @@
 # supervisor records launch arguments where every local account can read
 # them, so --install-service refuses the flag outright and registers
 # --config=<path> instead. A file carrying a token should be readable only
-# by the account the service runs as -- 0640 root:fastcache-node -- and the
+# by the account the service runs as -- 0640 root:pace-node -- and the
 # worker WARNS at startup and at every accepted reload when it is not.
 #
 # Reloadable, which is what a fleet-wide rotation needs: edit this key and

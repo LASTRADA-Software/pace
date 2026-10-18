@@ -70,11 +70,11 @@ fatal, on purpose: the operator named a path, and carrying on without it would
 silently deliver less than was configured.
 
 ```
-failed to open storage '/var/lib/fastcached/cache': StorageError(code=Corrupt system=0 context=FilePageStore::Open)
+failed to open storage '/var/lib/pace-kv/cache': StorageError(code=Corrupt system=0 context=FilePageStore::Open)
 ```
 
 ```
---cache-dir cannot open /var/cache/fastcache-node/objects.cow: StorageError(code=Corrupt system=0 context=FilePageStore::Open); refusing to start
+--cache-dir cannot open /var/cache/pace-node/objects.cow: StorageError(code=Corrupt system=0 context=FilePageStore::Open); refusing to start
 ```
 
 For a compile node this takes the **whole node** down, not just its cache tier.

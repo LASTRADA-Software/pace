@@ -676,7 +676,7 @@ TEST_CASE("A real state directory other accounts can write in is refused with th
           "[node][identity][key][secret]")
 {
     // The production guard over the real filesystem: `BUILTIN\Users` add-file and add-subdirectory,
-    // measured on this project's own `%ProgramData%\fastcache-node`, and a group- and world-writable
+    // measured on this project's own `%ProgramData%\pace-node`, and a group- and world-writable
     // POSIX directory without the sticky bit.
     ScratchDirectory const scratch { "node-key-writable-directory" };
     auto const stateDir = scratch.Path() / "state";
@@ -1001,7 +1001,7 @@ TEST_CASE("A key planted in a directory other accounts can write in is refused f
 TEST_CASE("A key that inherited a broad read in a directory that inherits broad writes is asked about with the directory",
           "[node][identity][key][secret]")
 {
-    // The live `C:\ProgramData\fastcache-node\cluster` shape, on the real filesystem: the
+    // The live `C:\ProgramData\pace-node\cluster` shape, on the real filesystem: the
     // directory inherits `%ProgramData%`'s `Users` create rights, and a key written there before
     // the key was minted protected inherits `Users` read. Refused for the directory -- with the
     // key's question in the same refusal, since the directory's remedy erases the evidence.

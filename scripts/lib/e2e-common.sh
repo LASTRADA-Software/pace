@@ -1132,7 +1132,7 @@ _e2e_wait_retire_deadline() {
 # So the rule is "a pid this shell may signal, or `-`", and `-` is not a lesser
 # answer -- the verdict reports it as its own outcome, which is honest, where a
 # borrowed pid is simply wrong. `macos-package-e2e` is the live case: its
-# LaunchDaemon runs as `_fastcached`, so it passes `-`, while
+# LaunchDaemon runs as `_pace-kv`, so it passes `-`, while
 # `macos-service-e2e`'s agent runs as the test user and is `kill -0`-ed by the
 # fixture itself three lines earlier, so it passes the pid.
 #

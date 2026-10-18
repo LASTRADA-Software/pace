@@ -771,7 +771,7 @@ determinism rests on.
     names DOCUMENTS the defect, open or closed (#1410), and an EMPTY table passes every mode, so
     retiring the last row leaves a working guard.
   - **One question, three askers.** `--resolve` hands a local run the binary `PACE_CLANG_TIDY`
-    names, or the one installed at `${XDG_DATA_HOME:-~/.local/share}/fastcached/clang-tidy/<version>`,
+    names, or the one installed at `${XDG_DATA_HOME:-~/.local/share}/pace/clang-tidy/<version>`,
     only after identifying it, and names the exact `pip install --target` command when it cannot.
     `local-gate.sh` passes that binary to the configure. `tidy-sweep.sh` resolves or checks its
     `TIDY` the same way. Both CI jobs install with `--requirement` and check with `--installed`
@@ -3079,7 +3079,7 @@ makes it anyway and says so there.
 - **Sharing sccache entries across Windows CI runs is safe, and the reason is not
   "it seems fine".** The `/showIncludes` hazard `CompileCache.cmake` warns about
   needs an *incremental* build across checkouts at *different* absolute paths.
-  Every runner builds from scratch at `D:\a\fastcached\fastcached`, so neither half
+  Every runner builds from scratch at `D:\a\pace\pace`, so neither half
   holds. Change either — a persistent Windows runner, or a checkout somewhere else
   — and this stops being true.
 

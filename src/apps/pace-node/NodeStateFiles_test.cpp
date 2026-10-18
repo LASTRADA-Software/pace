@@ -717,7 +717,7 @@ TEST_CASE("A state file an elevated operator writes stays readable by the servic
 
 TEST_CASE("A state file the node cannot open names the command that hands it to the service", "[node][state]")
 {
-    auto const file = std::filesystem::path { "C:/ProgramData/fastcache-node/cluster/roster" };
+    auto const file = std::filesystem::path { "C:/ProgramData/pace-node/cluster/roster" };
     auto const hint = StateFileUnreadableHint(file);
     // Outside the CHECK: MSVC 19.44 re-reads a raw string's backslash as an escape when the macro
     // stringizes its argument (C4129 on `\<`, an error under /WX); 19.51 does not.
@@ -1403,7 +1403,7 @@ namespace
 {
 
 /// The node's service account as an administrator's trusted-owner set names it by default.
-constexpr std::string_view NodeServiceAccount = "NT SERVICE\\FastCacheCompileNode";
+constexpr std::string_view NodeServiceAccount = "NT SERVICE\\pace-node";
 
 /// A SID this case gives the node's service account: a PER-SERVICE SID, five sub-authorities.
 constexpr std::string_view NodeServiceSid = "S-1-5-80-1111111111-2222222222-3333333333-4444444444-5555555555";
@@ -1758,7 +1758,7 @@ TEST_CASE("The trusted-owner set names the service --service-name names for a ve
     // so an administrator trusts no account beyond its own and the administrators'.
     CHECK(OwnStateAccountIds(JudgingCaller::Administrator, StateUse::Inspects, cfg, &ScriptedAccountId).empty());
 
-    cfg.serviceName = "FastCacheCompileNode";
+    cfg.serviceName = "pace-node";
     CHECK(OwnStateAccountIds(JudgingCaller::Administrator, StateUse::Inspects, cfg, &ScriptedAccountId)
           == std::vector<std::string> { std::string { NodeServiceSid } });
     // Every other pair trusts nothing: a start writes, and anyone else trusts no account it is not.
@@ -1777,7 +1777,7 @@ TEST_CASE("The trusted-owner set names the service --service-name names for a ve
 
     // Every (caller, use) pair has its row, with a reason, and only one names an account.
     REQUIRE(OwnStateAccountRows().size() == EnumeratorCount<JudgingCaller> * EnumeratorCount<StateUse>);
-    cfg.serviceName = "FastCacheCompileNode";
+    cfg.serviceName = "pace-node";
     for (auto const& row: OwnStateAccountRows())
     {
         CAPTURE(static_cast<int>(row.caller), static_cast<int>(row.use));

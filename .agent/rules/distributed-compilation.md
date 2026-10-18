@@ -3785,11 +3785,11 @@ the platform's default, machine-wide for a privileged process or a service and p
 otherwise (`DefaultNodeClusterDirectory`). The refusal that guarded a node with nowhere to keep
 a key (`SchedulerNeedsIdentityRefusal`) went with the case. What a PACKAGED registration must
 still get right is WHICH directory: a POSIX service runs as an unprivileged account, so the
-Linux unit's `StateDirectory=fastcache-node` hands it `STATE_DIRECTORY` and a launchd
+Linux unit's `StateDirectory=pace-node` hands it `STATE_DIRECTORY` and a launchd
 registration states the same variable (`ServiceSpec::serviceAccountEnvironment`), or the
 service would take the per-user default in its account's home -- a second identity, or on the
 packaged unit (`ProtectSystem=strict`, home `/`) an unwritable one. The Windows service is
-privileged by its service SID and takes `%ProgramData%\fastcache-node` by itself. A client
+privileged by its service SID and takes `%ProgramData%\pace-node` by itself. A client
 asking for a lease presents a machine ticket instead (*Machine tickets*, below), and a ticket
 never satisfies `ProvenNodeOnly`: a ticketed connection is not sealed.
 

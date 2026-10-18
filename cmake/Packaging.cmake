@@ -6,7 +6,7 @@
 #              registers pace-kv as an auto-start service
 #   - Linux  : TGZ + DEB + RPM — installs both binaries plus the systemd units
 #   - macOS  : TGZ + productbuild (.pkg) — installs both binaries under
-#              /opt/fastcached, puts them on PATH, and offers the launchd
+#              /opt/pace, puts them on PATH, and offers the launchd
 #              registration as installer choices
 #
 # The service-integration assets themselves (units, sysusers.d, tmpfiles.d, the
@@ -122,7 +122,7 @@ elseif(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
     # Same reasoning as Linux, plus a constraint of the generator: CPack always
     # invokes `pkgbuild --install-location /`, so the only way to place a file is
     # to spell its absolute path as a prefix-relative destination. Pointing this
-    # at /opt/fastcached instead would appear to work for the binaries and then
+    # at /opt/pace instead would appear to work for the binaries and then
     # write /etc/paths.d and /Library/LaunchDaemons straight onto the *build
     # host*, since an absolute install(DESTINATION) escapes the staging tree.
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")
@@ -435,9 +435,9 @@ if(WIN32)
     #   component | display name | description | required
     set(PACE_WINDOWS_FEATURES
         "Cli|Command-line client|pacectl, and the files every other feature shares.|REQUIRED"
-        "Daemon|pace-kv cache daemon|The memcached- and Redis-compatible cache, registered as the FastCached service.|"
+        "Daemon|pace-kv cache daemon|The memcached- and Redis-compatible cache, registered as the pace-kv service.|"
         "Launcher|pace-cc compiler launcher|The launcher a build system runs in place of the compiler.|"
-        "Node|pace-node|The compile worker and fleet node, registered as the FastCacheCompileNode service.|"
+        "Node|pace-node|The compile worker and fleet node, registered as the pace-node service.|"
     )
     foreach(_fcFeature IN LISTS PACE_WINDOWS_FEATURES)
         string(REPLACE "|" ";" _fcFields "${_fcFeature}")
@@ -472,7 +472,7 @@ if(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
     # click-through install gets the per-user agent rather than a root daemon.
     cpack_add_component(LaunchDaemon
         DISPLAY_NAME "Start at boot, system-wide"
-        DESCRIPTION  "Run pace-kv as a dedicated service account from boot, shared by every user. Creates the _fastcached account. Takes precedence over the per-user option above."
+        DESCRIPTION  "Run pace-kv as a dedicated service account from boot, shared by every user. Creates the _pace-kv account. Takes precedence over the per-user option above."
         DISABLED
     )
 endif()

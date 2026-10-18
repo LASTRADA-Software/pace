@@ -26,9 +26,9 @@ namespace
 
 /// An absolute path on this host: a rule's program must be one.
 #if defined(_WIN32)
-constexpr auto ProbeProgram = std::string_view { "C:/Program Files/fastcached/bin/probe.exe" };
+constexpr auto ProbeProgram = std::string_view { "C:/Program Files/Pace/bin/probe.exe" };
 #else
-constexpr auto ProbeProgram = std::string_view { "/opt/fastcached/bin/probe" };
+constexpr auto ProbeProgram = std::string_view { "/opt/pace/bin/probe" };
 #endif
 
 /// A rule of @p group on TCP @p port, as a planner would build it.
@@ -52,12 +52,12 @@ constexpr auto LiveReadVariable = std::string_view { "PACE_FIREWALL_LIVE_READ" }
 
 TEST_CASE("A firewall rule and its group are named after the service and the surface", "[platform][firewall]")
 {
-    CHECK(Pace::FirewallGroupFor("FastCacheCompileNode") == "Pace: FastCacheCompileNode");
-    CHECK(Pace::FirewallRuleName("FastCacheCompileNode",
+    CHECK(Pace::FirewallGroupFor("pace-node") == "Pace: pace-node");
+    CHECK(Pace::FirewallRuleName("pace-node",
                                       "discovery-beacon",
                                       FirewallProtocol::Udp,
                                       FirewallLocalPort { .kind = FirewallPortKind::Fixed, .number = 6681 })
-          == "FastCacheCompileNode discovery-beacon udp/6681");
+          == "pace-node discovery-beacon udp/6681");
     CHECK(Pace::FirewallProtocolRowOf(FirewallProtocol::Tcp).ianaNumber == 6);
     CHECK(Pace::FirewallProtocolRowOf(FirewallProtocol::Udp).ianaNumber == 17);
 }
@@ -68,8 +68,8 @@ TEST_CASE("A rule admitting any local port says so in its name and gives the fir
     // "any" in the name rather than a 0: a rule list reading `udp/0` looks like a port that
     // admits nothing, which is the opposite of what the rule does.
     auto const any = FirewallLocalPort { .kind = FirewallPortKind::Any, .number = 0 };
-    CHECK(Pace::FirewallRuleName("FastCacheCompileNode", "discovery-reply", FirewallProtocol::Udp, any)
-          == "FastCacheCompileNode discovery-reply udp/any");
+    CHECK(Pace::FirewallRuleName("pace-node", "discovery-reply", FirewallProtocol::Udp, any)
+          == "pace-node discovery-reply udp/any");
 
     // What `INetFwRule::put_LocalPorts` is given: `*` is the Windows Firewall's every-port value
     // (a new UDP rule reads it back before any port is set, and "any" is refused as invalid

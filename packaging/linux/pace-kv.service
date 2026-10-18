@@ -20,7 +20,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/pace-kv --config=/etc/fastcached/fastcached.yaml
+ExecStart=/usr/bin/pace-kv --config=/etc/pace/pace-kv.yaml
 
 # SIGHUP re-reads the config file. Note that only a subset of settings is
 # reloadable — bind/port/listeners/storage*/threads are validated as immutable
@@ -51,7 +51,7 @@ RestartPreventExitStatus=78
 User=pace-kv
 Group=pace-kv
 
-# Creates and owns /var/lib/fastcached (0750). This is where the example
+# Creates and owns /var/lib/pace-kv (0750). This is where the example
 # config points `storage_path`, and it survives restarts but is cleaned up on
 # package purge.
 StateDirectory=pace-kv

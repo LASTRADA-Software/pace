@@ -85,7 +85,7 @@ TEST_CASE("FileTrust: a secret file's verdict follows what the platform reported
         // The half that keeps this from becoming an alarm nobody reads.
         // `InlineCredentialRejection` tells operators to use "mode 0640, readable
         // by the account the service runs as", and the macOS package ships
-        // `0640 root:_fastcached`. A rule condemning every group-readable file
+        // `0640 root:_pace-kv`. A rule condemning every group-readable file
         // would condemn the documented arrangement.
         CHECK(ClassifySecretFile({ .determined = true, .readableByGroup = true, .administrativelyOwned = true })
               == SecretExposure::None);
@@ -122,7 +122,7 @@ TEST_CASE("FileTrust: every exposure names its own remedy", "[platform][filetrus
     // An alarm nobody can act on is the one that gets ignored, so each outcome
     // has to say what to DO -- and each remedy has to differ, or two different
     // mistakes arrive as one sentence describing neither.
-    std::filesystem::path const path { "/etc/fastcached/fastcached.yaml" };
+    std::filesystem::path const path { "/etc/pace/pace-kv.yaml" };
 
     auto const world = SecretExposureHint(path, SecretExposure::AnyLocalAccount);
     auto const group = SecretExposureHint(path, SecretExposure::OwnersOwnGroup);
@@ -160,7 +160,7 @@ TEST_CASE("FileTrust: a secret one account holds is restricted to that account, 
     // The remedy for an identity key. `SecretExposureHint`'s Windows line names no owner, so a
     // node run by a user that followed it could no longer read its own key: the remedy has to
     // set the list `SecureSecretFileForOwner` sets, and name the file.
-    std::filesystem::path const path { "/var/lib/fastcache-node/node-key" };
+    std::filesystem::path const path { "/var/lib/pace-node/node-key" };
 
     for (auto const exposure: { SecretExposure::AnyLocalAccount, SecretExposure::OwnersOwnGroup })
     {
@@ -511,7 +511,7 @@ TEST_CASE("FileTrust: a secret created owner-only is protected from its first in
 TEST_CASE("FileTrust: a directory other accounts may add to is not its owner's alone", "[platform][filetrust][secret]")
 {
     // `BUILTIN\Users` add-file and add-subdirectory: the list measured on this project's own
-    // `%ProgramData%\fastcache-node`, and exactly the directory a planted key would be put in.
+    // `%ProgramData%\pace-node`, and exactly the directory a planted key would be put in.
     Pace::Testing::ScratchDirectory const scratch { "fastcached-directory-writers" };
     auto const directory = scratch / "state";
     std::filesystem::create_directories(directory);
@@ -535,7 +535,7 @@ TEST_CASE("FileTrust: a directory other accounts may add to is not its owner's a
 TEST_CASE("FileTrust: the printed directory remedy, run as printed, restricts a directory that INHERITS its grants",
           "[platform][filetrust][secret]")
 {
-    // The live shape: `C:\ProgramData\fastcache-node\cluster` holds no grant of its own and
+    // The live shape: `C:\ProgramData\pace-node\cluster` holds no grant of its own and
     // inherits `%ProgramData%`'s -- `Users` read and execute, and `Users` create-files and
     // create-folders on the containers. One `icacls /inheritance:d /remove:g` reported success
     // there and removed nothing (the removal ran before the conversion made the entries

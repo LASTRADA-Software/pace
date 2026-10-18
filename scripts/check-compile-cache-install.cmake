@@ -43,7 +43,7 @@ cmake_minimum_required(VERSION 3.28)
 # is simply nothing here to compare against.
 set(PaceInstallOracle
     "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc"
+    "Darwin|arm64|Darwin-arm64|opt/pace/bin/pace-cc"
 )
 
 # The version the mirror publishes. Deliberately not a version that exists, so a

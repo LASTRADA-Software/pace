@@ -102,7 +102,7 @@ echo "$JOBS" | while IFS='|' read -r job_binary job_label; do
 done
 
 # --- PATH integration ----------------------------------------------------
-rm -f /etc/paths.d/fastcached || true
+rm -f /etc/paths.d/pace || true
 # Only remove the symlinks if they still point into our prefix: someone may have
 # replaced them with a Homebrew install, and deleting that would be rude.
 for tool in @PACE_MACOS_LINKED_TOOLS@; do

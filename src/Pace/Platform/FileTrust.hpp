@@ -20,8 +20,8 @@ namespace Pace
 /// Is this process running with the rights the machine-wide daemon has?
 ///
 /// The question that decides whether a machine-wide configuration is *this*
-/// process's business at all. A file at `/etc/fastcached` or
-/// `%ProgramData%\fastcached` describes the system service — its cache lives
+/// process's business at all. A file at `/etc/pace` or
+/// `%ProgramData%\pace` describes the system service — its cache lives
 /// where only the service account can write — so a per-user instance that
 /// adopted it would be configured for a daemon it is not: pointed at a state
 /// directory it cannot open, or at a port the real daemon already holds.
@@ -95,7 +95,7 @@ enum class SecretExposure : std::uint8_t
     /// with -- so the group grant is the file owner's own, over accounts they do
     /// not answer for.
     ///
-    /// POSIX only, and the distinction is load-bearing: `0640 root:_fastcached`
+    /// POSIX only, and the distinction is load-bearing: `0640 root:_pace-kv`
     /// is how this project TELLS operators to hold a secret, and the macOS
     /// package ships exactly that, so a rule that condemned every group-readable
     /// file would condemn the documented arrangement. See
@@ -174,7 +174,7 @@ struct SecretFileFacts
     // A group grant is an exposure only when the owner is not administrative.
     // Owned by root it is an ADMINISTRATOR delegating read to a service account,
     // which is what `InlineCredentialRejection` instructs in so many words and
-    // what the macOS package ships as `0640 root:_fastcached`; owned by a user it
+    // what the macOS package ships as `0640 root:_pace-kv`; owned by a user it
     // is that user's own group, over accounts they do not answer for.
     if (facts.readableByGroup && !facts.administrativelyOwned)
         return SecretExposure::OwnersOwnGroup;
@@ -197,7 +197,7 @@ struct SecretFileFacts
 /// root", and the second clause is what stops this becoming an alarm nobody
 /// reads.** `InlineCredentialRejection` tells operators in so many words to put
 /// the secret in a file of "mode 0640, readable by the account the service runs
-/// as", and the macOS package ships `0640 root:_fastcached` for exactly that
+/// as", and the macOS package ships `0640 root:_pace-kv` for exactly that
 /// reason. A rule refusing every group-readable file would refuse the documented
 /// arrangement, which is the failure #384's own acceptance criteria are built
 /// around. Owned by root, a group grant is an administrator delegating read to a
@@ -207,13 +207,13 @@ struct SecretFileFacts
 ///
 /// **What it therefore does NOT catch, stated rather than implied:** `0640
 /// root:staff` passes, because nothing here can know that `staff` is broad while
-/// `_fastcached` is not. Group membership is a policy question about a particular
+/// `_pace-kv` is not. Group membership is a policy question about a particular
 /// machine; a predicate that guessed would be wrong in whichever direction the
 /// machine disagreed with.
 ///
 /// **On Windows this fires on the PACKAGED machine-wide config today, and that is
 /// a true positive rather than the check being wrong.**
-/// `packaging/windows/service-actions.xml` locks `%ProgramData%\fastcached` with an
+/// `packaging/windows/service-actions.xml` locks `%ProgramData%\pace` with an
 /// access list granting `BUILTIN\Users` `FILE_GENERIC_READ`, inherited by files --
 /// deliberately, because the service's virtual account has to read its own
 /// configuration. So the file `InlineCredentialRejection` tells operators to put
@@ -311,7 +311,7 @@ struct SecretFileFacts
 ///
 /// On POSIX it removes every group and other bit, leaving the owner's. A package
 /// that wants to delegate read to a service account chowns and chmods afterwards
-/// -- which is what the macOS postinstall does to reach `0640 root:_fastcached`,
+/// -- which is what the macOS postinstall does to reach `0640 root:_pace-kv`,
 /// and it stays that package's decision rather than this function guessing a
 /// group name.
 ///

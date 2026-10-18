@@ -1379,7 +1379,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "twice in one term after a restart, which is two\n"
                            "leaders; a node that lost it is a new identity.\n"
                            "Unless given: the machine's (%ProgramData%, /var/lib or\n"
-                           "/Library/Application Support, /fastcache-node) for a\n"
+                           "/Library/Application Support, /pace-node) for a\n"
                            "privileged process or a service, the account's own\n"
                            "(%LOCALAPPDATA% or ~/.local/state) otherwise.",
             .yamlKey = "cluster_dir",
@@ -1494,7 +1494,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "beacon reaches; repeatable. A name or name:port (the\n"
                            "node port, 6674, when none). Tried after the fleet\n"
                            "this node remembers and before DNS SRV\n"
-                           "_fastcache._tcp.<domain>. Asked only while this node\n"
+                           "_pace._tcp.<domain>. Asked only while this node\n"
                            "is alone; a fleet it finds is joined by approval.",
             .yamlKey = "fleet_seed",
             .same = FieldEq<&NodeConfig::fleetSeeds>(),
@@ -1938,7 +1938,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
           .operand = "=<name>",
           .apply = AssignFrom<&NodeConfig::serviceName, ParseText>(),
           .description = "name the supervisor keys the registration on\n"
-                         "(default FastCacheCompileNode). Distinct from the\n"
+                         "(default pace-node). Distinct from the\n"
                          "daemon's by default: a machine may run both, and one\n"
                          "name would make installing either displace the other." },
         { .primary = "--service-scope",
@@ -2774,7 +2774,7 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
                          // creates it -- rather than silently succeeding as root.
                          // `--service-scope=user` works today and is the per-developer
                          // case anyway: a user agent runs as the invoking account.
-                         .serviceAccount = "fastcache-node",
+                         .serviceAccount = "pace-node",
                          .ownedPaths = std::move(owned),
                          .serviceAccountEnvironment = std::move(accountEnvironment),
                          .inlineCredential = cfg.requirePass.empty() ? InlineCredential::Absent : InlineCredential::Present,

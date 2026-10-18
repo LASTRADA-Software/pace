@@ -143,7 +143,7 @@ void DirectedBroadcastDestinations::Refresh() const
                      "discovery: no interface to beacon on, so no other machine on any link hears this node until "
                      "one comes up (asked again every {}s). Passed over: {}. To beacon somewhere anyway, name it: "
                      "--discovery=<address>:{}; or, for a machine with no broadcast link, reach the fleet by "
-                     "--fleet-seed=<host[:port]> or a DNS SRV record, _fastcache._tcp.<domain>",
+                     "--fleet-seed=<host[:port]> or a DNS SRV record, _pace._tcp.<domain>",
                      std::chrono::duration_cast<std::chrono::seconds>(_refreshInterval).count(),
                      PassedOver(interfaces),
                      _port);

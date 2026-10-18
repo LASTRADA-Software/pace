@@ -73,7 +73,7 @@ TEST_CASE("SecretProvenance: the daemon's subject list is what the gate lets thr
     // typed `--requirepass=` -- asking for no authentication -- from one who typed
     // nothing at all; the bit comes from the parse (`CliResult::requirePassExplicit`)
     // and is passed as the fact it is.
-    std::filesystem::path const configFile { "/etc/fastcached/fastcached.yaml" };
+    std::filesystem::path const configFile { "/etc/pace/pace-kv.yaml" };
 
     SECTION("no secret in force")
     {
@@ -341,8 +341,8 @@ TEST_CASE("DaemonSecretFiles: a path-reached secret is not provenance-gated", "[
     // gate would silently skip every argv-named key, which is a change no test
     // asserting merely that "some warning arrives" could see.
     Config cfg;
-    cfg.tlsKeyPath = "/etc/fastcached/server.key";
-    cfg.tlsCertPath = "/etc/fastcached/server.crt";
+    cfg.tlsKeyPath = "/etc/pace/server.key";
+    cfg.tlsCertPath = "/etc/pace/server.crt";
 
     SECTION("named in argv, with no configuration file at all")
     {
@@ -377,7 +377,7 @@ TEST_CASE("DaemonSecretFiles: a path-reached secret is not provenance-gated", "[
         // It is the file an operator most often has open, and the order is the
         // caller's rather than the filesystem's.
         cfg.requirePass = "hunter2";
-        cfg.configPath = "/etc/fastcached/fastcached.yaml";
+        cfg.configPath = "/etc/pace/pace-kv.yaml";
         CHECK(DaemonSecretFiles(cfg, false)
               == std::vector<std::filesystem::path> { std::filesystem::path { cfg.configPath }, cfg.tlsKeyPath });
     }

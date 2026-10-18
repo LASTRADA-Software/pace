@@ -23,8 +23,8 @@ python bench/pace_kv_bench.py --base v1.0 --candidate my-feature-branch
 
 # Skip building; compare two binaries you already have:
 python bench/pace_kv_bench.py --no-build \
-    --base-binary path/to/base/fastcached \
-    --candidate-binary path/to/candidate/fastcached
+    --base-binary path/to/base/pace-kv \
+    --candidate-binary path/to/candidate/pace-kv
 
 # Charts (PNG + inline Sixel where supported):
 python -m pip install -r bench/requirements-plots.txt
@@ -39,7 +39,7 @@ python bench/pace_kv_bench.py --no-build --candidate-binary <pace-kv> \
 `--vs redis,memcached` runs the candidate pace-kv and each available real
 server over the same scenarios and reports throughput per target plus
 `pace-kv vs best` (>1× means pace-kv wins). Real servers are in-memory, so
-only the memory scenarios run against them; disk scenarios stay fastcached-only.
+only the memory scenarios run against them; disk scenarios stay pace-kv-only.
 
 Baseline discovery (optional; each is skipped with a notice if absent):
 - **redis**: a native `redis-server` on `PATH` (or `--redis-server <path>`),

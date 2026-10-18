@@ -2767,7 +2767,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DPACE_TABLE=src/Pace/Config/CliParser.cpp"
-        "-DPACE_REFERENCE=packaging/config/fastcached.yaml"
+        "-DPACE_REFERENCE=packaging/config/pace-kv.yaml"
         "-DPACE_LABEL=pace-kv"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-config-reference.cmake"
 )
@@ -4227,8 +4227,8 @@ set_tests_properties("sccache-backend-caveat-selftest" PROPERTIES
 # UserName it cannot resolve, bootstraps the job, and simply never spawns it -- so
 # the install-time refusal in ServiceControl.cpp is the only thing standing between
 # an operator and a service that reports installed and never runs. Issue #87 was the
-# other half of that refusal missing: `pace-node` named `fastcache-node`
-# and the package created only `_fastcached`.
+# other half of that refusal missing: `pace-node` named `pace-node`
+# and the package created only `_pace-kv`.
 #
 # Registered here rather than left to the macOS packaging job precisely because it
 # is macOS-only in effect: a check only one platform can run reports after the
@@ -4272,7 +4272,7 @@ set_tests_properties("service-accounts" PROPERTIES
 #
 # It also reads where the node's DISK TIER can live: the unit's `CacheDirectory=`,
 # judged against every `cache_dir` the docs and the shipped reference configuration
-# cite. The unit shipped without one while the docs named /var/cache/fastcache-node,
+# cite. The unit shipped without one while the docs named /var/cache/pace-node,
 # a path ProtectSystem=strict left read-only, and the state directory -- the one
 # persistent directory the service could write -- is refused by the node as a
 # cache_dir, so following the docs gave no disk tier and the obvious workaround gave
@@ -4584,7 +4584,7 @@ set_tests_properties("compile-cache-daemon-staging" PROPERTIES
 #
 # The staging test above is green whether or not that is explained: its stand-in exits 3
 # with nothing on either stream, so it reaches this very branch and asserts only that a
-# daemon was MENTIONED. `_fc_auto_start_fastcached` spawned under `OUTPUT_QUIET
+# daemon was MENTIONED. `_fc_auto_start_pace_kv` spawned under `OUTPUT_QUIET
 # ERROR_QUIET` and reported `(127)` -- a number that reads as *not found* for a binary
 # the module has just staged and knows the path of, while the sentence that explains it
 # sat on the child's stderr.
@@ -5228,7 +5228,7 @@ endif()
 # PACE_AUTO_START spawn+probe (issue #90), the real-binary counterpart to
 # compile-cache-daemon-staging above. That test proves the staging plumbing
 # with fake --version-only stand-ins; a fake has no socket to accept on, so it
-# cannot prove _fc_auto_start_fastcached actually starts something that
+# cannot prove _fc_auto_start_pace_kv actually starts something that
 # answers a real connection. This drives the real, freshly built pace-kv
 # and pace-cc instead: a configure with no daemon reachable spawns one, a
 # real translation unit compiled through the configured launcher reports a

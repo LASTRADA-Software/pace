@@ -34,11 +34,11 @@ readable and silently ignored. Every rule below has already been one of them.
     other system services, to an unprivileged cache account.
   - **An empty `serviceAccount` means root, so a worker names one.** A system-scope
     launchd job with no `UserName` runs as root, and `pace-node`
-    compiles input that arrived over the network. Naming `fastcache-node` -- the
+    compiles input that arrived over the network. Naming `pace-node` -- the
     account the Linux unit already uses -- puts the existing "that account does not
     exist" guard in the way, so a macOS system-scope install refuses rather than
     silently succeeding with root privileges. It is deliberately not the daemon's
-    `_fastcached`: one account would let a compromised compile rewrite every cached
+    `_pace-kv`: one account would let a compromised compile rewrite every cached
     object. **The package creates it** (issue #87), from the *Runtime* component and
     not the LaunchDaemon one -- which launchd choice an operator made for
     `pace-kv` says nothing about whether they will run a worker, and the
@@ -53,7 +53,7 @@ readable and silently ignored. Every rule below has already been one of them.
     supervisor-must-survive-its-own-parser rule below, produced by the installer
     itself -- the job registered, reported success, and answered `unrecognised
     argument` at every boot. On a packaged macOS system it was worse than that: the
-    daemon's config is `0640 root:_fastcached`, so `ServiceAccountReadDenial`
+    daemon's config is `0640 root:_pace-kv`, so `ServiceAccountReadDenial`
     refused the worker install for a reason that had nothing to do with the worker.
     `WithScopeDefaults` was private to the `__APPLE__` block for all of this, which
     is exactly why no test saw it; it is declared in the header now, like
@@ -67,7 +67,7 @@ readable and silently ignored. Every rule below has already been one of them.
     and the one directory the node unit declared persistently, its state directory, is
     not a `cache_dir`: the node starts beside no entry there it has no row for ("this
     build keeps no entry by that name"). The unit shipped with no `CacheDirectory=`
-    while the docs cited `cache_dir: /var/cache/fastcache-node`, so following them gave
+    while the docs cited `cache_dir: /var/cache/pace-node`, so following them gave
     a store the service could not open and the obvious workaround, a directory inside
     the state directory, gave a node that refused to start -- found installing 0.5.0 on
     a laptop, nowhere else. `ctest -R node-working-directory` judges every `cache_dir`
@@ -116,7 +116,7 @@ readable and silently ignored. Every rule below has already been one of them.
     one; neither has any use for the local Administrators group. What the daemon can no
     longer do is WRITE its configuration, which is the point: a service that cannot
     rewrite its own configuration cannot be made to load a different one. How it READS
-    it has moved -- this used to say the `%ProgramData%\fastcached` access list grants
+    it has moved -- this used to say the `%ProgramData%\pace` access list grants
     `BUILTIN\Users` read and a virtual account is an Authenticated User, which was true
     and was also why `requirepass:` in that file was readable by every local account
     (#741). The seeded config carries a protected list of its own naming
@@ -716,7 +716,7 @@ readable and silently ignored. Every rule below has already been one of them.
     the saved state already deleted and every exact restore reads a missing key and does nothing
     (#1629). A commit action runs only after the whole script succeeded and never in a rollback.
     Step 11 of `msi-custom-action-commands` derives the actions that delete the key from their
-    command lines -- those spelling `reg.exe delete HKLM\SOFTWARE\fastcached\InstallerRollback`
+    command lines -- those spelling `reg.exe delete HKLM\SOFTWARE\Pace\InstallerRollback`
     on the whole key, the one spelling the fragment uses -- refuses a deferred one that is not a
     stated `$DeferredStateDeleters` row, and refuses to pass unless a SCHEDULED commit action is
     among them. It fails OPEN for a deleter spelled any other way (`Remove-Item`,
@@ -764,7 +764,7 @@ readable and silently ignored. Every rule below has already been one of them.
     `Uninstall\[WIX_UPGRADE_DETECTED]`, which is empty outside an upgrade, so a repair, a feature
     change or an uninstall of a custom root resolved the DEFAULT root. CI run 37456507637
     MEASURED the uninstall: it ran the default root's `pace-kv.exe --uninstall-service`
-    (Info 1721, ignored), removed the files, and left FastCached registered over a deleted
+    (Info 1721, ignored), removed the files, and left pace-kv registered over a deleted
     binary, while the log showed the installed component's own directory (`CM_DP_Daemon.bin`)
     correct. The fix is one property rather than a component directory per action, because a
     feature that a change ADDS, every `Directory="INSTALL_ROOT"`, the PATH entry and
@@ -787,7 +787,7 @@ readable and silently ignored. Every rule below has already been one of them.
   such transaction and needs no property -- a node that serves is refused `--scheduler`, and a
   registration kept as found would replay the one an earlier package wrote and fail at every
   start -- so the OPTIONAL properties are REMEMBERED (the WiX remember-property pattern: saved
-  before `AppSearch`, read back from `HKLM\SOFTWARE\fastcached\Installer`, restored, written
+  before `AppSearch`, read back from `HKLM\SOFTWARE\Pace\Installer`, restored, written
   again by a deferred `PaceRemember*` action on every transaction that registers; a root-feature
   component only OWNS the key, since a feature change reinstalls no component). Three of them:
   `PACE_FIREWALL_ALLOW`, `PACE_FLEET_SEED` and `PACE_FLEET_ID` (passed VERBATIM, a pin
@@ -830,7 +830,7 @@ readable and silently ignored. Every rule below has already been one of them.
   it again, WHATEVER the table decided (`MSIDISABLERMRESTART`'s own page: at `0` "all system
   services that were shut down to install the update are restarted").
   - **What PR 1634's CI MEASURED, and what is INFERRED.** MEASURED: in the upgrade from 0.3.0, with
-    FastCached running, FastCached stopped one second in (InstallValidate time) and was started
+    pace-kv running, pace-kv stopped one second in (InstallValidate time) and was started
     again at 12:12:47, after the table had made it manual and stopped it for the node; it could not
     bind 6674, which the node holds exclusively, terminated three times before msiexec returned, and
     its 30-second recovery restart took 6674 while "an upgrade deselecting pace-kv" had the node
@@ -845,9 +845,9 @@ readable and silently ignored. Every rule below has already been one of them.
     are replaced, and `StopServices` records a rollback start only for a service it found RUNNING.
     Restart Manager's shutdown came first, so `StopServices` found nothing to stop and a failed
     transaction had no rollback start for it (INFERRED from the order; that a failed upgrade still
-    ended with FastCached running under Restart Manager was its end-of-install restart, equally
+    ended with pace-kv running under Restart Manager was its end-of-install restart, equally
     INFERRED). With it disabled, the OLD product's `PaceStopForFiles`, run inside
-    `RemoveExistingProducts`, stops a running FastCached and records the start, which the rollback
+    `RemoveExistingProducts`, stops a running pace-kv and records the start, which the rollback
     replays last, after the node's registration is undone.
   - **`Disable`, not the other two answers.** `DisableShutdown` keeps Restart Manager detecting
     which files are in use, and its documented scope ("a package that has not been authored to use
@@ -903,7 +903,7 @@ readable and silently ignored. Every rule below has already been one of them.
     only a step's LAST transaction relies on its call site -- every step ends in an
     `Assert-ServiceTable` today, and that blind spot fails OPEN.
   - **7036 is a witness only where the host writes it**, MEASURED on two hosts: PR 1634's runner
-    (Windows Server 2025) writes it -- its log printed "The FastCached service entered the running
+    (Windows Server 2025) writes it -- its log printed "The pace-kv service entered the running
     state" -- and this repository's Windows 11 26200 development host wrote none among 50,978 System
     records. The node's own start is the positive control: every transaction whose row leaves the
     node running starts it, and the pass line says `7036 live`, `7036 NOT SEEN` (no 7036 at all was
@@ -930,17 +930,17 @@ readable and silently ignored. Every rule below has already been one of them.
     this package logged "Disabled by MSIRESTARTMANAGERCONTROL property"; 0.3.0's removal, which
     `RemoveExistingProducts` runs as a nested installation with 0.3.0's properties, opened a session
     of its own and "Successfully shut down all applications in the service's session that held files
-    in use" (FastCached); and the OUTER engine, after "Installation completed successfully" and after
+    in use" (pace-kv); and the OUTER engine, after "Installation completed successfully" and after
     every action of this package, commit actions included, logged "Failed while restarting
-    applications. Error: 352", with FastCached started and crashing on 6674 between the two lines.
+    applications. Error: 352", with pace-kv started and crashing on 6674 between the two lines.
     Nothing reaches that session: `RemoveExistingProducts` sets only `ProductCode` and `REMOVE` for
     the removal ("RemoveExistingProducts Action"), the Upgrade table has no column for a property,
     nothing of ours may run before it (Error 2613), moving it before `InstallInitialize` takes the old
     product's removal out of the transaction (#1629), an immediate action runs unelevated under UAC,
     and `DisableAutomaticApplicationShutdown` is a machine POLICY. And it cannot be followed: the
     restart comes after the last action. So it is answered where it lands --
-    `PaceDisableForNode` (`sc config FastCached start= disabled`, `Return="check"`) leaves a
-    start of FastCached beside the node failing at the service control manager, with no process, no
+    `PaceDisableForNode` (`sc config pace-kv start= disabled`, `Return="check"`) leaves a
+    start of pace-kv beside the node failing at the service control manager, with no process, no
     recovery restart and no race for 6674; the 352 is that refused start, and the upgrade still exits
     0 (MEASURED: it did with the crash too). Not the binary: a bind conflict is an I/O arm, `Failed`
     and restarted by design (`ProcessExit`, above), so a start that may not run must not be STARTABLE.
@@ -960,7 +960,7 @@ readable and silently ignored. Every rule below has already been one of them.
       `Return="ignore"`) is left `manual`: the state before PR 1634, harmful only on a later upgrade
       from a package whose removal still has its own Restart Manager, so accepted rather than given a
       start mode the command line would never use.
-    - The RESIDUAL is pace-kv WITHOUT the node: Windows Installer's restart of a FastCached that ran
+    - The RESIDUAL is pace-kv WITHOUT the node: Windows Installer's restart of a pace-kv that ran
       before the upgrade succeeds, so `PACE_START_SERVICE=0` on an upgrade from 0.3.0 leaves it
       running; harmless (nothing else wants its port), and install.md says to stop it first. Every
       package from PR 1634 on disables Restart Manager, so the hazard is an upgrade FROM 0.3.0 or
@@ -1057,7 +1057,7 @@ readable and silently ignored. Every rule below has already been one of them.
   opens for reading* — `Config/DefaultConfigPath.cpp` is the single source of
   truth for that order, for what `--help` lists, and for where `--seed-config`
   writes. Readability, not mere existence, is the test: the macOS system config
-  is mode `0640 root:_fastcached`, so a per-user agent has to fall through it
+  is mode `0640 root:_pace-kv`, so a per-user agent has to fall through it
   rather than fail to start. A discovered file that is absent or unreadable is
   skipped silently; one that parses badly is still fatal, as is a missing file
   named with `--config`. The resolved path goes into a *local* in `main.cpp` and
@@ -1078,7 +1078,7 @@ readable and silently ignored. Every rule below has already been one of them.
     would fail to open that directory and be respawned until the start limit
     tripped — the out-of-the-box restart loop the user unit's header says it
     exists to prevent. Readability is not enough of a filter here: the packaged
-    `/etc/fastcached/fastcached.yaml` is `0644 root:root` and readable by all.
+    `/etc/pace/pace-kv.yaml` is `0644 root:root` and readable by all.
   - **Privileged runs trust-check *every* row, per-user ones included.** `$HOME`
     and `$XDG_CONFIG_HOME` are inputs an unprivileged account often controls and
     sudo does not always reset, so checking only `System` rows would leave
@@ -1092,7 +1092,7 @@ readable and silently ignored. Every rule below has already been one of them.
   any standard account —
   `storage_path:` alone turns that into arbitrary directory creation and file
   writes as SYSTEM. Two halves, and both are needed: the MSI owns
-  `%ProgramData%\fastcached` and gives it a protected access list of its own
+  `%ProgramData%\pace` and gives it a protected access list of its own
   (`PermissionEx`, not `Permission` or `util:PermissionEx` — those take an
   account *name* and are wrong on a non-English Windows), and `DefaultConfigPath`
   refuses a candidate whose directory fails `Platform/FileTrust`. The test there
@@ -1120,9 +1120,9 @@ readable and silently ignored. Every rule below has already been one of them.
   could not secure — which would otherwise be the very shape being defended
   against, authored by the defence.
 - **The directory answers integrity; the FILE has to answer secrecy, and the
-  directory's list cannot.** `%ProgramData%\fastcached` grants `BUILTIN\Users`
+  directory's list cannot.** `%ProgramData%\pace` grants `BUILTIN\Users`
   read *inheritably* and must — the daemon runs as the virtual account
-  `NT SERVICE\FastCached`, an ordinary `BUILTIN\Users` member, and that grant is
+  `NT SERVICE\pace-kv`, an ordinary `BUILTIN\Users` member, and that grant is
   how it reached its own configuration. `OICI` then handed the same read to the one
   file `InlineCredentialRejection` tells operators to move `requirepass:` into,
   *because* a command line is world-readable — so the documented remedy relocated
@@ -1168,7 +1168,7 @@ readable and silently ignored. Every rule below has already been one of them.
   its first start, under its virtual account, into `--cluster-dir` -- so no per-file list
   can be applied beforehand, and the directory's own list is the only place the answer can
   live. `GrantPathAccess` ADDS the account to what the path already has, and what
-  `%ProgramData%\fastcache-node` already has is `BUILTIN\Users:(I)(OI)(CI)(RX)` (read on
+  `%ProgramData%\pace-node` already has is `BUILTIN\Users:(I)(OI)(CI)(RX)` (read on
   a hand-deployed directory, 2026-09-26): the key inherited every local account's read,
   and any local account could impersonate the machine to the fleet. So an owned path
   carries a `PathPrivacy`, and `MakeNodeServiceSpec` marks the state directory `Private`.

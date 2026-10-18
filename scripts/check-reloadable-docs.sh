@@ -28,7 +28,7 @@
 # numerals are a table here rather than a regex that would silently stop matching.
 #
 # A reference configuration's NAME list is covered too, when it states one. The count
-# line may carry the settings after a colon -- `fastcached.yaml` does, the node's states
+# line may carry the settings after a colon -- `pace-kv.yaml` does, the node's states
 # a count alone -- and those names are compared to the table both ways. #1070 made the
 # COUNT derivable and left the five names beside it read by nothing, which is the same
 # unchecked claim one field over.
@@ -320,7 +320,7 @@ readonly CountRead='
 
 # The setting NAMES a reference configuration states beside its count, if it states any.
 #
-# **A count made derivable does not make a NAME list derivable, and `fastcached.yaml`
+# **A count made derivable does not make a NAME list derivable, and `pace-kv.yaml`
 # stated both.** #1070 removed the hand-typed total and left five hand-typed names on the
 # same line, read by nothing -- so renaming a key moved `reload-matrix.md` (checked, both
 # directions) and left this line stale, in the one artefact an operator actually edits.
@@ -664,7 +664,7 @@ check_subject() {
     # **Every subject states a count, and requiring one of the DAEMON was a decision rather
     # than an inherited default** (#1070). The node states one in
     # `packaging/config/pace-node.yaml`. The daemon ships the same kind of
-    # file, `packaging/config/fastcached.yaml`, and it carried a hand-typed list AND a
+    # file, `packaging/config/pace-kv.yaml`, and it carried a hand-typed list AND a
     # hand-typed total -- "The five above are the complete list" -- with nothing deriving
     # either. Exempting the daemon would have left the one artefact an operator actually
     # edits as the one artefact nothing checks, which is the wrong half to skip.
@@ -909,7 +909,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
             "$nodeTable" "$nodeDocs" "$nodeCount" expanded
 
         _artefacts "$at" pace-kv \
-            src/Pace/Config/CliParser.cpp docs/snippets/reload-matrix.md packaging/config/fastcached.yaml \
+            src/Pace/Config/CliParser.cpp docs/snippets/reload-matrix.md packaging/config/pace-kv.yaml \
             "$dTable" "$dDocs" "$dCount" compact
 
         # The tree states its third-party roots (#1370), or every case is refused for
@@ -1037,7 +1037,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     _tree "${work}/nomarkers" "log_level" "log_level" "one"
     sed -i.bak 's/reloadable-for:/describes:/' \
         "${work}/nomarkers/docs/tools/node.md" "${work}/nomarkers/packaging/config/node.yaml" \
-        "${work}/nomarkers/docs/snippets/reload-matrix.md" "${work}/nomarkers/packaging/config/fastcached.yaml"
+        "${work}/nomarkers/docs/snippets/reload-matrix.md" "${work}/nomarkers/packaging/config/pace-kv.yaml"
     find "${work}/nomarkers" -name "*.bak" -delete
     _track "${work}/nomarkers"
     # The MARKER is part of the expected phrase, not decoration: "no tracked file carries"
@@ -1105,19 +1105,19 @@ if [[ "${1:-}" == "--self-test" ]]; then
     # its own rather than being covered incidentally.
     _tree "${work}/namesagree" "log_level" "log_level" "one" \
         "log_level max_memory" "log_level max_memory" "two"
-    _name_settings "${work}/namesagree/packaging/config/fastcached.yaml" "log_level max_memory"
+    _name_settings "${work}/namesagree/packaging/config/pace-kv.yaml" "log_level max_memory"
     _case "a-named-set-that-matches-the-table" 0 "names the same 2 setting(s)" "${work}/namesagree"
 
     _tree "${work}/namesmissing" "log_level" "log_level" "one" \
         "log_level max_memory" "log_level max_memory" "two"
-    _name_settings "${work}/namesmissing/packaging/config/fastcached.yaml" "log_level"
+    _name_settings "${work}/namesmissing/packaging/config/pace-kv.yaml" "log_level"
     _case "a-named-set-omitting-a-reloadable-row" 1 "does not list max_memory" "${work}/namesmissing"
 
     # The operator-facing direction: a file naming a setting the table does NOT reload.
     # An operator edits it, sends SIGHUP, sees no error and believes it took effect.
     _tree "${work}/namesextra" "log_level" "log_level" "one" \
         "log_level max_memory" "log_level max_memory" "two"
-    _name_settings "${work}/namesextra/packaging/config/fastcached.yaml" "log_level max_memory never"
+    _name_settings "${work}/namesextra/packaging/config/pace-kv.yaml" "log_level max_memory never"
     _case "a-named-set-claiming-a-row-the-table-denies" 1 "names never" "${work}/namesextra"
 
     echo "reloadable-docs-selftest: ${ran} case(s) ran, ${failed} failed"

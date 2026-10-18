@@ -82,7 +82,7 @@
          shuts down, at InstallValidate, a service holding a file the transaction
          replaces, and starts it again at the end of the install, WHATEVER this
          table decided. PR 1634's CI measured an upgrade of a machine where
-         FastCached ran START FastCached after the table had made it manual and
+         pace-kv ran START pace-kv after the table had made it manual and
          stopped it for the node: it could not bind the port the node holds,
          crash-looped under its own recovery policy, and a restart landing while
          a later transaction had the node stopped took the port and failed that
@@ -120,10 +120,10 @@
          whose package sets no such property: this package logged "Disabled by
          MSIRESTARTMANAGERCONTROL property", then the nested removal opened a
          session of its own and "Successfully shut down all applications in the
-         service's session that held files in use" (FastCached), and the OUTER
+         service's session that held files in use" (pace-kv), and the OUTER
          engine restarted them after "Installation completed successfully",
          after every action of this package, commit actions included: "Failed
-         while restarting applications. Error: 352", with FastCached started and
+         while restarting applications. Error: 352", with pace-kv started and
          crashing on the port the node holds between the two lines. No property
          of this package reaches a nested removal (RemoveExistingProducts sets
          only ProductCode and REMOVE for it), and nothing of ours may run before
@@ -142,7 +142,7 @@
          every maintenance transaction of a custom root fell back to the default
          one: the uninstall ran the default root's pace-kv.exe
          uninstall-service over a product installed elsewhere (Info 1721,
-         ignored), removed the files, and left FastCached registered and pointing
+         ignored), removed the files, and left pace-kv registered and pointing
          at a deleted binary (CI run 37456507637). Every action spelling
          [INSTALL_ROOT], as its command or as its Directory, ran against that
          wrong root.
@@ -209,7 +209,7 @@
          laptop on public Wi-Fi is everybody on that segment. -->
     <Property Id="PACE_FIREWALL_ALLOW" Secure="yes">
       <RegistrySearch Id="PaceRememberedFirewallAllow" Root="HKLM"
-                      Key="SOFTWARE\fastcached\Installer"
+                      Key="SOFTWARE\Pace\Installer"
                       Name="FirewallAllow" Type="raw" Bitness="always64" />
     </Property>
 
@@ -220,7 +220,7 @@
          fleet by beacon, from the fleet it remembers, and by DNS SRV. -->
     <Property Id="PACE_FLEET_SEED" Secure="yes">
       <RegistrySearch Id="PaceRememberedFleetSeed" Root="HKLM"
-                      Key="SOFTWARE\fastcached\Installer"
+                      Key="SOFTWARE\Pace\Installer"
                       Name="FleetSeed" Type="raw" Bitness="always64" />
     </Property>
 
@@ -233,7 +233,7 @@
          keeping a registration pinned to nothing and remembering the value. -->
     <Property Id="PACE_FLEET_ID" Secure="yes">
       <RegistrySearch Id="PaceRememberedFleetId" Root="HKLM"
-                      Key="SOFTWARE\fastcached\Installer"
+                      Key="SOFTWARE\Pace\Installer"
                       Name="FleetId" Type="raw" Bitness="always64" />
     </Property>
 
@@ -247,17 +247,17 @@
          package build when these were spelled in mixed case. -->
     <Property Id="PACE_FIREWALL_ALLOW_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceRememberedFirewallAllowBefore" Root="HKLM"
-                      Key="SOFTWARE\fastcached\Installer"
+                      Key="SOFTWARE\Pace\Installer"
                       Name="FirewallAllow" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="PACE_FLEET_SEED_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceRememberedFleetSeedBefore" Root="HKLM"
-                      Key="SOFTWARE\fastcached\Installer"
+                      Key="SOFTWARE\Pace\Installer"
                       Name="FleetSeed" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="PACE_FLEET_ID_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceRememberedFleetIdBefore" Root="HKLM"
-                      Key="SOFTWARE\fastcached\Installer"
+                      Key="SOFTWARE\Pace\Installer"
                       Name="FleetId" Type="raw" Bitness="always64" />
     </Property>
 
@@ -308,9 +308,9 @@
          the node's. -->
     <Component Id="PaceRememberedProperties" Directory="INSTALL_ROOT"
                Guid="87BB5EEE-8B9E-4401-9367-C86DB5061258" Bitness="always64">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\Installer"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\Installer"
                      Name="Remembered" Type="integer" Value="1" KeyPath="yes" />
-      <RemoveRegistryKey Root="HKLM" Key="SOFTWARE\fastcached\Installer" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKLM" Key="SOFTWARE\Pace\Installer" Action="removeOnUninstall" />
     </Component>
 
     <!-- The node's discovery reply port, PINNED by the package where a node
@@ -332,12 +332,12 @@
          was measured to return. -->
     <Property Id="PACE_NODE_IMAGEPATH" Secure="yes">
       <RegistrySearch Id="PaceNodeImagePathSearch" Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+                      Key="SYSTEM\CurrentControlSet\Services\pace-node"
                       Name="ImagePath" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="PACE_IMAGEPATH" Secure="yes">
       <RegistrySearch Id="PaceImagePathSearch" Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Services\FastCached"
+                      Key="SYSTEM\CurrentControlSet\Services\pace-kv"
                       Name="ImagePath" Type="raw" Bitness="always64" />
     </Property>
 
@@ -352,12 +352,12 @@
          PR 1634 (the rule says why that is acceptable). -->
     <Property Id="PACE_START_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceStartBeforeSearch" Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Services\FastCached"
+                      Key="SYSTEM\CurrentControlSet\Services\pace-kv"
                       Name="Start" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="PACE_NODE_START_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceNodeStartBeforeSearch" Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+                      Key="SYSTEM\CurrentControlSet\Services\pace-node"
                       Name="Start" Type="raw" Bitness="always64" />
     </Property>
 
@@ -365,12 +365,12 @@
          reads: the registration copies below carry it with the rest. -->
     <Property Id="PACE_DELAYED_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceDelayedBeforeSearch" Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Services\FastCached"
+                      Key="SYSTEM\CurrentControlSet\Services\pace-kv"
                       Name="DelayedAutostart" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="PACE_NODE_DELAYED_BEFORE" Secure="yes">
       <RegistrySearch Id="PaceNodeDelayedBeforeSearch" Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+                      Key="SYSTEM\CurrentControlSet\Services\pace-node"
                       Name="DelayedAutostart" Type="raw" Bitness="always64" />
     </Property>
 
@@ -413,29 +413,29 @@
     <Component Id="PaceRegistrationCopy" Directory="INSTALL_ROOT"
                Guid="5E7A3C1D-2B84-4F69-9A0E-6D1C8B2F4A31" Bitness="always64"
                Condition="PACE_IMAGEPATH" Transitive="yes">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\InstallerRegistrationCopy\pace-kv"
                      Name="ImagePath" Type="string" Value="[PACE_IMAGEPATH]" KeyPath="yes" />
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\InstallerRegistrationCopy\pace-kv"
                      Name="Start" Type="string" Value="[PACE_START_BEFORE]" />
     </Component>
     <Component Id="PaceRegistrationCopyDelayed" Directory="INSTALL_ROOT"
                Guid="7C0B9D24-5E13-4A87-B6F2-1D3E8A9C5F62" Bitness="always64"
                Condition="PACE_DELAYED_BEFORE" Transitive="yes">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\InstallerRegistrationCopy\pace-kv"
                      Name="DelayedAutostart" Type="string" Value="[PACE_DELAYED_BEFORE]" KeyPath="yes" />
     </Component>
     <Component Id="PaceNodeRegistrationCopy" Directory="INSTALL_ROOT"
                Guid="A3D61E8F-9C27-4B05-8E4A-2F7B1C6D9E04" Bitness="always64"
                Condition="PACE_NODE_IMAGEPATH" Transitive="yes">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\InstallerRegistrationCopy\pace-node"
                      Name="ImagePath" Type="string" Value="[PACE_NODE_IMAGEPATH]" KeyPath="yes" />
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\InstallerRegistrationCopy\pace-node"
                      Name="Start" Type="string" Value="[PACE_NODE_START_BEFORE]" />
     </Component>
     <Component Id="PaceNodeRegistrationCopyDelayed" Directory="INSTALL_ROOT"
                Guid="C8F25A73-1E6D-4B9C-A04F-3B7E2D8C6A15" Bitness="always64"
                Condition="PACE_NODE_DELAYED_BEFORE" Transitive="yes">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode"
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Pace\InstallerRegistrationCopy\pace-node"
                      Name="DelayedAutostart" Type="string" Value="[PACE_NODE_DELAYED_BEFORE]" KeyPath="yes" />
     </Component>
 
@@ -450,7 +450,7 @@
          CPACK_WIX_UPGRADE_GUID). Permanent: the operator's config outlives the
          package. -->
     <StandardDirectory Id="CommonAppDataFolder">
-      <Directory Id="PaceProgramData" Name="pace-kv">
+      <Directory Id="PaceProgramData" Name="pace">
         <Component Id="PaceProgramDataDir"
                    Guid="84BE18BD-514D-4D51-B22C-5BCF34255AE0"
                    Permanent="yes">
@@ -625,7 +625,7 @@
          FULL quoted path; a relative one cannot be launched (error 1721). -->
     <CustomAction Id="PaceSeedConfig"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --seed-config=&quot;[INSTALL_ROOT]etc\fastcached.yaml.default&quot;"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --seed-config=&quot;[INSTALL_ROOT]etc\pace-kv.yaml.default&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceNodeSeedConfig"
                   Directory="INSTALL_ROOT"
@@ -656,13 +656,13 @@
          after this starts it again (PaceRestartAfterStop). -->
     <CustomAction Id="PaceStopForNode"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]sc.exe query FastCached | [System64Folder]find.exe &quot;RUNNING&quot; &gt;nul &amp;&amp; [System64Folder]reg.exe add HKLM\SOFTWARE\fastcached\InstallerRollback /v PaceWasRunning /t REG_DWORD /d 1 /f /reg:64 &gt;nul) &amp; [System64Folder]net.exe stop FastCached"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]sc.exe query pace-kv | [System64Folder]find.exe &quot;RUNNING&quot; &gt;nul &amp;&amp; [System64Folder]reg.exe add HKLM\SOFTWARE\Pace\InstallerRollback /v PaceWasRunning /t REG_DWORD /d 1 /f /reg:64 &gt;nul) &amp; [System64Folder]net.exe stop pace-kv"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- And its PROCESS gone, bounded, before the node starts: a service reports
          STOPPED before its process has exited, and the process holds the port
          until it does. An upgrade from 0.3.0 is the case that made this a rule
-         (batch 4 review, B4-2): 0.3.0's uninstall stops FastCached without
+         (batch 4 review, B4-2): 0.3.0's uninstall stops pace-kv without
          waiting, and the node, which binds 6674 exclusively, refused into a
          port the old process still held. Matched by executable path, so a
          pace-kv run by hand from elsewhere is not waited for: the path in
@@ -719,7 +719,7 @@
          port and crash-loop under its recovery policy, racing the node for it
          whenever the node is stopped. One start is certain on an upgrade from a
          package that did not disable Restart Manager (0.3.0 and every build
-         before PR 1634): the old product's removal shuts a running FastCached
+         before PR 1634): the old product's removal shuts a running pace-kv
          down, and Windows Installer restarts it by name after this whole
          transaction has ended, which no action of this package can follow (the
          comment on MSIRESTARTMANAGERCONTROL, MEASURED in PR 1634's CI). A start
@@ -742,16 +742,16 @@
          name nothing registers, both ways. -->
     <CustomAction Id="PaceDisableForNode"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]sc.exe query FastCached &gt;nul 2&gt;&amp;1 &amp; if errorlevel 1060 if not errorlevel 1061 exit 0) &amp; [System64Folder]sc.exe config FastCached start= disabled"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]sc.exe query pace-kv &gt;nul 2&gt;&amp;1 &amp; if errorlevel 1060 if not errorlevel 1061 exit 0) &amp; [System64Folder]sc.exe config pace-kv start= disabled"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <CustomAction Id="PaceStartService"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]sc.exe&quot; start FastCached"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; start pace-kv"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- The state directory is neither a property nor an argument. The node's
-         own default for a service is %ProgramData%\fastcache-node, where it keeps
+         own default for a service is %ProgramData%\pace-node, where it keeps
          the identity key it mints at its first start, and the install secludes
          that resolved directory itself. Spelling it here would bake a value into
          the registration that outranks the configuration file's cluster_dir for
@@ -793,7 +793,7 @@
          running answers that it was not started. -->
     <CustomAction Id="PaceNodeStopForRestart"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]sc.exe query FastCacheCompileNode | [System64Folder]find.exe &quot;RUNNING&quot; &gt;nul &amp;&amp; [System64Folder]reg.exe add HKLM\SOFTWARE\fastcached\InstallerRollback /v NodeWasRunning /t REG_DWORD /d 1 /f /reg:64 &gt;nul) &amp; [System64Folder]net.exe stop FastCacheCompileNode"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]sc.exe query pace-node | [System64Folder]find.exe &quot;RUNNING&quot; &gt;nul &amp;&amp; [System64Folder]reg.exe add HKLM\SOFTWARE\Pace\InstallerRollback /v NodeWasRunning /t REG_DWORD /d 1 /f /reg:64 &gt;nul) &amp; [System64Folder]net.exe stop pace-node"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Started, WAITED FOR, and checked, for the same reason: sc.exe returns
@@ -807,7 +807,7 @@
          once more, as the state word of sc.exe's query, which is not localized. -->
     <CustomAction Id="PaceNodeStartService"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c [System64Folder]net.exe start FastCacheCompileNode &amp;&amp; [System64Folder]sc.exe query FastCacheCompileNode | [System64Folder]find.exe &quot;RUNNING&quot;"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c [System64Folder]net.exe start pace-node &amp;&amp; [System64Folder]sc.exe query pace-node | [System64Folder]find.exe &quot;RUNNING&quot;"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <!-- A registration left behind by an upgrade that DESELECTED its feature.
@@ -826,11 +826,11 @@
          such upgrade. -->
     <CustomAction Id="PaceNodeDeleteLeftover"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]sc.exe&quot; delete FastCacheCompileNode"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; delete pace-node"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceDeleteLeftover"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]sc.exe&quot; delete FastCached"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; delete pace-kv"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- And the leftover registration's FIREWALL GROUP, which the binary's own
@@ -844,11 +844,11 @@
          empty afterwards. -->
     <CustomAction Id="PaceNodeDeleteLeftoverFirewall"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'Pace: FastCacheCompileNode' -ErrorAction SilentlyContinue&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'Pace: pace-node' -ErrorAction SilentlyContinue&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceDeleteLeftoverFirewall"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'Pace: FastCached' -ErrorAction SilentlyContinue&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'Pace: pace-kv' -ErrorAction SilentlyContinue&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Remember what this transaction registers, for the next one's AppSearch:
@@ -876,15 +876,15 @@
          both registrations, so either remembers it. -->
     <CustomAction Id="PaceRememberFirewallAllow"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d &quot;[PACE_FIREWALL_ALLOW]&quot; /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\Pace\Installer /v FirewallAllow /t REG_SZ /d &quot;[PACE_FIREWALL_ALLOW]&quot; /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="PaceRememberFleetSeed"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d &quot;[PACE_FLEET_SEED]&quot; /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\Pace\Installer /v FleetSeed /t REG_SZ /d &quot;[PACE_FLEET_SEED]&quot; /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="PaceRememberFleetId"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d &quot;[PACE_FLEET_ID]&quot; /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\Pace\Installer /v FleetId /t REG_SZ /d &quot;[PACE_FLEET_ID]&quot; /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <!-- What a FAILED transaction puts back, so a step that fails leaves
@@ -923,11 +923,11 @@
                   Execute="rollback" Impersonate="no" Return="ignore" />
 
     <!-- The copy each exact restore reads: the service's whole key, under
-         SOFTWARE\fastcached\InstallerRollback, which every transaction empties
+         SOFTWARE\Pace\InstallerRollback, which every transaction empties
          first (PaceClearRollbackState) so no copy from an earlier one is
          ever restored. Return="ignore": a fresh install has no service to copy.
 
-         A key NO component owns, and not one under SOFTWARE\fastcached\Installer:
+         A key NO component owns, and not one under SOFTWARE\Pace\Installer:
          PaceRememberedProperties removes that key on uninstall, and an
          upgrade's RemoveExistingProducts IS an uninstall of the old product, run
          after the copy below, so the copy taken by an upgrade FROM this build
@@ -948,11 +948,11 @@
          WriteRegistryValues, which wrote the fallback. -->
     <CustomAction Id="PaceStashRegistration"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; copy HKLM\SYSTEM\CurrentControlSet\Services\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; copy HKLM\SYSTEM\CurrentControlSet\Services\pace-kv HKLM\SOFTWARE\Pace\InstallerRollback\pace-kv /s /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceNodeStashRegistration"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; copy HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; copy HKLM\SYSTEM\CurrentControlSet\Services\pace-node HKLM\SOFTWARE\Pace\InstallerRollback\pace-node /s /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- The fallback, an action of its own so it can be conditioned: only in an
@@ -963,11 +963,11 @@
          before the stash must not roll back to that. -->
     <CustomAction Id="PaceStashFromCopy"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCached /reg:64 &gt;nul 2&gt;&amp;1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64)"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\pace-kv /reg:64 &gt;nul 2&gt;&amp;1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\Pace\InstallerRegistrationCopy\pace-kv HKLM\SOFTWARE\Pace\InstallerRollback\pace-kv /s /f /reg:64)"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceNodeStashFromCopy"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode /reg:64 &gt;nul 2&gt;&amp;1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64)"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c ([System64Folder]reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\pace-node /reg:64 &gt;nul 2&gt;&amp;1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\Pace\InstallerRegistrationCopy\pace-node HKLM\SOFTWARE\Pace\InstallerRollback\pace-node /s /f /reg:64)"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- The exact restore: the copied command line through the service manager
@@ -977,11 +977,11 @@
          boot. -->
     <CustomAction Id="PaceRestoreRegistrationExactly"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$k=Get-Item -LiteralPath 'HKLM:\SOFTWARE\fastcached\InstallerRollback\FastCached' -ErrorAction Stop;$s=Get-CimInstance Win32_Service -Filter 'Name=''FastCached''';$null=Invoke-CimMethod -InputObject $s -MethodName Change -Arguments @[\{]PathName=$k.GetValue('ImagePath','','DoNotExpandEnvironmentNames')[\}];$m=@('boot','system','auto','demand','disabled').GetValue($k.GetValue('Start'));if($m -eq 'auto' -and $k.GetValue('DelayedAutostart') -eq 1)[\{]$m='delayed-auto'[\}];&amp; sc.exe config FastCached start= $m&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$k=Get-Item -LiteralPath 'HKLM:\SOFTWARE\Pace\InstallerRollback\pace-kv' -ErrorAction Stop;$s=Get-CimInstance Win32_Service -Filter 'Name=''pace-kv''';$null=Invoke-CimMethod -InputObject $s -MethodName Change -Arguments @[\{]PathName=$k.GetValue('ImagePath','','DoNotExpandEnvironmentNames')[\}];$m=@('boot','system','auto','demand','disabled').GetValue($k.GetValue('Start'));if($m -eq 'auto' -and $k.GetValue('DelayedAutostart') -eq 1)[\{]$m='delayed-auto'[\}];&amp; sc.exe config pace-kv start= $m&quot;"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceNodeRestoreRegistrationExactly"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$k=Get-Item -LiteralPath 'HKLM:\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode' -ErrorAction Stop;$s=Get-CimInstance Win32_Service -Filter 'Name=''FastCacheCompileNode''';$null=Invoke-CimMethod -InputObject $s -MethodName Change -Arguments @[\{]PathName=$k.GetValue('ImagePath','','DoNotExpandEnvironmentNames')[\}];$m=@('boot','system','auto','demand','disabled').GetValue($k.GetValue('Start'));if($m -eq 'auto' -and $k.GetValue('DelayedAutostart') -eq 1)[\{]$m='delayed-auto'[\}];&amp; sc.exe config FastCacheCompileNode start= $m&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$k=Get-Item -LiteralPath 'HKLM:\SOFTWARE\Pace\InstallerRollback\pace-node' -ErrorAction Stop;$s=Get-CimInstance Win32_Service -Filter 'Name=''pace-node''';$null=Invoke-CimMethod -InputObject $s -MethodName Change -Arguments @[\{]PathName=$k.GetValue('ImagePath','','DoNotExpandEnvironmentNames')[\}];$m=@('boot','system','auto','demand','disabled').GetValue($k.GetValue('Start'));if($m -eq 'auto' -and $k.GetValue('DelayedAutostart') -eq 1)[\{]$m='delayed-auto'[\}];&amp; sc.exe config pace-node start= $m&quot;"
                   Execute="rollback" Impersonate="no" Return="ignore" />
 
     <!-- And each service started again if the transaction stopped it while it
@@ -1001,11 +1001,11 @@
          install has no install root yet. -->
     <CustomAction Id="PaceRestartAfterStop"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c [System64Folder]reg.exe query HKLM\SOFTWARE\fastcached\InstallerRollback /v PaceWasRunning /reg:64 &gt;nul 2&gt;&amp;1 &amp;&amp; [System64Folder]sc.exe start FastCached"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c [System64Folder]reg.exe query HKLM\SOFTWARE\Pace\InstallerRollback /v PaceWasRunning /reg:64 &gt;nul 2&gt;&amp;1 &amp;&amp; [System64Folder]sc.exe start pace-kv"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceNodeRestartAfterStop"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c [System64Folder]reg.exe query HKLM\SOFTWARE\fastcached\InstallerRollback /v NodeWasRunning /reg:64 &gt;nul 2&gt;&amp;1 &amp;&amp; [System64Folder]sc.exe start FastCacheCompileNode"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c [System64Folder]reg.exe query HKLM\SOFTWARE\Pace\InstallerRollback /v NodeWasRunning /reg:64 &gt;nul 2&gt;&amp;1 &amp;&amp; [System64Folder]sc.exe start pace-node"
                   Execute="rollback" Impersonate="no" Return="ignore" />
 
     <!-- The rollback state, emptied before the transaction writes any and after
@@ -1016,7 +1016,7 @@
          restarts that find no mark an earlier, interrupted transaction left. -->
     <CustomAction Id="PaceClearRollbackState"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\InstallerRollback /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <!-- And the KEY itself, which no component owns and so nothing else removes: by
          a FAILED transaction, as the last step of its rollback (scheduled before
@@ -1026,11 +1026,11 @@
          install followed by an uninstall left the key on the machine for good. -->
     <CustomAction Id="PaceUndoRollbackState"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\InstallerRollback /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceRemoveRollbackState"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\InstallerRollback /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <!-- The discard is a COMMIT action: it runs only after the whole script
          succeeded and never in a rollback. A deferred one ran inside the
@@ -1038,7 +1038,7 @@
          already deleted and every exact restore found nothing (#1629). -->
     <CustomAction Id="PaceDiscardRollbackState"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\InstallerRollback /f /reg:64"
                   Execute="commit" Impersonate="no" Return="ignore" />
 
     <!-- A late, deliberate failure, for the CI step that proves a failed upgrade
@@ -1058,27 +1058,27 @@
          transaction leaves no value a later one would replay. -->
     <CustomAction Id="PaceRollbackRestoreFirewallAllow"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d &quot;[PACE_FIREWALL_ALLOW_BEFORE]&quot; /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\Pace\Installer /v FirewallAllow /t REG_SZ /d &quot;[PACE_FIREWALL_ALLOW_BEFORE]&quot; /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceRollbackDeleteFirewallAllow"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\Installer /v FirewallAllow /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceRollbackRestoreFleetSeed"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d &quot;[PACE_FLEET_SEED_BEFORE]&quot; /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\Pace\Installer /v FleetSeed /t REG_SZ /d &quot;[PACE_FLEET_SEED_BEFORE]&quot; /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceRollbackDeleteFleetSeed"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\Installer /v FleetSeed /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceRollbackRestoreFleetId"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d &quot;[PACE_FLEET_ID_BEFORE]&quot; /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; add HKLM\SOFTWARE\Pace\Installer /v FleetId /t REG_SZ /d &quot;[PACE_FLEET_ID_BEFORE]&quot; /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="PaceRollbackDeleteFleetId"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\Installer /v FleetId /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\Installer /v FleetId /f /reg:64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
 
     <!-- The advertised endpoint an earlier package of this table remembered,
@@ -1089,7 +1089,7 @@
          successful one would. -->
     <CustomAction Id="PaceForgetNodeAdvertise"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\fastcached\Installer /v NodeAdvertise /f /reg:64"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKLM\SOFTWARE\Pace\Installer /v NodeAdvertise /f /reg:64"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Removal. It runs while the binary still exists (before RemoveFiles),
@@ -1326,10 +1326,10 @@
        fails the package ("Some XML patch fragments did not have matching IDs");
        the authoritative list is the generated _CPack_Packages/win64/WIX/files.wxs. -->
   <CPackWiXFragment Id="CM_CP_Daemon.bin.pace_kv.exe">
-    <ServiceControl Id="PaceStopForFiles" Name="FastCached" Stop="both" Wait="yes" />
+    <ServiceControl Id="PaceStopForFiles" Name="pace-kv" Stop="both" Wait="yes" />
   </CPackWiXFragment>
   <CPackWiXFragment Id="CM_CP_Node.bin.pace_node.exe">
-    <ServiceControl Id="PaceNodeStopForFiles" Name="FastCacheCompileNode" Stop="both" Wait="yes" />
+    <ServiceControl Id="PaceNodeStopForFiles" Name="pace-node" Stop="both" Wait="yes" />
   </CPackWiXFragment>
 
   <!-- The install's bin directory on the system PATH, on the REQUIRED Cli

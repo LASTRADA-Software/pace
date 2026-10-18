@@ -18,12 +18,12 @@ using Pace::Testing::ScopedEnv;
 
 TEST_CASE("ReadEnvironmentVariable: a variable that is set comes back verbatim", "[platform][environment]")
 {
-    ScopedEnv const env { "FC_TEST_ENVIRONMENT", "/opt/fastcached/etc" };
+    ScopedEnv const env { "FC_TEST_ENVIRONMENT", "/opt/pace/etc" };
 
     // value_or, not a dereference after REQUIRE: Catch2's macros are opaque to
     // clang-tidy's optional analysis, and the fallback is a value the call can
     // never legitimately produce, so it doubles as the failure signal.
-    REQUIRE(ReadEnvironmentVariable("FC_TEST_ENVIRONMENT").value_or(std::string {}) == "/opt/fastcached/etc");
+    REQUIRE(ReadEnvironmentVariable("FC_TEST_ENVIRONMENT").value_or(std::string {}) == "/opt/pace/etc");
 }
 
 TEST_CASE("ReadEnvironmentVariable: an unset variable is nullopt, not an empty string", "[platform][environment]")

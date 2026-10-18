@@ -37,7 +37,7 @@
 #
 # The MSIRESTARTMANAGERCONTROL row pins Restart Manager OUT of every transaction ("Disable"): a
 # silent install otherwise restarts, at its end, every service it shut down at InstallValidate,
-# whatever the service table decided. PR 1634's CI measured FastCached started after the table had
+# whatever the service table decided. PR 1634's CI measured pace-kv started after the table had
 # made it manual and stopped it for the node, and then MEASURED whose session did it: the OLD
 # package's removal, nested in the upgrade, while this package's own logged "Disabled". So this row is
 # necessary and not sufficient; the PaceDisableForNode rows below are the other half (see the
@@ -47,7 +47,7 @@
 #
 # The PaceDisableForNode rows pin pace-kv DISABLED beside the node, Return="check": an OLD
 # package's removal inside an upgrade keeps its own Restart Manager session, and PR 1634's CI MEASURED
-# Windows Installer restarting FastCached by name after the whole transaction had ended, onto the
+# Windows Installer restarting pace-kv by name after the whole transaction had ended, onto the
 # port the node holds. Disabled, that start fails at the service control manager with no process.
 # And only a registration that EXISTS: the 1060 guard rows, since pace-kv's own registration is
 # Return="ignore" and a checked disable of an absent service failed the node's whole install
@@ -90,10 +90,10 @@ endif()
 # `[INSTALL_ROOT]`, and a square bracket or a `;` in a list element merges or
 # drops elements in silence. A blank line is a separator and is skipped.
 set(_table [=[
-<Property Id="PACE_NODE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+<Property Id="PACE_NODE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\pace-node"
 <Property Id="PACE_NODE_IMAGEPATH"|</Property>|Name="ImagePath"
 <Property Id="PACE_NODE_IMAGEPATH"|</Property>|Root="HKLM"
-<Property Id="PACE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCached"
+<Property Id="PACE_IMAGEPATH"|</Property>|Key="SYSTEM\CurrentControlSet\Services\pace-kv"
 <Property Id="PACE_IMAGEPATH"|</Property>|Name="ImagePath"
 <Property Id="PACE_IMAGEPATH"|</Property>|Root="HKLM"
 
@@ -109,11 +109,11 @@ set(_table [=[
 
 <Property Id="MSIRESTARTMANAGERCONTROL"|/>|Value="Disable"
 
-<CustomAction Id="PaceNodeDeleteLeftover"|/>|sc.exe" delete FastCacheCompileNode"
+<CustomAction Id="PaceNodeDeleteLeftover"|/>|sc.exe" delete pace-node"
 <CustomAction Id="PaceNodeDeleteLeftover"|/>|Execute="deferred"
 <CustomAction Id="PaceNodeDeleteLeftover"|/>|Impersonate="no"
 <CustomAction Id="PaceNodeDeleteLeftover"|/>|Return="ignore"
-<CustomAction Id="PaceDeleteLeftover"|/>|sc.exe" delete FastCached"
+<CustomAction Id="PaceDeleteLeftover"|/>|sc.exe" delete pace-kv"
 <CustomAction Id="PaceDeleteLeftover"|/>|Execute="deferred"
 <CustomAction Id="PaceDeleteLeftover"|/>|Impersonate="no"
 <CustomAction Id="PaceDeleteLeftover"|/>|Return="ignore"
@@ -130,11 +130,11 @@ set(_table [=[
 <Custom Action="PaceDeleteLeftover"|/>|PACE_REGISTERED_HERE = "1"
 <Custom Action="PaceDeleteLeftover"|/>|!~><
 <Custom Action="PaceDeleteLeftover"|/>|After="PaceNodeDeleteLeftoverFirewall"
-<CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCacheCompileNode'
+<CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: pace-node'
 <CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Execute="deferred"
 <CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Impersonate="no"
 <CustomAction Id="PaceNodeDeleteLeftoverFirewall"|/>|Return="ignore"
-<CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCached'
+<CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: pace-kv'
 <CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Execute="deferred"
 <CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Impersonate="no"
 <CustomAction Id="PaceDeleteLeftoverFirewall"|/>|Return="ignore"
@@ -150,7 +150,7 @@ set(_table [=[
 <CustomAction Id="PaceNodeInstallService"|/>|!PaceNodeAdvertiseArgument
 <CustomAction Id="PaceNodeCheckArguments"|/>|!PaceNodeAdvertiseArgument
 <CustomAction Id="PaceNodeRestoreRegistration"|/>|!PaceNodeAdvertise
-<CustomAction Id="PaceForgetNodeAdvertise"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v NodeAdvertise /f /reg:64"
+<CustomAction Id="PaceForgetNodeAdvertise"|/>|reg.exe" delete HKLM\SOFTWARE\Pace\Installer /v NodeAdvertise /f /reg:64"
 <CustomAction Id="PaceForgetNodeAdvertise"|/>|Execute="deferred"
 <CustomAction Id="PaceForgetNodeAdvertise"|/>|Impersonate="no"
 <CustomAction Id="PaceForgetNodeAdvertise"|/>|Return="ignore"
@@ -162,7 +162,7 @@ set(_table [=[
 <CustomAction Id="PaceNodeInstallService"|/>|!--scheduler
 <CustomAction Id="PaceNodeInstallService"|/>|Return="check"
 <CustomAction Id="PaceNodeStartService"|/>|Return="check"
-<CustomAction Id="PaceNodeStartService"|/>|/c [System64Folder]net.exe start FastCacheCompileNode && [System64Folder]sc.exe query FastCacheCompileNode | [System64Folder]find.exe "RUNNING""
+<CustomAction Id="PaceNodeStartService"|/>|/c [System64Folder]net.exe start pace-node && [System64Folder]sc.exe query pace-node | [System64Folder]find.exe "RUNNING""
 <CustomAction Id="PaceNodeStartService"|/>|!ping.exe
 <CustomAction Id="PaceNodeStartService"|/>|!||
 <CustomAction Id="PaceNodeStartService"|/>|!sc.exe" start
@@ -196,13 +196,13 @@ set(_table [=[
 <SetProperty Action="SetPaceFleetIdArgument"|/>|Condition="PACE_FLEET_ID"
 <SetProperty Action="SetPaceFleetIdArgument"|/>|After="SetPaceFleetSeedArgument"
 
-<Property Id="PACE_FIREWALL_ALLOW"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FIREWALL_ALLOW"|</Property>|Key="SOFTWARE\Pace\Installer"
 <Property Id="PACE_FIREWALL_ALLOW"|</Property>|Name="FirewallAllow"
 <Property Id="PACE_FIREWALL_ALLOW"|</Property>|Root="HKLM"
-<Property Id="PACE_FLEET_SEED"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_SEED"|</Property>|Key="SOFTWARE\Pace\Installer"
 <Property Id="PACE_FLEET_SEED"|</Property>|Name="FleetSeed"
 <Property Id="PACE_FLEET_SEED"|</Property>|Root="HKLM"
-<Property Id="PACE_FLEET_ID"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_ID"|</Property>|Key="SOFTWARE\Pace\Installer"
 <Property Id="PACE_FLEET_ID"|</Property>|Name="FleetId"
 <Property Id="PACE_FLEET_ID"|</Property>|Root="HKLM"
 <SetProperty Action="SaveTypedPaceFirewallAllow"|/>|Value="[PACE_FIREWALL_ALLOW]"
@@ -226,15 +226,15 @@ set(_table [=[
 <Component Id="PaceRememberedProperties"|</Component>|Guid="87BB5EEE-8B9E-4401-9367-C86DB5061258"
 <Component Id="PaceRememberedProperties"|</Component>|Action="removeOnUninstall"
 <ComponentRef Id="PaceRememberedProperties"|/>|ComponentRef
-<CustomAction Id="PaceRememberFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d "[PACE_FIREWALL_ALLOW]" /f /reg:64"
+<CustomAction Id="PaceRememberFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\Pace\Installer /v FirewallAllow /t REG_SZ /d "[PACE_FIREWALL_ALLOW]" /f /reg:64"
 <CustomAction Id="PaceRememberFirewallAllow"|/>|Execute="deferred"
 <CustomAction Id="PaceRememberFirewallAllow"|/>|Impersonate="no"
 <CustomAction Id="PaceRememberFirewallAllow"|/>|Return="check"
-<CustomAction Id="PaceRememberFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d "[PACE_FLEET_SEED]" /f /reg:64"
+<CustomAction Id="PaceRememberFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\Pace\Installer /v FleetSeed /t REG_SZ /d "[PACE_FLEET_SEED]" /f /reg:64"
 <CustomAction Id="PaceRememberFleetSeed"|/>|Execute="deferred"
 <CustomAction Id="PaceRememberFleetSeed"|/>|Impersonate="no"
 <CustomAction Id="PaceRememberFleetSeed"|/>|Return="check"
-<CustomAction Id="PaceRememberFleetId"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d "[PACE_FLEET_ID]" /f /reg:64"
+<CustomAction Id="PaceRememberFleetId"|/>|reg.exe" add HKLM\SOFTWARE\Pace\Installer /v FleetId /t REG_SZ /d "[PACE_FLEET_ID]" /f /reg:64"
 <CustomAction Id="PaceRememberFleetId"|/>|Execute="deferred"
 <CustomAction Id="PaceRememberFleetId"|/>|Impersonate="no"
 <CustomAction Id="PaceRememberFleetId"|/>|Return="check"
@@ -248,32 +248,32 @@ set(_table [=[
 <Custom Action="PaceRememberFleetSeed"|/>|!PACE_SELECTED
 <Custom Action="PaceRememberFleetId"|/>|Condition="PACE_NODE_SELECTED = "1""
 <Custom Action="PaceRememberFleetId"|/>|!PACE_SELECTED
-<Property Id="PACE_FIREWALL_ALLOW_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FIREWALL_ALLOW_BEFORE"|</Property>|Key="SOFTWARE\Pace\Installer"
 <Property Id="PACE_FIREWALL_ALLOW_BEFORE"|</Property>|Name="FirewallAllow"
-<CustomAction Id="PaceRollbackRestoreFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /t REG_SZ /d "[PACE_FIREWALL_ALLOW_BEFORE]" /f /reg:64"
+<CustomAction Id="PaceRollbackRestoreFirewallAllow"|/>|reg.exe" add HKLM\SOFTWARE\Pace\Installer /v FirewallAllow /t REG_SZ /d "[PACE_FIREWALL_ALLOW_BEFORE]" /f /reg:64"
 <CustomAction Id="PaceRollbackRestoreFirewallAllow"|/>|Execute="rollback"
-<CustomAction Id="PaceRollbackDeleteFirewallAllow"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FirewallAllow /f /reg:64"
+<CustomAction Id="PaceRollbackDeleteFirewallAllow"|/>|reg.exe" delete HKLM\SOFTWARE\Pace\Installer /v FirewallAllow /f /reg:64"
 <CustomAction Id="PaceRollbackDeleteFirewallAllow"|/>|Execute="rollback"
 <Custom Action="PaceRollbackRestoreFirewallAllow"|/>|After="PaceNodeInstallService"
 <Custom Action="PaceRollbackRestoreFirewallAllow"|/>|Condition="(PACE_SELECTED = "1" OR PACE_NODE_SELECTED = "1") AND PACE_FIREWALL_ALLOW_BEFORE"
 <Custom Action="PaceRollbackDeleteFirewallAllow"|/>|After="PaceRollbackRestoreFirewallAllow"
 <Custom Action="PaceRollbackDeleteFirewallAllow"|/>|Condition="(PACE_SELECTED = "1" OR PACE_NODE_SELECTED = "1") AND NOT PACE_FIREWALL_ALLOW_BEFORE"
 <Custom Action="PaceRememberFirewallAllow"|/>|After="PaceRollbackDeleteFirewallAllow"
-<Property Id="PACE_FLEET_SEED_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_SEED_BEFORE"|</Property>|Key="SOFTWARE\Pace\Installer"
 <Property Id="PACE_FLEET_SEED_BEFORE"|</Property>|Name="FleetSeed"
-<CustomAction Id="PaceRollbackRestoreFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /t REG_SZ /d "[PACE_FLEET_SEED_BEFORE]" /f /reg:64"
+<CustomAction Id="PaceRollbackRestoreFleetSeed"|/>|reg.exe" add HKLM\SOFTWARE\Pace\Installer /v FleetSeed /t REG_SZ /d "[PACE_FLEET_SEED_BEFORE]" /f /reg:64"
 <CustomAction Id="PaceRollbackRestoreFleetSeed"|/>|Execute="rollback"
-<CustomAction Id="PaceRollbackDeleteFleetSeed"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FleetSeed /f /reg:64"
+<CustomAction Id="PaceRollbackDeleteFleetSeed"|/>|reg.exe" delete HKLM\SOFTWARE\Pace\Installer /v FleetSeed /f /reg:64"
 <CustomAction Id="PaceRollbackDeleteFleetSeed"|/>|Execute="rollback"
 <Custom Action="PaceRollbackRestoreFleetSeed"|/>|Condition="(PACE_NODE_SELECTED = "1") AND PACE_FLEET_SEED_BEFORE"
 <Custom Action="PaceRollbackDeleteFleetSeed"|/>|After="PaceRollbackRestoreFleetSeed"
 <Custom Action="PaceRollbackDeleteFleetSeed"|/>|Condition="(PACE_NODE_SELECTED = "1") AND NOT PACE_FLEET_SEED_BEFORE"
 <Custom Action="PaceRememberFleetSeed"|/>|After="PaceRollbackDeleteFleetSeed"
-<Property Id="PACE_FLEET_ID_BEFORE"|</Property>|Key="SOFTWARE\fastcached\Installer"
+<Property Id="PACE_FLEET_ID_BEFORE"|</Property>|Key="SOFTWARE\Pace\Installer"
 <Property Id="PACE_FLEET_ID_BEFORE"|</Property>|Name="FleetId"
-<CustomAction Id="PaceRollbackRestoreFleetId"|/>|reg.exe" add HKLM\SOFTWARE\fastcached\Installer /v FleetId /t REG_SZ /d "[PACE_FLEET_ID_BEFORE]" /f /reg:64"
+<CustomAction Id="PaceRollbackRestoreFleetId"|/>|reg.exe" add HKLM\SOFTWARE\Pace\Installer /v FleetId /t REG_SZ /d "[PACE_FLEET_ID_BEFORE]" /f /reg:64"
 <CustomAction Id="PaceRollbackRestoreFleetId"|/>|Execute="rollback"
-<CustomAction Id="PaceRollbackDeleteFleetId"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\Installer /v FleetId /f /reg:64"
+<CustomAction Id="PaceRollbackDeleteFleetId"|/>|reg.exe" delete HKLM\SOFTWARE\Pace\Installer /v FleetId /f /reg:64"
 <CustomAction Id="PaceRollbackDeleteFleetId"|/>|Execute="rollback"
 <Custom Action="PaceRollbackRestoreFleetId"|/>|After="PaceRememberFleetSeed"
 <Custom Action="PaceRollbackRestoreFleetId"|/>|Condition="(PACE_NODE_SELECTED = "1") AND PACE_FLEET_ID_BEFORE"
@@ -351,11 +351,11 @@ set(_table [=[
 <Custom Action="PaceAwaitExitForNode"|/>|After="PaceStopForNode"
 <Custom Action="PaceAwaitExitForNode"|/>|Condition="PACE_SELECTED = "1" AND PACE_NODE_SELECTED = "1""
 <CustomAction Id="PaceStopForNode"|/>|/v PaceWasRunning
-<CustomAction Id="PaceStopForNode"|/>|net.exe stop FastCached"
+<CustomAction Id="PaceStopForNode"|/>|net.exe stop pace-kv"
 <CustomAction Id="PaceStopForNode"|/>|Return="ignore"
 <Custom Action="PaceStopForNode"|/>|After="PaceInstallService"
-<CustomAction Id="PaceDisableForNode"|/>|cmd.exe" /c ([System64Folder]sc.exe query FastCached >nul 2>&1 & if errorlevel 1060 if not errorlevel 1061 exit 0) &
-<CustomAction Id="PaceDisableForNode"|/>|& [System64Folder]sc.exe config FastCached start= disabled"
+<CustomAction Id="PaceDisableForNode"|/>|cmd.exe" /c ([System64Folder]sc.exe query pace-kv >nul 2>&1 & if errorlevel 1060 if not errorlevel 1061 exit 0) &
+<CustomAction Id="PaceDisableForNode"|/>|& [System64Folder]sc.exe config pace-kv start= disabled"
 <CustomAction Id="PaceDisableForNode"|/>|Execute="deferred"
 <CustomAction Id="PaceDisableForNode"|/>|Impersonate="no"
 <CustomAction Id="PaceDisableForNode"|/>|Return="check"
@@ -363,11 +363,11 @@ set(_table [=[
 <Custom Action="PaceDisableForNode"|/>|Condition="PACE_SELECTED = "1" AND PACE_NODE_SELECTED = "1""
 <Custom Action="PaceStartService"|/>|After="PaceDisableForNode"
 
-<CustomAction Id="PaceClearRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+<CustomAction Id="PaceClearRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\Pace\InstallerRollback /f /reg:64"
 <CustomAction Id="PaceClearRollbackState"|/>|Execute="deferred"
 <Custom Action="PaceClearRollbackState"|/>|Before="PaceUndoRollbackState"
 <CustomAction Id="PaceClearRollbackState"|/>|Directory="System64Folder"
-<CustomAction Id="PaceDiscardRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\fastcached\InstallerRollback /f /reg:64"
+<CustomAction Id="PaceDiscardRollbackState"|/>|reg.exe" delete HKLM\SOFTWARE\Pace\InstallerRollback /f /reg:64"
 <CustomAction Id="PaceDiscardRollbackState"|/>|Execute="commit"
 <CustomAction Id="PaceDiscardRollbackState"|/>|Directory="System64Folder"
 <CustomAction Id="PaceFailForTest"|/>|Execute="deferred"
@@ -380,44 +380,44 @@ Before="InstallFinalize"|/>|PACE_FAIL_FOR_TEST = "1"
 <Property Id="PACE_FAIL_FOR_TEST"|/>|Secure="yes"
 <Custom Action="PaceDiscardRollbackState"|/>|After="PaceNodeStartService"
 <CustomAction Id="PaceRestartAfterStop"|/>|/v PaceWasRunning
-<CustomAction Id="PaceRestartAfterStop"|/>|sc.exe start FastCached"
+<CustomAction Id="PaceRestartAfterStop"|/>|sc.exe start pace-kv"
 <CustomAction Id="PaceRestartAfterStop"|/>|Execute="rollback"
 <Custom Action="PaceRestartAfterStop"|/>|Before="PaceNodeRestartAfterStop"
 <CustomAction Id="PaceRestartAfterStop"|/>|Directory="System64Folder"
 <Custom Action="PaceRestartAfterStop"|/>|Condition="PACE_SELECTED = "1" AND PACE_NODE_SELECTED = "1""
 <CustomAction Id="PaceNodeRestartAfterStop"|/>|/v NodeWasRunning
-<CustomAction Id="PaceNodeRestartAfterStop"|/>|sc.exe start FastCacheCompileNode"
+<CustomAction Id="PaceNodeRestartAfterStop"|/>|sc.exe start pace-node"
 <CustomAction Id="PaceNodeRestartAfterStop"|/>|Execute="rollback"
 <Custom Action="PaceNodeRestartAfterStop"|/>|Before="PaceAwaitServiceExit"
 <CustomAction Id="PaceNodeRestartAfterStop"|/>|Directory="System64Folder"
 <Custom Action="PaceUndoRollbackState"|/>|Before="PaceRestartAfterStop"
 <Custom Action="PaceNodeRestartAfterStop"|/>|Condition="PACE_NODE_SELECTED = "1""
 <CustomAction Id="PaceNodeStopForRestart"|/>|/v NodeWasRunning
-<CustomAction Id="PaceNodeStopForRestart"|/>|net.exe stop FastCacheCompileNode"
+<CustomAction Id="PaceNodeStopForRestart"|/>|net.exe stop pace-node"
 <CustomAction Id="PaceNodeStopForRestart"|/>|Return="ignore"
 <Custom Action="PaceNodeStopForRestart"|/>|After="PaceForgetNodeAdvertise"
 <Custom Action="PaceNodeStopForRestart"|/>|Condition="PACE_NODE_SELECTED = "1""
 
-<Property Id="PACE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCached"
+<Property Id="PACE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\pace-kv"
 <Property Id="PACE_START_BEFORE"|</Property>|Name="Start"
-<Property Id="PACE_NODE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\FastCacheCompileNode"
+<Property Id="PACE_NODE_START_BEFORE"|</Property>|Key="SYSTEM\CurrentControlSet\Services\pace-node"
 <Property Id="PACE_NODE_START_BEFORE"|</Property>|Name="Start"
 <SetProperty Action="SetPaceStartModeBeforeAuto"|/>|Condition="PACE_START_BEFORE = "#2""
 <SetProperty Action="SetPaceStartModeBeforeManual"|/>|Condition="NOT (PACE_START_BEFORE = "#2")"
 <SetProperty Action="SetPaceNodeStartModeBeforeAuto"|/>|Condition="PACE_NODE_START_BEFORE = "#2""
 <SetProperty Action="SetPaceNodeStartModeBeforeManual"|/>|Condition="NOT (PACE_NODE_START_BEFORE = "#2")"
 
-<CustomAction Id="PaceStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64"
-<CustomAction Id="PaceStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCached /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCached HKLM\SOFTWARE\fastcached\InstallerRollback\FastCached /s /f /reg:64)"
+<CustomAction Id="PaceStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\pace-kv HKLM\SOFTWARE\Pace\InstallerRollback\pace-kv /s /f /reg:64"
+<CustomAction Id="PaceStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\pace-kv /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\Pace\InstallerRegistrationCopy\pace-kv HKLM\SOFTWARE\Pace\InstallerRollback\pace-kv /s /f /reg:64)"
 <CustomAction Id="PaceStashRegistration"|/>|Execute="deferred"
 <Custom Action="PaceStashRegistration"|/>|After="WriteRegistryValues"
 <Custom Action="PaceStashFromCopy"|/>|After="PaceStashRegistration"
 <Custom Action="PaceStashFromCopy"|/>|AND WIX_UPGRADE_DETECTED"
 <CustomAction Id="PaceStashRegistration"|/>|Directory="System64Folder"
 <Custom Action="PaceStashRegistration"|/>|Condition="PACE_SELECTED = "1" AND PACE_IMAGEPATH"
-<CustomAction Id="PaceRestoreRegistrationExactly"|/>|Rollback\FastCached'
+<CustomAction Id="PaceRestoreRegistrationExactly"|/>|Rollback\pace-kv'
 <CustomAction Id="PaceRestoreRegistrationExactly"|/>|Invoke-CimMethod
-<CustomAction Id="PaceRestoreRegistrationExactly"|/>|sc.exe config FastCached start=
+<CustomAction Id="PaceRestoreRegistrationExactly"|/>|sc.exe config pace-kv start=
 <CustomAction Id="PaceRestoreRegistrationExactly"|/>|Execute="rollback"
 <Custom Action="PaceRestoreRegistrationExactly"|/>|After="PaceStashFromCopy"
 <Custom Action="PaceRestoreRegistrationExactly"|/>|Condition="PACE_SELECTED = "1" AND PACE_IMAGEPATH"
@@ -425,8 +425,8 @@ Before="InstallFinalize"|/>|PACE_FAIL_FOR_TEST = "1"
 <CustomAction Id="PaceRestoreRegistration"|/>|Execute="rollback"
 <Custom Action="PaceRestoreRegistration"|/>|After="PaceUndoRegistration"
 <Custom Action="PaceRestoreRegistration"|/>|Condition="PACE_SELECTED = "1" AND PACE_IMAGEPATH"
-<CustomAction Id="PaceNodeStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64"
-<CustomAction Id="PaceNodeStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\FastCacheCompileNode /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\fastcached\InstallerRegistrationCopy\FastCacheCompileNode HKLM\SOFTWARE\fastcached\InstallerRollback\FastCacheCompileNode /s /f /reg:64)"
+<CustomAction Id="PaceNodeStashRegistration"|/>|reg.exe" copy HKLM\SYSTEM\CurrentControlSet\Services\pace-node HKLM\SOFTWARE\Pace\InstallerRollback\pace-node /s /f /reg:64"
+<CustomAction Id="PaceNodeStashFromCopy"|/>|reg.exe query HKLM\SYSTEM\CurrentControlSet\Services\pace-node /reg:64 >nul 2>&1 || [System64Folder]reg.exe copy HKLM\SOFTWARE\Pace\InstallerRegistrationCopy\pace-node HKLM\SOFTWARE\Pace\InstallerRollback\pace-node /s /f /reg:64)"
 <Custom Action="PaceNodeStashRegistration"|/>|After="PaceRestoreRegistration"
 <Custom Action="PaceNodeStashFromCopy"|/>|After="PaceNodeStashRegistration"
 <Custom Action="PaceNodeStashFromCopy"|/>|AND WIX_UPGRADE_DETECTED"
@@ -436,8 +436,8 @@ Before="InstallFinalize"|/>|PACE_FAIL_FOR_TEST = "1"
 <Component Id="PaceRegistrationCopy"|</Component>|Value="[PACE_IMAGEPATH]"
 <CustomAction Id="PaceNodeStashRegistration"|/>|Directory="System64Folder"
 <Custom Action="PaceNodeStashRegistration"|/>|Condition="PACE_NODE_SELECTED = "1" AND PACE_NODE_IMAGEPATH"
-<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|Rollback\FastCacheCompileNode'
-<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|sc.exe config FastCacheCompileNode start=
+<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|Rollback\pace-node'
+<CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|sc.exe config pace-node start=
 <CustomAction Id="PaceNodeRestoreRegistrationExactly"|/>|Execute="rollback"
 <Custom Action="PaceNodeRestoreRegistrationExactly"|/>|After="PaceNodeStashFromCopy"
 <Custom Action="PaceNodeRestoreRegistrationExactly"|/>|Condition="PACE_NODE_SELECTED = "1" AND PACE_NODE_IMAGEPATH"

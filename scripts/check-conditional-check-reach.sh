@@ -114,7 +114,7 @@ DeriveRegistrations() {
                 # error, so the check would not have run at all on the one platform
                 # nobody here would have tested it on.
                 for (i = 1; i <= n; i++)
-                    if (w[i] ~ /^(FASTCACHED|ENABLE)_[A-Z0-9_]+$/) {
+                    if (w[i] ~ /^(PACE|ENABLE)_[A-Z0-9_]+$/) {
                         if (index("," out ",", "," w[i] ",") == 0) out = (out == "" ? w[i] : out "," w[i])
                     }
                 # AND or OR. `vendor-sanitized` is registered under
@@ -136,7 +136,7 @@ DeriveRegistrations() {
                     # trailing `AND NOT MSVC` names no option and does not mix.
                     probe = toks
                     gsub(/\([^()]*\)/, "", probe)
-                    if (probe ~ /(FASTCACHED|ENABLE)_[A-Z0-9_]+/) mode = "mixed"
+                    if (probe ~ /(PACE|ENABLE)_[A-Z0-9_]+/) mode = "mixed"
                 }
                 if (out != "") { found[nm] = out; modeOf[nm] = mode }
                 pending = 0
@@ -181,9 +181,9 @@ DerivePresets() {
             for (i = 2; i <= n; i += 2) if (parts[i] != "") print cur "\t@inherits=" parts[i]
             next
         }
-        /"(FASTCACHED|ENABLE)_[A-Z0-9_]+"[ \t]*:/ {
+        /"(PACE|ENABLE)_[A-Z0-9_]+"[ \t]*:/ {
             s = $0
-            if (!match(s, /"(FASTCACHED|ENABLE)_[A-Z0-9_]+"/)) next
+            if (!match(s, /"(PACE|ENABLE)_[A-Z0-9_]+"/)) next
             k = substr(s, RSTART + 1, RLENGTH - 2)
             v = s; sub(/.*:[ \t]*"?/, "", v); sub(/"?,?[ \t]*$/, "", v)
             print cur "\t" k "=" v

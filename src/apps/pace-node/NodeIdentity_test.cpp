@@ -389,7 +389,7 @@ TEST_CASE("The state directory has one author, and the default names no identity
     // Which is what makes the flag the discriminator, and the discriminator was never
     // lost: two nodes on one machine need two Raft logs and so two directories.
     auto named = Testing::FirstStart(NodeConfig {});
-    named.clusterDir = std::filesystem::path { "/var/lib/fastcache-node/left" };
+    named.clusterDir = std::filesystem::path { "/var/lib/pace-node/left" };
     CHECK(NodeStateDirectory(named) == named.clusterDir);
 }
 
@@ -681,7 +681,7 @@ TEST_CASE("A node that runs no consensus still carries the key it holds", "[node
     // A worker naming --cluster-dir holds a key and has no id. The key-only identity is what
     // reaches it -- and every reload candidate -- without inventing an id or a member entry.
     auto worker = Testing::FirstStart(NodeConfig {});
-    worker.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+    worker.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
 
     auto const keyOnly = NodeIdentity { .id = {}, .origin = NodeIdentityOrigin::Recorded, .publicKey = KeyOf(0x77) };
     ApplyNodeIdentity(worker, keyOnly);

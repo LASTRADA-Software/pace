@@ -110,7 +110,7 @@ build down, never break it.
 ### 1. Start a daemon
 
 ```sh
-pace-kv --storage=$HOME/.cache/fastcached/cache.cow
+pace-kv --storage=$HOME/.cache/pace/cache.cow
 ```
 
 The 256 MiB default value cap already covers real object files, which routinely
@@ -330,9 +330,9 @@ puts it:
 
 | Platform | Per-user | Machine-wide |
 |---|---|---|
-| Linux | `$XDG_CONFIG_HOME/fastcached/fastcached.yaml`, then `~/.config/fastcached/fastcached.yaml` | `/etc/fastcached/fastcached.yaml` |
-| macOS | `$XDG_CONFIG_HOME/fastcached/fastcached.yaml`, then `~/.config/fastcached/fastcached.yaml` | `/opt/fastcached/etc/fastcached.yaml` |
-| Windows | `%APPDATA%\fastcached\fastcached.yaml` | `%ProgramData%\fastcached\fastcached.yaml` |
+| Linux | `$XDG_CONFIG_HOME/pace/pace-kv.yaml`, then `~/.config/pace/pace-kv.yaml` | `/etc/pace/pace-kv.yaml` |
+| macOS | `$XDG_CONFIG_HOME/pace/pace-kv.yaml`, then `~/.config/pace/pace-kv.yaml` | `/opt/pace/etc/pace-kv.yaml` |
+| Windows | `%APPDATA%\pace\pace-kv.yaml` | `%ProgramData%\pace\pace-kv.yaml` |
 
 Which column applies depends on who you are: the machine-wide file describes the
 system service, so only a process that could *be* that service — root, an

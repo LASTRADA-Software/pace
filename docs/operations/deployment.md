@@ -95,7 +95,7 @@ not load.
 ### Reloading
 
 `systemctl reload pace-kv` sends `SIGHUP`, which re-reads the config file in
-use — `/etc/fastcached/fastcached.yaml` for the packaged unit. Only part of the
+use — `/etc/pace/pace-kv.yaml` for the packaged unit. Only part of the
 configuration is reloadable:
 
 --8<-- "reload-matrix.md"
@@ -117,7 +117,7 @@ systemd-analyze security pace-kv.service
 
 Two consequences worth knowing. `ProtectSystem=strict` and
 `ProtectHome=yes` mean TLS certificates must live somewhere the unit can
-still read — `/etc/fastcached/` is the natural place. And binding a port
+still read — `/etc/pace/` is the natural place. And binding a port
 below 1024 needs capabilities the unit drops by default:
 
 ```ini
@@ -129,11 +129,11 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 ### Persistent storage
 
-`StateDirectory=pace-kv` provides `/var/lib/fastcached`, owned by the
+`StateDirectory=pace-kv` provides `/var/lib/pace-kv`, owned by the
 service user. Point `storage_path` at it to enable the on-disk tier:
 
 ```yaml
-storage_path: /var/lib/fastcached/cache
+storage_path: /var/lib/pace-kv/cache
 ```
 
 The path's *shape* selects the layout: a path with no file extension (as
@@ -151,12 +151,12 @@ pace-kv --install-service --service-scope=user            # LaunchAgent
 sudo pace-kv --install-service --service-scope=system      # LaunchDaemon
 ```
 
-The system scope needs the `_fastcached` service account, which the `.pkg`
+The system scope needs the `_pace-kv` service account, which the `.pkg`
 creates; installing from a tarball or a source build fails with a message
 saying so rather than registering a job launchd cannot spawn.
 
-The `.pkg` creates a second account, `fastcache-node`, for
-`pace-node`. It is deliberately not shared with `_fastcached`: a
+The `.pkg` creates a second account, `pace-node`, for
+`pace-node`. It is deliberately not shared with `_pace-kv`: a
 worker runs a compiler on input that arrived over the network while `pace-kv`
 owns the cache storage, so one account would let a compromised compile rewrite
 every cached object. It comes from the package's Runtime component, so it is
@@ -169,7 +169,7 @@ restarting the job keeps working.
 
 ```sh
 sudo pace-kv --install-service --service-scope=system \
-    --config=/opt/fastcached/etc/fastcached.yaml --threads=4
+    --config=/opt/pace/etc/pace-kv.yaml --threads=4
 ```
 
 Prefer the config file for anything you might want to change later. A flag
@@ -185,10 +185,10 @@ line whether that file actually carries `requirepass:`, so accepting the
 combination would be the silent drop under another name.
 
 The package sets the system daemon's config to mode `0640`, owned
-`root:_fastcached`, so it is readable by the account the daemon drops to and
+`root:_pace-kv`, so it is readable by the account the daemon drops to and
 by nobody else — which is the whole reason to keep the secret there rather
 than in the plist. If you point the daemon at a config of your own, the
-install checks that `_fastcached` can read it and tells you how to fix it if
+install checks that `_pace-kv` can read it and tells you how to fix it if
 not; without that check an unreadable config shows up only as a job that
 exits at every start, with the `EACCES` visible nowhere.
 
@@ -200,7 +200,7 @@ agent under `/var/root` that your own login never starts and your own
 | | `user` | `system` |
 |---|---|---|
 | Plist | `~/Library/LaunchAgents/` | `/Library/LaunchDaemons/` |
-| Runs as | the invoking user | `_fastcached` |
+| Runs as | the invoking user | `_pace-kv` |
 | Starts at | login | boot |
 | Privileges | none | root to install |
 | `KeepAlive` | on crash only | on crash only |
@@ -232,18 +232,18 @@ the least bad choice, and it costs two things the other supervisors do not:
 Status, restart, logs:
 
 ```sh
-launchctl print gui/$UID/software.lastrada.fastcached
-launchctl kickstart -k gui/$UID/software.lastrada.fastcached
-tail -f ~/Library/Logs/fastcached/software.lastrada.fastcached.err.log
+launchctl print gui/$UID/software.lastrada.pace-kv
+launchctl kickstart -k gui/$UID/software.lastrada.pace-kv
+tail -f ~/Library/Logs/pace-kv/software.lastrada.pace-kv.err.log
 ```
 
-The system daemon logs to `/opt/fastcached/var/log/<label>/` instead — a
+The system daemon logs to `/opt/pace/var/log/<label>/` instead — a
 directory per job, because that directory is owned by the account the job runs
 as and a machine may run both `pace-kv` and `pace-node`
 system-wide:
 
 ```sh
-tail -f /opt/fastcached/var/log/software.lastrada.fastcached/software.lastrada.fastcached.err.log
+tail -f /opt/pace/var/log/software.lastrada.pace-kv/software.lastrada.pace-kv.err.log
 ```
 
 ### Timestamps
@@ -268,14 +268,14 @@ There is no reload equivalent to `systemctl reload`: send `SIGHUP` to the
 pid `launchctl print` reports, or kickstart the job.
 
 To remove it: `pace-kv --uninstall-service --service-scope=<scope>`, or
-`sudo /opt/fastcached/bin/pace-uninstall` to remove the whole install.
+`sudo /opt/pace/bin/pace-uninstall` to remove the whole install.
 
 ## Windows service
 
 The MSI registers `pace-kv` as an auto-start service — a disabled one, left
 stopped, when the pace-node feature is installed too, since both answer
 on 6674 ([the MSI's service table](../getting-started/install.md#windows)) — and seeds
-`C:\ProgramData\fastcached\fastcached.yaml` from the template it ships, unless
+`C:\ProgramData\pace\pace-kv.yaml` from the template it ships, unless
 a config is already there. The registration passes **no** `--config`: the
 service resolves that path itself at every start, so editing the file is all it
 takes to reconfigure it, and a machine without one still starts on the built-in
@@ -285,11 +285,11 @@ The same registration is available from the command line on any installation:
 
 ```powershell
 pace-kv.exe --install-service
-sc.exe start FastCached
+sc.exe start pace-kv
 pace-kv.exe --uninstall-service
 ```
 
-Pass `--config=C:\path\to\fastcached.yaml` only to point the service at a file
+Pass `--config=C:\path\to\pace-kv.yaml` only to point the service at a file
 *other* than the default location.
 
 ### When a start is refused
@@ -301,7 +301,7 @@ a service-specific code**, and the reason is written to the Application event lo
 under the service's name:
 
 ```
-> sc.exe query FastCached
+> sc.exe query pace-kv
         STATE              : 1  STOPPED
         WIN32_EXIT_CODE    : 1066  (0x42a)
         SERVICE_EXIT_CODE  : 78  (0x4e)
@@ -338,14 +338,14 @@ launchd restarts a crash only (see [launchd](#launchd)).
 
 ### What it runs as
 
-The service logs on as the **virtual account** `NT SERVICE\FastCached`. The SCM
+The service logs on as the **virtual account** `NT SERVICE\pace-kv`. The SCM
 derives that from the service name and manages it itself, so there is no account
 to create and no password to keep. Told nothing, `CreateService` would use
 LocalSystem, which has unrestricted access to every local resource and is a
 member of the local Administrators group — more than a cache daemon listening on
 a socket has any use for.
 
-It can still read `C:\ProgramData\fastcached\fastcached.yaml`, because seeding
+It can still read `C:\ProgramData\pace\pace-kv.yaml`, because seeding
 grants `NT AUTHORITY\SERVICE` read on that file and a service logon is a member
 of it. The file does **not** inherit the directory's `BUILTIN\Users` read, so a
 `requirepass:` written there is not readable by every local account. It
@@ -368,7 +368,7 @@ and needs the `icacls` command below, run against the directory that will hold i
 If you add or move `storage_path` afterwards, grant it from an elevated prompt:
 
 ```powershell
-icacls "D:\fastcached\cache" /grant "NT SERVICE\FastCached":(OI)(CI)F
+icacls "D:\fastcached\cache" /grant "NT SERVICE\pace-kv":(OI)(CI)F
 ```
 
 Re-running `--install-service` from an elevated prompt repairs it too: registering
@@ -422,7 +422,7 @@ Registering also opens the Windows Firewall for every cache listener that binds
 beyond loopback and, with `--metrics`, for a metrics endpoint that does — nothing
 at all for the default `127.0.0.1:6674`. Each gets one inbound rule, admitting
 `pace-kv.exe` running as this service, on every network profile, in the group
-`Pace: FastCached`; the install line lists them. `--firewall-allow=<address[/prefix]>`
+`Pace: pace-kv`; the install line lists them. `--firewall-allow=<address[/prefix]>`
 (IPv4 or IPv6, repeatable) limits which remote addresses they admit, and `/0` is
 refused: leave the flag out to allow any address.
 
@@ -489,7 +489,7 @@ TLS is compiled in with `-DPACE_ENABLE_TLS=ON` (the image enables it) and
 turned on at runtime:
 
 ```sh
-pace-kv --tls --tls-cert=/etc/fastcached/server.crt --tls-key=/etc/fastcached/server.key
+pace-kv --tls --tls-cert=/etc/pace/server.crt --tls-key=/etc/pace/server.key
 # clients:
 redis-cli --tls --insecure -a secret ping
 ```

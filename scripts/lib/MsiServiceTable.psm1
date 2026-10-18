@@ -107,12 +107,12 @@ $ErrorActionPreference = 'Stop'
 #                          registered auto and left stopped.
 #   NothingInstalled    -- after an uninstall.
 $script:ServiceTable = [ordered]@{
-    Release030WithNode   = [ordered]@{ FastCached = @('Auto', 'Running'); FastCacheCompileNode = @('Auto', 'Stopped') }
-    NodeSelected         = [ordered]@{ FastCacheCompileNode = @('Auto', 'Running'); FastCached = @('Disabled', 'Stopped') }
-    NodeAlone            = [ordered]@{ FastCacheCompileNode = @('Auto', 'Running'); FastCached = $null }
-    DaemonAlone          = [ordered]@{ FastCacheCompileNode = $null; FastCached = @('Auto', 'Running') }
-    DaemonAloneUnstarted = [ordered]@{ FastCacheCompileNode = $null; FastCached = @('Auto', 'Stopped') }
-    NothingInstalled     = [ordered]@{ FastCacheCompileNode = $null; FastCached = $null }
+    Release030WithNode   = [ordered]@{ 'pace-kv' = @('Auto', 'Running'); 'pace-node' = @('Auto', 'Stopped') }
+    NodeSelected         = [ordered]@{ 'pace-node' = @('Auto', 'Running'); 'pace-kv' = @('Disabled', 'Stopped') }
+    NodeAlone            = [ordered]@{ 'pace-node' = @('Auto', 'Running'); 'pace-kv' = $null }
+    DaemonAlone          = [ordered]@{ 'pace-node' = $null; 'pace-kv' = @('Auto', 'Running') }
+    DaemonAloneUnstarted = [ordered]@{ 'pace-node' = $null; 'pace-kv' = @('Auto', 'Stopped') }
+    NothingInstalled     = [ordered]@{ 'pace-node' = $null; 'pace-kv' = $null }
 }
 
 # The vocabulary a row may use, so a misspelt mode fails the self-test rather than
@@ -125,7 +125,7 @@ $script:States = @('Running', 'Stopped')
 # names a service by its display name in its text and by its service name in its
 # binary data; either is recognised, so a registration another build wrote under
 # another display name is still matched by its service name.
-$script:ServiceDisplayNames = [ordered]@{ FastCached = 'pace-kv'; FastCacheCompileNode = 'pace-node' }
+$script:ServiceDisplayNames = [ordered]@{ 'pace-kv' = 'pace-kv'; 'pace-node' = 'pace-node' }
 
 # The service control manager's events for a service that ended without being told
 # to: 7031 while the SCM still takes a recovery action for it, 7034 when it takes
@@ -370,7 +370,7 @@ function Assert-ServiceTable {
             # Running, not running, absent and unobservable are four answers, and only the first clears it.
             $node = $null
             $now = try {
-                $node = & $Observe 'FastCacheCompileNode'
+                $node = & $Observe 'pace-node'
                 if ($null -eq $node) { 'not registered' } else { "$($node.State), process $($node.ProcessId)" }
             } catch { "unobservable ($($_.Exception.Message))" }
             if ($null -eq $node -or $node.State -ne 'Running') {
@@ -559,7 +559,7 @@ function Assert-InstalledProduct([string] $UpgradeCode, [string] $ProductCode) {
 # next step starts from a machine that never had this product, and refuses by
 # name when a directory survives.
 function Remove-PaceMachineState {
-    foreach ($dir in "$env:ProgramData\fastcached", "$env:ProgramData\fastcache-node") {
+    foreach ($dir in "$env:ProgramData\pace", "$env:ProgramData\pace-node") {
         Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
         if (Test-Path $dir) { throw "$dir survived its removal, so the next install would read the previous one's files" }
     }
@@ -571,10 +571,10 @@ function Remove-PaceMachineState {
 # so no rule admits any local port. DocumentedCommandLines_test's [msi] case derives the same
 # reply rule from the fragment's own command line.
 $script:NodeFirewallRuleNames = @(
-    'FastCacheCompileNode node tcp/6674',
-    'FastCacheCompileNode raft tcp/6680',
-    'FastCacheCompileNode discovery-beacon udp/6681',
-    'FastCacheCompileNode discovery-reply udp/6682')
+    'pace-node node tcp/6674',
+    'pace-node raft tcp/6680',
+    'pace-node discovery-beacon udp/6681',
+    'pace-node discovery-reply udp/6682')
 
 # Does the node's firewall group hold exactly @p Expected? A pure verdict so the self-test can
 # drive it without a real firewall.
@@ -594,7 +594,7 @@ function Get-NodeFirewallVerdict([string[]] $Seen, [string[]] $Expected) {
 # and rules derived before that opened the node port alone. Reads a live firewall, so the
 # self-test reaches only the verdict above; fails CLOSED.
 function Assert-NodeFirewall {
-    $group = 'Pace: FastCacheCompileNode'
+    $group = 'Pace: pace-node'
     $rules = @(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue)
     $rules | Format-Table DisplayName, Direction, Action, Profile | Out-String | Write-Host
     if ($verdict = Get-NodeFirewallVerdict @($rules | ForEach-Object { $_.DisplayName }) $script:NodeFirewallRuleNames) {
@@ -730,7 +730,7 @@ function Get-NodeFirewallScopeVerdict([object[]] $Seen, [string] $Scope) {
 # a rule reading Any here is the fail-open this exists to catch. Reads a live firewall, so the
 # self-test reaches only the verdict above; fails CLOSED.
 function Assert-NodeFirewallScope([string] $Scope) {
-    $group = 'Pace: FastCacheCompileNode'
+    $group = 'Pace: pace-node'
     $seen = @(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue | ForEach-Object {
             @{ Name = $_.DisplayName; Remote = @(($_ | Get-NetFirewallAddressFilter).RemoteAddress) }
         })
@@ -754,9 +754,9 @@ function Get-NodeRegistrationArgumentVerdict([string] $ImagePath, [string] $Argu
 # one an earlier transaction stated (the remembered property). Reads a live service, so the
 # self-test reaches only the verdict above; fails CLOSED.
 function Assert-NodeRegistrationArgument([string] $Argument) {
-    $svc = Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'"
-    if (-not $svc) { throw "no FastCacheCompileNode service is registered, so it carries no $Argument" }
-    Write-Host "FastCacheCompileNode: $($svc.PathName)"
+    $svc = Get-CimInstance Win32_Service -Filter "Name='pace-node'"
+    if (-not $svc) { throw "no pace-node service is registered, so it carries no $Argument" }
+    Write-Host "pace-node: $($svc.PathName)"
     if ($verdict = Get-NodeRegistrationArgumentVerdict $svc.PathName $Argument) { throw $verdict }
 }
 
@@ -778,9 +778,9 @@ function Get-NodeRegistrationLacksVerdict([string] $ImagePath, [string] $Prefix)
 # The node's REAL registration carries no token for @p Prefix. Reads a live service, so the self-test
 # reaches only the verdict above; fails CLOSED on no registration.
 function Assert-NodeRegistrationLacks([string] $Prefix) {
-    $svc = Get-CimInstance Win32_Service -Filter "Name='FastCacheCompileNode'"
-    if (-not $svc) { throw "no FastCacheCompileNode service is registered, so nothing can be said about $Prefix" }
-    Write-Host "FastCacheCompileNode: $($svc.PathName)"
+    $svc = Get-CimInstance Win32_Service -Filter "Name='pace-node'"
+    if (-not $svc) { throw "no pace-node service is registered, so nothing can be said about $Prefix" }
+    Write-Host "pace-node: $($svc.PathName)"
     if ($verdict = Get-NodeRegistrationLacksVerdict $svc.PathName $Prefix) { throw $verdict }
 }
 
@@ -850,7 +850,7 @@ function Get-NodeServiceAccessVerdict([string] $State, [string] $Key, [string] $
 # keeps only READ_CONTROL, the service may add to the directory but not rewrite its
 # list, and the service still reaches its key (`Get-NodeServiceAccessVerdict`).
 function Assert-NodeStatePrivate {
-    $state = Join-Path $env:ProgramData 'fastcache-node'
+    $state = Join-Path $env:ProgramData 'pace-node'
     $key = Join-Path $state 'node-key'
     for ($i = 0; $i -lt 30 -and -not (Test-Path $key); $i++) { Start-Sleep 1 }
     if (-not (Test-Path $key)) {
@@ -897,8 +897,8 @@ function Assert-NodeStatePrivate {
         throw "$state lets its owner do more than read the access list: $($ownerRights.FileSystemRights)"
     }
 
-    $serviceSid = (New-Object Security.Principal.NTAccount 'NT SERVICE\FastCacheCompileNode').Translate([Security.Principal.SecurityIdentifier]).Value
-    if ($verdict = Get-NodeServiceAccessVerdict $state $key $serviceSid) { throw "NT SERVICE\FastCacheCompileNode: $verdict" }
+    $serviceSid = (New-Object Security.Principal.NTAccount 'NT SERVICE\pace-node').Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($verdict = Get-NodeServiceAccessVerdict $state $key $serviceSid) { throw "NT SERVICE\pace-node: $verdict" }
     Write-Host "$state and its identity key answer to nobody but SYSTEM, Administrators and the service"
 }
 
@@ -1172,7 +1172,7 @@ function Invoke-Msiexec {
         Show-TransactionEvidence -Transaction $script:LastMsiTransaction
         # A checked service action that failed rolled the transaction back, and the service's
         # own events are where its refusal was written: they outlive the rollback.
-        foreach ($name in 'FastCacheCompileNode', 'FastCached') { Show-ServiceDiagnosis $name }
+        foreach ($name in 'pace-node', 'pace-kv') { Show-ServiceDiagnosis $name }
         Show-PortHolders 6674
         throw "$What exited $($p.ExitCode); accepted: $($Accept -join ', ')"
     }
@@ -1324,12 +1324,12 @@ function Get-MsiActionRanPattern([string] $Action) {
 # The service table row a transaction leaves is asserted AFTER it, so a service
 # that was started during it and died again -- or crash-looped, stopped between
 # two recovery restarts at the moment it was asked -- passes the row. That is
-# what PR 1634's CI showed (MEASURED): the upgrade from 0.3.0 started FastCached
+# what PR 1634's CI showed (MEASURED): the upgrade from 0.3.0 started pace-kv
 # at 12:12:47, after the table had made it manual and stopped it for the node;
 # it could not bind the port the node holds, terminated three times before
 # msiexec returned, and the row read "Manual and Stopped". That Windows
 # Installer's Restart Manager started it is INFERRED: nothing in the package
-# starts FastCached on that path, and FastCached stopped one second into the
+# starts pace-kv on that path, and pace-kv stopped one second into the
 # transaction, at InstallValidate time.
 #
 # So Invoke-Msiexec JUDGES every transaction it runs, against the row it names
@@ -1346,7 +1346,7 @@ function Get-MsiActionRanPattern([string] $Action) {
 #
 # 7036 is a witness only where the host writes it. MEASURED on two hosts: the
 # Windows Server 2025 runner of PR 1634's CI writes it (its log printed "The
-# FastCached service entered the running state"); this repository's Windows 11
+# pace-kv service entered the running state"); this repository's Windows 11
 # 26200 development host wrote none among 50,978 System records. So the watch
 # stays, and each transaction that starts the node says which of the two hosts
 # it ran on: the node's own start is the positive control (Get-Witness7036State).
@@ -1370,8 +1370,8 @@ $script:TransactionExpectations = [ordered]@{
         Reason = 'the transaction fails on purpose and rolls back: the rollback restarts what it stopped and removes what it created, so no row describes what may start during it; every unexpected termination is still a finding'
     }
     NodeCannotBind = @{
-        MayTerminate = @('FastCacheCompileNode'); MustFail = $true
-        Reason = 'the step holds 6674, so the node the transaction adds cannot bind and its refusal is logged as an unexpected termination (7031, or 7034 once its restarts are spent); the transaction then rolls back, so no start is judged; a termination of FastCached is still a finding'
+        MayTerminate = @('pace-node'); MustFail = $true
+        Reason = 'the step holds 6674, so the node the transaction adds cannot bind and its refusal is logged as an unexpected termination (7031, or 7034 once its restarts are spent); the transaction then rolls back, so no start is judged; a termination of pace-kv is still a finding'
     }
 }
 
@@ -1393,7 +1393,7 @@ function Get-TransactionExpectation([string] $Leaves = '', [string] $Expect = ''
         }
         $row = $script:ServiceTable[$Leaves]
         $notRunning = @(foreach ($name in $row.Keys) { if ($null -eq $row[$name] -or $row[$name][1] -eq 'Stopped') { $name } })
-        $node = $row['FastCacheCompileNode']
+        $node = $row['pace-node']
         return [pscustomobject]@{
             Name = "row $Leaves"; NotRunning = $notRunning; MayTerminate = @(); MustFail = $false
             NodeStarts = ($null -ne $node -and $node[1] -eq 'Running'); Reason = ''
@@ -1458,7 +1458,7 @@ function Watch-ServiceProcesses {
 # One service control manager event as a record, from its XML and its rendered message.
 #
 # The service is read from the first of these that the event's shape carries:
-#   1. its binary data, the SERVICE name in UTF-16 (a real 7031's decodes to FastCacheCompileNode); a
+#   1. its binary data, the SERVICE name in UTF-16 (a real 7031's decodes to pace-node); a
 #      `/` in it is read as `<name>/<state code>`, a layout seen reported for 7036 but NOT verified
 #      here, so it decides only when param2 says nothing;
 #   2. a `ServiceName` data item, as 7045 ("a service was installed") carries it;
@@ -1658,7 +1658,7 @@ function Show-TransactionEvidence {
 function Get-Witness7036State([object[]] $Events = @(), [datetime] $StartedUtc, [bool] $NodeStarts) {
     if (-not $NodeStarts) { return 'no control' }
     $logged = @($Events | Where-Object { $_.Id -eq 7036 -and $_.Time -ge $StartedUtc })
-    $node = @($logged | Where-Object { $_.Service -eq 'FastCacheCompileNode' })
+    $node = @($logged | Where-Object { $_.Service -eq 'pace-node' })
     if (@($node | Where-Object { $_.State -eq 'Running' }).Count -gt 0) { return 'live' }
     if (@($node | Where-Object { $_.State -eq 'Stopped' }).Count -gt 0) { return 'node stopped' }
     if ($logged.Count -gt 0) { return 'unmatched' }
@@ -1724,7 +1724,7 @@ function Invoke-TransactionJudgement {
     }
     $witness = ''
     if ($state -eq 'node stopped') {
-        $stop = @($events | Where-Object { $_.Id -eq 7036 -and $_.Service -eq 'FastCacheCompileNode' -and $_.State -eq 'Stopped' -and $_.Time -ge $Transaction.StartedUtc } | Sort-Object Time)[-1]
+        $stop = @($events | Where-Object { $_.Id -eq 7036 -and $_.Service -eq 'pace-node' -and $_.State -eq 'Stopped' -and $_.Time -ge $Transaction.StartedUtc } | Sort-Object Time)[-1]
         $stopAt = $stop.Time.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
         $missedRunning = "the reader reads the node's, so the node's 'running' was missed: the 7036 witness failed on the STATE, not on the service ($read7036)"
         if (-not $Transaction.Extended) {
@@ -1742,7 +1742,7 @@ function Invoke-TransactionJudgement {
             $deferred = if ($Transaction.Deferred) { " -- the exit judgement deferred exactly this: $($Transaction.Deferred)" } else { '' }
             $node = $null
             $now = try {
-                $node = & $Observe 'FastCacheCompileNode'
+                $node = & $Observe 'pace-node'
                 if ($null -eq $node) { 'not registered' } else { "$($node.State), process $($node.ProcessId), exit code $($node.ExitCode), service-specific $($node.ServiceSpecificExitCode)" }
             } catch { "unobservable ($($_.Exception.Message))" }
             & $evidence
@@ -1857,13 +1857,13 @@ function Get-SettledServiceState {
 function Get-InstallationSnapshot {
     param([Parameter(Mandatory)] [string] $UpgradeCode, [Parameter(Mandatory)] [string] $Root)
     $snapshot = [ordered]@{}
-    foreach ($name in 'FastCached', 'FastCacheCompileNode') {
+    foreach ($name in 'pace-kv', 'pace-node') {
         $snapshot["service $name"] = Get-RegistryTreeLines "SYSTEM\CurrentControlSet\Services\$name" $name
         $snapshot["state $name"] = @(Get-SettledServiceState $name)
     }
-    $snapshot['installer values'] = Get-RegistryTreeLines 'SOFTWARE\fastcached\Installer'
-    $snapshot['rollback state'] = Get-RegistryTreeLines 'SOFTWARE\fastcached\InstallerRollback'
-    foreach ($group in 'Pace: FastCached', 'Pace: FastCacheCompileNode') {
+    $snapshot['installer values'] = Get-RegistryTreeLines 'SOFTWARE\Pace\Installer'
+    $snapshot['rollback state'] = Get-RegistryTreeLines 'SOFTWARE\Pace\InstallerRollback'
+    foreach ($group in 'Pace: pace-kv', 'Pace: pace-node') {
         $snapshot["firewall $group"] = @(Get-FirewallGroupSnapshot $group)
     }
     # Bound first: the reader returns its array as ONE pipeline object, so piping the call itself
@@ -2225,7 +2225,7 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The registration verdict Assert-NodeRegistrationArgument reads: a whole token passes behind a
     # quoted program path with spaces, and neither its absence nor a longer value passes.
-    $imagePath = '"C:\Program Files\fastcached\bin\pace-node.exe" --service --fleet-seed=seed.example.invalid:6674'
+    $imagePath = '"C:\Program Files\Pace\bin\pace-node.exe" --service --fleet-seed=seed.example.invalid:6674'
     if ($null -ne (Get-NodeRegistrationArgumentVerdict $imagePath '--fleet-seed=seed.example.invalid:6674')) {
         throw 'registration verdict: a whole token must pass'
     }
@@ -2239,8 +2239,8 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The diagnosis's command-line split: a quoted program path with spaces is one token, and so
     # is a value quoted after its `=`; the quotes are dropped either way.
-    $split = @(Split-RegisteredCommandLine '"C:\Program Files\fastcached\bin\pace-node.exe" --daemon --cache-dir="C:\dir with space" --x=1')
-    if (($split -join '|') -ne 'C:\Program Files\fastcached\bin\pace-node.exe|--daemon|--cache-dir=C:\dir with space|--x=1') {
+    $split = @(Split-RegisteredCommandLine '"C:\Program Files\Pace\bin\pace-node.exe" --daemon --cache-dir="C:\dir with space" --x=1')
+    if (($split -join '|') -ne 'C:\Program Files\Pace\bin\pace-node.exe|--daemon|--cache-dir=C:\dir with space|--x=1') {
         throw "split: got '$($split -join '|')'"
     }
     Pass 'split: a quoted program path and a quoted value are one token each'
@@ -2275,7 +2275,7 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The absence verdict: 0.3.0's registration is refused, the new one passes, and a flag that
     # merely shares the prefix is not the flag.
-    $old030 = '"C:\Program Files\fastcached\bin\pace-node.exe" --daemon --service-name=FastCacheCompileNode --scheduler=127.0.0.1:6675 --advertise=127.0.0.1:6674'
+    $old030 = '"C:\Program Files\Pace\bin\pace-node.exe" --daemon --service-name=pace-node --scheduler=127.0.0.1:6675 --advertise=127.0.0.1:6674'
     ExpectThrow 'absent: a registration still carrying --scheduler is refused' {
         if ($v = Get-NodeRegistrationLacksVerdict $old030 '--scheduler') { throw $v }
     } 'still carries --scheduler'
@@ -2309,28 +2309,28 @@ function Invoke-MsiServiceTableSelfTest {
     # The before-and-after verdict Assert-FirewallGroupUnchanged reads (R4-3): the same rules pass in
     # any order, a scope the rollback did not put back is refused naming both lines, and an empty
     # BEFORE is refused rather than compared.
-    $rule = 'FastCached cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=Any'
-    $scoped = 'FastCached cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=10.0.0.0/255.0.0.0'
-    $other = 'FastCached admin tcp/6675 | enabled=True Inbound Allow | TCP/6675 | remote=Any'
+    $rule = 'pace-kv cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=Any'
+    $scoped = 'pace-kv cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=10.0.0.0/255.0.0.0'
+    $other = 'pace-kv admin tcp/6675 | enabled=True Inbound Allow | TCP/6675 | remote=Any'
     if ($null -ne (Get-FirewallGroupUnchangedVerdict @($rule, $other) @($other, $rule) 'pace-kv: X')) {
         throw 'unchanged verdict: the same rules in another order must pass'
     }
     Pass 'unchanged: the same rules in another order pass'
     ExpectThrow 'unchanged: a scope the rollback left in place is refused, naming what was lost and what is held' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($scoped) 'pace-kv: X') { throw $verdict }
-    } 'lost \[FastCached cache tcp/6674 .*remote=Any\] and holds \[FastCached cache tcp/6674 .*remote=10\.0\.0\.0'
+    } 'lost \[pace-kv cache tcp/6674 .*remote=Any\] and holds \[pace-kv cache tcp/6674 .*remote=10\.0\.0\.0'
     ExpectThrow 'unchanged: an empty group before the transaction proves nothing, and is refused' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @() @() 'pace-kv: X') { throw $verdict }
     } 'held no rule BEFORE the transaction'
     # And the snapshot LINE carries the profile and the program (round 11 review, M6): a rollback that
     # put the port and the scope back but admitted another program, or another profile, is refused.
-    $ruleObject = [pscustomobject] @{ DisplayName = 'FastCached cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
+    $ruleObject = [pscustomobject] @{ DisplayName = 'pace-kv cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
     $portFilter = [pscustomobject] @{ Protocol = 'TCP'; LocalPort = '6674' }
     $addressFilter = [pscustomobject] @{ RemoteAddress = 'Any' }
-    $programBefore = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\fastcached\bin\pace-kv.exe' })
+    $programBefore = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\Pace\bin\pace-kv.exe' })
     $programAfter = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Elsewhere\pace-kv.exe' })
-    $privateOnly = [pscustomobject] @{ DisplayName = 'FastCached cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Private' }
-    $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\fastcached\bin\pace-kv.exe' })
+    $privateOnly = [pscustomobject] @{ DisplayName = 'pace-kv cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Private' }
+    $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\Pace\bin\pace-kv.exe' })
     ExpectThrow 'unchanged: a rollback that admits another PROGRAM is refused, naming it' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'pace-kv: X') { throw $verdict }
     } 'holds \[.*program=C:\\Elsewhere\\fastcached\.exe\]'
@@ -2341,7 +2341,7 @@ function Invoke-MsiServiceTableSelfTest {
     # unchanged (#1629, M1): the comparison is a multiset.
     ExpectThrow 'unchanged: a rule the rollback duplicated is refused, naming the extra one' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($rule, $rule) 'pace-kv: X') { throw $verdict }
-    } 'lost \[\] and holds \[FastCached cache tcp/6674 .*remote=Any\] it did not$'
+    } 'lost \[\] and holds \[pace-kv cache tcp/6674 .*remote=Any\] it did not$'
 
     # The firewall snapshot's error decision (#1629, M2): a group that holds no rule reads as empty, and
     # any OTHER failed read is thrown, never read as an empty group that then compares as unchanged.
@@ -2397,7 +2397,7 @@ function Invoke-MsiServiceTableSelfTest {
     # What failed, read whatever shape Windows Installer gave it: an action that could not START names
     # no CustomAction and no code (round 5), one that ran and failed does, and a clean log says nothing.
     $startFailure = @('Action start 5:34:04: InstallFiles.', 'noise', 'noise', 'noise',
-        'MSI (s) (88:AC) [05:34:04:780]: Product: pace-kv -- Error 1721. There is a problem with this Windows Installer package. Action: PaceAwaitServiceExit, location: C:\Program Files\fastcached\, command: ...',
+        'MSI (s) (88:AC) [05:34:04:780]: Product: pace-kv -- Error 1721. There is a problem with this Windows Installer package. Action: PaceAwaitServiceExit, location: C:\Program Files\Pace\, command: ...',
         'after')
     $found = @(Get-MsiFailureLines $startFailure)
     if ($found.Count -ne 4 -or $found[-1] -notmatch 'Error 1721.*PaceAwaitServiceExit' -or $found -contains 'after') {
@@ -2454,13 +2454,13 @@ function Invoke-MsiServiceTableSelfTest {
         'MSI (s) (D8:AC) [13:31:40:000]: Doing action: InstallInitialize',
         'MSI (s) (D8:AC) [13:32:00:000]: Running product ''{FDCDAB73-40AF-4EDA-9340-7C33986C3207}'' with elevated privileges: Product is assigned.',
         'Action start 13:32:01: InstallValidate.', 'Property(S): noise',
-        'MSI (s) (D8:AC) [13:32:19:900]: Executing op: ServiceControl(,Name=FastCached,Action=1,Wait=0,)',
+        'MSI (s) (D8:AC) [13:32:19:900]: Executing op: ServiceControl(,Name=pace-kv,Action=1,Wait=0,)',
         'MSI (s) (D8:AC) [13:32:20:100]: RESTART MANAGER: Restarted the applications.',
         'MSI (s) (D8:AC) [13:32:21:000]: Note: 1: 2205 2:  3: Error',
         'MSI (s) (D8:AC) [13:32:40:000]: Product: pace-kv -- Installation completed successfully.',
         'MSI (s) (D8:AC) [00:00:02:000]: Doing action: AfterMidnight')
     $got = Get-MsiLinesAround -Lines $around -Times @([TimeSpan]::new(0, 13, 32, 20, 306), [TimeSpan]::new(0, 13, 32, 24, 585)) -BeforeSeconds 30
-    if ($got.Omitted -ne 0 -or ($got.Lines -join '|') -notmatch '^MSI .*Running product .*\|Action start 13:32:01: InstallValidate\.\|.*ServiceControl\(,Name=FastCached.*\|.*RESTART MANAGER: Restarted the applications\.$') {
+    if ($got.Omitted -ne 0 -or ($got.Lines -join '|') -notmatch '^MSI .*Running product .*\|Action start 13:32:01: InstallValidate\.\|.*ServiceControl\(,Name=pace-kv.*\|.*RESTART MANAGER: Restarted the applications\.$') {
         throw "lines around: kept [$($got.Lines -join ' | ')]"
     }
     Pass 'lines around: the actions, service operations and Restart Manager lines in the window, once, in log order'
@@ -2468,7 +2468,7 @@ function Invoke-MsiServiceTableSelfTest {
     if (($got.Lines -join '|') -notmatch '^MSI .*Doing action: AfterMidnight$') { throw "lines around: across midnight kept [$($got.Lines -join ' | ')]" }
     Pass 'lines around: a window across midnight matches the next day''s first seconds'
     $got = Get-MsiLinesAround -Lines $around -Times @([TimeSpan]::new(0, 13, 32, 20)) -BeforeSeconds 30 -Cap 2
-    if ($got.Lines.Count -ne 2 -or $got.Omitted -ne 2 -or ($got.Lines -join '|') -notmatch 'ServiceControl\(,Name=FastCached.*\|.*RESTART MANAGER: Restarted the applications\.$') {
+    if ($got.Lines.Count -ne 2 -or $got.Omitted -ne 2 -or ($got.Lines -join '|') -notmatch 'ServiceControl\(,Name=pace-kv.*\|.*RESTART MANAGER: Restarted the applications\.$') {
         throw "lines around: a cap of 2 kept [$($got.Lines -join ' | ')], $($got.Omitted) omitted"
     }
     Pass 'lines around: a cap keeps the LATEST lines, nearest the findings, and counts the earliest it cut'
@@ -2520,14 +2520,14 @@ function Invoke-MsiServiceTableSelfTest {
     }
 
     # The installation comparison, over synthetic snapshots (#1629): every outcome, and WHICH field.
-    $base = [ordered]@{ 'service FastCached' = @('ImagePath ExpandString "C:\r\pace-kv.exe" --daemon', 'Start DWord 2'); 'state FastCached' = @('Running') }
+    $base = [ordered]@{ 'service pace-kv' = @('ImagePath ExpandString "C:\r\pace-kv.exe" --daemon', 'Start DWord 2'); 'state pace-kv' = @('Running') }
     $cmp = @(
         @{ Case = 'equal snapshots'; After = $base; Match = $null }
-        @{ Case = 'one changed value'; After = [ordered]@{ 'service FastCached' = @('ImagePath ExpandString "C:\r\pace-kv.exe" --daemon', 'Start DWord 3'); 'state FastCached' = @('Running') }; Match = '^service FastCached: lost \[Start DWord 2\]; gained \[Start DWord 3\]$' }
-        @{ Case = 'a changed state'; After = [ordered]@{ 'service FastCached' = $base['service FastCached']; 'state FastCached' = @('Stopped') }; Match = '^state FastCached: lost \[Running\]; gained \[Stopped\]$' }
-        @{ Case = 'a field only one side has'; After = [ordered]@{ 'service FastCached' = $base['service FastCached'] }; Match = '^state FastCached: lost \[Running\]; gained \[\]$' }
-        @{ Case = 'a key that vanished'; After = [ordered]@{ 'service FastCached' = @('<absent>'); 'state FastCached' = @('Running') }; Match = '^service FastCached: lost' }
-        @{ Case = 'a line held twice where it was held once'; After = [ordered]@{ 'service FastCached' = @($base['service FastCached']) + @('Start DWord 2'); 'state FastCached' = @('Running') }; Match = '^service FastCached: lost \[\]; gained \[Start DWord 2\]$' }
+        @{ Case = 'one changed value'; After = [ordered]@{ 'service pace-kv' = @('ImagePath ExpandString "C:\r\pace-kv.exe" --daemon', 'Start DWord 3'); 'state pace-kv' = @('Running') }; Match = '^service pace-kv: lost \[Start DWord 2\]; gained \[Start DWord 3\]$' }
+        @{ Case = 'a changed state'; After = [ordered]@{ 'service pace-kv' = $base['service pace-kv']; 'state pace-kv' = @('Stopped') }; Match = '^state pace-kv: lost \[Running\]; gained \[Stopped\]$' }
+        @{ Case = 'a field only one side has'; After = [ordered]@{ 'service pace-kv' = $base['service pace-kv'] }; Match = '^state pace-kv: lost \[Running\]; gained \[\]$' }
+        @{ Case = 'a key that vanished'; After = [ordered]@{ 'service pace-kv' = @('<absent>'); 'state pace-kv' = @('Running') }; Match = '^service pace-kv: lost' }
+        @{ Case = 'a line held twice where it was held once'; After = [ordered]@{ 'service pace-kv' = @($base['service pace-kv']) + @('Start DWord 2'); 'state pace-kv' = @('Running') }; Match = '^service pace-kv: lost \[\]; gained \[Start DWord 2\]$' }
     )
     foreach ($row in $cmp) {
         $diff = @(Compare-InstallationSnapshot -Before $base -After $row.After)
@@ -2558,7 +2558,7 @@ function Invoke-MsiServiceTableSelfTest {
     Pass 'settled: two process ids read as unstable'
 
     # What a transaction did to the services (PR 1634), over synthetic records. The first is the
-    # upgrade from 0.3.0 that CI ran: FastCached Auto and running as 9268 before it, stopped one second
+    # upgrade from 0.3.0 that CI ran: pace-kv Auto and running as 9268 before it, stopped one second
     # in, started again at 12:12:47 after the table had made it manual, and terminated three times
     # before msiexec returned. Every other row is one witness alone, or one thing that must NOT count.
     $t0 = [DateTime]::new(2026, 10, 6, 12, 12, 14, [DateTimeKind]::Utc)
@@ -2569,55 +2569,55 @@ function Invoke-MsiServiceTableSelfTest {
     $sighting = { param([string] $service, [int] $processId, [int] $second, [string] $state = 'Running')
         [pscustomobject]@{ Time = $t0.AddSeconds($second); Service = $service; State = $state; ProcessId = $processId } }
     $upgradeFrom030 = @{
-        Events = @((& $termination 7031 34 'FastCached'), (& $termination 7031 36 'FastCached'), (& $termination 7031 38 'FastCached'),
-            (& $entered 33 'FastCached' 'Running'), (& $entered 30 'FastCacheCompileNode' 'Running'))
-        Observed = @((& $sighting 'FastCached' 9268 0 'Stop Pending'), (& $sighting 'FastCacheCompileNode' 8392 30), (& $sighting 'FastCached' 5120 33))
-        Baseline = @{ FastCached = 9268; FastCacheCompileNode = 0 }
+        Events = @((& $termination 7031 34 'pace-kv'), (& $termination 7031 36 'pace-kv'), (& $termination 7031 38 'pace-kv'),
+            (& $entered 33 'pace-kv' 'Running'), (& $entered 30 'pace-node' 'Running'))
+        Observed = @((& $sighting 'pace-kv' 9268 0 'Stop Pending'), (& $sighting 'pace-node' 8392 30), (& $sighting 'pace-kv' 5120 33))
+        Baseline = @{ 'pace-kv' = 9268; 'pace-node' = 0 }
     }
     $none = @{ Events = @(); Observed = @(); Baseline = @{} }
     $transactionVerdicts = @(
-        @{ Case = 'the upgrade from 0.3.0 that CI ran: three terminations and a start seen by both start witnesses'; Input = $upgradeFrom030; NotRunning = @('FastCached')
-           Match = @("^Termination: FastCached terminated unexpectedly during 'T': event 7031 at 2026-10-06T12:12:48\.000Z: The FastCached service terminated unexpectedly",
+        @{ Case = 'the upgrade from 0.3.0 that CI ran: three terminations and a start seen by both start witnesses'; Input = $upgradeFrom030; NotRunning = @('pace-kv')
+           Match = @("^Termination: pace-kv terminated unexpectedly during 'T': event 7031 at 2026-10-06T12:12:48\.000Z: The pace-kv service terminated unexpectedly",
                      '^Termination: .*event 7031 at 2026-10-06T12:12:50\.000Z', '^Termination: .*event 7031 at 2026-10-06T12:12:52\.000Z',
-                     "^Start: FastCached, which the expectation leaves not running, was started during 'T': event 7036 at 2026-10-06T12:12:47\.000Z: The FastCached service entered the running state\.$",
-                     "^Start: FastCached, which the expectation leaves not running, was started during 'T': process 5120 seen Running at 2026-10-06T12:12:47\.000Z, 1 time\(s\); it ran as process 9268 when the transaction began$") }
+                     "^Start: pace-kv, which the expectation leaves not running, was started during 'T': event 7036 at 2026-10-06T12:12:47\.000Z: The pace-kv service entered the running state\.$",
+                     "^Start: pace-kv, which the expectation leaves not running, was started during 'T': process 5120 seen Running at 2026-10-06T12:12:47\.000Z, 1 time\(s\); it ran as process 9268 when the transaction began$") }
         @{ Case = 'a termination alone, with no start seen'; NotRunning = @()
-           Input = @{ Events = @(& $termination 7034 20 'FastCacheCompileNode'); Observed = @(); Baseline = @{} }
-           Match = @("^Termination: FastCacheCompileNode terminated unexpectedly during 'T': event 7034 at 2026-10-06T12:12:34\.000Z") }
-        @{ Case = 'a start seen by the watch alone, of a service that was not running'; NotRunning = @('FastCached')
-           Input = @{ Events = @(); Observed = @(& $sighting 'FastCached' 5120 33); Baseline = @{ FastCached = 0 } }
+           Input = @{ Events = @(& $termination 7034 20 'pace-node'); Observed = @(); Baseline = @{} }
+           Match = @("^Termination: pace-node terminated unexpectedly during 'T': event 7034 at 2026-10-06T12:12:34\.000Z") }
+        @{ Case = 'a start seen by the watch alone, of a service that was not running'; NotRunning = @('pace-kv')
+           Input = @{ Events = @(); Observed = @(& $sighting 'pace-kv' 5120 33); Baseline = @{ 'pace-kv' = 0 } }
            Match = @('^Start: .*process 5120 seen Running at 2026-10-06T12:12:47\.000Z, 1 time\(s\); it was not running when the transaction began$') }
-        @{ Case = 'a start seen by 7036 alone, between two observations of the watch'; NotRunning = @('FastCached')
-           Input = @{ Events = @((& $entered 33 'FastCached' 'Running'), (& $entered 34 'FastCached' 'Stopped')); Observed = @(); Baseline = @{ FastCached = 0 } }
-           Match = @('^Start: FastCached, .*event 7036 at 2026-10-06T12:12:47\.000Z', '^Start: FastCached, .*event 7036 \(stopped\) at 2026-10-06T12:12:48\.000Z, a stop of a service that was not running') }
-        @{ Case = 'a stop (7036 stopped) of the process a service ran under when it began is not a start'; NotRunning = @('FastCached')
-           Input = @{ Events = @(& $entered 1 'FastCached' 'Stopped'); Observed = @(); Baseline = @{ FastCached = 9268 } }
+        @{ Case = 'a start seen by 7036 alone, between two observations of the watch'; NotRunning = @('pace-kv')
+           Input = @{ Events = @((& $entered 33 'pace-kv' 'Running'), (& $entered 34 'pace-kv' 'Stopped')); Observed = @(); Baseline = @{ 'pace-kv' = 0 } }
+           Match = @('^Start: pace-kv, .*event 7036 at 2026-10-06T12:12:47\.000Z', '^Start: pace-kv, .*event 7036 \(stopped\) at 2026-10-06T12:12:48\.000Z, a stop of a service that was not running') }
+        @{ Case = 'a stop (7036 stopped) of the process a service ran under when it began is not a start'; NotRunning = @('pace-kv')
+           Input = @{ Events = @(& $entered 1 'pace-kv' 'Stopped'); Observed = @(); Baseline = @{ 'pace-kv' = 9268 } }
            Match = @() }
-        @{ Case = 'a start that never reached RUNNING, of a service that was not running, is seen by its stop'; NotRunning = @('FastCached')
-           Input = @{ Events = @(& $entered 34 'FastCached' 'Stopped'); Observed = @(); Baseline = @{ FastCached = 0 } }
-           Match = @('^Start: FastCached, which the expectation leaves not running, was started during ''T'': event 7036 \(stopped\) at 2026-10-06T12:12:48\.000Z, a stop of a service that was not running when the transaction began, follows a start') }
-        @{ Case = 'PR 1634''s stray starts, which logged four stops and no running: every stop past the first is a start'; NotRunning = @('FastCached')
-           Input = @{ Events = @((& $entered 1 'FastCached' 'Stopped'), (& $entered 34 'FastCached' 'Stopped'), (& $entered 36 'FastCached' 'Stopped'), (& $entered 38 'FastCached' 'Stopped'))
-                      Observed = @(); Baseline = @{ FastCached = 9268 } }
+        @{ Case = 'a start that never reached RUNNING, of a service that was not running, is seen by its stop'; NotRunning = @('pace-kv')
+           Input = @{ Events = @(& $entered 34 'pace-kv' 'Stopped'); Observed = @(); Baseline = @{ 'pace-kv' = 0 } }
+           Match = @('^Start: pace-kv, which the expectation leaves not running, was started during ''T'': event 7036 \(stopped\) at 2026-10-06T12:12:48\.000Z, a stop of a service that was not running when the transaction began, follows a start') }
+        @{ Case = 'PR 1634''s stray starts, which logged four stops and no running: every stop past the first is a start'; NotRunning = @('pace-kv')
+           Input = @{ Events = @((& $entered 1 'pace-kv' 'Stopped'), (& $entered 34 'pace-kv' 'Stopped'), (& $entered 36 'pace-kv' 'Stopped'), (& $entered 38 'pace-kv' 'Stopped'))
+                      Observed = @(); Baseline = @{ 'pace-kv' = 9268 } }
            Match = @('^Start: .*event 7036 \(stopped\) at 2026-10-06T12:12:48\.000Z, a stop past the one of process 9268', '^Start: .*event 7036 \(stopped\) at 2026-10-06T12:12:50\.000Z', '^Start: .*event 7036 \(stopped\) at 2026-10-06T12:12:52\.000Z') }
-        @{ Case = 'one stray process seen twice is one finding'; NotRunning = @('FastCached')
-           Input = @{ Events = @(); Observed = @((& $sighting 'FastCached' 5120 33), (& $sighting 'FastCached' 5120 34)); Baseline = @{ FastCached = 0 } }
+        @{ Case = 'one stray process seen twice is one finding'; NotRunning = @('pace-kv')
+           Input = @{ Events = @(); Observed = @((& $sighting 'pace-kv' 5120 33), (& $sighting 'pace-kv' 5120 34)); Baseline = @{ 'pace-kv' = 0 } }
            Match = @('process 5120 seen Running at 2026-10-06T12:12:47\.000Z, 2 time\(s\)') }
-        @{ Case = 'the process a service ran under when it began is not a start'; NotRunning = @('FastCached')
-           Input = @{ Events = @(); Observed = @((& $sighting 'FastCached' 9268 0), (& $sighting 'FastCached' 9268 1 'Stop Pending')); Baseline = @{ FastCached = 9268 } }
+        @{ Case = 'the process a service ran under when it began is not a start'; NotRunning = @('pace-kv')
+           Input = @{ Events = @(); Observed = @((& $sighting 'pace-kv' 9268 0), (& $sighting 'pace-kv' 9268 1 'Stop Pending')); Baseline = @{ 'pace-kv' = 9268 } }
            Match = @() }
-        @{ Case = 'a service the expectation leaves running may be started'; NotRunning = @('FastCached')
-           Input = @{ Events = @(& $entered 30 'FastCacheCompileNode' 'Running'); Observed = @(& $sighting 'FastCacheCompileNode' 8392 30); Baseline = @{ FastCacheCompileNode = 0 } }
+        @{ Case = 'a service the expectation leaves running may be started'; NotRunning = @('pace-kv')
+           Input = @{ Events = @(& $entered 30 'pace-node' 'Running'); Observed = @(& $sighting 'pace-node' 8392 30); Baseline = @{ 'pace-node' = 0 } }
            Match = @() }
         @{ Case = 'a termination before the transaction began is not its'; NotRunning = @()
-           Input = @{ Events = @(& $termination 7031 -5 'FastCached'); Observed = @(); Baseline = @{} }
+           Input = @{ Events = @(& $termination 7031 -5 'pace-kv'); Observed = @(); Baseline = @{} }
            Match = @() }
         @{ Case = "another service's termination is not this package's"; NotRunning = @()
            Input = @{ Events = @(& $termination 7034 5 'sshd'); Observed = @(); Baseline = @{} }
            Match = @() }
-        @{ Case = 'a termination the expectation allows is not a finding, and the other service''s still is'; NotRunning = @(); MayTerminate = @('FastCacheCompileNode')
-           Input = @{ Events = @((& $termination 7034 20 'FastCacheCompileNode'), (& $termination 7031 21 'FastCached')); Observed = @(); Baseline = @{} }
-           Match = @("^Termination: FastCached terminated unexpectedly during 'T': event 7031 at 2026-10-06T12:12:35\.000Z") }
+        @{ Case = 'a termination the expectation allows is not a finding, and the other service''s still is'; NotRunning = @(); MayTerminate = @('pace-node')
+           Input = @{ Events = @((& $termination 7034 20 'pace-node'), (& $termination 7031 21 'pace-kv')); Observed = @(); Baseline = @{} }
+           Match = @("^Termination: pace-kv terminated unexpectedly during 'T': event 7031 at 2026-10-06T12:12:35\.000Z") }
     )
     foreach ($row in $transactionVerdicts) {
         $may = if ($row.ContainsKey('MayTerminate')) { $row.MayTerminate } else { @() }
@@ -2633,8 +2633,8 @@ function Invoke-MsiServiceTableSelfTest {
     # What each row makes an expectation of: the services it leaves NOT RUNNING (stopped, or not
     # registered) are watched for a start, and the node's start is the 7036 control where it runs.
     $wantNotRunning = @{
-        Release030WithNode = 'FastCacheCompileNode'; NodeSelected = 'FastCached'; NodeAlone = 'FastCached'
-        DaemonAlone = 'FastCacheCompileNode'; DaemonAloneUnstarted = 'FastCacheCompileNode,FastCached'; NothingInstalled = 'FastCacheCompileNode,FastCached'
+        Release030WithNode = 'pace-node'; NodeSelected = 'pace-kv'; NodeAlone = 'pace-kv'
+        DaemonAlone = 'pace-node'; DaemonAloneUnstarted = 'pace-node,pace-kv'; NothingInstalled = 'pace-node,pace-kv'
     }
     foreach ($rowName in $script:ServiceTable.Keys) {
         $expectation = Get-TransactionExpectation -Leaves $rowName
@@ -2653,7 +2653,7 @@ function Invoke-MsiServiceTableSelfTest {
             throw "expectation: $name read as $($expectation | ConvertTo-Json -Compress)"
         }
     }
-    if ((@((Get-TransactionExpectation -Expect NodeCannotBind).MayTerminate) -join ',') -cne 'FastCacheCompileNode' -or @((Get-TransactionExpectation -Expect RollsBack).MayTerminate).Count -ne 0) {
+    if ((@((Get-TransactionExpectation -Expect NodeCannotBind).MayTerminate) -join ',') -cne 'pace-node' -or @((Get-TransactionExpectation -Expect RollsBack).MayTerminate).Count -ne 0) {
         throw 'expectation: only NodeCannotBind allows a termination, and only the node''s'
     }
     Pass 'expectation: each named expectation carries its reason, must fail, judges no start, and only NodeCannotBind allows a termination'
@@ -2676,17 +2676,17 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The 7036 witness's positive control: the node's own start, in every state.
     foreach ($row in @(
-            @{ Case = 'the node''s start logged'; Events = @(& $entered 30 'FastCacheCompileNode' 'Running'); NodeStarts = $true; Want = 'live' }
+            @{ Case = 'the node''s start logged'; Events = @(& $entered 30 'pace-node' 'Running'); NodeStarts = $true; Want = 'live' }
             @{ Case = 'the node started and no 7036 at all was read'; Events = @(); NodeStarts = $true; Want = 'not seen' }
-            @{ Case = 'the node started and only another service''s 7036 was read'; Events = @(& $entered 30 'FastCached' 'Running'); NodeStarts = $true; Want = 'unmatched' }
-            @{ Case = 'a node start BEFORE the transaction is not its control'; Events = @(& $entered -3 'FastCacheCompileNode' 'Running'); NodeStarts = $true; Want = 'not seen' }
+            @{ Case = 'the node started and only another service''s 7036 was read'; Events = @(& $entered 30 'pace-kv' 'Running'); NodeStarts = $true; Want = 'unmatched' }
+            @{ Case = 'a node start BEFORE the transaction is not its control'; Events = @(& $entered -3 'pace-node' 'Running'); NodeStarts = $true; Want = 'not seen' }
             # The node's OWN 7036s answer for the node, never for the host (PR 1645's refused-pin repair):
             # its stop alone proves the reader reads the node's, so it is not 'unmatched'.
-            @{ Case = 'the node''s own stop alone is the node''s outcome, not a dead reader'; Events = @(& $entered 2 'FastCacheCompileNode' 'Stopped'); NodeStarts = $true; Want = 'node stopped' }
-            @{ Case = 'the node''s own stop beside another service''s 7036 is still the node''s outcome'; Events = @((& $entered 2 'FastCacheCompileNode' 'Stopped'), (& $entered 3 'msiserver' 'Running')); NodeStarts = $true; Want = 'node stopped' }
-            @{ Case = 'a node 7036 whose state the parse could not read is the matcher failing'; Events = @(& $entered 2 'FastCacheCompileNode' ''); NodeStarts = $true; Want = 'unmatched' }
-            @{ Case = 'the node''s stop and then its start is live'; Events = @((& $entered 2 'FastCacheCompileNode' 'Stopped'), (& $entered 9 'FastCacheCompileNode' 'Running')); NodeStarts = $true; Want = 'live' }
-            @{ Case = 'no node start in the transaction'; Events = @(& $entered 30 'FastCacheCompileNode' 'Running'); NodeStarts = $false; Want = 'no control' })) {
+            @{ Case = 'the node''s own stop alone is the node''s outcome, not a dead reader'; Events = @(& $entered 2 'pace-node' 'Stopped'); NodeStarts = $true; Want = 'node stopped' }
+            @{ Case = 'the node''s own stop beside another service''s 7036 is still the node''s outcome'; Events = @((& $entered 2 'pace-node' 'Stopped'), (& $entered 3 'msiserver' 'Running')); NodeStarts = $true; Want = 'node stopped' }
+            @{ Case = 'a node 7036 whose state the parse could not read is the matcher failing'; Events = @(& $entered 2 'pace-node' ''); NodeStarts = $true; Want = 'unmatched' }
+            @{ Case = 'the node''s stop and then its start is live'; Events = @((& $entered 2 'pace-node' 'Stopped'), (& $entered 9 'pace-node' 'Running')); NodeStarts = $true; Want = 'live' }
+            @{ Case = 'no node start in the transaction'; Events = @(& $entered 30 'pace-node' 'Running'); NodeStarts = $false; Want = 'no control' })) {
         $state = Get-Witness7036State -Events $row.Events -StartedUtc $t0 -NodeStarts $row.NodeStarts
         if ($state -cne $row.Want) { throw "7036 control: $($row.Case) read '$state', expected '$($row.Want)'" }
         Pass "7036 control: $($row.Case) is '$($row.Want)'"
@@ -2704,10 +2704,10 @@ function Invoke-MsiServiceTableSelfTest {
     $parses = @(
         @{ Case = 'the service name is read from the binary data, the time in UTC'
            Xml = (& $eventXml 7031 '2026-10-06T12:12:48.1234567Z' @{ param1 = 'pace-node'; param2 = '1' } $realBinary); Message = "The node`r`n terminated."
-           Id = 7031; Service = 'FastCacheCompileNode'; State = ''; Text = 'The node terminated.'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc).AddTicks(1234567) }
+           Id = 7031; Service = 'pace-node'; State = ''; Text = 'The node terminated.'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc).AddTicks(1234567) }
         @{ Case = "with no binary data, this package's display name reads as its service name"
            Xml = (& $eventXml 7034 '2026-10-06T12:12:48Z' @{ param1 = 'pace-kv'; param2 = '1' } ''); Message = 'm'
-           Id = 7034; Service = 'FastCached'; State = ''; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc) }
+           Id = 7034; Service = 'pace-kv'; State = ''; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc) }
         @{ Case = 'another service keeps its own name'
            Xml = (& $eventXml 7034 '2026-10-06T12:12:48Z' @{ param1 = 'OpenSSH SSH Server'; param2 = '1' } (& $hexOf 'sshd')); Message = 'm'
            Id = 7034; Service = 'sshd'; State = ''; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc) }
@@ -2715,11 +2715,11 @@ function Invoke-MsiServiceTableSelfTest {
            Xml = (& $eventXml 7045 '2026-10-01T08:00:00Z' @{ ServiceName = 'cowork-svc'; ImagePath = 'C:\x.exe'; ServiceType = 'user mode service'; StartType = 'auto start'; AccountName = 'LocalSystem' } ''); Message = 'A service was installed in the system.'
            Id = 7045; Service = 'cowork-svc'; State = ''; Text = 'A service was installed in the system.'; Time = [DateTime]::new(2026, 10, 1, 8, 0, 0, [DateTimeKind]::Utc) }
         @{ Case = 'a 7036 reads its state from param2 and its service from the display name'
-           Xml = (& $eventXml 7036 '2026-10-06T12:13:23Z' @{ param1 = 'FastCached'; param2 = 'running' } ''); Message = 'The FastCached service entered the running state.'
-           Id = 7036; Service = 'FastCached'; State = 'Running'; Text = 'The FastCached service entered the running state.'; Time = [DateTime]::new(2026, 10, 6, 12, 13, 23, [DateTimeKind]::Utc) }
+           Xml = (& $eventXml 7036 '2026-10-06T12:13:23Z' @{ param1 = 'pace-kv'; param2 = 'running' } ''); Message = 'The pace-kv service entered the running state.'
+           Id = 7036; Service = 'pace-kv'; State = 'Running'; Text = 'The pace-kv service entered the running state.'; Time = [DateTime]::new(2026, 10, 6, 12, 13, 23, [DateTimeKind]::Utc) }
         @{ Case = 'a 7036 whose binary data reads <name>/<code> and whose param2 says nothing'
-           Xml = (& $eventXml 7036 '2026-10-06T12:13:24Z' @{ param1 = 'pace-node'; param2 = '' } (& $hexOf 'FastCacheCompileNode/1')); Message = 'm'
-           Id = 7036; Service = 'FastCacheCompileNode'; State = 'Stopped'; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 13, 24, [DateTimeKind]::Utc) }
+           Xml = (& $eventXml 7036 '2026-10-06T12:13:24Z' @{ param1 = 'pace-node'; param2 = '' } (& $hexOf 'pace-node/1')); Message = 'm'
+           Id = 7036; Service = 'pace-node'; State = 'Stopped'; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 13, 24, [DateTimeKind]::Utc) }
     )
     foreach ($row in $parses) {
         $parsed = ConvertTo-ServiceControlEvent $row.Xml $row.Message
@@ -2749,20 +2749,20 @@ function Invoke-MsiServiceTableSelfTest {
     $record = { param([string] $leaves, [string] $expect, [int] $polls, [int] $failed, $observed, [int] $exitCode = 0)
         [pscustomobject]@{ What = 'the upgrade from v0.3.0'; Log = ''; StartedUtc = $t0; Baseline = $upgradeFrom030.Baseline
             Expectation = (Get-TransactionExpectation -Leaves $leaves -Expect $expect); Polls = $polls; FailedPolls = $failed
-            FirstFailure = $(if ($failed) { 'FastCached: Invalid class' } else { '' }); Observed = $observed
+            FirstFailure = $(if ($failed) { 'pace-kv: Invalid class' } else { '' }); Observed = $observed
             EndedTimestamp = [Diagnostics.Stopwatch]::GetTimestamp() - 60 * [Diagnostics.Stopwatch]::Frequency; Extended = $false
             ExitCode = $exitCode; Deferred = '' } }
     $savedLatch = $script:Witness7036LiveSince
     ExpectThrow 'judgement: a watch that never looked is refused, naming its failed rounds' {
         Invoke-TransactionJudgement -Transaction (& $record 'NodeSelected' '' 0 3 @()) -ReadEvents { @() }
-    } "were never observed .*\(3 observation round\(s\) failed, first: FastCached: Invalid class\)"
+    } "were never observed .*\(3 observation round\(s\) failed, first: pace-kv: Invalid class\)"
     $read = $upgradeFrom030.Events
     ExpectThrow 'judgement: the upgrade from 0.3.0 is refused with each finding and both kinds'' remedies' {
         Invoke-TransactionJudgement -Transaction (& $record 'NodeSelected' '' 120 0 $upgradeFrom030.Observed) `
             -ReadEvents { param($since) if ($since -ne $t0) { throw "read from $since" }; $read } 6>$null
     } "disturbed a service the table owns \(row NodeSelected\)(.|\n)*event 7031 at 2026-10-06T12:12:48(.|\n)*process 5120(.|\n)*a TERMINATION is the service failing(.|\n)*Restart Manager \(PR 1634\)"
     try {
-        Invoke-TransactionJudgement -Transaction (& $record 'NodeSelected' '' 5 0 @()) -ReadEvents { @(& $termination 7034 20 'FastCacheCompileNode') } 6>$null
+        Invoke-TransactionJudgement -Transaction (& $record 'NodeSelected' '' 5 0 @()) -ReadEvents { @(& $termination 7034 20 'pace-node') } 6>$null
         throw 'judgement: a termination alone was not refused'
     } catch {
         if ($_.Exception.Message -notmatch 'a TERMINATION is the service failing' -or $_.Exception.Message -match 'Restart Manager') {
@@ -2785,19 +2785,19 @@ function Invoke-MsiServiceTableSelfTest {
         "MSI (c) (80:EC) [$(& $stamp 1)]: RESTART MANAGER: Session opened.",
         "MSI (s) (D8:AC) [$(& $stamp 2)]: RESTART MANAGER: Shut down the nested session's applications.",
         "MSI (s) (D8:AC) [$(& $stamp 32)]: Doing action: PaceNodeStartService",
-        "MSI (s) (D8:AC) [$(& $stamp 33)]: RESTART MANAGER: Restarted FastCached.",
+        "MSI (s) (D8:AC) [$(& $stamp 33)]: RESTART MANAGER: Restarted pace-kv.",
         "MSI (s) (D8:AC) [$(& $stamp 38)]: Product: pace-kv -- Installation completed successfully.")
     try {
         $judged = & $record 'NodeSelected' '' 5 0 @()
         $judged.Log = $judgedLog
         # Invoke-Msiexec's own shape: the judgement's output captured as Write-Host's argument.
         $shown = @(& {
-                try { Write-Host (Invoke-TransactionJudgement -Transaction $judged -ReadEvents { @(& $termination 7031 34 'FastCached') }) } catch { 'refused' }
+                try { Write-Host (Invoke-TransactionJudgement -Transaction $judged -ReadEvents { @(& $termination 7031 34 'pace-kv') }) } catch { 'refused' }
             } 6>&1 | ForEach-Object { "$_" })
         if ($shown -notcontains 'refused') { throw "log on refusal: the judgement did not refuse ($($shown.Count) line(s))" }
         $text = $shown -join "`n"
         foreach ($want in @('--- the tail ---\n(MSI [^\n]*\n)*MSI [^\n]*Doing action: PaceNodeStartService\n', 'RESTART MANAGER: Shut down the nested session''s applications',
-                '--- the actions from 10 s before to 5 s after each finding .*---\n.*Doing action: PaceNodeStartService\n.*RESTART MANAGER: Restarted FastCached\.\n.*Product: pace-kv -- Installation completed successfully\.')) {
+                '--- the actions from 10 s before to 5 s after each finding .*---\n.*Doing action: PaceNodeStartService\n.*RESTART MANAGER: Restarted pace-kv\.\n.*Product: pace-kv -- Installation completed successfully\.')) {
             if ($text -notmatch $want) { throw "log on refusal: nothing shown matches '$want' in:`n$text" }
         }
         if (@(Show-MsiLog $judgedLog 6>$null).Count -ne 0) { throw 'log on refusal: Show-MsiLog wrote to the output stream' }
@@ -2809,11 +2809,11 @@ function Invoke-MsiServiceTableSelfTest {
             @{ Case = 'a rollback names its expectation and its reason, and judges no start'; Leaves = ''; Expect = 'RollsBack'; Events = @(); Failed = 0
                Match = "against expectation RollsBack -- the transaction fails on purpose.*no start judged; 7036 unchecked" }
             @{ Case = 'the node started with no 7036 read is named NOT SEEN, naming both causes'; Leaves = 'NodeSelected'; Expect = ''; Events = @(); Failed = 0
-               Match = 'judged at msiexec''s exit against row NodeSelected: no unexpected termination, no start of FastCached; 7036 NOT SEEN: .*either this host writes none or the reader fails' }
-            @{ Case = 'the node''s logged start makes 7036 live'; Leaves = 'NodeSelected'; Expect = ''; Events = @(& $entered 30 'FastCacheCompileNode' 'Running'); Failed = 0
+               Match = 'judged at msiexec''s exit against row NodeSelected: no unexpected termination, no start of pace-kv; 7036 NOT SEEN: .*either this host writes none or the reader fails' }
+            @{ Case = 'the node''s logged start makes 7036 live'; Leaves = 'NodeSelected'; Expect = ''; Events = @(& $entered 30 'pace-node' 'Running'); Failed = 0
                Match = '7036 live' }
             @{ Case = 'failed observation rounds are named'; Leaves = 'NodeAlone'; Expect = ''; Events = @(); Failed = 2
-               Match = '5 observation round\(s\); 2 observation round\(s\) FAILED, first: FastCached: Invalid class$' })) {
+               Match = '5 observation round\(s\); 2 observation round\(s\) FAILED, first: pace-kv: Invalid class$' })) {
         $events = $row.Events
         $script:Witness7036LiveSince = ''
         $line = Invoke-TransactionJudgement -Transaction (& $record $row.Leaves $row.Expect 5 $row.Failed @()) -ReadEvents { $events }
@@ -2830,7 +2830,7 @@ function Invoke-MsiServiceTableSelfTest {
         ExpectThrow 'judgement: a node start whose 7036 is missed while others are read is refused' {
             Invoke-TransactionJudgement -Transaction (& $record 'NodeAlone' '' 5 0 @()) -ReadEvents { $others }
         } 'none is the node entering the running state while others are(.|\n)*7036 witness is dead'
-        $nodeLogged = @(& $entered 30 'FastCacheCompileNode' 'Running')
+        $nodeLogged = @(& $entered 30 'pace-node' 'Running')
         $null = Invoke-TransactionJudgement -Transaction (& $record 'NodeAlone' '' 5 0 @()) -ReadEvents { $nodeLogged }
         ExpectThrow 'judgement: once a node start read live, one that reads no 7036 is refused' {
             Invoke-TransactionJudgement -Transaction (& $record 'NodeAlone' '' 5 0 @()) -ReadEvents { @() }
@@ -2843,7 +2843,7 @@ function Invoke-MsiServiceTableSelfTest {
     $saved = $script:LastMsiTransaction
     try {
         $script:LastMsiTransaction = & $record 'NothingInstalled' '' 5 0 @()
-        $late = @(& $termination 7031 60 'FastCached')
+        $late = @(& $termination 7031 60 'pace-kv')
         ExpectThrow 'judgement: Assert-ServiceTable judges the transaction again, over the longer window' {
             Assert-ServiceTable -Row NothingInstalled -StableSeconds 0 -TimeoutSeconds 1 -Observe { param($name) $null } -ReadEvents { $late } 6>$null
         } 'disturbed a service the table owns \(row NothingInstalled\)(.|\n)*event 7031 at 2026-10-06T12:13:14'
@@ -2862,9 +2862,9 @@ function Invoke-MsiServiceTableSelfTest {
     # PaceNodeStartService awaited RUNNING, so a missed 'running' is the witness failing on the
     # state); settled, a node that never came back is refused naming the outcome, through the
     # settled judgement alone and through the row's own wait.
-    $nodeStoppedAt2 = @(& $entered 2 'FastCacheCompileNode' 'Stopped')
+    $nodeStoppedAt2 = @(& $entered 2 'pace-node' 'Stopped')
     $nodeIs = { param([string] $state, [int] $processId, [int] $exitCode)
-        { param($name) if ($name -eq 'FastCacheCompileNode') { [pscustomobject]@{ StartMode = 'Auto'; State = $state; ProcessId = $processId; ExitCode = $exitCode; ServiceSpecificExitCode = 0 } }
+        { param($name) if ($name -eq 'pace-node') { [pscustomobject]@{ StartMode = 'Auto'; State = $state; ProcessId = $processId; ExitCode = $exitCode; ServiceSpecificExitCode = 0 } }
           else { [pscustomobject]@{ StartMode = 'Disabled'; State = 'Stopped'; ProcessId = 0; ExitCode = 1077; ServiceSpecificExitCode = 0 } } }.GetNewClosure() }
     $saved = $script:LastMsiTransaction
     $savedLatch = $script:Witness7036LiveSince
@@ -2889,23 +2889,23 @@ function Invoke-MsiServiceTableSelfTest {
 
         # The evidence a refusal shows, from the same read the verdict was taken from: each event with
         # its meaning, and each service's state, process and exit codes.
-        $refusedWith = @($nodeStoppedAt2) + @([pscustomobject]@{ Id = 7000; Time = $t0.AddSeconds(3); Service = 'FastCacheCompileNode'; State = ''; Message = 'The pace-node service failed to start.' })
+        $refusedWith = @($nodeStoppedAt2) + @([pscustomobject]@{ Id = 7000; Time = $t0.AddSeconds(3); Service = 'pace-node'; State = ''; Message = 'The pace-node service failed to start.' })
         $shown = @(& { try { $null = Invoke-TransactionJudgement -Transaction (& $record 'NodeSelected' '' 5 0 @() 0) -ReadEvents { $refusedWith } -Observe (& $nodeIs 'Stopped' 0 1067) } catch { 'refused' } } 6>&1 | ForEach-Object { "$_" })
         $text = $shown -join "`n"
-        foreach ($want in @('^refused$', '^FastCacheCompileNode: Auto, Stopped, process 0; exit code 1067, service-specific 0$', '^FastCached: Disabled, Stopped, process 0; exit code 1077, service-specific 0$',
+        foreach ($want in @('^refused$', '^pace-node: Auto, Stopped, process 0; exit code 1067, service-specific 0$', '^pace-kv: Disabled, Stopped, process 0; exit code 1077, service-specific 0$',
                 '^===== System events 7000, 7009, 7022, 7023, 7024, 7026, 7031, 7034, 7036 since ''the upgrade from v0\.3\.0'' began \(2026-10-06T12:12:14\.000Z\) =====$',
-                '^2026-10-06T12:12:16\.000Z 7036 FastCacheCompileNode Stopped -- the service entered the running or the stopped state: ',
-                '^2026-10-06T12:12:17\.000Z 7000 FastCacheCompileNode -- the service failed to start \(the error it names')) {
+                '^2026-10-06T12:12:16\.000Z 7036 pace-node Stopped -- the service entered the running or the stopped state: ',
+                '^2026-10-06T12:12:17\.000Z 7000 pace-node -- the service failed to start \(the error it names')) {
             if (@($shown | Where-Object { $_ -match $want }).Count -ne 1) { throw "evidence: no single line matches '$want' in:`n$text" }
         }
-        if ($text.IndexOf('7036 FastCacheCompileNode Stopped') -gt $text.IndexOf('7000 FastCacheCompileNode')) { throw "evidence: the events are not in time order:`n$text" }
+        if ($text.IndexOf('7036 pace-node Stopped') -gt $text.IndexOf('7000 pace-node')) { throw "evidence: the events are not in time order:`n$text" }
         Pass 'evidence: a refusal shows each event with its meaning, in time order, and each service''s state, process and exit codes'
 
         # Settled: the deferred outcome is DECIDED. A node that came back passes, live; one that never did
         # is refused naming the outcome; one that runs while its 'running' was never read is the witness.
         $rolledBack.EndedTimestamp = [Diagnostics.Stopwatch]::GetTimestamp()
         $script:LastMsiTransaction = $rolledBack
-        $cameBack = @($nodeStoppedAt2) + @(& $entered 9 'FastCacheCompileNode' 'Running')
+        $cameBack = @($nodeStoppedAt2) + @(& $entered 9 'pace-node' 'Running')
         Assert-TransactionSettled -SettleSeconds 0 -ReadEvents { $cameBack } -Observe (& $nodeIs 'Running' 40 0) 6>$null
         Pass 'node stopped: settled, the rollback''s restart logged as running passes'
         foreach ($row in @(
@@ -2926,8 +2926,8 @@ function Invoke-MsiServiceTableSelfTest {
         ExpectThrow 'node stopped: a row whose node never comes back is refused naming the deferred outcome' {
             Assert-ServiceTable -Row NodeSelected -StableSeconds 0 -TimeoutSeconds 1 -Observe (& $nodeIs 'Stopped' 0 1067) -ReadEvents { $nodeStoppedAt2 } `
                 -Diagnose { param($name) $diagnosed.Add($name) } 6>$null
-        } "^FastCacheCompileNode is Stopped, expected Running \(waited .*\n'the upgrade from v0\.3\.0' exited 1603, a transaction that ROLLED BACK, .*; the row was waited for and the node is Stopped, process 0: the rollback's restart never brought it to RUNNING$"
-        if (($diagnosed -join ',') -cne 'FastCacheCompileNode,FastCached') { throw "node stopped: the row diagnosed [$($diagnosed -join ',')]" }
+        } "^pace-node is Stopped, expected Running \(waited .*\n'the upgrade from v0\.3\.0' exited 1603, a transaction that ROLLED BACK, .*; the row was waited for and the node is Stopped, process 0: the rollback's restart never brought it to RUNNING$"
+        if (($diagnosed -join ',') -cne 'pace-node,pace-kv') { throw "node stopped: the row diagnosed [$($diagnosed -join ',')]" }
     } finally {
         $script:LastMsiTransaction = $saved
         $script:Witness7036LiveSince = $savedLatch
@@ -2941,7 +2941,7 @@ function Invoke-MsiServiceTableSelfTest {
         $failed = & $record '' 'RollsBack' 5 0 @() 1603
         $failed.EndedTimestamp = [Diagnostics.Stopwatch]::GetTimestamp()
         $script:LastMsiTransaction = $failed
-        $late = @(& $termination 7031 60 'FastCached')
+        $late = @(& $termination 7031 60 'pace-kv')
         $atExit = Invoke-TransactionJudgement -Transaction $failed -ReadEvents { @() }
         if ($atExit -notmatch 'judged at msiexec''s exit against expectation RollsBack') { throw "settle: the exit judgement read '$atExit'" }
         $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -3004,9 +3004,9 @@ function Invoke-MsiServiceTableSelfTest {
         $process }
     $probe = & $startProbe
     $watched = Watch-ServiceProcesses -Process $probe -IntervalMilliseconds 100 -Observe {
-        param($name) if ($name -eq 'FastCached') { [pscustomobject]@{ StartMode = 'Manual'; State = 'Running'; ProcessId = 77 } } else { $null } }
+        param($name) if ($name -eq 'pace-kv') { [pscustomobject]@{ StartMode = 'Manual'; State = 'Running'; ProcessId = 77 } } else { $null } }
     if ($watched.Polls -lt 1 -or $watched.FailedPolls -ne 0 -or @($watched.Observed).Count -ne $watched.Polls -or
-        @($watched.Observed | Where-Object { $_.Service -ne 'FastCached' -or $_.ProcessId -ne 77 }).Count -ne 0) {
+        @($watched.Observed | Where-Object { $_.Service -ne 'pace-kv' -or $_.ProcessId -ne 77 }).Count -ne 0) {
         throw "watch: $($watched.Polls) poll(s) observed [$(@($watched.Observed | ForEach-Object { "$($_.Service) $($_.ProcessId)" }) -join '; ')]"
     }
     if ($probe.ExitCode -ne 3) { throw "watch: the watched process's exit code read '$($probe.ExitCode)', expected 3" }
@@ -3016,7 +3016,7 @@ function Invoke-MsiServiceTableSelfTest {
     $script:failuresLeft = 2
     $watched = Watch-ServiceProcesses -Process $probe -IntervalMilliseconds 100 -Observe {
         param($name) if ($script:failuresLeft -gt 0) { $script:failuresLeft--; throw 'Invalid class' }; $null }
-    if ($watched.FailedPolls -lt 1 -or $watched.Polls -lt 1 -or $watched.FirstFailure -notmatch '^FastCached(CompileNode)?: Invalid class$' -or -not $probe.HasExited) {
+    if ($watched.FailedPolls -lt 1 -or $watched.Polls -lt 1 -or $watched.FirstFailure -notmatch '^pace-kv(CompileNode)?: Invalid class$' -or -not $probe.HasExited) {
         throw "watch: a failing observation read as $($watched.Polls) round(s), $($watched.FailedPolls) failed ('$($watched.FirstFailure)'), exited $($probe.HasExited)"
     }
     Pass "watch: a failed observation is counted ($($watched.FailedPolls) round(s)) and the watch goes on to the process's exit"

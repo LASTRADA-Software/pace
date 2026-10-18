@@ -126,7 +126,7 @@ Each of these is a scar, not a preference.
   proving no committed watcher carried the bad predicate, which is what established that
   the guide entry was the whole fix rather than the documentation half of one. **A ticket
   closed on "the docs landed" when code was also needed is a hole with a green tick.**
-- **Nobody restarts the local `FastCacheCompileNode` service.** Every developer's build
+- **Nobody restarts the local `pace-node` service.** Every developer's build
   goes through it. A ticket needing a restart or reinstall goes back to the manager, who
   serialises it.
 - **Rebase on the manager's signal.** `origin/master` moves fast here and a build that was

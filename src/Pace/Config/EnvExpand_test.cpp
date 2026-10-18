@@ -12,9 +12,9 @@ using Pace::Testing::ScopedEnv;
 
 TEST_CASE("EnvExpand: input without references is returned unchanged", "[config][env]")
 {
-    auto const r = ExpandEnvironmentVariables("/var/lib/fastcached/cache", "storage_path");
+    auto const r = ExpandEnvironmentVariables("/var/lib/pace-kv/cache", "storage_path");
     REQUIRE(r.has_value());
-    REQUIRE(*r == "/var/lib/fastcached/cache");
+    REQUIRE(*r == "/var/lib/pace-kv/cache");
 }
 
 TEST_CASE("EnvExpand: bare $NAME ends at the first non-name character", "[config][env]")
@@ -23,7 +23,7 @@ TEST_CASE("EnvExpand: bare $NAME ends at the first non-name character", "[config
 
     auto const r = ExpandEnvironmentVariables("$FC_TEST_ROOT/fastcached/cache", "storage_path");
     REQUIRE(r.has_value());
-    REQUIRE(*r == "C:/ProgramData/fastcached/cache");
+    REQUIRE(*r == "C:/ProgramData/pace/cache");
 }
 
 TEST_CASE("EnvExpand: braced ${NAME} allows names the bare form cannot spell", "[config][env]")
@@ -31,9 +31,9 @@ TEST_CASE("EnvExpand: braced ${NAME} allows names the bare form cannot spell", "
     ScopedEnv const env { "FC_TEST_ODD", "/opt" };
 
     // The brace form is what makes Windows' ProgramFiles(x86) expressible.
-    auto const r = ExpandEnvironmentVariables("${FC_TEST_ODD}/fastcached", "storage_path");
+    auto const r = ExpandEnvironmentVariables("${FC_TEST_ODD}/pace-kv", "storage_path");
     REQUIRE(r.has_value());
-    REQUIRE(*r == "/opt/fastcached");
+    REQUIRE(*r == "/opt/pace");
 }
 
 TEST_CASE("EnvExpand: adjacent references concatenate", "[config][env]")
@@ -106,7 +106,7 @@ TEST_CASE("EnvExpand: Windows %NAME% is left alone", "[config][env]")
 {
     // Deliberately unsupported: a bare '%' is valid in a path, so rewriting it
     // would be worse than not handling it.
-    auto const r = ExpandEnvironmentVariables("%ProgramData%/fastcached", "storage_path");
+    auto const r = ExpandEnvironmentVariables("%ProgramData%/pace", "storage_path");
     REQUIRE(r.has_value());
-    REQUIRE(*r == "%ProgramData%/fastcached");
+    REQUIRE(*r == "%ProgramData%/pace");
 }

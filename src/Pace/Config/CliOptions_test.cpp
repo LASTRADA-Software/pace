@@ -44,7 +44,7 @@ struct FlagSample
 /// One sample per row. Asserted below to cover `CliOptions()` exactly, so a new
 /// flag cannot be added without also being exercised here.
 constexpr auto Samples = std::to_array<FlagSample>({
-    { .flag = "--config", .value = "fastcached.yaml" },
+    { .flag = "--config", .value = "pace-kv.yaml" },
     { .flag = "--bind", .value = "127.0.0.1" },
     { .flag = "--port", .value = "1234" },
     { .flag = "--max-memory", .value = "1m" },
@@ -93,8 +93,8 @@ constexpr auto Samples = std::to_array<FlagSample>({
     { .flag = "--healthcheck", .value = "" },
     { .flag = "--seed-config", .value = "template.yaml" },
     { .flag = "--migrate-storage", .value = "" },
-    { .flag = "--pidfile", .value = "fastcached.pid" },
-    { .flag = "--service-name", .value = "FastCached" },
+    { .flag = "--pidfile", .value = "pace-kv.pid" },
+    { .flag = "--service-name", .value = "pace-kv" },
     { .flag = "--help", .value = "" },
     { .flag = "--version", .value = "" },
 });

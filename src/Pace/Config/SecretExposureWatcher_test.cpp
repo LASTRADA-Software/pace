@@ -37,8 +37,8 @@ TEST_CASE("SecretExposureWatcher: the memory rule, on every platform", "[config]
     // therefore be invisible. `Platform/FileTrust` draws the same split one level
     // down, for the same reason its comment gives: the branch a developer cannot run
     // is still exercised against a constructed input.
-    std::filesystem::path const key { "/etc/fastcached/cluster.key" };
-    std::filesystem::path const token { "/etc/fastcached/dashboard.token" };
+    std::filesystem::path const key { "/etc/pace/cluster.key" };
+    std::filesystem::path const token { "/etc/pace/dashboard.token" };
 
     SecretExposureWatcher watcher;
 
@@ -246,7 +246,7 @@ TEST_CASE("SecretExposureWatcher: a reload reports a transition into exposure, o
         // **Not owned by root, and under #870 that stopped being an assumption.** The
         // sequence this section needs is TWO DIFFERENT exposure kinds, and only a
         // non-administrative owner produces the first of them: owned by root, 0640 is
-        // the delegation the packages ship (`0640 root:_fastcached`) and reports
+        // the delegation the packages ship (`0640 root:_pace-kv`) and reports
         // nothing at all, leaving `AnyLocalAccount` as the only kind a mode change can
         // still reach -- so there is no second kind to change TO, and the property
         // this case exists for is not arrangeable at all.

@@ -55,7 +55,7 @@ constexpr std::string_view NodeApplicationName = "pace-node";
 struct ConfigCandidate
 {
     /// Human-readable form for `--help` and the docs, e.g.
-    /// `"~/.config/{app}/{app}.yaml"`. Spelled symbolically because the real
+    /// `"~/.config/pace/{app}.yaml"`. Spelled symbolically because the real
     /// path is only known once the environment is read, and carrying
     /// ApplicationNameToken because more than one binary looks itself up here --
     /// the rows used to hardcode `pace-kv`, which is why the worker had no
@@ -97,7 +97,7 @@ class IConfigPathProbe
     /// @param path Candidate file.
     /// @return true when `path` names an existing file that can actually be
     ///         opened for reading. Readability, not mere existence: the macOS
-    ///         system config is mode 0640 root:_fastcached, and a per-user
+    ///         system config is mode 0640 root:_pace-kv, and a per-user
     ///         agent must fall through it rather than fail to start.
     [[nodiscard]] virtual bool IsReadableFile(std::filesystem::path const& path) const = 0;
 

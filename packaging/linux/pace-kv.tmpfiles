@@ -5,4 +5,4 @@
 # a cache file before first start.
 #
 # Type Path                 Mode Owner      Group      Age Argument
-d      /var/lib/fastcached  0750 pace-kv pace-kv -   -
+d      /var/lib/pace-kv  0750 pace-kv pace-kv -   -

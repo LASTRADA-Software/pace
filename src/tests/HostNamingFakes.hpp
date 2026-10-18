@@ -112,7 +112,7 @@ class ScriptedConfigPathProbe final: public IConfigPathProbe
 
 /// The probe a service registration is built with in a case: an elevated installer whose
 /// environment names the Windows machine-wide base, so the machine-wide state directory resolves
-/// alike on every platform -- `C:\ProgramData\fastcache-node` or the POSIX row's own path --
+/// alike on every platform -- `C:\ProgramData\pace-node` or the POSIX row's own path --
 /// and never from the real environment of the machine running the test.
 /// @return The probe.
 [[nodiscard]] inline ScriptedConfigPathProbe InstallerPathProbe()

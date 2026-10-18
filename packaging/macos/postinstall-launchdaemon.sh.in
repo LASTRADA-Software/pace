@@ -100,7 +100,7 @@ REGISTER_LOG="/var/log/fastcached-install.log"
 {
     echo "--- $(date -u '+%Y-%m-%dT%H:%M:%SZ') registering the system daemon"
     "${PREFIX}/bin/pace-kv" --install-service --service-scope=system \
-        --config="${PREFIX}/etc/fastcached.yaml" 2>&1
+        --config="${PREFIX}/etc/pace-kv.yaml" 2>&1
     echo "--- exit=$?"
 } >>"$REGISTER_LOG" 2>&1 || true
 

@@ -336,7 +336,7 @@ packaging/
                       component); exports the config-file list reused by the
                       dpkg conffiles and rpm %config filelists
   linux/              system + user systemd units, sysusers.d/tmpfiles.d,
-                      the commented /etc/fastcached/fastcached.yaml, and the
+                      the commented /etc/pace/pace-kv.yaml, and the
                       DEB/RPM maintainer-script templates (*.in)
   macos/              /etc/paths.d entry, the per-component postinstall
                       templates, the uninstaller, and the installer panes

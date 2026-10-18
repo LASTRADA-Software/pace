@@ -48,7 +48,7 @@ inline constexpr std::string_view DefaultRaftListen = "6680";
 inline constexpr std::string_view DefaultDiscoveryAddress = "255.255.255.255:6681";
 
 /// The last component of every platform's default state directory.
-inline constexpr std::string_view NodeStateDirectoryName = "fastcache-node";
+inline constexpr std::string_view NodeStateDirectoryName = "pace-node";
 
 /// The variable a service manager hands a unit's state directory over in: systemd's, for
 /// `StateDirectory=`, and the one a launchd registration of this node states.
@@ -85,10 +85,10 @@ struct NodeStateDirectoryChoice
 /// The state directory a node uses when `--cluster-dir` is not given.
 ///
 /// First the directory a service manager hands over (`STATE_DIRECTORY`, POSIX only, and only an
-/// entry named `fastcache-node`); then, for a PRIVILEGED process, the machine-wide one --
-/// `%ProgramData%\fastcache-node`, `/Library/Application Support/fastcache-node` or
-/// `/var/lib/fastcache-node`; otherwise the account's own -- `%LOCALAPPDATA%\fastcache-node`, or
-/// `$XDG_STATE_HOME/fastcache-node` falling back to `~/.local/state/fastcache-node`.
+/// entry named `pace-node`); then, for a PRIVILEGED process, the machine-wide one --
+/// `%ProgramData%\pace-node`, `/Library/Application Support/pace-node` or
+/// `/var/lib/pace-node`; otherwise the account's own -- `%LOCALAPPDATA%\pace-node`, or
+/// `$XDG_STATE_HOME/pace-node` falling back to `~/.local/state/pace-node`.
 ///
 /// **Per-user when unprivileged, because the machine-wide directory is the service's**: a node
 /// a developer starts by hand cannot create it, and one that could would share an identity with

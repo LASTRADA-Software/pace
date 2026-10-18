@@ -337,7 +337,7 @@ TEST_CASE("The node's credential is a secret and nothing else", "[node][config]"
 
 TEST_CASE("NodeConfig: --migrate-cache is a mode, and never reaches a service registration", "[node][config]")
 {
-    auto const parsed = ParseNodeArgv({ "--migrate-cache", "--cache-dir=/var/cache/fastcache-node" });
+    auto const parsed = ParseNodeArgv({ "--migrate-cache", "--cache-dir=/var/cache/pace-node" });
     REQUIRE(parsed.has_value());
     auto const& cfg = *parsed;
     REQUIRE(cfg.migrateCache);
@@ -355,7 +355,7 @@ TEST_CASE("NodeConfig: --cordon is a mode, and never reaches a service registrat
     // #1303. A registration replays its arguments at every start, so a cordon baked into
     // one would re-cordon the worker at every boot -- the machine that silently never comes
     // back, which is why the cordon lives in the running worker's memory and nowhere else.
-    auto const parsed = ParseNodeArgv({ "--cordon", "--cache-dir=/var/cache/fastcache-node" });
+    auto const parsed = ParseNodeArgv({ "--cordon", "--cache-dir=/var/cache/pace-node" });
     REQUIRE(parsed.has_value());
     auto const& cfg = *parsed;
     REQUIRE(cfg.cordon == CordonCommand::Cordon);
@@ -1108,7 +1108,7 @@ TEST_CASE("NodeConfig: a system-scope job names an unprivileged account", "[node
     auto const spec = MakeNodeServiceSpec(
         std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
-    CHECK(spec.serviceAccount == "fastcache-node");
+    CHECK(spec.serviceAccount == "pace-node");
 
     // And not the daemon's: a worker runs a compiler on input from the network
     // while pace-kv owns the cache storage, so one account would let a
@@ -1124,7 +1124,7 @@ TEST_CASE("NodeConfig: a system-scope job names an unprivileged account", "[node
     // logs a service on as LocalSystem, which is the machine -- so the worker names
     // a virtual account there for exactly the reason it names an account here.
     CHECK(spec.windowsLogon == WindowsLogonAccount::VirtualAccount);
-    CHECK(Unwrap(WindowsLogonName(spec)) == "NT SERVICE\\FastCacheCompileNode");
+    CHECK(Unwrap(WindowsLogonName(spec)) == "NT SERVICE\\pace-node");
 }
 
 TEST_CASE("NodeConfig: the worker's launchd label is what the packaging removes", "[node][service]")
@@ -1178,7 +1178,7 @@ TEST_CASE("NodeConfig: the worker's registration survives its own parser", "[nod
         auto const filled = WithScopeDefaults(spec,
                                               scope,
                                               std::filesystem::path { "/Users/jo" },
-                                              std::filesystem::path { "/opt/fastcached/etc/fastcached.yaml" });
+                                              std::filesystem::path { "/opt/pace/etc/pace-kv.yaml" });
 
         // Every argument must be one this binary's own parser accepts.
         for (auto const& argument: filled.arguments)
@@ -1352,7 +1352,7 @@ TEST_CASE("NodeConfig: a consensus node that names no dial address is refused be
     auto nameless = Solitary(Installable());
     nameless.nodeId = "n1";
     nameless.raftListen = "6680";
-    nameless.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+    nameless.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
     ApplyHostNames(nameless, NodeHostNames { .fqdn = {}, .dnsSuffix = {}, .withheld = {} });
 
     // The tier says the same thing in the same words, because it asks the same
@@ -1474,7 +1474,7 @@ TEST_CASE("NodeConfig: a cluster configured without --listen-raft is refused bef
     bare.nodeId = "n1";
     bare.raftSelf = "10.0.0.1";
     bare.raftListen = "6680";
-    bare.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+    bare.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
     CHECK_FALSE(StartupPolicyRejection(bare).has_value());
     CHECK_FALSE(NodeInstallRejection(bare).has_value());
 
@@ -1498,7 +1498,7 @@ TEST_CASE("NodeConfig: an unreadable state directory is refused once before any 
         void (*set)(NodeConfig& cfg);  ///< What makes that row fire.
         std::string_view flagRowOpens; ///< How that row's own sentence opens.
     };
-    auto const reading = std::string { "/var/lib/fastcache-node/raft-state is owned by NT SERVICE\\SomeOtherService, "
+    auto const reading = std::string { "/var/lib/pace-node/raft-state is owned by NT SERVICE\\SomeOtherService, "
                                        "which is neither the account judging it" };
     for (auto const& [flag, set, flagRowOpens]: std::to_array<FlagRow>({
              { .flag = "--raft-self",
@@ -1931,7 +1931,7 @@ TEST_CASE("NodeConfig: a listen flag whose value is not an endpoint is refused b
               cfg.nodeId = "n1";
               cfg.raftListen = "6680";
               cfg.raftSelf = "10.0.0.1";
-              cfg.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+              cfg.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
               return cfg;
           }() },
     });
@@ -2022,7 +2022,7 @@ TEST_CASE("NodeConfig: --discovery takes an address and a port, never a bare por
     bare.nodeId = "n1";
     bare.raftListen = "6680";
     bare.raftSelf = "10.0.0.1";
-    bare.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+    bare.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
     bare.discoveryAddress = "6681";
 
     auto const refusal = StartupPolicyRejection(bare);
@@ -2077,7 +2077,7 @@ TEST_CASE("NodeConfig: consensus flags with no --listen-raft are refused rather 
     // for the dashboard's history file, so a node with no consensus at all still
     // has a use for it. Refusing it here would refuse a working configuration.
     auto history = Installable();
-    history.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+    history.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
     CHECK_FALSE(StartupPolicyRejection(history).has_value());
 
     // And the ordinary single-machine worker, which configures none of this.
@@ -2091,8 +2091,8 @@ TEST_CASE("NodeConfig: a system-scope job owns the directories it was given", "[
     // which launchd surfaces only as a job that exits over and over. The daemon
     // has always handed over its --storage for exactly this reason.
     auto cfg = Installable();
-    cfg.cacheDir = std::filesystem::path { "/var/cache/fastcache-node" };
-    cfg.clusterDir = std::filesystem::path { "/var/lib/fastcache-node" };
+    cfg.cacheDir = std::filesystem::path { "/var/cache/pace-node" };
+    cfg.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
 
     auto const spec =
         MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
@@ -3025,14 +3025,14 @@ TEST_CASE("Naming the dashboard flags parses them", "[node][dashboard][cli]")
     auto const parsed = ParseNodeArgv({ "--toolchain=/usr/bin/g++",
                                         "--admin-listen=6677",
                                         "--dashboard",
-                                        "--dashboard-token-file=/etc/fastcached/dashboard.token",
-                                        "--tls-cert=/etc/fastcached/admin.crt",
-                                        "--tls-key=/etc/fastcached/admin.key" });
+                                        "--dashboard-token-file=/etc/pace/dashboard.token",
+                                        "--tls-cert=/etc/pace/admin.crt",
+                                        "--tls-key=/etc/pace/admin.key" });
     REQUIRE(parsed.has_value());
     CHECK(parsed->dashboard);
-    CHECK(parsed->dashboardTokenFile == "/etc/fastcached/dashboard.token");
-    CHECK(parsed->tlsCertFile == "/etc/fastcached/admin.crt");
-    CHECK(parsed->tlsKeyFile == "/etc/fastcached/admin.key");
+    CHECK(parsed->dashboardTokenFile == "/etc/pace/dashboard.token");
+    CHECK(parsed->tlsCertFile == "/etc/pace/admin.crt");
+    CHECK(parsed->tlsKeyFile == "/etc/pace/admin.key");
     CHECK_FALSE(parsed->tlsSelfSigned);
 
     // The other spelling of asking for TLS, which needs no material to name.
@@ -3897,7 +3897,7 @@ TEST_CASE("NodeConfig: a file naming fleet_member refuses to start, naming the k
 TEST_CASE("NodeConfig: a file naming scheduler_token_file refuses to start, naming the key", "[node][config]")
 {
     // The file twin of the retired flag, for its reason.
-    auto const merged = FromFileAndArgv({ Setting("scheduler_token_file", { "/etc/fastcached/scheduler.token" }) }, {});
+    auto const merged = FromFileAndArgv({ Setting("scheduler_token_file", { "/etc/pace/scheduler.token" }) }, {});
 
     REQUIRE_FALSE(merged.has_value());
     CHECK(merged.error().code == ConfigErrorCode::UnknownKey);
@@ -4590,9 +4590,9 @@ TEST_CASE("NodeSecretFiles: a path-reached secret is not provenance-gated", "[no
     // provenance gate would silently skip every argv-named key file -- a change no test
     // asserting merely that "some warning arrives" could see.
     auto cfg = Testing::FirstStart(NodeConfig {});
-    cfg.dashboardTokenFile = "/etc/fastcached/dashboard.token";
-    cfg.tlsKeyFile = "/etc/fastcached/admin.key";
-    cfg.tlsCertFile = "/etc/fastcached/admin.crt";
+    cfg.dashboardTokenFile = "/etc/pace/dashboard.token";
+    cfg.tlsKeyFile = "/etc/pace/admin.key";
+    cfg.tlsCertFile = "/etc/pace/admin.crt";
 
     SECTION("named in argv, with no configuration file at all")
     {
@@ -4610,7 +4610,7 @@ TEST_CASE("NodeSecretFiles: a path-reached secret is not provenance-gated", "[no
     SECTION("an unnamed flag contributes nothing")
     {
         auto bare = Testing::FirstStart(NodeConfig {});
-        bare.dashboardTokenFile = "/etc/fastcached/dashboard.token";
+        bare.dashboardTokenFile = "/etc/pace/dashboard.token";
         CHECK(NodeSecretFiles(bare, {}, false) == std::vector<std::filesystem::path> { bare.dashboardTokenFile });
     }
 
@@ -4619,10 +4619,10 @@ TEST_CASE("NodeSecretFiles: a path-reached secret is not provenance-gated", "[no
         // The row's path is DERIVED -- `NodeKeyPath`, the one author of where the key is --
         // so the file asked about is the file the start read, never a re-spelling of it.
         auto worker = Testing::FirstStart(NodeConfig {});
-        worker.clusterDir = "/var/lib/fastcache-node";
+        worker.clusterDir = "/var/lib/pace-node";
         auto const files = NodeSecretFiles(worker, {}, false);
         CHECK(std::ranges::find(files, NodeKeyPath(worker)) != files.end());
-        CHECK(NodeKeyPath(worker) == std::filesystem::path { "/var/lib/fastcache-node" } / NodeKeyFileName);
+        CHECK(NodeKeyPath(worker) == std::filesystem::path { "/var/lib/pace-node" } / NodeKeyFileName);
 
         // A node with no state directory holds no key, so there is no file to ask about.
         auto bare = Testing::FirstStart(NodeConfig {});
@@ -4678,7 +4678,7 @@ TEST_CASE("NodeSecretFiles: the configuration file is gated on provenance", "[no
 {
     // The other half, and it is #384's rule unchanged: the file's mode is what protects
     // a secret only when the file is what supplied it.
-    std::filesystem::path const configFile { "/etc/fastcached/pace-node.yaml" };
+    std::filesystem::path const configFile { "/etc/pace/pace-node.yaml" };
 
     auto cfg = Testing::FirstStart(NodeConfig {});
     cfg.requirePass = "hunter2";
@@ -4708,7 +4708,7 @@ TEST_CASE("NodeSecretFiles: the configuration file is gated on provenance", "[no
     {
         // It is the file an operator most often has open, and the order is the
         // caller's rather than the filesystem's.
-        cfg.dashboardTokenFile = "/etc/fastcached/dashboard.token";
+        cfg.dashboardTokenFile = "/etc/pace/dashboard.token";
         CHECK(NodeSecretFiles(cfg, configFile, false)
               == std::vector<std::filesystem::path> { configFile, cfg.dashboardTokenFile });
     }
@@ -5028,7 +5028,7 @@ TEST_CASE("A cache the operator NAMED is refused when no node surface can serve 
     {
         auto cfg = Installable();
         cfg.nodeListen = {};
-        cfg.cacheDir = "/var/lib/fastcache-node/cache";
+        cfg.cacheDir = "/var/lib/pace-node/cache";
         REQUIRE(StartupPolicyRejection(cfg).has_value());
     }
 
@@ -5059,7 +5059,7 @@ TEST_CASE("A cache the operator NAMED is refused when no node surface can serve 
     {
         auto cfg = Installable();
         cfg.cacheMemoryExplicit = true;
-        cfg.cacheDir = "/var/lib/fastcache-node/cache";
+        cfg.cacheDir = "/var/lib/pace-node/cache";
         auto const refusal = StartupPolicyRejection(cfg);
         INFO("refusal: " << refusal.value_or("<none>"));
         CHECK_FALSE(refusal.has_value());

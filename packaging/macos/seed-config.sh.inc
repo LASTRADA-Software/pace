@@ -31,7 +31,7 @@
 # One row per seeded file: `<basename>`. The APPENDIX is per file and is applied
 # below by name rather than carried in the row, because only one file has one and
 # a column that is empty for every row but one is a column nobody maintains.
-PACE_SEED_FILES="fastcached.yaml pace-node.yaml"
+PACE_SEED_FILES="pace-kv.yaml pace-node.yaml"
 
 for _seed in $PACE_SEED_FILES; do
     _live="${PREFIX}/etc/${_seed}"
@@ -63,7 +63,7 @@ for _seed in $PACE_SEED_FILES; do
     # The daemon is given only --config, precisely so this file governs the cache
     # location; left unset it would come up memory-only and lose the whole cache
     # on every restart. The worker has no such setting and gets no appendix.
-    if [ "$_seed" = "fastcached.yaml" ]; then
+    if [ "$_seed" = "pace-kv.yaml" ]; then
         cat >>"$_live" <<SEED_CONFIG_EOF || true
 
 # --- macOS package defaults -------------------------------------------------
@@ -76,5 +76,5 @@ done
 
 # The daemon's pair, named for the consumers that tighten its mode. Set outside
 # the loop so it holds whether or not this install seeded anything.
-CONFIG="${PREFIX}/etc/fastcached.yaml"
-DEFAULT_CONFIG="${PREFIX}/etc/fastcached.yaml.default"
+CONFIG="${PREFIX}/etc/pace-kv.yaml"
+DEFAULT_CONFIG="${PREFIX}/etc/pace-kv.yaml.default"

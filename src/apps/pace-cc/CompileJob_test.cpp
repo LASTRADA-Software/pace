@@ -2110,7 +2110,7 @@ TEST_CASE("A worker asked for no mapping adds no rule", "[compile-job][prefix-ma
     // build that maps nothing must get an object recording no directory it did not ask
     // for, so an absent pair is not an error and not an invitation for the worker to
     // pick a token of its own.
-    auto const rules = WorkerPrefixMapRules("/var/lib/fastcache-node", "", "", DriverFamily::Gnu);
+    auto const rules = WorkerPrefixMapRules("/var/lib/pace-node", "", "", DriverFamily::Gnu);
     REQUIRE(rules.has_value());
     CHECK(rules->empty());
 }
@@ -2195,11 +2195,11 @@ TEST_CASE("A worker maps BOTH candidate directories to the client's replacement"
     // `clang++ -E`/`-E -g` record the WORKER's. Mapping only the worker's own left gcc
     // recording the client's UNMAPPED path -- which the fleet fixture's object
     // comparison cannot see, and reading `comp_dir` can.
-    auto const rules = WorkerPrefixMapRules("/var/lib/fastcache-node", "/home/ci/out/build/x", ".", DriverFamily::Gnu);
+    auto const rules = WorkerPrefixMapRules("/var/lib/pace-node", "/home/ci/out/build/x", ".", DriverFamily::Gnu);
     REQUIRE(rules.has_value());
     CHECK(*rules
           == std::vector<std::string> { "-fdebug-prefix-map=/home/ci/out/build/x=.",
-                                        "-fdebug-prefix-map=/var/lib/fastcache-node=." });
+                                        "-fdebug-prefix-map=/var/lib/pace-node=." });
 }
 
 TEST_CASE("Every prefix-map row is spelled with its own separator, both times", "[compile-job][prefix-map]")

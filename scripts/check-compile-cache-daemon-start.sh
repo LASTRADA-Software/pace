@@ -5,7 +5,7 @@
 # #90 from scripts/check-compile-cache-daemon-staging.cmake, which proves the
 # module can STAGE a pace-kv daemon out of a mirrored release archive with
 # fake, --version-only stand-ins. What that mirror test cannot reach is
-# whether _fc_auto_start_fastcached actually spawns a REAL daemon that
+# whether _fc_auto_start_pace_kv actually spawns a REAL daemon that
 # answers real connections — a fake shell script has no socket to accept on
 # — so this drives the real, freshly built pace-kv and pace-cc
 # through a real configure instead.
@@ -138,14 +138,14 @@ stageDir="${workdir}/stage"
 storageDir="${stageDir}/daemon-storage"
 buildDir1="${workdir}/build1"
 buildDir2="${workdir}/build2"
-daemonPidfile="${storageDir}/fastcached.pid"
+daemonPidfile="${storageDir}/pace-kv.pid"
 
 # Stage the real, freshly built binaries exactly where the module would have
 # put them after auto-installing from a real release — same directory shape
 # (<dir>/<version>/<platform>/<exe>) — so PACE_AUTO_INSTALL never has
 # anything to do and this test needs no network access. The platform token
 # MUST match the asset-table row the module itself resolves for this host
-# (_fc_asset_<row>_platform in CompileCache.cmake) — _fc_auto_start_fastcached
+# (_fc_asset_<row>_platform in CompileCache.cmake) — _fc_auto_start_pace_kv
 # builds its staging path from that row, not from anything this script
 # invents, so a made-up label here would make the module look in a directory
 # this script never populated and fall through to "no binary staged". This
@@ -181,10 +181,10 @@ commonArgs=(
     "-DPACE_AUTO_START_STORAGE_DIR=${storageDir}"
     # AUTO_INSTALL stays OFF: PACE_CC is already supplied above, so the
     # only thing left for auto-start to do is find/stage/spawn the DAEMON,
-    # which _fc_auto_start_fastcached still needs a resolvable release row
+    # which _fc_auto_start_pace_kv still needs a resolvable release row
     # for. Pinning AUTO_INSTALL_DIR at the same stage directory and a version
     # this test controls means it finds the daemon already sitting there
-    # (see the EXISTS check ahead of any fetch in _fc_auto_start_fastcached)
+    # (see the EXISTS check ahead of any fetch in _fc_auto_start_pace_kv)
     # and never reaches the network.
     "-DPACE_AUTO_INSTALL_DIR=${stageDir}"
     "-DPACE_AUTO_INSTALL_VERSION=${version}"

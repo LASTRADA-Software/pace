@@ -147,8 +147,8 @@ $src = Join-Path $workdir 'hello.cpp'
 $obj = Join-Path $workdir 'hello.obj'
 # Start-Process cannot send stdout and stderr to one file, so they are separate
 # and read back together.
-$daemonOut = Join-Path $workdir 'fastcached.out.log'
-$daemonErr = Join-Path $workdir 'fastcached.err.log'
+$daemonOut = Join-Path $workdir 'pace-kv.out.log'
+$daemonErr = Join-Path $workdir 'pace-kv.err.log'
 # sccache's own server log, for the half of a failure the daemon cannot see: a
 # lookup that sccache abandoned, timed out or could not decode reaches the daemon
 # as an ordinary GET, or not at all. Debug, because a miss is not an error to it.

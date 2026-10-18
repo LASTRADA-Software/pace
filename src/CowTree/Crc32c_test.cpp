@@ -40,7 +40,7 @@ TEST_CASE("Crc32c known vector for '123456789'", "[crc32c]")
 
 TEST_CASE("Crc32c streaming matches one-shot", "[crc32c]")
 {
-    std::string_view const text = "fastcached.cowtree";
+    std::string_view const text = "pace-kv.cowtree";
 
     auto const oneShot = CowTree::Crc32c::Compute(AsBytes(text));
 

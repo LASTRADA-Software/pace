@@ -38,7 +38,7 @@
 # declares, as the PyPI wheel it names (#1404), into the site this script and
 # `local-gate.sh` look in when `TIDY` is unset:
 #
-#   python3 -m pip install --target "${XDG_DATA_HOME:-$HOME/.local/share}/fastcached/clang-tidy/<version>" \
+#   python3 -m pip install --target "${XDG_DATA_HOME:-$HOME/.local/share}/pace/clang-tidy/<version>" \
 #       "$(bash scripts/check-clang-tidy-version.sh --requirement)"
 #
 # A host whose python3 has no pip can unzip the wheel into that directory instead

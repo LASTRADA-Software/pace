@@ -12,7 +12,7 @@ That refusal is not a report of damage. The store is intact.
 ## What it looks like
 
 ```
-pace-kv: failed to open storage '/var/lib/fastcached/cache':
+pace-kv: failed to open storage '/var/lib/pace-kv/cache':
 StorageError(code=13 system=0 context=on-disk storage format version 3
 (this build reads and writes 4): the store is intact and does not need to be
 deleted -- convert it with `pace-kv --migrate-storage` ...)
@@ -56,7 +56,7 @@ Stop the daemon, then run the conversion with **the same storage options the
 daemon runs with**:
 
 ```bash
-pace-kv --migrate-storage --config /etc/fastcached/fastcached.yaml
+pace-kv --migrate-storage --config /etc/pace/pace-kv.yaml
 ```
 
 The flag takes no path of its own. It converts exactly the files the daemon would
@@ -67,7 +67,7 @@ reported separately.
 For a compile worker, the equivalent is:
 
 ```bash
-pace-node --migrate-cache --cache-dir /var/cache/fastcache-node
+pace-node --migrate-cache --cache-dir /var/cache/pace-node
 ```
 
 Both print a line per store and exit non-zero if any of them could not be
