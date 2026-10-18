@@ -19,12 +19,12 @@ using Pace::Testing::ScopedEnv;
 
 TEST_CASE("ReadEnvironmentVariable: a variable that is set comes back verbatim", "[platform][environment]")
 {
-    ScopedEnv const env { "FC_TEST_ENVIRONMENT", "/opt/pace/etc" };
+    ScopedEnv const env { "PACE_TEST_ENVIRONMENT", "/opt/pace/etc" };
 
     // value_or, not a dereference after REQUIRE: Catch2's macros are opaque to
     // clang-tidy's optional analysis, and the fallback is a value the call can
     // never legitimately produce, so it doubles as the failure signal.
-    REQUIRE(ReadEnvironmentVariable("FC_TEST_ENVIRONMENT").value_or(std::string {}) == "/opt/pace/etc");
+    REQUIRE(ReadEnvironmentVariable("PACE_TEST_ENVIRONMENT").value_or(std::string {}) == "/opt/pace/etc");
 }
 
 TEST_CASE("ReadEnvironmentVariable: an unset variable is nullopt, not an empty string", "[platform][environment]")
@@ -33,17 +33,17 @@ TEST_CASE("ReadEnvironmentVariable: an unset variable is nullopt, not an empty s
     // means "this location does not apply to this process" and skips its
     // candidate row, whereas an empty one would make the suffix relative to the
     // working directory — C:\Windows\System32 for a service.
-    REQUIRE_FALSE(ReadEnvironmentVariable("FC_TEST_DEFINITELY_NOT_SET").has_value());
+    REQUIRE_FALSE(ReadEnvironmentVariable("PACE_TEST_DEFINITELY_NOT_SET").has_value());
 }
 
 TEST_CASE("ReadEnvironmentVariable: a name is not required to be NUL-terminated", "[platform][environment]")
 {
-    ScopedEnv const env { "FC_TEST_ENVIRONMENT", "value" };
+    ScopedEnv const env { "PACE_TEST_ENVIRONMENT", "value" };
 
     // Callers pass string_views cut out of larger buffers — the candidate
     // table's baseVar fields are views into string literals — and both platform
     // APIs take a NUL-terminated name, so the copy has to happen inside.
-    std::string const haystack { "FC_TEST_ENVIRONMENTX" };
+    std::string const haystack { "PACE_TEST_ENVIRONMENTX" };
     auto const name = std::string_view { haystack }.substr(0, haystack.size() - 1);
     REQUIRE(ReadEnvironmentVariable(name).value_or(std::string {}) == "value");
 }
@@ -56,9 +56,9 @@ TEST_CASE("ReadEnvironmentVariable: a variable set to nothing is an empty string
     // this asserts is unreachable there. getenv_s' convention still has to be
     // read correctly for it (a length of 1, not 0), which is what makes the
     // case worth pinning where it can be.
-    ScopedEnv const env { "FC_TEST_ENVIRONMENT", "" };
+    ScopedEnv const env { "PACE_TEST_ENVIRONMENT", "" };
 
-    auto const value = ReadEnvironmentVariable("FC_TEST_ENVIRONMENT");
+    auto const value = ReadEnvironmentVariable("PACE_TEST_ENVIRONMENT");
     REQUIRE(value.has_value());
     REQUIRE(value.value_or(std::string { "not empty" }).empty());
 }

@@ -115,7 +115,7 @@ class ThreadRecordingRunner final: public Cc::IProcessRunner
 struct Fixture
 {
     ThreadRecordingRunner runner;
-    ScratchDirectory scratch { "fc-compile-responder" };
+    ScratchDirectory scratch { "pace-compile-responder" };
     Cc::CompileJobRunner jobs;
     AtomicMetricsSink metrics;
     Cc::WorkerProtocol protocol;

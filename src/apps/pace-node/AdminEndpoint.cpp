@@ -10,7 +10,7 @@
 #include <core/Ranges.hpp>
 #include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     #include <core/net/Tls.hpp>
 #endif
 #include <Pace/Distributed/FleetChart.hpp>
@@ -154,7 +154,7 @@ std::expected<AdminCredential, NodeRefusal> ReadDashboardToken(std::filesystem::
 
 namespace
 {
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     /// Names a generated certificate should be valid for.
     ///
     /// Every modern client ignores a certificate's common name, so this list is
@@ -1051,7 +1051,7 @@ std::expected<AdminSurface, NodeRefusal> StartAdminSurfaceOrExplain(NodeConfig c
     // and this node has nothing to serve it with.
     if (cfg.tlsSelfSigned || !cfg.tlsCertFile.empty())
     {
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
         // The common name is this project's, stated rather than left to core-cpp's default of
         // "localhost": a certificate a browser shows an operator names what it belongs to.
         auto created = cfg.tlsSelfSigned
@@ -1089,7 +1089,7 @@ std::expected<AdminSurface, NodeRefusal> StartAdminSurfaceOrExplain(NodeConfig c
                                         logger,
                                         acceptLoops,
                                         std::move(routes),
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
                                         surface.tls.get());
 #else
                                         nullptr);
@@ -1102,12 +1102,12 @@ std::expected<AdminSurface, NodeRefusal> StartAdminSurfaceOrExplain(NodeConfig c
     surface.endpoint = std::move(*started);
 
     auto const* const scheme =
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
         surface.tls ? "https" : "http";
 #else
         "http";
 #endif
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     // Printed because with a generated certificate this is the ONLY thing that
     // authenticates the node: nothing signs it, so an operator compares what is
     // logged here against what their browser shows and knows they reached the

@@ -122,7 +122,7 @@ linked_tools() {
 }
 
 # The PATH is read from the plist launchd was actually given, never recomputed here.
-# `DefaultLogDirectory` builds it under `FC_MACOS_PREFIX`, which is a BUILD setting,
+# `DefaultLogDirectory` builds it under `PACE_MACOS_PREFIX_PATH`, which is a BUILD setting,
 # so a fixture recomputing the rule would agree with itself rather than with the
 # installation under test -- and a plist naming no such key is a finding about the
 # plist rather than a missing log.

@@ -88,7 +88,7 @@ TEST_CASE("A change time is on the seam's own clock, in its own unit", "[input-f
 {
     // Catches a wrong epoch (1601 vs 1970) or a wrong scale (100 ns vs 1 ns), both of which
     // would put every change time decades away from Now() and make the T0 rule vacuous.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-clock" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-clock" };
     scratch.Write("a.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const identity = files->Identify((scratch / "a.hpp").string());
@@ -100,7 +100,7 @@ TEST_CASE("A change time is on the seam's own clock, in its own unit", "[input-f
 
 TEST_CASE("A file written after an instant has a change time at or after it", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-after" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-after" };
     scratch.Write("a.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const before = files->Now();
@@ -114,7 +114,7 @@ TEST_CASE("A file written after an instant has a change time at or after it", "[
 TEST_CASE("CopyFileW keeps the last-write time and still moves the change time", "[input-files]")
 {
     // #1650's deterministic variant: an mtime-only identity cannot see this copy at all.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-copy" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-copy" };
     scratch.Write("old.hpp", "MESSAGE_V1_OLD\n");
     scratch.Write("new.hpp", "MESSAGE_V2_NEW\n");
     auto const oldPath = scratch / "old.hpp";
@@ -135,7 +135,7 @@ TEST_CASE("CopyFileW keeps the last-write time and still moves the change time",
 #else
 TEST_CASE("Setting a file's modification time back still moves its change time", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-utimens" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-utimens" };
     scratch.Write("a.hpp", "MESSAGE_V1_OLD\n");
     auto const path = (scratch / "a.hpp").string();
     auto const files = MakeDiskInputFiles();
@@ -151,7 +151,7 @@ TEST_CASE("Setting a file's modification time back still moves its change time",
 
 TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-symlink" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-symlink" };
     scratch.Write("a.hpp", "same\n");
     scratch.Write("b.hpp", "same\n");
     auto const link = scratch / "h.hpp";
@@ -169,7 +169,7 @@ TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-
 
 TEST_CASE("A rename over a file changes its identity, same bytes and size", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-rename" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-rename" };
     scratch.Write("h.hpp", "same\n");
     scratch.Write("h.tmp", "same\n");
     auto const files = MakeDiskInputFiles();
@@ -183,7 +183,7 @@ TEST_CASE("A rename over a file changes its identity, same bytes and size", "[in
 
 TEST_CASE("A missing file has no identity and no hash", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-missing" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-missing" };
     auto const files = MakeDiskInputFiles();
     auto const absent = (scratch / "absent.hpp").string();
     CHECK_FALSE(files->Identify(absent).has_value());
@@ -194,7 +194,7 @@ TEST_CASE("A non-ASCII path is identified", "[input-files]")
 {
     // Review focus 1: a path the seam could not open would make every TU under it Unwitnessed,
     // which silently stops caching it.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-utf8" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-utf8" };
     scratch.Write("header-\xC3\xBC.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const path = (scratch.Path().string() + "/header-\xC3\xBC.hpp");
@@ -564,7 +564,7 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
     // #1650: the hashes BuildManifest recorded were read AFTER the compile, so a save during it
     // paired the new content with the old object. The content source is the witness in
     // production; this proves BuildManifest no longer reads the files itself.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-source" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-content-source" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
@@ -599,7 +599,7 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
 
 TEST_CASE("A content source's refusal names its path and its fault", "[direct-manifest][1650]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-refusal" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-content-refusal" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
@@ -626,7 +626,7 @@ TEST_CASE("A content source's refusal names its path and its fault", "[direct-ma
 
 TEST_CASE("ProjectDependencyPaths keeps project headers, resolved, and drops toolchain ones", "[direct-manifest][1650]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-project-paths" };
     auto const& root = scratch.Path();
     Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
                                                 .buildTree = (root / "out").string() };
@@ -1091,8 +1091,8 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
 {
     // Spec invariant 1, at the seam: identities differ in every field between the two
     // checkouts (and between two machines), and nothing of them may reach the record.
-    Pace::Testing::ScratchDirectory const scratchA { "fc-witness-share-a" };
-    Pace::Testing::ScratchDirectory const scratchB { "fc-witness-share-b-deeper" };
+    Pace::Testing::ScratchDirectory const scratchA { "pace-witness-share-a" };
+    Pace::Testing::ScratchDirectory const scratchB { "pace-witness-share-b-deeper" };
     std::string encoded[2];
     std::string manifestKeys[2];
     for (auto const index: { 0, 1 })
@@ -1429,10 +1429,10 @@ git commit -s -m "cc: the witness guards the STORE, the manifest and the backfil
 <!-- table-total: none -->
 | variable | meaning |
 |---|---|
-| `FC_EDIT_STUB_REAL` | absolute path of the real compiler to forward to |
-| `FC_EDIT_STUB_AT` | `after-compile`: copy after a real compile exits 0; `before-dispatch-preprocess`: copy before forwarding a line-marker preprocess (`-E` without `-P`, or `/E`) |
-| `FC_EDIT_STUB_TRIGGER` | a file; the copy happens only while it exists, and the stub deletes it (one shot) |
-| `FC_EDIT_STUB_FROM`, `FC_EDIT_STUB_TO` | the copy: FROM's bytes overwrite TO in place |
+| `PACE_EDIT_STUB_REAL` | absolute path of the real compiler to forward to |
+| `PACE_EDIT_STUB_AT` | `after-compile`: copy after a real compile exits 0; `before-dispatch-preprocess`: copy before forwarding a line-marker preprocess (`-E` without `-P`, or `/E`) |
+| `PACE_EDIT_STUB_TRIGGER` | a file; the copy happens only while it exists, and the stub deletes it (one shot) |
+| `PACE_EDIT_STUB_FROM`, `PACE_EDIT_STUB_TO` | the copy: FROM's bytes overwrite TO in place |
 
 The stub classifies its own argv, from argv[1] on:
 - **A real compile:** `-c` or `/c` present, and none of `-E`, `/E`, `-EP`, `/EP`, `-P`, `/P` or `-###`.
@@ -1493,7 +1493,7 @@ write_moved_tree() {
 moved_compile() {
     local root="$1" log="$2"
     shift 2
-    env "$@" FC_EDIT_STUB_REAL="$real_compiler" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
+    env "$@" PACE_EDIT_STUB_REAL="$real_compiler" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
         "$launcher" "$stub" -std=c++20 -MD -MF "${root}/build/m.d" -c "${root}/src/m.cpp" -o "${root}/build/m.o" 2> "$log"
 }
 object_says() { LC_ALL=C grep -aq "$2" "$1"; }
@@ -1510,8 +1510,8 @@ for leg in tu header; do
     fi
     : > "${moved}/${leg}.trigger"
     echo "== mid-compile save (${leg}): the compile that raced it stores nothing =="
-    moved_compile "$root" "${moved}/${leg}-1.log" FC_EDIT_STUB_AT=after-compile \
-        FC_EDIT_STUB_TRIGGER="${moved}/${leg}.trigger" FC_EDIT_STUB_FROM="$from" FC_EDIT_STUB_TO="$to" \
+    moved_compile "$root" "${moved}/${leg}-1.log" PACE_EDIT_STUB_AT=after-compile \
+        PACE_EDIT_STUB_TRIGGER="${moved}/${leg}.trigger" PACE_EDIT_STUB_FROM="$from" PACE_EDIT_STUB_TO="$to" \
         || { cat "${moved}/${leg}-1.log" >&2; fail "mid-compile ${leg}: the racing compile failed"; }
     cat "${moved}/${leg}-1.log"
     [[ ! -e "${moved}/${leg}.trigger" ]] || fail "mid-compile ${leg}: the stub never fired, so this leg tested nothing"
@@ -1568,7 +1568,7 @@ In `run-launcher-e2e.ps1`:
 - add `[string]$EditStub` to `param(...)`;
 - add the same five legs inside the per-compiler loop, under `Write-Host "=== a save during a compile records nothing unsound ($cc) ==="`;
 - copy the stub to `<MoveTemp>\stub-$cc\$cc.exe`;
-- set `$env:FC_EDIT_STUB_REAL = (Get-Command $cc).Source`;
+- set `$env:PACE_EDIT_STUB_REAL = (Get-Command $cc).Source`;
 - invoke through a variant of `Invoke-Launcher` that takes the compiler path and the extra environment, following `Invoke-LauncherWithEnv`'s set-then-remove pattern;
 - read the logged outcome with `Get-E2ELauncherLogField` on the last line of `$launcherState.Log`;
 - check object contents with `Select-String -Path $obj -Pattern MESSAGE_V2_NEW -SimpleMatch -Quiet`.
@@ -1614,13 +1614,13 @@ stub_fingerprint="$("$launcher" --print-toolchain-fingerprint "$stub")" \
     || fail "the edit stub changes the toolchain fingerprint (${stub_fingerprint} vs ${fingerprint}), so no compile through it can be dispatched and this case would test a local compile"
 ```
 
-Set `FC_EDIT_STUB_REAL` in the environment of that call too. If the fingerprints differ, STOP and report. Do not loosen the case to accept a local compile: that is the tautology `distributed-compilation.md` warns about.
+Set `PACE_EDIT_STUB_REAL` in the environment of that call too. If the fingerprints differ, STOP and report. Do not loosen the case to accept a local compile: that is the tautology `distributed-compilation.md` warns about.
 
 - [ ] **Step 2: Write the case**
 
 The steps, in order:
 1. Write `one-moved.cpp` with `write_source` and token `movedone`. Write a V2 copy whose `// unique:` line and one literal differ.
-2. Compile through `run_launcher` with the stub as the compiler and `FC_EDIT_STUB_AT=before-dispatch-preprocess` armed. The save lands after the key's snapshot and before the dispatch preprocess reads the file: #1650's T1→T2 window.
+2. Compile through `run_launcher` with the stub as the compiler and `PACE_EDIT_STUB_AT=before-dispatch-preprocess` armed. The save lands after the key's snapshot and before the dispatch preprocess reads the file: #1650's T1→T2 window.
 3. Assert `DISPATCHED to `. On failure, run `fail_if_withdrawn` first, as case 1 does.
 4. Assert `an input changed during the compile`, no `STORED key=`, and the logged outcome `INPUTS-MOVED`.
 5. Restore the V1 content and compile again with no trigger. Assert a `MISS` and an object built from V1.

@@ -137,7 +137,7 @@ std::vector<BindConfig> EffectiveBinds(Config const& config)
 
 std::optional<std::string> DaemonStartupRejection(Config const& config)
 {
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     constexpr bool buildServesTls = true;
 #else
     constexpr bool buildServesTls = false;

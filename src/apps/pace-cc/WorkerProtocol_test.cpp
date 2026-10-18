@@ -299,7 +299,7 @@ class RecordingRefusals final: public IJobRefusalObserver
 struct Fixture
 {
     StubRunner runner;
-    Pace::Testing::ScratchDirectory scratch { "fc-wp" };
+    Pace::Testing::ScratchDirectory scratch { "pace-wp" };
     CompileJobRunner jobs;
     AtomicMetricsSink metrics;
 
@@ -731,7 +731,7 @@ TEST_CASE("The envelope ceiling is the surface's own, not a figure this class as
     // the frame length, so a listener with a smaller request cap has to say so or the
     // two disagree about how much memory one request may cost.
     StubRunner runner;
-    Pace::Testing::ScratchDirectory const scratch { "fc-wp" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-wp" };
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     constexpr std::size_t TinyCap = 8;
@@ -2118,7 +2118,7 @@ TEST_CASE("The real runner is what a correlation comes from", "[worker-protocol]
     // the REAL `CompileJobRunner` end to end and recomputes the digest the way a client
     // will -- from what it asked for, against what came back.
     StubRunner runner;
-    Pace::Testing::ScratchDirectory const scratch { "fc-wp-corr" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-wp-corr" };
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
@@ -2529,7 +2529,7 @@ namespace
 struct RosterWorker
 {
     StubRunner runner;
-    Pace::Testing::ScratchDirectory scratch { "fc-wp-roster" };
+    Pace::Testing::ScratchDirectory scratch { "pace-wp-roster" };
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     Testing::FixedLeaseRoster roster { { "scheduler" } }; ///< Declared before `worker`, which borrows it.

@@ -130,7 +130,7 @@ endforeach()
 # in the text would each merge or split elements, and the two files read here are a
 # markdown page and CMake source, which are full of all four. Only the captured names
 # reach a list, and a target name contains no separator.
-function(fc_capture_lines content pattern outVar)
+function(pace_capture_lines content pattern outVar)
     set(hits "")
     set(rest "${content}")
     while(TRUE)
@@ -168,7 +168,7 @@ endfunction()
 # its own "the app table matched no rows" guard could never fire. That was found by the
 # selftest case written to watch that guard refuse, which is the argument for having
 # one.
-function(fc_capture_block_lines content beginPattern endPattern pattern outVar)
+function(pace_capture_block_lines content beginPattern endPattern pattern outVar)
     set(hits "")
     set(rest "${content}")
     set(inBlock FALSE)
@@ -210,7 +210,7 @@ endfunction()
 # Step one -- which app directories exist, from the table that gates them, read as
 # THAT table rather than as any line in the file shaped like a row.
 file(READ "${appTable}" appTableText)
-fc_capture_block_lines("${appTableText}"
+pace_capture_block_lines("${appTableText}"
                        "^[ \t]*set\\([ \t]*PACE_APPS([ \t]|$)"
                        "^[ \t]*\\)[ \t]*$"
                        "^[ \t]*\"([A-Za-z0-9_.+-]+)\\|" appDirectories)
@@ -244,7 +244,7 @@ foreach(appDir IN LISTS appDirectories)
     endif()
 
     file(READ "${appCMake}" appCMakeText)
-    fc_capture_lines("${appCMakeText}"
+    pace_capture_lines("${appCMakeText}"
                      "^[ \t]*install\\(TARGETS[ \t]+([A-Za-z0-9_.+-]+)" appInstalls)
     foreach(target IN LISTS appInstalls)
         list(APPEND installed "${target}")
@@ -266,13 +266,13 @@ list(SORT installed)
 # ---------------------------------------------------------------------------
 # Side B: the documented set.
 file(READ "${toolsPage}" toolsPageText)
-fc_capture_lines("${toolsPageText}" "^##[ \t]+`([A-Za-z0-9_.+-]+)`" documented)
+pace_capture_lines("${toolsPageText}" "^##[ \t]+`([A-Za-z0-9_.+-]+)`" documented)
 
 if(NOT documented)
     # Separate the two ways this happens, because they are different repairs: a page
     # that lost its tool sections, and a page that still has them in a shape this scan
     # no longer recognises.
-    fc_capture_lines("${toolsPageText}" "^##[ \t]+(.*)$" anyHeadings)
+    pace_capture_lines("${toolsPageText}" "^##[ \t]+(.*)$" anyHeadings)
     message("")
     if(anyHeadings)
         list(LENGTH anyHeadings headingCount)

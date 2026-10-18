@@ -204,7 +204,7 @@ target_compile_definitions(pace-cc PRIVATE
     PACE_CC_VERSION="${PACE_VERSION_STRING}")
 if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
     target_link_libraries(pace-cc PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})
-    target_compile_definitions(pace-cc PRIVATE FC_COMPRESSION_ENABLED=1)
+    target_compile_definitions(pace-cc PRIVATE PACE_COMPRESSION_ENABLED=1)
 endif()
 
 # Core/Ed25519.cpp's primitive; see the comment on `_pace_cc_core`.
@@ -345,7 +345,7 @@ if(PACE_BUILD_TESTS)
     target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads pace-monocypher core::async core::net)
     if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
         target_link_libraries(pace-cc-tests PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})
-        target_compile_definitions(pace-cc-tests PRIVATE FC_COMPRESSION_ENABLED=1)
+        target_compile_definitions(pace-cc-tests PRIVATE PACE_COMPRESSION_ENABLED=1)
     endif()
     if(WIN32)
         target_link_libraries(pace-cc-tests PRIVATE ws2_32)

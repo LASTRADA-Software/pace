@@ -707,7 +707,7 @@ TEST_CASE("BuildManifest tells dropped, absent and unobserved dependencies apart
     // Refused by name rather than recorded thin. The refusal costs direct mode for
     // this compile, exactly as `Unanchored` already does, and the ordinary
     // preprocessed key still serves it.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-hollow" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-hollow" };
     auto const& root = scratch.Path();
 
     auto const sourcePath = root / "src" / "u.cpp";
@@ -834,7 +834,7 @@ TEST_CASE("Build then validate a manifest against real files on disk")
     // The end-to-end invalidation contract, exercised against the filesystem rather
     // than fixtures: a manifest validates while the headers are untouched, and stops
     // validating the moment one of them changes or disappears.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-test" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-test" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "header.hpp";
@@ -887,7 +887,7 @@ TEST_CASE("ValidateManifest catches an edit to the translation unit itself, MSVC
     // editing a .cpp's own body while leaving every header untouched is invisible
     // to ValidateManifest, and a direct-mode hit replays a stale object forever
     // (see issue #49 / issue #51).
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-source-edit" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-source-edit" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "header.hpp";
@@ -934,7 +934,7 @@ TEST_CASE("BuildManifest records a relative dependency path instead of dropping 
     // code, which is the whole failure class direct mode's revalidation exists to
     // prevent. Cc::IsCheckable and Cc::PortableForm both order this correctly and
     // say so in comments; this was the third consumer and did not.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-relative" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-relative" };
     auto const& root = scratch.Path();
 
     scratch.Write("src/header.hpp", "#pragma once\nint helper();\n");
@@ -981,7 +981,7 @@ TEST_CASE("BuildManifest records a relatively-named translation unit (issue #57)
     // relative to the build directory, so `cmd.source` arrived relative, was
     // classified as toolchain, and was dropped -- reopening issues #49/#51, whose
     // whole fix was to make the TU part of what a manifest revalidates.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-relative-tu" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-relative-tu" };
     auto const& root = scratch.Path();
     std::filesystem::create_directories(root / "out");
 
@@ -1117,7 +1117,7 @@ TEST_CASE("BuildManifest names the offending DEPENDENCY, not the source (issue #
     // case below would be testing the wrong path. Which is itself the property under
     // test -- the refusal must send the reader to the file that was actually wrong,
     // and reporting the source would send them to the one file that was fine.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-fault-dep" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-fault-dep" };
     auto const& root = scratch.Path();
 
     auto const sourcePath = root / "src" / "t.cpp";
@@ -1231,7 +1231,7 @@ TEST_CASE("AnchorWorkingDirectory re-spells a symlinked cwd in the layout's voca
     // prefix with the root it is actually inside -- and a relative path resolved
     // against it then canonicalizes to nothing, silently costing the build direct
     // mode. Found by the end-to-end test on macOS, whose `/var` is a symlink.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-anchor" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-anchor" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "sub");
 
@@ -1262,7 +1262,7 @@ TEST_CASE("AnchorWorkingDirectory prefers the longest root and passes through th
     // The same rule CanonicalizeOne applies: a build tree nested inside the source
     // root must anchor to the build tree, or the tail spliced back on would be
     // relative to the wrong one.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-anchor-longest" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-anchor-longest" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "proj" / "out" / "build");
     std::filesystem::create_directories(base / "elsewhere");
@@ -1335,7 +1335,7 @@ TEST_CASE("BuildManifest normalizes '..' segments and mixed separators to one to
     // collapse to a single canonical token, or an entry recorded through one
     // spelling would never validate against the other — which is exactly what made
     // manifests come out empty before this was handled.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-normalize" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-normalize" };
     auto const& root = scratch.Path();
     std::filesystem::create_directories(root / "src" / "a");
     std::filesystem::create_directories(root / "src" / "b");
@@ -1376,7 +1376,7 @@ TEST_CASE("BuildManifest normalizes '..' segments and mixed separators to one to
 TEST_CASE("BuildManifest drops toolchain headers and deduplicates project headers")
 {
     Test::HashedWhenAsked const hashedWhenAsked;
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-dedup" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-dedup" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "shared.hpp";
@@ -1582,7 +1582,7 @@ TEST_CASE("A GNU depfile drives a manifest exactly as showIncludes notes do")
     // The point of parsing depfiles at all: on POSIX the GNU drivers report
     // dependencies ONLY here, so without this direct mode can never populate —
     // it would pay for a manifest lookup on every compile and never hit.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-depfile" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-depfile" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "dep.hpp";
@@ -1760,7 +1760,7 @@ TEST_CASE("HashFileContents separates equal-length contents and reports unreadab
     // it is not something this case has to remember. That matters here rather than
     // being tidiness: the case asserts `absent.hpp` is ABSENT, so a leftover of that
     // name would fail it for a reason that has nothing to do with hashing.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-hashfile" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-hashfile" };
 
     // Through `ScratchDirectory::Write`, which creates the parents and THROWS when
     // the open or the close fails. The lambda survives only for its RETURN: this case
@@ -1989,7 +1989,7 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
     // #1650: the hashes BuildManifest recorded were read AFTER the compile, so a save during it
     // paired the new content with the old object. The content source is the witness in
     // production; this proves BuildManifest no longer reads the files itself.
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-source" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-content-source" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
@@ -2024,7 +2024,7 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
 
 TEST_CASE("A content source's refusal names its path and its fault", "[direct-manifest][1650]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-refusal" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-content-refusal" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
@@ -2051,7 +2051,7 @@ TEST_CASE("A content source's refusal names its path and its fault", "[direct-ma
 
 TEST_CASE("ProjectDependencyPaths keeps project headers, resolved, and drops toolchain ones", "[direct-manifest][1650]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-project-paths" };
     auto const& root = scratch.Path();
     Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "out").string() };
     auto const project = (root / "src" / "inc" / ".." / "h.hpp").string();

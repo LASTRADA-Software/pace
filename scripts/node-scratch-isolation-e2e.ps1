@@ -1146,7 +1146,7 @@ function Invoke-SelfTest {
 # directory, no ports and no binaries.
 if ($SelfTest) { exit (Invoke-SelfTest) }
 
-$scratch = Join-Path ([IO.Path]::GetTempPath()) ("fc-scratch-iso-" + [Guid]::NewGuid().ToString("N").Substring(0, 12))
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ("pace-scratch-iso-" + [Guid]::NewGuid().ToString("N").Substring(0, 12))
 New-Item -ItemType Directory -Force -Path $scratch | Out-Null
 
 function New-SlowSource([string]$path, [int]$seed) {

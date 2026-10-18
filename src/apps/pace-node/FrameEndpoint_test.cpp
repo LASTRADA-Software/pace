@@ -4713,7 +4713,7 @@ struct TicketedNode
     SessionResponder session { verifier, SessionKeys {}, random, fleet.wallClock, fleet.metrics };
 
     StubCompiler compiler;
-    Testing::ScratchDirectory const scratch { "fc-ticketed-node" };
+    Testing::ScratchDirectory const scratch { "pace-ticketed-node" };
     Cc::CompileJobRunner jobs { compiler, scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() };
     Cc::WorkerProtocol worker {
         jobs,          Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),

@@ -45,7 +45,7 @@ endforeach()
 # macro: a macro substitutes its arguments textually and CMake re-parses them.
 # @param ARGV the sentence, in pieces that are joined with nothing between them
 set(refusals 0)
-function(fc_refuse)
+function(pace_refuse)
     string(JOIN "" sentence ${ARGV})
     message(SEND_ERROR "off-thread-assertion-guard: ${sentence}")
     math(EXPR count "${refusals} + 1")
@@ -72,7 +72,7 @@ foreach(edge IN LISTS linkEdges)
     # tail names no rule and is skipped. An unmatched `[` is what merges elements.
     string(FIND "${edge}" "[" bracketAt)
     if(NOT bracketAt EQUAL -1)
-        fc_refuse("a link edge carries an opening bracket, which this reader cannot split safely, so nothing it "
+        pace_refuse("a link edge carries an opening bracket, which this reader cannot split safely, so nothing it "
                   "says about that executable could be trusted: ${edge}")
         continue()
     endif()
@@ -92,7 +92,7 @@ foreach(edge IN LISTS linkEdges)
             set(anchorProven TRUE)
         endif()
     else()
-        fc_refuse("${name} links Catch2 and its '${CONFIG}' link line carries no OffThreadAssertionGuard "
+        pace_refuse("${name} links Catch2 and its '${CONFIG}' link line carries no OffThreadAssertionGuard "
                   "object, so an assertion on one of its helper threads damages the heap instead of failing "
                   "the case (#1211). The guard is an INTERFACE source of the Catch2 target in the top-level "
                   "CMakeLists.txt: an executable that reaches Catch2 some other way -- a second copy, or the "
@@ -101,11 +101,11 @@ foreach(edge IN LISTS linkEdges)
 endforeach()
 
 if(catchEdges EQUAL 0)
-    fc_refuse("no '${CONFIG}' link edge in ${ninjaFile} links Catch2, so this derivation found nothing to "
+    pace_refuse("no '${CONFIG}' link edge in ${ninjaFile} links Catch2, so this derivation found nothing to "
               "check -- which is not the same as everything being covered. Either the tests are not built "
               "here, or the library is spelled in a way this reader does not recognise.")
 elseif(NOT anchorProven)
-    fc_refuse("${ANCHOR}, the one test executable certain to exist, is not among the covered, so a derivation "
+    pace_refuse("${ANCHOR}, the one test executable certain to exist, is not among the covered, so a derivation "
               "that proves nothing about it proves nothing at all.")
 endif()
 

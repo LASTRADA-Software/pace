@@ -162,7 +162,7 @@ TEST_CASE("A memo is saved only when it changed, and the file store round-trips"
     CHECK(store.Writes() == 1);
     CHECK(ReachabilityMemo::Load(store).Remembers(MemoKind::SchedulerUnreached, Scheduler, Noon));
 
-    Pace::Testing::ScratchDirectory const scratch { "fc-cc-memo" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-cc-memo" };
     auto const disk = MakeDiskFiles();
     FileMemoStore file { scratch / "reachability.memo", *disk };
     CHECK_FALSE(file.Read().has_value()); // absent is nothing, not an error
@@ -207,7 +207,7 @@ TEST_CASE("The file store replaces an existing memo and leaves no temp file behi
 {
     // The atomicity argument rests on the rename REPLACING a file that is already there
     // -- the ordinary case, since every launcher after the first writes over the last one.
-    Pace::Testing::ScratchDirectory const scratch { "fc-cc-memo-replace" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-cc-memo-replace" };
     auto const disk = MakeDiskFiles();
     FileMemoStore file { scratch / "reachability.memo", *disk };
     REQUIRE(file.Write("pace-cc reachability 1\nscheduler-unreached 1 first:1\n"));

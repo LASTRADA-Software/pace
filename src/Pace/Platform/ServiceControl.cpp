@@ -1027,8 +1027,8 @@ namespace
 /// compile this file outside the package configuration (a plain
 /// `cmake --install --prefix /usr/local`, or the test binary on a
 /// non-Apple CI toolchain), where no prefix has been chosen.
-#if defined(FC_MACOS_PREFIX)
-    constexpr std::string_view MacOsPrefix = FC_MACOS_PREFIX;
+#if defined(PACE_MACOS_PREFIX_PATH)
+    constexpr std::string_view MacOsPrefix = PACE_MACOS_PREFIX_PATH;
 #else
     constexpr std::string_view MacOsPrefix = "/opt/pace";
 #endif

@@ -82,13 +82,13 @@ set(baseSeamHeader
 namespace Pace::Ranges
 {
 // Where the macro is defined this is std::ranges::iota itself.
-#if defined(__cpp_lib_ranges_iota) && !defined(FC_RANGES_FORCE_FALLBACK)
+#if defined(__cpp_lib_ranges_iota) && !defined(PACE_RANGES_FORCE_FALLBACK)
 inline constexpr auto Iota = std::ranges::iota;
 #else
 inline constexpr auto Iota = Detail::IotaFallback;
 #endif
 
-#if defined(__cpp_lib_ranges_fold) && !defined(FC_RANGES_FORCE_FALLBACK)
+#if defined(__cpp_lib_ranges_fold) && !defined(PACE_RANGES_FORCE_FALLBACK)
 inline constexpr auto FoldLeft = std::ranges::fold_left;
 #else
 inline constexpr auto FoldLeft = Detail::FoldLeftFallback;
@@ -303,7 +303,7 @@ set(PaceRangesSeamCases
     "comments are not calls|newfile|src/Pace/Core/Note.cpp|// Never std::ranges::iota(v, 0) here.~n~/// Nor `std::ranges::fold_left(v, 0, op)`.~n~/*~n~ std::ranges::iota(v, 0) is missing from Apple's libc++.~n~*/~n~int Note() { return 0~sc~ }~n~|none called directly|CMake Error"
 
     # --- DERIVATION: a block added to the header is enforced with no edit to the check ---
-    "a selection block added to the header is enforced|seamrow:src/Pace/Core/Right.cpp|#if defined(__cpp_lib_ranges_fold) && !defined(FC_RANGES_FORCE_FALLBACK)~n~inline constexpr auto FoldRight = std::ranges::fold_right~sc~~n~#else~n~inline constexpr auto FoldRight = Detail::FoldRightFallback~sc~~n~#endif|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|Right.cpp:1: calls `std::ranges::fold_right` directly -- write `Ranges::FoldRight` && std::ranges::fold_right -> Ranges::FoldRight|-"
+    "a selection block added to the header is enforced|seamrow:src/Pace/Core/Right.cpp|#if defined(__cpp_lib_ranges_fold) && !defined(PACE_RANGES_FORCE_FALLBACK)~n~inline constexpr auto FoldRight = std::ranges::fold_right~sc~~n~#else~n~inline constexpr auto FoldRight = Detail::FoldRightFallback~sc~~n~#endif|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|Right.cpp:1: calls `std::ranges::fold_right` directly -- write `Ranges::FoldRight` && std::ranges::fold_right -> Ranges::FoldRight|-"
     # ...and its CONTROL: the same call with no block in the header is not this check's business.
     "a facility the header does not wrap is not refused|newfile|src/Pace/Core/Right.cpp|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|none called directly|CMake Error"
 

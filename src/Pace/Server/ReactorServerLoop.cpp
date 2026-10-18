@@ -81,7 +81,7 @@ namespace
     {
         if (int const r = Detail::VerifyTlsContextForTlsBinds(options, logger); r != EXIT_SUCCESS)
             return r;
-        CORE_THREAD_NAME("fc-reactor");
+        CORE_THREAD_NAME("pace-reactor");
         core::platform::SteadyClock ownClock;
         core::platform::IClock& clock = options.clock != nullptr ? *options.clock : ownClock;
 
@@ -463,7 +463,7 @@ namespace
             auto* const perBindTls = bindTls[bindIdx] ? options.tlsContext : nullptr;
             acceptors.push_back(Detail::StartAcceptorThread(
                 Detail::AcceptorThreadOptions { .surface = Detail::BindSurface(options.binds[bindIdx]),
-                                                .threadName = std::format("fc-acceptor-{}", bindIdx),
+                                                .threadName = std::format("pace-acceptor-{}", bindIdx),
                                                 .acceptor = std::make_unique<ListeningSocketAcceptor>(listenSocks[bindIdx]),
                                                 .logger = logger,
                                                 .acceptLoops = acceptLoops,
@@ -542,12 +542,12 @@ namespace
         threads.reserve(reactorCount - 1);
         for (auto const i: std::views::iota(1U, reactorCount))
             threads.emplace_back([&reactors, &announcer, i] {
-                [[maybe_unused]] auto const threadName = std::format("fc-reactor-{}", i);
+                [[maybe_unused]] auto const threadName = std::format("pace-reactor-{}", i);
                 CORE_THREAD_NAME(threadName.c_str());
                 announcer.AcceptorArmed(std::format("reactor {}", i));
                 reactors[i]->run();
             });
-        CORE_THREAD_NAME("fc-reactor-0");
+        CORE_THREAD_NAME("pace-reactor-0");
         announcer.AcceptorArmed("reactor 0");
         reactors[0]->run();
         threads.clear();
@@ -699,11 +699,11 @@ namespace
             threads.emplace_back([&runReactor, i] {
                 // Hoist into a stack local; Tracy's SetThreadName does not
                 // copy and would dangle on a `std::format(...).c_str()`.
-                [[maybe_unused]] auto const threadName = std::format("fc-reactor-{}", i);
+                [[maybe_unused]] auto const threadName = std::format("pace-reactor-{}", i);
                 CORE_THREAD_NAME(threadName.c_str());
                 runReactor(i);
             });
-        CORE_THREAD_NAME("fc-reactor-0");
+        CORE_THREAD_NAME("pace-reactor-0");
         runReactor(0);
         threads.clear();
 

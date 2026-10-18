@@ -417,7 +417,7 @@ namespace
           .operand = "=<host:port>",
           .apply = AppendFrom<&Config::binds, ParseListen<TlsListener>>(),
           .description = "additional TLS listener; repeatable. Shares --tls-cert / --tls-key.\n"
-                         "Needs a build with OpenSSL (FC_TLS_ENABLED)",
+                         "Needs a build with OpenSSL (PACE_TLS_ENABLED)",
           .yamlKey = "listen_tls",
           .same = FieldEq<&Config::binds>(),
           .clear = ClearList<&Config::binds>() },

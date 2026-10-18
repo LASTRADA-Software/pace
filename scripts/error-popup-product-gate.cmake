@@ -26,7 +26,7 @@ endif()
 # Run the canary under one environment and read its answer.
 # @param outVar receives the mode word, or a description of what came back instead
 # @param ARGN the `cmake -E env` arguments that shape the environment
-function(fc_ask outVar)
+function(pace_ask outVar)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env ${ARGN} "${CANARY}"
         RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err
@@ -40,8 +40,8 @@ function(fc_ask outVar)
     endif()
 endfunction()
 
-fc_ask(asked "${VARIABLE}=1")
-fc_ask(unasked "--unset=${VARIABLE}")
+pace_ask(asked "${VARIABLE}=1")
+pace_ask(unasked "--unset=${VARIABLE}")
 
 set(problems "")
 if(NOT asked STREQUAL "file")

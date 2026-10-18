@@ -25,8 +25,8 @@ namespace
     // to prevent, and src/Pace/CMakeLists.txt defines it for every
     // non-Windows build. Windows needs none — its machine-wide location is
     // resolved from %ProgramData% at runtime.
-#if !defined(_WIN32) && !defined(FC_SYSCONF_DIR)
-    #error "FC_SYSCONF_DIR must be defined by the build (see src/Pace/CMakeLists.txt)"
+#if !defined(_WIN32) && !defined(PACE_SYSCONF_PATH)
+    #error "PACE_SYSCONF_PATH must be defined by the build (see src/Pace/CMakeLists.txt)"
 #endif
 
     /// The candidate table, in priority order. See ConfigCandidate.
@@ -65,9 +65,9 @@ namespace
           .baseVar = "HOME",
           .suffix = ".config/pace/{app}.yaml",
           .scope = ConfigScope::User },
-        { .display = FC_SYSCONF_DIR "/{app}.yaml",
+        { .display = PACE_SYSCONF_PATH "/{app}.yaml",
           .baseVar = "",
-          .suffix = FC_SYSCONF_DIR "/{app}.yaml",
+          .suffix = PACE_SYSCONF_PATH "/{app}.yaml",
           .scope = ConfigScope::System },
     });
 #endif

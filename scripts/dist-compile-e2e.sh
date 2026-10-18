@@ -1069,7 +1069,7 @@ chmod +x "$stub"
 # The worker serves only a matching toolchain fingerprint. A stub that changed it could be
 # dispatched nowhere, and every assertion below would then be about a LOCAL compile -- the
 # tautology distributed-compilation.md warns about. So it is refused here, never loosened.
-stub_fingerprint="$(FC_EDIT_STUB_REAL="$real_compiler" "$launcher" --print-toolchain-fingerprint "$stub")" \
+stub_fingerprint="$(PACE_EDIT_STUB_REAL="$real_compiler" "$launcher" --print-toolchain-fingerprint "$stub")" \
     || fail "the launcher could not fingerprint the edit stub"
 [[ "$stub_fingerprint" == "$fingerprint" ]] \
     || fail "the edit stub changes the toolchain fingerprint (${stub_fingerprint} vs ${fingerprint}), so no compile through it can be dispatched and this case would test a local compile"
@@ -1108,14 +1108,14 @@ fi
 moved_compile() {
     local log="$1"
     shift
-    env "$@" FC_EDIT_STUB_REAL="$real_compiler" \
+    env "$@" PACE_EDIT_STUB_REAL="$real_compiler" \
         "$launcher" "$stub" -std=c++17 -O1 -c "${proj}/one-moved.cpp" -o "${proj}/build/one-moved.o" > "$log" 2>&1
 }
 
 : > "${moved}/trigger"
-moved_compile "${workdir}/case2b-1.log" FC_EDIT_STUB_AT=before-dispatch-preprocess \
-    FC_EDIT_STUB_TRIGGER="${moved}/trigger" FC_EDIT_STUB_FROM="${moved}/v2/one-moved.cpp" \
-    FC_EDIT_STUB_TO="${proj}/one-moved.cpp" \
+moved_compile "${workdir}/case2b-1.log" PACE_EDIT_STUB_AT=before-dispatch-preprocess \
+    PACE_EDIT_STUB_TRIGGER="${moved}/trigger" PACE_EDIT_STUB_FROM="${moved}/v2/one-moved.cpp" \
+    PACE_EDIT_STUB_TO="${proj}/one-moved.cpp" \
     || { cat "${workdir}/case2b-1.log" >&2; fail "case 2b: the racing compile failed"; }
 cat "${workdir}/case2b-1.log"
 grep -q "DISPATCHED to " "${workdir}/case2b-1.log" \

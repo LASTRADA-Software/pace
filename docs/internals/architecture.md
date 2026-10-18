@@ -138,7 +138,7 @@ is not a Windows property and the paragraph above is not its reason.
 persistent backend is one of four conditions that say so — the others being an
 explicit multi-shard layout, the reactor running on more than one thread (the
 default, since `--threads` unset means `hardware_concurrency()`), and the
-metrics endpoint, whose `fc-admin` thread calls `engine.Snapshot()`
+metrics endpoint, whose `pace-admin` thread calls `engine.Snapshot()`
 concurrently with the reactor.
 
 See `Server/ReactorServerLoop.cpp` for both paths.

@@ -918,7 +918,7 @@ TEST_CASE("An admin surface serves the fleet only when there is a fleet to read"
     }
 }
 
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
 TEST_CASE("Asking for a generated certificate gives the surface one to serve", "[node][admin][tls]")
 {
     // The flag exists so an internal deployment needs nothing to obtain first, so
@@ -1001,7 +1001,7 @@ TEST_CASE("A surface with no TLS asked for holds no context at all", "[node][adm
                                                     acceptLoops);
     REQUIRE(surface.has_value());
     REQUIRE(surface->endpoint != nullptr);
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     CHECK(surface->tls == nullptr);
 #endif
     // Checked and benign, which is not the same answer as the no-surface case's: this surface

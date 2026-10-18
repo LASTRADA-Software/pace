@@ -578,7 +578,7 @@ determinism rests on.
     - **The fallback is compiled and tested on EVERY platform**, under `Ranges::Detail`,
       and held to agree with the standard facility wherever one exists. A fallback compiled
       only where it is selected is compiled only on the leg nobody builds locally.
-      `FC_RANGES_FORCE_FALLBACK`, as a WHOLE-BUILD define only (a per-TU define is an ODR
+      `PACE_RANGES_FORCE_FALLBACK`, as a WHOLE-BUILD define only (a per-TU define is an ODR
       violation), selects it everywhere so a Linux or Windows build can compile the real call
       sites against it -- the only local stand-in for Apple's libc++.
     - **A copy of the function object, not a reference, and `Iota` rather than `iota`.**
@@ -2886,7 +2886,7 @@ makes it anyway and says so there.
 
 - **The unit of work is a compile command, not a file, and that is what makes the
   swap lossless.** `Stats.cpp` builds into `pace-cc`, `pace-cc-tests`
-  and `pace-node`, which do not agree about `FC_COMPRESSION_ENABLED`.
+  and `pace-node`, which do not agree about `PACE_COMPRESSION_ENABLED`.
   `clang-tidy -p <dir> <file>` does **not** take the first matching entry:
   libTooling's `ClangTool::run` loops over *every* command the database returns for
   that file. So a file with one command needs nothing special, and a file with
@@ -3630,7 +3630,7 @@ makes it anyway and says so there.
   - **A global flag is wrong even when it is set on one file.** A translation unit built with
     `-msha -msse4.1` emits its own out-of-line copies of every inline function it uses:
     `std::span::subspan`, the `views::iota` iterator, and so on. The linker keeps one arbitrary
-    copy for the whole program -- the ODR shape of `FC_RANGES_FORCE_FALLBACK`'s per-TU define
+    copy for the whole program -- the ODR shape of `PACE_RANGES_FORCE_FALLBACK`'s per-TU define
     above. The scalar fallback, running on a CPU without those instructions, can then execute
     the copy that has them and die of SIGILL. The attribute keeps the instructions inside the
     attributed bodies. It also needs no per-source flag in each target that compiles the file,

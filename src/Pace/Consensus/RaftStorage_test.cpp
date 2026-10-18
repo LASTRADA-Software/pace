@@ -61,7 +61,7 @@ TEST_CASE("An empty store loads as a node that has never run", "[consensus][raft
     // reporting it as a failure would make a first start indistinguishable from
     // unreadable state.
     InMemoryRaftStorage memory;
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto file = OpenStore(scratch.Path());
 
     for (IRaftStorage* store: { static_cast<IRaftStorage*>(&memory), static_cast<IRaftStorage*>(&file) })
@@ -76,7 +76,7 @@ TEST_CASE("An empty store loads as a node that has never run", "[consensus][raft
 
 TEST_CASE("Term and vote survive a round trip", "[consensus][raft][storage]")
 {
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store.SaveState(PersistentState { .currentTerm = Term { .value = 7 }, .votedFor = "n3" }).has_value());
@@ -95,7 +95,7 @@ TEST_CASE("A vote for nobody is distinct from a vote for the empty string", "[co
     // Inferring absence from a zero length would make the two identical on disk,
     // and a node that recovered "voted for nobody" as a vote could vote again in
     // the same term.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(
@@ -112,7 +112,7 @@ TEST_CASE("A vote for nobody is distinct from a vote for the empty string", "[co
 
 TEST_CASE("Log entries survive a round trip", "[consensus][raft][storage]")
 {
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store
@@ -135,7 +135,7 @@ TEST_CASE("An entry's kind survives a round trip", "[consensus][raft][storage]")
 {
     // A no-op recovered as a command would be delivered to the application, which
     // cannot interpret it.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store
@@ -157,7 +157,7 @@ TEST_CASE("A truncating append does not leave the overwritten tail behind", "[co
 {
     // A store that only appended would recover entries the cluster had
     // overwritten, which is a divergent log rather than a lost one.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store
@@ -193,7 +193,7 @@ TEST_CASE("A torn record at the tail is discarded, not refused", "[consensus][ra
     // A record still being written was never acknowledged to a leader, so nobody
     // can have committed on it -- discarding it is correct rather than lenient,
     // and refusing the whole log would strand a node that merely lost power.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(
@@ -221,7 +221,7 @@ TEST_CASE("A corrupt state record is refused rather than read as a fresh start",
 {
     // Mistaking it for a fresh start would discard a vote this node had already
     // given, which is how one term gets two leaders.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store.SaveState(PersistentState { .currentTerm = Term { .value = 3 }, .votedFor = "n2" }).has_value());
@@ -263,7 +263,7 @@ TEST_CASE("A node recovers its term and vote across a restart", "[consensus][raf
 {
     // The property the whole storage layer exists for: a node that answered a
     // RequestVote and then restarted must not vote again in the same term.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto store = OpenStore(scratch.Path());
 
     auto const config = RaftConfig { .self = "n1",
@@ -314,7 +314,7 @@ TEST_CASE("A node recovers its term and vote across a restart", "[consensus][raf
 
 TEST_CASE("A node recovers its log across a restart", "[consensus][raft][storage]")
 {
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto store = OpenStore(scratch.Path());
     REQUIRE(store.SaveLog(LogAppend { .fromIndex = LogIndex { .value = 1 }, .entries = { Entry(1, "a"), Entry(2, "b") } })
                 .has_value());
@@ -345,7 +345,7 @@ TEST_CASE("A second append lands after the first, not on top of it", "[consensus
     // range, so none of them ever asked where index N+1 begins. Answering that
     // with the last record's start -- which is what an offset table without an
     // end sentinel can do -- overwrites the entry before it.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(
@@ -368,7 +368,7 @@ TEST_CASE("Appending one entry at a time builds the whole log", "[consensus][raf
 {
     // What a leader actually does: RecordLogAppend names the single index just
     // written, so every proposal after the first is an append past the end.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         for (auto const index: std::views::iota(std::uint64_t { 1 }, std::uint64_t { 6 }))
@@ -394,7 +394,7 @@ TEST_CASE("A same-length replacement leaves no readable old record behind", "[co
     // same-size commands -- the bytes after the new tail are an intact old record
     // with valid magic and a valid CRC, so a crash before the truncation would
     // recover an entry the cluster had deleted.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store
@@ -427,7 +427,7 @@ TEST_CASE("A store opened over an existing log knows where it ends", "[consensus
     // The offset table is built at Open rather than at Load, so a SaveLog issued
     // before any Load -- or after a Load that failed on the state file and never
     // reached the log -- cannot compute a start of zero and erase everything.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(
@@ -455,7 +455,7 @@ TEST_CASE("A leader's own writes round-trip through the store", "[consensus][raf
     // End to end rather than by construction: whatever RaftNode emits as
     // persistLog is fed straight to the store, so an index the node and the store
     // disagree about shows up here rather than in a cluster.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto store = OpenStore(scratch.Path());
 
     auto const config = RaftConfig { .self = "n1",
@@ -506,7 +506,7 @@ TEST_CASE("A log append that would leave a gap is refused", "[consensus][raft][s
     // leaves the store disagreeing with the node about where entries live. No
     // correct driver produces one -- which is exactly why it is an error rather
     // than a coincidence.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto file = OpenStore(scratch.Path());
     InMemoryRaftStorage memory;
 
@@ -531,7 +531,7 @@ TEST_CASE("A torn tail is removed by the next append, not written over", "[conse
     // leaves the torn bytes in place for the next append to overwrite the front
     // of, and whatever suffix survives stays in the file -- discarded on load only
     // because it happens to fail to parse.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(
@@ -564,7 +564,7 @@ TEST_CASE("A torn tail is removed by the next append, not written over", "[conse
     // than against a byte count written out here. A literal states the record
     // layout a second time, so it goes stale the moment a field is added to one --
     // which is exactly what happened when records grew an index.
-    ScratchDirectory reference { "fc-raft-store" };
+    ScratchDirectory reference { "pace-raft-store" };
     {
         auto clean = OpenStore(reference.Path());
         REQUIRE(
@@ -580,7 +580,7 @@ TEST_CASE("A saved snapshot survives a reopen and trims the log", "[consensus][r
     // Both stores, one case: the in-memory one is what a cluster simulation gives
     // its nodes, so a rule only the file store obeyed would be untested exactly
     // where restarts are actually exercised.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto const snapshot = RaftSnapshot { .lastIncludedIndex = LogIndex { .value = 2 },
                                          .lastIncludedTerm = Term { .value = 1 },
                                          .configuration = { .voters = { "n1", "n2", "n3" }, .learners = {} },
@@ -624,14 +624,14 @@ TEST_CASE("A log trimmed to nothing still knows where it resumes", "[consensus][
     // The degenerate case, and the one a per-record index alone does not answer:
     // with every record gone there is none left to state the boundary, so the
     // snapshot has to. Without it the next append is refused as a gap, forever.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto const snapshot = RaftSnapshot { .lastIncludedIndex = LogIndex { .value = 3 },
                                          .lastIncludedTerm = Term { .value = 2 },
                                          .configuration = { .voters = { "n1" }, .learners = {} },
                                          .state = Pace::BytesFromString("all-of-it") };
 
     InMemoryRaftStorage memory;
-    ScratchDirectory fileScratch { "fc-raft-store" };
+    ScratchDirectory fileScratch { "pace-raft-store" };
     auto file = OpenStore(fileScratch.Path());
 
     for (IRaftStorage* store: { static_cast<IRaftStorage*>(&memory), static_cast<IRaftStorage*>(&file) })
@@ -665,7 +665,7 @@ TEST_CASE("An append below the snapshot boundary is refused", "[consensus][raft]
     // it would leave the store's indices disagreeing with the node's, which is the
     // fault the gap check exists for -- and a trimmed log is the case where the
     // old one-ended check could not see it.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto store = OpenStore(scratch.Path());
     InMemoryRaftStorage memory;
 
@@ -697,7 +697,7 @@ TEST_CASE("A corrupt snapshot is refused rather than read as an empty one", "[co
     // produces one -- so a reader that fell back to it on damage would hand a node
     // "you are caught up through index N with nothing in you", and the node would
     // ship that to a follower as though it were state.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(store
@@ -731,7 +731,7 @@ TEST_CASE("A reopened store knows its boundary before anything reads it", "[cons
     // `SaveLog` before `Load` would then be refused as a gap. The same repair has
     // to happen in both places, because either can be the first to touch the store
     // after a restart.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     {
         auto store = OpenStore(scratch.Path());
         REQUIRE(
@@ -899,7 +899,7 @@ TEST_CASE("A store the previous format wrote is refused as UnsupportedFormatVers
     // One file per section, alone in a fresh directory -- the other two absent, which
     // a store reads as empty rather than refusing -- so a refusal here is the old
     // file's and nothing else's.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
 
     auto const expectForeign = [&scratch](std::string_view file, std::vector<std::byte> const& bytes) {
         FormatOne::Write(scratch.Path() / file, bytes);
@@ -939,7 +939,7 @@ TEST_CASE("A store this build wrote opens, and damage to it is still damage", "[
     // pass it; so would one that called damage a foreign format. So: a current store,
     // carrying learners in both the snapshot and a log entry, opens and reads back
     // whole -- and the same kinds of file with their bytes damaged are `StorageFailure`.
-    ScratchDirectory scratch { "fc-raft-store" };
+    ScratchDirectory scratch { "pace-raft-store" };
     auto const configuration = Configuration { .voters = { "n1", "n2" }, .learners = { "laptop" } };
     auto const snapshot = RaftSnapshot { .lastIncludedIndex = LogIndex { .value = 2 },
                                          .lastIncludedTerm = Term { .value = 1 },

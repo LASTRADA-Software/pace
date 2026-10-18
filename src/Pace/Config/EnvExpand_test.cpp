@@ -19,29 +19,29 @@ TEST_CASE("EnvExpand: input without references is returned unchanged", "[config]
 
 TEST_CASE("EnvExpand: bare $NAME ends at the first non-name character", "[config][env]")
 {
-    ScopedEnv const env { "FC_TEST_ROOT", "C:/ProgramData" };
+    ScopedEnv const env { "PACE_TEST_ROOT", "C:/ProgramData" };
 
-    auto const r = ExpandEnvironmentVariables("$FC_TEST_ROOT/pace/cache", "storage_path");
+    auto const r = ExpandEnvironmentVariables("$PACE_TEST_ROOT/pace/cache", "storage_path");
     REQUIRE(r.has_value());
     REQUIRE(*r == "C:/ProgramData/pace/cache");
 }
 
 TEST_CASE("EnvExpand: braced ${NAME} allows names the bare form cannot spell", "[config][env]")
 {
-    ScopedEnv const env { "FC_TEST_ODD", "/opt" };
+    ScopedEnv const env { "PACE_TEST_ODD", "/opt" };
 
     // The brace form is what makes Windows' ProgramFiles(x86) expressible.
-    auto const r = ExpandEnvironmentVariables("${FC_TEST_ODD}/pace", "storage_path");
+    auto const r = ExpandEnvironmentVariables("${PACE_TEST_ODD}/pace", "storage_path");
     REQUIRE(r.has_value());
     REQUIRE(*r == "/opt/pace");
 }
 
 TEST_CASE("EnvExpand: adjacent references concatenate", "[config][env]")
 {
-    ScopedEnv const a { "FC_TEST_A", "one" };
-    ScopedEnv const b { "FC_TEST_B", "two" };
+    ScopedEnv const a { "PACE_TEST_A", "one" };
+    ScopedEnv const b { "PACE_TEST_B", "two" };
 
-    auto const r = ExpandEnvironmentVariables("${FC_TEST_A}${FC_TEST_B}", "storage_path");
+    auto const r = ExpandEnvironmentVariables("${PACE_TEST_A}${PACE_TEST_B}", "storage_path");
     REQUIRE(r.has_value());
     REQUIRE(*r == "onetwo");
 }
@@ -57,9 +57,9 @@ TEST_CASE("EnvExpand: a set-but-empty variable expands to empty", "[config][env]
 {
     // Distinct from unset: an operator who exported an empty value meant it.
 #if !defined(_WIN32)
-    ScopedEnv const env { "FC_TEST_EMPTY", "" };
+    ScopedEnv const env { "PACE_TEST_EMPTY", "" };
 
-    auto const r = ExpandEnvironmentVariables("[$FC_TEST_EMPTY]", "storage_path");
+    auto const r = ExpandEnvironmentVariables("[$PACE_TEST_EMPTY]", "storage_path");
     REQUIRE(r.has_value());
     REQUIRE(*r == "[]");
 #endif
@@ -67,18 +67,18 @@ TEST_CASE("EnvExpand: a set-but-empty variable expands to empty", "[config][env]
 
 TEST_CASE("EnvExpand: an unset variable is an error, not an empty string", "[config][env]")
 {
-    auto const r = ExpandEnvironmentVariables("$FC_TEST_DEFINITELY_UNSET/cache", "storage_path");
+    auto const r = ExpandEnvironmentVariables("$PACE_TEST_DEFINITELY_UNSET/cache", "storage_path");
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code == ConfigErrorCode::UndefinedVariable);
     REQUIRE(r.error().field == "storage_path");
-    REQUIRE(r.error().context.contains("FC_TEST_DEFINITELY_UNSET"));
+    REQUIRE(r.error().context.contains("PACE_TEST_DEFINITELY_UNSET"));
 }
 
 TEST_CASE("EnvExpand: malformed references are rejected", "[config][env]")
 {
     SECTION("unterminated brace")
     {
-        auto const r = ExpandEnvironmentVariables("${FC_TEST_A/cache", "storage_path");
+        auto const r = ExpandEnvironmentVariables("${PACE_TEST_A/cache", "storage_path");
         REQUIRE_FALSE(r.has_value());
         REQUIRE(r.error().code == ConfigErrorCode::ParseError);
     }

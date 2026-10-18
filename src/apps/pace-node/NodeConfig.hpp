@@ -1748,7 +1748,7 @@ inline constexpr std::string_view RaftSelfWithConsensusClosedRefusal =
 /// Whether this build can terminate TLS: a property of the BUILD, which the startup table asks
 /// beside the configuration so a line naming TLS material on a build without it is refused where
 /// an operator is watching -- `--print-surfaces`, `--install-service` -- and not only at boot.
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
 inline constexpr bool BuildServesTls = true;
 #else
 inline constexpr bool BuildServesTls = false;

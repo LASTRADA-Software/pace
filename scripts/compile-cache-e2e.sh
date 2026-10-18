@@ -1633,7 +1633,7 @@ write_moved_tree() {
 moved_compile() {
     local root="$1" log="$2"
     shift 2
-    env "$@" FC_EDIT_STUB_REAL="$real_compiler" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
+    env "$@" PACE_EDIT_STUB_REAL="$real_compiler" PACE_SOURCE_DIR="$root" PACE_BINARY_DIR="${root}/build" \
         "$launcher" "$stub" -std=c++20 -MD -MF "${root}/build/m.d" -c "${root}/src/m.cpp" -o "${root}/build/m.o" 2> "$log"
 }
 # `LC_ALL=C`, or macOS's grep matches nothing on an object's non-UTF-8 bytes.
@@ -1651,8 +1651,8 @@ for leg in tu header; do
     fi
     : > "${moved}/${leg}.trigger"
     echo "== mid-compile save (${leg}): the compile that raced it stores nothing =="
-    moved_compile "$root" "${moved}/${leg}-1.log" FC_EDIT_STUB_AT=after-compile \
-        FC_EDIT_STUB_TRIGGER="${moved}/${leg}.trigger" FC_EDIT_STUB_FROM="$from" FC_EDIT_STUB_TO="$to" \
+    moved_compile "$root" "${moved}/${leg}-1.log" PACE_EDIT_STUB_AT=after-compile \
+        PACE_EDIT_STUB_TRIGGER="${moved}/${leg}.trigger" PACE_EDIT_STUB_FROM="$from" PACE_EDIT_STUB_TO="$to" \
         || { cat "${moved}/${leg}-1.log" >&2; fail "mid-compile ${leg}: the racing compile failed"; }
     cat "${moved}/${leg}-1.log"
     [[ ! -e "${moved}/${leg}.trigger" ]] || fail "mid-compile ${leg}: the stub never fired, so this leg tested nothing"
@@ -1706,9 +1706,9 @@ write_moved_tree "$keyed" MESSAGE_V1_OLD_keyed HEADER_V1_OLD_keyed
 write_moved_tree "${moved}/keyed-v2" MESSAGE_V2_NEW_keyed HEADER_V1_OLD_keyed
 write_moved_tree "${moved}/keyed-v1-twin" MESSAGE_V1_OLD_keyed HEADER_V1_OLD_keyed
 : > "${moved}/keyed.trigger"
-moved_compile "$keyed" "${moved}/keyed-1.log" FC_EDIT_STUB_AT=after-compile \
-    FC_EDIT_STUB_TRIGGER="${moved}/keyed.trigger" FC_EDIT_STUB_FROM="${moved}/keyed-v2/src/m.cpp" \
-    FC_EDIT_STUB_TO="${keyed}/src/m.cpp" \
+moved_compile "$keyed" "${moved}/keyed-1.log" PACE_EDIT_STUB_AT=after-compile \
+    PACE_EDIT_STUB_TRIGGER="${moved}/keyed.trigger" PACE_EDIT_STUB_FROM="${moved}/keyed-v2/src/m.cpp" \
+    PACE_EDIT_STUB_TO="${keyed}/src/m.cpp" \
     || { cat "${moved}/keyed-1.log" >&2; fail "keyed manifest: the racing compile failed"; }
 [[ ! -e "${moved}/keyed.trigger" ]] || fail "keyed manifest: the stub never fired, so this case tested nothing"
 grep -q "manifest recorded from the keyed content" "${moved}/keyed-1.log" \

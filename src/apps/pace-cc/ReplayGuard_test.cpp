@@ -78,7 +78,7 @@ struct ScopedTree
         // longer be the whole story. `temp / "<fixed>"` is the same directory in every
         // concurrent test process -- see `tests/ScratchPath.hpp` for the five times
         // that has been paid for.
-        base { Pace::Testing::UniqueScratchPath("fc-replayguard") },
+        base { Pace::Testing::UniqueScratchPath("pace-replayguard") },
         root { base / name }
     {
         std::filesystem::create_directories(root);
@@ -283,7 +283,7 @@ TEST_CASE("A drive-relative dependency is skipped even under a drive-relative ro
 
 TEST_CASE("A replay whose dependencies all exist is honoured", "[replay-guard]")
 {
-    ScopedTree const tree { "fc-replayguard-present" };
+    ScopedTree const tree { "pace-replayguard-present" };
     auto const header = tree.Write("src/inc/Hdr.hpp");
     auto const source = tree.Write("src/a.cpp");
     PathCanon::Layout const layout { .sourceRoot = (tree.root / "src").string(),
@@ -298,7 +298,7 @@ TEST_CASE("A moved header makes the recorded depfile untrue", "[replay-guard]")
     // Issue #53. The header's CONTENTS do not change, so the preprocessed text and
     // therefore the object key are identical and the value is served — but the
     // depfile it carries names a path that is now empty.
-    ScopedTree const tree { "fc-replayguard-moved" };
+    ScopedTree const tree { "pace-replayguard-moved" };
     auto const source = tree.Write("src/a.cpp");
     auto const oldPath = tree.Write("src/inc/old/Hdr.hpp");
     PathCanon::Layout const layout { .sourceRoot = (tree.root / "src").string(),
@@ -321,7 +321,7 @@ TEST_CASE("An absent path outside the roots does not discard the hit", "[replay-
 {
     // Cross-machine sharing depends on this: the producer's system headers are not
     // this machine's, and requiring them would make both machines miss forever.
-    ScopedTree const tree { "fc-replayguard-foreign" };
+    ScopedTree const tree { "pace-replayguard-foreign" };
     auto const source = tree.Write("src/a.cpp");
     PathCanon::Layout const layout { .sourceRoot = (tree.root / "src").string(),
                                      .buildTree = (tree.root / "build").string() };
@@ -334,7 +334,7 @@ TEST_CASE("A relative dependency resolves against the supplied working directory
 {
     // Not against the process working directory: the launcher passes the compile's
     // own, and a test must be able to say which without mutating global state.
-    ScopedTree const tree { "fc-replayguard-relative" };
+    ScopedTree const tree { "pace-replayguard-relative" };
     (void) tree.Write("src/hdr.hpp");
     PathCanon::Layout const layout { .sourceRoot = (tree.root / "src").string(),
                                      .buildTree = (tree.root / "build").string() };
@@ -366,7 +366,7 @@ TEST_CASE("A replayed dependency this host cannot read discards the hit rather t
     // Reported as missing, which discards the hit and recompiles: a dependency this
     // host cannot name is one it cannot check, and an unchecked hit is what this
     // guard exists to refuse.
-    ScopedTree const tree { "fc-replayguard-unreadable" };
+    ScopedTree const tree { "pace-replayguard-unreadable" };
     (void) tree.Write("src/hdr.hpp");
     PathCanon::Layout const layout { .sourceRoot = (tree.root / "src").string(),
                                      .buildTree = (tree.root / "build").string() };

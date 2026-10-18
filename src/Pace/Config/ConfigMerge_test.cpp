@@ -348,29 +348,29 @@ TEST_CASE("AssembleEffectiveConfig: a path setting expands the environment from 
     // is expanded, `--storage=${NAME}` arrives as the operator's shell left it, and a
     // secret beside it is never expanded -- a `$` in a password is part of the password.
     Pace::Testing::ScratchDirectory const scratch { "pace-assemble-expand" };
-    Pace::Testing::ScopedEnv const root { "FC_ASSEMBLE_ROOT", "/srv/fc" };
+    Pace::Testing::ScopedEnv const root { "PACE_ASSEMBLE_ROOT", "/srv/fc" };
 
     SECTION("from a file")
     {
         auto const assembled = Assemble(scratch,
-                                        "storage_path: ${FC_ASSEMBLE_ROOT}/cache\ntls_cert: "
-                                        "$FC_ASSEMBLE_ROOT/c.pem\nrequirepass: \"$FC_ASSEMBLE_ROOT\"\n");
+                                        "storage_path: ${PACE_ASSEMBLE_ROOT}/cache\ntls_cert: "
+                                        "$PACE_ASSEMBLE_ROOT/c.pem\nrequirepass: \"$PACE_ASSEMBLE_ROOT\"\n");
         REQUIRE(assembled.has_value());
         CHECK(assembled->Configuration().storagePath == "/srv/fc/cache");
         CHECK(assembled->Configuration().tlsCertPath == "/srv/fc/c.pem");
-        CHECK(assembled->Configuration().requirePass == "$FC_ASSEMBLE_ROOT");
+        CHECK(assembled->Configuration().requirePass == "$PACE_ASSEMBLE_ROOT");
     }
 
     SECTION("from the command line")
     {
-        auto const assembled = Assemble(scratch, std::nullopt, { "--storage=${FC_ASSEMBLE_ROOT}/cache" });
+        auto const assembled = Assemble(scratch, std::nullopt, { "--storage=${PACE_ASSEMBLE_ROOT}/cache" });
         REQUIRE(assembled.has_value());
-        CHECK(assembled->Configuration().storagePath == "${FC_ASSEMBLE_ROOT}/cache");
+        CHECK(assembled->Configuration().storagePath == "${PACE_ASSEMBLE_ROOT}/cache");
     }
 
     SECTION("an unset variable is refused at its key and line")
     {
-        auto const assembled = Assemble(scratch, "port: 12000\nstorage_path: ${FC_ASSEMBLE_NEVER_SET}/cache\n");
+        auto const assembled = Assemble(scratch, "port: 12000\nstorage_path: ${PACE_ASSEMBLE_NEVER_SET}/cache\n");
         REQUIRE_FALSE(assembled.has_value());
         CHECK(assembled.error().code == Pace::ConfigErrorCode::UndefinedVariable);
         CHECK(assembled.error().field == "storage_path");
@@ -526,7 +526,7 @@ TEST_CASE("The daemon's startup rules refuse what its body used to refuse only o
     SECTION("TLS on one listener with no material, or on a build that cannot serve it")
     {
         config.binds = { Pace::BindConfig { .address = "127.0.0.1", .port = 6380, .tls = true } };
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
         auto const why = Pace::DaemonTlsMaterialRefusal;
 #else
         auto const why = Pace::DaemonTlsUnavailableRefusal;
@@ -561,7 +561,7 @@ TEST_CASE("The daemon's startup rules refuse what its body used to refuse only o
         config.tlsEnabled = true;
         config.tlsCertPath = "server.crt";
         config.tlsKeyPath = "server.key";
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
         CHECK_FALSE(Pace::DaemonStartupRejection(config).has_value());
 #else
         CHECK(Pace::DaemonStartupRejection(config)

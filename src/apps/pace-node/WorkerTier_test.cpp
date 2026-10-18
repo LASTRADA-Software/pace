@@ -262,7 +262,7 @@ TEST_CASE("A reloaded allowlist re-judges the refused-arguments row", "[node][wo
     NodeConditions conditions;
     NullLogger logger;
     auto runner = Cc::MakeProcessRunner();
-    Pace::Testing::ScratchDirectory scratch { "fc-adopt-allowlist" };
+    Pace::Testing::ScratchDirectory scratch { "pace-adopt-allowlist" };
     Cc::CompileJobRunner jobs { *runner, scratch.Path(), { { "gcc", "/opt/none/g++" } }, Cc::ToolchainSurvey::Completed() };
     std::vector<std::string> inForce;
     RefusedArgumentsReport report { conditions, logger, inForce };

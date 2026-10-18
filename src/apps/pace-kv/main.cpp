@@ -57,7 +57,7 @@
 #include <core/net/BlockingSocket.hpp>
 #include <core/net/HealthProbe.hpp>
 #include <core/platform/Clock.hpp>
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     #include <core/net/Tls.hpp>
 #endif
 
@@ -814,7 +814,7 @@ int DaemonBody(Pace::Config const& effective,
     // Wrap the backend in a ShardedStorage (its per-shard mutex serialises
     // access) whenever more than one thread can reach it: an explicit
     // multi-shard layout, the persistent backend, the reactor running on more
-    // than one thread, or the metrics endpoint (its fc-admin thread calls
+    // than one thread, or the metrics endpoint (its pace-admin thread calls
     // engine.Snapshot() concurrently with the reactor, and InMemoryLruStorage::
     // Snapshot is only safe under the shard's exclusive lock). A lone reactor
     // over in-memory storage with no metrics stays unwrapped — one thread owns
@@ -953,13 +953,13 @@ int DaemonBody(Pace::Config const& effective,
 
     // TLS context: built once and shared read-only across connections. Fails
     // fast on a missing build feature or unreadable cert/key.
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     std::shared_ptr<core::net::ITlsContext> tlsContext;
 #endif
     auto const anyTlsBind = std::ranges::any_of(effective.binds, [](auto const& b) { return b.tls; });
     if (effective.tlsEnabled || anyTlsBind)
     {
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
         if (effective.tlsCertPath.empty() || effective.tlsKeyPath.empty())
         {
             logger.Logf(Pace::LogLevel::Fatal, "pace-kv: {}", Pace::DaemonTlsMaterialRefusal);
@@ -1186,7 +1186,7 @@ int DaemonBody(Pace::Config const& effective,
                 logger.Log(Pace::LogLevel::Info, "config reloaded");
         }
     } };
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     serverOpts.tlsContext = tlsContext.get(); // null unless --tls is active
 #endif
 
@@ -1260,7 +1260,7 @@ int DaemonBody(Pace::Config const& effective,
             adminServer = std::make_unique<Pace::AdminHttpServer>(
                 *adminListener, metrics, snapshotProvider, logger, steadyClock, acceptLoops, Pace::DefaultDrainWait());
             adminThread = std::jthread { [&adminServer] {
-                CORE_THREAD_NAME("fc-admin");
+                CORE_THREAD_NAME("pace-admin");
                 core::async::syncRun(adminServer->Run());
             } };
             logger.Logf(Pace::LogLevel::Info,

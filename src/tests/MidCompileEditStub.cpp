@@ -18,14 +18,14 @@
 //
 // ## Driven by the environment
 //
-//   FC_EDIT_STUB_REAL      absolute path of the real compiler to forward to (required)
-//   FC_EDIT_STUB_AT        `after-compile`: save after a real compile exits 0;
+//   PACE_EDIT_STUB_REAL      absolute path of the real compiler to forward to (required)
+//   PACE_EDIT_STUB_AT        `after-compile`: save after a real compile exits 0;
 //                          `before-dispatch-preprocess`: save before forwarding a
 //                          line-marker preprocess. Unset: forward only.
-//   FC_EDIT_STUB_TRIGGER   a file; the save happens only while it exists, and the stub
+//   PACE_EDIT_STUB_TRIGGER   a file; the save happens only while it exists, and the stub
 //                          deletes it, so the save is ONE shot and a fixture can ask
 //                          whether it fired
-//   FC_EDIT_STUB_FROM/TO   the save: FROM's bytes overwrite TO IN PLACE
+//   PACE_EDIT_STUB_FROM/TO   the save: FROM's bytes overwrite TO IN PLACE
 //
 // The save opens TO for a truncating write, the way an editor saves, and never copies the
 // file: on Windows `CopyFileW` (which `std::filesystem::copy_file` is) carries the source's
@@ -94,7 +94,7 @@ enum class Invocation : std::uint8_t
     Last, ///< The enumerator count; never an invocation.
 };
 
-/// Where in the invocation the save is placed (`FC_EDIT_STUB_AT`). Private.
+/// Where in the invocation the save is placed (`PACE_EDIT_STUB_AT`). Private.
 enum class SaveAt : std::uint8_t
 {
     Never,
@@ -126,7 +126,7 @@ constexpr std::array<ClassifyRow, 2> ClassifyTable {
     ClassifyRow { .kind = Invocation::DispatchPreprocess, .anyOf = PreprocessSwitches, .noneOf = NotADispatchPreprocess },
 };
 
-/// The spelling of one `SaveAt` in `FC_EDIT_STUB_AT`.
+/// The spelling of one `SaveAt` in `PACE_EDIT_STUB_AT`.
 struct SaveAtRow
 {
     /// The variable's value.
@@ -183,12 +183,12 @@ constexpr std::array<SaveAtRow, 2> SaveAtSpellings {
 #endif
 }
 
-/// Reads `FC_EDIT_STUB_AT`.
+/// Reads `PACE_EDIT_STUB_AT`.
 /// @return Where the save is placed, `SaveAt::Never` when the variable is unset; nothing when
 ///         it names no placement.
 [[nodiscard]] std::optional<SaveAt> ReadSaveAt()
 {
-    auto const value = ReadVariable("FC_EDIT_STUB_AT");
+    auto const value = ReadVariable("PACE_EDIT_STUB_AT");
     if (!value)
         return SaveAt::Never;
     auto const spelling = value->string();
@@ -205,14 +205,14 @@ constexpr std::array<SaveAtRow, 2> SaveAtSpellings {
 /// @return True when the save was done or the trigger is gone; false when it failed, said why.
 [[nodiscard]] bool SaveOnce()
 {
-    auto const trigger = ReadVariable("FC_EDIT_STUB_TRIGGER");
-    auto const from = ReadVariable("FC_EDIT_STUB_FROM");
-    auto const to = ReadVariable("FC_EDIT_STUB_TO");
+    auto const trigger = ReadVariable("PACE_EDIT_STUB_TRIGGER");
+    auto const from = ReadVariable("PACE_EDIT_STUB_FROM");
+    auto const to = ReadVariable("PACE_EDIT_STUB_TO");
     if (!trigger || !from || !to)
     {
         std::println(stderr,
-                     "mid-compile-edit-stub: FC_EDIT_STUB_AT needs FC_EDIT_STUB_TRIGGER, FC_EDIT_STUB_FROM and "
-                     "FC_EDIT_STUB_TO");
+                     "mid-compile-edit-stub: PACE_EDIT_STUB_AT needs PACE_EDIT_STUB_TRIGGER, PACE_EDIT_STUB_FROM and "
+                     "PACE_EDIT_STUB_TO");
         return false;
     }
     std::error_code error;
@@ -354,17 +354,17 @@ int main(int argc, char** argv, char** environment)
 #endif
 {
     auto const arguments = std::span<char* const> { argv, static_cast<std::size_t>(argc) }.subspan(1);
-    auto const real = ReadVariable("FC_EDIT_STUB_REAL");
+    auto const real = ReadVariable("PACE_EDIT_STUB_REAL");
     if (!real)
     {
-        std::println(stderr, "mid-compile-edit-stub: FC_EDIT_STUB_REAL names no compiler to forward to");
+        std::println(stderr, "mid-compile-edit-stub: PACE_EDIT_STUB_REAL names no compiler to forward to");
         return StubFailure;
     }
     auto const at = ReadSaveAt();
     if (!at)
     {
         std::println(stderr,
-                     "mid-compile-edit-stub: FC_EDIT_STUB_AT is neither after-compile nor before-dispatch-preprocess");
+                     "mid-compile-edit-stub: PACE_EDIT_STUB_AT is neither after-compile nor before-dispatch-preprocess");
         return StubFailure;
     }
     auto const kind = Classify(arguments);

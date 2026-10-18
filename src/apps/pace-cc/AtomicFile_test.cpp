@@ -302,7 +302,7 @@ TEST_CASE("The temp file of an atomic write sits beside its target", "[launcher]
 
 TEST_CASE("On disk, an atomic write replaces a longer file whole and leaves no temp file", "[launcher][atomicfile]")
 {
-    Testing::ScratchDirectory const scratch { "fc-cc-atomic" };
+    Testing::ScratchDirectory const scratch { "pace-cc-atomic" };
     scratch.Write("u.obj", "AN OLDER OBJECT, LONGER THAN THE NEW ONE");
     auto const files = MakeDiskFiles();
     auto const written = WriteFileAtomically(scratch / "u.obj", Bytes("NEW OBJECT"), Writer, *files);
@@ -317,7 +317,7 @@ TEST_CASE("On disk, a rename that cannot happen leaves the target and removes th
 {
     // A non-empty DIRECTORY where the object should be: no rename replaces it, on any
     // platform, so the write fails at its last step -- after the temp file was written.
-    Testing::ScratchDirectory const scratch { "fc-cc-atomic-replace" };
+    Testing::ScratchDirectory const scratch { "pace-cc-atomic-replace" };
     scratch.Write("u.obj/keep", "kept");
     auto const files = MakeDiskFiles();
     auto const written = WriteFileAtomically(scratch / "u.obj", Bytes("NEW OBJECT"), Writer, *files);
@@ -337,7 +337,7 @@ TEST_CASE("Two threads of one process writing one target each finish whole and l
     // chance at the overlap; every observation is taken on this thread, after the joins.
     constexpr auto Rounds = 60;
     constexpr std::size_t PayloadBytes = 256 * 1024;
-    Testing::ScratchDirectory const scratch { "fc-cc-atomic-threads" };
+    Testing::ScratchDirectory const scratch { "pace-cc-atomic-threads" };
     auto const target = scratch / "toolchain.fingerprint";
     auto const payloadA = std::vector<std::byte>(PayloadBytes, std::byte { 'a' });
     auto const payloadB = std::vector<std::byte>(PayloadBytes, std::byte { 'b' });
@@ -378,7 +378,7 @@ TEST_CASE("A replace over a reader that holds the target open is never torn: it 
 {
     // Launchers read the fingerprint cache and the reachability memo while another launcher
     // replaces them.
-    Testing::ScratchDirectory const scratch { "fc-cc-atomic-reader" };
+    Testing::ScratchDirectory const scratch { "pace-cc-atomic-reader" };
     auto const target = scratch / "reachability.memo";
 
     SECTION("a reader opened the way every launcher reader opens it: the replace lands, and the reader keeps its bytes")

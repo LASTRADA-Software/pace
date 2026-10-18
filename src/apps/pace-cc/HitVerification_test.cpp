@@ -311,7 +311,7 @@ TEST_CASE("A verification put-back keeps the served object aside until it is con
     // After a FAILED fresh compile the aside is the only good copy of what the hit served. It goes
     // only once the build's object is confirmed to be that copy again; a put-back that failed keeps
     // it, and the verdict line says where.
-    Testing::ScratchDirectory const scratch { "fc-cc-verify-putback" };
+    Testing::ScratchDirectory const scratch { "pace-cc-verify-putback" };
     scratch.Write("u.obj.pace-verify", "SERVED OBJECT");
     auto const aside = scratch / "u.obj.pace-verify";
     auto const served = scratch / "u.obj";

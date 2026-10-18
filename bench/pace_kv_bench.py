@@ -200,7 +200,7 @@ def run_multitarget(
             for index, scenario in enumerate(scenarios):
                 print(f"  ({index + 1}/{len(scenarios)}) {scenario.name}", flush=True)
                 by_target: dict = {}
-                storage_dir = storage_root / f"fc-{index}"
+                storage_dir = storage_root / f"pace-{index}"
                 try:
                     by_target["pace-kv"] = run_scenario(
                         executor, pool_size, pace_binary, scenario, HOST, base_port + index,

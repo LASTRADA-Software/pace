@@ -906,20 +906,20 @@ repair_self_test() {
     mkdir -p "${scratch}/uncbin"
     cat > "${scratch}/uncbin/wslpath" <<'STUB'
 #!/usr/bin/env bash
-# A staged wslpath for one share, //localhost/fc-test-share: -u drops it, -w adds it.
+# A staged wslpath for one share, //localhost/pace-test-share: -u drops it, -w adds it.
 p="$2"
 case "$1" in
     -u) p="$(printf '%s' "$p" | tr '\\' '/')"
         case "$p" in
-            //localhost/fc-test-share/*) printf '/%s\n' "${p#//localhost/fc-test-share/}"; exit 0 ;;
+            //localhost/pace-test-share/*) printf '/%s\n' "${p#//localhost/pace-test-share/}"; exit 0 ;;
         esac
         exit 1 ;;
-    -w) printf '\\\\localhost\\fc-test-share%s\n' "$(printf '%s' "$p" | tr '/' '\\')"; exit 0 ;;
+    -w) printf '\\\\localhost\\pace-test-share%s\n' "$(printf '%s' "$p" | tr '/' '\\')"; exit 0 ;;
 esac
 exit 1
 STUB
     chmod +x "${scratch}/uncbin/wslpath"
-    printf 'gitdir: //localhost/fc-test-share%s\n' "${repo}/.git/worktrees/lane" > "${wt}/.git"
+    printf 'gitdir: //localhost/pace-test-share%s\n' "${repo}/.git/worktrees/lane" > "${wt}/.git"
     PATH="${scratch}/uncbin:${PATH}" repair_worktree "$wt" apply >/dev/null 2>&1
     local uncStatus=$?
     wtPointer="$(cat "${wt}/.git")"

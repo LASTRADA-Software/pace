@@ -209,7 +209,7 @@ endfunction()
 #
 # ## What is NOT converted, and why
 #
-# `check-config-reference-reach` splits through an `@FC_SEMI@` PLACEHOLDER and blanks
+# `check-config-reference-reach` splits through an `@PACE_SEMI@` PLACEHOLDER and blanks
 # no brackets at all. That is a third strategy, and converting it would change what
 # it matches: it keeps `;` inside the element rather than escaping it, and it is
 # bracket-EXPOSED where both families here are not. Which of those matters is a

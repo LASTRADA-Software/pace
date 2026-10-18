@@ -49,7 +49,7 @@ class Compression
   public:
     /// Whether `codec` can actually be used by this build. `Identity` is
     /// always usable; `Lz4`/`Zstd` are usable only when the library was built
-    /// with `PACE_ENABLE_COMPRESSION` (the `FC_COMPRESSION_ENABLED`
+    /// with `PACE_ENABLE_COMPRESSION` (the `PACE_COMPRESSION_ENABLED`
     /// compile definition).
     /// @param codec Codec to test.
     /// @return True if the codec is compiled in and selectable.

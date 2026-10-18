@@ -22,8 +22,8 @@
 # ones included, straight to Version.cmake's classifier, so each is judged on every CMake.
 #
 # Usage: cmake -DPACE_SOURCE_DIR=<repo> -DPACE_SCRATCH_DIR=<dir> -P <this>
-#   (internally re-entered as the driver with -DFC_ROLE=driver, and as the stub with
-#   -DFC_ROLE=stub)
+#   (internally re-entered as the driver with -DPACE_ROLE=driver, and as the stub with
+#   -DPACE_ROLE=stub)
 
 cmake_minimum_required(VERSION 3.28)
 
@@ -34,7 +34,7 @@ set(timeoutSeconds 4)
 set(holdSeconds 8)
 
 # ---- the stub: one git invocation ----------------------------------------------------------
-if(FC_ROLE STREQUAL "stub")
+if(PACE_ROLE STREQUAL "stub")
     # The arguments after `--`.
     set(args "")
     set(seenSeparator FALSE)
@@ -77,25 +77,25 @@ if(FC_ROLE STREQUAL "stub")
         file(APPEND "${LOG}" "UNKNOWN QUERY: ${query}\n")
         message(FATAL_ERROR "stub: no row for `git ${query}`")
     endif()
-    if(label STREQUAL "$ENV{FC_STUB_HOLD}")
+    if(label STREQUAL "$ENV{PACE_STUB_HOLD}")
         execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep ${holdSeconds})
     endif()
     # Dying is the WRAPPER's to do, since a CMake script can end itself only with an exit
     # status: this leaves the marker, and the wrapper ends the way a crash does.
-    if(label STREQUAL "$ENV{FC_STUB_DIE}")
+    if(label STREQUAL "$ENV{PACE_STUB_DIE}")
         file(WRITE "${LOG}.die" "")
         return()
     endif()
     # The ordinary non-zero answers: no tag, and no repository at all -- where every query
     # exits non-zero, as git does outside a work tree.
-    if(label STREQUAL "tag" AND "$ENV{FC_STUB_NO_TAG}" STREQUAL "1")
+    if(label STREQUAL "tag" AND "$ENV{PACE_STUB_NO_TAG}" STREQUAL "1")
         message(FATAL_ERROR "stub: no names found")
     endif()
-    if("$ENV{FC_STUB_NOT_REPO}" STREQUAL "1")
+    if("$ENV{PACE_STUB_NOT_REPO}" STREQUAL "1")
         message(FATAL_ERROR "stub: not a git repository")
     endif()
     set(dirtyAnswer "")
-    if("$ENV{FC_STUB_DIRTY}" STREQUAL "1")
+    if("$ENV{PACE_STUB_DIRTY}" STREQUAL "1")
         set(dirtyAnswer " M src/x.cpp")
     endif()
     string(REPLACE "@DIRTY@" "${dirtyAnswer}" answer "${answer}")
@@ -107,7 +107,7 @@ if(FC_ROLE STREQUAL "stub")
 endif()
 
 # ---- the driver: one version resolution ----------------------------------------------------
-if(FC_ROLE STREQUAL "driver")
+if(PACE_ROLE STREQUAL "driver")
     set(PaceGitTimeoutSeconds ${timeoutSeconds})
     include("${PACE_SOURCE_DIR}/cmake/Version.cmake")
     GetVersionInformation(PACE_VERSION PACE_VERSION_STRING)
@@ -138,14 +138,14 @@ if(CMAKE_HOST_WIN32)
     file(TO_NATIVE_PATH "${CMAKE_COMMAND}" nativeCmake)
     file(TO_NATIVE_PATH "${dieMarker}" nativeDieMarker)
     file(WRITE "${stub}"
-        "@\"${nativeCmake}\" -DFC_ROLE=stub \"-DLOG=${log}\" -P \"${self}\" -- %*\r\n"
+        "@\"${nativeCmake}\" -DPACE_ROLE=stub \"-DLOG=${log}\" -P \"${self}\" -- %*\r\n"
         "@if exist \"${nativeDieMarker}\" (del \"${nativeDieMarker}\" & exit /b -1073741819)\r\n"
         "@exit /b %ERRORLEVEL%\r\n")
     set(deathWords "Access violation")
 else()
     set(stub "${PACE_SCRATCH_DIR}/git")
     file(WRITE "${stub}"
-        "#!/bin/sh\n\"${CMAKE_COMMAND}\" -DFC_ROLE=stub \"-DLOG=${log}\" -P \"${self}\" -- \"$@\"\n"
+        "#!/bin/sh\n\"${CMAKE_COMMAND}\" -DPACE_ROLE=stub \"-DLOG=${log}\" -P \"${self}\" -- \"$@\"\n"
         "status=$?\n"
         "if [ -f \"${dieMarker}\" ]; then rm -f \"${dieMarker}\"; kill -SEGV $$; fi\n"
         "exit $status\n")
@@ -174,7 +174,7 @@ file(COPY "${PACE_SOURCE_DIR}/cmake/Version.cmake" DESTINATION "${parenthesisedT
 # @param notPhrase text the output must NOT carry, or `none`
 # @param SOURCE the tree whose cmake/Version.cmake is driven; the real one when absent
 # @param GIT the git to run instead of the stub; the stub when absent
-function(fc_case label hold environment exact wantTriple wantString wantSeverity wantPhrase notPhrase)
+function(pace_case label hold environment exact wantTriple wantString wantSeverity wantPhrase notPhrase)
     cmake_parse_arguments(PARSE_ARGV 9 case "" "SOURCE;GIT" "")
     math(EXPR count "${cases} + 1")
     set(cases ${count} PARENT_SCOPE)
@@ -187,13 +187,13 @@ function(fc_case label hold environment exact wantTriple wantString wantSeverity
         set(git "${case_GIT}")
     endif()
     file(REMOVE "${log}")
-    set(stubEnvironment "FC_STUB_HOLD=${hold}")
+    set(stubEnvironment "PACE_STUB_HOLD=${hold}")
     if(NOT environment STREQUAL "none")
         list(APPEND stubEnvironment ${environment})
     endif()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env ${stubEnvironment}
-                "${CMAKE_COMMAND}" -DFC_ROLE=driver "-DPACE_SOURCE_DIR=${sourceDir}"
+                "${CMAKE_COMMAND}" -DPACE_ROLE=driver "-DPACE_SOURCE_DIR=${sourceDir}"
                 "-DGIT_EXECUTABLE=${git}" "-DPACE_REQUIRE_EXACT_VERSION=${exact}" -P "${self}"
         WORKING_DIRECTORY "${PACE_SCRATCH_DIR}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE status)
@@ -281,36 +281,36 @@ endfunction()
 
 # ---- every query answers: the positive control ---------------------------------------------
 # Each also asserts that no git warning was printed at all.
-fc_case("every query answers, clean: the tag row is Exact" none none OFF
+pace_case("every query answers, clean: the tag row is Exact" none none OFF
     1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "pace-kv: git")
-fc_case("every query answers, dirty: the string says so" none FC_STUB_DIRTY=1 OFF
+pace_case("every query answers, dirty: the string says so" none PACE_STUB_DIRTY=1 OFF
     1.2.3 1.2.3-4-gabc1234-dirty STATUS "from git tag (v1.2.3)" "pace-kv: git")
-fc_case("every query answers under REQUIRE_EXACT: nothing to refuse" none none ON
+pace_case("every query answers under REQUIRE_EXACT: nothing to refuse" none none ON
     1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "pace-kv: git")
 
 # ---- git answers "no", which is an answer ----------------------------------------------------
 # An untagged checkout, a shallow clone without tags, a tarball built where git is installed:
 # the most common Provisional paths. A non-zero exit there IS the answer, so no query may be
 # reported as unanswered, and nothing may blame the index or git itself.
-fc_case("no tag and everything else answers: the commit row, with no git warning" none FC_STUB_NO_TAG=1 OFF
+pace_case("no tag and everything else answers: the commit row, with no git warning" none PACE_STUB_NO_TAG=1 OFF
     0.0.0 0.0.0-0-gabc1234 WARNING "from git commit without a matching tag" "pace-kv: git")
-fc_case("not a git repository: the declared fallback, with no git warning" none FC_STUB_NOT_REPO=1 OFF
+pace_case("not a git repository: the declared fallback, with no git warning" none PACE_STUB_NOT_REPO=1 OFF
     0.0.0 0.0.0-unknown WARNING "from declared fallback" "pace-kv: git")
 
 # ---- one query does not answer -------------------------------------------------------------
-fc_case("the dirty check does not answer: -dirty-unknown, never clean, and Provisional" dirty none OFF
+pace_case("the dirty check does not answer: -dirty-unknown, never clean, and Provisional" dirty none OFF
     1.2.3 1.2.3-4-gabc1234-dirty-unknown WARNING "whether the tree has uncommitted changes is unknown" none)
-fc_case("the distance does not answer: the commit row, never the bare tag" distance none OFF
+pace_case("the distance does not answer: the commit row, never the bare tag" distance none OFF
     0.0.0 0.0.0-0-gabc1234 WARNING "the distance from the tag is unknown" none)
-fc_case("the tag does not answer: the commit row, and the warning says the version falls back" tag none OFF
+pace_case("the tag does not answer: the commit row, and the warning says the version falls back" tag none OFF
     0.0.0 0.0.0-0-gabc1234 WARNING "the release tag is unknown, so the version falls back" none)
-fc_case("no tag, and the commit does not answer: the declared fallback" commit FC_STUB_NO_TAG=1 OFF
+pace_case("no tag, and the commit does not answer: the declared fallback" commit PACE_STUB_NO_TAG=1 OFF
     0.0.0 0.0.0-unknown WARNING "the commit is unknown" none)
 
 # ---- git cannot run at all: unavailable, not slow ----------------------------------------------
 # A cached GIT_EXECUTABLE that has moved. It still fails closed -- the version is Provisional --
 # but its words name the binary, and nothing blames the Windows/WSL index re-hash.
-fc_case("git cannot be run: the declared fallback, worded as git being unavailable" none none OFF
+pace_case("git cannot be run: the declared fallback, worded as git being unavailable" none none OFF
     0.0.0 0.0.0-unknown WARNING "git could not run `git describe --tags --abbrev=0 --match v[0-9]*`" "re-hashes"
     GIT "${PACE_SCRATCH_DIR}/no-such-git/git")
 
@@ -318,20 +318,20 @@ fc_case("git cannot be run: the declared fallback, worded as git being unavailab
 # A crash or a signal lands in the catch-all row, worded with CMake's own words for the death.
 # Before that row every non-timeout was "could not run", which named GIT_EXECUTABLE for a git
 # that had started, so this case asserts that wording is ABSENT.
-fc_case("git dies on the tag query: the commit row, in CMake's words, never 'could not run'" none FC_STUB_DIE=tag OFF
+pace_case("git dies on the tag query: the commit row, in CMake's words, never 'could not run'" none PACE_STUB_DIE=tag OFF
     0.0.0 0.0.0-0-gabc1234 WARNING "git ended `git describe --tags --abbrev=0 --match v[0-9]*` without an answer (${deathWords})" "GIT_EXECUTABLE")
 
 # ---- under REQUIRE_EXACT, any unanswered query refuses --------------------------------------
-fc_case("REQUIRE_EXACT refuses an unanswered dirty check" dirty none ON
+pace_case("REQUIRE_EXACT refuses an unanswered dirty check" dirty none ON
     - - FATAL_ERROR "git did not answer `git status --porcelain --untracked-files=no`" none)
-fc_case("REQUIRE_EXACT refuses an unanswered distance" distance none ON
+pace_case("REQUIRE_EXACT refuses an unanswered distance" distance none ON
     - - FATAL_ERROR "git did not answer `git describe --tags --match v[0-9]*`" none)
 
 # ---- the severity is read from a path carrying `(` ------------------------------------------
-fc_case("a source path with `(`: WARNING is still read as WARNING" dirty none OFF
+pace_case("a source path with `(`: WARNING is still read as WARNING" dirty none OFF
     1.2.3 1.2.3-4-gabc1234-dirty-unknown WARNING "whether the tree has uncommitted changes is unknown" none
     SOURCE "${parenthesisedTree}")
-fc_case("a source path with `(`: FATAL_ERROR is still read as FATAL_ERROR" dirty none ON
+pace_case("a source path with `(`: FATAL_ERROR is still read as FATAL_ERROR" dirty none ON
     - - FATAL_ERROR "git did not answer `git status --porcelain --untracked-files=no`" none
     SOURCE "${parenthesisedTree}")
 
@@ -372,7 +372,7 @@ endforeach()
 # Every case this file calls must have run: a refactor that returned early would otherwise
 # print a smaller count and pass, having judged less. The number is DERIVED from the calls
 # and the classification rows.
-file(STRINGS "${self}" calls REGEX "^fc_case\\(")
+file(STRINGS "${self}" calls REGEX "^pace_case\\(")
 list(LENGTH calls called)
 list(LENGTH classifications classified)
 math(EXPR called "${called} + ${classified}")
