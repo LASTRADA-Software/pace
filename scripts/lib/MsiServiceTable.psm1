@@ -2305,11 +2305,11 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The emptiness verdict Assert-FirewallGroupEmpty reads: no rule passes, one left behind is refused
     # by name.
-    if ($null -ne (Get-FirewallGroupEmptyVerdict @() 'pace-kv: X')) { throw 'group verdict: an empty group must pass' }
+    if ($null -ne (Get-FirewallGroupEmptyVerdict @() 'Pace: X')) { throw 'group verdict: an empty group must pass' }
     Pass 'group: an empty group passes'
     ExpectThrow 'group: a rule left behind is refused, naming it' {
-        if ($verdict = Get-FirewallGroupEmptyVerdict @('X node tcp/6674') 'pace-kv: X') { throw $verdict }
-    } "'pace-kv: X' still holds \[X node tcp/6674\]"
+        if ($verdict = Get-FirewallGroupEmptyVerdict @('X node tcp/6674') 'Pace: X') { throw $verdict }
+    } "'Pace: X' still holds \[X node tcp/6674\]"
 
     # The before-and-after verdict Assert-FirewallGroupUnchanged reads (R4-3): the same rules pass in
     # any order, a scope the rollback did not put back is refused naming both lines, and an empty
@@ -2317,15 +2317,15 @@ function Invoke-MsiServiceTableSelfTest {
     $rule = 'pace-kv cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=Any'
     $scoped = 'pace-kv cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=10.0.0.0/255.0.0.0'
     $other = 'pace-kv admin tcp/6675 | enabled=True Inbound Allow | TCP/6675 | remote=Any'
-    if ($null -ne (Get-FirewallGroupUnchangedVerdict @($rule, $other) @($other, $rule) 'pace-kv: X')) {
+    if ($null -ne (Get-FirewallGroupUnchangedVerdict @($rule, $other) @($other, $rule) 'Pace: X')) {
         throw 'unchanged verdict: the same rules in another order must pass'
     }
     Pass 'unchanged: the same rules in another order pass'
     ExpectThrow 'unchanged: a scope the rollback left in place is refused, naming what was lost and what is held' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($scoped) 'pace-kv: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($scoped) 'Pace: X') { throw $verdict }
     } 'lost \[pace-kv cache tcp/6674 .*remote=Any\] and holds \[pace-kv cache tcp/6674 .*remote=10\.0\.0\.0'
     ExpectThrow 'unchanged: an empty group before the transaction proves nothing, and is refused' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @() @() 'pace-kv: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @() @() 'Pace: X') { throw $verdict }
     } 'held no rule BEFORE the transaction'
     # And the snapshot LINE carries the profile and the program (round 11 review, M6): a rollback that
     # put the port and the scope back but admitted another program, or another profile, is refused.
@@ -2337,26 +2337,26 @@ function Invoke-MsiServiceTableSelfTest {
     $privateOnly = [pscustomobject] @{ DisplayName = 'pace-kv cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Private' }
     $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\Pace\bin\pace-kv.exe' })
     ExpectThrow 'unchanged: a rollback that admits another PROGRAM is refused, naming it' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'pace-kv: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'Pace: X') { throw $verdict }
     } 'holds \[.*program=C:\\Elsewhere\\pace\.exe\]'
     ExpectThrow 'unchanged: a rollback that changes the PROFILE is refused, naming it' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($profileAfter) 'pace-kv: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($profileAfter) 'Pace: X') { throw $verdict }
     } 'holds \[.*profile=Private'
     # A rule the rollback DUPLICATED renders as the same line twice, and a set comparison reads that as
     # unchanged (#1629, M1): the comparison is a multiset.
     ExpectThrow 'unchanged: a rule the rollback duplicated is refused, naming the extra one' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($rule, $rule) 'pace-kv: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($rule, $rule) 'Pace: X') { throw $verdict }
     } 'lost \[\] and holds \[pace-kv cache tcp/6674 .*remote=Any\] it did not$'
 
     # The firewall snapshot's error decision (#1629, M2): a group that holds no rule reads as empty, and
     # any OTHER failed read is thrown, never read as an empty group that then compares as unchanged.
     $failWith = { param([string] $id, [string] $message)
         { param($group) throw [Management.Automation.ErrorRecord]::new([Exception]::new($message), $id, 'NotSpecified', $group) }.GetNewClosure() }
-    $empty = @(Get-FirewallGroupSnapshot 'pace-kv: X' -Read (& $failWith $script:FirewallGroupNotFoundId 'No MSFT_NetFirewallRule objects found'))
+    $empty = @(Get-FirewallGroupSnapshot 'Pace: X' -Read (& $failWith $script:FirewallGroupNotFoundId 'No MSFT_NetFirewallRule objects found'))
     if ($empty.Count -ne 0) { throw "firewall snapshot: a group holding no rule answered '$($empty -join ' | ')'" }
     Pass 'firewall snapshot: a group holding no rule reads as empty'
     ExpectThrow 'firewall snapshot: any other failed read is thrown, never read as empty' {
-        Get-FirewallGroupSnapshot 'pace-kv: X' -Read (& $failWith 'HRESULT 0x80070005,Get-NetFirewallRule' 'Access is denied')
+        Get-FirewallGroupSnapshot 'Pace: X' -Read (& $failWith 'HRESULT 0x80070005,Get-NetFirewallRule' 'Access is denied')
     } '^Access is denied$'
     # And the id is the one the REAL firewall raises: a group no host has, read live.
     $noGroup = @(Get-FirewallGroupSnapshot ('pace-kv: SelfTest' + [guid]::NewGuid().ToString('N')))

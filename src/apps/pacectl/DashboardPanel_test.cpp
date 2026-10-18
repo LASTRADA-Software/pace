@@ -2538,8 +2538,10 @@ TEST_CASE("a narrow title bar drops its facts by priority, and never the subject
     CHECK_FALSE(wide.contains("every"));
     CHECK_FALSE(wide.contains(" q quit"));
 
-    auto const narrow = at(40);
-    CHECK(FakeCellWidth(narrow) == 40);
+    // 37, not 40: the subject is `pace-kv` now, three cells shorter than the name it replaced,
+    // and at 40 the version fits again -- the case is about the width where it no longer does.
+    auto const narrow = at(37);
+    CHECK(FakeCellWidth(narrow) == 37);
     CHECK(narrow.starts_with(TopStart("pace-kv")));
     CHECK(narrow.ends_with(TopEnd("127.0.0.1:6379")));
     CHECK_FALSE(narrow.contains("0.4.1"));

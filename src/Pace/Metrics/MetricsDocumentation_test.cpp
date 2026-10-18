@@ -6,8 +6,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -57,13 +59,15 @@ using Pace::Testing::Unwrap;
 ///
 /// ## What it does NOT cover, stated rather than left to be discovered
 ///
-/// **The `pace_*` series** (no `d`). Every process that serves this endpoint
-/// exports every counter, so a daemon's scrape also carries the worker, node and
-/// scheduler series — flat at zero, because nothing in that binary moves them. They
-/// are `pace-node`'s and are documented on its page; documenting sixty
+/// **The node's series on the daemon's page.** Every process that serves this
+/// endpoint exports every counter, so a daemon's scrape also carries the worker,
+/// node and scheduler series — flat at zero, because nothing in that binary moves
+/// them. They are `pace-node`'s and are documented on its page; documenting sixty
 /// permanently-zero rows on the daemon's page would bury the rows that mean
-/// something. The deployment page says so in prose, and that prose is outside what
-/// this check can verify.
+/// something. One prefix covers both binaries since the rename, so which series is
+/// whose is read from a table of families (`NodeSeriesFamilies`) rather than
+/// from the prefix. The deployment page says so in prose, and that prose is outside what this
+/// check can verify.
 ///
 /// **Whether a description is right.** This compares names. A row whose sentence is
 /// wrong passes.
@@ -77,16 +81,65 @@ constexpr std::string_view DeploymentPage = "docs/operations/deployment.md";
 /// The heading the table lives under, and the level a sibling heading ends it at.
 constexpr std::string_view MetricsHeading = "## Metrics";
 
-/// Only series in the daemon's own namespace are checked. See the note above.
+/// Every series the project exports. The daemon's and the node's series share this one
+/// namespace since the rename to Pace collapsed their two prefixes into it, so a prefix no
+/// longer says which binary a series belongs to: `NodeSeriesFamilies` does.
 constexpr std::string_view DaemonPrefix = "pace_";
+
+/// The families -- the word after `pace_` -- of the node's series: exactly the families that
+/// carried the node's own prefix before the rename (the old name with no `d`), while every family the
+/// daemon's prefix carried is absent here. The two sets were disjoint, which is what lets one
+/// table restore the split the prefixes made: a series of one of these families is the node's,
+/// documented on its page, and any other is the daemon's, documented on the deployment page
+/// (#648). A family new to either binary is a row here or nothing, and nothing is the daemon's.
+constexpr auto NodeSeriesFamilies = std::to_array<std::string_view>({
+    "cluster",
+    "discovery",
+    "enrollment",
+    "fleet",
+    "formation",
+    "frame",
+    "live",
+    "node",
+    "raft",
+    "scheduler",
+    "state",
+    "worker",
+});
+
+/// Whether a series is the node's rather than the daemon's.
+/// @param name A `pace_` series name.
+/// @return True when its family is a row of `NodeSeriesFamilies`.
+[[nodiscard]] bool IsNodeSeries(std::string_view name)
+{
+    auto const rest = name.substr(DaemonPrefix.size());
+    return std::ranges::contains(NodeSeriesFamilies, rest.substr(0, rest.find('_')));
+}
+
+/// Which binary a series belongs to. Private to this test.
+enum class Owner : std::uint8_t
+{
+    Daemon, ///< `pace-kv`'s, documented on the deployment page.
+    Node,   ///< `pace-node`'s, documented on its own page.
+};
+
+/// The names of @p names that belong to @p owner.
+/// @param names Series names.
+/// @param owner Which binary's to keep.
+/// @return Those names.
+[[nodiscard]] std::set<std::string> SeriesOf(std::set<std::string> const& names, Owner owner)
+{
+    std::set<std::string> kept;
+    for (auto const& name: names)
+        if (IsNodeSeries(name) == (owner == Owner::Node))
+            kept.insert(name);
+    return kept;
+}
 
 /// The page that carries the compile node's per-series tables.
 constexpr std::string_view NodePage = "docs/tools/pace-node.md";
 
-/// The node's namespace.
-///
-/// It cannot collide with the daemon's despite the shared stem: `pace_` has a
-/// `d` where this one has its separator, so no name matches both prefixes.
+/// The node's namespace: the same one, for the same reason.
 constexpr std::string_view NodePrefix = "pace_";
 
 /// A snapshot with every optional part present, so the renderer emits every line
@@ -183,6 +236,10 @@ constexpr std::string_view NodePrefix = "pace_";
     while (next != std::string_view::npos)
     {
         auto const at = std::exchange(next, text.find(prefix, next + 1));
+        // A series name starts a token. `pace_` also occurs INSIDE one -- `keyspace_reclaim`
+        // carries it -- and read from there it names a series nobody documented.
+        if (at > 0 && (std::isalnum(static_cast<unsigned char>(text[at - 1])) != 0 || text[at - 1] == '_'))
+            continue;
         auto end = at;
         while (end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) != 0 || text[end] == '_'))
             ++end;
@@ -260,9 +317,8 @@ TEST_CASE("Every pace_ series the daemon renders is documented, and vice versa",
     REQUIRE_FALSE(section.empty());
 
     AtomicMetricsSink sink;
-    auto const exposition = RenderPrometheus(sink, FullySpecifiedSnapshot());
-    auto const rendered = SeriesIn(exposition, DaemonPrefix);
-    auto const documented = DocumentedSeriesIn(section, DaemonPrefix);
+    auto const rendered = SeriesOf(SeriesIn(RenderPrometheus(sink, FullySpecifiedSnapshot()), DaemonPrefix), Owner::Daemon);
+    auto const documented = SeriesOf(DocumentedSeriesIn(section, DaemonPrefix), Owner::Daemon);
 
     // A census returning zero is the absence of a verdict, not a verdict. Both sets
     // are asserted non-trivial before either difference is believed, and the floor
@@ -330,9 +386,8 @@ TEST_CASE("Every pace_ series the node renders is documented, and vice versa", "
     auto const& page = Unwrap(read);
 
     AtomicMetricsSink sink;
-    auto const exposition = RenderPrometheus(sink, NodeShapedSnapshot());
-    auto const rendered = SeriesIn(exposition, NodePrefix);
-    auto const documented = DocumentedSeriesIn(page, NodePrefix);
+    auto const rendered = SeriesOf(SeriesIn(RenderPrometheus(sink, NodeShapedSnapshot()), NodePrefix), Owner::Node);
+    auto const documented = SeriesOf(DocumentedSeriesIn(page, NodePrefix), Owner::Node);
 
     // Both censuses non-trivial before either difference is believed: two empty
     // lists agree perfectly, which is `node-config-reference`'s rule and the one

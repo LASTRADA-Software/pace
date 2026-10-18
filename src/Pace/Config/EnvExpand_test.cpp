@@ -31,7 +31,7 @@ TEST_CASE("EnvExpand: braced ${NAME} allows names the bare form cannot spell", "
     ScopedEnv const env { "FC_TEST_ODD", "/opt" };
 
     // The brace form is what makes Windows' ProgramFiles(x86) expressible.
-    auto const r = ExpandEnvironmentVariables("${FC_TEST_ODD}/pace-kv", "storage_path");
+    auto const r = ExpandEnvironmentVariables("${FC_TEST_ODD}/pace", "storage_path");
     REQUIRE(r.has_value());
     REQUIRE(*r == "/opt/pace");
 }

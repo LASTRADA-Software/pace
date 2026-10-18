@@ -619,7 +619,10 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // Moved when `node_endpoint_changes` and `node_raft_endpoint_changes` joined the catalogue last
     // (roaming node addresses: the endpoint resolver counts each published move). Clients and nodes
     // upgrade together. Read off the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x4f985465a864bf5eULL);
+    //
+    // Moved when the rename to Pace renamed every series (`fastcached_`/`fastcache_` to `pace_`),
+    // which the layout folds in by name. Clients and nodes upgrade together. Read off the built test.
+    CHECK(StatsReadingLayout == 0x603edf728d83daf4ULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

@@ -108,7 +108,7 @@ class DnsMessage
 constexpr auto QueryName = std::string_view { "_pace._tcp.corp.example" };
 
 /// Where `corp.example` starts inside the question's name: past `_pace` and `_tcp`.
-constexpr std::uint16_t CorpExampleOffset = DnsMessage::QuestionNameOffset + 11 + 5;
+constexpr std::uint16_t CorpExampleOffset = DnsMessage::QuestionNameOffset + 6 + 5;
 
 /// Header flags: a recursive answer with RCODE 0, the same flagged TC, and two failures.
 constexpr std::uint16_t FlagsNoError = 0x8180;

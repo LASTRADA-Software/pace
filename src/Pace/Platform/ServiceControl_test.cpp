@@ -117,7 +117,7 @@ TEST_CASE("ServiceControl: a command line that named nothing registers nothing",
     // the host-derived ones.
     Pace::CliResult const cli {};
     auto const cmd = CommandLineFor(std::filesystem::path { "pace-kv" }, cli);
-    REQUIRE(cmd == "\"pace\" --daemon --service-name=pace-kv");
+    REQUIRE(cmd == "\"pace-kv\" --daemon --service-name=pace-kv");
 }
 
 TEST_CASE("ServiceControl: the executable path is always quoted", "[platform][service]")
@@ -729,7 +729,8 @@ TEST_CASE("Every shipped systemd unit restarts a failure and never a refusal", "
         CHECK_FALSE(text.contains("StartLimitBurst="));
         CHECK_FALSE(text.contains("StartLimitIntervalSec="));
     }
-    CHECK(units == 3);
+    // pace-kv.service, pace-kv-user.service, pace-node.service and pace-node-user.service.
+    CHECK(units == 4);
 }
 
 TEST_CASE("ServiceControl: only the system job runs as the service account", "[platform][service][launchd]")
@@ -2505,7 +2506,7 @@ TEST_CASE("ServiceControl: an uninstall whose firewall removal is refused still 
     CHECK(deleted.message.starts_with("uninstalled service 'Probe'"));
     CHECK(deleted.message.contains("have the same name ignoring case"));
     CHECK(deleted.message.contains("still in place: Probe cache tcp/6674"));
-    CHECK(deleted.message.contains("Remove-NetFirewallRule -Group 'pace-kv: Probe'"));
+    CHECK(deleted.message.contains("Remove-NetFirewallRule -Group 'Pace: Probe'"));
     CHECK(firewall.rules.size() == 2);
 
     // A service that was never there leaves nothing to protect, so its rules go -- and the outcome
@@ -2586,7 +2587,7 @@ TEST_CASE("ServiceControl: only an install that registered touches the firewall,
     CHECK(registered.outcome == Pace::ServiceControlOutcome::Created);
     CHECK(registered.message
           == "installed service 'Probe'\nfirewall: allowed inbound Probe cache tcp/6674 (every network profile)");
-    CHECK(firewall.InGroup("pace-kv: Probe") == rules);
+    CHECK(firewall.InGroup("Pace: Probe") == rules);
 
     firewall.refuseRemove = "access denied reading the firewall";
     auto const unopened =

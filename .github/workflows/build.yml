@@ -4370,7 +4370,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path 'target/pace-kv.exe').Path
           $name = 'PaceFirewallProbe'
-          $group = "pace-kv: $name"
+          $group = "Pace: $name"
           $config = Join-Path $env:RUNNER_TEMP 'firewall-probe.yaml'
           Set-Content -LiteralPath $config -Value '# The firewall probe: named so no machine-wide configuration is read.'
           if (@(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue).Count -ne 0) {
