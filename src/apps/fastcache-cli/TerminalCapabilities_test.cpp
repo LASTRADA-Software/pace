@@ -5,8 +5,8 @@
 
 #include <array>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
+using namespace Pace;
+using namespace Pace::Cli;
 
 namespace
 {

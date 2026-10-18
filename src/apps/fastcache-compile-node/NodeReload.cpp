@@ -4,13 +4,13 @@
 #include "NodeFormation.hpp"
 #include "NodeReload.hpp"
 
-#include <FastCache/Config/YamlReader.hpp>
+#include <Pace/Config/YamlReader.hpp>
 
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 NodeReloader::Reparse ReloadCandidateReader(std::span<char const* const> args, ReloadBasis basis)
@@ -134,4 +134,4 @@ void ApplyReloadRequest(NodeReloader* reloader, NodeMembership& membership, Node
         logger.Logf(LogLevel::Info, "configuration reloaded; log level is now {}", ToStringView(current->logLevel));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

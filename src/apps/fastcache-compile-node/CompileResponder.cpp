@@ -2,8 +2,8 @@
 #include "CompileResponder.hpp"
 #include "MembershipGate.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -16,7 +16,7 @@
 
 #include <core/async/ResumeOn.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -377,4 +377,4 @@ std::vector<std::byte> CompileResponder::AnswerCordon(std::span<std::byte const>
     return Wire::EncodeReply(Wire::Status::Ok, Wire::EncodeCordonFields(fields));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

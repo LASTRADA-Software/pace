@@ -3,10 +3,10 @@
 #include "NodeIoLoop.hpp"
 #include "SchedulerTier.hpp"
 
-#include <FastCache/Core/StopAwareWait.hpp>
-#include <FastCache/Core/Version.hpp>
-#include <FastCache/Distributed/FleetVersions.hpp>
-#include <FastCache/Distributed/UnservedToolchains.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Distributed/FleetVersions.hpp>
+#include <Pace/Distributed/UnservedToolchains.hpp>
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -314,4 +314,4 @@ void SchedulerTier::Administer(Distributed::IClusterAdmin& admin)
     _service.AdministerWith(admin);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

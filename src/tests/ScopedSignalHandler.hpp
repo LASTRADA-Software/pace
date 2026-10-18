@@ -12,7 +12,7 @@
 
     #include <pthread.h>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Installs a handler that does nothing for one signal, and restores the previous disposition when
@@ -69,6 +69,6 @@ class ScopedSignalHandler
     bool _installed { false };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing
 
 #endif

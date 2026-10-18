@@ -2,9 +2,9 @@
 #include "ForeignFleetWatch.hpp"
 #include "NodeConditions.hpp"
 
-#include <FastCache/Cluster/DiscoveryService.hpp>
-#include <FastCache/Cluster/PeerDirectory.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/DiscoveryService.hpp>
+#include <Pace/Cluster/PeerDirectory.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,8 +18,8 @@
 #include <tests/FormationFakes.hpp>
 #include <tests/NodeConditionFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using CompileCacheWire::FleetState;
 using CompileCacheWire::FleetSummary;
 using namespace std::chrono_literals;

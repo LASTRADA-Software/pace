@@ -2,8 +2,8 @@
 #include "FleetSummaryResponder.hpp"
 #include "Responders.hpp"
 
-#include <FastCache/Cluster/FleetSummarySignature.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/FleetSummarySignature.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,15 +25,15 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using CompileCacheWire::FleetState;
 using CompileCacheWire::FleetSummary;
-using FastCache::Testing::ErrorOf;
-using FastCache::Testing::StatusOf;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::ErrorOf;
+using Pace::Testing::StatusOf;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

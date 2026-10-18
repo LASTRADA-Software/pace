@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 InProcessSharedUpstream::InProcessSharedUpstream(SharedCacheHost const& host) noexcept:
@@ -38,4 +38,4 @@ bool InProcessSharedUpstream::Configured() const noexcept
     return _host.Host().Current() != nullptr;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

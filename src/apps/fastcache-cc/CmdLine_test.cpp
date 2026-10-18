@@ -4,7 +4,7 @@
 #include "CmdLine.hpp"
 #include "IProcessRunner.hpp"
 
-#include <FastCache/Platform/EnvironmentTestUtils.hpp>
+#include <Pace/Platform/EnvironmentTestUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,8 +23,8 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache::Cc;
-using FastCache::Testing::Unwrap;
+using namespace Pace::Cc;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -1998,7 +1998,7 @@ TEST_CASE("CompilerWorkingDirectory falls back to the resolved directory in ever
     // rule and the empty-directory rule were both asserted by rows that could not fail.
     // The directories are real now, and the two rows that turn on a guard are separated
     // out below.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-cwdfallback" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-cwdfallback" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "build");
     std::filesystem::create_directories(base / "other");
@@ -2055,7 +2055,7 @@ TEST_CASE("CompilerWorkingDirectory has no answer without a physical directory")
     // half deleted, `equivalent(pwd, "")` errors and the fallback returns `""` anyway,
     // so the assertion held either way. An EXISTING `PWD` is what separates them --
     // the guard must fire before the identity test can succeed against nothing.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-cwdempty" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-cwdempty" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base);
 
@@ -2070,7 +2070,7 @@ TEST_CASE("CompilerWorkingDirectory reads PWD from the environment through its o
     // two-argument form. Its two parameters are `std::string_view`, so a swapped pair or
     // the wrong variable name in the wrapper is type-checked, silent, and would leave
     // the launcher predicting a directory from nothing.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-cwdenv" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-cwdenv" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "build");
 
@@ -2086,7 +2086,7 @@ TEST_CASE("CompilerWorkingDirectory reads PWD from the environment through its o
     auto const logical = (base / "link" / "build").string();
 
     {
-        FastCache::Testing::ScopedEnv const pwd { "PWD", logical };
+        Pace::Testing::ScopedEnv const pwd { "PWD", logical };
 #if defined(_WIN32)
         // A Windows layout spells this `C:\...`, which carries a root NAME, and no
         // Windows driver consults `PWD` -- libiberty's `getpwd()` gates on a leading
@@ -2102,7 +2102,7 @@ TEST_CASE("CompilerWorkingDirectory reads PWD from the environment through its o
     {
         // And a `PWD` naming somewhere else is ignored on every platform, so the
         // wrapper cannot be passing the variable through unread.
-        FastCache::Testing::ScopedEnv const pwd { "PWD", (base / "real").string() };
+        Pace::Testing::ScopedEnv const pwd { "PWD", (base / "real").string() };
         CHECK(CompilerWorkingDirectory(physical) == physical);
     }
 
@@ -2120,7 +2120,7 @@ TEST_CASE("CompilerWorkingDirectory keeps the symlinked spelling a driver report
     //
     // The same arrangement as `AnchorWorkingDirectory`'s test, and for the same reason:
     // macOS's `/var` is a symlink, so `$TMPDIR` is where CI meets this.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-logicalcwd" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-logicalcwd" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "build");
 
@@ -2173,7 +2173,7 @@ TEST_CASE("CompilerWorkingDirectory keeps the symlinked spelling a driver report
     // `Unwrap`, not `mapped->`: the pinned clang-tidy reports a bare `operator->` as
     // `bugprone-unchecked-optional-access` whatever the `REQUIRE` one line above
     // established, and neither MSVC nor GCC says a word about it.
-    auto const& pair = FastCache::Testing::Unwrap(mapped);
+    auto const& pair = Pace::Testing::Unwrap(mapped);
     CHECK(pair.directory == logical);
     CHECK(pair.replacement == ".");
 #endif
@@ -2275,7 +2275,7 @@ TEST_CASE("A real clang-cl worker re-expands no definition the client's source h
     // `RemoteCompileArgs` hands it. A definition left on that line re-expands an identifier the
     // source had `#undef`ed: `return x` becomes `return y`, which compiles -- measured at /O2, the
     // worker's `f()` returned 5 where the client's returned 1, and the object was accepted.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-pass-through-macro" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-pass-through-macro" };
     auto const runner = MakeProcessRunner();
     auto const source = scratch.Path() / "tu.cpp";
     std::ofstream { source } << "#undef x\nint f() { int x = 1; { int y = 5; return x; } }\n";

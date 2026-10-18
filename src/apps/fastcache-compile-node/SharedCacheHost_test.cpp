@@ -3,10 +3,10 @@
 #include "SharedCacheHost.hpp"
 #include "SharedCacheTier.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/NodeConditionWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/NodeConditionWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,10 +23,10 @@
 #include <tests/BoundedWait.hpp>
 #include <tests/SharedTierFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::MemoryOpener;
-using FastCache::Testing::NamingSharedCache;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::MemoryOpener;
+using Pace::Testing::NamingSharedCache;
 
 namespace
 {

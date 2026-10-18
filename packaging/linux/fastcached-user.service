@@ -57,7 +57,7 @@ TimeoutStopSec=30
 Restart=on-failure
 RestartSec=1
 # A start refused on its configuration, or on a defect in its own build, exits 78
-# (EX_CONFIG, `ProcessExit::Refused` in src/FastCache/Platform/ProcessExit.hpp), and the
+# (EX_CONFIG, `ProcessExit::Refused` in src/Pace/Platform/ProcessExit.hpp), and the
 # next start would refuse it again, so
 # it is not restarted: the unit stays failed, with the reason in the journal. Every other
 # failure -- a port still held by a process that was exiting, a store another process

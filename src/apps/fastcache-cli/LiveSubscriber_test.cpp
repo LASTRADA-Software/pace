@@ -3,11 +3,11 @@
 #include "NodeClient.hpp"
 #include "SocketExchange.hpp"
 
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -29,12 +29,12 @@
 #include <core/net/TcpClient.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
+using namespace Pace;
+using namespace Pace::Cli;
 using namespace std::chrono_literals;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

@@ -14,11 +14,11 @@
 #include "LiveSubscriber.hpp"
 #include "ScriptedStopSignal.hpp"
 
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -42,10 +42,10 @@
 #include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
-using FastCache::Testing::Unwrap;
+using Pace::Testing::Unwrap;
 
 /// The interval every case asks the server for, and waits before subscribing again.
 inline constexpr auto Interval = std::chrono::milliseconds { 2000 };
@@ -601,4 +601,4 @@ inline void CloseAndDrain(Rig& rig, LiveEventSource& source)
     CHECK(rig.pool.pendingSubmissions() == 0);
 }
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

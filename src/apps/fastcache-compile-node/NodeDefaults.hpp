@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Config/DefaultConfigPath.hpp>
-#include <FastCache/Platform/HostNaming.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Platform/HostNaming.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -17,7 +17,7 @@
 /// What a node with no flags does: the ports it opens, where it keeps its state, and what it
 /// calls itself. Each is the value of the row it defaults, never a special case beside it, so
 /// "did the operator type it" stays provenance and a service registration carries none of them.
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 struct NodeConfig;
@@ -269,4 +269,4 @@ struct ResolvedHostNames
 /// @param cfg The running configuration.
 void EvaluateHostNameCondition(NodeConditions& conditions, NodeConfig const& cfg);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

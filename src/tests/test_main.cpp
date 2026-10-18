@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Catch2 entry point for the FastCacheTest binary. We provide a custom main
+// Catch2 entry point for the PaceTest binary. We provide a custom main
 // (rather than linking Catch2WithMain) so future work can register CLI flags
 // for connecting tests to non-default test seams (test-env paths, etc.).
 

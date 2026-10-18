@@ -62,7 +62,7 @@ struct TempFile
         // most draws on the host #1507 was reproduced on, so every process here agreed on
         // one filename and contended for its `flock`. See `StorageTestUtils.hpp`'s
         // `TempFile`, which carries the measurement.
-        path = FastCache::Testing::UniqueScratchPath("cowtree-test");
+        path = Pace::Testing::UniqueScratchPath("cowtree-test");
         path += ".cow";
         std::filesystem::remove(path);
     }
@@ -139,9 +139,9 @@ auto OpenFreeListStore(std::filesystem::path const& path)
 // One damaged meta slot, in a real file (#632).
 //
 // The two-slot alternation is what makes an interrupted meta write survivable,
-// and it is the CowTree library's own promise rather than FastCache's --
+// and it is the CowTree library's own promise rather than Pace's --
 // `src/CowTree/` is a standalone sibling any project can pick up, so a
-// guarantee asserted only from the FastCache suite would not travel with it.
+// guarantee asserted only from the Pace suite would not travel with it.
 //
 // `CowTreeStorage_test.cpp` asks the OPERATOR's version of this question -- a
 // daemon's store opens, serves the surviving commit and says nothing -- and it
@@ -149,11 +149,11 @@ auto OpenFreeListStore(std::filesystem::path const& path)
 // slot does not spend it". So that property is pinned in BOTH suites, for two
 // different reasons, and this case is not the only place it lives: `_lastDurableSlot`
 // is a `FilePageStore` member, so the LIBRARY's own guarantee has to be
-// assertable without FastCache present, while the other suite asserts what the
+// assertable without Pace present, while the other suite asserts what the
 // same behaviour costs an operator.
 //
 // The fixtures are separate because a TEST helper cannot be shared: `src/tests/`
-// and `src/FastCache/` are off `CowTreeTests`' include path, which is the
+// and `src/Pace/` are off `CowTreeTests`' include path, which is the
 // boundary that keeps this library standalone. That is narrower than "nothing
 // can be shared" -- `src/CowTree/CowTree/` is on BOTH suites' paths under the
 // same `<CowTree/...>` spelling.
@@ -184,7 +184,7 @@ auto OpenFreeListStore(std::filesystem::path const& path)
 //     case red in `FilePageStore::RecoverExistingFile` (at `Open`) and again in
 //     `CowTree::Open` (at `tree.Open()`);
 //   * recording the DAMAGED slot as `_lastDurableSlot` turns it red at the
-//     byte comparison below -- and turned only the FastCache suite red before
+//     byte comparison below -- and turned only the Pace suite red before
 //     that assertion was moved in here, which is why it was moved;
 //   * inverting the both-valid `txnId` tie-break does NOT, correctly, since only
 //     one slot is valid here; eight existing cases cover that comparison.
@@ -594,7 +594,7 @@ struct FlushingStore
 TEST_CASE("A batched store churning at a steady size keeps its page count flat",
           "[filestore][durability][batched][freelist]")
 {
-    // The page store's half of the unbounded-file defect, with no FastCache present: a
+    // The page store's half of the unbounded-file defect, with no Pace present: a
     // store that frees what it allocates must stop growing. Each round allocates
     // `PagesPerRound` pages, frees the previous round's and flushes -- one group commit per
     // round, which a cache at its byte bound does every 64 commits.
@@ -939,7 +939,7 @@ TEST_CASE("A second store on one path is refused as InUse", "[filestore][lock]")
     // PRODUCED this arm is the code reported. Naming one errno would make the case a
     // statement about the host it was written on.
     REQUIRE(second.error().systemCode.has_value());
-    auto const systemCode = FastCache::Testing::Unwrap(second.error().systemCode);
+    auto const systemCode = Pace::Testing::Unwrap(second.error().systemCode);
     INFO("system code: " << systemCode);
     CHECK(CowTree::FilePageStore::ClassifyLockFailure(systemCode) == CowTree::FilePageStore::LockFailure::Contended);
 }
@@ -1408,7 +1408,7 @@ TEST_CASE("A recorded page count above the file's length reclaims nothing and re
     // The premise, asserted rather than traced: the meta recovery lands on records MORE pages than
     // the file now holds. A fixture whose cut fell short of it would test the ordinary range instead.
     REQUIRE(recovered.dataPages.has_value());
-    auto const recorded = FastCache::Testing::Unwrap(recovered.dataPages);
+    auto const recorded = Pace::Testing::Unwrap(recovered.dataPages);
     INFO("recorded " << recorded << " data pages, the file holds " << s.store->TotalDataPages());
     REQUIRE(recorded > s.store->TotalDataPages());
     CHECK(s.store->PagesInUse() == inUse);
@@ -1494,7 +1494,7 @@ TEST_CASE("A store whose slots are both version 1 opens and serves, and its next
     REQUIRE(written.has_value());
     CHECK(written->version == 2U);
     REQUIRE(written->dataPages.has_value());
-    CHECK(FastCache::Testing::Unwrap(written->dataPages) == (*store)->TotalDataPages());
+    CHECK(Pace::Testing::Unwrap(written->dataPages) == (*store)->TotalDataPages());
 }
 
 TEST_CASE("A store with one slot in each layout opens on the higher txnId, whichever layout that is",

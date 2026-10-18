@@ -1,6 +1,6 @@
 # The compile cache key
 
-Rules for `src/apps/fastcache-cc/` and `src/FastCache/CompileCache/`: what goes
+Rules for `src/apps/fastcache-cc/` and `src/Pace/CompileCache/`: what goes
 into a cache key, how paths are canonicalized so two machines derive the same one,
 what a direct-mode manifest may record, and what a hit is allowed to replay.
 

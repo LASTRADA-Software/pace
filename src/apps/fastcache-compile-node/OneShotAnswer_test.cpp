@@ -8,9 +8,9 @@
 #include <string>
 #include <string_view>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Node;
+namespace Wire = Pace::CompileCacheWire;
 
 TEST_CASE("A one-shot network verb ends by where its answer came from", "[node][exit]")
 {

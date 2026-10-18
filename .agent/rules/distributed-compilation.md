@@ -1,6 +1,6 @@
 # Distributed compilation
 
-Rules for `src/FastCache/Distributed/`, `src/apps/fastcache-compile-node/` and the
+Rules for `src/Pace/Distributed/`, `src/apps/fastcache-compile-node/` and the
 dispatch half of `src/apps/fastcache-cc/`: preparing a translation unit for a
 remote worker, running a worker as a service, the scheduler's gate, the node's
 own cache tier, and what the end-to-end fixtures assert.
@@ -252,7 +252,7 @@ is the reproducible lesson, since no unit test can reach either:
     spent a lease, a round trip and the whole translation unit on an answer it could read
     off the same table: `Dispatch` returns `DispatchStatus::DeniedHere`, recorded as this
     machine's refusal and naming the argument, and asks nobody. Header-only, for
-    `CompileCacheWire.hpp`'s reason -- the launcher does not link `FastCache`. The worker
+    `CompileCacheWire.hpp`'s reason -- the launcher does not link `Pace`. The worker
     still enforces it, because two ends can be two builds and the launcher is not the only
     thing that reaches a worker's port.
   - **Operator entries EXTEND and can never shrink**, which is a property of the ORDER:
@@ -1086,7 +1086,7 @@ Consequences that are each load-bearing:
   comes to pass for the other. The token wraps the `LeaseTable` serial rather than
   replacing it, which is what keeps that component pure — no key, no wall clock, no
   crypto in the thing whose whole job is a deterministic unit test. See
-  `src/FastCache/Distributed/LeaseToken.hpp` (#281, #282, #178).
+  `src/Pace/Distributed/LeaseToken.hpp` (#281, #282, #178).
 - **A credential lives in `SecureByteBuffer`, and the wipe is an ALLOCATOR rather than a
   destructor.** The cluster key was a plain `std::vector<std::byte>` in every one of its
   holders, freed without being touched — the key that MACed discovery proofs and lease grants
@@ -2775,7 +2775,7 @@ spelled it the same way, which is what makes this a drift rather than a discover
     fails without the timer.
   - **`Threads::Threads` is linked and named.** The resolver pool is the one thing
     this launcher genuinely needs a thread for. Not a departure from the rule this
-    binary exists to protect -- that rule is about not linking `FastCache` and
+    binary exists to protect -- that rule is about not linking `Pace` and
     therefore not dragging in yaml-cpp, OpenSSL and the reactor's transitive world --
     and it is named rather than left to glibc folding pthread into libc since 2.34,
     which happens to work on the distributions CI uses.

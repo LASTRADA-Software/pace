@@ -2,9 +2,9 @@
 #include "CompileCorrelation.hpp"
 #include "Dispatch.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Protocol/CompileReplySeal.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Protocol/CompileReplySeal.hpp>
 
 #include <algorithm>
 #include <format>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -659,4 +659,4 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
     return result;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

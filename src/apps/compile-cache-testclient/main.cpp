@@ -15,10 +15,10 @@
 
 #include "TestClientCli.hpp"
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Platform/Terminal.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/Terminal.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -46,9 +46,9 @@
 namespace
 {
 
-using namespace FastCache;
+using namespace Pace;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 /// Print an error and exit non-zero.
 [[noreturn]] void Die(std::string_view message)

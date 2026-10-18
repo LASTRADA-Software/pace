@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
 
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Why a node's start gave up after the command line was judged -- in a tier, a surface, or the
@@ -139,4 +139,4 @@ struct NodeRefusal
     return NodeRefusal { .cause = cause, .reason = std::move(reason) };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

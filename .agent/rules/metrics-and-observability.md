@@ -1,6 +1,6 @@
 # Metrics and observability
 
-Rules for `src/FastCache/Metrics/` and the admin/scrape endpoints the daemon and
+Rules for `src/Pace/Metrics/` and the admin/scrape endpoints the daemon and
 the worker each serve.
 
 Read this before adding a counter, adding a refusal code, or changing what
@@ -718,7 +718,7 @@ looks exactly like a port nobody is talking to.
   whose retired-code rule exists because bytes are scarce and irreversible.
 - **`RefusedVerb` cannot grow a counter column.** It lives in `CompileCacheWire.hpp`,
   which is header-only and dependency-free because `fastcache-cc` compiles it in
-  without linking `FastCache`; `IMetricsSink::Counter` is not reachable from there. The
+  without linking `Pace`; `IMetricsSink::Counter` is not reachable from there. The
   pairing lives in the surface that owns the sink.
 - **The refusals that ALREADY counted go through the same door**, converting their own
   tables' rows rather than restating the pair. Not tidiness: it is what makes the guard
@@ -1042,7 +1042,7 @@ The log lines stay.
   row whose component is PRESENT is left undecided on purpose -- filling it in would hide the
   wiring defect it reports. The `[conditions]` Catch2 tag holds a fully configured node to no
   undecided row, through the one registry the components share. **The tag spans THREE test
-  binaries** -- `FastCacheTest` for `Distributed/` and `Protocol/`, plus the node's and the
+  binaries** -- `PaceTest` for `Distributed/` and `Protocol/`, plus the node's and the
   cli's own -- because a condition is produced on one machine, carried over two wires and
   rendered by two readers, and a tag selecting only the producer's binary would assert the row
   exists while saying nothing about whether either reader can draw it. Select by the TAG, never

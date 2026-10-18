@@ -1,0 +1,4262 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Cache/CowTreeStorage.hpp>
+#include <Pace/Cache/StorageTestUtils.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <optional>
+#include <random>
+#include <ranges>
+#include <span>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <CowTree/Bytes.hpp>
+#include <CowTree/CowTree.hpp>
+#include <CowTree/Crc32c.hpp>
+#include <CowTree/Errors.hpp>
+#include <CowTree/FilePageStore.hpp>
+#include <CowTree/IPageStore.hpp>
+#include <CowTree/InMemoryPageStore.hpp>
+#include <CowTree/Meta.hpp>
+#include <CowTree/PageId.hpp>
+#include <core/Ranges.hpp>
+#include <core/platform/Clock.hpp>
+#include <tests/Unwrap.hpp>
+
+using namespace std::chrono_literals;
+using Pace::Testing::Decode;
+using Pace::Testing::MakeBytes;
+using Pace::Testing::TempFile;
+using Pace::Testing::Unwrap;
+using Pace::Testing::ValueOf;
+
+namespace
+{
+
+/// Generate `size` deterministic-pseudo-random bytes from `seed`. Used
+/// by the binary-blob roundtrip tests so they can compare bytewise
+/// after a reopen without baking the values into the test source.
+std::vector<std::byte> RandomBytes(std::size_t size, std::uint64_t seed)
+{
+    std::mt19937_64 rng { seed };
+    std::vector<std::byte> out;
+    out.reserve(size);
+    for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, size))
+        out.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(rng() & 0xFFU)));
+    return out;
+}
+
+/// Read a little-endian u32 from `bytes` at `offset` (host-endian aware).
+std::uint32_t LoadLeU32(std::span<std::byte const> bytes, std::size_t offset)
+{
+    std::uint32_t value = 0;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    if constexpr (std::endian::native != std::endian::little)
+        value = std::byteswap(value);
+    return value;
+}
+
+/// Store a little-endian u64 into `bytes` at `offset` (host-endian aware).
+void StoreLeU64(std::vector<std::byte>& bytes, std::size_t offset, std::uint64_t value)
+{
+    if constexpr (std::endian::native != std::endian::little)
+        value = std::byteswap(value);
+    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+
+/// True iff `page` parses as a valid overflow page under the on-disk layout
+/// `[u32 crc][u64 next][u32 chunkLen][chunk]`, CRC over `[4 .. 16 + chunkLen)`.
+/// Lets a test pick overflow pages out of a store without touching internals.
+constexpr std::size_t OverflowHeader = 16;
+bool LooksLikeOverflowPage(std::span<std::byte const> page, std::size_t pageSize)
+{
+    if (page.size() < OverflowHeader)
+        return false;
+    auto const crc = LoadLeU32(page, 0);
+    auto const chunkLen = LoadLeU32(page, 12);
+    if (chunkLen > pageSize - OverflowHeader)
+        return false;
+    auto const region = std::span<std::byte const> { page.data() + 4, (OverflowHeader - 4) + chunkLen };
+    return CowTree::Crc32c::Compute(region) == crc;
+}
+
+/// Open + drop helper: returns the result of a callable that takes a
+/// CowTreeStorage&, having opened the storage at `path` first and closed
+/// it on return. Lets tests express roundtrip-across-reopen as two
+/// successive calls.
+template <class F>
+auto WithOpenStorage(std::filesystem::path const& path, F&& fn)
+{
+    Pace::CowTreeStorage::Options opts;
+    opts.path = path;
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    return std::forward<F>(fn)(**storage);
+}
+
+/// Like WithOpenStorage but opens the store with the given compression codec,
+/// so a test can drive the compress/decompress path across a reopen.
+template <class F>
+auto WithOpenStorageCompressed(std::filesystem::path const& path, Pace::CompressionCodec codec, F&& fn)
+{
+    Pace::CowTreeStorage::Options opts;
+    opts.path = path;
+    opts.compression = codec;
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    return std::forward<F>(fn)(**storage);
+}
+
+} // namespace
+
+// ============================================================================
+// Single-session roundtrip
+// ============================================================================
+
+TEST_CASE("CowTreeStorage reports what its key index costs in RAM", "[cowstorage][index]")
+{
+    // #175. This tier's budget is bytes on a FILESYSTEM, and `StorageTierTraits` says
+    // so -- but the LRU mirror it keeps beside the tree is resident memory that grows
+    // with the object count, and nothing named it. A node could hold a gigabyte of
+    // index for a disk cache it had been told was costing it no RAM.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+
+    // Empty means empty, so a node with a disk tier and nothing in it reserves
+    // nothing -- the direction that matters, since the alternative is a machine that
+    // holds memory back for a cache it is not using.
+    REQUIRE((*storage)->Snapshot().indexBytes == 0);
+
+    REQUIRE((*storage)->Set("a-key", MakeBytes("value"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const one = (*storage)->Snapshot().indexBytes;
+    REQUIRE(one > 0);
+
+    // It GROWS with the count, which is the property the figure exists to expose.
+    REQUIRE((*storage)->Set("another-key", MakeBytes("value"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    REQUIRE((*storage)->Snapshot().indexBytes > one);
+
+    // A longer key costs more than a short one, which is why this is accumulated
+    // rather than `itemCount` times an average: a compile cache's keys are uniform
+    // hashes and a daemon client's are whatever it sent.
+    TempFile wide;
+    Pace::CowTreeStorage::Options wideOpts;
+    wideOpts.path = wide.path;
+    auto wideStorage = Pace::CowTreeStorage::Open(wideOpts);
+    REQUIRE(wideStorage.has_value());
+    REQUIRE((*wideStorage)
+                ->Set(std::string(200, 'k'), MakeBytes("value"), 0, core::platform::SteadyTimePoint::max())
+                .has_value());
+    REQUIRE((*wideStorage)->Snapshot().indexBytes > one);
+
+    // And it comes back down, or a long-running node would report an index that only
+    // ever grew -- which is worse than reporting nothing, because it would be
+    // believed.
+    REQUIRE((*storage)->Delete("another-key", core::platform::SteadyTimePoint::min()).has_value());
+    REQUIRE((*storage)->Snapshot().indexBytes == one);
+
+    // Overwriting is not a second entry. `TouchOrInsert` takes the existing-key path
+    // there, and an accumulator that counted it twice would drift upward on exactly
+    // the workload a compile cache runs.
+    REQUIRE((*storage)
+                ->Set("a-key", MakeBytes("a longer value than before"), 0, core::platform::SteadyTimePoint::max())
+                .has_value());
+    REQUIRE((*storage)->Snapshot().indexBytes == one);
+}
+
+TEST_CASE("CowTreeStorage Set + Get round-trips", "[cowstorage]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+
+    core::platform::ManualClock clock;
+    auto const cas = (*storage)->Set("k", MakeBytes("hello"), 7, core::platform::SteadyTimePoint::max());
+    REQUIRE(cas.has_value());
+
+    auto got = (*storage)->Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "hello");
+    REQUIRE(got->entry.flags == 7U);
+    REQUIRE(got->entry.cas == *cas);
+}
+
+TEST_CASE("CowTreeStorage entries survive close + reopen", "[cowstorage][persist]")
+{
+    TempFile tmp;
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("persisted"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "persisted");
+    });
+}
+
+// ============================================================================
+// Byte-level roundtrip
+// ============================================================================
+
+TEST_CASE("Empty value roundtrips, including across reopen", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("empty", {}, 0, core::platform::SteadyTimePoint::max()).has_value());
+        auto got = storage.Get("empty", core::platform::ManualClock {}.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry).empty());
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("empty", core::platform::ManualClock {}.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry).empty());
+    });
+}
+
+TEST_CASE("Every single byte 0x00..0xFF roundtrips across reopen", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        for (auto const b: std::views::iota(0, 256))
+        {
+            auto const key = std::format("k-{:02x}", b);
+            std::vector<std::byte> value { static_cast<std::byte>(static_cast<std::uint8_t>(b)) };
+            // Evaluate Set() outside REQUIRE: the macro expands its argument
+            // twice (eval + stringify), which trips bugprone-use-after-move on
+            // the std::move(value).
+            auto const stored = storage.Set(key, std::move(value), 0, core::platform::SteadyTimePoint::max());
+            REQUIRE(stored.has_value());
+        }
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        for (auto const b: std::views::iota(0, 256))
+        {
+            auto const key = std::format("k-{:02x}", b);
+            auto got = storage.Get(key, clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(got->entry.ValueSize() == 1U);
+            REQUIRE(static_cast<std::uint8_t>(ValueOf(got->entry)[0]) == static_cast<std::uint8_t>(b));
+        }
+    });
+}
+
+TEST_CASE("All-byte-values blob roundtrips across reopen", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    std::vector<std::byte> blob;
+    blob.reserve(256);
+    for (auto const i: std::views::iota(0, 256))
+        blob.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(i)));
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("blob", blob, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("blob", core::platform::ManualClock {}.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry) == blob);
+    });
+}
+
+TEST_CASE("1 KiB / 64 KiB random binary roundtrips across reopen", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    auto const small = RandomBytes(1024, 0xAAAA1111ULL);
+    auto const medium = RandomBytes(64 * 1024, 0xBBBB2222ULL);
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("small", small, 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set("medium", medium, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto a = storage.Get("small", clock.now());
+        REQUIRE(a.has_value());
+        REQUIRE(a->found);
+        REQUIRE(ValueOf(a->entry) == small);
+
+        auto b = storage.Get("medium", clock.now());
+        REQUIRE(b.has_value());
+        REQUIRE(b->found);
+        REQUIRE(ValueOf(b->entry) == medium);
+    });
+}
+
+TEST_CASE("Value exactly at maxValueBytes roundtrips; one over returns ValueTooLarge", "[cowstorage][roundtrip][boundary]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    opts.maxValueBytes = 4096;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+
+    auto const fits = RandomBytes(4096, 0xCCCC3333ULL);
+    auto const oversized = RandomBytes(4097, 0xDDDD4444ULL);
+
+    REQUIRE((*storage)->Set("fits", fits, 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const oversizedResult = (*storage)->Set("oversized", oversized, 0, core::platform::SteadyTimePoint::max());
+    REQUIRE_FALSE(oversizedResult.has_value());
+    REQUIRE(oversizedResult.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    auto got = (*storage)->Get("fits", core::platform::ManualClock {}.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(ValueOf(got->entry) == fits);
+}
+
+TEST_CASE("Keys with embedded NULs and non-ASCII bytes roundtrip", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    std::string const keyA { 'a', '\0', 'b' };
+    std::string const keyB { '\xC3', '\xA9' };
+    std::string const keyC { '\x00', '\x01', '\xFF' };
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set(keyA, MakeBytes("A"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set(keyB, MakeBytes("B"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set(keyC, MakeBytes("C"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto a = storage.Get(keyA, clock.now());
+        REQUIRE(a.has_value());
+        REQUIRE(a->found);
+        REQUIRE(Decode(a->entry.ValueBytes()) == "A");
+
+        auto b = storage.Get(keyB, clock.now());
+        REQUIRE(b.has_value());
+        REQUIRE(b->found);
+        REQUIRE(Decode(b->entry.ValueBytes()) == "B");
+
+        auto c = storage.Get(keyC, clock.now());
+        REQUIRE(c.has_value());
+        REQUIRE(c->found);
+        REQUIRE(Decode(c->entry.ValueBytes()) == "C");
+    });
+}
+
+// ============================================================================
+// Metadata roundtrip
+// ============================================================================
+
+TEST_CASE("Flags roundtrip across reopen", "[cowstorage][roundtrip][metadata]")
+{
+    TempFile tmp;
+    constexpr std::uint32_t kFlags[] { 0U, 1U, 0xDEADBEEFU, std::numeric_limits<std::uint32_t>::max() };
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        for (auto const i: std::views::iota(std::size_t { 0 }, std::size(kFlags)))
+        {
+            auto const key = std::format("flag-{}", i);
+            REQUIRE(storage.Set(key, MakeBytes("v"), kFlags[i], core::platform::SteadyTimePoint::max()).has_value());
+        }
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        for (auto const i: std::views::iota(std::size_t { 0 }, std::size(kFlags)))
+        {
+            auto got = storage.Get(std::format("flag-{}", i), clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(got->entry.flags == kFlags[i]);
+        }
+    });
+}
+
+TEST_CASE("Expiry roundtrip across reopen", "[cowstorage][roundtrip][metadata]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    auto const farFuture = clock.now() + 24h;
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("forever", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set("future", MakeBytes("v"), 0, farFuture).has_value());
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto forever = storage.Get("forever", clock.now());
+        REQUIRE(forever.has_value());
+        REQUIRE(forever->found);
+        REQUIRE(forever->entry.expiry == core::platform::SteadyTimePoint::max());
+
+        auto future = storage.Get("future", clock.now());
+        REQUIRE(future.has_value());
+        REQUIRE(future->found);
+        REQUIRE(future->entry.expiry == farFuture);
+    });
+}
+
+TEST_CASE("CAS tokens are strictly monotonic within a session", "[cowstorage][cas]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+
+    Pace::CasToken last { 0 };
+    for (auto const i: std::views::iota(0, 10))
+    {
+        auto const cas = (*storage)->Set(std::format("k-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+        REQUIRE(cas.has_value());
+        REQUIRE(*cas > last);
+        last = *cas;
+    }
+}
+
+// ============================================================================
+// B+tree shape coverage
+// ============================================================================
+
+TEST_CASE("Many small entries fit and read back across reopen", "[cowstorage][shape]")
+{
+    constexpr int N = 1000;
+    TempFile tmp;
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        for (auto const i: std::views::iota(0, N))
+        {
+            auto const key = std::format("key-{:05d}", i);
+            auto const value = std::format("value-{:05d}", i);
+            REQUIRE(storage.Set(key, MakeBytes(value), 0, core::platform::SteadyTimePoint::max()).has_value());
+        }
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        // Shuffle the iteration order so the test exercises non-trivial tree paths.
+        std::vector<int> order(N);
+        core::ranges::Iota(order, 0);
+        // Deterministic seed via seed_seq for reproducibility;
+        // bugprone-random-generator-seed only flags direct literal seeding.
+        std::seed_seq seed { 0x12345678U, 0x9ABCDEF0U, 0x0FEDCBA9U, 0x87654321U };
+        std::mt19937_64 rng { seed };
+        std::ranges::shuffle(order, rng);
+
+        for (int const i: order)
+        {
+            auto got = storage.Get(std::format("key-{:05d}", i), clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(Decode(got->entry.ValueBytes()) == std::format("value-{:05d}", i));
+        }
+    });
+}
+
+TEST_CASE("Sort-key prefixes do not leak across entries", "[cowstorage][shape]")
+{
+    TempFile tmp;
+    std::vector<std::pair<std::string, std::string>> const items {
+        { "a", "VA" },   { "aa", "VAA" }, { "aaa", "VAAA" }, { "aab", "VAAB" },
+        { "ab", "VAB" }, { "b", "VB" },   { "ba", "VBA" },   { "z", "VZ" },
+    };
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        for (auto const& [k, v]: items)
+            REQUIRE(storage.Set(k, MakeBytes(v), 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        for (auto const& [k, v]: items)
+        {
+            auto got = storage.Get(k, clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(Decode(got->entry.ValueBytes()) == v);
+        }
+    });
+}
+
+TEST_CASE("Update replaces in place; only the latest value persists", "[cowstorage][shape]")
+{
+    TempFile tmp;
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("v1"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set("k", MakeBytes("v2"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set("k", MakeBytes("v3"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("k", core::platform::ManualClock {}.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "v3");
+    });
+}
+
+TEST_CASE("Delete + reinsert with different value persists the new value", "[cowstorage][shape]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("old"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Delete("k", clock.now()).has_value());
+        REQUIRE(storage.Set("k", MakeBytes("new"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "new");
+    });
+}
+
+// ============================================================================
+// Compound-op roundtrip
+// ============================================================================
+
+TEST_CASE("CowTreeStorage Add fails on existing key", "[cowstorage]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("first"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto r = (*storage)->Add("k", MakeBytes("second"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::KeyExists);
+}
+
+TEST_CASE("CowTreeStorage Replace fails when missing", "[cowstorage]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    auto r = (*storage)->Replace("k", MakeBytes("nope"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::KeyNotFound);
+}
+
+TEST_CASE("Replace overwrites and persists across reopen", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("v1"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Replace("k", MakeBytes("v2"), 0, core::platform::SteadyTimePoint::max(), clock.now()).has_value());
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "v2");
+    });
+}
+
+TEST_CASE("Append + Prepend round-trip and persist", "[cowstorage][roundtrip]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    auto const suffix = MakeBytes(" end");
+    auto const prefix = MakeBytes("start ");
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("middle"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(
+            storage.Append("k", std::span<std::byte const> { suffix.data(), suffix.size() }, 0, clock.now()).has_value());
+        REQUIRE(
+            storage.Prepend("k", std::span<std::byte const> { prefix.data(), prefix.size() }, 0, clock.now()).has_value());
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "start middle end");
+    });
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "start middle end");
+    });
+}
+
+TEST_CASE("Append exceeding maxValueBytes returns ValueTooLarge and leaves value untouched",
+          "[cowstorage][roundtrip][boundary]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    opts.maxValueBytes = 16;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("0123456789ABCDE"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const overflow = MakeBytes("XX");
+    auto const result =
+        (*storage)->Append("k", std::span<std::byte const> { overflow.data(), overflow.size() }, 0, clock.now());
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code == Pace::StorageErrorCode::ValueTooLarge);
+
+    auto got = (*storage)->Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "0123456789ABCDE");
+}
+
+TEST_CASE("CompareAndSwap success path persists across reopen", "[cowstorage][cas][roundtrip]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    Pace::CasToken originalCas { 0 };
+    Pace::CasToken newCas { 0 };
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto const setCas = storage.Set("k", MakeBytes("one"), 0, core::platform::SteadyTimePoint::max());
+        REQUIRE(setCas.has_value());
+        originalCas = *setCas;
+        auto const casResult = storage.CompareAndSwap(
+            "k", originalCas, MakeBytes("two"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+        REQUIRE(casResult.has_value());
+        newCas = *casResult;
+        REQUIRE(newCas != originalCas);
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "two");
+    });
+}
+
+TEST_CASE("CompareAndSwap mismatch leaves entry untouched", "[cowstorage][cas]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    auto const setCas = (*storage)->Set("k", MakeBytes("one"), 7, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+    auto const wrong =
+        (*storage)->CompareAndSwap("k", 999, MakeBytes("two"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(wrong.has_value());
+    REQUIRE(wrong.error().code == Pace::StorageErrorCode::CasMismatch);
+
+    auto got = (*storage)->Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "one");
+    REQUIRE(got->entry.flags == 7U);
+    REQUIRE(got->entry.cas == *setCas);
+}
+
+TEST_CASE("IncrementOrInitialize returns KeyNotFound on a miss; increments an existing key", "[cowstorage][incr][roundtrip]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        // Contract: a missing key is a miss, NOT an auto-create. The
+        // protocol layer owns the "initialize" semantics (binary
+        // initial/expiration, meta J/N) and re-issues a Set on KeyNotFound.
+        auto miss = storage.IncrementOrInitialize("counter", 10, /*decrement=*/false, clock.now());
+        REQUIRE_FALSE(miss.has_value());
+        REQUIRE(miss.error().code == Pace::StorageErrorCode::KeyNotFound);
+
+        // Seed the key, then increment the existing value.
+        REQUIRE(storage.Set("counter", MakeBytes("10"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        auto b = storage.IncrementOrInitialize("counter", 5, /*decrement=*/false, clock.now());
+        REQUIRE(b.has_value());
+        REQUIRE(b->value == 15U);
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto got = storage.Get("counter", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Decode(got->entry.ValueBytes()) == "15");
+    });
+}
+
+TEST_CASE("IncrementOrInitialize floors at 0 on saturating decrement", "[cowstorage][incr]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("5"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto r = (*storage)->IncrementOrInitialize("k", 10, /*decrement=*/true, clock.now());
+    REQUIRE(r.has_value());
+    REQUIRE(r->value == 0U);
+}
+
+TEST_CASE("IncrementOrInitialize handles full-uint64 magnitudes without signed-overflow UB",
+          "[cowstorage][incr][regression]")
+{
+    // The magnitude is a full std::uint64_t, so a decrement by 2^63 saturates
+    // cleanly at 0 and an increment by 2^63 adds — magnitudes the old signed
+    // delta could not carry (decr by 2^63 was negation-of-INT64_MIN UB; incr
+    // by 2^63 aliased to a decrement). UBSan would abort on a regression.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    constexpr std::uint64_t Huge = 1ULL << 63;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("0"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const up = (*storage)->IncrementOrInitialize("k", Huge, /*decrement=*/false, clock.now());
+    REQUIRE(up.has_value());
+    REQUIRE(up->value == Huge); // 0 + 2^63, not aliased to a decrement
+
+    auto const down = (*storage)->IncrementOrInitialize("k", Huge, /*decrement=*/true, clock.now());
+    REQUIRE(down.has_value());
+    REQUIRE(down->value == 0U); // 2^63 - 2^63
+}
+
+TEST_CASE("CowTreeStorage Touch preserves the fetched bit (a touch is not a read)", "[cowstorage][stats][unfetched]")
+{
+    // Regression: Touch used the default AccessKind::Write, clearing `fetched`
+    // and diverging from InMemoryLruStorage. A previously-read entry that is
+    // later purged must NOT be counted expired_unfetched.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, clock.now() + 1s).has_value());
+    REQUIRE((*storage)->Get("k", clock.now())->found);                          // fetched = true
+    REQUIRE((*storage)->Touch("k", clock.now() + 1s, clock.now()).has_value()); // must keep fetched
+
+    clock.advance(2s);
+    REQUIRE((*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 1U);
+    REQUIRE((*storage)->Snapshot().expiredUnfetched == 0U);
+}
+
+TEST_CASE("CowTreeStorage MarkStale preserves the fetched bit", "[cowstorage][stats][unfetched]")
+{
+    // MarkStale shares TouchOrInsert(AccessKind::Preserve) with Touch, so a
+    // previously-read entry that is later purged must not be counted unfetched.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, clock.now() + 1s).has_value());
+    REQUIRE((*storage)->Get("k", clock.now())->found);                          // fetched = true
+    REQUIRE((*storage)->MarkStale("k", std::nullopt, clock.now()).has_value()); // must keep fetched
+
+    clock.advance(2s);
+    REQUIRE((*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 1U);
+    REQUIRE((*storage)->Snapshot().expiredUnfetched == 0U);
+}
+
+TEST_CASE("CowTreeStorage GetAndTouch refreshes the expiry and returns the entry", "[cowstorage][gat]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, clock.now() + 1s).has_value());
+    auto const newExpiry = clock.now() + 60s;
+    auto const gat = (*storage)->GetAndTouch("k", newExpiry, clock.now());
+    REQUIRE(gat.has_value());
+    REQUIRE(gat->found);
+    REQUIRE(Decode(gat->entry.ValueBytes()) == "v");
+    REQUIRE(gat->entry.expiry == newExpiry);
+
+    auto const miss = (*storage)->GetAndTouch("absent", newExpiry, clock.now());
+    REQUIRE_FALSE(miss.has_value());
+    REQUIRE(miss.error().code == Pace::StorageErrorCode::KeyNotFound);
+}
+
+TEST_CASE("CowTreeStorage CompareAndDelete honours the CAS precondition", "[cowstorage][cad]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    auto const setCas = (*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(setCas.has_value());
+
+    // Wrong CAS -> mismatch, entry survives.
+    auto const wrong = (*storage)->CompareAndDelete("k", *setCas + 1, clock.now());
+    REQUIRE_FALSE(wrong.has_value());
+    REQUIRE(wrong.error().code == Pace::StorageErrorCode::CasMismatch);
+    REQUIRE((*storage)->Get("k", clock.now())->found);
+
+    // Right CAS -> deleted.
+    REQUIRE((*storage)->CompareAndDelete("k", *setCas, clock.now()).has_value());
+    REQUIRE_FALSE((*storage)->Get("k", clock.now())->found);
+
+    // Absent key -> KeyNotFound.
+    auto const absent = (*storage)->CompareAndDelete("absent", 1, clock.now());
+    REQUIRE_FALSE(absent.has_value());
+    REQUIRE(absent.error().code == Pace::StorageErrorCode::KeyNotFound);
+}
+
+// ============================================================================
+// Delete and expiry coverage
+// ============================================================================
+
+TEST_CASE("CowTreeStorage CAS mismatch path", "[cowstorage]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    auto cas = (*storage)->Set("k", MakeBytes("one"), 0, core::platform::SteadyTimePoint::max());
+    REQUIRE(cas.has_value());
+
+    auto wrong =
+        (*storage)->CompareAndSwap("k", 999, MakeBytes("two"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(wrong.has_value());
+    REQUIRE(wrong.error().code == Pace::StorageErrorCode::CasMismatch);
+
+    auto right =
+        (*storage)->CompareAndSwap("k", *cas, MakeBytes("two"), 0, core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE(right.has_value());
+}
+
+TEST_CASE("CowTreeStorage Delete + TTL expiry path", "[cowstorage]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    auto const expiry = clock.now() + 100ms;
+    REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, expiry).has_value());
+    auto const before = (*storage)->Get("k", clock.now());
+    REQUIRE(before->found);
+
+    clock.advance(200ms);
+    auto const after = (*storage)->Get("k", clock.now());
+    REQUIRE(after.has_value());
+    REQUIRE_FALSE(after->found);
+}
+
+TEST_CASE("Delete on expired entry erases the on-disk record across reopen", "[cowstorage][regression]")
+{
+    // Regression for finding #12 — Delete on an expired entry used to
+    // return KeyNotFound without erasing the disk record, so a
+    // subsequent reopen would have the entry still occupying space.
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    auto const shortExpiry = clock.now() + 1ms;
+
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("v"), 0, shortExpiry).has_value());
+        core::platform::ManualClock laterClock;
+        laterClock.advance(10ms);
+        auto deleted = storage.Delete("k", laterClock.now());
+        REQUIRE_FALSE(deleted.has_value());
+        REQUIRE(deleted.error().code == Pace::StorageErrorCode::KeyNotFound);
+    });
+
+    // After reopen the entry must not resurface even if the clock is
+    // rewound to before the original expiry.
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock freshClock;
+        auto got = storage.Get("k", freshClock.now());
+        REQUIRE(got.has_value());
+        REQUIRE_FALSE(got->found);
+    });
+}
+
+TEST_CASE("Get on an expired entry does NOT mutate the tree (no BeginWrite from a read path)", "[cowstorage][regression]")
+{
+    // Regression for finding #1 — Get used to open a write transaction
+    // to erase expired entries, which under ShardedStorage's
+    // shared_lock would race concurrent same-shard Gets and corrupt
+    // the CowTree's free list. The fix defers cleanup to
+    // PurgeExpired. The test here just verifies Get is idempotent on
+    // expired entries (no error, value stays accessible to
+    // PurgeExpired).
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    auto const shortExpiry = clock.now() + 1ms;
+    REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, shortExpiry).has_value());
+    clock.advance(10ms);
+
+    // Issue several Gets back-to-back; none should return found, none
+    // should mutate the tree visibly to subsequent Gets.
+    for ([[maybe_unused]] auto const i: std::views::iota(0, 5))
+    {
+        auto got = (*storage)->Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE_FALSE(got->found);
+    }
+
+    // PurgeExpired should now report 1 victim and remove it.
+    auto const purged = (*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged;
+    REQUIRE(purged == 1U);
+
+    auto after = (*storage)->Get("k", clock.now());
+    REQUIRE(after.has_value());
+    REQUIRE_FALSE(after->found);
+}
+
+TEST_CASE("PurgeExpired clears all expired entries and reports the count", "[cowstorage][purge]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    auto const shortExpiry = clock.now() + 1ms;
+
+    for (auto const i: std::views::iota(0, 6))
+        REQUIRE((*storage)->Set(std::format("expire-{}", i), MakeBytes("v"), 0, shortExpiry).has_value());
+    for (auto const i: std::views::iota(0, 4))
+        REQUIRE((*storage)
+                    ->Set(std::format("keep-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max())
+                    .has_value());
+
+    clock.advance(10ms);
+    auto const purged = (*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged;
+    REQUIRE(purged == 6U);
+
+    for (auto const i: std::views::iota(0, 4))
+    {
+        auto got = (*storage)->Get(std::format("keep-{}", i), clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+    }
+}
+
+TEST_CASE("CowTreeStorage counts every expiry, whichever path removed it", "[cowstorage][stats][expiry]")
+{
+    // WHAT DISTINGUISHES: a write verb meeting a lapsed record and the sweep each count one expiry, and a live
+    // record the sweep passes over counts none.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    REQUIRE((*storage)->Set("deleted", MakeBytes("v"), 0, clock.now() + 1ms).has_value());
+    REQUIRE((*storage)->Set("swept", MakeBytes("v"), 0, clock.now() + 1ms).has_value());
+    REQUIRE((*storage)->Set("kept", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    clock.advance(10ms);
+    REQUIRE_FALSE((*storage)->Delete("deleted", clock.now()).has_value());
+    CHECK((*storage)->Snapshot().expirations == 1U);
+    REQUIRE((*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).purged == 1U);
+    CHECK((*storage)->Snapshot().expirations == 2U);
+}
+
+TEST_CASE("PurgeExpired on the disk tier is bounded and resumes", "[cowstorage][purge]")
+{
+    // Every step here additionally costs a `LoadEntry`, so an unbounded sweep
+    // over a large store is a disk read per key while the tier's lock is held.
+    // The ceiling makes that a fixed cost per cycle, and the cursor is what
+    // stops a fixed cost per cycle from meaning "only ever the same keys".
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts { .path = tmp.path };
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    // Written first, so the newest-first mirror leaves them BEHIND the live
+    // ones -- out of reach of a sweep that restarted at the front each cycle.
+    for (auto const i: std::views::iota(0, 3))
+        REQUIRE((*storage)->Set(std::format("expire-{}", i), MakeBytes("v"), 0, clock.now() + 1ms).has_value());
+    for (auto const i: std::views::iota(0, 4))
+        REQUIRE((*storage)
+                    ->Set(std::format("keep-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max())
+                    .has_value());
+    clock.advance(10ms);
+
+    auto const first = (*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 4 });
+    CHECK(first.scanned == 4U);
+    CHECK(first.purged == 0U);
+    CHECK_FALSE(first.completedPass);
+
+    auto const second = (*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 3 });
+    CHECK(second.purged == 3U);
+
+    for (auto const i: std::views::iota(0, 4))
+    {
+        auto const got = (*storage)->Get(std::format("keep-{}", i), clock.now());
+        REQUIRE(got.has_value());
+        CHECK(got->found);
+    }
+    CHECK((*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded()).completedPass);
+}
+
+// ============================================================================
+// Eviction & accounting
+// ============================================================================
+
+namespace
+{
+/// Page size the footprint cases build their store with: the smallest the store accepts,
+/// so a budget of a few pages is a few kilobytes of fixture rather than megabytes.
+///
+/// The disk budget is the store's PAGE footprint, so these cases are written in pages.
+constexpr std::size_t FootprintPageSize = 512;
+
+/// Bytes of an overflow page the value occupies: the page less its 16-byte header.
+constexpr std::size_t OverflowPayload = FootprintPageSize - 16;
+
+/// A value past the inline limit (a quarter page) and within one overflow page, so each
+/// entry costs exactly one page of its own and evicting it frees that page.
+constexpr std::size_t OnePageValueLen = 300;
+static_assert(OnePageValueLen > FootprintPageSize / 4 && OnePageValueLen <= OverflowPayload);
+
+/// The bytes `pages` pages occupy at `FootprintPageSize`.
+constexpr std::size_t Pages(std::size_t pages) noexcept
+{
+    return pages * FootprintPageSize;
+}
+
+/// A footprint case's store: small pages, uncompressed, at `maxBytes`.
+Pace::CowTreeStorage::Options FootprintOptions(std::filesystem::path const& path, std::size_t maxBytes)
+{
+    Pace::CowTreeStorage::Options opts;
+    opts.path = path;
+    opts.pageSize = FootprintPageSize;
+    opts.maxBytes = maxBytes;
+    opts.compression = Pace::CompressionCodec::Identity;
+    return opts;
+}
+} // namespace
+
+TEST_CASE("EvictToFit drops LRU tail when over maxBytes", "[cowstorage][eviction]")
+{
+    TempFile tmp;
+    auto const opts = FootprintOptions(tmp.path, Pages(16));
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    // Fifty entries of a page each against a sixteen-page budget.
+    for (auto const i: std::views::iota(0, 50))
+        REQUIRE((*storage)
+                    ->Set(std::format("k-{:03d}", i),
+                          RandomBytes(OnePageValueLen, static_cast<std::uint64_t>(i)),
+                          0,
+                          core::platform::SteadyTimePoint::max())
+                    .has_value());
+    auto const stats = (*storage)->Snapshot();
+    REQUIRE(stats.bytesUsed <= opts.maxBytes);
+    REQUIRE(stats.evictions > 0U);
+
+    // The most recently inserted keys should still be readable.
+    auto last = (*storage)->Get("k-049", clock.now());
+    REQUIRE(last.has_value());
+    REQUIRE(last->found);
+}
+
+TEST_CASE("Resize shrinks budget and triggers immediate eviction", "[cowstorage][eviction]")
+{
+    TempFile tmp;
+    auto storage = Pace::CowTreeStorage::Open(FootprintOptions(tmp.path, 1024 * 1024));
+    REQUIRE(storage.has_value());
+
+    for (auto const i: std::views::iota(0, 100))
+        REQUIRE((*storage)
+                    ->Set(std::format("k-{:03d}", i),
+                          RandomBytes(OnePageValueLen, static_cast<std::uint64_t>(i)),
+                          0,
+                          core::platform::SteadyTimePoint::max())
+                    .has_value());
+    auto const before = (*storage)->Snapshot();
+    REQUIRE(before.itemCount == 100U);
+
+    (*storage)->Resize(Pages(16));
+    auto const after = (*storage)->Snapshot();
+    REQUIRE(after.bytesUsed <= Pages(16));
+    REQUIRE(after.evictions > 0U);
+    // Down to the budget, not past it to nothing: an entry costs a page, so a sixteen-page
+    // budget still holds some.
+    CHECK(after.itemCount > 0U);
+}
+
+TEST_CASE("Three Open/Close cycles preserve every entry", "[cowstorage][persist]")
+{
+    constexpr int N = 100;
+    TempFile tmp;
+
+    auto write = [&] {
+        WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+            for (auto const i: std::views::iota(0, N))
+                REQUIRE(storage
+                            .Set(std::format("k-{:04d}", i),
+                                 MakeBytes(std::format("v-{:04d}", i)),
+                                 0,
+                                 core::platform::SteadyTimePoint::max())
+                            .has_value());
+        });
+    };
+
+    auto verify = [&] {
+        WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+            core::platform::ManualClock clock;
+            for (auto const i: std::views::iota(0, N))
+            {
+                auto got = storage.Get(std::format("k-{:04d}", i), clock.now());
+                REQUIRE(got.has_value());
+                REQUIRE(got->found);
+                REQUIRE(Decode(got->entry.ValueBytes()) == std::format("v-{:04d}", i));
+            }
+        });
+    };
+
+    write();
+    verify();
+    verify();
+    verify();
+}
+
+TEST_CASE("Mixed Set/Update/Delete script replays identically across a mid-script reopen", "[cowstorage][persist]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+
+    // Phase 1: Set 20 keys, update 10 of them, delete 5.
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        for (auto const i: std::views::iota(0, 20))
+            REQUIRE(storage
+                        .Set(std::format("k-{}", i),
+                             MakeBytes(std::format("v0-{}", i)),
+                             0,
+                             core::platform::SteadyTimePoint::max())
+                        .has_value());
+        for (auto const i: std::views::iota(0, 10))
+            REQUIRE(storage
+                        .Set(std::format("k-{}", i),
+                             MakeBytes(std::format("v1-{}", i)),
+                             0,
+                             core::platform::SteadyTimePoint::max())
+                        .has_value());
+        for (auto const i: std::views::iota(15, 20))
+            REQUIRE(storage.Delete(std::format("k-{}", i), clock.now()).has_value());
+    });
+
+    // Phase 2: After reopen, verify the expected state.
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        for (auto const i: std::views::iota(0, 10))
+        {
+            auto got = storage.Get(std::format("k-{}", i), clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(Decode(got->entry.ValueBytes()) == std::format("v1-{}", i));
+        }
+        for (auto const i: std::views::iota(10, 15))
+        {
+            auto got = storage.Get(std::format("k-{}", i), clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(Decode(got->entry.ValueBytes()) == std::format("v0-{}", i));
+        }
+        for (auto const i: std::views::iota(15, 20))
+        {
+            auto got = storage.Get(std::format("k-{}", i), clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE_FALSE(got->found);
+        }
+    });
+}
+
+// ============================================================================
+// Failure modes
+// ============================================================================
+
+TEST_CASE("Open with a non-existent path under an existing directory creates the file", "[cowstorage][open]")
+{
+    // Through the seam, for the reason `StorageTestUtils.hpp`'s `TempFile` records: a
+    // `std::random_device` draw is not unique on the host #1507 was reproduced on.
+    std::filesystem::path const path = Pace::Testing::UniqueScratchPath("cowstorage-mktest").string() + ".cow";
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.path = path;
+        auto storage = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+    REQUIRE(std::filesystem::exists(path));
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("Open on a path holding random non-CowTree bytes returns Corrupt or IoError", "[cowstorage][open]")
+{
+    TempFile tmp;
+    {
+        // Fill the file with random bytes so neither meta slot validates.
+        auto const garbage = RandomBytes(8192, 0xCAFEBABEULL);
+        std::ofstream f { tmp.path, std::ios::binary };
+        REQUIRE(f.good());
+        f.write(reinterpret_cast<char const*>(garbage.data()), static_cast<std::streamsize>(garbage.size()));
+    }
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE_FALSE(storage.has_value());
+    // The exact error code depends on which level rejects the bytes
+    // first; we accept either Corrupt or IoError, both are sane.
+    auto const code = storage.error().code;
+    REQUIRE((code == Pace::StorageErrorCode::Corrupt || code == Pace::StorageErrorCode::IoError));
+}
+
+// ============================================================================
+// What `Corrupt` costs an operator (issue #484)
+//
+// The rules are careful that a store of another VINTAGE never reports
+// `Corrupt`, because `Corrupt` is what makes somebody delete a healthy cache.
+// The missing half was what an operator does when the bytes really are damaged,
+// and the answer turns entirely on WHERE the damage landed: the same code means
+// "this process will not start" in one place and "this process lost some keys"
+// in another. `docs/operations/corrupt-store.md` states both, and these two
+// cases are what stop that page from being prose about behaviour nothing
+// asserts.
+// ============================================================================
+
+namespace
+{
+
+/// A page size small enough that a few hundred small records occupy many pages,
+/// so a per-page damage sweep has more than one leaf to land on. The daemon
+/// runs a 16 KiB page, and at that size the same store would be a handful of
+/// pages and the sweep would prove much less.
+constexpr std::size_t DamagePageSize = CowTree::MinPageSize;
+
+/// How many records the damage sweep writes. Enough that the tree is several
+/// levels of several pages, so damage to one leaf leaves other leaves readable.
+constexpr int DamageRecords = 400;
+
+/// Key `i` of the damage sweep's store.
+/// @param i Record index.
+/// @return A fixed-width key, so every record is the same size.
+[[nodiscard]] std::string DamageKey(int i)
+{
+    return std::format("damage-key-{:04}", i);
+}
+
+/// Read a whole file into memory.
+///
+/// Only the meta-slot case needs this. Data pages are damaged through
+/// `IPageStore::Write`, which is simpler and cannot reach a meta slot by
+/// construction — but a meta slot has no such route, because `WriteMeta`
+/// recomputes the CRC and so cannot express damage at all.
+/// @param path The file to read.
+/// @return Its bytes.
+[[nodiscard]] std::vector<std::byte> ReadWholeFile(std::filesystem::path const& path)
+{
+    std::ifstream f { path, std::ios::binary | std::ios::ate };
+    REQUIRE(f.good());
+    auto const size = static_cast<std::size_t>(f.tellg());
+    f.seekg(0);
+    std::vector<std::byte> bytes(size);
+    f.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    REQUIRE(f.good());
+    return bytes;
+}
+
+/// Replace a file's contents wholesale.
+/// @param path  The file to write.
+/// @param bytes What it should hold afterwards.
+void WriteWholeFile(std::filesystem::path const& path, std::span<std::byte const> bytes)
+{
+    std::ofstream f { path, std::ios::binary | std::ios::trunc };
+    REQUIRE(f.good());
+    f.write(reinterpret_cast<char const*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    REQUIRE(f.good());
+}
+
+/// Open the store file at `path` with the sweep's page size.
+///
+/// Returns the `expected` rather than asserting on it, unlike `WithOpenStorage`
+/// above: whether this store opens at all is the thing under test.
+/// @param path The store file.
+/// @return The opened store, or why it would not open.
+[[nodiscard]] std::expected<std::unique_ptr<Pace::CowTreeStorage>, Pace::StorageError> OpenDamaged(
+    std::filesystem::path const& path,
+    CowTree::FilePageStore::Durability durability = CowTree::FilePageStore::Durability::Batched)
+{
+    // `Batched` is the DEFAULT here rather than a value each caller repeats,
+    // because it decides the SHAPE of the store the meta-slot cases below are
+    // written against -- not merely a property they assert. A case that reopens
+    // a seeded store under another durability passes one explicitly; the seed
+    // always uses this.
+    //
+    // Measured, seeding two sessions of five `Set`s at each durability:
+    //
+    //   Batched  A: txn=11  B: txn=6   -- one slot per generation, parity broken
+    //   Fsync    A: txn=10  B: txn=11  -- BOTH slots inside generation 2
+    //
+    // Every row below reads "the live commit" against "the previous commit", and
+    // an `Fsync` default collapses that into two commits from the same
+    // generation: the damaged-live row then finds four or five generation-2 keys
+    // where it expects none. So the honest reason is not that the fixture would
+    // "stay green" if the default moved -- it would go loudly RED, which an
+    // earlier draft of this comment had backwards. It is that it would be red for
+    // a store nobody meant to build, and stating the durability is what stops the
+    // seed drifting out from under the rows.
+    return Pace::CowTreeStorage::Open({ .path = path, .durability = durability, .pageSize = DamagePageSize });
+}
+
+/// Overwrite data page `id` of `store` with `page`.
+/// @param store The page store.
+/// @param id    The 1-based data page to replace.
+/// @param page  Its new contents.
+void WritePage(CowTree::IPageStore& store, std::uint64_t id, std::span<std::byte const> page)
+{
+    REQUIRE(store.Write(CowTree::PageId { id }, CowTree::BytesView { page.data(), page.size() }).has_value());
+}
+
+} // namespace
+
+TEST_CASE("Damage to both meta pages refuses the store at Open, and refuses it as damage", "[cowstorage][open][corrupt]")
+{
+    TempFile tmp;
+    {
+        auto storage = OpenDamaged(tmp.path);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    // Only the two meta slots. Everything beneath them is left exactly as the
+    // store wrote it, so this is "the store can no longer say what it is" and
+    // not a file that happens to be full of garbage -- which is the case the
+    // test above already covers, and which is allowed to answer `IoError`.
+    auto bytes = ReadWholeFile(tmp.path);
+    REQUIRE(bytes.size() > 2 * DamagePageSize);
+    std::ranges::fill(std::span<std::byte> { bytes }.first(2 * DamagePageSize), std::byte { 0xFF });
+    WriteWholeFile(tmp.path, bytes);
+
+    auto const opened = OpenDamaged(tmp.path);
+    // The process does not start. Both `fastcached` and `fastcache-compile-node`
+    // treat a store that will not open as fatal, which is why the operator page
+    // calls damage here an outage rather than a degradation.
+    //
+    // `Corrupt` exactly, because the two neighbouring codes mean the store is
+    // FINE and must not be reachable from real damage: `UnsupportedFormatVersion`
+    // is a vintage to convert, `MalformedValue` is a client that sent a value
+    // this build cannot parse. Asserting those separately would be a tautology
+    // once the code is known to be `Corrupt`; the cases that hold the line from
+    // the other side are the vintage tests below.
+    REQUIRE_FALSE(opened.has_value());
+    REQUIRE(opened.error().code == Pace::StorageErrorCode::Corrupt);
+
+    // And the `context`, which is the other half of what an operator matches
+    // their console against (#633). `docs/operations/corrupt-store.md` quotes
+    // the whole sentence verbatim -- twice, once per binary -- and until now no
+    // test read this field at all, so a refactor that renamed the context or
+    // dropped it would have left the page confidently describing output nobody
+    // gets, with every test green.
+    REQUIRE(opened.error().context == "FilePageStore::Open");
+
+    // The rendering too, and deliberately as a whole string. Asserting the
+    // fields alone would leave `StorageError::ToString`'s wording free to move
+    // under a page that quotes it, and an operator comparing a console line
+    // against a doc is matching the RENDERING, not the struct. It is a
+    // change-detector, which is what a documented verbatim quote needs: the
+    // page and this literal move together or the change does not land.
+    REQUIRE(opened.error().ToString() == "StorageError(code=Corrupt system=0 context=FilePageStore::Open)");
+}
+
+TEST_CASE("Damage below the meta pages still opens, and costs keys rather than the process", "[cowstorage][open][corrupt]")
+{
+    // `Open` reads the two meta slots and looks up two reserved keys -- the
+    // in-flight-conversion marker and the format marker -- and `Replay()` is
+    // deliberately a no-op, so nothing scans the store. Damage anywhere else is
+    // therefore not found until something reads the page it landed on, and a
+    // node logging `Corrupt` while serving is not the same event as one that
+    // will not start.
+    //
+    // Damage goes in through `IPageStore::Write`, which addresses DATA pages --
+    // the meta slots have accessors of their own and are not reachable from
+    // here at all. So "below the meta pages" is a property of how the fixture
+    // reaches the store, rather than an assumption about byte offsets that
+    // would restate `FilePageStore`'s layout back at it.
+    //
+    // What this fixture does NOT cover, stated so the next reader does not
+    // assume it does: `CowTree::Open` reads only the two meta slots, and the
+    // free-list walk that `FilePageStore::RecoverExistingFile` does at startup
+    // has no `InMemoryPageStore` equivalent, so nothing HERE exercises it. The
+    // `[filestore][freelist]` cases do, on a real file (#580) -- named by tag
+    // and issue rather than by path, since a path is the half of a cross-file
+    // pointer that goes stale on a move, and a comment claiming coverage that
+    // moved is worse than one claiming none.
+    //
+    // Those cases also bound what they prove, and it is less than the operator
+    // page implies: `CowTree::CommitTxn` writes `freeRoot = PageId::None()`
+    // unconditionally, so no store `CowTreeStorage` produces has a chain for
+    // that walk to find. The guard is pinned; the refusal is not one an
+    // operator can reach today.
+    CowTree::InMemoryPageStore store { DamagePageSize };
+    Pace::CowTreeStorage::Options const opts;
+    {
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        for (auto const i: std::views::iota(0, DamageRecords))
+            REQUIRE(
+                (*storage)->Set(DamageKey(i), MakeBytes("value"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    auto const pageCount = store.PageCount();
+    REQUIRE(pageCount > 1);
+
+    // Which page holds which record is not something a test may assume, so the
+    // sweep looks for the case rather than computing where it is: damage each
+    // data page in turn until one leaves the store open and only partly
+    // readable. Pages that carry the marker's own root-to-leaf path refuse at
+    // `Open` instead, and are skipped -- that outcome is the case above.
+    //
+    // The three ways it can fail are different bugs, so the sweep counts them
+    // apart rather than reporting one bare `false`: every page refusing at `Open`
+    // means damage below the metas has become a refusal to start, a page that
+    // opens with nothing corrupt means the damage was not detected at all, and
+    // one that opens with nothing readable means the loss is total rather than
+    // partial.
+    bool partialLoss = false;
+    auto probed = 0;
+    auto refusedAtOpen = 0;
+    auto openedWithNothingCorrupt = 0;
+    auto openedWithNothingReadable = 0;
+    for (auto const id: std::views::iota(std::uint64_t { 1 }, static_cast<std::uint64_t>(pageCount) + 1))
+    {
+        auto const view = store.Read(CowTree::PageId { id });
+        if (!view.has_value())
+            continue;
+        ++probed;
+        std::vector<std::byte> const pristine { view->begin(), view->end() };
+
+        auto damaged = pristine;
+        damaged[damaged.size() / 2] ^= std::byte { 0xFF };
+        WritePage(store, id, damaged);
+
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        if (!storage.has_value())
+        {
+            // A refusal here is skipped rather than asserted on -- but not
+            // silently. `StoredFormatVersion` answers `PreMarkerFormatVersion`
+            // whenever the marker lookup MISSES over a non-empty tree, and that
+            // becomes `UnsupportedFormatVersion`: damage would then tell an
+            // operator their store is a healthy vintage to convert, which is the
+            // "delete a healthy cache" failure running backwards. Today every
+            // damaged page fails its CRC so the lookup errors instead of missing,
+            // and this is what keeps that true.
+            CAPTURE(id);
+            REQUIRE(storage.error().code == Pace::StorageErrorCode::Corrupt);
+            ++refusedAtOpen;
+        }
+        else
+        {
+            core::platform::ManualClock clock;
+            auto corrupt = 0;
+            auto readable = 0;
+            for (auto const i: std::views::iota(0, DamageRecords))
+            {
+                // BOTH halves, and the second is the one that gets forgotten. A
+                // count of corrupt keys alone would pass against a store that had
+                // lost everything -- which is precisely the outcome the operator
+                // page tells somebody they are not necessarily in, and the reason
+                // it says to copy the file before deleting it.
+                if (corrupt > 0 && readable > 0)
+                    break;
+                auto const got = (*storage)->Get(DamageKey(i), clock.now());
+                if (!got.has_value())
+                {
+                    if (got.error().code == Pace::StorageErrorCode::Corrupt)
+                        ++corrupt;
+                }
+                else if (got->found)
+                    ++readable;
+            }
+            partialLoss = corrupt > 0 && readable > 0;
+            if (corrupt == 0)
+                ++openedWithNothingCorrupt;
+            else if (readable == 0)
+                ++openedWithNothingReadable;
+        }
+
+        // Put the page back whatever happened, so the next probe damages one
+        // page rather than accumulating every earlier one.
+        WritePage(store, id, pristine);
+        if (partialLoss)
+            break;
+    }
+    INFO("probed " << probed << " pages: " << refusedAtOpen << " refused at Open, " << openedWithNothingCorrupt
+                   << " opened with no key corrupt, " << openedWithNothingReadable << " opened with no key readable");
+    REQUIRE(partialLoss);
+}
+
+// ============================================================================
+// One damaged meta slot (issue #632)
+//
+// `docs/operations/corrupt-store.md` tells an operator that one damaged meta
+// page is survived SILENTLY: the store keeps two slots and alternates between
+// them, so `Corrupt` at open means BOTH failed. The cases above pin the
+// "both failed" half. This is the other one, and nothing reached it.
+//
+// It needs a real FILE, and that is not a preference. `WriteMeta` encodes and
+// CRCs whatever it is handed, so damaged meta bytes cannot be expressed through
+// the page-store API at all -- an `InMemoryPageStore` reaches them only behind
+// a `FaultPlan`, which is a torn write happening NOW rather than the bytes an
+// operator's file is already sitting on when the process starts. The two are
+// different events and only the second is what the page is about.
+//
+// The byte offsets these cases patch are `Meta.hpp`'s own documented layout
+// ("slot A at offset 0, slot B at offset PageSize"), not a private detail read
+// out of `FilePageStore.cpp` -- and `DamageMetaSlot` asserts the injection
+// landed, in both directions, so a layout that moved fails here rather than
+// quietly damaging nothing.
+//
+// Each of the three claims below was WATCHED refusing, because a guard nobody
+// has seen refuse is not a guard. Measured on `gcc-debug`, one break at a time:
+//
+//   * `RecoverExistingFile` reading its condition as "EITHER slot failed" --
+//     both cases red, at the first `Open`.
+//   * `RecoverExistingFile` recording the DAMAGED slot as the last durable one
+//     -- the first case stays GREEN and only the second goes red, which is the
+//     whole reason the second case exists separately.
+//   * a `std::cerr` line added to the one-surviving-slot recovery path -- only
+//     the silence assertion goes red; every assertion about the store itself
+//     still passes, which is what it is there to say.
+// ============================================================================
+
+namespace
+{
+
+/// Byte the meta damage flips, as an offset inside an encoded meta page.
+///
+/// Derived rather than chosen: it has to land in the CRC'd PAYLOAD, the leading
+/// `MetaEncodedSize - sizeof(u32)` bytes. Half way into the encoded record is
+/// inside the payload for any layout the encoder can grow into, and
+/// `DamageMetaSlot` proves detection for the layout in force rather than
+/// trusting that arithmetic.
+///
+/// It is NOT chosen to avoid the trailing CRC word, which is the tempting
+/// reading and is wrong: `DecodeMeta` recomputes the CRC over the payload and
+/// compares it against the stored word, so flipping the STORED word leaves the
+/// recomputed one unchanged and the mismatch always fires -- measured `Corrupt`
+/// at both ends of it. The region nothing reads is the zero PADDING past
+/// `MetaEncodedSize`, where a flip decodes clean. Said out loud because the next
+/// fixture wanting damage a decoder cannot see would otherwise aim at the CRC.
+constexpr std::size_t MetaDamageOffset = CowTree::MetaEncodedSize / 2;
+
+/// Commit generations the meta-damage fixture writes, one per session.
+///
+/// Two, and not one: a single session leaves the OTHER slot holding the blank
+/// `txnId == 0` meta that `BootstrapNewFile` wrote, so damaging the live slot
+/// would fall back to an EMPTY store and "serves the previous commit" could not
+/// be told from "serves nothing".
+constexpr int MetaDamageGenerations = 2;
+
+/// Keys each generation writes.
+///
+/// More than one so a generation is not represented by a single record: at
+/// `MinPageSize` these are a leaf or two, and a lone key per generation would
+/// make every assertion below rest on which page that one key happened to land
+/// on. Five rather than fifty because the tree shape is not what is under test
+/// here -- the per-page damage sweep above is where that matters.
+constexpr int MetaDamageKeysPerGeneration = 5;
+
+/// Key `i` of generation `gen`.
+/// @param gen Commit generation, 1-based.
+/// @param i   Key index within the generation.
+/// @return A fixed-width key naming both.
+[[nodiscard]] std::string GenerationKey(int gen, int i)
+{
+    return std::format("gen-{}-key-{:02}", gen, i);
+}
+
+/// Human-readable slot name for `INFO`/`CAPTURE`.
+/// @param slot The slot.
+/// @return "A" or "B".
+[[nodiscard]] constexpr std::string_view SlotName(CowTree::MetaSlot slot) noexcept
+{
+    return slot == CowTree::MetaSlot::A ? "A" : "B";
+}
+
+/// The bytes of one meta slot, out of a store file read whole.
+/// @param file  The whole store file.
+/// @param slot  Which slot.
+/// @return A view over that slot's page.
+[[nodiscard]] std::span<std::byte const> SlotBytes(std::span<std::byte const> file, CowTree::MetaSlot slot)
+{
+    REQUIRE(file.size() >= 2 * DamagePageSize);
+    return file.subspan(static_cast<std::size_t>(slot) * DamagePageSize, DamagePageSize);
+}
+
+/// Decode one meta slot out of a store file read whole.
+/// @param file  The whole store file.
+/// @param slot  Which slot.
+/// @return Whatever `DecodeMeta` answered for it.
+[[nodiscard]] std::expected<CowTree::Meta, CowTree::CowTreeError> DecodeSlot(std::span<std::byte const> file,
+                                                                             CowTree::MetaSlot slot)
+{
+    auto const page = SlotBytes(file, slot);
+    return CowTree::DecodeMeta(CowTree::BytesView { page.data(), page.size() });
+}
+
+/// Build a real store file at `path` carrying `MetaDamageGenerations` durable
+/// commit generations, one per session, prove both meta slots ended up holding
+/// a real and DIFFERENT commit, and say which of them holds the newest.
+///
+/// One session per generation because the default `Batched` durability buffers
+/// the meta until a flush boundary, and closing the store is the boundary this
+/// reaches: each session therefore contributes exactly one durable meta, to the
+/// slot the previous one did not use.
+///
+/// It RETURNS the live slot rather than leaving the caller to work it out. Both
+/// callers want it immediately, and the precondition check below has already
+/// read the file and decoded both slots -- so handing the answer back costs
+/// nothing, where returning `void` had every caller re-read the same bytes and
+/// re-run the same two decodes. That is the shape AGENT.md names under #259: a
+/// function that derived the answer, returned none of it, and left its caller
+/// deriving it again.
+///
+/// The tie-break is `>=`, which is what `RecoverExistingFile` and
+/// `CowTree::Open` both spell; the tie itself is unreachable, the two ids being
+/// asserted different immediately above it.
+/// @param path Where to build the store.
+/// @return The slot holding the newest commit.
+[[nodiscard]] CowTree::MetaSlot SeedTwoCommitGenerations(std::filesystem::path const& path)
+{
+    for (auto const gen: std::views::iota(1, MetaDamageGenerations + 1))
+    {
+        auto storage = OpenDamaged(path);
+        REQUIRE(storage.has_value());
+        for (auto const i: std::views::iota(0, MetaDamageKeysPerGeneration))
+            REQUIRE((*storage)
+                        ->Set(GenerationKey(gen, i), MakeBytes("value"), 0, core::platform::SteadyTimePoint::max())
+                        .has_value());
+    }
+
+    // The fixture's own precondition, asserted rather than assumed: two slots,
+    // both valid, holding different commits. Everything below reads "the live
+    // one" and "the previous one" off this, so a seed that produced one usable
+    // slot would make every case beneath it vacuous.
+    auto const file = ReadWholeFile(path);
+    auto const a = DecodeSlot(file, CowTree::MetaSlot::A);
+    auto const b = DecodeSlot(file, CowTree::MetaSlot::B);
+    REQUIRE(a.has_value());
+    REQUIRE(b.has_value());
+    REQUIRE(a->txnId != b->txnId);
+    return a->txnId >= b->txnId ? CowTree::MetaSlot::A : CowTree::MetaSlot::B;
+}
+
+/// Flip one byte inside meta slot `slot` of the closed store file at `path`.
+///
+/// The injection is ASSERTED, both ways: the named slot must stop decoding --
+/// as `Corrupt`, because `DecodeMeta` checks the CRC before magic and version,
+/// so damage never presents as a store of another vintage -- and the other slot
+/// must still decode. A fixture that damaged nothing, or damaged both, would
+/// otherwise pass every case below for the wrong reason.
+/// @param path Store file to damage in place.
+/// @param slot Which meta slot to damage.
+void DamageMetaSlot(std::filesystem::path const& path, CowTree::MetaSlot slot)
+{
+    auto bytes = ReadWholeFile(path);
+    REQUIRE(bytes.size() >= 2 * DamagePageSize);
+    bytes[(static_cast<std::size_t>(slot) * DamagePageSize) + MetaDamageOffset] ^= std::byte { 0xFF };
+    WriteWholeFile(path, bytes);
+
+    auto const after = ReadWholeFile(path);
+    auto const damaged = DecodeSlot(after, slot);
+    REQUIRE_FALSE(damaged.has_value());
+    REQUIRE(damaged.error() == CowTree::CowTreeError::Corrupt);
+    REQUIRE(DecodeSlot(after, CowTree::OtherSlot(slot)).has_value());
+}
+
+/// Redirects `std::cout` and `std::cerr` into buffers of its own for its
+/// lifetime, so a caller can assert that a scope wrote NOTHING.
+///
+/// The operator page says one damaged meta page is survived *silently*, and a
+/// build that opened the store and then complained about it would satisfy every
+/// assertion about the store itself. Nothing in `Cache/` or `CowTree/` takes an
+/// `ILogger` -- a success carries no warning channel, which is the structural
+/// half of "silently" -- so a diagnostic added here would have to be a direct
+/// stream write, and this is what sees one.
+///
+/// What it cannot see, stated rather than left to be assumed: a write through
+/// `std::fprintf(stderr, ...)` or a platform console API. Neither is a spelling
+/// this tree uses -- `ConsoleLogger` takes an `std::ostream&` -- but a guard is
+/// worth exactly what it can observe.
+class CapturedStreams
+{
+  public:
+    CapturedStreams():
+        _outWas { std::cout.rdbuf(_out.rdbuf()) },
+        _errWas { std::cerr.rdbuf(_err.rdbuf()) }
+    {
+    }
+
+    ~CapturedStreams()
+    {
+        std::cout.rdbuf(_outWas);
+        std::cerr.rdbuf(_errWas);
+    }
+
+    CapturedStreams(CapturedStreams const&) = delete;
+    CapturedStreams& operator=(CapturedStreams const&) = delete;
+    CapturedStreams(CapturedStreams&&) = delete;
+    CapturedStreams& operator=(CapturedStreams&&) = delete;
+
+    /// @return Everything written to either stream so far.
+    [[nodiscard]] std::string Captured() const
+    {
+        return _out.str() + _err.str();
+    }
+
+  private:
+    // Declared before the saved buffers: the constructor's member-init list
+    // hands `_out.rdbuf()` to `std::cout` while initialising `_outWas`, and a
+    // half-constructed stream would be what it installed.
+    std::ostringstream _out;
+    std::ostringstream _err;
+    std::streambuf* _outWas;
+    std::streambuf* _errWas;
+};
+
+} // namespace
+
+TEST_CASE("One damaged meta slot leaves the store open, silent, and on the surviving slot's commit",
+          "[cowstorage][open][corrupt][meta]")
+{
+    /// One row of the table below.
+    struct MetaDamageRow
+    {
+        bool damageLive;               ///< Damage the slot holding the NEWEST commit, not the older one.
+        int highestReadableGeneration; ///< Generations 1..this stay readable; anything above is gone.
+        std::string_view what;         ///< What the row is about, for `INFO`.
+    };
+
+    // Two rows rather than one, because they fail differently and only the pair
+    // says the SURVIVING slot was chosen. Damage the live slot alone and a build
+    // that always picked the older valid slot would pass; damage the stale slot
+    // alone and one that always picked the newer would. Neither is a strawman --
+    // both are one comparison operator away from what `RecoverExistingFile` and
+    // `CowTree::Open` each write out separately.
+    //
+    // `highestReadableGeneration` is stated rather than derived from
+    // `damageLive`. The formula is trivial, and that is the problem: deriving
+    // the expectation from the discriminator makes the assertion agree with
+    // itself whatever the code does.
+    auto const rows = std::vector<MetaDamageRow> {
+        { .damageLive = false,
+          .highestReadableGeneration = MetaDamageGenerations,
+          .what = "the stale slot is damaged: the newest commit still serves, whole" },
+        { .damageLive = true,
+          .highestReadableGeneration = MetaDamageGenerations - 1,
+          .what = "the live slot is damaged: the store falls back to the previous commit" },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(row.what);
+        TempFile tmp;
+        auto const live = SeedTwoCommitGenerations(tmp.path);
+        auto const damaged = row.damageLive ? live : CowTree::OtherSlot(live);
+        CAPTURE(SlotName(damaged));
+        DamageMetaSlot(tmp.path, damaged);
+
+        // Only the open is inside the capture. A Catch2 assertion failing in
+        // here would write its own report into the buffers and lose it.
+        std::string said;
+        auto opened = [&] {
+            CapturedStreams const quiet;
+            auto result = OpenDamaged(tmp.path);
+            said = quiet.Captured();
+            return result;
+        }();
+
+        // The process starts. This is the whole claim: `Corrupt` at open means
+        // BOTH slots failed, and one is not both.
+        REQUIRE(opened.has_value());
+        REQUIRE(said.empty());
+
+        core::platform::ManualClock clock;
+        for (auto const gen: std::views::iota(1, MetaDamageGenerations + 1))
+        {
+            for (auto const i: std::views::iota(0, MetaDamageKeysPerGeneration))
+            {
+                CAPTURE(gen, i);
+                auto const got = (*opened)->Get(GenerationKey(gen, i), clock.now());
+                // A key from a commit the surviving slot never saw is a MISS,
+                // not a failure: the store is internally consistent, it is just
+                // consistent with an earlier moment. Reporting `Corrupt` for it
+                // would tell an operator the bytes under that key are damaged
+                // when the key was simply never committed in this view -- and
+                // `Corrupt` is what makes somebody delete a healthy cache.
+                REQUIRE(got.has_value());
+                REQUIRE(got->found == (gen <= row.highestReadableGeneration));
+            }
+        }
+    }
+}
+
+TEST_CASE("Recovering onto the surviving meta slot does not spend it", "[cowstorage][open][corrupt][meta]")
+{
+    // A store opened on one surviving slot is one torn write from unopenable,
+    // and which slot the next commit lands on is what decides whether it stays
+    // that way or stops being recoverable altogether. The alternation has to
+    // move AWAY from the slot it recovered from -- which is the same invariant
+    // `FlushBatchLocked` maintains in normal running, asked of the one state
+    // where getting it wrong is unrecoverable rather than merely wasteful.
+    //
+    // Every case above stops at "the store opened", and a build that recovered
+    // correctly and then overwrote the good slot passes all of them.
+    //
+    // NOT scoped to a durability any more, and the un-scoping IS the #726
+    // regression test. It used to be `Batched`-only for a reason that turned out
+    // to be a defect rather than a design: under `Fsync` the slot came from
+    // `CowTree::CommitTxn`'s `txnId % 2`, which consulted nothing recovery had
+    // recorded, so a store whose parity an ordinary `Batched` run had broken --
+    // which is every store a daemon writes -- had its SURVIVING slot overwritten
+    // by the first commit after a degraded start. Measured then: one valid slot
+    // where `Batched` left two.
+    //
+    // The alternation now belongs to the page store on every path, so both
+    // durabilities are asserted here. A regression re-scopes the property by
+    // turning a row RED rather than by quietly narrowing a comment, which is
+    // what the `Batched`-only version had already done once.
+    // `--storage-durability=fsync` is operator-selectable, which is what made
+    // this reachable in production rather than only in a fixture.
+    //
+    // **What "spent" means, and why the survivor may still change by the close.**
+    // The hazard is the FIRST meta write after the degraded open: it is the only one
+    // made while the survivor is the file's only good meta, so it must go to the
+    // damaged slot. Since #1624 a clean close may write ONE more -- the restate of
+    // `~FilePageStore`, which names the frees a commit makes after its own meta --
+    // and that one alternates onto the survivor's slot as every write does. Whether
+    // that is safe is a question PER DURABILITY, because it rests on the commit being
+    // DURABLE in the damaged slot before the restate overwrites the survivor:
+    //   - `Fsync`: the commit's meta is fsynced in the damaged slot before the close
+    //     runs, so a torn restate still leaves a valid meta standing. Not a spend.
+    //     And it runs: the commit's frees reach no list but the restate's.
+    //   - `Batched`: the close flushes the frees with its ONE meta, into the damaged
+    //     slot, and does not restate, so the survivor is never written at all.
+    //   - `None`: syncs nothing, so none of this is promised -- that is the decision
+    //     `.agent/rules/storage.md` records for `None` and a power loss (such a store
+    //     can be refused `Corrupt`). There is no `None` row, and no claim for it here.
+    // Which a row does is stated, never derived, and the assertions below tell the two
+    // writes apart by `txnId`: the commit is the survivor's id plus one, a restate the
+    // commit's plus one with its root -- so a build that put the commit on the
+    // survivor fails either way.
+    /// One row: what the REOPEN uses. The seed is always `Batched`, because that
+    /// is what leaves the one-slot-per-generation shape -- and what an ordinary
+    /// daemon leaves behind.
+    struct DurabilityRow
+    {
+        CowTree::FilePageStore::Durability durability; ///< What the reopen uses.
+        bool closeRestates;                            ///< Whether the close writes a second meta.
+        std::string_view what;                         ///< Which one, for `INFO`.
+    };
+    auto const durabilities = std::vector<DurabilityRow> {
+        { .durability = CowTree::FilePageStore::Durability::Batched, .closeRestates = false, .what = "reopened Batched" },
+        { .durability = CowTree::FilePageStore::Durability::Fsync, .closeRestates = true, .what = "reopened Fsync (#726)" },
+    };
+
+    for (auto const& durabilityRow: durabilities)
+    {
+        for (auto const damageLive: { false, true })
+        {
+            INFO(durabilityRow.what);
+            INFO((damageLive ? "the live slot was the damaged one" : "the stale slot was the damaged one"));
+            TempFile tmp;
+            auto const live = SeedTwoCommitGenerations(tmp.path);
+            auto const damaged = damageLive ? live : CowTree::OtherSlot(live);
+            auto const survivor = CowTree::OtherSlot(damaged);
+            CAPTURE(SlotName(damaged));
+            DamageMetaSlot(tmp.path, damaged);
+
+            auto const before = ReadWholeFile(tmp.path);
+            auto const survivorBefore = DecodeSlot(before, survivor);
+            REQUIRE(survivorBefore.has_value());
+            // One span, bound once: taking `begin()` from one temporary and `end()`
+            // from a second is well-defined here and is still a shape this file was
+            // just rewritten to stop containing.
+            auto const survivorView = SlotBytes(before, survivor);
+            std::vector<std::byte> const survivorPage { survivorView.begin(), survivorView.end() };
+
+            {
+                // Seeded `Batched` above -- so under the `Fsync` row this is exactly
+                // the mixed sequence #726 was about: a store an ordinary daemon
+                // wrote, reopened with the durability an operator picks for safety.
+                auto storage = OpenDamaged(tmp.path, durabilityRow.durability);
+                REQUIRE(storage.has_value());
+                REQUIRE((*storage)
+                            ->Set("after-recovery", MakeBytes("value"), 0, core::platform::SteadyTimePoint::max())
+                            .has_value());
+            }
+
+            auto const after = ReadWholeFile(tmp.path);
+
+            // The commit landed in the slot that was already damaged, and it is the
+            // FIRST write after the one recovery stood on: exactly one past it.
+            // Without this a build that wrote no meta at all would pass.
+            auto const repaired = DecodeSlot(after, damaged);
+            REQUIRE(repaired.has_value());
+            REQUIRE(repaired->txnId == survivorBefore->txnId + 1);
+
+            auto const survivorAfter = SlotBytes(after, survivor);
+            if (!durabilityRow.closeRestates)
+            {
+                // Byte-for-byte, not "still decodes": a slot rewritten with an equally
+                // valid meta would decode fine and would still have been the one spent.
+                REQUIRE(std::ranges::equal(survivorPage, survivorAfter));
+            }
+            else
+            {
+                // Rewritten, and only AFTER the damaged slot held the commit: a
+                // restatement of it, one id later, over the same root. A build that
+                // wrote the commit onto the survivor leaves the damaged slot one
+                // id higher than this instead, and fails the assertion above.
+                auto const restated = DecodeSlot(after, survivor);
+                REQUIRE(restated.has_value());
+                REQUIRE(restated->txnId == repaired->txnId + 1);
+                REQUIRE(restated->root == repaired->root);
+                // A restatement and nothing else: the world it names is the commit's.
+                REQUIRE(restated->itemCount == repaired->itemCount);
+                REQUIRE(restated->keyBytes == repaired->keyBytes);
+                REQUIRE(restated->valueBytes == repaired->valueBytes);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// On-disk format vintage (issue #131)
+//
+// A store written under another record layout is refused — that part was always
+// right. What these pin down is that the refusal is not spelled `Corrupt`: the
+// code is what monitoring and every programmatic caller sees, and an operator
+// reading "Corrupt" about an intact cache deletes it.
+// ============================================================================
+
+namespace
+{
+
+/// The format-marker key as tree-key bytes.
+///
+/// Taken from `CowTreeStorage::FormatMarkerKey` rather than a second copy of
+/// the magic, so these tests cannot keep passing after the real key moves.
+/// @return A view over the reserved sentinel key.
+[[nodiscard]] CowTree::BytesView FormatMarkerKeyView() noexcept
+{
+    auto const key = Pace::CowTreeStorage::FormatMarkerKey;
+    return CowTree::BytesView { reinterpret_cast<std::byte const*>(key.data()), key.size() };
+}
+
+/// Commit one key/value into a store, over a raw tree that stamps no marker of
+/// its own — the only way to produce a store this build refuses.
+/// @param store Page store to write into (opened/initialised here).
+/// @param key   Tree key.
+/// @param value Tree value.
+void PutRaw(CowTree::IPageStore& store, CowTree::BytesView key, CowTree::BytesView value)
+{
+    CowTree::CowTree tree { store };
+    REQUIRE(tree.Open().has_value());
+    auto txn = tree.BeginWrite();
+    REQUIRE(txn.Put(key, value).has_value());
+    REQUIRE(txn.Commit().has_value());
+}
+
+/// Stamp `version` into a store's format marker.
+///
+/// The four bytes are spelled out least-significant first rather than memcpy'd
+/// from the integer, so the marker this writes is little-endian on a big-endian
+/// host too — the test would otherwise agree with a bug on exactly the hosts the
+/// on-disk format exists to be portable across.
+/// @param store   Page store to write into.
+/// @param version The version to record.
+void StampFormatVersion(CowTree::IPageStore& store, std::uint32_t version)
+{
+    std::array<std::byte, sizeof(std::uint32_t)> const value {
+        static_cast<std::byte>(version & 0xFFU),
+        static_cast<std::byte>((version >> 8) & 0xFFU),
+        static_cast<std::byte>((version >> 16) & 0xFFU),
+        static_cast<std::byte>((version >> 24) & 0xFFU),
+    };
+    PutRaw(store, FormatMarkerKeyView(), CowTree::BytesView { value.data(), value.size() });
+}
+
+} // namespace
+
+TEST_CASE("A store stamped with an unknown format version is refused as a vintage, not as damage",
+          "[cowstorage][open][format]")
+{
+    constexpr auto Future = Pace::CowTreeStorage::CurrentFormatVersion + 1;
+    CowTree::InMemoryPageStore store;
+    StampFormatVersion(store, Future);
+
+    Pace::CowTreeStorage::Options opts;
+    auto const opened = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE_FALSE(opened.has_value());
+    REQUIRE(opened.error().code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+
+    // Both versions named, so an operator can tell which way round it is
+    // without going to the source.
+    auto const& context = opened.error().context;
+    REQUIRE(context.contains(std::format("version {}", Future)));
+    // "writes N", not a bare "N": the digit alone would match anywhere in the
+    // sentence, including the store's own version, so it would keep passing
+    // with the two the wrong way round.
+    REQUIRE(context.contains(std::format("writes {}", Pace::CowTreeStorage::CurrentFormatVersion)));
+    // A newer store is not something this build can convert; say so instead.
+    REQUIRE(context.contains("upgrade"));
+}
+
+TEST_CASE("A non-empty store carrying no format marker is refused as a vintage, not as damage", "[cowstorage][open][format]")
+{
+    // The marker arrived WITH v4, so its absence over a store that already
+    // holds records IS the version stamp: this is a v3 store.
+    CowTree::InMemoryPageStore store;
+    auto const key = std::string_view { "legacy-key" };
+    std::array<std::byte, 4> const record { std::byte { 0 }, std::byte { 1 }, std::byte { 2 }, std::byte { 3 } };
+    PutRaw(store,
+           CowTree::BytesView { reinterpret_cast<std::byte const*>(key.data()), key.size() },
+           CowTree::BytesView { record.data(), record.size() });
+
+    Pace::CowTreeStorage::Options opts;
+    auto const opened = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE_FALSE(opened.has_value());
+    REQUIRE(opened.error().code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+    REQUIRE(opened.error().context.contains("version 3"));
+    // The whole point of the code: nothing here tells the operator to delete it.
+    REQUIRE(opened.error().context.contains("does not need to be deleted"));
+}
+
+TEST_CASE("A format marker too short to hold a version is damage, and keeps saying Corrupt", "[cowstorage][open][format]")
+{
+    // The one case in this area that really IS corruption: there is no version
+    // to report and nothing to convert, so the vintage code would be a lie in
+    // the other direction.
+    CowTree::InMemoryPageStore store;
+    std::array<std::byte, 2> const truncated { std::byte { 4 }, std::byte { 0 } };
+    PutRaw(store, FormatMarkerKeyView(), CowTree::BytesView { truncated.data(), truncated.size() });
+
+    Pace::CowTreeStorage::Options opts;
+    auto const opened = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE_FALSE(opened.has_value());
+    REQUIRE(opened.error().code == Pace::StorageErrorCode::Corrupt);
+
+    // And NOT the code #296 introduced. That ticket split "a client sent bytes that
+    // are not a well-formed value" out of `Corrupt`, and the easy way to get it wrong
+    // is to widen the new code until real damage stops reporting as damage -- which
+    // is worse than the bug, because this is the one condition where telling an
+    // operator the store is broken is the correct thing to do.
+    REQUIRE(opened.error().code != Pace::StorageErrorCode::MalformedValue);
+}
+
+// ============================================================================
+// Converting a store of an older vintage (issue #131)
+// ============================================================================
+
+namespace
+{
+
+/// Read a little-endian integer of `Width` bytes at `offset`.
+/// @param bytes Source.
+/// @param offset Byte offset.
+/// @return The value, host order.
+template <std::size_t Width>
+[[nodiscard]] std::uint64_t LoadLe(CowTree::BytesView bytes, std::size_t offset)
+{
+    std::uint64_t value = 0;
+    for (auto const i: std::views::iota(std::size_t { 0 }, Width))
+        value |= static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(bytes[offset + i])) << (8U * i);
+    return value;
+}
+
+/// Append a little-endian integer of `Width` bytes.
+/// @param out Destination.
+/// @param value The value, host order.
+template <std::size_t Width>
+void AppendLe(std::vector<std::byte>& out, std::uint64_t value)
+{
+    for (auto const i: std::views::iota(std::size_t { 0 }, Width))
+        out.push_back(static_cast<std::byte>((value >> (8U * i)) & 0xFFU));
+}
+
+/// Bytes of the leaf-record header both v3 and v4 carry, between the kind tag
+/// (plus v4's codec byte) and the length fields: flags, cas, expiry,
+/// generation, lastAccess, stale.
+constexpr std::size_t CommonHeaderBytes = 4 + 8 + 8 + 8 + 8 + 1;
+
+/// Rewrite one current-format leaf record as the v3 layout it would have had.
+///
+/// v3 is v4 minus the codec byte and minus every original-length field. The
+/// test only reverses THAT, and never touches the overflow page format — which
+/// v3 and v4 share — so the chains a downgraded store points at are the ones
+/// the production writer laid down rather than a second implementation of them.
+///
+/// Only meaningful for an uncompressed record, which is why the callers open
+/// with `CompressionCodec::Identity`: v3 had no codec field because it never
+/// compressed anything, so a compressed record has no v3 spelling at all.
+/// @param v4 The record as the current encoder wrote it.
+/// @return The same record under format v3.
+[[nodiscard]] std::vector<std::byte> DowngradeRecordToV3(CowTree::BytesView v4)
+{
+    REQUIRE(v4.size() > 2 + CommonHeaderBytes);
+    auto const kind = std::to_integer<std::uint8_t>(v4[0]);
+    REQUIRE(std::to_integer<std::uint8_t>(v4[1]) == static_cast<std::uint8_t>(Pace::CompressionCodec::Identity));
+
+    std::vector<std::byte> out;
+    out.push_back(v4[0]);
+    // The common header is copied verbatim: identical fields, identical order.
+    auto const common = v4.subspan(2, CommonHeaderBytes);
+    out.insert(out.end(), common.begin(), common.end());
+
+    auto const tail = 2 + CommonHeaderBytes;
+    if (kind == 0) // inline
+    {
+        auto const storedLen = LoadLe<4>(v4, tail);
+        REQUIRE(LoadLe<4>(v4, tail + 4) == storedLen); // Identity: original == stored
+        AppendLe<4>(out, storedLen);
+        auto const value = v4.subspan(tail + 8, static_cast<std::size_t>(storedLen));
+        out.insert(out.end(), value.begin(), value.end());
+        return out;
+    }
+
+    // overflow: v4 is [u64 stored][u64 original][u64 root], v3 [u64 len][u64 root].
+    auto const storedLen = LoadLe<8>(v4, tail);
+    REQUIRE(LoadLe<8>(v4, tail + 8) == storedLen);
+    AppendLe<8>(out, storedLen);
+    AppendLe<8>(out, LoadLe<8>(v4, tail + 16));
+    return out;
+}
+
+/// Turn a current-format store into a genuine v3 one: every leaf record
+/// rewritten under the old layout, and the version marker removed — which is
+/// exactly the shape a build from before the marker existed left behind.
+/// @param store The store to rewrite in place.
+void DowngradeStoreToV3(CowTree::IPageStore& store,
+                        std::size_t leaveConverted = 0,
+                        std::uint32_t targetVersion = Pace::CowTreeStorage::CurrentFormatVersion)
+{
+    CowTree::CowTree tree { store };
+    REQUIRE(tree.Open().has_value());
+
+    std::vector<std::vector<std::byte>> keys;
+    std::vector<std::pair<std::vector<std::byte>, std::vector<std::byte>>> rewritten;
+    {
+        auto const reader = tree.BeginRead();
+        REQUIRE(reader
+                    .ForEach([&](CowTree::BytesView key, CowTree::BytesView value) {
+                        if (std::ranges::equal(key, FormatMarkerKeyView()))
+                            return true;
+                        keys.emplace_back(key.begin(), key.end());
+                        // The first `leaveConverted` keys stay in the current
+                        // layout: together with the progress marker the caller
+                        // plants, that is precisely the shape an interrupted
+                        // conversion leaves behind.
+                        if (keys.size() > leaveConverted)
+                            rewritten.emplace_back(std::vector<std::byte> { key.begin(), key.end() },
+                                                   DowngradeRecordToV3(value));
+                        return true;
+                    })
+                    .has_value());
+    }
+    REQUIRE_FALSE(rewritten.empty());
+
+    auto txn = tree.BeginWrite();
+    for (auto const& [key, record]: rewritten)
+        REQUIRE(txn.Put(CowTree::BytesView { key.data(), key.size() }, CowTree::BytesView { record.data(), record.size() })
+                    .has_value());
+    auto const erased = txn.Erase(FormatMarkerKeyView());
+    REQUIRE(erased.has_value());
+    REQUIRE(*erased);
+    REQUIRE(txn.Commit().has_value());
+
+    if (leaveConverted != 0)
+    {
+        REQUIRE(leaveConverted <= keys.size());
+        std::vector<std::byte> value;
+        AppendLe<4>(value, 3);             // fromVersion
+        AppendLe<4>(value, targetVersion); // toVersion
+        auto const& lastConverted = keys[leaveConverted - 1];
+        value.insert(value.end(), lastConverted.begin(), lastConverted.end());
+
+        auto marker = tree.BeginWrite();
+        auto const key = Pace::CowTreeStorage::MigrationMarkerKey;
+        REQUIRE(marker
+                    .Put(CowTree::BytesView { reinterpret_cast<std::byte const*>(key.data()), key.size() },
+                         CowTree::BytesView { value.data(), value.size() })
+                    .has_value());
+        REQUIRE(marker.Commit().has_value());
+    }
+}
+
+/// The overflow-chain head the current-format record under `key` names, or
+/// nullopt when that record stores its value inline.
+///
+/// Read straight off the leaf record rather than inferred from page counts,
+/// because "the chain is reused in place" is the specific claim under test and
+/// a page total can be right for the wrong reason — freed leaf pages get
+/// recycled, so a rebuilt chain need not grow the file at all.
+/// @param store The store to read.
+/// @param key   The cache key.
+/// @return The chain head page id, or nullopt for an inline record.
+[[nodiscard]] std::optional<std::uint64_t> OverflowRootOf(CowTree::IPageStore& store, std::string_view key)
+{
+    CowTree::CowTree tree { store };
+    REQUIRE(tree.Open().has_value());
+    auto const reader = tree.BeginRead();
+    auto const got = reader.Get(CowTree::AsBytes(key));
+    REQUIRE(got.has_value());
+    REQUIRE(got->has_value());
+
+    // Through Unwrap: clang-tidy cannot see the REQUIRE above as a guard, and
+    // the dereference it DOES understand lives in there.
+    auto const& stored = Pace::Testing::Unwrap(*got);
+    auto const raw = CowTree::BytesView { stored.data(), stored.size() };
+    if (std::to_integer<std::uint8_t>(raw[0]) != 1) // RecordKindOverflow
+        return std::nullopt;
+    return LoadLe<8>(raw, 2 + CommonHeaderBytes + 16);
+}
+
+} // namespace
+
+TEST_CASE("A v3 store converts in place, and every entry survives it", "[cowstorage][format][migrate]")
+{
+    // 4 KiB pages put the inline limit at 1 KiB, so the samples straddle it on
+    // purpose: the small ones exercise the inline record rewrite and the large
+    // ones the overflow descriptor, whose whole claim is that the chain it
+    // names is reused rather than rebuilt.
+    CowTree::InMemoryPageStore store { 4096 };
+
+    struct Sample
+    {
+        std::string key;
+        std::size_t size;
+        std::uint32_t flags;
+    };
+    auto const samples = std::vector<Sample> {
+        { .key = "inline-tiny", .size = 8, .flags = 1 },
+        { .key = "inline-near-limit", .size = 900, .flags = 7 },
+        { .key = "overflow-one-page", .size = 5000, .flags = 3 },
+        { .key = "overflow-many-pages", .size = 40000, .flags = 42 },
+    };
+
+    std::map<std::string, std::vector<std::byte>> written;
+    {
+        Pace::CowTreeStorage::Options opts;
+        // v3 never compressed anything, so a store that is to be downgraded
+        // must not have.
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        // Indexed by hand rather than with `std::views::enumerate`, which Apple
+        // clang's libc++ does not carry -- and which nothing else in this tree
+        // uses, so the one caller is not worth the portability.
+        for (auto const index: std::views::iota(std::size_t { 0 }, samples.size()))
+        {
+            auto const& sample = samples[index];
+            auto bytes = RandomBytes(sample.size, 0xA5A5ULL + index);
+            REQUIRE((*storage)->Set(sample.key, bytes, sample.flags, core::platform::SteadyTimePoint::max()).has_value());
+            written.emplace(sample.key, std::move(bytes));
+        }
+    }
+
+    // Captured before anything is rewritten, so the assertion at the end can
+    // name the very pages the chains started on.
+    std::map<std::string, std::optional<std::uint64_t>> rootsBefore;
+    for (auto const& sample: samples)
+        rootsBefore.emplace(sample.key, OverflowRootOf(store, sample.key));
+    REQUIRE(rootsBefore.at("overflow-many-pages").has_value());
+
+    DowngradeStoreToV3(store);
+
+    // Precondition for the whole test: it really is refused now.
+    {
+        Pace::CowTreeStorage::Options opts;
+        auto const refused = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE_FALSE(refused.has_value());
+        REQUIRE(refused.error().code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+    }
+
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE(report.has_value());
+    REQUIRE(report->fromVersion == 3);
+    REQUIRE(report->toVersion == Pace::CowTreeStorage::CurrentFormatVersion);
+    REQUIRE(report->recordsConverted == samples.size());
+
+    Pace::CowTreeStorage::Options opts;
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+
+    core::platform::ManualClock clock;
+    for (auto const& sample: samples)
+    {
+        auto const got = (*storage)->Get(sample.key, clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Pace::Testing::ValueOf(got->entry) == written.at(sample.key));
+        REQUIRE(got->entry.flags == sample.flags);
+    }
+
+    // The conversion rewrites leaf records, never value pages. Every chain must
+    // still start on the page it started on — a rebuilt chain would round-trip
+    // the data just as well and quietly cost a second copy of every large
+    // value, which is the difference between converting a 50 GB cache and
+    // needing 100 GB to do it.
+    for (auto const& sample: samples)
+        REQUIRE(OverflowRootOf(store, sample.key) == rootsBefore.at(sample.key));
+}
+
+TEST_CASE("An interrupted conversion is refused by name rather than mis-parsed", "[cowstorage][format][migrate]")
+{
+    // A part-converted store has no single format version: some records are the
+    // new layout and the marker still names the old one. Reading it under
+    // either would be wrong, so it says what actually happened instead.
+    CowTree::InMemoryPageStore store { 4096 };
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        for (auto const i: std::views::iota(0, 6))
+            REQUIRE((*storage)
+                        ->Set(std::format("key-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max())
+                        .has_value());
+    }
+    DowngradeStoreToV3(store, 2);
+
+    Pace::CowTreeStorage::Options opts;
+    auto const refused = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE_FALSE(refused.has_value());
+    REQUIRE(refused.error().code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+    REQUIRE(refused.error().context.contains("interrupted"));
+    // And it must not read as advice to delete the store, which is the whole
+    // point of the code.
+    REQUIRE(refused.error().context.contains("does not need to be deleted"));
+}
+
+TEST_CASE("A conversion another build started is never picked up", "[cowstorage][format][migrate]")
+{
+    // The failure this marker records a target version to prevent. A newer build
+    // interrupted part-way from 4 to 5 leaves a store whose FORMAT marker still
+    // says 4 -- so an older build reading only the source version would find a
+    // vintage it can read, "resume", re-encode the tail 4-to-4, and stamp the
+    // whole store as 4 over a prefix that is really 5. That is precisely the
+    // silent mis-parse the version marker exists to prevent, reached through the
+    // machinery meant to prevent it.
+    constexpr auto Future = Pace::CowTreeStorage::CurrentFormatVersion + 1;
+
+    CowTree::InMemoryPageStore store { 4096 };
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        for (auto const i: std::views::iota(0, 6))
+            REQUIRE((*storage)
+                        ->Set(std::format("key-{}", i), MakeBytes("v"), 0, core::platform::SteadyTimePoint::max())
+                        .has_value());
+    }
+    DowngradeStoreToV3(store, 2, Future);
+
+    auto const pagesBefore = store.PageCount();
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE_FALSE(report.has_value());
+    REQUIRE(report.error().error.code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+    REQUIRE(report.error().error.context.contains("finish it with the build that started it"));
+    // A decision, not a failure: the conversion had not begun rewriting, and a re-run gets the same
+    // answer, so its operator's exit says do not retry.
+    CHECK_FALSE(report.error().rewriting);
+    CHECK_FALSE(report.error().Transient());
+    // Refused without writing: the check happens before the first slice opens a
+    // transaction.
+    REQUIRE(store.PageCount() == pagesBefore);
+
+    // And Open says the same thing rather than the resumable-here message.
+    Pace::CowTreeStorage::Options opts;
+    auto const refused = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE_FALSE(refused.has_value());
+    REQUIRE(refused.error().context.contains("finish it with the build that started it"));
+}
+
+TEST_CASE("Resuming converts only what is left, and never the same record twice", "[cowstorage][format][migrate]")
+{
+    // Converting an already-converted record would read a v4 record with the v3
+    // reader: it would parse (the layouts overlap) and silently produce wrong
+    // flags and a wrong value length. The value assertions below are what catch
+    // that, so this test fails loudly if the resume point is off by one.
+    constexpr int Total = 6;
+    constexpr std::size_t AlreadyDone = 2;
+
+    CowTree::InMemoryPageStore store { 4096 };
+    std::map<std::string, std::vector<std::byte>> written;
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        for (auto const i: std::views::iota(0, Total))
+        {
+            auto const key = std::format("key-{}", i);
+            auto bytes = RandomBytes(64 + static_cast<std::size_t>(i), 0xBEEFULL + static_cast<std::uint64_t>(i));
+            REQUIRE((*storage)
+                        ->Set(key, bytes, static_cast<std::uint32_t>(i) + 1, core::platform::SteadyTimePoint::max())
+                        .has_value());
+            written.emplace(key, std::move(bytes));
+        }
+    }
+    DowngradeStoreToV3(store, AlreadyDone);
+
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE(report.has_value());
+    REQUIRE(report->resumed);
+    REQUIRE(report->fromVersion == 3);
+    REQUIRE(report->recordsConverted == Total - AlreadyDone);
+
+    Pace::CowTreeStorage::Options opts;
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, Total))
+    {
+        auto const key = std::format("key-{}", i);
+        auto const got = (*storage)->Get(key, clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(Pace::Testing::ValueOf(got->entry) == written.at(key));
+        REQUIRE(got->entry.flags == static_cast<std::uint32_t>(i) + 1);
+    }
+}
+
+TEST_CASE("A conversion killed part-way finishes correctly on a re-run", "[cowstorage][format][migrate]")
+{
+    // The end-to-end property the slicing exists to preserve: whatever write
+    // fails and wherever it fails, running the conversion again produces a
+    // store in which every entry is intact. Driven through the page store's
+    // fault injection rather than by hand, so the interrupted state is one the
+    // real code path actually produces.
+    constexpr int Total = 2500; // more than MigrationChunkRecords, so it slices
+
+    for (auto const failAt: { std::size_t { 300 }, std::size_t { 3000 }, std::size_t { 9000 } })
+    {
+        CowTree::InMemoryPageStore store { 4096 };
+        std::map<std::string, std::vector<std::byte>> written;
+        {
+            Pace::CowTreeStorage::Options opts;
+            opts.compression = Pace::CompressionCodec::Identity;
+            auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+            REQUIRE(storage.has_value());
+            for (auto const i: std::views::iota(0, Total))
+            {
+                auto const key = std::format("key-{:05d}", i);
+                auto bytes = MakeBytes(std::format("value-{}", i));
+                REQUIRE((*storage)
+                            ->Set(key, bytes, static_cast<std::uint32_t>(i), core::platform::SteadyTimePoint::max())
+                            .has_value());
+                written.emplace(key, std::move(bytes));
+            }
+        }
+        DowngradeStoreToV3(store);
+
+        CowTree::InMemoryPageStore::FaultPlan plan;
+        plan.failNthWrite = failAt;
+        store.SetFaultPlan(plan);
+        // It may fail or (if the store needed fewer writes than that) succeed;
+        // either way the store must end up correct after the retry below.
+        std::ignore = Pace::CowTreeStorage::MigrateStore(store);
+
+        store.SetFaultPlan(CowTree::InMemoryPageStore::FaultPlan {});
+        auto const retry = Pace::CowTreeStorage::MigrateStore(store);
+        INFO("failAt=" << failAt);
+        REQUIRE(retry.has_value());
+
+        Pace::CowTreeStorage::Options opts;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        core::platform::ManualClock clock;
+        for (auto const i: std::views::iota(0, Total))
+        {
+            auto const key = std::format("key-{:05d}", i);
+            auto const got = (*storage)->Get(key, clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(Pace::Testing::ValueOf(got->entry) == written.at(key));
+            REQUIRE(std::cmp_equal(got->entry.flags, i));
+        }
+    }
+}
+
+TEST_CASE("A conversion that stops part-way says it had begun rewriting", "[cowstorage][format][migrate][exit]")
+{
+    // The other half of the refusals above: a write that fails once the conversion has left its
+    // read-only passes has left the store part-way, and that is what an operator's exit code turns
+    // on -- `Failed`, where a refusal before rewriting is `Declined`. Driven through the page store's
+    // fault injection, as the part-way case above is, so the stop is one the real path produces.
+    //
+    // The FIRST write fails, so the stop is certain rather than depending on how many writes the
+    // conversion happens to need -- and every write is past the read-only passes, which is the
+    // boundary asserted.
+    constexpr int Total = 200;
+    CowTree::InMemoryPageStore store { 4096 };
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        for (auto const i: std::views::iota(0, Total))
+            REQUIRE((*storage)
+                        ->Set(std::format("key-{:05d}", i),
+                              MakeBytes(std::format("value-{}", i)),
+                              static_cast<std::uint32_t>(i),
+                              core::platform::SteadyTimePoint::max())
+                        .has_value());
+    }
+    DowngradeStoreToV3(store);
+
+    // The store counts its writes from construction, and populating it made plenty: counted afresh,
+    // so the ONE the plan names is the conversion's own first.
+    store.ResetCounters();
+    CowTree::InMemoryPageStore::FaultPlan plan;
+    plan.failNthWrite = 1;
+    store.SetFaultPlan(plan);
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE_FALSE(report.has_value());
+    CHECK(report.error().rewriting);
+    CHECK(report.error().Transient());
+}
+
+TEST_CASE("A conversion that cannot find its store is transient, and one held by another process is a decision",
+          "[cowstorage][format][migrate][exit]")
+{
+    // Both refused before rewriting anything, and a script reads them differently: a path that is not
+    // there -- a mount not back yet -- may be there on a re-run, while a store another process holds
+    // is a decision to act on, not to retry into (the lock is exclusive for the holder's lifetime).
+    TempFile missingFile; // named and never created: `TempFile` removes its path, and nothing opens it
+    Pace::CowTreeStorage::Options absent;
+    absent.path = missingFile.path;
+    auto const missing = Pace::CowTreeStorage::Migrate(absent);
+    REQUIRE_FALSE(missing.has_value());
+    CHECK(missing.error().error.code == Pace::StorageErrorCode::IoError);
+    CHECK_FALSE(missing.error().rewriting);
+    CHECK(missing.error().Transient());
+
+    TempFile heldFile;
+    Pace::CowTreeStorage::Options held;
+    held.path = heldFile.path;
+    auto holder = Pace::CowTreeStorage::Open(held);
+    REQUIRE(holder.has_value());
+    auto const busy = Pace::CowTreeStorage::Migrate(held);
+    REQUIRE_FALSE(busy.has_value());
+    CHECK(busy.error().error.code == Pace::StorageErrorCode::InUse);
+    CHECK_FALSE(busy.error().rewriting);
+    CHECK_FALSE(busy.error().Transient());
+}
+
+TEST_CASE("Converting a store costs a slice of headroom, not a multiple of the store", "[cowstorage][format][migrate]")
+{
+    // The reason the conversion commits in slices at all. One transaction over
+    // the whole store allocates a page per record per tree level and can reuse
+    // none of them until it commits -- and since `CommitTxn` writes
+    // `freeRoot = PageId::None()`, that growth is not reclaimable by the next
+    // process either. Slicing bounds it: each slice returns its replaced pages
+    // to the free list and the next one allocates out of that.
+    //
+    // Asserted as a SHAPE rather than a number, because that is the actual
+    // claim. Quadrupling the records must not quadruple the growth: whatever
+    // the conversion costs, it costs about a slice, and a slice is a constant.
+    // Measured on real files, opened fresh for the conversion exactly as the
+    // tool does -- an in-memory store carries a warm free list that hides the
+    // whole effect.
+    auto const growthFor = [](int total) {
+        TempFile tmp;
+        Pace::CowTreeStorage::Options opts;
+        opts.path = tmp.path;
+        opts.pageSize = 512; // small pages keep the fixture's files small
+        opts.compression = Pace::CompressionCodec::Identity;
+
+        std::map<std::string, std::vector<std::byte>> written;
+        {
+            auto storage = Pace::CowTreeStorage::Open(opts);
+            REQUIRE(storage.has_value());
+            for (auto const i: std::views::iota(0, total))
+            {
+                auto const key = std::format("key-{:05d}", i);
+                auto bytes = MakeBytes(std::format("value-{}", i));
+                REQUIRE((*storage)->Set(key, bytes, 0, core::platform::SteadyTimePoint::max()).has_value());
+                written.emplace(key, std::move(bytes));
+            }
+        }
+        {
+            auto pageStore = CowTree::FilePageStore::Open(CowTree::FilePageStore::Options { .path = tmp.path });
+            REQUIRE(pageStore.has_value());
+            DowngradeStoreToV3(**pageStore);
+        }
+
+        auto const before = std::filesystem::file_size(tmp.path);
+        auto const report = Pace::CowTreeStorage::Migrate(opts);
+        REQUIRE(report.has_value());
+        REQUIRE(std::cmp_equal(report->recordsConverted, total));
+        auto const after = std::filesystem::file_size(tmp.path);
+
+        // ...and it converted everything, which is the other half of the claim:
+        // a conversion that grew by nothing because it did nothing is not the
+        // property under test.
+        auto storage = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(storage.has_value());
+        core::platform::ManualClock clock;
+        for (auto const& [key, value]: written)
+        {
+            auto const got = (*storage)->Get(key, clock.now());
+            REQUIRE(got.has_value());
+            REQUIRE(got->found);
+            REQUIRE(Pace::Testing::ValueOf(got->entry) == value);
+        }
+        // Clamped, because a conversion can now SHORTEN the file: it frees every page it
+        // replaces, and the store cuts a free tail after each slice's flush. Headroom is
+        // what a conversion needs beyond the store it started with, and a shorter file
+        // needs none. Measured on Windows: 3,302,912 -> 1,726,464 bytes at 2000 records.
+        return after > before ? after - before : std::uintmax_t { 0 };
+    };
+
+    auto const small = growthFor(2000);
+    auto const large = growthFor(8000);
+
+    // Four times the records. A conversion that allocated per record would
+    // grow four times as much; one bounded by a slice grows about the same.
+    INFO("growth: 2000 records -> " << small << " bytes, 8000 records -> " << large << " bytes");
+    // `<=` rather than `<`: two conversions that both cost nothing satisfy the claim,
+    // and one whose growth still scales with the store fails it as before.
+    REQUIRE(large <= small * 2);
+}
+
+TEST_CASE("A record whose expiry does not fit the clock is decoded, not undefined", "[cowstorage][format]")
+{
+    // The timestamps come off DISK, and the clock counts in nanoseconds, so
+    // building a time point from a microsecond count multiplies by a thousand.
+    // A damaged field near the type's range therefore overflows a signed
+    // integer -- undefined behaviour rather than a wrong timestamp, on a path
+    // any corrupt record can reach. Only a sanitizer sees it, which is why this
+    // pins the value rather than the absence of a crash.
+    CowTree::InMemoryPageStore store { 4096 };
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    // Rewrite the record's expiry field to a microsecond count that is huge but
+    // not the "never expires" sentinel, so the conversion below is a real one.
+    constexpr std::int64_t Overflowing = (std::numeric_limits<std::int64_t>::max() / 16) + 1;
+    {
+        CowTree::CowTree tree { store };
+        REQUIRE(tree.Open().has_value());
+        std::vector<std::byte> record;
+        {
+            auto const reader = tree.BeginRead();
+            auto const got = reader.Get(CowTree::AsBytes("k"));
+            REQUIRE(got.has_value());
+            REQUIRE(got->has_value());
+            record = Pace::Testing::Unwrap(*got);
+        }
+        // kind(1) + codec(1) + flags(4) + cas(8) puts expiry at offset 14.
+        constexpr std::size_t ExpiryOffset = 1 + 1 + 4 + 8;
+        REQUIRE(record.size() > ExpiryOffset + sizeof(std::int64_t));
+        auto const raw = static_cast<std::uint64_t>(Overflowing);
+        for (auto const i: std::views::iota(std::size_t { 0 }, sizeof(std::uint64_t)))
+            record[ExpiryOffset + i] = static_cast<std::byte>((raw >> (8U * i)) & 0xFFU);
+
+        auto txn = tree.BeginWrite();
+        REQUIRE(txn.Put(CowTree::AsBytes("k"), CowTree::BytesView { record.data(), record.size() }).has_value());
+        REQUIRE(txn.Commit().has_value());
+    }
+
+    Pace::CowTreeStorage::Options opts;
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+
+    // Clamped to "never", which is the nearest representable instant, and the
+    // entry is still readable rather than the process being in undefined
+    // behaviour.
+    auto const got = (*storage)->Peek("k", core::platform::ManualClock {}.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(got->entry.expiry == core::platform::SteadyTimePoint::max());
+}
+
+TEST_CASE("A store older than any reader is refused, not rewritten in place", "[cowstorage][format][migrate]")
+{
+    // "No marker" is an inference, not a statement: it means v3, because that
+    // is the last layout that did not stamp one -- but a store from before v3
+    // is equally unmarked, and its records begin with a flags field rather than
+    // a kind tag, so a zero-flags record starts with the same byte as an inline
+    // one. Accepting it would be the worst outcome this feature can have: a
+    // store the daemon merely refused to open, destroyed in place by the thing
+    // meant to rescue it.
+    CowTree::InMemoryPageStore store { 4096 };
+
+    // A record in the pre-v3 layout -- no kind byte -- and specifically one
+    // that a LENIENT reader accepts. Every field lands one byte early, so the
+    // four bytes the reader takes for the inline length are the top half of the
+    // real length field followed by the first two value bytes. A value that
+    // begins with two zero bytes therefore reads as length zero, which a reader
+    // that only checks "are there at least that many bytes left" is happy with:
+    // it returns an empty value, and the conversion writes that empty value
+    // over the real one. Requiring the record to end exactly where its value
+    // does is what rejects it.
+    std::vector<std::byte> ancient;
+    AppendLe<4>(ancient, 0);  // flags
+    AppendLe<8>(ancient, 11); // cas
+    AppendLe<8>(ancient, 0);  // expiry
+    AppendLe<8>(ancient, 0);  // generation
+    AppendLe<8>(ancient, 0);  // lastAccess
+    AppendLe<4>(ancient, 8);  // value length
+    for (auto const b: { 0x00, 0x00, 0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x21 })
+        ancient.push_back(static_cast<std::byte>(b));
+
+    auto const key = std::string_view { "ancient-key" };
+    PutRaw(store,
+           CowTree::BytesView { reinterpret_cast<std::byte const*>(key.data()), key.size() },
+           CowTree::BytesView { ancient.data(), ancient.size() });
+
+    auto const before = store.PageCount();
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE_FALSE(report.has_value());
+    REQUIRE(report.error().error.code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+    REQUIRE(report.error().error.context.contains("NOT been modified"));
+    CHECK_FALSE(report.error().rewriting);
+    CHECK_FALSE(report.error().Transient());
+
+    // Refused before writing anything: the validation pass runs to completion
+    // before the first slice opens a transaction.
+    REQUIRE(store.PageCount() == before);
+    {
+        CowTree::CowTree tree { store };
+        REQUIRE(tree.Open().has_value());
+        auto const reader = tree.BeginRead();
+        auto const got = reader.Get(CowTree::AsBytes(key));
+        REQUIRE(got.has_value());
+        REQUIRE(got->has_value());
+        REQUIRE(Pace::Testing::Unwrap(*got) == ancient);
+    }
+}
+
+TEST_CASE("Converting a store already at the current version changes nothing", "[cowstorage][format][migrate]")
+{
+    CowTree::InMemoryPageStore store;
+    {
+        Pace::CowTreeStorage::Options opts;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE(report.has_value());
+    REQUIRE(report->fromVersion == Pace::CowTreeStorage::CurrentFormatVersion);
+    REQUIRE(report->toVersion == report->fromVersion);
+    REQUIRE(report->recordsConverted == 0);
+}
+
+TEST_CASE("Converting a store nothing has written yet is a no-op, not a failure", "[cowstorage][format][migrate]")
+{
+    // An operator pointing the conversion at a path the daemon has not created
+    // yet should read "nothing to do", not a diagnostic they have to interpret.
+    CowTree::InMemoryPageStore store;
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE(report.has_value());
+    REQUIRE(report->fromVersion == Pace::CowTreeStorage::CurrentFormatVersion);
+    REQUIRE(report->recordsConverted == 0);
+}
+
+TEST_CASE("A store newer than this build cannot be converted forwards", "[cowstorage][format][migrate]")
+{
+    // There is no reader for a layout that does not exist yet, so the honest
+    // answer is the same refusal Open gives — not a conversion that guesses.
+    CowTree::InMemoryPageStore store;
+    StampFormatVersion(store, Pace::CowTreeStorage::CurrentFormatVersion + 1);
+
+    auto const report = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE_FALSE(report.has_value());
+    REQUIRE(report.error().error.code == Pace::StorageErrorCode::UnsupportedFormatVersion);
+    REQUIRE(report.error().error.context.contains("upgrade"));
+    CHECK_FALSE(report.error().rewriting);
+    CHECK_FALSE(report.error().Transient());
+}
+
+TEST_CASE("A converted store keeps working as a cache", "[cowstorage][format][migrate]")
+{
+    // Converting must leave a store that is writable, not merely readable: the
+    // marker has to be committed alongside the records, or the next Open stamps
+    // nothing and the LRU accounting starts from a tree it never replayed.
+    CowTree::InMemoryPageStore store { 4096 };
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("old", MakeBytes("value"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+    DowngradeStoreToV3(store);
+    REQUIRE(Pace::CowTreeStorage::MigrateStore(store).has_value());
+
+    Pace::CowTreeStorage::Options opts;
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+
+    core::platform::ManualClock clock;
+    REQUIRE((*storage)->Set("new", MakeBytes("written-after"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    REQUIRE((*storage)->Delete("old", clock.now()).has_value());
+
+    auto const fresh = (*storage)->Get("new", clock.now());
+    REQUIRE(fresh.has_value());
+    REQUIRE(fresh->found);
+    REQUIRE(Decode(fresh->entry.ValueBytes()) == "written-after");
+
+    auto const gone = (*storage)->Get("old", clock.now());
+    REQUIRE(gone.has_value());
+    REQUIRE_FALSE(gone->found);
+}
+
+TEST_CASE("Converting a second time reports nothing left to do", "[cowstorage][format][migrate]")
+{
+    CowTree::InMemoryPageStore store { 4096 };
+    {
+        Pace::CowTreeStorage::Options opts;
+        opts.compression = Pace::CompressionCodec::Identity;
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+    DowngradeStoreToV3(store);
+
+    auto const first = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE(first.has_value());
+    REQUIRE(first->recordsConverted == 1);
+
+    // Idempotent, which is what makes it safe to put in a start-up script.
+    auto const second = Pace::CowTreeStorage::MigrateStore(store);
+    REQUIRE(second.has_value());
+    REQUIRE(second->fromVersion == second->toVersion);
+    REQUIRE(second->recordsConverted == 0);
+}
+
+TEST_CASE("Set above maxValueBytes returns ValueTooLarge", "[cowstorage][boundary]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    opts.maxValueBytes = 32;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+
+    auto const too_big = RandomBytes(33, 0x1ULL);
+    auto const r = (*storage)->Set("k", too_big, 0, core::platform::SteadyTimePoint::max());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::ValueTooLarge);
+}
+
+TEST_CASE("Touch refreshes expiry and bumps CAS, persists across reopen", "[cowstorage][touch]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    auto firstCas = Pace::CasToken { 0 };
+    auto extendedExpiry = clock.now() + 60s;
+    {
+        auto storage = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(storage.has_value());
+
+        auto const setCas = (*storage)->Set("k", MakeBytes("payload"), 0xBEEF, clock.now() + 1s);
+        REQUIRE(setCas.has_value());
+        firstCas = *setCas;
+
+        auto const touched = (*storage)->Touch("k", extendedExpiry, clock.now());
+        REQUIRE(touched.has_value());
+        REQUIRE(*touched != firstCas);
+
+        auto const stats = (*storage)->Snapshot();
+        REQUIRE(stats.touchHits == 1U);
+        REQUIRE(stats.cmdTouch == 1U);
+    }
+    // Reopen: the touch should have persisted (extended expiry + new CAS).
+    auto reopened = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(reopened.has_value());
+    auto const got = (*reopened)->Get("k", clock.now() + 30s);
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "payload");
+    REQUIRE(got->entry.flags == 0xBEEF);
+    REQUIRE(got->entry.expiry == extendedExpiry);
+}
+
+TEST_CASE("Touch on absent key returns KeyNotFound + bumps touchMisses", "[cowstorage][touch]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+
+    auto const r = (*storage)->Touch("nope", core::platform::SteadyTimePoint::max(), clock.now());
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code == Pace::StorageErrorCode::KeyNotFound);
+    REQUIRE((*storage)->Snapshot().touchMisses == 1U);
+}
+
+TEST_CASE("CowTree v2 trailer round-trips lastAccess and stale across reopen", "[cowstorage][v2]")
+{
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    clock.advance(7s);
+    auto const t = clock.now();
+
+    {
+        auto storage = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        // Touch persists lastAccess; MarkStale persists the stale flag.
+        // (A read no longer writes — see the "no write on read" test — so
+        // we exercise the trailer via the write paths that legitimately
+        // own those fields.)
+        REQUIRE((*storage)->Touch("k", core::platform::SteadyTimePoint::max(), t).has_value());
+        REQUIRE((*storage)->MarkStale("k", std::nullopt, t).has_value());
+    }
+
+    auto reopened = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(reopened.has_value());
+    // Peek so the read itself does not advance lastAccess in the copy.
+    auto const got = (*reopened)->Peek("k", t);
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(got->entry.lastAccess == t); // round-tripped through the v2 trailer
+    REQUIRE(got->entry.stale);           // stale flag round-tripped too
+}
+
+TEST_CASE("CowTreeStorage Get does not persist lastAccess (no write on a read path)", "[cowstorage][get][regression]")
+{
+    // Regression: Get used to open a full write transaction on every hit to
+    // persist lastAccess — crippling read-heavy workloads. The returned
+    // copy still carries a fresh lastAccess, but nothing is written back, so
+    // the persisted value (set by Set, which never reads) stays the unset
+    // sentinel across a reopen.
+    TempFile tmp;
+    core::platform::ManualClock clock;
+    clock.advance(100s);
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+        auto const got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(got->entry.lastAccess == clock.now()); // fresh in the returned copy
+    });
+    WithOpenStorage(tmp.path, [&](Pace::CowTreeStorage& storage) {
+        auto const peeked = storage.Peek("k", clock.now());
+        REQUIRE(peeked.has_value());
+        REQUIRE(peeked->found);
+        REQUIRE(peeked->entry.lastAccess == core::platform::SteadyTimePoint::min()); // never written by the read
+    });
+}
+
+// ============================================================================
+// Overflow pages (values larger than the inline limit spill to a page chain)
+// ============================================================================
+
+namespace
+{
+/// Options with a small fixed page so values above ~1 KiB exercise the
+/// overflow chain, and a generous value cap so multi-page values are allowed.
+Pace::CowTreeStorage::Options OverflowOptions(
+    std::filesystem::path const& path,
+    CowTree::FilePageStore::Durability durability = CowTree::FilePageStore::Durability::Batched)
+{
+    Pace::CowTreeStorage::Options opts;
+    opts.path = path;
+    opts.pageSize = 4096;                 // InlineValueLimit() = 1024
+    opts.maxValueBytes = 4 * 1024 * 1024; // allow multi-page values
+    opts.durability = durability;
+    return opts;
+}
+} // namespace
+
+TEST_CASE("Overflow chains round-trip across many sizes and survive reopen", "[cowstorage][overflow]")
+{
+    TempFile tmp;
+    std::vector<std::size_t> const sizes { 0, 1, 1024, 1025, 4079, 4080, 4081, 8192, 65536, 262144, 1024 * 1024 };
+
+    {
+        auto storage = Pace::CowTreeStorage::Open(OverflowOptions(tmp.path));
+        REQUIRE(storage.has_value());
+        for (auto const size: sizes)
+        {
+            auto const value = RandomBytes(size, 0xA000ULL + size);
+            REQUIRE((*storage)->Set(std::format("k{}", size), value, 0, core::platform::SteadyTimePoint::max()).has_value());
+        }
+    }
+
+    auto reopened = Pace::CowTreeStorage::Open(OverflowOptions(tmp.path));
+    REQUIRE(reopened.has_value());
+    core::platform::ManualClock clock;
+    for (auto const size: sizes)
+    {
+        auto const value = RandomBytes(size, 0xA000ULL + size);
+        auto const got = (*reopened)->Get(std::format("k{}", size), clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry) == value); // exact bytewise round-trip via the chain
+    }
+}
+
+TEST_CASE("Overwriting a large value reclaims the old overflow chain", "[cowstorage][overflow]")
+{
+    TempFile tmp;
+    // Fsync durability frees pages immediately (Batched defers reuse to the
+    // group-commit flush boundary), so reuse is observable within this session.
+    auto storage = Pace::CowTreeStorage::Open(OverflowOptions(tmp.path, CowTree::FilePageStore::Durability::Fsync));
+    REQUIRE(storage.has_value());
+
+    REQUIRE((*storage)->Set("k", RandomBytes(256 * 1024, 1), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const afterFirst = std::filesystem::file_size(tmp.path);
+
+    for (auto const i: std::views::iota(0U, 12U))
+        REQUIRE(
+            (*storage)->Set("k", RandomBytes(256 * 1024, 100U + i), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const afterMany = std::filesystem::file_size(tmp.path);
+
+    // Each overwrite frees the previous chain, so the file reuses pages instead
+    // of growing ~12x. (A leak would push this well past 3x.)
+    REQUIRE(afterMany < afterFirst * 3);
+
+    auto const got = (*storage)->Get("k", core::platform::ManualClock {}.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(ValueOf(got->entry) == RandomBytes(256 * 1024, 111)); // last write wins
+}
+
+TEST_CASE("Deleting a large value frees its overflow chain for reuse", "[cowstorage][overflow]")
+{
+    TempFile tmp;
+    // Fsync durability frees pages immediately so reuse is observable in-session
+    // (Batched would defer the freed-chain reuse to the group-commit boundary).
+    auto storage = Pace::CowTreeStorage::Open(OverflowOptions(tmp.path, CowTree::FilePageStore::Durability::Fsync));
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    REQUIRE((*storage)->Set("k", RandomBytes(256 * 1024, 5), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const afterFirst = std::filesystem::file_size(tmp.path);
+    for (auto const i: std::views::iota(0U, 8U))
+    {
+        REQUIRE((*storage)->Delete("k", clock.now()).has_value());
+        REQUIRE(
+            (*storage)->Set("k", RandomBytes(256 * 1024, 200U + i), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+    REQUIRE(std::filesystem::file_size(tmp.path) < afterFirst * 3);
+
+    REQUIRE((*storage)->Delete("k", clock.now()).has_value());
+    auto const got = (*storage)->Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE_FALSE(got->found);
+}
+
+TEST_CASE("Crash during overflow-chain write leaves the previous value intact", "[cowstorage][overflow][crash]")
+{
+    CowTree::InMemoryPageStore store; // default 4 KiB page -> 1 KiB inline limit
+    Pace::CowTreeStorage::Options opts;
+    opts.maxValueBytes = 1024 * 1024;
+
+    {
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("initial"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    {
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        CowTree::InMemoryPageStore::FaultPlan plan;
+        plan.failNthWrite = 1; // fail the first overflow-chunk write
+        store.SetFaultPlan(plan);
+        store.ResetCounters();
+        auto const r = (*storage)->Set("k", RandomBytes(50000, 9), 0, core::platform::SteadyTimePoint::max());
+        REQUIRE_FALSE(r.has_value());
+    }
+
+    store.SetFaultPlan({});
+    store.ResetCounters();
+    auto reopened = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(reopened.has_value());
+    auto const got = (*reopened)->Get("k", core::platform::ManualClock {}.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "initial"); // rolled back, never a hybrid
+}
+
+TEST_CASE("Crash during overflow SyncData leaves the previous value intact", "[cowstorage][overflow][crash]")
+{
+    CowTree::InMemoryPageStore store;
+    Pace::CowTreeStorage::Options opts;
+    opts.maxValueBytes = 1024 * 1024;
+
+    {
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        REQUIRE((*storage)->Set("k", MakeBytes("initial"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    {
+        auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+        REQUIRE(storage.has_value());
+        CowTree::InMemoryPageStore::FaultPlan plan;
+        plan.failNthSyncData = 1; // fail the durability barrier before the meta flip
+        store.SetFaultPlan(plan);
+        store.ResetCounters();
+        auto const r = (*storage)->Set("k", RandomBytes(50000, 11), 0, core::platform::SteadyTimePoint::max());
+        REQUIRE_FALSE(r.has_value());
+    }
+
+    store.SetFaultPlan({});
+    store.ResetCounters();
+    auto reopened = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(reopened.has_value());
+    auto const got = (*reopened)->Get("k", core::platform::ManualClock {}.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(Decode(got->entry.ValueBytes()) == "initial");
+}
+
+TEST_CASE("Reclaiming a corrupted overflow chain never frees another key's pages", "[cowstorage][overflow][crash]")
+{
+    // Regression for the FreeChain cross-key-corruption finding: FreeChain must
+    // validate each overflow page's CRC before trusting its `next` link. Here we
+    // point target's chain links at a victim page and break their CRC; if the
+    // reclaim path followed the corrupt link it would free the victim's pages,
+    // which a later allocation would overwrite.
+    CowTree::InMemoryPageStore store { 4096 };
+    Pace::CowTreeStorage::Options opts;
+    opts.maxValueBytes = 1024 * 1024;
+    opts.durability = CowTree::FilePageStore::Durability::Fsync; // free pages reusable immediately
+
+    auto const victimBytes = RandomBytes(50000, 0x5151ULL);
+    auto const targetBytes = RandomBytes(50000, 0x7272ULL);
+
+    auto liveOverflowPages = [&](std::uint64_t maxScan) {
+        std::vector<std::uint64_t> ids;
+        for (auto const i: std::views::iota(std::uint64_t { 1 }, maxScan + 1))
+        {
+            auto const view = store.Read(CowTree::PageId { i });
+            if (view.has_value() && LooksLikeOverflowPage(*view, store.PageSize()))
+                ids.push_back(i);
+        }
+        return ids;
+    };
+
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+
+    REQUIRE((*storage)->Set("victim", victimBytes, 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const victimPages = liveOverflowPages(2048);
+    REQUIRE_FALSE(victimPages.empty());
+    auto const victimPage = victimPages.front();
+
+    REQUIRE((*storage)->Set("target", targetBytes, 0, core::platform::SteadyTimePoint::max()).has_value());
+    std::vector<std::uint64_t> targetPages;
+    for (auto const id: liveOverflowPages(2048))
+        if (std::ranges::find(victimPages, id) == victimPages.end())
+            targetPages.push_back(id);
+    REQUIRE_FALSE(targetPages.empty());
+
+    // Point every target overflow page's `next` at a victim page. Because the
+    // CRC now covers `next`, this also breaks each page's checksum.
+    for (auto const id: targetPages)
+    {
+        auto const view = store.Read(CowTree::PageId { id });
+        REQUIRE(view.has_value());
+        std::vector<std::byte> page(view->begin(), view->end());
+        StoreLeU64(page, sizeof(std::uint32_t), victimPage); // next := a victim page id
+        REQUIRE(store.Write(CowTree::PageId { id }, CowTree::BytesView { page.data(), page.size() }).has_value());
+    }
+
+    // Overwrite target with a tiny inline value: this reclaims the (now corrupt)
+    // overflow chain. The CRC guard must stop the walk at the first bad page.
+    REQUIRE((*storage)->Set("target", MakeBytes("small"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    // Churn allocations so a wrongly-freed victim page would be reused + clobbered.
+    for (auto const i: std::views::iota(0U, 8U))
+        REQUIRE(
+            (*storage)
+                ->Set(std::format("filler-{}", i), RandomBytes(50000, 900U + i), 0, core::platform::SteadyTimePoint::max())
+                .has_value());
+
+    // The victim's bytes survive intact: its pages were never freed.
+    auto const got = (*storage)->Get("victim", core::platform::ManualClock {}.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(ValueOf(got->entry) == victimBytes);
+}
+
+TEST_CASE("Touch on a large value reuses the overflow chain without an O(value) rewrite", "[cowstorage][overflow][touch]")
+{
+    CowTree::InMemoryPageStore store { 4096 }; // inline limit 1024
+    Pace::CowTreeStorage::Options opts;
+    opts.maxValueBytes = 1024 * 1024;
+    opts.durability = CowTree::FilePageStore::Durability::Fsync;
+
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    auto const big = RandomBytes(50000, 0xABCDULL); // ~13 overflow pages at 4 KiB
+    REQUIRE((*storage)->Set("k", big, 0, clock.now() + 1s).has_value());
+
+    auto const writesBefore = store.WriteCount();
+    auto const newExpiry = clock.now() + 3600s;
+    auto const touched = (*storage)->Touch("k", newExpiry, clock.now());
+    REQUIRE(touched.has_value());
+    auto const writesByTouch = store.WriteCount() - writesBefore;
+
+    // Reusing the chain rewrites only the small descriptor leaf; a chain rewrite
+    // would write the whole ~13-page chain. Guard well below that.
+    REQUIRE(writesByTouch < 8);
+
+    // The value is intact and the expiry was refreshed without touching the chain.
+    auto const got = (*storage)->Get("k", clock.now() + 1800s);
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    REQUIRE(ValueOf(got->entry) == big);
+    REQUIRE(got->entry.expiry == newExpiry);
+}
+
+// ============================================================================
+// On-disk value compression (per-entry codec tag, v4 record format)
+// ============================================================================
+
+namespace
+{
+
+/// A highly compressible payload of `size` bytes: a short repeated pattern so
+/// zstd/lz4 shrink it dramatically. Deterministic (no baked-in literal).
+std::vector<std::byte> CompressibleBytes(std::size_t size)
+{
+    static constexpr std::string_view pattern = "fastcached-compresses-this-well-0123456789 ";
+    std::vector<std::byte> out;
+    out.reserve(size);
+    for (auto const i: std::views::iota(std::size_t { 0 }, size))
+        out.push_back(static_cast<std::byte>(static_cast<unsigned char>(pattern[i % pattern.size()])));
+    return out;
+}
+
+/// Current on-disk size of the store file at `path`.
+std::uintmax_t StoreFileSize(std::filesystem::path const& path)
+{
+    std::error_code ec;
+    auto const size = std::filesystem::file_size(path, ec);
+    return ec ? 0 : size;
+}
+
+} // namespace
+
+TEST_CASE("Compression: values round-trip under every codec, inline and overflow", "[cowstorage][compression]")
+{
+    auto const codec =
+        GENERATE(Pace::CompressionCodec::Identity, Pace::CompressionCodec::Lz4, Pace::CompressionCodec::Zstd);
+    if (!Pace::Compression::IsAvailable(codec))
+        return;
+
+    TempFile tmp;
+    // Small value stays inline; large value spills to an overflow chain.
+    auto const small = CompressibleBytes(300);
+    auto const large = CompressibleBytes(64 * 1024);
+
+    WithOpenStorageCompressed(tmp.path, codec, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("small", small, 1, core::platform::SteadyTimePoint::max()).has_value());
+        REQUIRE(storage.Set("large", large, 2, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    // Reopen (fresh LRU mirror, values materialised from disk) and verify the
+    // plaintext survives a decompress round-trip.
+    WithOpenStorageCompressed(tmp.path, codec, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto gotSmall = storage.Get("small", clock.now());
+        REQUIRE(gotSmall.has_value());
+        REQUIRE(gotSmall->found);
+        REQUIRE(ValueOf(gotSmall->entry) == small);
+        REQUIRE(gotSmall->entry.flags == 1U);
+
+        auto gotLarge = storage.Get("large", clock.now());
+        REQUIRE(gotLarge.has_value());
+        REQUIRE(gotLarge->found);
+        REQUIRE(ValueOf(gotLarge->entry) == large);
+        REQUIRE(gotLarge->entry.flags == 2U);
+    });
+}
+
+TEST_CASE("Compression: a compressible value shrinks the on-disk file", "[cowstorage][compression]")
+{
+    if (!Pace::Compression::IsAvailable(Pace::CompressionCodec::Zstd))
+        return;
+
+    auto const value = CompressibleBytes(128 * 1024);
+
+    TempFile rawFile;
+    WithOpenStorageCompressed(rawFile.path, Pace::CompressionCodec::Identity, [&](Pace::CowTreeStorage& s) {
+        REQUIRE(s.Set("k", value, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    TempFile zstdFile;
+    WithOpenStorageCompressed(zstdFile.path, Pace::CompressionCodec::Zstd, [&](Pace::CowTreeStorage& s) {
+        REQUIRE(s.Set("k", value, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    CHECK(StoreFileSize(zstdFile.path) < StoreFileSize(rawFile.path));
+}
+
+TEST_CASE("Compression: an incompressible value falls back to Identity (shrink-check)", "[cowstorage][compression]")
+{
+    if (!Pace::Compression::IsAvailable(Pace::CompressionCodec::Zstd))
+        return;
+
+    // Random bytes do not compress; the shrink-check must store them verbatim,
+    // so the zstd store is not meaningfully larger than the identity store.
+    auto const value = RandomBytes(64 * 1024, 0xFEEDFACEULL);
+
+    TempFile rawFile;
+    WithOpenStorageCompressed(rawFile.path, Pace::CompressionCodec::Identity, [&](Pace::CowTreeStorage& s) {
+        REQUIRE(s.Set("k", value, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+    TempFile zstdFile;
+    WithOpenStorageCompressed(zstdFile.path, Pace::CompressionCodec::Zstd, [&](Pace::CowTreeStorage& s) {
+        REQUIRE(s.Set("k", value, 0, core::platform::SteadyTimePoint::max()).has_value());
+        // Value still reads back correctly despite the Identity fallback.
+        auto got = s.Get("k", core::platform::ManualClock {}.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry) == value);
+    });
+
+    // The compressed store must not be dramatically larger than the raw one
+    // (a naive "always compress" would inflate incompressible data).
+    CHECK(StoreFileSize(zstdFile.path) <= StoreFileSize(rawFile.path) + 4096);
+}
+
+TEST_CASE("Compression: Append/Prepend on a compressed entry yield correct plaintext", "[cowstorage][compression]")
+{
+    if (!Pace::Compression::IsAvailable(Pace::CompressionCodec::Zstd))
+        return;
+
+    TempFile tmp;
+    WithOpenStorageCompressed(tmp.path, Pace::CompressionCodec::Zstd, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto const base = CompressibleBytes(2000);
+        REQUIRE(storage.Set("k", base, 0, core::platform::SteadyTimePoint::max()).has_value());
+
+        auto const suffix = MakeBytes("-SUFFIX");
+        REQUIRE(
+            storage.Append("k", std::span<std::byte const> { suffix.data(), suffix.size() }, 0, clock.now()).has_value());
+        auto const prefix = MakeBytes("PREFIX-");
+        REQUIRE(
+            storage.Prepend("k", std::span<std::byte const> { prefix.data(), prefix.size() }, 0, clock.now()).has_value());
+
+        std::vector<std::byte> expected;
+        expected.insert(expected.end(), prefix.begin(), prefix.end());
+        expected.insert(expected.end(), base.begin(), base.end());
+        expected.insert(expected.end(), suffix.begin(), suffix.end());
+
+        auto got = storage.Get("k", clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry) == expected);
+    });
+}
+
+TEST_CASE("Compression: Touch preserves the compressed value unchanged", "[cowstorage][compression]")
+{
+    if (!Pace::Compression::IsAvailable(Pace::CompressionCodec::Zstd))
+        return;
+
+    TempFile tmp;
+    auto const value = CompressibleBytes(64 * 1024);
+    WithOpenStorageCompressed(tmp.path, Pace::CompressionCodec::Zstd, [&](Pace::CowTreeStorage& storage) {
+        using namespace std::chrono_literals;
+        core::platform::ManualClock clock;
+        REQUIRE(storage.Set("k", value, 5, clock.now() + 1s).has_value());
+
+        auto const newExpiry = clock.now() + 3600s;
+        REQUIRE(storage.Touch("k", newExpiry, clock.now()).has_value());
+
+        auto got = storage.Get("k", clock.now() + 60s);
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        REQUIRE(ValueOf(got->entry) == value); // value survived the metadata rewrite
+        REQUIRE(got->entry.expiry == newExpiry);
+        REQUIRE(got->entry.flags == 5U);
+    });
+}
+
+TEST_CASE("Compression: a store mixes codecs and reads each by its own tag", "[cowstorage][compression]")
+{
+    if (!Pace::Compression::IsAvailable(Pace::CompressionCodec::Lz4)
+        || !Pace::Compression::IsAvailable(Pace::CompressionCodec::Zstd))
+        return;
+
+    TempFile tmp;
+    auto const lz4Value = CompressibleBytes(8000);
+    auto const zstdValue = CompressibleBytes(9000);
+
+    // First session writes an lz4-tagged entry.
+    WithOpenStorageCompressed(tmp.path, Pace::CompressionCodec::Lz4, [&](Pace::CowTreeStorage& storage) {
+        REQUIRE(storage.Set("lz4key", lz4Value, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    // Second session is configured for zstd. The old lz4 entry must still read
+    // (decoded by its own per-entry tag), and a new entry is written as zstd.
+    WithOpenStorageCompressed(tmp.path, Pace::CompressionCodec::Zstd, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto oldGot = storage.Get("lz4key", clock.now());
+        REQUIRE(oldGot.has_value());
+        REQUIRE(oldGot->found);
+        REQUIRE(ValueOf(oldGot->entry) == lz4Value);
+
+        REQUIRE(storage.Set("zstdkey", zstdValue, 0, core::platform::SteadyTimePoint::max()).has_value());
+    });
+
+    // Reopen once more: both entries survive and decode correctly.
+    WithOpenStorageCompressed(tmp.path, Pace::CompressionCodec::Zstd, [&](Pace::CowTreeStorage& storage) {
+        core::platform::ManualClock clock;
+        auto a = storage.Get("lz4key", clock.now());
+        REQUIRE(a.has_value());
+        REQUIRE(a->found);
+        REQUIRE(ValueOf(a->entry) == lz4Value);
+        auto b = storage.Get("zstdkey", clock.now());
+        REQUIRE(b.has_value());
+        REQUIRE(b->found);
+        REQUIRE(ValueOf(b->entry) == zstdValue);
+    });
+}
+
+// ============================================================================
+// The exclusive claim, as the storage layer reports it
+// ============================================================================
+
+TEST_CASE("A second CowTreeStorage on one path reports InUse, not IoError", "[cowstorage][open][lock]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    auto first = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(first.has_value());
+
+    // The distinction IS the fix. `IoError` sends an operator to look at the
+    // disk, the permissions and the file; `InUse` tells them the truth, which
+    // is that a second process is already serving this path.
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE_FALSE(second.has_value());
+    REQUIRE(second.error().code == Pace::StorageErrorCode::InUse);
+    REQUIRE(Pace::ToStringView(second.error().code) == "InUse");
+}
+
+TEST_CASE("An opened CowTreeStorage reports holding its file", "[cowstorage][open][lock]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    auto const state = (*storage)->StoreLockState();
+    REQUIRE(state.has_value());
+    REQUIRE(Unwrap(state) == CowTree::FilePageStore::LockState::Held);
+}
+
+TEST_CASE("A CowTreeStorage over a borrowed page store reports no claim at all", "[cowstorage][open][lock]")
+{
+    // Absent is not zero: there is no file here, so "not claimed" would be a
+    // false statement about a store that never had one to take.
+    CowTree::InMemoryPageStore store;
+    Pace::CowTreeStorage::Options opts;
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+    REQUIRE_FALSE((*storage)->StoreLockState().has_value());
+}
+
+TEST_CASE("Closing a CowTreeStorage releases the path for the next one", "[cowstorage][open][lock]")
+{
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        REQUIRE((*first)->Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    }
+
+    // Every restart goes through here, so the claim must not outlive the object
+    // that took it -- and the data written under it must still be there.
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(second.has_value());
+    core::platform::ManualClock clock;
+    auto const got = (*second)->Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+}
+
+TEST_CASE("The expiry sweep reads a TTL without inflating the value", "[cowstorage][purge][cost]")
+{
+    // #944: `PurgeExpired` used `LoadEntry`, which walks the overflow chain and
+    // decompresses, to reach two fields `ParseRecord` had already produced. On
+    // the dogfood store that spent 76% of a core on an idle daemon forever.
+    //
+    // Asserted by COUNT, not by timing: a timing assertion on a small store
+    // measures the machine. The page store counts its reads, and an out-of-line
+    // value is the only shape where walking the chain is distinguishable from
+    // not walking it -- so the value has to be big enough to overflow.
+    constexpr std::size_t PageSize = 4096;
+    CowTree::InMemoryPageStore store { PageSize };
+
+    Pace::CowTreeStorage::Options opts;
+    opts.pageSize = PageSize;
+    opts.maxValueBytes = 4 * 1024 * 1024;
+    auto storage = Pace::CowTreeStorage::OpenBorrowing(opts, store);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+
+    // SEMI-compressible, and that is the whole difficulty. `StoreEntry` lets the
+    // STORED (post-compression) size decide inline-vs-overflow, so a trivially
+    // compressible blob shrinks to a couple of KiB, lands inline, and the test
+    // measures a chain that is not there -- which is how the first version of
+    // this case failed, with a Get costing exactly one page read. The value must
+    // compress (or no decompress is on the path being tested) AND stay far bigger
+    // than a page afterwards. A restricted-alphabet PRNG gives roughly 2:1.
+    std::string big(1024 * 1024, '\0');
+    std::uint64_t lcg = 0x9E3779B97F4A7C15ULL;
+    for (auto& c: big)
+    {
+        lcg = (lcg * 6364136223846793005ULL) + 1442695040888963407ULL;
+        c = static_cast<char>('a' + ((lcg >> 33) % 16));
+    }
+    REQUIRE((*storage)->Set("k", MakeBytes(big), 0, clock.now() + 3600s).has_value());
+
+    // A Get is the control: it must materialise the value, so it must walk the
+    // chain. Without it the sweep's own figure calibrates against nothing.
+    auto const beforeGet = store.ReadCount();
+    REQUIRE((*storage)->Get("k", clock.now())->found);
+    auto const getReads = store.ReadCount() - beforeGet;
+    REQUIRE(getReads > 8U); // the chain really is many pages
+
+    // The sweep scans the same key and reclaims nothing -- the TTL is an hour out.
+    auto const beforeSweep = store.ReadCount();
+    auto const outcome = (*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded());
+    auto const sweepReads = store.ReadCount() - beforeSweep;
+    REQUIRE(outcome.scanned == 1U);
+    REQUIRE(outcome.purged == 0U);
+
+    // The distinguishing assertion. Under the defect the sweep took the same
+    // path as the Get and this is >= getReads; the metadata load stops at the
+    // record page, so it is a small fraction of it.
+    REQUIRE(sweepReads < getReads / 4);
+
+    // ... and the sweep still WORKS: an out-of-line compressed value expires
+    // exactly when it did. Without this, "reads less" and "reads nothing
+    // useful" are the same passing test.
+    clock.advance(3601s);
+    auto const lapsed = (*storage)->PurgeExpired(clock.now(), Pace::PurgeBudget::Unbounded());
+    REQUIRE(lapsed.purged == 1U);
+    REQUIRE_FALSE((*storage)->Get("k", clock.now())->found);
+}
+
+TEST_CASE("A reopened store's index reports what has been TOUCHED, not what is on disk", "[cowstorage][index][capacity]")
+{
+    // The measurement [#175](https://github.com/LASTRADA-Software/fastcached/issues/175)
+    // turns on, taken rather than read. That ticket's cheapest option is to reserve the
+    // index at startup, from `StorageStats` -- and this is what decides whether that
+    // option exists at all.
+    //
+    // The LRU mirror is populated by `TouchOrInsert`, which `Open` never calls. So the
+    // index of a store holding a million objects is EMPTY the instant it reopens, and a
+    // reservation taken at startup would reserve nothing on the very node the ticket is
+    // about: a long-lived worker with a warm disk tier, restarted.
+    //
+    // **This pins a fact, not a policy.** It is equally true and equally load-bearing
+    // whichever way #175 is settled -- a fix that reserves must reserve something other
+    // than a startup reading, and a fix that bounds the index must bound something that
+    // starts empty and grows.
+    //
+    // It used to assert `itemCount == 0` here as well, for a reason worth keeping: to stop
+    // the next reader inferring a durable INDEX from a non-zero item count, `itemCount`
+    // having been `_index.size()` too. #1483 made the item count the STORE's, so that job
+    // is now done better by the CONTRAST -- one figure in this one reading is durable and
+    // the other is the working set since the last restart, which is #175's whole
+    // distinction stated in two lines instead of inferred from one.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    constexpr int Objects = 64;
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        for (auto const i: std::views::iota(0, Objects))
+            REQUIRE((*first)
+                        ->Set(std::format("key-{:04}", i), MakeBytes("value"), 0, core::platform::SteadyTimePoint::max())
+                        .has_value());
+        // Not vacuous: the index really is populated before the close, so a zero after
+        // it is the reopen and not a store that never held anything.
+        REQUIRE((*first)->Snapshot().indexBytes > 0);
+    }
+
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(second.has_value());
+
+    // Nothing has been touched, so nothing is mirrored -- while every one of the
+    // objects is still on disk, which the read below proves.
+    CHECK((*second)->Snapshot().indexBytes == 0);
+
+    // The contrast, in the same reading: the store knows what it HOLDS across a restart.
+    // A cold index beside a cold item count was one fact; a cold index beside a warm item
+    // count is two, and the second one is what says the first is about the mirror rather
+    // than about an empty store.
+    CHECK((*second)->Snapshot().itemCount == Objects);
+
+    core::platform::ManualClock clock;
+    auto const got = (*second)->Get("key-0000", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+
+    // And one read is what puts one entry into the mirror. The index is a function of
+    // the WORKING SET since the last restart, not of the store -- so it MOVED while the
+    // item count did not, and asserting both is what distinguishes "the index tracks
+    // touches" from "both figures woke up together".
+    CHECK((*second)->Snapshot().indexBytes > 0);
+    CHECK((*second)->Snapshot().itemCount == Objects);
+}
+
+TEST_CASE("A store reuses the pages a previous session freed", "[cowstorage][freelist][persist]")
+{
+    // #990's own measurement, inverted into an assertion. Before this the free list
+    // was pinned to `None` on every commit, so a reopened store marked every data page
+    // live: pages a previous session freed were not forgotten but permanently CLAIMED,
+    // and the file grew past its configured bound across restarts.
+    //
+    // Asserted on the FILE SIZE and not on a counter, because the counter is the half
+    // that lied -- `bytesUsed` read 65,536 in both sessions of the original measurement
+    // while the file went 1,114,112 -> 2,179,072.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    opts.maxBytes = 64 * 1024;
+
+    auto const write300 = [&](Pace::CowTreeStorage& store) {
+        for (auto const i: std::views::iota(0, 300))
+            REQUIRE(store
+                        .Set(std::format("k-{:04}", i),
+                             MakeBytes(std::string(1024, 'x')),
+                             0,
+                             core::platform::SteadyTimePoint::max())
+                        .has_value());
+    };
+
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        write300(**first);
+    }
+    // Read AFTER the close: the store commits on destruction.
+    auto const afterFirst = std::filesystem::file_size(tmp.path);
+
+    // Not vacuous: the first session really did exceed its bound, so there ARE freed
+    // pages for the second to find. Without this the case could pass on a store that
+    // never freed anything, which is the shape that would be silent about the defect.
+    REQUIRE(afterFirst > opts.maxBytes);
+
+    {
+        auto second = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(second.has_value());
+        write300(**second);
+    }
+    auto const afterSecond = std::filesystem::file_size(tmp.path);
+
+    // **The assertion.** A second session of identical work must not double the file.
+    // A ratio rather than a byte figure: the absolute size depends on page size,
+    // compression and the tree's shape, none of which this is about.
+    INFO("file after session 1: " << afterFirst << ", after session 2: " << afterSecond);
+    CHECK(afterSecond < afterFirst * 3 / 2);
+}
+
+namespace
+{
+/// Page size the file-growth cases assume: `CowTreeStorage`'s default, which they use.
+constexpr std::uintmax_t GrowthStorePageSize = 16 * 1024;
+
+/// Value length the file-growth cases store, uncompressed so a page holds a known amount.
+constexpr std::size_t GrowthValueLen = 1024;
+
+/// The key the file-growth cases write `index`-th.
+///
+/// SCATTERED across the keyspace, the way a cache's digest keys are: a sequential key
+/// lands every write on the tree's right edge, so the rest of the tree is never rewritten,
+/// never moves down the file, and holds its tail whatever the page store does. The
+/// multiplier is odd, so the mapping is a bijection on 32 bits and no two indices collide.
+std::string GrowthKey(std::size_t index)
+{
+    return std::format("growth-{:08x}", static_cast<std::uint32_t>(index * 2654435761U));
+}
+
+/// The value stored under `GrowthKey(index)`: the key, padded, so a read names its key.
+std::string GrowthValue(std::size_t index)
+{
+    auto value = GrowthKey(index);
+    value.resize(GrowthValueLen, 'x');
+    return value;
+}
+
+/// A file-growth case's store: uncompressed, at `maxBytes`.
+Pace::CowTreeStorage::Options GrowthOptions(std::filesystem::path const& path, std::size_t maxBytes)
+{
+    Pace::CowTreeStorage::Options opts;
+    opts.path = path;
+    opts.maxBytes = maxBytes;
+    opts.compression = Pace::CompressionCodec::Identity;
+    return opts;
+}
+
+/// Set `GrowthKey(i)` for every `i` in `[first, first + count)`.
+void SetGrowthKeys(Pace::CowTreeStorage& store, std::size_t first, std::size_t count)
+{
+    for (auto const i: std::views::iota(first, first + count))
+        REQUIRE(store.Set(GrowthKey(i), MakeBytes(GrowthValue(i)), 0, core::platform::SteadyTimePoint::max()).has_value());
+}
+} // namespace
+
+TEST_CASE("A store at its byte bound keeps its file size flat", "[cowstorage][freelist][capacity]")
+{
+    // The production half of the unbounded-file defect. A disk tier at its bound evicts
+    // about what each Set allocates, so data churn nets to zero -- and the file grew
+    // anyway, because every group commit EXTENDED the file to write the free list and
+    // handed the previous list's pages back to it: +1 page per flush while the list fit
+    // one page, geometric after. Measured on a node: a 64 GiB tier, a 103 GB file, 89 %
+    // free pages. The case beside this one runs 300 Sets with a 1.5x tolerance, which a
+    // drift of one page per flush cannot fail.
+    //
+    // Sized to the defect rather than to the diagnosis's 64 x 1000 commits: the drift is a
+    // page per 64 commits from the moment the store settles, so `ChurnSets` Sets -- each
+    // at least one commit, plus its eviction -- leave the old code dozens of pages over the
+    // slack below, in seconds rather than minutes.
+    constexpr std::size_t MaxBytes = 1024 * 1024; // 64 pages of footprint
+    constexpr std::size_t SettleSets = 1000;
+    constexpr std::size_t ChurnSets = 1500;
+    // What a settled store may still move by: the free list alternates between two pages,
+    // and a flush whose free pages all went to data extends once for its list.
+    constexpr std::uintmax_t SlackPages = 4;
+
+    TempFile tmp;
+    auto store = Pace::CowTreeStorage::Open(GrowthOptions(tmp.path, MaxBytes));
+    REQUIRE(store.has_value());
+
+    SetGrowthKeys(**store, 0, SettleSets);
+    // Not vacuous: the store reached its bound and is evicting, which is the state the
+    // defect needs. A store under its bound frees nothing and could pass on any code.
+    REQUIRE((*store)->Snapshot().itemCount < SettleSets);
+    auto const settled = std::filesystem::file_size(tmp.path);
+
+    SetGrowthKeys(**store, SettleSets, ChurnSets);
+    auto const churned = std::filesystem::file_size(tmp.path);
+
+    INFO("file once settled: " << settled << " bytes, after " << ChurnSets << " more Sets: " << churned << " bytes");
+    CHECK(churned <= settled + (SlackPages * GrowthStorePageSize));
+
+    // The two figures an operator reads: `fileBytes` IS the file -- the gauge reports the
+    // filesystem's own answer, not a model of it -- and it is never below the footprint
+    // the budget bounds, which it exceeds only by free pages awaiting reuse.
+    auto const stats = (*store)->Snapshot();
+    CHECK(stats.fileBytes == churned);
+    CHECK(stats.bytesUsed <= MaxBytes);
+    CHECK(stats.fileBytes >= stats.bytesUsed);
+}
+
+TEST_CASE("A store over its bound shrinks its file as it churns, and loses no live key",
+          "[cowstorage][freelist][capacity][persist]")
+{
+    // The file SHRINKS, so a store already past its bound converges with no operator
+    // action -- which is the only relief a node that grew under the old code gets short of
+    // deleting its cache. The first session fills the file with no bound; the second
+    // reopens it at a small one, so its first Sets evict nearly everything and the durable
+    // free list dwarfs the live set; its churn then allocates the lowest free pages and the
+    // flushes cut the free tail.
+    constexpr std::size_t SeedSets = 2000;
+    constexpr std::size_t MaxBytes = 256 * 1024; // 16 pages of footprint
+    constexpr std::size_t ChurnSets = 1000;
+
+    TempFile tmp;
+    {
+        auto seed = Pace::CowTreeStorage::Open(GrowthOptions(tmp.path, 0));
+        REQUIRE(seed.has_value());
+        SetGrowthKeys(**seed, 0, SeedSets);
+    }
+    auto const seeded = std::filesystem::file_size(tmp.path);
+
+    std::size_t live = 0;
+    {
+        auto churn = Pace::CowTreeStorage::Open(GrowthOptions(tmp.path, MaxBytes));
+        REQUIRE(churn.has_value());
+        SetGrowthKeys(**churn, SeedSets, ChurnSets);
+        live = (*churn)->Snapshot().itemCount;
+    }
+    auto const churned = std::filesystem::file_size(tmp.path);
+
+    // A quarter, not merely "smaller": the seed holds ~2 MB of values and the bound 64 KiB,
+    // so a file that only trimmed a few tail pages is the defect still standing.
+    INFO("file after the seed: " << seeded << " bytes, after the bounded churn: " << churned << " bytes");
+    CHECK(churned < seeded / 4);
+
+    // The negative control: the cut never reaches a live page. Every key the store still
+    // holds is the newest it wrote, so the last `live` keys must all read back, intact.
+    REQUIRE(live > 0);
+    REQUIRE(live < ChurnSets);
+    auto reopened = Pace::CowTreeStorage::Open(GrowthOptions(tmp.path, MaxBytes));
+    REQUIRE(reopened.has_value());
+    CHECK((*reopened)->Snapshot().itemCount == live);
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(SeedSets + ChurnSets - live, SeedSets + ChurnSets))
+    {
+        auto const got = (*reopened)->Get(GrowthKey(i), clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+        CHECK(std::ranges::equal(got->entry.ValueBytes(), MakeBytes(GrowthValue(i))));
+    }
+}
+
+TEST_CASE("A compressed disk tier holds more under the same budget", "[cowstorage][compression][capacity]")
+{
+    // The point of bounding the FOOTPRINT rather than the values' original lengths: a
+    // value costs what it occupies, so a codec that shrinks it lets the same budget hold
+    // more. Under the old denomination the two stores below held the same number of
+    // entries, because the budget charged each one its uncompressed length.
+    if (!Pace::Compression::IsAvailable(Pace::CompressionCodec::Zstd))
+        SKIP("this build has no zstd, so there is no codec to tell apart from none");
+
+    auto const holds = [](Pace::CompressionCodec codec) {
+        // Inside the lambda rather than captured: `iota` takes its bounds by reference,
+        // which odr-uses a constexpr local, and MSVC then refuses an uncaptured one.
+        constexpr std::size_t Budget = 256 * 1024;
+        constexpr std::size_t Values = 1000;
+        constexpr std::size_t CompressibleLen = 2048;
+        TempFile tmp;
+        auto opts = GrowthOptions(tmp.path, Budget);
+        opts.compression = codec;
+        auto store = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(store.has_value());
+        std::size_t peak = 0;
+        for (auto const i: std::views::iota(std::size_t { 0 }, Values))
+        {
+            // Text that repeats, under a prefix that makes each value its own.
+            auto value = std::format("value-{:06}:", i);
+            while (value.size() < CompressibleLen)
+                value += "the build cache holds what the compiler wrote; ";
+            value.resize(CompressibleLen);
+            REQUIRE((*store)->Set(GrowthKey(i), MakeBytes(value), 0, core::platform::SteadyTimePoint::max()).has_value());
+            peak = std::max(peak, (*store)->Snapshot().bytesUsed);
+        }
+        INFO("codec " << static_cast<int>(codec) << ": peak footprint " << peak << " against " << Budget);
+        // The footprint is what is bounded, and after every Set it is within the budget.
+        CHECK(peak <= Budget);
+        return (*store)->Snapshot().itemCount;
+    };
+
+    auto const plain = holds(Pace::CompressionCodec::Identity);
+    auto const packed = holds(Pace::CompressionCodec::Zstd);
+    INFO("entries held: " << plain << " uncompressed, " << packed << " under zstd");
+    REQUIRE(plain > 0);
+    CHECK(packed > plain);
+}
+TEST_CASE("A reopened store's bytesUsed describes the STORE, and reads do not inflate it",
+          "[cowstorage][bytesused][capacity]")
+{
+    // #1006, both halves. The first: a reopened store reported 0 while it was full, so
+    // `--cache-disk` went unenforced until a whole budget had been rewritten. The second:
+    // `_bytesUsed` counts what this SESSION touched, so a fix seeding it from a durable
+    // total double-counted once the entries were read back.
+    //
+    // Since the disk budget became the page footprint, the figure is the page store's
+    // count of pages in use -- known the moment the store opens, and moved by no read --
+    // so both halves are now structural. They are pinned anyway, because the defect they
+    // describe is the one a future "cheaper" figure would bring back.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+    opts.compression = Pace::CompressionCodec::Identity;
+
+    constexpr int Objects = 8;
+    constexpr std::size_t ValueLen = 1000;
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        for (auto const i: std::views::iota(0, Objects))
+            REQUIRE((*first)
+                        ->Set(std::format("k-{:02}", i),
+                              MakeBytes(std::string(ValueLen, 'x')),
+                              0,
+                              core::platform::SteadyTimePoint::max())
+                        .has_value());
+    }
+
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(second.has_value());
+
+    // **The first half.** The store holds the values uncompressed, so a footprint under
+    // their total would be a store that does not know what it holds.
+    auto const reopened = (*second)->Snapshot().bytesUsed;
+    CHECK(reopened >= Objects * ValueLen);
+
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, Objects))
+    {
+        auto const got = (*second)->Get(std::format("k-{:02}", i), clock.now());
+        REQUIRE(got.has_value());
+        REQUIRE(got->found);
+    }
+
+    // **The second half.** Reading every object back must not move the figure by a byte.
+    CHECK((*second)->Snapshot().bytesUsed == reopened);
+}
+
+TEST_CASE("A reopened store over its bound evicts entries it has never touched", "[cowstorage][evict][capacity]")
+{
+    // #1012. #1006 made the byte figure truthful at `Open`, so a reopened store finally
+    // KNEW it was over its bound -- and could still do nothing about it, because
+    // `EvictToFit` names victims out of `_lru`, which only `TouchOrInsert` populates
+    // and no `Open` path calls. The bound was observable and unenforceable at the same
+    // time, which is the worse half: the gauge an operator watches said "over" while
+    // the store sat there.
+    //
+    // Two things are asserted, and the second is the one that makes this LRU rather
+    // than a scramble for anything erasable. Written in pages: each object costs one
+    // overflow page, so a budget five pages under the reopened footprint is five evictions.
+    TempFile tmp;
+    auto const opts = FootprintOptions(tmp.path, 0);
+
+    constexpr int Objects = 8;
+    constexpr std::size_t Evicted = 5;
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        for (auto const i: std::views::iota(0, Objects))
+            REQUIRE((*first)
+                        ->Set(std::format("k-{:02}", i),
+                              MakeBytes(std::string(OnePageValueLen, 'x')),
+                              0,
+                              core::platform::SteadyTimePoint::max())
+                        .has_value());
+    }
+
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(second.has_value());
+    auto const reopened = (*second)->Snapshot().bytesUsed;
+    REQUIRE(reopened > Pages(Evicted));
+
+    // Touched, so it is the one entry in the mirror. Everything else is cold, and cold
+    // means "not used since this process started" -- strictly less recently used than
+    // this one, whatever order they were written in.
+    core::platform::ManualClock clock;
+    auto const warmed = (*second)->Get("k-00", clock.now());
+    REQUIRE(warmed.has_value());
+    REQUIRE(warmed->found);
+
+    auto const budget = reopened - Pages(Evicted);
+    (*second)->Resize(budget);
+
+    // **The first half.** Before #1012 nothing went: an empty mirror, nothing to name,
+    // and a `while` loop that never ran a single iteration.
+    CHECK((*second)->Snapshot().bytesUsed <= budget);
+
+    // **The second half**, and it turned out to describe a sharper defect than the
+    // first. Measured against the neutered fix: THIS key was the one missing. The
+    // mirror's only member after a reopen is whatever the session has touched, so the
+    // old loop evicted the entry that had just been read -- the single worst LRU choice
+    // available -- and then stopped, the mirror being empty again.
+    auto const survivor = (*second)->Get("k-00", clock.now());
+    REQUIRE(survivor.has_value());
+    CHECK(survivor->found);
+
+    std::size_t present = 0;
+    for (auto const i: std::views::iota(0, Objects))
+    {
+        auto const got = (*second)->Get(std::format("k-{:02}", i), clock.now());
+        REQUIRE(got.has_value());
+        if (got->found)
+            ++present;
+    }
+    CHECK(present == Objects - Evicted);
+}
+
+TEST_CASE("A reopened store over its bound strands no cold entry, so it keeps what it is handed next",
+          "[cowstorage][evict][capacity]")
+{
+    // The cold walk collects a slice of victims and erases only until the store fits.
+    // Its cursor used to jump to the last key the WALK reached, so every victim after the
+    // stopping point was skipped, and once the walk reached the end `_coldExhausted`
+    // stranded them for the session. Those strays then held the budget for good, and each
+    // new Set evicted the previous one -- the only warm entry -- so the store kept nothing
+    // it was handed but the newest. Found by the file-growth convergence case, whose file
+    // could not shrink past the pages the strays held.
+    //
+    // More seed entries than one slice holds, so the walk is several slices long and the
+    // last one stops partway. Each entry costs one overflow page; the budget holds a few
+    // dozen beside the tree and the free list's own pages, well over `Kept` and well under
+    // `Handed`, so a store that drained its cold set first must have drained ALL of it.
+    constexpr std::size_t Seeded = 600;
+    constexpr std::size_t Kept = 10;
+    constexpr std::size_t Handed = 100;
+
+    TempFile tmp;
+    auto opts = FootprintOptions(tmp.path, 0);
+    auto const set = [](Pace::CowTreeStorage& store, std::string const& key) {
+        REQUIRE(store.Set(key, MakeBytes(std::string(OnePageValueLen, 'x')), 0, core::platform::SteadyTimePoint::max())
+                    .has_value());
+    };
+    {
+        auto seed = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(seed.has_value());
+        for (auto const i: std::views::iota(std::size_t { 0 }, Seeded))
+            set(**seed, std::format("seed-{:04}", i));
+    }
+
+    opts.maxBytes = Pages(60);
+    auto store = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(store.has_value());
+    for (auto const i: std::views::iota(std::size_t { 0 }, Handed))
+        set(**store, std::format("new-{:04}", i));
+
+    // Every cold entry has gone, and the budget holds the newest `Kept` it was handed.
+    // The old code kept a few seed entries and one new one here.
+    core::platform::ManualClock clock;
+    std::size_t seedLeft = 0;
+    for (auto const i: std::views::iota(std::size_t { 0 }, Seeded))
+    {
+        auto const got = (*store)->Get(std::format("seed-{:04}", i), clock.now());
+        REQUIRE(got.has_value());
+        seedLeft += got->found ? 1 : 0;
+    }
+    std::size_t newestKept = 0;
+    for (auto const i: std::views::iota(Handed - Kept, Handed))
+    {
+        auto const got = (*store)->Get(std::format("new-{:04}", i), clock.now());
+        REQUIRE(got.has_value());
+        newestKept += got->found ? 1 : 0;
+    }
+    CHECK(seedLeft == 0);
+    CHECK(newestKept == Kept);
+    // And the store, opened over its budget, came down to it: the first write evicts, not
+    // `Open`, which would hold a large store's startup for the whole drain.
+    CHECK((*store)->Snapshot().bytesUsed <= opts.maxBytes);
+}
+
+TEST_CASE("The store's byte total follows deletes and replaces, not just writes", "[cowstorage][bytesused][capacity]")
+{
+    // The footprint is pages in use, so this asserts it page by page: a Set adds its leaf
+    // and its overflow pages, a replace swaps the old chain for the new one once the new
+    // value is durable, and deleting everything returns to the empty store's two meta
+    // pages and the leaf that holds the store's own format marker. A total that only ever
+    // grew would pass a bound check and still evict a store it believed was full.
+    TempFile tmp;
+    auto store = Pace::CowTreeStorage::Open(FootprintOptions(tmp.path, 0));
+    REQUIRE(store.has_value());
+    core::platform::ManualClock clock;
+
+    // A value three overflow pages long, and one a single page long.
+    constexpr std::size_t ThreePageValueLen = (2 * OverflowPayload) + 100;
+    auto const empty = (*store)->Snapshot().bytesUsed;
+    // The two meta slots and the one leaf holding the format marker `Open` writes. Every
+    // entry below shares that leaf, so what each step moves is its overflow chain alone.
+    CHECK(empty == Pages(3));
+
+    REQUIRE((*store)->Set("a", RandomBytes(ThreePageValueLen, 1), 0, core::platform::SteadyTimePoint::max()).has_value());
+    CHECK((*store)->Snapshot().bytesUsed == empty + Pages(3));
+    REQUIRE((*store)->Set("b", RandomBytes(ThreePageValueLen, 2), 0, core::platform::SteadyTimePoint::max()).has_value());
+    CHECK((*store)->Snapshot().bytesUsed == empty + Pages(3 + 3));
+
+    // A replace frees the three-page chain and keeps a one-page one.
+    REQUIRE((*store)->Set("a", RandomBytes(OnePageValueLen, 3), 0, core::platform::SteadyTimePoint::max()).has_value());
+    CHECK((*store)->Snapshot().bytesUsed == empty + Pages(1 + 3));
+
+    REQUIRE((*store)->Delete("b", clock.now()).has_value());
+    CHECK((*store)->Snapshot().bytesUsed == empty + Pages(1));
+
+    REQUIRE((*store)->Delete("a", clock.now()).has_value());
+    CHECK((*store)->Snapshot().bytesUsed == empty);
+}
+
+TEST_CASE("A reopened store projects what its index WILL cost, not what it costs now", "[cowstorage][index][capacity]")
+{
+    // #175: a disk tier's key index is real RAM that no figure described, so a
+    // disk-only node reserved nothing and offered the fleet the whole machine.
+    //
+    // The trap is that `indexBytes` -- the obvious figure -- is EMPTY the instant a
+    // full store reopens, which is the state the ticket is about. This asserts the
+    // difference between the two, because a projection that merely equalled
+    // `indexBytes` would satisfy any test written about the warm case and reserve
+    // nothing on the restarted one.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    constexpr int Objects = 64;
+    std::size_t warmProjection = 0;
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        for (auto const i: std::views::iota(0, Objects))
+            REQUIRE((*first)
+                        ->Set(std::format("key-{:04}", i), MakeBytes("value"), 0, core::platform::SteadyTimePoint::max())
+                        .has_value());
+        auto const warm = (*first)->Snapshot();
+        // Warm, the projection is at least the actual cost and slightly above it: the
+        // tree also holds the store's RESERVED records -- the format marker and the
+        // in-flight-conversion marker -- which `ItemCount()` counts and the mirror
+        // never holds. An upper bound is what a reservation wants, so counting them is
+        // right; asserting equality here was wrong and this case caught it.
+        CHECK(warm.indexBytes > 0);
+        CHECK(warm.indexBytesAtCapacity >= warm.indexBytes);
+        warmProjection = warm.indexBytesAtCapacity;
+    }
+
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(second.has_value());
+    auto const cold = (*second)->Snapshot();
+
+    // The mirror is empty -- pinned elsewhere, restated here because it is what makes
+    // the next assertion mean something.
+    CHECK(cold.indexBytes == 0);
+
+    // **The assertion.** The projection still knows what the index will cost, because
+    // it is computed from the store's durable item and key totals rather than from the
+    // mirror. Without it a restarted node reserves zero.
+    CHECK(cold.indexBytesAtCapacity > 0);
+
+    // And it is the SAME answer as when warm: the store did not change, so neither
+    // should the projection. Asserted against the warm reading rather than against a
+    // recomputed constant, so the case cannot drift with `IndexBytesFor`'s internals
+    // and cannot pass by agreeing with its own arithmetic.
+    CHECK(cold.indexBytesAtCapacity == warmProjection);
+}
+
+TEST_CASE("A reopened store reports the items it HOLDS rather than the ones this session touched",
+          "[cowstorage][stats][items]")
+{
+    // #1483. `itemCount` was read from the session mirror while `bytesUsed` -- two lines
+    // below it in the same function -- was read from the store, so a node restarted onto
+    // a full cache reported zero items and read as a cache nothing was using. Found by
+    // dogfooding: `live-stats cache` said `items 0` beside `bytes_used 50873463991`.
+    //
+    // #1006 fixed the byte half of that function and left this one, which is why the fix
+    // sits directly above a comment describing the same defect for the other field.
+    TempFile tmp;
+    Pace::CowTreeStorage::Options opts;
+    opts.path = tmp.path;
+
+    constexpr int Objects = 37;
+    core::platform::ManualClock clock;
+
+    {
+        auto first = Pace::CowTreeStorage::Open(opts);
+        REQUIRE(first.has_value());
+        for (auto const i: std::views::iota(0, Objects))
+            REQUIRE((*first)
+                        ->Set(std::format("key-{:04}", i), MakeBytes("value"), 0, core::platform::SteadyTimePoint::max())
+                        .has_value());
+
+        // Warm, this figure was ALREADY right, and it has to stay right: the mirror and
+        // the store agree here, so a fix that moved the warm reading moved the wrong
+        // thing. The control, not the subject.
+        CHECK((*first)->Snapshot().itemCount == Objects);
+    }
+
+    auto second = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(second.has_value());
+
+    // **The assertion**, and it is taken BEFORE anything is read back. The mirror fills
+    // itself from reads, so a case that fetched a key first would pass under the defect.
+    //
+    // `== Objects` rather than `> 0`, and that is the whole difference between this case
+    // and one that cannot fail: the tree keeps the store's format marker as a record too,
+    // so an unadjusted `ItemCount()` answers `Objects + 1`. That overstating fix satisfies
+    // every "the reading looks populated after a reopen" assertion.
+    auto const cold = (*second)->Snapshot();
+    CHECK(cold.itemCount == Objects);
+
+    // `bytesUsed` is the half #1006 already closed, so it is correct under the defect as
+    // well: a case asserting the pair agree, or merely that the row looks populated,
+    // passes with the item count still broken.
+    CHECK(cold.bytesUsed > 0);
+
+    // `indexBytes` deliberately still reports the PRESENT -- what the mirror costs now --
+    // with `indexBytesAtCapacity` as the durable projection beside it (#175). A fix that
+    // made every figure durable would destroy the reservation argument that field exists
+    // for, and these two are what say it did not.
+    CHECK(cold.indexBytes == 0);
+    CHECK(cold.indexBytesAtCapacity > 0);
+
+    // One read, and the mirror now costs something while the count does not move: the
+    // figure is the store's, not a mirror that happens to have been filled.
+    REQUIRE((*second)->Get("key-0000", clock.now()).has_value());
+    auto const touched = (*second)->Snapshot();
+    CHECK(touched.itemCount == Objects);
+    CHECK(touched.indexBytes > 0);
+}

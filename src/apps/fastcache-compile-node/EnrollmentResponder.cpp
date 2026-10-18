@@ -2,16 +2,16 @@
 #include "EnrollmentResponder.hpp"
 #include "MembershipGate.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/EnrollAdmissionSignature.hpp>
-#include <FastCache/Cluster/EnrollRequestSignature.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Sha256.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/EnrollAdmissionSignature.hpp>
+#include <Pace/Cluster/EnrollRequestSignature.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Sha256.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <format>
@@ -20,7 +20,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace Wire = CompileCacheWire;
@@ -736,4 +736,4 @@ std::vector<std::byte> EnrollmentResponder::AnswerDecision(
     return Wire::EncodeReply(Wire::Status::Ok, Wire::EncodeEnrollmentReport(_window.Report()));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

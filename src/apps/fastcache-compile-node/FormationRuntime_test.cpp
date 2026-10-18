@@ -6,13 +6,13 @@
 #include "NodeFormation.hpp"
 #include "NodeReload.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/SeedSources.hpp>
-#include <FastCache/Core/Errors/ConsensusError.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/SeedSources.hpp>
+#include <Pace/Core/Errors/ConsensusError.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -42,8 +42,8 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/SecureRandomFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

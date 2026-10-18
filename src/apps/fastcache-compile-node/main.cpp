@@ -65,46 +65,46 @@
 #include "WorkerLease.hpp"
 #include "WorkerTier.hpp"
 
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cli/UsageDoc.hpp>
-#include <FastCache/Config/ByteSize.hpp>
-#include <FastCache/Config/ConfigReloader.hpp>
-#include <FastCache/Config/DefaultConfigPath.hpp>
-#include <FastCache/Config/FileOptions.hpp>
-#include <FastCache/Config/SecretExposureWatcher.hpp>
-#include <FastCache/Config/SecretProvenance.hpp>
-#include <FastCache/Config/YamlReader.hpp>
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/ReadinessMarker.hpp>
-#include <FastCache/Core/StopAwareWait.hpp>
-#include <FastCache/Core/Version.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
-#include <FastCache/Platform/CpuAffinity.hpp>
-#include <FastCache/Platform/DaemonControls.hpp>
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/Firewall.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Platform/HostMemory.hpp>
-#include <FastCache/Platform/HostNaming.hpp>
-#include <FastCache/Platform/IDaemonHost.hpp>
-#include <FastCache/Platform/InheritedListener.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
-#include <FastCache/Platform/NetworkChangeWatcher.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
-#include <FastCache/Platform/Terminal.hpp>
-#include <FastCache/Platform/WindowsEventLogger.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Config/ConfigReloader.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Config/FileOptions.hpp>
+#include <Pace/Config/SecretExposureWatcher.hpp>
+#include <Pace/Config/SecretProvenance.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/ReadinessMarker.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Platform/CpuAffinity.hpp>
+#include <Pace/Platform/DaemonControls.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/Firewall.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Platform/HostMemory.hpp>
+#include <Pace/Platform/HostNaming.hpp>
+#include <Pace/Platform/IDaemonHost.hpp>
+#include <Pace/Platform/InheritedListener.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/NarrowText.hpp>
+#include <Pace/Platform/NetworkChangeWatcher.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
+#include <Pace/Platform/Terminal.hpp>
+#include <Pace/Platform/WindowsEventLogger.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <algorithm>
 #include <array>
@@ -140,8 +140,8 @@
 
 namespace
 {
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 /// The ids of the accounts THIS process counts as the node's own when it judges a state directory
 /// (`OwnStateAccountRows`): the node's service account for an administrator running a verb that

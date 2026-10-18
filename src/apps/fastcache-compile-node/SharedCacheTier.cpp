@@ -3,7 +3,7 @@
 #include "SharedCacheTier.hpp"
 #include "SharedTierProfile.hpp"
 
-#include <FastCache/Core/Compression.hpp>
+#include <Pace/Core/Compression.hpp>
 
 #include <cstddef>
 #include <expected>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 SharedCacheTier::SharedCacheTier(std::unique_ptr<IStorage> storage, core::platform::IClock& clock, IMetricsSink& metrics):
@@ -77,4 +77,4 @@ std::expected<std::shared_ptr<SharedCacheTier>, std::string> DiskSharedTierOpene
     return std::make_shared<SharedCacheTier>(ShareStorage(std::move(*opened), _logger), _clock, _metrics);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -12,10 +12,10 @@ namespace CowTree
 ///
 /// Self-contained copy used internally by the CowTree library. The
 /// implementation matches the canonical reflected CRC-32C used by iSCSI,
-/// SSE 4.2's `crc32` instruction, and FastCache's own `Core/Crc32c`.
+/// SSE 4.2's `crc32` instruction, and Pace's own `Core/Crc32c`.
 ///
 /// Duplicated rather than shared because CowTree is a standalone sibling
-/// library with no link dependency on FastCache.
+/// library with no link dependency on Pace.
 class Crc32c
 {
   public:

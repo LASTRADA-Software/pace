@@ -11,23 +11,23 @@
 #include "Responders.hpp"
 #include "SharedCacheResponder.hpp"
 
-#include <FastCache/Cache/CowTreeStorage.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Config/ConfigReloader.hpp>
-#include <FastCache/Config/DefaultConfigPath.hpp>
-#include <FastCache/Config/SecretExposureWatcher.hpp>
-#include <FastCache/Config/YamlReader.hpp>
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Platform/ServiceControl.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cache/CowTreeStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Config/ConfigReloader.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Config/SecretExposureWatcher.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -67,9 +67,9 @@
     #include <sys/stat.h>
 #endif
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -531,7 +531,7 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
     // they are being relied upon. Away from the default WHATEVER the default is, so
     // the fixture's own rule -- no field holds its default -- keeps holding on a
     // platform where that default is true (#496).
-    cfg.logTimestamps = !FastCache::DefaultLogTimestamps;
+    cfg.logTimestamps = !Pace::DefaultLogTimestamps;
     cfg.pidfile = "worker.pid";
     cfg.drainTimeout = std::chrono::seconds { 90 };
     cfg.compileRequestMaxBytes = 512ULL * 1024 * 1024;
@@ -1117,7 +1117,7 @@ TEST_CASE("NodeConfig: a system-scope job names an unprivileged account", "[node
     // NAMED, so its spec is built from the command line, not from the merged
     // configuration. This case only reads the account, and a parse that named nothing
     // is what asks for the default one.
-    auto const daemonSpec = MakeDaemonServiceSpec(std::filesystem::path { "fastcached" }, FastCache::CliResult {});
+    auto const daemonSpec = MakeDaemonServiceSpec(std::filesystem::path { "fastcached" }, Pace::CliResult {});
     CHECK(spec.serviceAccount != daemonSpec.serviceAccount);
 
     // The same decision for the other supervisor. Told nothing, the Windows SCM
@@ -4485,8 +4485,8 @@ TEST_CASE("NodeSecretFiles: every path-valued flag is classified, secret or not"
     // than two Catch2 cases that drift on which directions they check.
     auto const secret = NodeSecretFileTable();
     auto const publicPaths = NodePublicPathFlags();
-    auto const coverage = FastCache::Testing::ClassifyPathFlags<NodeConfig>(
-        NodeOptions(), FastCache::Testing::FlagsOf(secret), FastCache::Testing::FlagsOf(publicPaths));
+    auto const coverage = Pace::Testing::ClassifyPathFlags<NodeConfig>(
+        NodeOptions(), Pace::Testing::FlagsOf(secret), Pace::Testing::FlagsOf(publicPaths));
 
     SECTION("every =<path> row of NodeOptions() is in exactly one table")
     {
@@ -4496,13 +4496,13 @@ TEST_CASE("NodeSecretFiles: every path-valued flag is classified, secret or not"
         // is not decoration: a flag renamed in the option table leaves a row here
         // naming nothing, and the file it used to cover goes unasked about with both
         // tables still looking full.
-        INFO("unclassified: " << FastCache::Testing::Join(coverage.unclassified));
+        INFO("unclassified: " << Pace::Testing::Join(coverage.unclassified));
         CHECK(coverage.unclassified.empty());
 
-        INFO("classified twice: " << FastCache::Testing::Join(coverage.classifiedTwice));
+        INFO("classified twice: " << Pace::Testing::Join(coverage.classifiedTwice));
         CHECK(coverage.classifiedTwice.empty());
 
-        INFO("naming no row: " << FastCache::Testing::Join(coverage.namingNoRow));
+        INFO("naming no row: " << Pace::Testing::Join(coverage.namingNoRow));
         CHECK(coverage.namingNoRow.empty());
 
         // The positive control. A scan that matched nothing would leave all three
@@ -4528,8 +4528,8 @@ TEST_CASE("NodeSecretFiles: every path-valued flag is classified, secret or not"
         // #178 moved it: the directory stopped being "Raft state, no credential" the moment it
         // held the key a machine proves itself with. Classified on the secret side, where the
         // row's path is the key file the node minted inside it -- never the directory itself.
-        CHECK(FastCache::Testing::Names(secret, "--cluster-dir"));
-        CHECK_FALSE(FastCache::Testing::Names(publicPaths, "--cluster-dir"));
+        CHECK(Pace::Testing::Names(secret, "--cluster-dir"));
+        CHECK_FALSE(Pace::Testing::Names(publicPaths, "--cluster-dir"));
     }
 
     SECTION("--tls-cert is classified as public, deliberately")
@@ -4539,8 +4539,8 @@ TEST_CASE("NodeSecretFiles: every path-valued flag is classified, secret or not"
         // client during the handshake, so warning about the mode of a file that is
         // MEANT to be readable is the alarm that teaches operators to ignore the four
         // that matter.
-        CHECK(FastCache::Testing::Names(publicPaths, "--tls-cert"));
-        CHECK(FastCache::Testing::Names(secret, "--tls-key"));
+        CHECK(Pace::Testing::Names(publicPaths, "--tls-cert"));
+        CHECK(Pace::Testing::Names(secret, "--tls-key"));
     }
 }
 
@@ -4641,7 +4641,7 @@ TEST_CASE("NodeSecretFiles: the worker actually asks, and that is asserted", "[n
     // A source scan because `main.cpp` is in no test target. Full-line comments are
     // stripped first: a COMMENT is not a call site, and the call site here sits under
     // twenty lines of comment that name the very function being looked for.
-    std::ifstream source { std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps"
+    std::ifstream source { std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps"
                            / "fastcache-compile-node" / "main.cpp" };
     REQUIRE(source.is_open());
 

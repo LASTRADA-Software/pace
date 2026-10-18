@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # Catch2 test binary. Picks up every *_test.cpp adjacent to source files in
-# src/FastCache so adding a test file is a one-step operation: drop it next
+# src/Pace so adding a test file is a one-step operation: drop it next
 # to the implementation and re-configure.
 
 file(GLOB_RECURSE FASTCACHE_TEST_SOURCES
     CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/src/FastCache/*_test.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/*_test.cpp"
 )
 
-add_executable(FastCacheTest
+add_executable(PaceTest
     test_main.cpp
-    # The shared test helpers' own cases: not under src/FastCache, so the glob above cannot reach them.
+    # The shared test helpers' own cases: not under src/Pace, so the glob above cannot reach them.
     ScratchPath_test.cpp
     ${FASTCACHE_TEST_SOURCES}
 )
 
-target_link_libraries(FastCacheTest
+target_link_libraries(PaceTest
     PRIVATE
-        FastCache
+        Pace
         Catch2::Catch2
 )
 
@@ -67,7 +67,7 @@ include(Catch)
 # property is exact. The argument is there, one place pointed at rather than restated,
 # because this comment exists five times over; `catch-skip-exit-contract` below runs the
 # shapes against the linked Catch2, so the contract cannot rot into a false rule.
-catch_discover_tests(FastCacheTest PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
+catch_discover_tests(PaceTest PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${FASTCACHED_ERROR_DIALOG_ENVIRONMENT}")
 
 # ---------------------------------------------------------------------------
 # The ThreadSanitizer canary: a program that MUST fail, so that a green sanitizer
@@ -82,7 +82,7 @@ catch_discover_tests(FastCacheTest PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MOD
 # the defect that module's own comment records. A canary built with hand-written
 # flags would keep passing through exactly that failure.
 #
-# Deliberately NOT linked against FastCache: it answers "is the toolchain
+# Deliberately NOT linked against Pace: it answers "is the toolchain
 # instrumenting and reporting", which has to stay answerable even when the
 # library does not build.
 #
@@ -2019,7 +2019,7 @@ set_tests_properties("unique-temp-paths-selftest" PROPERTIES
 # Not guarded to Debug, unlike the canary gates it is shaped like: nothing here is an
 # `assert`, and the generator a Release build ships is the one worth asking.
 add_executable(secure-random-probe SecureRandomProbe.cpp)
-target_link_libraries(secure-random-probe PRIVATE FastCache)
+target_link_libraries(secure-random-probe PRIVATE Pace)
 add_test(
     NAME "secure-random-cross-process"
     COMMAND ${CMAKE_COMMAND}
@@ -2766,7 +2766,7 @@ add_test(
     NAME "daemon-config-reference"
     COMMAND ${CMAKE_COMMAND}
         "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "-DFASTCACHED_TABLE=src/FastCache/Config/CliParser.cpp"
+        "-DFASTCACHED_TABLE=src/Pace/Config/CliParser.cpp"
         "-DFASTCACHED_REFERENCE=packaging/config/fastcached.yaml"
         "-DFASTCACHED_LABEL=fastcached"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-config-reference.cmake"
@@ -3957,7 +3957,7 @@ endif()
 # `--self-test` drives the verdicts against staged object trees: a suite binary
 # with one uninstrumented object, an uninstrumented canary, a fully instrumented
 # target, an instrumented translation unit with no functions (the six
-# platform-gated files in FastCacheTest, which carry `__tsan_init` and no
+# platform-gated files in PaceTest, which carry `__tsan_init` and no
 # per-function hooks -- a rule built on `__tsan_func_entry` would refuse them), an
 # unreadable object, a missing object directory, two candidate directories, an
 # empty one, and a binary that was never built.
@@ -3965,7 +3965,7 @@ endif()
 # The suite case is the one that matters and is deliberately first. An
 # uninstrumented CANARY already failed closed -- it exits 0, reports no race, and
 # the gate refuses. The test binaries had no backstop at all, so an uninstrumented
-# `FastCacheTest` ran, reported assertions, exited 0, and the gate printed
+# `PaceTest` ran, reported assertions, exited 0, and the gate printed
 # "all scoped targets clean". A guard demonstrated only on the backstopped half
 # would be a guard nobody has seen fire where it matters.
 #
@@ -5975,8 +5975,8 @@ set_tests_properties("ranges-seam-selftest" PROPERTIES
 
 # No first-party file includes a Monocypher header except `Core/Ed25519.cpp` and
 # `Core/X25519.cpp`, the crypto seam (#178). The include directories are PUBLIC on the
-# vendored library and FastCache links it PRIVATE, which keeps them from FastCache's consumers
-# and not from FastCache itself -- so the build cannot say this and a scan does. The permitted
+# vendored library and Pace links it PRIVATE, which keeps them from Pace's consumers
+# and not from Pace itself -- so the build cannot say this and a scan does. The permitted
 # rows are the positive control: each must be seen INCLUDING Monocypher, or it is refused as
 # stale, which is what a broken pattern or an enumeration that missed `src/` looks like.
 add_test(
@@ -6987,7 +6987,7 @@ endif()
 # `tsan-scope-hygiene` above asks whether a scoped test CASE carries a tag the
 # gate selects. That is a question about cases inside binaries the gate already
 # runs, so it could not see `fastcache-cc-tests`, which was in no row at all: the
-# launcher does not link the FastCache library, so no tag expression could ever
+# launcher does not link the Pace library, so no tag expression could ever
 # have reached it.
 #
 # Derived, not tabulated. The set comes from the `catch_discover_tests(`
@@ -7340,7 +7340,7 @@ set_tests_properties("cli-text-cell-selftest" PROPERTIES
 # machine it was tested on and passes every behavioural test, so the clause is a scan.
 # Exemptions are rows with reasons in `scripts/cli-ambient-read-exemptions.txt`, and a row
 # that no longer describes the tree is refused. It fails closed: the same scanner must
-# recognise a read in `src/FastCache/Platform/`, where these calls live.
+# recognise a read in `src/Pace/Platform/`, where these calls live.
 #
 # DEFAULT set: no compiler, no daemon, no socket.
 add_test(
@@ -7564,7 +7564,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DCONFIG=$<CONFIG>"
-        -DANCHOR=FastCacheTest
+        -DANCHOR=PaceTest
         -P "${CMAKE_SOURCE_DIR}/scripts/check-off-thread-assertion-guard.cmake"
 )
 set_tests_properties("off-thread-assertion-guard-coverage" PROPERTIES
@@ -7607,7 +7607,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DCONFIG=$<CONFIG>"
-        -DANCHOR=FastCacheTest
+        -DANCHOR=PaceTest
         "-DVARIABLE=${FASTCACHED_ERROR_DIALOG_VARIABLE}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-error-popups.cmake"
 )
@@ -7640,7 +7640,7 @@ add_test(
         "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
         "-DCONFIG=$<CONFIG>"
         "-DMSVC_STYLE=$<BOOL:${MSVC}>"
-        -DANCHOR=FastCacheTest
+        -DANCHOR=PaceTest
         -P "${CMAKE_SOURCE_DIR}/scripts/check-incremental-link.cmake"
 )
 set_tests_properties("incremental-link" PROPERTIES
@@ -7873,7 +7873,7 @@ if(CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
         COMMAND ${CMAKE_COMMAND}
             "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
             "-DFASTCACHED_COMPILE_DATABASE=${CMAKE_BINARY_DIR}/compile_commands.json"
-            "-DFASTCACHED_PLANT_UNIT=src/FastCache/Core/Sha256.cpp"
+            "-DFASTCACHED_PLANT_UNIT=src/Pace/Core/Sha256.cpp"
             -P "${CMAKE_SOURCE_DIR}/scripts/check-instruction-set-flags.cmake"
     )
     set_tests_properties("instruction-set-flags-plant" PROPERTIES
@@ -8056,10 +8056,10 @@ set_tests_properties("wire-tag-reach-selftest" PROPERTIES
 # interesting: a `$<TARGET_FILE:x>` naming a target that was not built is a hard
 # error at GENERATE time, which fails the whole configure and names CMake rather
 # than the option the operator set.
-if(TARGET FastCacheTest)
+if(TARGET PaceTest)
     add_test(
         NAME "wire-tag-reach-count"
-        COMMAND $<TARGET_FILE:FastCacheTest> "[wire]"
+        COMMAND $<TARGET_FILE:PaceTest> "[wire]"
     )
     set_tests_properties("wire-tag-reach-count" PROPERTIES
         # The count is PINNED, not merely non-zero. `[1-9][0-9]*` -- the idiom

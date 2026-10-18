@@ -2,8 +2,8 @@
 #include "NodeIdentity.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -757,4 +757,4 @@ ServedSurfaces NodeServedSurfacesFor(NodeConfig const& cfg)
     return out;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

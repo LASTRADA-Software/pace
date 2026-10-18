@@ -5,8 +5,8 @@
 #include "CliFormat.hpp"
 #include "CliVerbs.hpp"
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cli/UsageDoc.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file CliCommand.hpp
@@ -213,4 +213,4 @@ struct EnvVarSpec
 /// @return A view of the static table; never empty.
 [[nodiscard]] std::span<EnvVarSpec const> CliEnvironment() noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

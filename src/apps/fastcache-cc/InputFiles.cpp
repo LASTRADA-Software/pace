@@ -2,7 +2,7 @@
 #include "DirectManifest.hpp"
 #include "InputFiles.hpp"
 
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -16,7 +16,7 @@
 #include <ctime>
 #include <optional>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -276,4 +276,4 @@ std::unique_ptr<IInputFiles> MakeDiskInputFiles()
     return std::make_unique<DiskInputFiles>();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

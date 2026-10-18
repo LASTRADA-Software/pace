@@ -6,14 +6,14 @@
 #include "NodeRefusal.hpp"
 #include "Responders.hpp"
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <expected>
 #include <memory>
 #include <optional>
 #include <string>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class CacheTier;
@@ -200,4 +200,4 @@ class NodeFrameSurface
                                                          SessionResponder& session,
                                                          SharedCacheService& sharedCache) noexcept;
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

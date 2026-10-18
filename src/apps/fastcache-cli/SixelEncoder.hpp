@@ -8,7 +8,7 @@
 #include <span>
 #include <string>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file SixelEncoder.hpp
@@ -66,4 +66,4 @@ class ISixelEncoder
 /// @return The encoder, or the reason there is none.
 [[nodiscard]] std::expected<std::unique_ptr<ISixelEncoder>, std::string> MakeSixelEncoder();
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -305,4 +305,4 @@ std::optional<std::string> ProbeIncludeNoteMarker(IProcessRunner& runner,
     return MarkerFromProbeOutput(run.out, files->header.string());
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

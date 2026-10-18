@@ -78,13 +78,13 @@
 #include "ToolchainHost.hpp"
 #include "ToolchainProbe.hpp"
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
-#include <FastCache/Platform/Terminal.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/NarrowText.hpp>
+#include <Pace/Platform/Terminal.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -128,14 +128,14 @@
 
 namespace
 {
-using namespace FastCache;
+using namespace Pace;
 
 // Supplied by the build; defaulted so the tool still compiles standalone.
 #if !defined(FASTCACHE_CC_VERSION)
     #define FASTCACHE_CC_VERSION "unknown"
 #endif
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 // --- config ----------------------------------------------------------------
 
@@ -268,7 +268,7 @@ struct Config
 /// @return The value, or `fallback`.
 [[nodiscard]] std::string EnvOr(std::string_view name, std::string_view fallback)
 {
-    auto value = FastCache::ReadEnvironmentVariable(name);
+    auto value = Pace::ReadEnvironmentVariable(name);
     return value.has_value() && !value->empty() ? std::move(*value) : std::string { fallback };
 }
 
@@ -345,7 +345,7 @@ struct Config
     // Loopback is not that -- a closed port refuses immediately, no timeout and no
     // round trip -- which is the whole argument for this default and why it could
     // not be any other address.
-    auto const configuredAddr = FastCache::ReadEnvironmentVariable(Cc::EnvName::Addr);
+    auto const configuredAddr = Pace::ReadEnvironmentVariable(Cc::EnvName::Addr);
     c.addr = configuredAddr.has_value() ? *configuredAddr : std::string { Cc::DefaultAddr };
     // Deliberately NOT resolved here. These are the spelling the build system
     // exported, and they stay that way: they are the roots that go on the wire,
@@ -397,7 +397,7 @@ struct Config
     //
     // `max` is parenthesized to defeat windows.h's function-style max() macro,
     // for the same reason Stats.cpp is: this target deliberately does not link
-    // the FastCache library, and NOMINMAX is defined on that library's target.
+    // the Pace library, and NOMINMAX is defined on that library's target.
     // `std::min<...>` needs no such guard -- the explicit template argument puts
     // a `<` where the macro would need a `(` -- but it is spelled the same way
     // so that dropping the argument later cannot quietly reintroduce this.
@@ -1156,7 +1156,7 @@ void ReplayStreams(std::string_view out, std::string_view err)
     if (!Cc::ShouldVerifyHit(key, rate))
         return { .verdict = Cc::HitVerdict::NotChecked, .comparison = std::nullopt, .detail = {} };
 
-    auto const served = FastCache::PathFromNarrowText(cmd.objPath);
+    auto const served = Pace::PathFromNarrowText(cmd.objPath);
     if (!served.has_value())
         return { .verdict = Cc::HitVerdict::Inconclusive, .comparison = std::nullopt, .detail = {} };
 
@@ -2893,7 +2893,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     // the one object every path a compiler emitted passes through. It is read from
     // the platform at exactly this call site so everything it reaches stays pure.
     Cc::RootReconciler reconciler {
-        cfg.srcRoot, cfg.buildTree, PathResolver(), FastCache::HostNarrowTextPolicy(), cfg.depsRoot
+        cfg.srcRoot, cfg.buildTree, PathResolver(), Pace::HostNarrowTextPolicy(), cfg.depsRoot
     };
     PathCanon::Layout const& layout = reconciler.Layout();
 
@@ -3618,7 +3618,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     // The color decision is made here, not inside Stats.cpp, so that module
     // stays free of ambient probes -- the same split --help already uses.
     std::cout << Cc::FormatReport(
-        groupFilter, FastCache::StdoutSupportsColor() ? FastCache::UsageColor::Colored : FastCache::UsageColor::Plain);
+        groupFilter, Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored : Pace::UsageColor::Plain);
     return 0;
 }
 
@@ -3724,8 +3724,8 @@ int main(int argc, char** argv)
             // the module stays free of ambient probes. On Windows the call also
             // enables virtual-terminal processing as a side effect, so it has to
             // happen before anything is written.
-            std::cout << Cc::HelpText(FastCache::StdoutSupportsColor() ? FastCache::UsageColor::Colored
-                                                                       : FastCache::UsageColor::Plain);
+            std::cout << Cc::HelpText(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored
+                                                                       : Pace::UsageColor::Plain);
             return 0;
         case Cc::Action::Version:
             std::cout << "fastcache-cc " << FASTCACHE_CC_VERSION << '\n';

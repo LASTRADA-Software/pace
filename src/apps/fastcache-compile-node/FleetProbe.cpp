@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "FleetProbe.hpp"
 
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Core/PeerText.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Transport/TotalDeadlineSocket.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Core/PeerText.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Transport/TotalDeadlineSocket.hpp>
 
 #include <format>
 #include <span>
@@ -15,7 +15,7 @@
 #include <CacheProtocol.hpp>
 #include <core/async/SyncRun.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -123,4 +123,4 @@ std::expected<Cluster::ProvenFleetSummary, std::string> DialledFleetProbe::AskSu
     return *std::move(proven);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

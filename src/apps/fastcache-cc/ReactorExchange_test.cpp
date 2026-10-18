@@ -8,8 +8,8 @@
 #include "CacheDecision.hpp"
 #include "ReactorExchange.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -32,10 +32,10 @@
 #include <core/net/testing/TestLoop.hpp>
 #include <core/platform/Clock.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 using namespace std::chrono_literals;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -45,9 +45,9 @@ namespace
 /// credential diagnostic. A case that asserted the diagnostic would need its own,
 /// because the notice reports once and a shared one couples cases to Catch2's order.
 /// @return A notice with no sink.
-[[nodiscard]] FastCache::Cc::CredentialNotice& Unwatched()
+[[nodiscard]] Pace::Cc::CredentialNotice& Unwatched()
 {
-    static FastCache::Cc::CredentialNotice notice = FastCache::Cc::CredentialNotice::Silent();
+    static Pace::Cc::CredentialNotice notice = Pace::Cc::CredentialNotice::Silent();
     return notice;
 }
 

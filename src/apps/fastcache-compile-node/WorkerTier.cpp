@@ -6,9 +6,9 @@
 #include "NodeIoLoop.hpp"
 #include "WorkerTier.hpp"
 
-#include <FastCache/Config/ByteSize.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Platform/DaemonControls.hpp>
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Platform/DaemonControls.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -21,7 +21,7 @@
 #include <CacheProtocol.hpp>
 #include <Dispatch.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -711,4 +711,4 @@ void WorkerTier::StopAndDrain()
     _capacity.Drain();
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

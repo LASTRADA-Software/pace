@@ -68,7 +68,7 @@ set(vslangScanRoots
     "src/apps/fastcache-cc"
     "src/apps/fastcache-compile-node"
     "src/apps/fastcached"
-    "src/FastCache"
+    "src/Pace"
 )
 
 # The assignment's shape. Anchored on the designated initializer, so a mention in

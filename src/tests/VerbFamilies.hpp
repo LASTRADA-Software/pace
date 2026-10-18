@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <ranges>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file VerbFamilies.hpp
@@ -25,4 +25,4 @@ namespace FastCache::Testing
     return { rows.begin(), rows.end() };
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

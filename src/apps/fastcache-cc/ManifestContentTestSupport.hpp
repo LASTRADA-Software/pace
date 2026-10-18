@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc::Test
+namespace Pace::Cc::Test
 {
 
 /// Hashes each file at the moment `BuildManifest` asks. That is RECORD time, which is what
@@ -67,4 +67,4 @@ class ScriptedContent final: public IManifestContent
     mutable std::vector<std::string> _asked;
 };
 
-} // namespace FastCache::Cc::Test
+} // namespace Pace::Cc::Test

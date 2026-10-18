@@ -3,12 +3,12 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Publish which identity keys @p state holds live and which it revoked, into @p keys.
@@ -412,4 +412,4 @@ class NodeMembership final: public Distributed::IMembershipOracle
     std::atomic<bool> _isOpen;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

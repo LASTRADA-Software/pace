@@ -2,10 +2,10 @@
 #include "LiveStatsResponder.hpp"
 #include "LiveStatsSources.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -33,13 +33,13 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ListedMembership;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ListedMembership;
+using Pace::Testing::Unwrap;
 using namespace std::chrono_literals;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

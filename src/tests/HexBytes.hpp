@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The value of one hexadecimal digit.
@@ -64,4 +64,4 @@ template <std::size_t N>
     return array;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

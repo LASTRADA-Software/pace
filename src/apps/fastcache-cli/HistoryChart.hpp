@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file HistoryChart.hpp
@@ -135,4 +135,4 @@ inline constexpr auto ChartWindows = std::to_array<std::size_t>({ 30, 60, 120, H
                                                      std::size_t cells,
                                                      std::span<std::string_view const> levels);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

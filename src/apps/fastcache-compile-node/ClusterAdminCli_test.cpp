@@ -3,10 +3,10 @@
 #include "EndpointDialerTestUtils.hpp"
 #include "OperatorCredentials.hpp"
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -29,14 +29,14 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ErrorOf;
-using FastCache::Testing::PayloadOf;
-using FastCache::Testing::StatusOf;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ErrorOf;
+using Pace::Testing::PayloadOf;
+using Pace::Testing::StatusOf;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

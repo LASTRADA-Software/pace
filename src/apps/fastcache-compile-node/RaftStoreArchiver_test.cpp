@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,8 +20,8 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/SecureRandomFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using Testing::ScratchDirectory;
 
 namespace

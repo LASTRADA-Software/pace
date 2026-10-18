@@ -3,7 +3,7 @@
 
 #include "AtomicFile.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <array>
 #include <chrono>
@@ -13,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Whether a daemon's refusal describes a condition the whole BUILD will hit.
@@ -111,4 +111,4 @@ inline constexpr std::chrono::seconds RefusalNoticeInterval { 300 };
                                             PersistentRefusal const& row,
                                             std::string_view detail);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

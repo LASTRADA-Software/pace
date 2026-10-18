@@ -22,14 +22,14 @@
 #include "NodeRoster.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/Version.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -60,14 +60,14 @@
 #include <tests/ScriptedHostEvents.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 constexpr std::string_view Scheduler = "scheduler.example:6676";
 constexpr std::string_view ThisMachine = "10.0.0.4:6674";
@@ -648,7 +648,7 @@ TEST_CASE("AnnouncedCapacity sets this build's compiled-in version on the conver
     // `NodePresenceTier`'s one call for both questions; this asserts what it answers.
     Distributed::NodeCapacity const capacity { .logicalCores = 8 };
     auto const wire = AnnouncedCapacity(capacity);
-    CHECK(wire.version == FastCache::VersionString);
+    CHECK(wire.version == Pace::VersionString);
     // And the conversion itself still ran -- a version stapled onto a default-constructed
     // record would pass the check above having thrown away everything else `capacity` said.
     CHECK(wire.logicalCores == 8);

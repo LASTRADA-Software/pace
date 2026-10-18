@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NotePathCollapse.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 std::string CollapseNotePaths(std::string_view text, PathCanon::Grammar grammar, std::string_view marker)
@@ -33,4 +33,4 @@ std::string CollapseNotePaths(std::string_view text, PathCanon::Grammar grammar,
     return PathCanon::RestoreIncludeNoteMarker(collapsed, marker);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

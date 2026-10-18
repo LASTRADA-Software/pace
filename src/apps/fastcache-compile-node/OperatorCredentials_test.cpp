@@ -2,9 +2,9 @@
 #include "EndpointDialerTestUtils.hpp"
 #include "OperatorCredentials.hpp"
 
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/TicketChoice.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,10 +17,10 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
 
 TEST_CASE("An operator verb mints from this machine's node, at the port --listen-node names", "[node][ticket]")
 {

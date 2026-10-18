@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Collapses every spelling of one filesystem location to a single one.
@@ -120,4 +120,4 @@ class IPathResolver
 /// @return A resolver backed by the real filesystem.
 [[nodiscard]] std::unique_ptr<IPathResolver> MakePathResolver();
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

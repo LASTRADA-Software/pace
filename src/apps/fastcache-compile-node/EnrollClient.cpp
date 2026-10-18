@@ -3,13 +3,13 @@
 #include "EnrollmentAbsence.hpp"
 #include "EnrollmentWindow.hpp"
 
-#include <FastCache/Cluster/EnrollRequestSignature.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/PeerText.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Protocol/LeaderRedirect.hpp>
+#include <Pace/Cluster/EnrollRequestSignature.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/PeerText.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Protocol/LeaderRedirect.hpp>
 
 #include <algorithm>
 #include <array>
@@ -28,7 +28,7 @@
 #include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace Wire = CompileCacheWire;
@@ -461,4 +461,4 @@ std::expected<std::string, UnfinishedCommand> RunEnrollAdmin(NodeConfig const& c
     return RenderEnrollmentReport(*report, answered->endpoint);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

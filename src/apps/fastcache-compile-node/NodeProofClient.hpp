@@ -3,12 +3,12 @@
 
 #include "NodeConditions.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Protocol/SealedFrameSocket.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Protocol/SealedFrameSocket.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -22,7 +22,7 @@
 
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file NodeProofClient.hpp
@@ -396,4 +396,4 @@ class NodeProofClient
     mutable std::atomic<std::size_t> _deferrals { 0 };
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

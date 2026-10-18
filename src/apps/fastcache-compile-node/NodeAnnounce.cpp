@@ -6,8 +6,8 @@
 #include "SchedulerReachability.hpp"
 #include "WorkerLease.hpp"
 
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Platform/DaemonControls.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Platform/DaemonControls.hpp>
 
 #include <algorithm>
 #include <expected>
@@ -18,12 +18,12 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
 {
-    namespace Wire = FastCache::CompileCacheWire;
+    namespace Wire = Pace::CompileCacheWire;
 
     /// Send every queued withdrawal on @p client and clear the queue, whatever each answered.
     /// @param round What to withdraw and where to log.
@@ -490,4 +490,4 @@ std::chrono::seconds NextAnnounceWait(NodeProofClient const* prover)
     return NodeAnnounceInterval;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

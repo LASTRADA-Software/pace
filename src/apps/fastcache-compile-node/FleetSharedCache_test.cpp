@@ -2,10 +2,10 @@
 #include "LocalCache.hpp"
 #include "SharedCacheUpstream.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,14 +19,14 @@
 #include <core/async/SyncRun.hpp>
 #include <tests/SharedCacheFleet.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::SharedCacheFleet;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::SharedCacheFleet;
 
 namespace
 {
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 /// A stored object told apart by one byte, so a hit on the wrong key cannot pass for the right one.
 /// @param tag The byte.

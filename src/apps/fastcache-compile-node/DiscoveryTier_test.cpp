@@ -4,16 +4,16 @@
 #include "NodeAnnounce.hpp"
 #include "NodeConditions.hpp"
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cluster/MembershipPolicy.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cluster/MembershipPolicy.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -43,26 +43,26 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
 using CompileCacheWire::FleetState;
 using CompileCacheWire::FleetSummary;
-using FastCache::Testing::CoHostedDatagramSocket;
-using FastCache::Testing::RosterPeerKeys;
-using FastCache::Testing::SharedRoster;
-using FastCache::Testing::TestBeaconPort;
-using FastCache::Testing::TestKeyPair;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::CoHostedDatagramSocket;
+using Pace::Testing::RosterPeerKeys;
+using Pace::Testing::SharedRoster;
+using Pace::Testing::TestBeaconPort;
+using Pace::Testing::TestKeyPair;
+using Pace::Testing::Unwrap;
 
 namespace
 {
 /// Where a tier under test says its `0xFC` port answers: what its founding record states. One object
 /// for the whole binary, so it outlives every tier a case starts.
 /// @return The source.
-[[nodiscard]] FastCache::Cc::IAdvertisedEndpointSource const& TestAdvertised()
+[[nodiscard]] Pace::Cc::IAdvertisedEndpointSource const& TestAdvertised()
 {
-    static FastCache::Node::AnnouncedEndpoint const advertised { "127.0.0.1:6674" };
+    static Pace::Node::AnnouncedEndpoint const advertised { "127.0.0.1:6674" };
     return advertised;
 }
 
@@ -70,9 +70,9 @@ namespace
 /// tier started with stands and no pass reads a move. One object for the whole binary, so it
 /// outlives every tier a case starts.
 /// @return The source.
-[[nodiscard]] FastCache::Cc::IAdvertisedEndpointSource const& TestRaftAdvertised()
+[[nodiscard]] Pace::Cc::IAdvertisedEndpointSource const& TestRaftAdvertised()
 {
-    static FastCache::Node::AnnouncedEndpoint const advertised { std::string {} };
+    static Pace::Node::AnnouncedEndpoint const advertised { std::string {} };
     return advertised;
 }
 

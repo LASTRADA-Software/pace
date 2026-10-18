@@ -9,7 +9,7 @@
 
 #include <apps/fastcache-compile-node/NodeConfig.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Every `--flag` spelled in @p text that no row of `Node::NodeOptions()` accepts.
@@ -60,4 +60,4 @@ namespace FastCache::Testing
     return unknown;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

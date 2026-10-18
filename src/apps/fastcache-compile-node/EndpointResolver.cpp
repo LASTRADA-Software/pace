@@ -2,7 +2,7 @@
 #include "EndpointResolver.hpp"
 #include "NodeDefaults.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -10,7 +10,7 @@
 #include <system_error>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -266,4 +266,4 @@ bool EndpointResolver::PublishIfMoved(Published const& row, NodeConfig const& cf
     return true;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

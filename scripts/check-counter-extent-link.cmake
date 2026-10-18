@@ -54,8 +54,8 @@ if(NOT DEFINED FASTCACHED_CONFIGS)
     set(FASTCACHED_CONFIGS Debug Release)
 endif()
 
-set(header "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.hpp")
-set(definition "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.cpp")
+set(header "${FASTCACHED_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.hpp")
+set(definition "${FASTCACHED_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.cpp")
 foreach(input IN ITEMS "${header}" "${definition}")
     if(NOT EXISTS "${input}")
         message(FATAL_ERROR "the fixture's input is missing: ${input}")
@@ -92,11 +92,11 @@ string(REPLACE "${lastAnchor}" "\n        FixtureSkewInsertedCounter,\n        L
 # The healthy copy is COPIED, never written back from `file(READ)`: on Windows `file(WRITE)` wrote
 # CRLF (measured, 88626 bytes in, 90107 out), which would make the identity check below refuse
 # a faithful copy. The skewed copy's line endings do not matter to a compiler.
-file(MAKE_DIRECTORY "${project}/healthy/FastCache/Metrics")
-file(COPY_FILE "${header}" "${project}/healthy/FastCache/Metrics/IMetricsSink.hpp")
-file(WRITE "${project}/skewed/FastCache/Metrics/IMetricsSink.hpp" "${skewedText}")
+file(MAKE_DIRECTORY "${project}/healthy/Pace/Metrics")
+file(COPY_FILE "${header}" "${project}/healthy/Pace/Metrics/IMetricsSink.hpp")
+file(WRITE "${project}/skewed/Pace/Metrics/IMetricsSink.hpp" "${skewedText}")
 file(COPY_FILE "${definition}" "${project}/IMetricsSink.cpp")
-foreach(pair IN ITEMS "${header}|${project}/healthy/FastCache/Metrics/IMetricsSink.hpp"
+foreach(pair IN ITEMS "${header}|${project}/healthy/Pace/Metrics/IMetricsSink.hpp"
                       "${definition}|${project}/IMetricsSink.cpp")
     string(REPLACE "|" ";" pair "${pair}")
     list(GET pair 0 original)
@@ -112,10 +112,10 @@ endforeach()
 # include path that fell back to the healthy copy would link cleanly and read as a guard
 # that does not work.
 file(WRITE "${project}/healthy.cpp"
-    "#include <FastCache/Metrics/IMetricsSink.hpp>\nint HealthyUnit() { return 1; }\n")
+    "#include <Pace/Metrics/IMetricsSink.hpp>\nint HealthyUnit() { return 1; }\n")
 file(WRITE "${project}/skewed.cpp"
-    "#include <FastCache/Metrics/IMetricsSink.hpp>\n"
-    "static_assert(FastCache::IMetricsSink::Counter::FixtureSkewInsertedCounter < FastCache::IMetricsSink::Counter::Last);\n"
+    "#include <Pace/Metrics/IMetricsSink.hpp>\n"
+    "static_assert(Pace::IMetricsSink::Counter::FixtureSkewInsertedCounter < Pace::IMetricsSink::Counter::Last);\n"
     "int SkewedUnit() { return 1; }\n")
 file(WRITE "${project}/control_main.cpp"
     "int HealthyUnit();\nint main() { return HealthyUnit() == 1 ? 0 : 1; }\n")
@@ -199,7 +199,7 @@ foreach(config IN LISTS FASTCACHED_CONFIGS)
     if(skewedResult EQUAL 0)
         list(APPEND violations
              "${config}: a unit compiled against a Counter enum with one more enumerator LINKED against the real "
-             "definition. The guard in src/FastCache/Metrics/IMetricsSink.hpp is not reaching the linker in this "
+             "definition. The guard in src/Pace/Metrics/IMetricsSink.hpp is not reaching the linker in this "
              "configuration -- check that `CounterExtentLinked` is still a `static` whose initializer calls "
              "CounterSkew::RequireExtent, and read that comment for why an inline or unused reference is not one.")
     else()

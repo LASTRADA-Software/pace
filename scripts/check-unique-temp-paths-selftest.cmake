@@ -10,7 +10,7 @@
 #
 # ## What each case stages
 #
-#   <case>/src/FastCache/Core/IRandomSource.hpp   the seam, reading the device -- or not
+#   <case>/src/Pace/Core/IRandomSource.hpp   the seam, reading the device -- or not
 #   <case>/src/apps/node/Subject.cpp              the text under test
 #
 # ## Read from the OUTPUT, never from the exit code
@@ -62,8 +62,8 @@ find_program(GIT_EXECUTABLE git)
 
 # ---------------------------------------------------------------------------
 # The staged texts.
-set(seam_reading "#pragma once\n#include <random>\nnamespace FastCache {\nclass SystemRandomSource {\n  public:\n    static unsigned Seed() { std::random_device device; return device(); }\n};\n}\n")
-set(seam_silent "#pragma once\n#include <random>\nnamespace FastCache {\nclass SystemRandomSource {\n  public:\n    static unsigned Seed() { return 7U; }\n};\n}\n")
+set(seam_reading "#pragma once\n#include <random>\nnamespace Pace {\nclass SystemRandomSource {\n  public:\n    static unsigned Seed() { std::random_device device; return device(); }\n};\n}\n")
+set(seam_silent "#pragma once\n#include <random>\nnamespace Pace {\nclass SystemRandomSource {\n  public:\n    static unsigned Seed() { return 7U; }\n};\n}\n")
 
 # A subject that draws from the device, the shape #1507 came out of.
 set(subject_draws "#include <random>\n#include <string>\nstd::string TempName()\n{\n    std::mt19937_64 rng { std::random_device {}() };\n    return \"t-\" + std::to_string(rng());\n}\n")
@@ -84,13 +84,13 @@ set(subject_clean "#include <string>\nstd::string TempName() { return \"t\"; }\n
 function(fastcached_stage_and_run name seam subject exemptionRow outOutput outStaged)
     set(tree "${FASTCACHED_SCRATCH_DIR}/case-${name}")
     file(REMOVE_RECURSE "${tree}")
-    file(MAKE_DIRECTORY "${tree}/src/FastCache/Core")
+    file(MAKE_DIRECTORY "${tree}/src/Pace/Core")
     file(MAKE_DIRECTORY "${tree}/src/apps/node")
 
     if(seam STREQUAL "reading")
-        file(WRITE "${tree}/src/FastCache/Core/IRandomSource.hpp" "${seam_reading}")
+        file(WRITE "${tree}/src/Pace/Core/IRandomSource.hpp" "${seam_reading}")
     elseif(seam STREQUAL "silent")
-        file(WRITE "${tree}/src/FastCache/Core/IRandomSource.hpp" "${seam_silent}")
+        file(WRITE "${tree}/src/Pace/Core/IRandomSource.hpp" "${seam_silent}")
     elseif(NOT seam STREQUAL "absent")
         message(FATAL_ERROR "case `${name}`: unknown seam kind `${seam}`")
     endif()

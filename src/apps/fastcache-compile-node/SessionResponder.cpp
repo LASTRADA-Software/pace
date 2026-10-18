@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "SessionResponder.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/MachineTicket.hpp>
-#include <FastCache/Protocol/CompileCacheAuth.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
+#include <Pace/Protocol/CompileCacheAuth.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -15,7 +15,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -193,7 +193,7 @@ CredentialVerdict SessionResponder::CheckCredential(std::span<std::byte const> p
 
     // No policy: the node checks no password. The shared decision still tells a payload that will
     // not decode apart from one that did, so a client version skew is answered as one.
-    return CredentialVerdict { .outcome = FastCache::CheckCredential(nullptr, payload) };
+    return CredentialVerdict { .outcome = Pace::CheckCredential(nullptr, payload) };
 }
 
 std::vector<std::byte> SessionResponder::Mint(std::span<std::byte const> payload) const
@@ -257,4 +257,4 @@ std::vector<std::byte> SessionResponder::EndpointRefusalReply(EndpointRefusal re
     return AnswerEndpointRefusal(_metrics, ErrorCodeFor(refusal), std::nullopt, row.rationale, detail);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

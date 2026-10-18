@@ -3,8 +3,8 @@
 #include "PrivateTierProfile.hpp"
 #include "SharedTierProfile.hpp"
 
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,9 +21,9 @@
 #include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {

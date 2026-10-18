@@ -1,0 +1,330 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Cache/ReclaimLog.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+
+#include <core/async/StopToken.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/platform/Clock.hpp>
+
+namespace Pace
+{
+
+/// How often the active expiry cycle runs, and how much one turn of it may do.
+struct ExpiryReaperOptions
+{
+    /// Entries one sweep may examine, per shard.
+    ///
+    /// The lock hold. Large enough that a cache of ordinary size is walked in a
+    /// handful of cycles, small enough that no single cycle is measurable
+    /// against a request.
+    static constexpr std::size_t DefaultScanBudget = 512;
+
+    /// Entries one sweep may reclaim.
+    ///
+    /// Deliberately below `ReclaimLog::DefaultCapacity`, and `static_assert`ed
+    /// against it below. A tier names every key it reclaims in the reclaim log,
+    /// `NotifyingStorage` drains that once the call returns, and the log drops
+    /// past its capacity -- so a sweep permitted to reclaim more keys at once
+    /// than the log holds would silently discard the very `expired` events it
+    /// exists to produce. Two numbers, one fact.
+    static constexpr std::size_t DefaultPurgeBudget = 1024;
+
+    /// Interval between sweeps while there is work to do. Zero disables the
+    /// cycle entirely, which is what an operator who wants expiry to stay
+    /// purely access-driven asks for.
+    core::platform::SteadyDuration interval { std::chrono::seconds { 1 } };
+
+    /// Interval the cycle backs off to while there is nothing to do.
+    ///
+    /// A cache with nothing to expire should not keep paying `interval` to be
+    /// told so. Backing off does not stop the cycle -- stopping entirely would
+    /// need a live count of entries carrying a finite TTL, maintained across
+    /// every mutation path in every tier, where the one site that forgot to
+    /// maintain it is a cache that silently never expires again.
+    core::platform::SteadyDuration maxInterval { std::chrono::seconds { 30 } };
+
+    /// Entries one sweep may examine. See `DefaultScanBudget`.
+    std::size_t scanBudget { DefaultScanBudget };
+
+    /// Entries one sweep may reclaim. See `DefaultPurgeBudget`.
+    std::size_t purgeBudget { DefaultPurgeBudget };
+
+    /// How long one sweep may hold the reactor before the scan budget is cut.
+    ///
+    /// **`scanBudget` counts ENTRIES, and entries are not work** (#946). Its own
+    /// note above says it is "small enough that no single cycle is measurable
+    /// against a request" -- which is an assumption about per-entry cost, and that
+    /// cost varies by three orders of magnitude between a tier of 100-byte values
+    /// and one of multi-megabyte objects. A ceiling expressed in entries therefore
+    /// bounds how many keys a sweep touches and says nothing about how long the
+    /// reactor is unavailable, which is the thing actually being protected.
+    ///
+    /// So the budget is ADAPTED from a measurement instead of trusted: the reaper
+    /// times its own sweep and cuts the scan budget when it overruns this, growing
+    /// it back while it does not. The clock is the reactor's, which the cycle
+    /// already holds -- a wall-clock budget inside `PurgeExpired` would need a seam
+    /// that primitive does not have, since it takes `now` and no clock.
+    ///
+    /// This does NOT move the sweep off the reactor, which is the other half of
+    /// #946 and a decision of its own.
+    core::platform::SteadyDuration sweepStallCeiling { std::chrono::milliseconds { 50 } };
+
+    /// How long `ExpiryReaper::Stop` waits for the frame to come back from its executor.
+    ///
+    /// Past it the frame is abandoned through `IDrainAbandonment`, which in production ends the
+    /// process. The default is `DrainBound`'s, as for every other shutdown drain here; a test
+    /// shortens it to drive the abandonment.
+    DrainBound stopDrain {};
+};
+
+static_assert(ExpiryReaperOptions::DefaultPurgeBudget <= ReclaimLog::DefaultCapacity,
+              "one sweep must not reclaim more keys than the reclaim log can hold, or the sweep "
+              "drops the expired events it runs to produce");
+
+/// How long to wait before the sweep after the one that produced @p outcome.
+///
+/// Free and pure, so the pacing can be decided in a test without a reactor, a
+/// clock or a storage tier -- and so the one interesting rule in the cycle is
+/// somewhere a reader can find it.
+///
+/// Anything that looks like work -- a key reclaimed, or a pass that ran out of
+/// budget and therefore has entries it has not looked at yet -- resets to the
+/// base interval. Only a completed pass that found nothing backs off.
+/// @param options Configured base and ceiling.
+/// @param current The interval that was just waited.
+/// @param outcome What the sweep at the end of that wait did.
+/// @return The interval to wait next.
+[[nodiscard]] constexpr core::platform::SteadyDuration NextExpiryInterval(ExpiryReaperOptions const& options,
+                                                                          core::platform::SteadyDuration current,
+                                                                          PurgeOutcome const& outcome) noexcept
+{
+    if (outcome.purged != 0 || !outcome.completedPass)
+        return options.interval;
+    auto const doubled = current * 2;
+    return doubled > options.maxInterval ? options.maxInterval : doubled;
+}
+
+/// The active expiry cycle: a periodic, bounded `IStorage::PurgeExpired`.
+///
+/// ## Why this exists
+///
+/// Without it nothing ever calls `PurgeExpired`, so expiry is entirely
+/// access-driven -- and with the default `Approximate` LRU recency a *read*
+/// does not reclaim either. A key whose TTL lapses and which nobody touches
+/// again therefore keeps its value bytes and its byte-budget contribution until
+/// eviction happens to reach it, and no `__keyevent@0__:expired` is ever
+/// published for it. A subscriber watching for `expired` heard nothing about
+/// precisely the case that motivates subscribing.
+///
+/// ## What it is careful about
+///
+/// It runs on **one** reactor. The sweep takes each shard's exclusive lock in
+/// turn, so a second cycle would contend with the first for no gain.
+///
+/// It is bounded on both axes (`ExpiryReaperOptions`), and every sweep resumes
+/// where the last one stopped, so the cost per cycle is fixed rather than
+/// proportional to how much is cached.
+///
+/// It backs off when idle, and it parks once per interval: a stop cancels the park, so it is
+/// prompt and leaves nothing parked on the reactor's timer wheel.
+class ExpiryReaper
+{
+  public:
+    /// Construct over the storage to sweep.
+    /// @param storage Storage chain to sweep. Must outlive the reaper. Pass the
+    ///        same object the engine writes through -- the notifying decorator
+    ///        included, or the reclaimed keys are never published.
+    /// @param logger  Where a swept cycle is reported at Debug.
+    /// @param options Pacing and ceilings.
+    /// @param metrics Counter sink, or nullptr.
+    /// @param abandonment What `Stop` does with a frame that does not come back in time.
+    /// @param drainWait Where `Stop`'s drain takes its clock and its blocking. Production's is real
+    ///        time; a test supplies one whose clock it controls, so a ceiling it is not asserting on
+    ///        is a condition rather than a race against the host (#1433). Must outlive this reaper.
+    ExpiryReaper(IStorage& storage,
+                 ILogger& logger,
+                 ExpiryReaperOptions options,
+                 IMetricsSink* metrics = nullptr,
+                 IDrainAbandonment& abandonment = DefaultDrainAbandonment(),
+                 IDrainWait& drainWait = DefaultDrainWait()) noexcept;
+
+    ~ExpiryReaper()
+    {
+        Stop();
+    }
+    ExpiryReaper(ExpiryReaper const&) = delete;
+    ExpiryReaper(ExpiryReaper&&) = delete;
+    ExpiryReaper& operator=(ExpiryReaper const&) = delete;
+    ExpiryReaper& operator=(ExpiryReaper&&) = delete;
+
+    /// Start the cycle on `reactor` and keep its task here.
+    ///
+    /// The reaper owns the coroutine frame for its whole life, which is what
+    /// makes `Stop` able to reclaim it. Call once.
+    /// @param reactor Reactor whose clock paces the cycle. Must outlive this reaper.
+    /// @param sweepOn Where `SweepOnce` runs. Pass the reactor itself to keep the
+    ///        sweep on the loop, which is what every test and every in-memory
+    ///        deployment wants; pass a pool to take it off (#946). `core::net::EventLoop` IS an
+    ///        `core::async::IExecutor`, so there is ONE code path and no null to branch on.
+    ///        Must outlive this reaper -- see `Stop`, which is what makes that
+    ///        orderable.
+    void Start(core::net::EventLoop& reactor, core::async::IExecutor& sweepOn);
+
+    /// Stop the cycle and reclaim its coroutine frame.
+    ///
+    /// Deliberately safe to call **after** `core::net::EventLoop::Run` has returned, which
+    /// is the case that matters: a loop that has stopped will never resume a
+    /// frame still parked on its timer wheel, and never free it either.
+    /// `CancelPending` is what makes taking it back decidable rather than a
+    /// guess -- true means this call removed it and we are now its only owner.
+    /// Idempotent; the destructor calls it.
+    ///
+    /// Waits at most `stopDrain` for a frame away on the executor, and past that ABANDONS it
+    /// rather than destroying it: the frame's code reaches into this reaper, so freeing it frees
+    /// a coroutine another thread is still inside. In production `IDrainAbandonment` ends the
+    /// process; a seam that returns -- only a test's -- gets the frame released, and owns it.
+    void Stop() noexcept;
+
+    /// Sweep until `token` is cancelled.
+    ///
+    /// Returns immediately when `options.interval` is zero -- a disabled cycle
+    /// is a coroutine that ends, not one that parks forever.
+    ///
+    /// Public so a test can drive the loop against a `core::net::testing::TestLoop` without
+    /// going through `Start`; production uses `Start`.
+    ///
+    /// A pointer rather than a reference, and a token rather than a reference
+    /// to one, for the same reason `InterruptibleSleepUntil` spells both that
+    /// way: this is a coroutine, so a reference parameter is bound before the
+    /// first suspension and then outlives the expression that produced it.
+    /// @param reactor Reactor whose clock paces the cycle. Must not be null, and
+    ///        must outlive the task.
+    /// @param sweepOn Where the sweep body runs; see `Start`. Must not be null.
+    /// @param token  Observed at every wake; cancelling it ends the loop.
+    /// @return A task that completes when the cycle stops.
+    [[nodiscard]] core::async::Task<void> Run(core::net::EventLoop* reactor,
+                                              core::async::IExecutor* sweepOn,
+                                              core::async::StopToken token);
+
+    /// One sweep, with this reaper's budget. Exposed so the sweep can be
+    /// exercised without a reactor.
+    /// @param now Current clock value.
+    /// @return What the sweep did.
+    PurgeOutcome SweepOnce(core::platform::SteadyTimePoint now);
+
+    /// Whether the task's frame is away from the reactor right now.
+    ///
+    /// **The one fact `Stop` cannot do without.** While the sweep is handed to another
+    /// executor the frame is not parked on the reactor, so `CancelPending` cannot retract
+    /// it and `~Task` would destroy a frame another thread is still inside. Reading this is
+    /// how `Stop` waits for that interval to close before it reclaims anything.
+    ///
+    /// **The interval is the whole trip, not the sweep body** (#1397). It opens on the
+    /// reactor thread immediately BEFORE the hop out -- once the frame is handed to the
+    /// executor, nothing on the reactor can take it back -- and closes on the executor
+    /// thread only AFTER the hop back's `Submit` has returned, when the frame is either
+    /// queued on the reactor or already running there. Bracketing the body alone leaves both
+    /// hops uncovered, and a stop landing in either frees a frame the executor is still inside.
+    ///
+    /// A COUNT rather than a flag, because the close is late by design: the reactor may
+    /// resume the frame and send it away again before the executor thread returns from the
+    /// previous hop's `Submit`, and clearing a flag then would erase the new trip.
+    ///
+    /// Never raised when the executor IS the reactor: that frame does not leave, and a
+    /// count raised for a hop still queued on a reactor whose loop has returned would never
+    /// fall, turning every stop into a wait for the drain ceiling. "Is" means the same
+    /// OBJECT. **A decorator over the reactor is a different object and is counted**, and
+    /// that is the safe side of the trade. Stopped with its hop out still queued on a loop that
+    /// has returned, its count never falls: `Stop` waits out `stopDrain`, logs an Error saying
+    /// the sweep did not come back from its executor, and **the process ends with
+    /// `AbandonedDrainExitCode`**. Treating the decorator as the reactor instead would skip the
+    /// wait for an executor that may really be elsewhere, which is this defect back again as a
+    /// use-after-free. Nothing can tell the two apart from an `IExecutor&`, so to keep the sweep
+    /// on the loop, pass the reactor itself and never a wrapper around it.
+    ///
+    /// A hand-over that THROWS keeps the count true in both directions: a hop out that could
+    /// not be handed over lowers it again, since the frame never left, and a hop back that
+    /// could not be handed over keeps it raised and is retried, since the frame never returned.
+    ///
+    /// It is NOT "a cycle is running": between sweeps the frame is parked on the reactor's
+    /// timer and reclaimable.
+    /// @return True while the frame is on its way to, on, or on its way back from the executor.
+    [[nodiscard]] bool AwayFromReactor() const noexcept
+    {
+        return _awayFromReactor.load(std::memory_order_acquire) != 0;
+    }
+
+    /// @return How many sweeps have run.
+    [[nodiscard]] std::uint64_t Cycles() const noexcept
+    {
+        return _cycles;
+    }
+
+    /// @return How long the cycle is currently waiting between sweeps. Grows
+    /// while there is nothing to reclaim; back to `options.interval` as soon as
+    /// there is.
+    /// The scan budget in force, which the reaper adapts from measured sweep cost.
+    ///
+    /// Sibling of `CurrentInterval()`, and for the same reason: both are values this
+    /// object adapts rather than holds, so both are worth being able to read.
+    /// @return Entries the next sweep may examine.
+    [[nodiscard]] std::size_t CurrentScanBudget() const noexcept
+    {
+        return _scanBudget;
+    }
+
+    /// Adapt the scan budget from how long the last sweep held the reactor.
+    ///
+    /// **Public because it is tested directly.** It is a pure function of the elapsed
+    /// time and this object's state, and driving it through `Run` would need an
+    /// `IStorage` fake that consumes clock time -- 28 forwarding methods to observe one
+    /// rule. Testing the rule where it lives is the honest trade; what that leaves
+    /// unasserted is the WIRING, which is stated on the definition.
+    /// @param elapsed How long the sweep took.
+    void AdaptScanBudget(core::platform::SteadyDuration elapsed) noexcept;
+
+    [[nodiscard]] core::platform::SteadyDuration CurrentInterval() const noexcept
+    {
+        return _interval;
+    }
+
+  private:
+    IStorage& _storage;
+    ILogger& _logger;
+    IMetricsSink* _metrics;
+    IDrainAbandonment& _abandonment;
+    IDrainWait& _drainWait;
+    ExpiryReaperOptions _options;
+    core::platform::SteadyDuration _interval;
+
+    /// Floor for the adapted scan budget. Not zero: zero is `PurgeBudget`'s
+    /// spelling of *no ceiling*, so a budget that decayed to it would become an
+    /// unbounded scan -- the opposite of what the adaptation is for.
+    static constexpr std::size_t MinScanBudget = 8;
+
+    /// The scan budget actually in force, adapted from measured sweep cost and
+    /// never above `_options.scanBudget`. See `sweepStallCeiling`.
+    std::size_t _scanBudget;
+    std::uint64_t _cycles { 0 };
+
+    /// Set by `Start`; the reactor `Stop` reclaims the frame from.
+    core::net::EventLoop* _reactor { nullptr };
+    /// See `AwayFromReactor()`. Atomic because the executor lowers it and `Stop` reads it,
+    /// each from its own thread.
+    std::atomic<std::uint32_t> _awayFromReactor { 0 };
+    core::async::StopSource _source;
+    core::async::Task<void> _task;
+};
+
+} // namespace Pace

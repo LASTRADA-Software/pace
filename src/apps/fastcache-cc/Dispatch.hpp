@@ -5,7 +5,7 @@
 #include "CacheProtocol.hpp"
 #include "CodecEnvelope.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Runs one framed request/reply against an endpoint named at runtime.
@@ -968,4 +968,4 @@ struct DispatchRequest
 // factory beside the reactor keeps that link honest instead of costing the node a
 // translation unit it never calls.
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

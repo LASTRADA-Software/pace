@@ -2,7 +2,7 @@
 #include "FleetChartModel.hpp"
 #include "FleetDocument.hpp"
 
-#include <FastCache/Core/NumericText.hpp>
+#include <Pace/Core/NumericText.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -16,7 +16,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -118,4 +118,4 @@ ChartRaster FleetChartRaster(std::deque<HistoryEntry> const& history,
     return ChartBandsRaster(FleetChartTracks(history, metric, bands, window), window, width, height);
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

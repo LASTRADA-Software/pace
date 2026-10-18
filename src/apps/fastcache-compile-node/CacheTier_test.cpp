@@ -10,18 +10,18 @@
 #include "SharedCacheStatus.hpp"
 #include "StatsSource.hpp"
 
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Server/AdminHttpServer.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Server/AdminHttpServer.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -57,12 +57,12 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::StatusOf;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::StatusOf;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -305,7 +305,7 @@ class MetricsDoors
         auto pair = core::net::testing::InMemorySocketPair::create();
         auto const request = std::string_view { "GET /metrics HTTP/1.1\r\n\r\n" };
         REQUIRE(core::async::syncRun(WriteWhole(pair.client.get(), Wire::AsBytes(request))));
-        REQUIRE(FastCache::Testing::ShutdownWrite(*pair.client).has_value());
+        REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
         core::platform::SteadyClock clock;
         // `_served`, the SAME set the `node-metrics` door reads through `_sources` -- which is
         // the whole point of this fixture. The two doors are meant to differ in nothing but how

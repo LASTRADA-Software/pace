@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "ToolchainHashProgress.hpp"
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,8 +16,8 @@
 
 #include <core/platform/Clock.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

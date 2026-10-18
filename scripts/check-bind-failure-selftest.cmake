@@ -61,7 +61,7 @@ set(compliantBody [==[
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeSurfaces.hpp"
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::expected<void, std::string> OpenEverything(NodeIoLoop& io, NodeConfig const& cfg, ILogger& logger)
@@ -81,7 +81,7 @@ std::expected<void, std::string> OpenEverything(NodeIoLoop& io, NodeConfig const
     return {};
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node
 ]==])
 
 # Build a tree: the compliant file, plus an optional extra file.

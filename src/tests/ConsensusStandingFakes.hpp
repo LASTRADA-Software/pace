@@ -10,8 +10,8 @@
 /// A node's consensus, as a case scripts what it says about itself.
 ///
 /// Shared rather than written per file, for `MembershipFakes.hpp`'s reason: a WRONG fake makes its
-/// cases pass. It reaches an app header, so `src/FastCache` tests must not include it.
-namespace FastCache::Testing
+/// cases pass. It reaches an app header, so `src/Pace` tests must not include it.
+namespace Pace::Testing
 {
 
 /// A consensus tier whose applied state is as caught up as a case says.
@@ -54,4 +54,4 @@ class ScriptedAppliedState final: public Node::IConsensusStandingSource
     Node::AppliedStateReading _reading;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

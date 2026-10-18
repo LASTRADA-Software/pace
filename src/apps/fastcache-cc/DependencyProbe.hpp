@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <array>
 #include <cstddef>
@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Turning a preprocess probe's output into a cache-key input.
@@ -350,4 +350,4 @@ struct DependencySet
                                              PathCanon::Layout const& layout,
                                              std::string_view workingDirectory);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

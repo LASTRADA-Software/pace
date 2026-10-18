@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc::Test
+namespace Pace::Cc::Test
 {
 
 /// Building ELF and Mach-O object images for tests, in ONE place -- the COFF builder's
@@ -228,4 +228,4 @@ struct StubElfShape
     return image;
 }
 
-} // namespace FastCache::Cc::Test
+} // namespace Pace::Cc::Test

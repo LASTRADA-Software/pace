@@ -96,8 +96,8 @@ endif()
 #
 # Both are asserted to exist. A moved or renamed file must fail here rather than
 # quietly reduce this check to scanning a tree with nothing to find in it.
-set(refusalHeader "src/FastCache/Protocol/SurfaceRefusal.hpp")
-set(wireHeader "src/FastCache/Protocol/CompileCacheWire.hpp")
+set(refusalHeader "src/Pace/Protocol/SurfaceRefusal.hpp")
+set(wireHeader "src/Pace/Protocol/CompileCacheWire.hpp")
 
 # The two files allowed to name the encoder, each with the reason it is allowed.
 # NOT a list of surfaces -- surfaces are found by globbing. These are the definition

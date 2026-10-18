@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "MembershipGate.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,10 +16,10 @@
 #include <tests/MembershipFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::FixedMembership;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::FixedMembership;
+using Pace::Testing::Unwrap;
 
 namespace
 {

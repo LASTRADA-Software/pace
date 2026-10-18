@@ -22,12 +22,12 @@
 #include <tests/BoundedWait.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using FastCache::Testing::DrainUntil;
-using FastCache::Testing::OffThreadWaits;
-using FastCache::Testing::Unwrap;
-using FastCache::Testing::WaitUntil;
+using namespace Pace;
+using namespace Pace::Cli;
+using Pace::Testing::DrainUntil;
+using Pace::Testing::OffThreadWaits;
+using Pace::Testing::Unwrap;
+using Pace::Testing::WaitUntil;
 
 namespace
 {
@@ -222,7 +222,7 @@ TEST_CASE("a stream frame is read off the reactor and delivered back onto it", "
         "the frame to come back through the reactor",
         [&result] { return result.has_value(); },
         state,
-        2 * FastCache::Testing::WaitHangGuard));
+        2 * Pace::Testing::WaitHangGuard));
     // The read has returned, so its own wait has concluded: first, while its account is attached.
     CHECK(subscription.waits.AllReached());
 

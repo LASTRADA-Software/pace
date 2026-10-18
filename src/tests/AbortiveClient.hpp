@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <cerrno>
 #include <cstddef>
@@ -20,7 +20,7 @@
     #include <netinet/in.h>
 #endif
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A loopback client that leaves by RESET rather than by FIN.
@@ -55,7 +55,7 @@ namespace FastCache::Testing
 /// ERROR rather than a `0` -- the guard for every other user.
 ///
 /// It builds on core-cpp's handle type (`core::platform::NativeHandle`) and on
-/// `FastCache::CloseNativeSocket`, and two of its steps are not optional.
+/// `Pace::CloseNativeSocket`, and two of its steps are not optional.
 ///
 /// **`core::platform::ensureWinsockInitialized` because Winsock** returns
 /// `INVALID_SOCKET` with `WSANOTINITIALISED` for a `::socket` call that precedes it,
@@ -224,4 +224,4 @@ class AbortiveClient
     core::platform::NativeHandle _fd { core::platform::InvalidHandle };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

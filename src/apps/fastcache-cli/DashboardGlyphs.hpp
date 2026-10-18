@@ -3,8 +3,8 @@
 
 #include "DashboardRung.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/FigureText.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/FigureText.hpp>
 
 #include <array>
 #include <cstddef>
@@ -14,7 +14,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardGlyphs.hpp
@@ -243,16 +243,16 @@ struct SlotGauge
     std::uint32_t inFlight, std::uint32_t available, std::uint32_t registered, std::size_t width, RungGlyphs const& glyphs);
 
 /// How a figure is written: the library's, so a panel and the browser page write one figure alike.
-using FastCache::FigureFormat;
+using Pace::FigureFormat;
 
 /// A written figure's number and unit: the library's, so every surface splits a figure at one place.
-using FastCache::WrittenFigure;
+using Pace::WrittenFigure;
 
 /// @p value written as @p format says.
 ///
 /// **Takes no rung, and that is the point** (§9.6): every rung writes a figure through this one
 /// function, so no rung can come to write one differently. The writing itself is
-/// `FastCache::WriteFigure`, which the leader's page uses too; this adds the absent marker.
+/// `Pace::WriteFigure`, which the leader's page uses too; this adds the absent marker.
 /// @param value The value, or nullopt where nothing was reported.
 /// @param format How to write it.
 /// @param absent The resolved absent marker.
@@ -306,4 +306,4 @@ using FastCache::WrittenFigure;
                                 RungGlyphs const& glyphs,
                                 CellWidth cellWidth);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -55,14 +55,14 @@ change: the worker re-registers, presence announces, the leader re-proposes the 
 ### Task 1: `IRouteProbe` — which local address routes to a host
 
 **Files:**
-- Create: `src/FastCache/Platform/RouteProbe.hpp`, `src/FastCache/Platform/RouteProbe.cpp`,
-  `src/FastCache/Platform/RouteProbe_test.cpp`
-- Modify: `src/FastCache/CMakeLists.txt` (add `Platform/RouteProbe.cpp` beside `Platform/LocalAddresses.cpp`)
+- Create: `src/Pace/Platform/RouteProbe.hpp`, `src/Pace/Platform/RouteProbe.cpp`,
+  `src/Pace/Platform/RouteProbe_test.cpp`
+- Modify: `src/Pace/CMakeLists.txt` (add `Platform/RouteProbe.cpp` beside `Platform/LocalAddresses.cpp`)
 - Modify: `scripts/check-udp-opener.cmake:66-68` (second `FastCachedUdpOpenerUnits` row)
 
 **Interfaces — Produces:**
 ```cpp
-namespace FastCache {
+namespace Pace {
 /// Why a route probe produced no address.
 enum class RouteProbeError : std::uint8_t { InvalidTarget, NoRoute, Unsupported, Last };
 
@@ -88,7 +88,7 @@ inline constexpr std::array<std::string_view, 2> DefaultRouteProbeTargets { "192
 - [ ] **Step 2: Build + run** `ctest --preset clang-debug -R "route probe"` — FAIL (undefined).
 - [ ] **Step 3: Implement** `RouteProbe.cpp`: parse literal with `inet_pton` (v4 then v6) → `InvalidTarget` on failure; `socket(family, SOCK_DGRAM, IPPROTO_UDP)` (Winsock on `_WIN32`, `closesocket`), RAII close; `connect()` to port 9; `ENETUNREACH`/`EHOSTUNREACH`/`EADDRNOTAVAIL`/`WSAENETUNREACH` → `NoRoute`, `EAFNOSUPPORT` → `Unsupported`; `getsockname` → format with `inet_ntop` exactly like `QueryLocalAddresses` (no scope). Keep the errno → error mapping a small table.
 - [ ] **Step 4: Register the opener** — add row
-  `"src/FastCache/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice; it never sends or receives, so no firewall rule is involved"`
+  `"src/Pace/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice; it never sends or receives, so no firewall rule is involved"`
   and run `ctest --preset clang-debug -R udp-opener` — PASS (also run its selftest if one exists: `-R udp-opener`).
 - [ ] **Step 5: Run tests** — PASS. clang-format changed files.
 - [ ] **Step 6: Commit** `feat(platform): add a route probe for the local address that reaches a host`.
@@ -96,16 +96,16 @@ inline constexpr std::array<std::string_view, 2> DefaultRouteProbeTargets { "192
 ### Task 2: POSIX network-change watchers (Linux netlink, macOS route socket)
 
 **Files:**
-- Create: `src/FastCache/Platform/NetworkChangeMessages.hpp/.cpp` (pure classifiers),
-  `src/FastCache/Platform/NetworkChangeMessages_test.cpp`
-- Modify: `src/FastCache/Platform/NetworkChangeWatcher.cpp:69-75` (POSIX branch),
-  `src/FastCache/Platform/NetworkChangeWatcher.hpp` (doc), `NetworkChangeWatcher_test.cpp:183` (expectation),
-  `src/FastCache/CMakeLists.txt`
+- Create: `src/Pace/Platform/NetworkChangeMessages.hpp/.cpp` (pure classifiers),
+  `src/Pace/Platform/NetworkChangeMessages_test.cpp`
+- Modify: `src/Pace/Platform/NetworkChangeWatcher.cpp:69-75` (POSIX branch),
+  `src/Pace/Platform/NetworkChangeWatcher.hpp` (doc), `NetworkChangeWatcher_test.cpp:183` (expectation),
+  `src/Pace/CMakeLists.txt`
 - Modify: `src/apps/fastcache-compile-node/main.cpp:2738-2747` (start POSIX watcher after the fork)
 
 **Interfaces — Produces:**
 ```cpp
-namespace FastCache {
+namespace Pace {
 /// Whether a buffer read from the OS change socket reports an interface or address change.
 /// Linux: a sequence of `nlmsghdr` (native endian: u32 len, u16 type, u16 flags, u32 seq, u32 pid),
 /// types RTM_NEWLINK=16, RTM_DELLINK=17, RTM_NEWADDR=20, RTM_DELADDR=21 count; NLMSG_DONE/ERROR/NOOP do not.
@@ -162,7 +162,7 @@ their length field, stop at a truncated/zero-length header (return what was seen
 
 **Interfaces — Produces:**
 ```cpp
-namespace FastCache::Node {
+namespace Pace::Node {
 /// How an advertised address is chosen.
 enum class AdvertiseMode : std::uint8_t { Auto, PinnedName, PinnedLiteral, Last };
 /// One row per mode: what the mode promises.
@@ -221,7 +221,7 @@ Semantics:
 - Modify: `main.cpp` (~:646-657 construct resolver + two `AnnouncedEndpoint`s; subscribe it to
   `hostEvents` FIRST; pass raft endpoint source on; ~:2538-2547 apply initial route host to `cfg`
   and `cliOnly` before `StartupPolicyRejection`)
-- Modify: `src/FastCache/Metrics/IMetricsSink.hpp`, `MetricsCatalog.hpp`, `StatsReading.hpp:542`
+- Modify: `src/Pace/Metrics/IMetricsSink.hpp`, `MetricsCatalog.hpp`, `StatsReading.hpp:542`
   (`CounterSoleWriterTable`), `docs/tools/fastcache-compile-node.md` metrics table
 - Test: `WorkerTier_test.cpp` (fixture `WorkerTierTestFixture.hpp`)
 
@@ -230,7 +230,7 @@ Semantics:
 `HostEvent::NetworkChanged`; `AnnouncedEndpoint` (NodeAnnounce.hpp:78).
 **Produces:**
 ```cpp
-namespace FastCache::Node {
+namespace Pace::Node {
 /// Literal IP hosts worth probing before the default route (e.g. applied schedulers given as IPs).
 class IProbeTargets { public: /*...*/ [[nodiscard]] virtual std::vector<std::string> Targets() const = 0; };
 
@@ -310,11 +310,11 @@ Behaviour:
   `.agent/rules/distributed-compilation.md:266-276` (rule rewritten: the inherited socket's bound
   address is read with `getsockname`; wildcard → Auto; specific → pinned).
 
-**Interfaces — Consumes:** `BoundEndpointOfDescriptor(int)` (`src/FastCache/Transport/NativeListen.hpp`,
+**Interfaces — Consumes:** `BoundEndpointOfDescriptor(int)` (`src/Pace/Transport/NativeListen.hpp`,
 returns `std::optional<BoundEndpoint>`), Task 3 policy.
 **Produces:**
 ```cpp
-namespace FastCache::Node {
+namespace Pace::Node {
 /// Make the configuration describe the socket a supervisor handed over: the Node surface's bind
 /// becomes the descriptor's bound host and port, so the advertised endpoint is derived as for any bind.
 /// @return The refusal when the descriptor cannot be asked what it is bound to.
@@ -337,11 +337,11 @@ namespace FastCache::Node {
 ### Task 6: Cluster — Raft endpoint follows the announced host; own move resets sessions; live beacon
 
 **Files:**
-- Modify: `src/FastCache/Cluster/AnnouncedEndpoints.hpp/.cpp` (+ `_test.cpp`)
-- Modify: `src/FastCache/Consensus/RaftPeerTransport.hpp/.cpp` (public `ResetSessions()`)
+- Modify: `src/Pace/Cluster/AnnouncedEndpoints.hpp/.cpp` (+ `_test.cpp`)
+- Modify: `src/Pace/Consensus/RaftPeerTransport.hpp/.cpp` (public `ResetSessions()`)
 - Modify: `src/apps/fastcache-compile-node/ConsensusTier.hpp/.cpp` (raft source; reconcile)
 - Modify: `main.cpp:1239` + `DiscoveryTier.cpp:102-123` (live fleet summary)
-- Test: `src/FastCache/Cluster/MembershipCluster_test.cpp`, `RaftPeerTransport_test.cpp`, `ConsensusTier_test.cpp`
+- Test: `src/Pace/Cluster/MembershipCluster_test.cpp`, `RaftPeerTransport_test.cpp`, `ConsensusTier_test.cpp`
 
 **Interfaces — Consumes:** raft `AnnouncedEndpoint` (Task 4) as `Cc::IAdvertisedEndpointSource const&`.
 **Produces:**
@@ -388,8 +388,8 @@ void ResetSessions();
 ### Task 7: Raft acceptor keeps one one-way session per proven dialler
 
 **Files:**
-- Modify: `src/FastCache/Consensus/RaftPeerServer.hpp/.cpp` (~251-281 accept path)
-- Test: `src/FastCache/Consensus/RaftPeerLink_test.cpp` (or `RaftPeerServer_test.cpp` if present)
+- Modify: `src/Pace/Consensus/RaftPeerServer.hpp/.cpp` (~251-281 accept path)
+- Test: `src/Pace/Consensus/RaftPeerLink_test.cpp` (or `RaftPeerServer_test.cpp` if present)
 
 **Behaviour:** after a one-way handshake proves `dialler`, the server records
 `dialler → socket` (map guarded like `_links`); if an older one-way socket for that dialler exists

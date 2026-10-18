@@ -13,11 +13,11 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
-using FastCache::Testing::Unwrap;
-namespace Wire = FastCache::CompileCacheWire;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -186,18 +186,18 @@ namespace
 /// as the text -- which is the whole point here: the exchange line already says a
 /// refusal happened, at the verb's own level, and what #181 is about is that nobody
 /// sees it there.
-class CapturingLines final: public FastCache::ILogger
+class CapturingLines final: public Pace::ILogger
 {
   public:
-    void Log(FastCache::LogLevel level, std::string_view message) override
+    void Log(Pace::LogLevel level, std::string_view message) override
     {
         lines.emplace_back(level, std::string { message });
     }
-    [[nodiscard]] FastCache::LogLevel MinLevel() const noexcept override
+    [[nodiscard]] Pace::LogLevel MinLevel() const noexcept override
     {
         return minLevel;
     }
-    void SetMinLevel(FastCache::LogLevel level) noexcept override
+    void SetMinLevel(Pace::LogLevel level) noexcept override
     {
         minLevel = level;
     }
@@ -205,11 +205,11 @@ class CapturingLines final: public FastCache::ILogger
     [[nodiscard]] std::size_t WarnCount() const
     {
         return static_cast<std::size_t>(
-            std::ranges::count_if(lines, [](auto const& l) { return l.first == FastCache::LogLevel::Warn; }));
+            std::ranges::count_if(lines, [](auto const& l) { return l.first == Pace::LogLevel::Warn; }));
     }
 
-    std::vector<std::pair<FastCache::LogLevel, std::string>> lines;
-    FastCache::LogLevel minLevel { FastCache::LogLevel::Trace }; ///< What `LogExchange` is told this logger hears.
+    std::vector<std::pair<Pace::LogLevel, std::string>> lines;
+    Pace::LogLevel minLevel { Pace::LogLevel::Trace }; ///< What `LogExchange` is told this logger hears.
 };
 
 /// An `Error` reply carrying `code`, framed the way the wire frames one.

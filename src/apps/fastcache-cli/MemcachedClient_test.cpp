@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache::Cli;
+using namespace Pace::Cli;
 using namespace std::string_view_literals;
 
 // Every reply string here was taken from the SERVER that writes it --

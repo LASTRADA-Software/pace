@@ -4,14 +4,14 @@
 #include "DashboardFrame.hpp"
 #include "DashboardRung.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/Terminal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/Terminal.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TerminalCapabilities.hpp
@@ -148,4 +148,4 @@ struct TerminalCapabilities
 /// @return The rung.
 [[nodiscard]] RenderRung ChooseRenderRung(TerminalCapabilities const& capabilities) noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using namespace FastCache::Cc::Testing;
+using namespace Pace;
+using namespace Pace::Cc;
+using namespace Pace::Cc::Testing;
 
 namespace
 {

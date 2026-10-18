@@ -55,7 +55,7 @@
 # ## What it does NOT establish
 #
 # Whether the tree itself reports, and how much. That needs an MSan build of
-# `FastCacheTest` with every dependency built from source -- this build links
+# `PaceTest` with every dependency built from source -- this build links
 # `libyaml-cpp.so.0.8`, `libssl.so.3` and `libcrypto.so.3` as system shared objects
 # besides libstdc++, and each is a second poisoning surface. TLS can be turned off
 # and yaml-cpp can be forced to build from source; libstdc++ cannot be waved away.

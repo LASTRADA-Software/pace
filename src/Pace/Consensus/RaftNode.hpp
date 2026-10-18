@@ -1,0 +1,753 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Consensus/IRaftStorage.hpp>
+#include <Pace/Consensus/RaftConfig.hpp>
+#include <Pace/Consensus/RaftLog.hpp>
+#include <Pace/Consensus/RaftOutput.hpp>
+#include <Pace/Consensus/RaftTypes.hpp>
+#include <Pace/Consensus/Standing.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/IRandomSource.hpp>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <optional>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include <core/platform/Clock.hpp>
+
+namespace Pace::Consensus
+{
+
+/// The per-role facts the state machine reads rather than branches on.
+struct RoleTraits
+{
+    Role role {};          ///< The role this row describes.
+    std::string_view name; ///< For log lines and test failure messages.
+    TimerKind timer {};    ///< Which deadline `Tick` compares against.
+};
+
+/// Behaviour that varies by role, as data.
+///
+/// Four rows, one per `Role`. It is a table and not a `switch` so that a new role is
+/// a row plus whatever columns it forces, not an edit to every function that asks
+/// what role this node is playing.
+///
+/// **A learner is NOT a row here**, although this comment once foresaw it as the
+/// fifth (#1449). Voting is a property of the CONFIGURATION, not of a role: a learner
+/// still follows -- it takes entries, arms nothing, redirects clients to the leader --
+/// so it is a `Follower` in every sense this table describes, and a fifth role `Tick`
+/// moved a node between would have to be left again the instant a promotion committed.
+/// What a learner lacks is decided by where its latest configuration seats it, which
+/// is `StandingTable`'s question.
+inline constexpr EnumTable<Role, RoleTraits> RoleTable { {
+    { .role = Role::Follower, .name = "follower", .timer = TimerKind::Election },
+    { .role = Role::PreCandidate, .name = "pre-candidate", .timer = TimerKind::Election },
+    { .role = Role::Candidate, .name = "candidate", .timer = TimerKind::Election },
+    { .role = Role::Leader, .name = "leader", .timer = TimerKind::Heartbeat },
+} };
+
+static_assert(RowsInEnumeratorOrder(RoleTable, &RoleTraits::role),
+              "RoleTable must hold one row per Role, in enumerator order -- the order is what lets a role index its "
+              "own row instead of being searched for");
+
+/// The row describing `role`.
+///
+/// An index rather than a search: `RoleTable` is `static_assert`ed to hold one row
+/// per enumerator in enumerator order, so the row for a role is at the role's own
+/// position and there is nothing to look for.
+/// @param role The role to look up.
+/// @return Its traits.
+[[nodiscard]] constexpr RoleTraits const& TraitsOf(Role role) noexcept
+{
+    return RoleTable[static_cast<std::size_t>(role)];
+}
+
+/// Whether this node's application can take on the state a leader's snapshot carries.
+///
+/// **Private: never transmitted or persisted**, so no enumerator states a value.
+///
+/// Decided by the driver, which holds the application, and handed to `RaftNode::Receive`
+/// beside the message (#1552) -- the node is where the PROTOCOL consequence is decided,
+/// and it must be decided there: a snapshot the application cannot read is refused
+/// before the node resets its log, moves its indices or acknowledges anything, while
+/// the leader that sent it still counts as heard. Deciding it after the node had taken
+/// the snapshot on would leave an acknowledgement nothing can retract.
+enum class SnapshotReadability : std::uint8_t
+{
+    Readable,   ///< Take it on, as ever.
+    Unreadable, ///< Refuse it: answer `Rejected` and stay where this node is.
+};
+
+/// One Raft node, as a deterministic state machine.
+///
+/// **Performs no I/O and reads no clock of its own.** Time arrives as a
+/// parameter, randomness through an injected `IRandomSource`, and everything the
+/// node wants done leaves as a `RaftOutput` for a driver to carry out. That is
+/// not stylistic: consensus is the one thing in this system where a rare
+/// interleaving is a correctness bug rather than a slow request, so the whole
+/// algorithm has to be reachable from a test that can produce those
+/// interleavings on demand. A node that read a clock or opened a socket could
+/// only be tested against a real network, which is to say against whichever
+/// interleavings happened to occur.
+///
+/// The driver owes it two things, and both are contracts rather than
+/// suggestions: make `RaftOutput::persist` durable **before** sending
+/// `RaftOutput::messages` (see `RaftOutput`), and call `Tick` no later than
+/// `NextDeadline()`.
+///
+/// Thread-compatible, not thread-safe: one node is driven by one loop. Sharing
+/// it would need a lock, and a lock around a state machine that also does I/O
+/// through its return value would be held across the I/O.
+class RaftNode
+{
+  public:
+    /// Create a node that has never run before, or say why the configuration
+    /// cannot run.
+    ///
+    /// A factory rather than a throwing constructor, because setup here is
+    /// genuinely fallible and the caller is a daemon that should refuse to start
+    /// with a message naming the offending field. It is also the only way to make
+    /// `RaftConfig::Validate` unbypassable: a constructor that merely *documents*
+    /// the precondition is one an omission can skip, and the resulting failures
+    /// are silent rather than loud — a `self` outside the configuration is a node
+    /// replicating to every member while believing it is one of them.
+    ///
+    /// An empty configuration is the one shape that is legal rather than refused:
+    /// it says this node has no cluster and is waiting to be admitted to one. It
+    /// would elect itself instantly on a quorum of one if it stood at all, which
+    /// is exactly why it does not — see `HasCluster`.
+    ///
+    /// Everything the node needs is supplied here and fixed afterwards, so there
+    /// is no window in which a node exists but does not yet know who it is.
+    /// @param config The cluster configuration.
+    /// @param random Source for election-timeout jitter; must outlive this node.
+    /// @param now The current instant, used to arm the first election timeout.
+    /// @param recovered What durable storage held; defaults to a node that has
+    ///        never run. One entry point rather than two, because a
+    ///        default-constructed `RecoveredState` *is* a fresh node — a separate
+    ///        restore path would be a second construction sequence able to drift
+    ///        from this one.
+    /// @return The node, or why the configuration was refused.
+    [[nodiscard]] static std::expected<RaftNode, ConsensusError> Create(RaftConfig config,
+                                                                        IRandomSource& random,
+                                                                        core::platform::SteadyTimePoint now,
+                                                                        RecoveredState recovered = {});
+
+    /// @return The role this node is currently playing.
+    [[nodiscard]] Role CurrentRole() const noexcept;
+
+    /// @return The latest term this node has seen.
+    [[nodiscard]] Term CurrentTerm() const noexcept;
+
+    /// @return Who this node voted for in the current term, if anyone.
+    [[nodiscard]] std::optional<NodeId> const& VotedFor() const noexcept;
+
+    /// The leader this node believes is in charge, if it knows of one.
+    ///
+    /// What a follower redirects a client to. Absent between a leader dying and
+    /// the next one winning, which is a real state a caller must handle rather
+    /// than wait out — the whole point of the fallback rule around this feature
+    /// is that "there is no leader right now" is answerable immediately.
+    /// @return The known leader, or nullopt.
+    [[nodiscard]] std::optional<NodeId> const& KnownLeader() const noexcept;
+
+    /// When a leader last spoke to this node: the last `AppendEntries` or `InstallSnapshot` it
+    /// accepted from the leader of its current term.
+    ///
+    /// A RECORD, never a decision here: this node answers a pre-vote from its election deadline, not
+    /// from this (issue #117). What reads it is a worker bounding how long it honours grants against
+    /// a state no leader has refreshed (`Distributed::StateLeaseRoster`), and a learner -- which runs
+    /// no election and so never forgets `KnownLeader` -- has no other evidence that one still speaks.
+    /// @return The instant, or nullopt before any leader has spoken.
+    [[nodiscard]] std::optional<core::platform::SteadyTimePoint> LastLeaderContact() const noexcept;
+
+    /// @return The node's log.
+    [[nodiscard]] RaftLog const& Log() const noexcept;
+
+    /// The highest index known to be committed.
+    ///
+    /// Committed means present in every future leader's log, so an entry at or
+    /// below this can be acted on and will never be taken back.
+    /// @return The commit index.
+    [[nodiscard]] LogIndex CommitIndex() const noexcept;
+
+    /// How far each member's log is known to match this leader's (#1537).
+    ///
+    /// A fact only a LEADER holds, and empty on any other node: a follower tracks nobody's
+    /// log but its own. Learners are in it as well as voters -- replication reaches both --
+    /// which is what lets a caller ask whether a learner has caught up before it is counted.
+    /// A member absent from it has acknowledged nothing to this leader yet.
+    /// @return The match index per member this leader replicates to.
+    [[nodiscard]] std::unordered_map<NodeId, LogIndex> const& MatchIndices() const noexcept;
+
+    /// What a successful proposal yields.
+    struct Proposal
+    {
+        LogIndex index {}; ///< Where the entry landed; watch `CommitIndex()` for it.
+        RaftOutput output; ///< What the driver should do about it.
+    };
+
+    /// Offer an entry to the cluster.
+    ///
+    /// Only a leader may accept one, so this refuses on every other node — with
+    /// the leader's identity when it knows one, because "ask that node instead"
+    /// and "nobody leads right now" are different answers and only the second
+    /// means give up and act locally.
+    ///
+    /// Acceptance is not commitment. The entry is appended to this leader's log
+    /// and replicated; it is committed when a quorum has it, which is reported
+    /// through `RaftOutput::applied` on some later event. A caller that needs to
+    /// know when to act watches for the index, and one that cannot wait treats a
+    /// proposal like any other refusal.
+    /// @param payload Application bytes, never interpreted here.
+    /// @param now The current instant.
+    /// @return Where it landed and what to do, or why it was refused.
+    [[nodiscard]] std::expected<Proposal, ConsensusError> Propose(std::vector<std::byte> payload,
+                                                                  core::platform::SteadyTimePoint now);
+
+    /// Propose a new configuration, one member moved (§4.3).
+    ///
+    /// Restricted to a single-member delta -- added, removed, promoted from
+    /// learner to voter, or demoted from voter to learner -- and that restriction
+    /// is the whole safety argument: any majority of the old configuration's
+    /// voters and any majority of the new one's then share at least one voter, so
+    /// the two cannot elect different leaders in the same term. Going from three
+    /// voters to five in one step makes `{n1,n2}` a majority of the old and
+    /// `{n3,n4,n5}` a majority of the new, with nobody in common — which is what
+    /// joint consensus exists to handle and why this refuses instead. Promoting
+    /// one member and removing another is two voter changes, and is refused the
+    /// same way (`Membership::ChangeShape::Unsafe`).
+    ///
+    /// Only one change may be in flight. A second proposed before the first
+    /// commits would be built on a configuration that can still be rolled back
+    /// by a truncation, so the safety argument above would be comparing against
+    /// a set that never existed.
+    ///
+    /// The new configuration takes effect on **this node** immediately, before
+    /// it is committed, because a configuration that waited for commitment could
+    /// not be used to reach it.
+    /// @param configuration The proposed configuration.
+    /// @param now The current instant.
+    /// @return Where the entry landed and what to do, or why it was refused.
+    [[nodiscard]] std::expected<Proposal, ConsensusError> ProposeMembership(Configuration configuration,
+                                                                            core::platform::SteadyTimePoint now);
+
+    /// Compact the log, keeping `state` as the snapshot that replaces it.
+    ///
+    /// The log carries cluster configuration and cluster state only, so it grows
+    /// slowly — but a log nobody ever trims is a restart that takes longer every
+    /// time, and a leader that has to keep every entry forever in case some
+    /// follower is behind.
+    ///
+    /// Only applied state may be discarded: entries above `LastApplied()` have
+    /// not reached the application, so a snapshot does not describe them. The
+    /// configuration is captured alongside, because a follower catching up from
+    /// this snapshot has no entries left to learn it from.
+    /// @param state The application's serialized state as of `LastApplied()`.
+    /// @param output Receives the snapshot to make durable.
+    /// @return True when the log was compacted.
+    ///
+    /// The snapshot leaves through `output` rather than being written here, for
+    /// the reason every other durability write does: the entries it replaces are
+    /// gone from memory the moment this returns, so a node that discarded them
+    /// without recording what they produced comes back from a restart missing
+    /// committed state.
+    bool CompactThroughApplied(std::vector<std::byte> state, RaftOutput& output);
+
+    /// The snapshot this node currently holds, as a durable record.
+    ///
+    /// Composed from the log's own boundary rather than stored beside it: the log
+    /// already owns where the snapshot ends, and a second copy of that pair is a
+    /// second thing that can come to disagree with it.
+    /// @return The record.
+    [[nodiscard]] RaftSnapshot CurrentSnapshot() const;
+
+    /// The last index this node's snapshot covers, or `BeforeFirst()`.
+    /// @return The snapshot point.
+    [[nodiscard]] LogIndex SnapshotIndex() const noexcept
+    {
+        return _log.SnapshotIndex();
+    }
+
+    /// How far the application has been advanced.
+    /// @return The last applied index.
+    [[nodiscard]] LogIndex LastApplied() const noexcept
+    {
+        return _lastApplied;
+    }
+
+    /// The configuration this node is currently operating under.
+    ///
+    /// The latest configuration in its log, which is not necessarily a committed
+    /// one; see `ProposeMembership`.
+    /// @return The active voters and learners.
+    [[nodiscard]] Configuration const& ActiveConfiguration() const noexcept
+    {
+        return _configuration;
+    }
+
+    /// Where this node sits in its own latest configuration.
+    ///
+    /// Derived from `ActiveConfiguration()` every time rather than stored, so it
+    /// cannot lag the configuration it describes. `StandingTable` says what each
+    /// answer permits.
+    /// @return This node's standing.
+    [[nodiscard]] Standing CurrentStanding() const;
+
+    /// Whether this node belongs to a cluster at all.
+    ///
+    /// False for a node started with an empty configuration and never yet
+    /// admitted to one — a machine brought up to be added to a running fleet. It
+    /// is a *waiting* state rather than a broken one, and three rules follow from
+    /// it, each of which is the difference between joining and never joining:
+    ///
+    ///   - **It never stands for election.** With no members the quorum arithmetic
+    ///     answers one, so a node that campaigned would elect itself, hold a term
+    ///     and a log of its own, and stop being admissible at all — see
+    ///     `RaftConfig::voters`. `NextDeadline` reports that nothing falls due,
+    ///     rather than naming a deadline `Tick` would have to decline to act on;
+    ///     the timer is re-armed by the leader contact that admits it. That is
+    ///     `StandingTable`'s `NoCluster` row, which a learner's row matches.
+    ///   - **It accepts `AppendEntries` and `InstallSnapshot` from any leader**,
+    ///     because the membership test that guards those has nothing to test
+    ///     against: the only way to learn a configuration is to be sent one. The
+    ///     protection that test provides is not given up, it is not yet available
+    ///     — and there is nothing here to protect, since such a node holds no
+    ///     committed state, has never voted and is counted by nobody. The moment
+    ///     it adopts a configuration the guard applies again, permanently.
+    ///   - **It grants no votes**: its row says so, and nobody counts its answer
+    ///     anyway, since it is in no member set.
+    ///
+    /// @return True once a configuration — bootstrapped or replicated — is in
+    ///         force.
+    [[nodiscard]] bool HasCluster() const noexcept
+    {
+        return !_configuration.voters.empty() || !_configuration.learners.empty();
+    }
+
+    /// How often a leader speaks when it has nothing to say.
+    ///
+    /// Published because the driver has to bound its own sleep by it: it parks on
+    /// a deadline read before it suspends, and a peer reader can move that deadline
+    /// *earlier* — a candidate that wins on the vote it delivers goes from an
+    /// election deadline up to `electionTimeoutMax` away to a heartbeat deadline
+    /// one interval away. Not exposed as the whole `RaftConfig`
+    /// on purpose: this is the one timing fact anything outside needs, and a
+    /// wholesale accessor is an invitation to take a second one.
+    /// @return The configured heartbeat interval.
+    [[nodiscard]] std::chrono::milliseconds HeartbeatInterval() const noexcept
+    {
+        return _config.heartbeatInterval;
+    }
+
+    /// When the driver must next call `Tick`.
+    ///
+    /// Which deadline this is depends on the role and comes from `RoleTable`,
+    /// and -- for a role that would wait on an election -- on the standing, from
+    /// `StandingTable`: a learner and a node with no cluster wait on nothing.
+    /// @return The next instant at which something is due.
+    [[nodiscard]] core::platform::SteadyTimePoint NextDeadline() const;
+
+    /// Advance time.
+    ///
+    /// Idempotent before the deadline: calling it early returns an empty output
+    /// rather than misbehaving, so a driver that wakes spuriously — which every
+    /// real reactor does — costs nothing.
+    /// @param now The current instant.
+    /// @return What the driver should do.
+    [[nodiscard]] RaftOutput Tick(core::platform::SteadyTimePoint now);
+
+    /// Handle one received message.
+    /// @param message The message, from any member.
+    /// @param now The current instant.
+    /// @param readability For an `InstallSnapshotRequest`, whether the application can
+    ///        take its state on -- the driver asks, since only it holds the application
+    ///        (#1552). Ignored for every other message.
+    /// @return What the driver should do.
+    [[nodiscard]] RaftOutput Receive(RaftMessage const& message,
+                                     core::platform::SteadyTimePoint now,
+                                     SnapshotReadability readability = SnapshotReadability::Readable);
+
+  private:
+    /// Private, so `Create` is the only way in and its validation cannot be
+    /// bypassed by omission.
+    /// @param config A configuration that has already passed `Validate()`.
+    /// @param random Source for election-timeout jitter.
+    /// @param now The current instant.
+    /// @param recovered What durable storage held.
+    RaftNode(RaftConfig config, IRandomSource& random, core::platform::SteadyTimePoint now, RecoveredState recovered);
+
+    /// Whether `id` is a configured member of this cluster, voter or learner.
+    ///
+    /// The question REPLICATION asks: a learner is sent the log and its answers
+    /// are read. Every identity in an incoming message is self-declared, so
+    /// whichever of this and `IsVoter` a handler asks decides what that identity
+    /// can do.
+    /// @param id The claimed identity.
+    /// @return True when the configuration contains it.
+    [[nodiscard]] bool IsMember(NodeId const& id) const;
+
+    /// Whether `id` is a VOTER of this cluster.
+    ///
+    /// The question every decision that COUNTS asks: a granted vote counts toward
+    /// leadership, and an accepted AppendEntries publishes its sender as the
+    /// leader clients are redirected to -- and a learner may be neither counted
+    /// nor leader (#1449).
+    /// @param id The claimed identity.
+    /// @return True when the configuration counts it.
+    [[nodiscard]] bool IsVoter(NodeId const& id) const;
+
+    [[nodiscard]] std::size_t Quorum() const noexcept;
+    void AdoptConfiguration(Configuration configuration);
+    void RefreshConfiguration();
+    [[nodiscard]] bool HasUncommittedConfiguration() const;
+    [[nodiscard]] LogIndex LatestConfigurationIndex() const;
+
+    /// Which timer governs this node right now: its role's, unless that is the
+    /// election timer and its standing never stands.
+    /// @return The timer `NextDeadline` and `Tick` read.
+    [[nodiscard]] TimerKind CurrentTimer() const;
+
+    /// Count this node's own vote into `tally`, but only while it is a voter.
+    ///
+    /// The carve-out `AdvanceCommitIndex` and `HasQuorumContact` already made for a
+    /// leader, made for a candidate too: a node its own configuration does not count
+    /// must not count itself. Without it a node REMOVED from a one-voter
+    /// configuration reached a quorum of one alone -- its own pre-vote and its own
+    /// vote -- and led a cluster that does not contain it, deposing the real leader
+    /// with every term it raised.
+    /// @param tally The pre-vote or vote tally being started.
+    void CountOwnVote(std::unordered_set<NodeId>& tally) const;
+
+    /// The configuration CheckQuorum measures contact against.
+    ///
+    /// `_configuration` while nothing is in flight, and the COMMITTED
+    /// configuration while a change is — see `HasQuorumContact`, which is the only
+    /// caller and carries the argument.
+    ///
+    /// By value rather than by reference because the two answers have different
+    /// lifetimes: one is a member, the other is decoded from a log entry. A
+    /// configuration is a handful of ids, and returning a reference to a local is
+    /// the bug that shape invites.
+    /// @return The configuration to measure a quorum of contact against.
+    [[nodiscard]] Configuration QuorumContactConfiguration() const;
+
+    /// Begin an election for the next term (§5.2).
+    void StartPreVote(core::platform::SteadyTimePoint now, RaftOutput& output);
+    void StartElection(core::platform::SteadyTimePoint now, RaftOutput& output);
+
+    /// Adopt a higher term and return to being a follower (§5.1).
+    ///
+    /// The single most-invoked rule in Raft, and the one whose omission is
+    /// hardest to see: it applies to **every** message, response as well as
+    /// request. A leader that ignores a higher term arriving on an
+    /// AppendEntriesResponse keeps believing it leads a term the cluster has
+    /// moved past, and goes on answering clients as though it did.
+    ///
+    /// Reports itself through `output.adoptedTerm`, naming `from`. That is the
+    /// only place the cause of a step-down is known: by the time a driver sees
+    /// the new role, the term and role it replaced are gone and the message that
+    /// carried it has been handled.
+    /// @param term The higher term to adopt.
+    /// @param from The peer whose message carried it.
+    /// @param now Current time.
+    /// @param output Where the report and any durable state are collected.
+    void StepDown(Term term, NodeId const& from, core::platform::SteadyTimePoint now, RaftOutput& output);
+
+    /// Give up leadership without changing the term, having lost quorum contact.
+    ///
+    /// Distinct from `StepDown`, which exists for a HIGHER TERM arriving and resets
+    /// the term and the vote with it. Here the term is unchanged, so the vote must
+    /// be left alone too — clearing it would let this node vote a second time in a
+    /// term it has already voted in. Bumping the term instead would have it return
+    /// with an inflated one and depose a working leader, which is what pre-vote
+    /// exists to prevent.
+    ///
+    /// Nothing durable moves: role is not durable state, and neither the term nor
+    /// the vote changes.
+    /// @param now When it happened, for the election timer.
+    /// @param output Unused; taken so the shape matches the other transitions and a
+    ///               later one that does need to persist cannot forget it.
+    void RelinquishLeadership(core::platform::SteadyTimePoint now, RaftOutput& output);
+
+    /// Win the election and start heartbeating.
+    void BecomeLeader(core::platform::SteadyTimePoint now, RaftOutput& output);
+
+    /// Record that a leader was heard from, by arming the election timer.
+    ///
+    /// Called only where a leader actually spoke — an AppendEntries or an
+    /// InstallSnapshot, whether or not the log accepts it: §5.2 resets the timer on
+    /// hearing from the current leader, and a leader whose entries do not match this
+    /// node's log yet was still heard from.
+    ///
+    /// Since issue #117 the armed deadline *is* the record: a node answers a
+    /// challenger's pre-vote from the deadline it would campaign on, so pushing that
+    /// out is what "a leader spoke to me" means, and the separate timestamp this used
+    /// to keep beside it had no reader left.
+    ///
+    /// Still its own function rather than `ArmElectionTimer` at the call sites,
+    /// because §5.2 resets the timer on exactly two events — hearing from a
+    /// current leader, and *granting a vote* — and only one of them is contact
+    /// from a leader. Which one a call site means is worth saying in its name.
+    /// @param now Current time.
+    void NoteLeaderContact(core::platform::SteadyTimePoint now);
+
+    /// Record that a follower answered this leader.
+    ///
+    /// Both response types and both of their outcomes, which is why this is
+    /// called ahead of the branch rather than from `AdvanceFollowerProgress`: a
+    /// rejection says the follower's log disagrees, not that the follower is
+    /// gone. Counting only accepted responses would make a leader lose the quorum
+    /// it is in the middle of repairing.
+    /// @param follower Which peer answered.
+    /// @param now Current time.
+    void NoteFollowerContact(NodeId const& follower, core::platform::SteadyTimePoint now);
+
+    /// Whether a majority of the cluster has answered this leader recently.
+    ///
+    /// CheckQuorum, and the only question a leader can honestly answer about
+    /// whether a leader is live: it is one, so it asks whether it still leads
+    /// anything. Decided from responses it already receives rather than from a
+    /// lease, which would need a clock-drift bound nothing else here assumes.
+    /// @param now Current time.
+    /// @return True while enough members are still answering.
+    [[nodiscard]] bool HasQuorumContact(core::platform::SteadyTimePoint now) const;
+
+    /// Whether some leader is live, as far as this node can tell.
+    ///
+    /// The whole of pre-vote's disruption check, and the two roles answer it from
+    /// different evidence. A leader knows because a majority still answers it;
+    /// every other role knows because it still names a leader and has not yet
+    /// reached the deadline at which it would stand against one. Asking a leader
+    /// the follower's question is what left the node best placed to refuse a
+    /// challenger as the only one that never did (issue #103).
+    ///
+    /// A candidate or pre-candidate therefore always answers **no**, and that is
+    /// the point rather than a gap: standing for election is precisely the act of
+    /// declaring there is no live leader, and a node that said otherwise while
+    /// campaigning refused every peer timing out alongside it.
+    /// @param now Current time.
+    /// @return True while a leader is demonstrably live.
+    [[nodiscard]] bool HasLiveLeader(core::platform::SteadyTimePoint now) const;
+
+    /// Arm the election timer with a freshly drawn randomized timeout.
+    ///
+    /// Re-drawn every time rather than drawn once per node, because a fixed
+    /// per-node timeout makes the node with the shortest one win every election
+    /// forever — and if that node is partitioned but alive, its repeated
+    /// candidacies disrupt the cluster on a fixed schedule.
+    void ArmElectionTimer(core::platform::SteadyTimePoint now);
+
+    /// Queue a vote or pre-vote request to every VOTER other than this node.
+    ///
+    /// Voters only: a learner casts no vote, so asking one costs a message and a
+    /// refusal and can change no tally. Replication goes to learners too, and that
+    /// is `ReplicateToPeers`.
+    void BroadcastToVoters(RaftOutput& output, RaftMessage const& message) const;
+
+    /// The AppendEntries this leader owes `peer`, given how far it has caught up.
+    ///
+    /// Carries whatever sits at and after that peer's `nextIndex`, which is empty
+    /// for a peer that is up to date — so a heartbeat is not a separate kind of
+    /// message, it is this one with nothing left to send. Keeping them one thing
+    /// is what makes a heartbeat also the mechanism that discovers a divergent
+    /// follower, rather than a second code path that has to remember to.
+    /// @param peer The follower.
+    /// @return The request to send it.
+    [[nodiscard]] AppendEntriesRequest MakeAppendEntriesFor(NodeId const& peer) const;
+
+    /// Send each peer the AppendEntries it is owed.
+    void ReplicateToPeers(RaftOutput& output) const;
+
+    /// Record how far a follower has confirmed it matches, and where to send next.
+    ///
+    /// One function rather than one per response type: an AppendEntries and an
+    /// InstallSnapshot both establish a match index by the same rule, and two
+    /// copies of a rule this delicate are two places for it to drift.
+    /// @param follower Which peer answered.
+    /// @param reported The match index it claims, before clamping.
+    void AdvanceFollowerProgress(NodeId const& follower, LogIndex reported);
+
+    /// Advance the commit index if a quorum has caught up (§5.4.2).
+    void AdvanceCommitIndex();
+
+    /// Emit every entry that has become committed since the last call.
+    void ApplyCommitted(RaftOutput& output);
+
+    /// Ask the driver to make the log durable from `fromIndex` onward.
+    ///
+    /// Reads the entries out of the log rather than taking them from the caller,
+    /// so the record is of what was actually written — including a truncation
+    /// that a follower's repair performed, which the incoming request does not
+    /// describe on its own.
+    /// @param output Where to record it.
+    /// @param fromIndex First index that changed.
+    void RecordLogAppend(RaftOutput& output, LogIndex fromIndex);
+
+    /// Record the durable state in `output`, for the driver to write first.
+    void MarkPersist(RaftOutput& output) const;
+
+    /// Per-message handlers; each may append to `output`.
+    /// Whether the §5.1 term rule must NOT be applied to this message.
+    /// @param message The message being received.
+    /// @return True for a pre-vote request, and for a granted pre-vote response.
+    [[nodiscard]] static bool IsPreVoteExempt(RaftMessage const& message) noexcept;
+    void OnPreVote(PreVoteRequest const& request, core::platform::SteadyTimePoint now, RaftOutput& output);
+
+    /// Which rule, if any, denies `request`.
+    ///
+    /// The whole decision, separated from the reply so the answer is written once
+    /// and the reason travels beside it in `RaftOutput::voteRefusal`. The order is
+    /// the order the rules are asked in, and the first is this node's own row.
+    /// @param request The pre-vote.
+    /// @param now Current time.
+    /// @return The refusal, or nullopt when the pre-vote would be granted.
+    [[nodiscard]] std::optional<VoteRefusal> PreVoteRefusal(PreVoteRequest const& request,
+                                                            core::platform::SteadyTimePoint now) const;
+
+    void OnPreVoteResponse(PreVoteResponse const& response, core::platform::SteadyTimePoint now, RaftOutput& output);
+    void OnRequestVote(RequestVoteRequest const& request, core::platform::SteadyTimePoint now, RaftOutput& output);
+
+    /// Which rule, if any, denies `request`; `PreVoteRefusal`'s counterpart.
+    /// @param request The vote request.
+    /// @return The refusal, or nullopt when the vote would be granted.
+    [[nodiscard]] std::optional<VoteRefusal> VoteRefusalFor(RequestVoteRequest const& request) const;
+
+    void OnRequestVoteResponse(RequestVoteResponse const& response, core::platform::SteadyTimePoint now, RaftOutput& output);
+    void OnAppendEntries(AppendEntriesRequest const& request, core::platform::SteadyTimePoint now, RaftOutput& output);
+    void OnAppendEntriesResponse(AppendEntriesResponse const& response,
+                                 core::platform::SteadyTimePoint now,
+                                 RaftOutput& output);
+    void OnInstallSnapshot(InstallSnapshotRequest const& request,
+                           core::platform::SteadyTimePoint now,
+                           SnapshotReadability readability,
+                           RaftOutput& output);
+    void OnInstallSnapshotResponse(InstallSnapshotResponse const& response,
+                                   core::platform::SteadyTimePoint now,
+                                   RaftOutput& output);
+    [[nodiscard]] bool NeedsSnapshot(NodeId const& peer) const;
+    [[nodiscard]] InstallSnapshotRequest MakeInstallSnapshotFor() const;
+
+    /// The term carried by any message, so the §5.1 rule can be applied once.
+    [[nodiscard]] static Term TermOf(RaftMessage const& message) noexcept;
+
+    RaftConfig _config;
+
+    /// Every member other than this node, voters AND learners: who is replicated to.
+    ///
+    /// Derived once per configuration rather than on every use: the configuration
+    /// moves only when a configuration entry does, while replicating happens on
+    /// every heartbeat — that is, on the interval that decides how fast a dead
+    /// leader is noticed, so it is the one path here that runs at a rate worth
+    /// caring about. `AdoptConfiguration` is the one writer of this and of
+    /// `_voterPeers`, which is what keeps the two in step with `_configuration`.
+    std::vector<NodeId> _peers;
+
+    /// Every VOTER other than this node: who is asked for a vote or a pre-vote.
+    std::vector<NodeId> _voterPeers;
+
+    IRandomSource& _random;
+
+    Role _role { Role::Follower };
+    Term _currentTerm {};
+    std::optional<NodeId> _votedFor;
+    std::optional<NodeId> _knownLeader;
+    RaftLog _log;
+
+    /// When this node would stand for election, and — since issue #117 — also
+    /// what it answers a challenger's pre-vote from, together with `_knownLeader`.
+    ///
+    /// It replaced a separate `_lastLeaderContact` timestamp for THIS question, which
+    /// it no longer answers; `_lastLeaderContact` below is back for another reader
+    /// and decides nothing about an election.
+    core::platform::SteadyTimePoint _electionDeadline {};
+
+    /// When a leader last spoke to this node; see `LastLeaderContact`. Read by the
+    /// lease roster's isolation bound, never by an election.
+    std::optional<core::platform::SteadyTimePoint> _lastLeaderContact;
+    core::platform::SteadyTimePoint _heartbeatDeadline {};
+
+    LogIndex _commitIndex {}; ///< Highest index known committed.
+    LogIndex _lastApplied {}; ///< Highest index already emitted as applied.
+
+    /// Per-peer: the next index to send. A guess, revised downward on rejection.
+    std::unordered_map<NodeId, LogIndex> _nextIndex;
+
+    /// Per-peer: the highest index known to be replicated there.
+    ///
+    /// Distinct from `_nextIndex` and not derivable from it, which is the usual
+    /// place to go wrong: `nextIndex` is optimistic and moves both ways, while
+    /// `matchIndex` is a fact that only ever increases. Committing on the
+    /// optimistic one would commit an entry nobody has acknowledged.
+    std::unordered_map<NodeId, LogIndex> _matchIndex;
+
+    /// Per-peer: when it last answered this leader. Empty for anyone else.
+    ///
+    /// A leader's own evidence that the cluster is healthy, and it exists because
+    /// nothing else on a leader is: a leader never hears from a leader, so what
+    /// every other role answers from is permanently stale on the one node best
+    /// placed to refuse a challenger.
+    ///
+    /// Stamped when a RESPONSE arrives, where a follower stamps when the REQUEST
+    /// does — half a round trip earlier. That difference is why the follower side
+    /// no longer answers from a timestamp at all; see `HasLiveLeader`.
+    ///
+    /// Absence is what a peer that has not answered *since this leadership began*
+    /// looks like, so it must not be seeded with anything but real contact --
+    /// which is why `BecomeLeader` clears it and fills it from the votes that
+    /// were actually cast rather than from the peer list.
+    std::unordered_map<NodeId, core::platform::SteadyTimePoint> _followerContact;
+
+    /// Voters that granted this node their vote in the current term, itself
+    /// included while it is a voter. A set rather than a counter because a
+    /// retransmitted response would otherwise be counted twice, and two counted
+    /// votes from one node is a quorum that does not exist.
+    std::unordered_set<NodeId> _votesGranted;
+
+    /// The configuration as of the snapshot.
+    ///
+    /// The fall-back for `RefreshConfiguration` when the retained log holds no
+    /// configuration entry — which is precisely what compaction produces. Without
+    /// it the fall-back is the *bootstrap* set, so a node that took part in a
+    /// membership change and then compacted would forget it, silently and only
+    /// after a restart.
+    Configuration _snapshotConfiguration;
+
+    /// The application state the log's discarded prefix produced.
+    ///
+    /// Held by the node rather than fetched from the application when needed,
+    /// because it must be shippable to a follower at the moment that follower
+    /// turns out to be behind — and asking the application for a snapshot *then*
+    /// would produce one as of a different index than the log was compacted to.
+    std::vector<std::byte> _snapshotState;
+
+    /// The configuration this node is operating under: the latest one in its log,
+    /// or the snapshot's, or `_config`'s bootstrap when neither holds one.
+    ///
+    /// Separate from `_config`, which stays what this node was *bootstrapped*
+    /// with. Keeping both is what lets a restart re-derive the active configuration
+    /// from the log rather than silently reverting a change the cluster already
+    /// made.
+    Configuration _configuration;
+
+    /// Voters that said an election would be winnable, itself included while it is
+    /// a voter.
+    ///
+    /// Separate from `_votesGranted` rather than reusing it, because the two
+    /// count answers to different questions in different terms: a pre-vote is
+    /// about the term this node has NOT entered, and folding them would let a
+    /// pre-vote be counted toward the real election that follows -- which is a
+    /// vote nobody cast.
+    std::unordered_set<NodeId> _preVotesGranted;
+};
+
+} // namespace Pace::Consensus

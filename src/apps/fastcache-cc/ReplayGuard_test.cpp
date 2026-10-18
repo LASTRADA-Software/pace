@@ -14,8 +14,8 @@
 
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -47,7 +47,7 @@ std::vector<TextRegion> Value(std::string stdoutText, std::string stderrText, st
 
 /// A scratch directory that removes itself, so a failing assertion cannot leave a
 /// tree behind that makes the next run pass for the wrong reason.
-// Not `FastCache::Testing::ScratchDirectory`, and not hoisted into a shared header
+// Not `Pace::Testing::ScratchDirectory`, and not hoisted into a shared header
 // either -- which is what #70 assumed had already happened.
 //
 // ONE difference carries that, and it is worth stating narrowly because the obvious
@@ -78,7 +78,7 @@ struct ScopedTree
         // longer be the whole story. `temp / "<fixed>"` is the same directory in every
         // concurrent test process -- see `tests/ScratchPath.hpp` for the five times
         // that has been paid for.
-        base { FastCache::Testing::UniqueScratchPath("fc-replayguard") },
+        base { Pace::Testing::UniqueScratchPath("fc-replayguard") },
         root { base / name }
     {
         std::filesystem::create_directories(root);

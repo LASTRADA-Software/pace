@@ -11,8 +11,8 @@
 #include <stdexcept>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 
 // The interface's contract, asserted against BOTH implementations. They have to
 // agree about a throwing slice, or a test that substitutes the serial one proves

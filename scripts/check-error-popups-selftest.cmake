@@ -81,7 +81,7 @@ function(fc_case label tree want phrase)
     math(EXPR count "${cases} + 1")
     set(cases ${count} PARENT_SCOPE)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" -DCONFIG=Debug -DANCHOR=FastCacheTest
+        COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${tree}" -DCONFIG=Debug -DANCHOR=PaceTest
                 "-DVARIABLE=${variable}" -P "${check}"
         OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE status)
     set(output "${out}${err}")
@@ -103,9 +103,9 @@ function(fc_case label tree want phrase)
 endfunction()
 
 set(t "D:/b/target")
-set(anchorRow "FastCacheTest|${t}/FastCacheTest.exe|always|\n")
-fc_registration(anchorTest "a case" "${t}/FastCacheTest.exe [=[a case]=]" TRUE)
-set(anchorEdge "build target\\FastCacheTest.exe: CXX_EXECUTABLE_LINKER__FastCacheTest_Debug src\\tests\\CMakeFiles\\FastCacheTest.dir\\a.cpp.obj src\\tests\\CMakeFiles\\FastCacheTest.dir\\ErrorPopupsAtStartup.cpp.obj\n")
+set(anchorRow "PaceTest|${t}/PaceTest.exe|always|\n")
+fc_registration(anchorTest "a case" "${t}/PaceTest.exe [=[a case]=]" TRUE)
+set(anchorEdge "build target\\PaceTest.exe: CXX_EXECUTABLE_LINKER__PaceTest_Debug src\\tests\\CMakeFiles\\PaceTest.dir\\a.cpp.obj src\\tests\\CMakeFiles\\PaceTest.dir\\ErrorPopupsAtStartup.cpp.obj\n")
 set(catchInclude "include(\"@TREE@/src/apps/x/cli-tests-b12d07c_include.cmake\")\n")
 set(catchTestsMarked "add_test( [==[the table is well formed]==] ${t}/cli-tests.exe [==[the table is well formed]==]  )\nset_tests_properties( [==[the table is well formed]==] PROPERTIES WORKING_DIRECTORY D:/b SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION ${variable}=set:1)\n")
 set(catchEdge "build target\\cli-tests.exe: CXX_EXECUTABLE_LINKER__cli-tests_Debug x.obj ErrorPopupsAtStartup.cpp.obj\n")
@@ -193,7 +193,7 @@ fc_case("an empty manifest is refused as vacuous" "${tree}" refuse "names no exe
 
 fc_registration(other "other" "D:/b/target/other.exe" TRUE)
 fc_stage(noanchor "${anchorRow}" "${other}" "" "<none>" "${anchorEdge}" tree)
-fc_case("an anchor that is not launched is refused" "${tree}" refuse "the anchor 'FastCacheTest' was not found launched AND covered")
+fc_case("an anchor that is not launched is refused" "${tree}" refuse "the anchor 'PaceTest' was not found launched AND covered")
 
 fc_stage(nomanifest "" "${anchorTest}" "" "<none>" "${anchorEdge}" tree)
 file(REMOVE "${tree}/error-popups-Debug.manifest")

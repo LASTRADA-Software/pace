@@ -11,8 +11,8 @@
 #include <ranges>
 #include <string>
 
-using namespace FastCache::Cc;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace::Cc;
+namespace Wire = Pace::CompileCacheWire;
 using namespace std::chrono_literals;
 
 namespace
@@ -23,7 +23,7 @@ constexpr auto Epoch = std::chrono::system_clock::time_point {};
 namespace
 {
 /// The filesystem every case's stamps are replaced on: the launcher's own.
-std::unique_ptr<FastCache::Cc::IAtomicWriteFiles> const Disk = FastCache::Cc::MakeDiskFiles();
+std::unique_ptr<Pace::Cc::IAtomicWriteFiles> const Disk = Pace::Cc::MakeDiskFiles();
 } // namespace
 
 TEST_CASE("RefusalNotice: a refusal about the daemon is persistent, one about the request is not", "[launcher]")
@@ -44,7 +44,7 @@ TEST_CASE("RefusalNotice: a thousand units produce one line, not a thousand", "[
     // `ScratchDirectory`, never a bare `UniqueScratchPath`: the stamps are written at a FIXED
     // epoch, and a bare path is neither created nor removed afterward, so a directory this
     // case's own writes populate would otherwise outlive it (#1355).
-    auto const scratch = FastCache::Testing::ScratchDirectory { "refusal-throttle" };
+    auto const scratch = Pace::Testing::ScratchDirectory { "refusal-throttle" };
     auto const& dir = scratch.Path();
 
     // The defect this exists to prevent is silence; the defect it must not introduce
@@ -68,7 +68,7 @@ TEST_CASE("RefusalNotice: two daemons and two causes throttle separately", "[lau
     // `ScratchDirectory`, never a bare `UniqueScratchPath`: the stamps are written at a FIXED
     // epoch, and a bare path is neither created nor removed afterward, so a directory this
     // case's own writes populate would otherwise outlive it (#1355).
-    auto const scratch = FastCache::Testing::ScratchDirectory { "refusal-keys" };
+    auto const scratch = Pace::Testing::ScratchDirectory { "refusal-keys" };
     auto const& dir = scratch.Path();
 
     CHECK(ShouldAnnounceRefusal(dir, "a:1", Wire::ErrorCode::UnsupportedVersion, Epoch, *Disk));

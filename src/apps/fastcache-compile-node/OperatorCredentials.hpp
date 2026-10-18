@@ -15,7 +15,7 @@
 #include <Dispatch.hpp>
 #include <TicketCredentials.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file OperatorCredentials.hpp
@@ -100,4 +100,4 @@ class OperatorCredentials
     Cc::TicketCredentials _tickets;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

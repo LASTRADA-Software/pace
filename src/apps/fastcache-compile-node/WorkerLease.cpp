@@ -7,13 +7,13 @@
 // this project requires of every public header -- and the proof is lost silently.
 #include "NodeMembership.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <format>
 #include <string>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::expected<Cc::LeaseValidator, std::string> MakeWorkerLeaseValidator(NodeConfig const& cfg,
@@ -106,4 +106,4 @@ std::function<std::expected<void, ConfigError>(NodeConfig const&, NodeConfig con
     };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

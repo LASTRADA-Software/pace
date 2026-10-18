@@ -13,7 +13,7 @@
 /// The arguments no worker passes to a compiler, whatever its operator allows -- read by BOTH ends.
 ///
 /// **Header-only, beside `CmdLine.hpp`, for the reason `CompileCacheWire.hpp` is header-only**:
-/// the launcher does not link `FastCache`, and a table two processes must agree on is one table.
+/// the launcher does not link `Pace`, and a table two processes must agree on is one table.
 /// The worker consults it inside `IsAcceptableJobArgument`, above its allowlist and above the
 /// operator's `--allow-compile-arg`, so no configuration re-admits a row. The LAUNCHER consults it
 /// in `Dispatch` before it asks for a lease: an argument every worker refuses by row is one no
@@ -32,7 +32,7 @@
 /// `-fplugin=x` carries no separator and `-fplugin=/tmp/x.so` does, so a shape-checked row would
 /// refuse the harmless-looking spelling and pass the one that names a payload.
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// One argument family no worker passes to a compiler.
@@ -211,4 +211,4 @@ static_assert(std::ranges::none_of(DeniedArguments, [](DeniedArgument const& row
     return nullptr;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

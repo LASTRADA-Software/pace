@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 namespace
 {

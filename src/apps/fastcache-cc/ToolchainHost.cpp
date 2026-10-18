@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "ToolchainHost.hpp"
 
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -31,7 +31,7 @@
     #include <sys/utsname.h>
 #endif
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -363,4 +363,4 @@ std::unique_ptr<IToolchainHost> MakeToolchainHost()
     return std::make_unique<HostToolchainHost>();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

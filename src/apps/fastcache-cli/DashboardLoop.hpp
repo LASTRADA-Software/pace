@@ -6,8 +6,8 @@
 #include "DashboardEvent.hpp"
 #include "DashboardFrame.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -22,7 +22,7 @@
 #include <core/async/Task.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 struct FleetDocument;
@@ -605,4 +605,4 @@ struct DashboardLimits
 /// @return True when the operator asked to leave.
 [[nodiscard]] bool IsQuitKey(std::string_view keys) noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

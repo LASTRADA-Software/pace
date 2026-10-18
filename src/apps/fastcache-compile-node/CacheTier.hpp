@@ -11,17 +11,17 @@
 #include "Responders.hpp"
 #include "SharedCacheDirectory.hpp"
 
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -34,7 +34,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class NodeIoLoop;
@@ -450,4 +450,4 @@ struct DiskStoreSpec
 ///         it (`CommandEnding`).
 [[nodiscard]] std::expected<std::string, UnfinishedCommand> MigrateDiskTier(NodeConfig const& cfg);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

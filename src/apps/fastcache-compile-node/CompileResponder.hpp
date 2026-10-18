@@ -4,11 +4,11 @@
 #include "CompileCapacity.hpp"
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -23,7 +23,7 @@
 #include <core/async/IExecutor.hpp>
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Serves the compile verbs on the node's merged `0xFC` listener.
@@ -378,4 +378,4 @@ class CompileResponder final: public IFrameResponder
     std::chrono::milliseconds _progressInterval;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -27,15 +27,15 @@
 #include <tests/RetiredGenerations.hpp>
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache::Cc;
-using FastCache::Cc::Test::DigestQuarters;
-using FastCache::Cc::Test::SplitMix64;
-using FastCache::Testing::Generation;
-using FastCache::Testing::RequireNoRetiredDigest;
+using namespace Pace::Cc;
+using Pace::Cc::Test::DigestQuarters;
+using Pace::Cc::Test::SplitMix64;
+using Pace::Testing::Generation;
+using Pace::Testing::RequireNoRetiredDigest;
 
 namespace
 {
-FastCache::PathCanon::Layout WindowsLayout()
+Pace::PathCanon::Layout WindowsLayout()
 {
     return { .sourceRoot = R"(D:\Project)", .buildTree = R"(D:\Project\out\build\win64)" };
 }
@@ -69,7 +69,7 @@ TEST_CASE("EncodeManifest writes the layout DecodeManifest reads, byte for byte"
     manifest.objectKey = "objkey";
     manifest.entries.push_back({ .canonicalPath = "<SRCROOT>/a.h", .contentHash = "hash" });
 
-    auto const expected = FastCache::Testing::DeclaredCountBlob {}
+    auto const expected = Pace::Testing::DeclaredCountBlob {}
                               .Byte(0x01) // ManifestVersion
                               .Field("stamp")
                               .Field("objkey")
@@ -150,7 +150,7 @@ namespace
 /// guards is not finished. What stays here is which fields a MANIFEST header has.
 [[nodiscard]] std::string BlobDeclaring(std::uint32_t count, std::size_t trailing)
 {
-    return FastCache::Testing::DeclaredCountBlob {}
+    return Pace::Testing::DeclaredCountBlob {}
         .Byte(0x01)   // version
         .EmptyField() // toolchainStamp
         .EmptyField() // objectKey
@@ -171,7 +171,7 @@ TEST_CASE("DecodeManifest refuses an entry count the blob cannot supply")
     //
     // The bytes come off the network: the launcher fetches this manifest from the
     // cache server, so the count is a peer's number rather than its own.
-    auto const hostile = BlobDeclaring(FastCache::Testing::ImpossibleCount, 0);
+    auto const hostile = BlobDeclaring(Pace::Testing::ImpossibleCount, 0);
     REQUIRE(hostile.size() == 13);
 
     auto const decoded = DecodeManifest(hostile);
@@ -280,12 +280,12 @@ TEST_CASE("ClassifyAgainstRoots matches a root spelled with forward slashes")
     // every project header look external, which classifies the whole manifest as
     // toolchain content and produces an empty manifest — direct mode then never
     // engages, silently.
-    FastCache::PathCanon::Layout const cmakeStyle { .sourceRoot = "D:/Project", .buildTree = "D:/Project/out/build/win64" };
+    Pace::PathCanon::Layout const cmakeStyle { .sourceRoot = "D:/Project", .buildTree = "D:/Project/out/build/win64" };
     CHECK(ClassifyAgainstRoots(R"(D:\Project\src\AppCore\AppCore.hpp)", cmakeStyle) == PathClass::Project);
     CHECK(ClassifyAgainstRoots(R"(D:\Project\out\build\win64\generated\config.hpp)", cmakeStyle) == PathClass::Project);
 
     // And the reverse spelling must work too.
-    FastCache::PathCanon::Layout const winStyle { .sourceRoot = R"(D:\Project)", .buildTree = R"(D:\Project\out)" };
+    Pace::PathCanon::Layout const winStyle { .sourceRoot = R"(D:\Project)", .buildTree = R"(D:\Project\out)" };
     CHECK(ClassifyAgainstRoots("D:/Project/src/AppCore/AppCore.hpp", winStyle) == PathClass::Project);
 }
 
@@ -314,12 +314,12 @@ TEST_CASE("A sibling directory extending a root's last segment is under no root,
     // does not pass is asking the two predicates the same question and comparing
     // the ANSWERS, so that is what this asserts -- reinstating the bare
     // `starts_with` in `ClassifyAgainstRoots` turns the first section red.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    Pace::PathCanon::Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
 
     // Not a marker path anywhere in this case, so `ClassifyAgainstRoots` is answering
     // purely on roots and the two predicates are comparable.
     auto const rooted = [&layout](std::string_view path) {
-        return FastCache::PathCanon::Canonicalize(path, layout) != path;
+        return Pace::PathCanon::Canonicalize(path, layout) != path;
     };
 
     SECTION("the classifier and the canonicalizer give one answer")
@@ -361,7 +361,7 @@ TEST_CASE("A sibling directory extending a root's last segment is under no root,
 
         // The degenerate form of the same mistake: a short source root that happens
         // to prefix the SDK would otherwise make every Windows header a near miss.
-        FastCache::PathCanon::Layout const shortRoot { .sourceRoot = R"(C:\P)", .buildTree = R"(C:\P\out)" };
+        Pace::PathCanon::Layout const shortRoot { .sourceRoot = R"(C:\P)", .buildTree = R"(C:\P\out)" };
         constexpr std::string_view sdk = R"(C:\Program Files (x86)\Windows Kits\10\include\um\windows.h)";
         CHECK(ClassifyAgainstRoots(sdk, shortRoot) == PathClass::Toolchain);
     }
@@ -372,7 +372,7 @@ TEST_CASE("A sibling directory extending a root's last segment is under no root,
         // at a time: a build tree may legitimately be spelled as the source root's
         // sibling, and a path inside it is then a near miss of one root and correctly
         // under the other. Calling that a misspelling reports a healthy layout broken.
-        FastCache::PathCanon::Layout const sideBySide { .sourceRoot = "/w/src", .buildTree = "/w/src-other" };
+        Pace::PathCanon::Layout const sideBySide { .sourceRoot = "/w/src", .buildTree = "/w/src-other" };
         CHECK(ClassifyAgainstRoots("/w/src-other/a.hpp", sideBySide) == PathClass::Project);
     }
 }
@@ -386,7 +386,7 @@ TEST_CASE("The key filter, the manifest and the replay guard all place the sibli
     // predicate because a shared NAME is not shared behaviour -- the rulebook
     // records that as its own class of defect -- and because a fourth consumer
     // added later has somewhere to be added.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    Pace::PathCanon::Layout const layout { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
     constexpr std::string_view sibling = "/home/dev/project-x/a.hpp";
     constexpr std::string_view project = "/home/dev/proj/src/d.hpp";
 
@@ -432,7 +432,7 @@ TEST_CASE("The key filter, the manifest and the replay guard all place the sibli
         auto const notes = std::format("Note: including file: {}\r\n"
                                        "Note: including file: /usr/include/vector\r\n",
                                        sibling);
-        std::vector<FastCache::TextRegion> const regions { { .grammar = FastCache::PathCanon::Grammar::ShowIncludes,
+        std::vector<Pace::TextRegion> const regions { { .grammar = Pace::PathCanon::Grammar::ShowIncludes,
                                                              .bytes = notes } };
         auto const probed = ReplayedDependencyPaths(regions, layout);
         CHECK(probed == std::vector<std::string> { std::string { sibling } });
@@ -456,7 +456,7 @@ TEST_CASE("The key filter, the manifest and the replay guard all place the sibli
         CHECK(refused.error().fault == ManifestFault::OutsideRoots);
 
         auto const notes = std::format("Note: including file: {}\r\n", vendored);
-        std::vector<FastCache::TextRegion> const regions { { .grammar = FastCache::PathCanon::Grammar::ShowIncludes,
+        std::vector<Pace::TextRegion> const regions { { .grammar = Pace::PathCanon::Grammar::ShowIncludes,
                                                              .bytes = notes } };
         CHECK(ReplayedDependencyPaths(regions, layout).empty());
     }
@@ -707,13 +707,13 @@ TEST_CASE("BuildManifest tells dropped, absent and unobserved dependencies apart
     // Refused by name rather than recorded thin. The refusal costs direct mode for
     // this compile, exactly as `Unanchored` already does, and the ordinary
     // preprocessed key still serves it.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-hollow" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-hollow" };
     auto const& root = scratch.Path();
 
     auto const sourcePath = root / "src" / "u.cpp";
     scratch.Write("src/u.cpp", "int main() { return 0; }\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
                                                 .buildTree = (root / "bld").string() };
 
     // A path under neither root -- another checkout's header, which is exactly what
@@ -794,7 +794,7 @@ TEST_CASE("BuildManifest refuses an unobserved dependency record before it looks
     // It matters because the refusal an operator is shown is the one they act on. A
     // build with no `-MD`/`-MF` reports every translation unit as a roots problem if
     // this order is reversed, and the roots are fine.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = "/home/dev/proj/src", .buildTree = "/home/dev/proj/out" };
+    Pace::PathCanon::Layout const layout { .sourceRoot = "/home/dev/proj/src", .buildTree = "/home/dev/proj/out" };
 
     auto const refused = BuildManifest({ .sourcePath = "/elsewhere/shared/t.cpp",
                                          .reportedDependencies = ReportedDependencies::NotObserved(),
@@ -835,7 +835,7 @@ TEST_CASE("Build then validate a manifest against real files on disk")
     // The end-to-end invalidation contract, exercised against the filesystem rather
     // than fixtures: a manifest validates while the headers are untouched, and stops
     // validating the moment one of them changes or disappears.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-test" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-test" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "header.hpp";
@@ -844,7 +844,7 @@ TEST_CASE("Build then validate a manifest against real files on disk")
     auto const sourcePath = root / "src" / "a.cpp";
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     constexpr std::string_view stamp = "cl-test-1";
 
     auto const inputs = [&](std::string_view objectKey) {
@@ -888,7 +888,7 @@ TEST_CASE("ValidateManifest catches an edit to the translation unit itself, MSVC
     // editing a .cpp's own body while leaving every header untouched is invisible
     // to ValidateManifest, and a direct-mode hit replays a stale object forever
     // (see issue #49 / issue #51).
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-source-edit" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-source-edit" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "header.hpp";
@@ -897,7 +897,7 @@ TEST_CASE("ValidateManifest catches an edit to the translation unit itself, MSVC
     auto const sourcePath = root / "src" / "a.cpp";
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\nint main() { return 0; }\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     constexpr std::string_view stamp = "cl-test-1";
 
     // MSVC's /showIncludes lists only the header; the TU reaches BuildManifest as
@@ -935,14 +935,14 @@ TEST_CASE("BuildManifest records a relative dependency path instead of dropping 
     // code, which is the whole failure class direct mode's revalidation exists to
     // prevent. Cc::IsCheckable and Cc::PortableForm both order this correctly and
     // say so in comments; this was the third consumer and did not.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-relative" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-relative" };
     auto const& root = scratch.Path();
 
     scratch.Write("src/header.hpp", "#pragma once\nint helper();\n");
 
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\nint main() { return 0; }\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     constexpr std::string_view stamp = "cc-test-1";
 
     // Both the source and the header spelled relatively, as `cc -c src/a.cpp` run
@@ -982,7 +982,7 @@ TEST_CASE("BuildManifest records a relatively-named translation unit (issue #57)
     // relative to the build directory, so `cmd.source` arrived relative, was
     // classified as toolchain, and was dropped -- reopening issues #49/#51, whose
     // whole fix was to make the TU part of what a manifest revalidates.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-relative-tu" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-relative-tu" };
     auto const& root = scratch.Path();
     std::filesystem::create_directories(root / "out");
 
@@ -991,7 +991,7 @@ TEST_CASE("BuildManifest records a relatively-named translation unit (issue #57)
 
     scratch.Write("src/t.cpp", "#include \"header.hpp\"\nint main() { return 0; }\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     constexpr std::string_view stamp = "cc-test-1";
 
     // Run from the build tree, as Ninja does: `../src/t.cpp`.
@@ -1023,7 +1023,7 @@ TEST_CASE("CanonicalSourceToken agrees whichever way the source is spelled")
     // that predates the relative-path bug: `cc -c ../src/t.cpp` run from `build/`
     // and from `build/sub/` relativizes to the SAME argument list, so a key derived
     // from the unresolved spelling names two different files.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
+    Pace::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
 
     auto const fromAbsolute = CanonicalSourceToken("/w/src/t.cpp", layout, "/w/build");
     auto const fromRelative = CanonicalSourceToken("../src/t.cpp", layout, "/w/build");
@@ -1051,7 +1051,7 @@ TEST_CASE("BuildManifest tells its refusals apart and names the path (issue #68)
     // happened. Collapsed into one value they printed "uncanonicalizable source or
     // include" for all of them alike, naming neither the cause nor the path, and a
     // translation unit that silently stopped shortcutting had no other trace at all.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
+    Pace::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
 
     auto const inputsWith = [&layout,
                              &hashedWhenAsked](std::string source, std::vector<std::string> includes, std::string cwd) {
@@ -1118,7 +1118,7 @@ TEST_CASE("BuildManifest names the offending DEPENDENCY, not the source (issue #
     // case below would be testing the wrong path. Which is itself the property under
     // test -- the refusal must send the reader to the file that was actually wrong,
     // and reporting the source would send them to the one file that was fine.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-fault-dep" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-fault-dep" };
     auto const& root = scratch.Path();
 
     auto const sourcePath = root / "src" / "t.cpp";
@@ -1127,7 +1127,7 @@ TEST_CASE("BuildManifest names the offending DEPENDENCY, not the source (issue #
     // Rooted at `<root>/src` rather than at `<root>`, so the near-miss path below
     // lies under neither root. Under a root of `<root>` it would canonicalize
     // perfectly and the section would be testing Unreadable by another name.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
                                                 .buildTree = (root / "out").string() };
     auto const build = [&](std::vector<std::string> includes, std::string cwd) {
         return BuildManifest({ .sourcePath = sourcePath.string(),
@@ -1191,7 +1191,7 @@ TEST_CASE("CanonicalSourceToken's refusal carries the path and the reason (issue
     // returns before BuildManifest ever runs, so a source with no token used to cost
     // a translation unit direct mode permanently while printing nothing whatsoever
     // -- not even under FASTCACHE_VERBOSE.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
+    Pace::PathCanon::Layout const layout { .sourceRoot = "/w/src", .buildTree = "/w/build" };
 
     auto const outsideRoots = CanonicalSourceToken("/elsewhere/t.cpp", layout, "/w/build");
     REQUIRE_FALSE(outsideRoots.has_value());
@@ -1233,7 +1233,7 @@ TEST_CASE("AnchorWorkingDirectory re-spells a symlinked cwd in the layout's voca
     // prefix with the root it is actually inside -- and a relative path resolved
     // against it then canonicalizes to nothing, silently costing the build direct
     // mode. Found by the end-to-end test on macOS, whose `/var` is a symlink.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-anchor" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-anchor" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "sub");
 
@@ -1250,7 +1250,7 @@ TEST_CASE("AnchorWorkingDirectory re-spells a symlinked cwd in the layout's voca
     }
 
     // The layout names the root through the symlink; the cwd arrives resolved.
-    FastCache::PathCanon::Layout const layout { .sourceRoot = (base / "link").string(),
+    Pace::PathCanon::Layout const layout { .sourceRoot = (base / "link").string(),
                                                 .buildTree = (base / "link" / "out").string() };
     auto const anchored = AnchorWorkingDirectory((base / "real" / "sub").string(), layout);
     CHECK(anchored == (base / "link" / "sub").string());
@@ -1264,12 +1264,12 @@ TEST_CASE("AnchorWorkingDirectory prefers the longest root and passes through th
     // The same rule CanonicalizeOne applies: a build tree nested inside the source
     // root must anchor to the build tree, or the tail spliced back on would be
     // relative to the wrong one.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-anchor-longest" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-anchor-longest" };
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "proj" / "out" / "build");
     std::filesystem::create_directories(base / "elsewhere");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = (base / "proj").string(),
+    Pace::PathCanon::Layout const layout { .sourceRoot = (base / "proj").string(),
                                                 .buildTree = (base / "proj" / "out").string() };
 
     CHECK(AnchorWorkingDirectory((base / "proj" / "out" / "build").string(), layout)
@@ -1288,8 +1288,8 @@ TEST_CASE("ResolveAgainst anchors by the layout's conventions, not the host's")
     // producing a path under no root, which is the classification this whole change
     // is about getting right. PathCanon::AnchorForLayout is the single definition,
     // and it answers from the layout.
-    FastCache::PathCanon::Layout const windows { .sourceRoot = R"(D:\Project)", .buildTree = R"(D:\Project\out)" };
-    FastCache::PathCanon::Layout const posix { .sourceRoot = "/w/src", .buildTree = "/w/build" };
+    Pace::PathCanon::Layout const windows { .sourceRoot = R"(D:\Project)", .buildTree = R"(D:\Project\out)" };
+    Pace::PathCanon::Layout const posix { .sourceRoot = "/w/src", .buildTree = "/w/build" };
 
     // The correction itself, both ways round, so neither host can pass by accident.
     // std::filesystem answers with the HOST's preferred separator, so on a Windows
@@ -1317,8 +1317,8 @@ TEST_CASE("ResolveAgainst anchors by the layout's conventions, not the host's")
     // backslash is an ordinary filename character rather than a separator spelled
     // differently, so `AnchorForLayout` reads a backslash-separated path as relative
     // instead of as the absolute path it is.
-    CHECK(FastCache::PathCanon::AnchorForLayout(NormalizeForLayout("D:/Project/src/a.hpp", windows), windows)
-          == FastCache::PathCanon::Anchor::Absolute);
+    CHECK(Pace::PathCanon::AnchorForLayout(NormalizeForLayout("D:/Project/src/a.hpp", windows), windows)
+          == Pace::PathCanon::Anchor::Absolute);
 
     CHECK(ResolveAgainst(R"(D:\Project\src\a.hpp)", R"(D:\Project\out)", windows) == R"(D:\Project\src\a.hpp)");
     CHECK(ResolveAgainst("/w/src/a.hpp", "/w/build", posix) == "/w/src/a.hpp");
@@ -1337,7 +1337,7 @@ TEST_CASE("BuildManifest normalizes '..' segments and mixed separators to one to
     // collapse to a single canonical token, or an entry recorded through one
     // spelling would never validate against the other — which is exactly what made
     // manifests come out empty before this was handled.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-normalize" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-normalize" };
     auto const& root = scratch.Path();
     std::filesystem::create_directories(root / "src" / "a");
     std::filesystem::create_directories(root / "src" / "b");
@@ -1348,7 +1348,7 @@ TEST_CASE("BuildManifest normalizes '..' segments and mixed separators to one to
     auto const sourcePath = root / "src" / "a" / "a.cpp";
     scratch.Write("src/a/a.cpp", "#include \"../b/shared.hpp\"\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
 
     // The same file named directly, via a `..` hop, with forward slashes, and once
     // more relative to the working directory -- four spellings, one entry.
@@ -1378,7 +1378,7 @@ TEST_CASE("BuildManifest normalizes '..' segments and mixed separators to one to
 TEST_CASE("BuildManifest drops toolchain headers and deduplicates project headers")
 {
     Test::HashedWhenAsked const hashedWhenAsked;
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-dedup" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-dedup" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "shared.hpp";
@@ -1387,7 +1387,7 @@ TEST_CASE("BuildManifest drops toolchain headers and deduplicates project header
     auto const sourcePath = root / "src" / "a.cpp";
     scratch.Write("src/a.cpp", "#include \"shared.hpp\"\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
 
     // The same project header included three times, plus toolchain headers that must
     // not appear at all (they ride the stamp).
@@ -1584,7 +1584,7 @@ TEST_CASE("A GNU depfile drives a manifest exactly as showIncludes notes do")
     // The point of parsing depfiles at all: on POSIX the GNU drivers report
     // dependencies ONLY here, so without this direct mode can never populate —
     // it would pay for a manifest lookup on every compile and never hit.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-depfile" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-depfile" };
     auto const& root = scratch.Path();
 
     auto const headerPath = root / "src" / "dep.hpp";
@@ -1593,7 +1593,7 @@ TEST_CASE("A GNU depfile drives a manifest exactly as showIncludes notes do")
     auto const sourcePath = root / "src" / "a.cpp";
     scratch.Write("src/a.cpp", "#include \"dep.hpp\"\n");
 
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
 
     // A depfile as gcc -MD -MF writes it: the object as the target, then the
     // source and its headers, wrapped across a continuation.
@@ -1762,7 +1762,7 @@ TEST_CASE("HashFileContents separates equal-length contents and reports unreadab
     // it is not something this case has to remember. That matters here rather than
     // being tidiness: the case asserts `absent.hpp` is ABSENT, so a leftover of that
     // name would fail it for a reason that has nothing to do with hashing.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-hashfile" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-hashfile" };
 
     // Through `ScratchDirectory::Write`, which creates the parents and THROWS when
     // the open or the close fails. The lambda survives only for its RETURN: this case
@@ -1829,7 +1829,7 @@ struct TwoCheckouts
     static constexpr std::string_view SourceName = "src/tu.cpp";
     static constexpr std::string_view HeaderName = "src/dep.hpp";
 
-    FastCache::Testing::ScratchDirectory root { "manifest-two-checkouts" };
+    Pace::Testing::ScratchDirectory root { "manifest-two-checkouts" };
 
     TwoCheckouts()
     {
@@ -1860,7 +1860,7 @@ struct TwoCheckouts
         root.Write(in + std::string { HeaderName }, header);
     }
 
-    [[nodiscard]] FastCache::PathCanon::Layout LayoutOf(std::string_view name) const
+    [[nodiscard]] Pace::PathCanon::Layout LayoutOf(std::string_view name) const
     {
         auto const base = root.Path() / name;
         return { .sourceRoot = base.string(), .buildTree = (base / "out").string() };
@@ -1991,11 +1991,11 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
     // #1650: the hashes BuildManifest recorded were read AFTER the compile, so a save during it
     // paired the new content with the old object. The content source is the witness in
     // production; this proves BuildManifest no longer reads the files itself.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-content-source" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-source" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     auto const source = (root / "src" / "a.cpp").string();
     auto const header = (root / "src" / "header.hpp").string();
     auto const resolvedSource = ResolveAgainst(source, root.string(), layout);
@@ -2026,11 +2026,11 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
 
 TEST_CASE("A content source's refusal names its path and its fault", "[direct-manifest][1650]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-content-refusal" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-refusal" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     auto const source = (root / "src" / "a.cpp").string();
     auto const header = (root / "src" / "header.hpp").string();
     auto const resolvedHeader = ResolveAgainst(header, root.string(), layout);
@@ -2053,9 +2053,9 @@ TEST_CASE("A content source's refusal names its path and its fault", "[direct-ma
 
 TEST_CASE("ProjectDependencyPaths keeps project headers, resolved, and drops toolchain ones", "[direct-manifest][1650]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
     auto const& root = scratch.Path();
-    FastCache::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
                                                 .buildTree = (root / "out").string() };
     auto const project = (root / "src" / "inc" / ".." / "h.hpp").string();
     auto const toolchain = (root / "sdk" / "vector").string();

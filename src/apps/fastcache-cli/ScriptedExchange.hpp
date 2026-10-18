@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
 /// @file ScriptedExchange.hpp
@@ -432,4 +432,4 @@ class ScriptedGatherer final: public IStatsGatherer
     return out;
 }
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

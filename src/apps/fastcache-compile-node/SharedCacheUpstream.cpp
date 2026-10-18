@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "SharedCacheUpstream.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@
 
 #include <core/net/SocketDeadline.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -359,4 +359,4 @@ Wire::SharedCacheStatusFields SharedCacheUpstream::ReportFor(SharedCacheTarget c
     return fields;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

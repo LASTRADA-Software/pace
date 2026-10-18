@@ -56,11 +56,11 @@ function(fastcached_seam_tree name outVar)
     set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "vendor/monocypher\n")
-    file(WRITE "${tree}/src/FastCache/Core/Ed25519.cpp"
-        "#include <FastCache/Core/Ed25519.hpp>\n#include <FastCache/Core/MonocypherBytes.hpp>\n#include <monocypher-ed25519.h>\n")
-    file(WRITE "${tree}/src/FastCache/Core/X25519.cpp" "#include <FastCache/Core/X25519.hpp>\n#include <monocypher.h>\n")
-    file(WRITE "${tree}/src/FastCache/Node/Caller.cpp"
-        "// Signs through the seam; never includes monocypher.h itself.\n#include <FastCache/Core/Ed25519.hpp>\n")
+    file(WRITE "${tree}/src/Pace/Core/Ed25519.cpp"
+        "#include <Pace/Core/Ed25519.hpp>\n#include <Pace/Core/MonocypherBytes.hpp>\n#include <monocypher-ed25519.h>\n")
+    file(WRITE "${tree}/src/Pace/Core/X25519.cpp" "#include <Pace/Core/X25519.hpp>\n#include <monocypher.h>\n")
+    file(WRITE "${tree}/src/Pace/Node/Caller.cpp"
+        "// Signs through the seam; never includes monocypher.h itself.\n#include <Pace/Core/Ed25519.hpp>\n")
     # A header, as upstream's is: the scan reads C++ by extension, so a `.c` would never be read
     # and the vendoredOwned case below would pass without the roots file deciding anything.
     file(WRITE "${tree}/vendor/monocypher/src/optional/monocypher-ed25519.h" "#include \"monocypher.h\"\n")
@@ -138,21 +138,21 @@ foreach(spelling IN ITEMS
     math(EXPR afterBar "${bar} + 1")
     string(SUBSTRING "${spelling}" ${afterBar} -1 directive)
     fastcached_seam_tree(${caseName} tree)
-    file(APPEND "${tree}/src/FastCache/Node/Caller.cpp" "${directive}\n")
-    fastcached_seam_judge(${caseName} "${tree}" refuse "src/FastCache/Node/Caller.cpp:3: includes a Monocypher header")
+    file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "${directive}\n")
+    fastcached_seam_judge(${caseName} "${tree}" refuse "src/Pace/Node/Caller.cpp:3: includes a Monocypher header")
 endforeach()
 
 fastcached_seam_tree(violationGit tree)
-file(APPEND "${tree}/src/FastCache/Node/Caller.cpp" "#include <monocypher.h>\n")
+file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "#include <monocypher.h>\n")
 fastcached_stage_git("${tree}")
 fastcached_seam_judge(violationGit "${tree}" refuse "via git ls-files")
 
 fastcached_seam_tree(commentedOut tree)
-file(APPEND "${tree}/src/FastCache/Node/Caller.cpp" "// #include <monocypher.h> is what this file must never do\n")
+file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "// #include <monocypher.h> is what this file must never do\n")
 fastcached_seam_judge(commentedOut "${tree}" accept "${accepted}")
 
 fastcached_seam_tree(bridgeHeader tree)
-file(APPEND "${tree}/src/FastCache/Node/Caller.cpp" "#include <FastCache/Core/MonocypherBytes.hpp>\n")
+file(APPEND "${tree}/src/Pace/Node/Caller.cpp" "#include <Pace/Core/MonocypherBytes.hpp>\n")
 fastcached_seam_judge(bridgeHeader "${tree}" accept "${accepted}")
 
 fastcached_seam_tree(vendoredDeclined tree)
@@ -165,12 +165,12 @@ fastcached_seam_judge(vendoredOwned "${tree}" refuse
     "vendor/monocypher/src/optional/monocypher-ed25519.h:1: includes a Monocypher header")
 
 fastcached_seam_tree(staleNoInclude tree)
-file(WRITE "${tree}/src/FastCache/Core/X25519.cpp" "#include <FastCache/Core/X25519.hpp>\n")
-fastcached_seam_judge(staleNoInclude "${tree}" refuse "STALE permitted row -- src/FastCache/Core/X25519.cpp: was read")
+file(WRITE "${tree}/src/Pace/Core/X25519.cpp" "#include <Pace/Core/X25519.hpp>\n")
+fastcached_seam_judge(staleNoInclude "${tree}" refuse "STALE permitted row -- src/Pace/Core/X25519.cpp: was read")
 
 fastcached_seam_tree(staleMissing tree)
-file(REMOVE "${tree}/src/FastCache/Core/Ed25519.cpp")
-fastcached_seam_judge(staleMissing "${tree}" refuse "STALE permitted row -- src/FastCache/Core/Ed25519.cpp: does not exist")
+file(REMOVE "${tree}/src/Pace/Core/Ed25519.cpp")
+fastcached_seam_judge(staleMissing "${tree}" refuse "STALE permitted row -- src/Pace/Core/Ed25519.cpp: does not exist")
 
 set(tree "${FASTCACHED_SCRATCH_DIR}/empty")
 file(REMOVE_RECURSE "${tree}")

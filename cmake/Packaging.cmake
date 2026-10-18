@@ -16,7 +16,7 @@
 # what is already installed.
 #
 # Linux and macOS ship a single Runtime payload; Windows ships one component
-# per application, the MSI's features. The FastCache/CowTree static libraries
+# per application, the MSI's features. The Pace/CowTree static libraries
 # are deliberately not installed (see the comment in the top-level
 # CMakeLists.txt), so there is no SDK component to separate out.
 # macOS additionally splits the two launchd registrations into their own

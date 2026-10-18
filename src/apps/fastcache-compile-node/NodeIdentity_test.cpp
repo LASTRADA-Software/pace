@@ -3,9 +3,9 @@
 #include "NodeIdentity.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -29,11 +29,11 @@
 #include <tests/UnreadablePath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ScratchDirectory;
-using FastCache::Testing::ScriptedSecureRandom;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ScratchDirectory;
+using Pace::Testing::ScriptedSecureRandom;
+using Pace::Testing::Unwrap;
 
 namespace
 {

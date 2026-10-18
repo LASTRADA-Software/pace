@@ -3,7 +3,7 @@
 #include "CordonCli.hpp"
 #include "EndpointDial.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <array>
 #include <chrono>
@@ -14,7 +14,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/BlockingConnector.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -123,4 +123,4 @@ std::expected<std::string, UnfinishedCommand> RunCordonAdmin(NodeConfig const& c
     return PutCordonRequest(*client, action, endpoint);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

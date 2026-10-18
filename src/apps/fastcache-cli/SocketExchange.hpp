@@ -6,7 +6,7 @@
 #include "NodeClient.hpp"
 #include "RespClient.hpp"
 
-#include <FastCache/Core/SecureBytes.hpp>
+#include <Pace/Core/SecureBytes.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -22,7 +22,7 @@
 
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// A RESP connection over one blocking TCP socket.
@@ -349,4 +349,4 @@ struct HttpResponse
                                                                  DialTimeouts timeouts,
                                                                  std::size_t maxBodyBytes = 8U * 1024U * 1024U);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

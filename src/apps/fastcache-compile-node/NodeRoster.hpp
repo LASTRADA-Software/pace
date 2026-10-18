@@ -6,10 +6,10 @@
 #include "NodeProofClient.hpp"
 #include "NodeRefusal.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/StateLeaseRoster.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/StateLeaseRoster.hpp>
 
 #include <expected>
 #include <memory>
@@ -29,7 +29,7 @@
 /// roster there is; a node no other machine can reach runs none and checks no grant -- the rule
 /// the startup table and `CompileVerbsReachOtherMachines` hold it to.
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The roster this node verifies grants against, as one object (#178).
@@ -101,4 +101,4 @@ class NodeRoster final: public IServerTrust
     NodeConditions* _conditions; ///< Where the silence is answered; may be null.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

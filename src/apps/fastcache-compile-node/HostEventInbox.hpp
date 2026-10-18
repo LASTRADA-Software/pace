@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/HostEvents.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -13,7 +13,7 @@
 #include <optional>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What the worker's heartbeat does about a host event.
@@ -97,4 +97,4 @@ class HostEventInbox final: public IHostEventSink
     std::optional<DrainResult> _lastSuspendWait; ///< How the last suspend's wait ended. Under `_mutex`.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

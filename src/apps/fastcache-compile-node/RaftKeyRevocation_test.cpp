@@ -11,16 +11,16 @@
 // server and transport between them.
 #include "NodeKey.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/RosterKeys.hpp>
-#include <FastCache/Consensus/IRaftPeerIdentity.hpp>
-#include <FastCache/Consensus/RaftPeerRefusals.hpp>
-#include <FastCache/Consensus/RaftPeerServer.hpp>
-#include <FastCache/Consensus/RaftPeerTransport.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/RosterKeys.hpp>
+#include <Pace/Consensus/IRaftPeerIdentity.hpp>
+#include <Pace/Consensus/RaftPeerRefusals.hpp>
+#include <Pace/Consensus/RaftPeerServer.hpp>
+#include <Pace/Consensus/RaftPeerTransport.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,10 +41,10 @@
 #include <tests/ListenerConnector.hpp>
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
-using FastCache::Testing::ScratchDirectory;
+using Pace::Testing::ScratchDirectory;
 
 namespace
 {

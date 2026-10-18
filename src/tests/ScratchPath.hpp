@@ -18,7 +18,7 @@
     #include <unistd.h>
 #endif
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 namespace Detail
@@ -257,4 +257,4 @@ class ScratchDirectory
     std::filesystem::path _path;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

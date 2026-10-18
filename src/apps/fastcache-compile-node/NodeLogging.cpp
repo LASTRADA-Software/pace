@@ -4,7 +4,7 @@
 #include <memory>
 #include <ostream>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::unique_ptr<ConsoleLogger> MakeNodeConsoleLogger(std::ostream& sink, NodeConfig const& cfg)
@@ -15,4 +15,4 @@ std::unique_ptr<ConsoleLogger> MakeNodeConsoleLogger(std::ostream& sink, NodeCon
     return std::make_unique<ConsoleLogger>(sink, cfg.logLevel, cfg.logTimestamps ? LogTimestamps::Yes : LogTimestamps::No);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

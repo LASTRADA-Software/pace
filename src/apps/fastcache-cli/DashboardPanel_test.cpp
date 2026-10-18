@@ -10,13 +10,13 @@
 #include "ScriptedCellWidth.hpp"
 #include "ScriptedSixelEncoder.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -40,11 +40,11 @@
 #include <core/Ranges.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
 using namespace std::chrono_literals;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::Unwrap;
 
 namespace
 {

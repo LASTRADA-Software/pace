@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetHistory.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A wall clock a case can place, so a bucket boundary is a decision rather than a
@@ -111,4 +111,4 @@ class RecordingHistorySink final: public Distributed::IFleetHistorySink
     return (millis / width) * width;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

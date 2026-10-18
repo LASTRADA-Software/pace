@@ -4,9 +4,9 @@
 #include "PathResolve.hpp"
 #include "RootAliases.hpp"
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/Errors/ProtocolError.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/Errors/ProtocolError.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -18,7 +18,7 @@
 #include <variant>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// # An object that names its producer's checkout is not portable, and only the OBJECT can say so
@@ -449,4 +449,4 @@ using ValueFetch = std::function<std::optional<std::vector<std::byte>>(std::stri
                                                  CheckoutRoots const& checkout,
                                                  ValueFetch const& fetch);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

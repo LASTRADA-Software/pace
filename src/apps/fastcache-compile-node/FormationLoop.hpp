@@ -7,11 +7,11 @@
 #include "NodeFormation.hpp"
 #include "NodeReload.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Platform/InheritedListener.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Platform/InheritedListener.hpp>
 
 #include <array>
 #include <atomic>
@@ -32,7 +32,7 @@
 /// loop adopts the record again and starts a fresh body from it. So what a start does with a record
 /// -- finish an interrupted archive, apply the mode -- is what every reform does, and nothing a
 /// previous body derived survives into the next.
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How a serving body ended. **Private**: never transmitted or persisted.
@@ -357,4 +357,4 @@ struct NodeBodies
 /// @return The basis.
 [[nodiscard]] KeptFormationReader RunningFormationOf(AdoptedFormation const& running);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "StatsSource.hpp"
 
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,8 +19,8 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
+using namespace Pace;
+using namespace Pace::Cli;
 
 namespace
 {

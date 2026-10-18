@@ -4,10 +4,10 @@
 #include "NodeReload.hpp"
 #include "WorkerLease.hpp"
 
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Config/YamlReader.hpp>
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -38,15 +38,15 @@
 //
 // So the cases are about narrowing, and about the one widening that is refused.
 
-using namespace FastCache;
+using namespace Pace;
 
 /// `NodeMembership` reports an unreadable `fleet-open` row here; no case asserts on it.
 namespace
 {
-FastCache::NullLogger membershipLog;
+Pace::NullLogger membershipLog;
 }
-using namespace FastCache::Node;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace::Node;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/ISecureRandom.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file SecureRandomFakes.hpp
@@ -133,4 +133,4 @@ class ScriptedSecureRandom final: public ISecureRandom
     std::size_t _fills { 0 };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

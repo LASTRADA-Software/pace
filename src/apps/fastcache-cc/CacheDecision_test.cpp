@@ -7,8 +7,8 @@
 #include <iterator>
 #include <string_view>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 
 namespace
 {

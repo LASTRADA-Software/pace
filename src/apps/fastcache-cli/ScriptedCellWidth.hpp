@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string_view>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
 /// @file ScriptedCellWidth.hpp
@@ -72,4 +72,4 @@ inline constexpr auto FakeCellRanges = std::to_array<CellRange>({
     return cells;
 }
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

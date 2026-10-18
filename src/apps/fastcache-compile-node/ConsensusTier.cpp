@@ -7,14 +7,14 @@
 #include "NodeSurfaces.hpp"
 #include "SchedulingRedirect.hpp"
 
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Consensus/RaftMembership.hpp>
-#include <FastCache/Consensus/RaftNode.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/StopAwareWait.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Consensus/RaftMembership.hpp>
+#include <Pace/Consensus/RaftNode.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <algorithm>
 #include <array>
@@ -35,7 +35,7 @@
 #include <core/net/Sockets.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -1711,4 +1711,4 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
     return tier;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -13,13 +13,13 @@
 #include "SharedCacheTier.hpp"
 #include "SharedCacheUpstream.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -65,14 +65,14 @@
 #include <tests/SharedCacheFleet.hpp>
 #include <tests/SharedTierFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::AStoredObject;
-using FastCache::Testing::MemoryOpener;
-using CacheMachine = FastCache::Testing::SharedCacheFleet::CacheMachine;
-using ClientNode = FastCache::Testing::SharedCacheFleet::ClientNode;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::AStoredObject;
+using Pace::Testing::MemoryOpener;
+using CacheMachine = Pace::Testing::SharedCacheFleet::CacheMachine;
+using ClientNode = Pace::Testing::SharedCacheFleet::ClientNode;
 using namespace std::chrono_literals;
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -382,7 +382,7 @@ TEST_CASE("The shared-cache upstream holds no credential source by construction"
     // The FILES are derived, not listed: every non-test `SharedCache*` source, so a file added to
     // this leg later is scanned without anybody remembering to add it.
     std::filesystem::path const nodeDir =
-        std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
     std::regex const seam { R"(\bICredentialSource\b|\bConfiguredCredential\b|\bCc::Credential\b)" };
 
     // The one reader both the scan and its control go through: the code lines that name the seam,

@@ -151,7 +151,7 @@ endforeach()
 # are three refusals rather than one: the file is gone, the documented site inside
 # it is gone, or the pattern has stopped matching. Folded into one message, two of
 # them send the reader off to re-derive a regex that was never broken.
-set(controlFile "${SOURCE_DIR}/FastCache/Platform/HostInfo.cpp")
+set(controlFile "${SOURCE_DIR}/Pace/Platform/HostInfo.cpp")
 set(controlSubject "CompiledArchitecture")
 
 if(NOT EXISTS "${controlFile}")

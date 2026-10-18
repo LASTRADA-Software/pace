@@ -2096,7 +2096,7 @@ stop_and_require_clean_exit() {
 #
 # IT IS ALSO COUPLED TO A NUMBER IN THE DAEMON, and nothing checks that. It must
 # stay STRICTLY ABOVE `AdminHttpServer::RequestTimeout`
-# (`src/FastCache/Server/AdminHttpServer.hpp`, 2000 ms today), because
+# (`src/Pace/Server/AdminHttpServer.hpp`, 2000 ms today), because
 # `http_response_to_silence` reads a silent server's CLOSE as its answer: if the
 # server's deadline ever reaches this bound, the probe returns
 # `$E2eSilenceInconclusive` and `fleet-dashboard-e2e.sh` FAILS rather than skips.
@@ -3402,9 +3402,9 @@ e2e_launcher_state_rows() {
     # match on a line, leftmost first. Its exit says which shape it refused.
     # Through ENVIRON and not `-v`: BWK awk, macOS's, refuses a newline in a `-v` value.
     rows="$(E2E_STATE_PLATFORM="$platform" awk '
-        # Every `IDENT = FastCache::ReadEnvironmentVariable("NAME")` on the line, in order.
+        # Every `IDENT = Pace::ReadEnvironmentVariable("NAME")` on the line, in order.
         function reads_on(s,   m, id, name) {
-            while (match(s, /[A-Za-z_][A-Za-z0-9_]* = FastCache::ReadEnvironmentVariable\("[A-Z_]+"\)/)) {
+            while (match(s, /[A-Za-z_][A-Za-z0-9_]* = Pace::ReadEnvironmentVariable\("[A-Z_]+"\)/)) {
                 m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
                 id = m; sub(/ = .*/, "", id)
                 name = m; sub(/^.*\("/, "", name); sub(/"\)$/, "", name)

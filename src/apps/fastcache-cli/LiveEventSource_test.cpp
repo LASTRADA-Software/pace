@@ -2,8 +2,8 @@
 #include "CliEndpoint.hpp"
 #include "LiveSourceRig.hpp"
 
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,9 +17,9 @@
 #include <utility>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
 using namespace std::chrono_literals;
 
 namespace

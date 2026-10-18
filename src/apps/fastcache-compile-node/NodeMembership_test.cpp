@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeMembership.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Protocol/ProvenIdentity.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,24 +15,24 @@
 
 #include <tests/RaftPeerKeyFakes.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 /// `NodeMembership` reports an unreadable `fleet-open` row here; no case asserts on it.
 namespace
 {
-FastCache::NullLogger membershipLog;
+Pace::NullLogger membershipLog;
 }
-using namespace FastCache::Node;
-using FastCache::Distributed::Membership;
+using namespace Pace::Node;
+using Pace::Distributed::Membership;
 
 namespace
 {
 /// The identity @p id proves on a connection: its test key.
 /// @param id The machine.
 /// @return What the connection proved.
-[[nodiscard]] FastCache::ProvenIdentity Proving(std::string const& id)
+[[nodiscard]] Pace::ProvenIdentity Proving(std::string const& id)
 {
-    return FastCache::ProvenIdentity { .id = id, .key = FastCache::Testing::TestKeyPair(id).PublicKey() };
+    return Pace::ProvenIdentity { .id = id, .key = Pace::Testing::TestKeyPair(id).PublicKey() };
 }
 
 /// The verdict @p membership reaches about one connection: an address, and what it proved.
@@ -42,20 +42,20 @@ namespace
 /// @return The folded verdict, as every surface's gate reaches it.
 [[nodiscard]] Membership VerdictOf(NodeMembership const& membership,
                                    std::string const& host,
-                                   std::optional<FastCache::ProvenIdentity> const& proven)
+                                   std::optional<Pace::ProvenIdentity> const& proven)
 {
-    return FastCache::Distributed::ExplainConnection(membership.Oracle(),
-                                                     FastCache::ConnectionFacts { .host = host, .proven = proven })
+    return Pace::Distributed::ExplainConnection(membership.Oracle(),
+                                                     Pace::ConnectionFacts { .host = host, .proven = proven })
         .verdict;
 }
 
 /// Apply a committed `--cluster-forget=<id>` to @p state, as consensus would.
 /// @param state The state.
 /// @param id The machine forgotten.
-void Forget(FastCache::Cluster::ClusterState& state, std::string const& id)
+void Forget(Pace::Cluster::ClusterState& state, std::string const& id)
 {
-    FastCache::Cluster::Apply(state,
-                              FastCache::Cluster::Command { .kind = FastCache::Cluster::CommandKind::Forget,
+    Pace::Cluster::Apply(state,
+                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::Forget,
                                                             .key = id,
                                                             .value = {},
                                                             .schedulerEndpoint = {},
@@ -67,13 +67,13 @@ void Forget(FastCache::Cluster::ClusterState& state, std::string const& id)
 /// @param id The machine.
 /// @param endpoint Its consensus endpoint.
 /// @param key The key it is admitted under.
-void Admit(FastCache::Cluster::ClusterState& state,
+void Admit(Pace::Cluster::ClusterState& state,
            std::string const& id,
            std::string const& endpoint,
-           FastCache::Ed25519PublicKey const& key)
+           Pace::Ed25519PublicKey const& key)
 {
-    FastCache::Cluster::Apply(state,
-                              FastCache::Cluster::Command { .kind = FastCache::Cluster::CommandKind::AddMember,
+    Pace::Cluster::Apply(state,
+                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddMember,
                                                             .key = id,
                                                             .value = endpoint,
                                                             .schedulerEndpoint = {},
@@ -94,7 +94,7 @@ TEST_CASE("An open node stays open across a membership commit", "[node][membersh
     NodeMembership membership { cfg, membershipLog };
     REQUIRE(membership.Oracle().Classify("10.9.9.9") == Membership::Member);
 
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "m1", "10.0.0.7:7000", Proving("m1").key);
     membership.PublishCluster(state);
 
@@ -115,11 +115,11 @@ TEST_CASE("Under --fleet-open a member set narrows nothing, and a revoked key is
     NodeMembership membership { cfg, membershipLog };
     REQUIRE(membership.Oracle().Classify("10.9.9.9") == Membership::Member);
 
-    membership.PublishCluster(FastCache::Cluster::ClusterState {});
+    membership.PublishCluster(Pace::Cluster::ClusterState {});
     CHECK(membership.Oracle().Classify("10.9.9.9") == Membership::Member);
     CHECK(membership.Oracle().Classify("10.0.0.1") == Membership::Member);
 
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "gone", "10.0.0.1:6676", Proving("gone").key);
     Forget(state, "gone");
     membership.PublishCluster(state);
@@ -130,10 +130,10 @@ TEST_CASE("Under --fleet-open a member set narrows nothing, and a revoked key is
 /// A cluster state carrying one `fleet-open` value and no members.
 /// @param value What the row says, exactly as an operator typed it.
 /// @return The state.
-[[nodiscard]] static FastCache::Cluster::ClusterState OpenSetTo(std::string value)
+[[nodiscard]] static Pace::Cluster::ClusterState OpenSetTo(std::string value)
 {
-    FastCache::Cluster::ClusterState state;
-    state.settings.push_back({ .name = std::string { FastCache::Cluster::FleetOpenSetting }, .value = std::move(value) });
+    Pace::Cluster::ClusterState state;
+    state.settings.push_back({ .name = std::string { Pace::Cluster::FleetOpenSetting }, .value = std::move(value) });
     return state;
 }
 
@@ -175,7 +175,7 @@ TEST_CASE("A node with no cluster row keeps its own flag, and an unset row is no
     REQUIRE(membership.Oracle().Classify("10.9.9.9") == Membership::Member);
 
     // A commit that names members and says nothing about openness.
-    membership.PublishCluster(FastCache::Cluster::ClusterState {});
+    membership.PublishCluster(Pace::Cluster::ClusterState {});
     CHECK(membership.Oracle().Classify("10.9.9.9") == Membership::Member);
 
     // And the ordinary policy still works on a closed node: this machine is admitted
@@ -185,7 +185,7 @@ TEST_CASE("A node with no cluster row keeps its own flag, and an unset row is no
     closed.nodeId = "node-b";
 
     NodeMembership shut { closed, membershipLog };
-    shut.PublishCluster(FastCache::Cluster::ClusterState {});
+    shut.PublishCluster(Pace::Cluster::ClusterState {});
     CHECK(shut.Oracle().Classify("127.0.0.1") == Membership::Member);
     CHECK(shut.Oracle().Classify("10.9.9.9") == Membership::Outsider);
 }
@@ -233,7 +233,7 @@ TEST_CASE("A cluster forget outranks the cluster's own member set, by the key it
     cfg.nodeId = "node-a";
 
     NodeMembership membership { cfg, membershipLog };
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "m1", "10.0.0.1:6676", Proving("m1").key);
     Admit(state, "m2", "10.0.0.2:6676", Proving("m2").key);
     membership.PublishCluster(state);
@@ -266,7 +266,7 @@ TEST_CASE("A re-admit under a new key admits the new key only, and a reload lift
 
     NodeMembership membership { cfg, membershipLog };
 
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "m1", "10.0.0.1:6676", Proving("m1").key);
     Forget(state, "m1");
     membership.PublishCluster(state);
@@ -285,7 +285,7 @@ TEST_CASE("A re-admit under a new key admits the new key only, and a reload lift
     auto const reminted = Proving("m1-reminted").key;
     Admit(state, "m1", "10.0.0.1:6676", reminted);
     membership.PublishCluster(state);
-    CHECK(VerdictOf(membership, "10.0.0.1", FastCache::ProvenIdentity { .id = "m1", .key = reminted })
+    CHECK(VerdictOf(membership, "10.0.0.1", Pace::ProvenIdentity { .id = "m1", .key = reminted })
           == Membership::Member);
     CHECK(VerdictOf(membership, "10.0.0.1", Proving("m1")) == Membership::Forgotten);
 }
@@ -308,7 +308,7 @@ TEST_CASE("A forget reaches an open node too", "[node][membership][forget]")
     // prove nothing.
     REQUIRE(membership.Oracle().Classify("10.9.9.9") == Membership::Member);
 
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "gone", "10.0.0.1:6676", Proving("gone").key);
     Forget(state, "gone");
     membership.PublishCluster(state);
@@ -382,13 +382,13 @@ TEST_CASE("A rosterless node that runs no consensus admits no other machine, by 
 
     // And the control that makes the key half able to fail: the same key IS admitted, by proof and
     // by ticket, once a roster names it -- which only a node running consensus is ever handed.
-    auto state = FastCache::Cluster::ClusterState {};
-    state.members.push_back(FastCache::Cluster::ClusterMember {
+    auto state = Pace::Cluster::ClusterState {};
+    state.members.push_back(Pace::Cluster::ClusterMember {
         .id = "n9",
         .raftEndpoint = {},
         .schedulerEndpoint = {},
-        .schedulerEndpointHistory = FastCache::Cluster::SchedulerEndpointHistory::NeverAnnounced,
-        .seat = FastCache::Cluster::MemberSeat::Learner,
+        .schedulerEndpointHistory = Pace::Cluster::SchedulerEndpointHistory::NeverAnnounced,
+        .seat = Pace::Cluster::MemberSeat::Learner,
         .publicKey = proven->key });
     membership.PublishCluster(state);
     CHECK(Distributed::ExplainConnection(oracle, ConnectionFacts { .host = "10.0.0.7", .proven = proven }).verdict
@@ -419,15 +419,15 @@ TEST_CASE("A learner's verified ticket admits it once consensus publishes the cl
     // Before any cluster reaches it, a verified ticket admits nobody: fails CLOSED.
     CHECK(presenting("10.0.0.7") != Membership::Member);
 
-    auto state = FastCache::Cluster::ClusterState {};
-    FastCache::Cluster::Apply(state,
-                              FastCache::Cluster::Command { .kind = FastCache::Cluster::CommandKind::AddLearner,
+    auto state = Pace::Cluster::ClusterState {};
+    Pace::Cluster::Apply(state,
+                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddLearner,
                                                             .key = machine.id,
                                                             .value = "10.0.0.7:6676",
                                                             .schedulerEndpoint = {},
                                                             .publicKey = machine.key });
     REQUIRE(state.members.size() == 1);
-    REQUIRE(state.members.front().seat == FastCache::Cluster::MemberSeat::Learner);
+    REQUIRE(state.members.front().seat == Pace::Cluster::MemberSeat::Learner);
     membership.PublishCluster(state);
 
     // A learner member: admitted by its ticket, from whatever address it dialled from.
@@ -454,10 +454,10 @@ TEST_CASE("A voter's ticket stands as an operator and a learner's does not, from
         return Distributed::CallerContextOf(membership.Oracle(),
                                             ConnectionFacts { .host = "10.0.0.9", .authenticatedMachine = Proving(id) });
     };
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "pc-07", "10.0.0.7:6676", Proving("pc-07").key);
-    FastCache::Cluster::Apply(state,
-                              FastCache::Cluster::Command { .kind = FastCache::Cluster::CommandKind::AddLearner,
+    Pace::Cluster::Apply(state,
+                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddLearner,
                                                             .key = "lt-12",
                                                             .value = {},
                                                             .schedulerEndpoint = {},
@@ -477,8 +477,8 @@ TEST_CASE("A voter's ticket stands as an operator and a learner's does not, from
 
     // Promoted: the same ticket, a voter's seat, an operator.
     Admit(state, "lt-12", "10.0.0.12:6676", Proving("lt-12").key);
-    REQUIRE(std::ranges::all_of(state.members, [](FastCache::Cluster::ClusterMember const& member) {
-        return member.seat == FastCache::Cluster::MemberSeat::Voter;
+    REQUIRE(std::ranges::all_of(state.members, [](Pace::Cluster::ClusterMember const& member) {
+        return member.seat == Pace::Cluster::MemberSeat::Voter;
     }));
     membership.PublishCluster(state);
     CHECK(contextOf("lt-12").operatorStanding);
@@ -496,7 +496,7 @@ TEST_CASE("A revoked ticket's evidence refuses on an open node, whatever the key
     cfg.nodeId = "node-a";
     cfg.fleetOpen = true;
     NodeMembership membership { cfg, membershipLog };
-    auto state = FastCache::Cluster::ClusterState {};
+    auto state = Pace::Cluster::ClusterState {};
     Admit(state, "pc-07", "10.0.0.7:6676", Proving("pc-07").key);
     membership.PublishCluster(state);
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CliFormat.hpp"
 
-#include <FastCache/Distributed/FleetText.hpp>
+#include <Pace/Distributed/FleetText.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -9,7 +9,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -588,4 +588,4 @@ std::string RenderValue(Value const& value, RenderOptions const& options)
     return {};
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

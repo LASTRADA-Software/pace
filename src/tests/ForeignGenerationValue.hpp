@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A generation inside the reserved leading-byte range that this build does not implement.
@@ -97,4 +97,4 @@ static_assert(ForeignGeneration >= 1 && ForeignGeneration <= MaxCompileValueGene
     return StampGeneration(EncodeCompileValue(produced), ForeignGeneration);
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

@@ -64,7 +64,7 @@ constexpr std::optional<std::size_t> CounterIndex(Counter counter) { auto const 
 function(fastcached_make_tree name converter extraPath extraBody outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
-    file(WRITE "${tree}/src/FastCache/Metrics/IMetricsSink.hpp" "${converter}")
+    file(WRITE "${tree}/src/Pace/Metrics/IMetricsSink.hpp" "${converter}")
     if(NOT extraPath STREQUAL "")
         file(WRITE "${tree}/src/${extraPath}" "${extraBody}\n")
     endif()
@@ -114,13 +114,13 @@ endif()
 
 # 2. A hand-rolled conversion elsewhere: the whole point.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("handrolled" "${converterBody}" "FastCache/Metrics/StatsReading.cpp"
+fastcached_make_tree("handrolled" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
     "void Capture(Reading& reading) {\n    for (auto const& row: CounterTable)\n        reading.counters[static_cast<std::size_t>(row.counter)] = 1\;\n}" tree)
 fastcached_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "handrolled: a counter indexed by a cast outside the converter was accepted -- the entire rule")
 else()
-    fastcached_expect_phrase("handrolled" "${output}" "FastCache/Metrics/StatsReading.cpp:3:"
+    fastcached_expect_phrase("handrolled" "${output}" "Pace/Metrics/StatsReading.cpp:3:"
         "the refusal did not name the site as file:line, so it cannot be acted on")
     fastcached_expect_phrase("handrolled" "${output}" "CounterIndex"
         "the refusal did not say what to do instead, so the likely response is to widen the table")
@@ -139,7 +139,7 @@ endif()
 
 # 4. Prose is not a conversion.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("prose" "${converterBody}" "FastCache/Metrics/MetricsCatalog.hpp"
+fastcached_make_tree("prose" "${converterBody}" "Pace/Metrics/MetricsCatalog.hpp"
     "/// Never `table[static_cast<std::size_t>(counter)]` -- see CounterIndex.\nint Answer()\; // not static_cast<int>(counter) either" tree)
 fastcached_run_check("${tree}" objected output)
 if(objected)
@@ -148,7 +148,7 @@ endif()
 
 # 5. A different name that merely contains the word.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("plural" "${converterBody}" "FastCache/Metrics/StatsReadingCodec.cpp"
+fastcached_make_tree("plural" "${converterBody}" "Pace/Metrics/StatsReadingCodec.cpp"
     "auto const bits = static_cast<std::uint32_t>(counters.size())\;" tree)
 fastcached_run_check("${tree}" objected output)
 if(objected)
@@ -203,8 +203,8 @@ endif()
 math(EXPR cases "${cases} + 1")
 set(tree "${root}/nosources")
 file(REMOVE_RECURSE "${tree}")
-file(MAKE_DIRECTORY "${tree}/src/FastCache")
-file(WRITE "${tree}/src/FastCache/notes.txt" "no source here\n")
+file(MAKE_DIRECTORY "${tree}/src/Pace")
+file(WRITE "${tree}/src/Pace/notes.txt" "no source here\n")
 fastcached_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "nosources: a tree holding no source this check can read was accepted")
@@ -226,7 +226,7 @@ endif()
 # 12. Balanced, not merely closed at the first `)`: a counter AFTER a nested call's closing
 #     parenthesis is still the operand, and an operand ended at the first `)` would miss it.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("nested" "${converterBody}" "FastCache/Metrics/StatsReading.cpp"
+fastcached_make_tree("nested" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
     "reading.counters[static_cast<std::size_t>(Base(reading) + row.counter)] = 1\;" tree)
 fastcached_run_check("${tree}" objected output)
 if(NOT objected)
@@ -235,7 +235,7 @@ endif()
 
 # 13. Every cast on the line is asked, not only the first.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("second" "${converterBody}" "FastCache/Metrics/StatsReading.cpp"
+fastcached_make_tree("second" "${converterBody}" "Pace/Metrics/StatsReading.cpp"
     "auto const pair = static_cast<int>(outcome) + static_cast<int>(row.counter)\;" tree)
 fastcached_run_check("${tree}" objected output)
 if(NOT objected)

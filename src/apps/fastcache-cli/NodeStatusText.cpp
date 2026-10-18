@@ -4,7 +4,7 @@
 #include <array>
 #include <format>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -197,4 +197,4 @@ std::optional<std::string> NamedLeader(CompileCacheWire::NodeStatusFields const&
     return std::nullopt;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

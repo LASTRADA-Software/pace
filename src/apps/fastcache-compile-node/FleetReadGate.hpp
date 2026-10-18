@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file FleetReadGate.hpp
@@ -59,4 +59,4 @@ struct FleetReadVerdict
                                                std::string_view token,
                                                std::string_view peer);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

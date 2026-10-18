@@ -8,7 +8,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/NetError.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Half-close @p socket from a test body that is not a coroutine, and report how it went.
@@ -25,4 +25,4 @@ namespace FastCache::Testing
     return core::async::syncRun(core::async::asTask(socket.shutdownWrite()));
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

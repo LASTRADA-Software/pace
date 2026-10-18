@@ -14,7 +14,7 @@
 #include <core/net/IDatagramSocket.hpp>
 #include <core/net/NetError.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A socket whose local stack refuses a send to some destinations, and passes every other call on.
@@ -97,4 +97,4 @@ class RefusingDatagramSocket final: public core::net::IDatagramSocket
     bool _refusing { true }; ///< False while `RefuseNothing` holds.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

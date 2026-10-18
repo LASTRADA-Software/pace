@@ -28,26 +28,26 @@
 #include "SharedCacheResponder.hpp"
 #include "SharedCacheTier.hpp"
 
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Core/SessionSeal.hpp>
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Distributed/MachineTicket.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/NodeProof.hpp>
-#include <FastCache/Distributed/StateLeaseRoster.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/SealedFrameSocket.hpp>
-#include <FastCache/Transport/ListenQueue.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Core/SessionSeal.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodeProof.hpp>
+#include <Pace/Distributed/StateLeaseRoster.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/SealedFrameSocket.hpp>
+#include <Pace/Transport/ListenQueue.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -110,20 +110,20 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::AwaitUntil;
-using FastCache::Testing::ReactorWaitOptions;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::AwaitUntil;
+using Pace::Testing::ReactorWaitOptions;
+using Pace::Testing::Unwrap;
 using namespace std::chrono_literals;
 
 // Shared rather than spelled here: this was one of five private copies of the same
 // reply readers, byte-identical once the `Wire` alias is expanded. A copy that has
 // stopped matching `DecodeReplyHeader`'s contract passes rather than fails, so the
 // duplication hid the next reply-header change rather than merely repeating itself.
-using FastCache::Testing::ErrorOf;
+using Pace::Testing::ErrorOf;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -503,7 +503,7 @@ class Conversation
     /// @return Every byte the server sent before it closed.
     [[nodiscard]] std::vector<std::byte> HalfCloseAndDrain()
     {
-        REQUIRE(FastCache::Testing::ShutdownWrite(*_socket).has_value());
+        REQUIRE(Pace::Testing::ShutdownWrite(*_socket).has_value());
         return ReadRest();
     }
 
@@ -609,7 +609,7 @@ TEST_CASE("A framed surface binds with the deep accept queue, as the kernel reco
     // that is up, reported unreachable (#1668). So the queue the opener ASKED for is read back from
     // the kernel, not from a helper's return value: an opener that bound with a bare
     // `ListenOptions` would leave core-cpp's 128 here (#1679).
-    auto const ceiling = FastCache::Testing::KernelListenCeiling();
+    auto const ceiling = Pace::Testing::KernelListenCeiling();
     if (!ceiling.has_value())
         SKIP("this platform cannot report a listening socket's queue limit");
     if (*ceiling <= core::net::ListenOptions {}.backlog)
@@ -622,7 +622,7 @@ TEST_CASE("A framed surface binds with the deep accept queue, as the kernel reco
     REQUIRE(started.has_value());
     fleet.Serve();
 
-    auto const limits = FastCache::Testing::ListenQueueLimitsOnPort(port);
+    auto const limits = Pace::Testing::ListenQueueLimitsOnPort(port);
     REQUIRE(limits.has_value());
     CHECK(Unwrap(limits) == std::vector { std::min(ListenQueueDepth, *ceiling) });
 }
@@ -1138,8 +1138,8 @@ class HoldableResponder final: public IFrameResponder
     {
         Hold(false);
         auto const bound =
-            std::chrono::milliseconds { _holdBoundMs.load(std::memory_order_acquire) } + FastCache::Testing::WaitHangGuard;
-        auto const left = FastCache::Testing::WaitUntil(
+            std::chrono::milliseconds { _holdBoundMs.load(std::memory_order_acquire) } + Pace::Testing::WaitHangGuard;
+        auto const left = Pace::Testing::WaitUntil(
             "every held answer to leave its hold",
             [this] { return _insideHold.load(std::memory_order_acquire) == 0; },
             [this] {
@@ -1148,8 +1148,8 @@ class HoldableResponder final: public IFrameResponder
                                    Entered(),
                                    Answered());
             },
-            FastCache::Testing::WaitOptions {
-                .step = {}, .context = {}, .bound = bound, .rest = FastCache::Testing::WaitRest });
+            Pace::Testing::WaitOptions {
+                .step = {}, .context = {}, .bound = bound, .rest = Pace::Testing::WaitRest });
         CHECK(left);
         CHECK(_waits.AllReached());
     }
@@ -1216,11 +1216,11 @@ class HoldableResponder final: public IFrameResponder
     core::net::EventLoop* _reactor { nullptr };
     std::atomic<bool> _held { false };
     /// Milliseconds, because the case sets it and the reactor thread reads it.
-    std::atomic<std::chrono::milliseconds::rep> _holdBoundMs { FastCache::Testing::WaitHangGuard.count() };
+    std::atomic<std::chrono::milliseconds::rep> _holdBoundMs { Pace::Testing::WaitHangGuard.count() };
     /// Answers waiting inside a hold right now, which `Release()` waits to reach zero.
     std::atomic<std::size_t> _insideHold { 0 };
     /// The accounts of held answers that gave up, asserted by `Release()`.
-    FastCache::Testing::OffThreadWaits _waits;
+    Pace::Testing::OffThreadWaits _waits;
     std::atomic<bool> _refusePeers { false };
     /// The one verb to refuse, or -1. An `int` because `std::atomic<std::optional<>>`
     /// is not lock-free and this is read on the accept path.
@@ -3555,7 +3555,7 @@ namespace
 /// is the remedy this repository has had to write down more than once.
 [[nodiscard]] std::string EndpointCodeWithoutComments()
 {
-    auto const path = std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps"
+    auto const path = std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps"
                       / "fastcache-compile-node" / "FrameEndpoint.cpp";
     std::ifstream in { path, std::ios::binary };
     std::ostringstream contents;

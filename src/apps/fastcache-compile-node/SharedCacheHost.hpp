@@ -3,8 +3,8 @@
 
 #include "NodeConditions.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -19,7 +19,7 @@
 #include <thread>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 // Declared, not included: the host holds tiers and asks an opener for them, and a caller that only
@@ -235,4 +235,4 @@ class SharedCacheHost
     std::jthread _reconciler;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

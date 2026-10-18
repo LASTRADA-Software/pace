@@ -18,7 +18,7 @@
 #include <ParallelFor.hpp>
 #include <ToolchainProbe.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 ClaimsReloaded ClaimsReloadedBetween(std::shared_ptr<NodeConfig const> const& previous,
@@ -778,4 +778,4 @@ ToolchainRefresh RefreshToolchains(std::map<std::string, ServedToolchain> const&
     return ToolchainRefresh { .changed = true, .served = std::move(next) };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

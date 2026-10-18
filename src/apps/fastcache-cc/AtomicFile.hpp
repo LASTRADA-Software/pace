@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// One file being written: its bytes, then a CHECKED close.
@@ -221,4 +221,4 @@ class SharedReadFile
 /// @return The id.
 [[nodiscard]] std::uint64_t CurrentProcessId() noexcept;
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

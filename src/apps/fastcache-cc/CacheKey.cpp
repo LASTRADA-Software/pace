@@ -4,7 +4,7 @@
 #include "DependencyProbe.hpp"
 #include "KeyDigest.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <algorithm>
 #include <format>
@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 namespace
 {
@@ -353,4 +353,4 @@ std::string ComputeKey(KeyInputs const& inputs)
     return digest.ToHex();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

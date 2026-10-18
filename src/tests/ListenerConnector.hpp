@@ -10,7 +10,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/testing/InMemorySocket.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file ListenerConnector.hpp
@@ -44,4 +44,4 @@ class ListenerConnector final: public core::net::IConnector
     core::net::testing::InMemoryListener& _listener;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

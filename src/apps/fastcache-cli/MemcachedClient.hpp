@@ -3,7 +3,7 @@
 
 #include "RespClient.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file MemcachedClient.hpp
@@ -219,4 +219,4 @@ class IMemcachedExchange
     [[nodiscard]] virtual std::expected<McReply, ExchangeError> Send(std::string_view request) = 0;
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

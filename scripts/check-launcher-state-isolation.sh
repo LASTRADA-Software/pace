@@ -681,9 +681,9 @@ cat > "${launcher_reader_dir}/extra.cpp" <<'PLANTED'
     [[nodiscard]] std::filesystem::path StateDirectoryImpl()
     {
         std::string base;
-        if (auto const local = FastCache::ReadEnvironmentVariable("LOCALAPPDATA"); local.has_value())
+        if (auto const local = Pace::ReadEnvironmentVariable("LOCALAPPDATA"); local.has_value())
             base = *local;
-        auto const extra = FastCache::ReadEnvironmentVariable("FC_STATE_EXTRA");
+        auto const extra = Pace::ReadEnvironmentVariable("FC_STATE_EXTRA");
         if (extra.has_value())
             base = *extra + "/sub";
         return base;
@@ -694,10 +694,10 @@ cat > "${launcher_reader_dir}/branches.cpp" <<'PLANTED'
     {
         std::string base;
 #if defined(_WIN32)
-        if (auto const w = FastCache::ReadEnvironmentVariable("WIN_ONLY"); w.has_value())
+        if (auto const w = Pace::ReadEnvironmentVariable("WIN_ONLY"); w.has_value())
             base = *w;
 #else
-        auto const p = FastCache::ReadEnvironmentVariable("POSIX_ONLY");
+        auto const p = Pace::ReadEnvironmentVariable("POSIX_ONLY");
         if (p.has_value())
             base = *p + "/s";
 #endif

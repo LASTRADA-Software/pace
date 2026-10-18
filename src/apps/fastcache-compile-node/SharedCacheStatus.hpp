@@ -3,18 +3,18 @@
 
 #include "SharedCacheDirectory.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <string_view>
 
 // Declared, not included: the status reads one string from it per call, and its header carries
 // the whole worker protocol.
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 class IAdvertisedEndpointSource;
-} // namespace FastCache::Cc
+} // namespace Pace::Cc
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class SharedCacheHost;
@@ -107,4 +107,4 @@ class NodeSharedCacheStatus final: public ISharedCacheStatusSource
     Cc::IAdvertisedEndpointSource const& _advertised;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

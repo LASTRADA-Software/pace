@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CliFormat.hpp"
 
-#include <FastCache/Cli/UsageTestUtils.hpp>
-#include <FastCache/Distributed/FleetText.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Cli/UsageTestUtils.hpp>
+#include <Pace/Distributed/FleetText.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,9 +15,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Testing;
 
 namespace
 {

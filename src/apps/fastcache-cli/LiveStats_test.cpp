@@ -3,9 +3,9 @@
 #include "LiveStats.hpp"
 #include "ScriptedExchange.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -24,9 +24,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
 using namespace std::chrono_literals;
 
 namespace
@@ -414,7 +414,7 @@ TEST_CASE("live-stats refuses a node whose description it cannot read, naming th
         CHECK(refused.result.error().outcome == Outcome::Protocol);
         CHECK(RefusalText(refused).contains("cannot read"));
         CHECK(RefusalText(refused).contains(
-            std::format("0xFC wire {}", static_cast<unsigned>(FastCache::CompileCacheWire::CurrentVersion))));
+            std::format("0xFC wire {}", static_cast<unsigned>(Pace::CompileCacheWire::CurrentVersion))));
     }
 
     // The control: the same node, readable, is admitted.

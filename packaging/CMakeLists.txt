@@ -47,7 +47,7 @@ set(FASTCACHED_TMPFILES_DIR       "usr/lib/tmpfiles.d")
 # CMakeLists.txt and inherited here. They have to live there because
 # cmake/Packaging.cmake is include()d at that scope and reads them too — a
 # set() in this subdirectory would not propagate back up — and because
-# src/FastCache/ compiles FASTCACHED_SYSCONF_DIR into the daemon's default
+# src/Pace/ compiles FASTCACHED_SYSCONF_DIR into the daemon's default
 # config lookup, so the file this directory installs and the path the daemon
 # probes for are one value.
 

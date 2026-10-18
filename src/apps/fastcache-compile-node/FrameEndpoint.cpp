@@ -4,15 +4,15 @@
 #include "FrameEndpoint.hpp"
 #include "NodeIoLoop.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/Framing/LineReader.hpp>
-#include <FastCache/Protocol/SealedFrameSocket.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
-#include <FastCache/Transport/AcceptLoopReporter.hpp>
-#include <FastCache/Transport/LingeringClose.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/Framing/LineReader.hpp>
+#include <Pace/Protocol/SealedFrameSocket.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Transport/AcceptLoopReporter.hpp>
+#include <Pace/Transport/LingeringClose.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <algorithm>
 #include <array>
@@ -40,7 +40,7 @@
 #include <core/net/SleepUntil.hpp>
 #include <core/net/Sockets.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -2971,4 +2971,4 @@ std::expected<std::unique_ptr<FrameEndpoint>, std::string> FrameEndpoint::StartA
         io, surface, std::move(listener), std::move(bound), responder, metrics, logger, std::move(namer));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

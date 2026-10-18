@@ -13,7 +13,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/PlatformLoop.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Drive one framed request/reply exchange on a reactor.
@@ -101,4 +101,4 @@ class ReactorExchange
 /// @param notice Where an ignored credential is reported; must outlive the result.
 [[nodiscard]] std::unique_ptr<IEndpointExchange> MakeTcpExchange(CredentialNotice& notice);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

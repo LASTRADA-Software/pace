@@ -4,9 +4,9 @@
 #include "Dispatch.hpp"
 #include "WorkerProtocol.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileReplySeal.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileReplySeal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -19,7 +19,7 @@
 
 #include <core/async/SyncRun.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -803,4 +803,4 @@ std::expected<void, AnnounceRefusal> WorkerRegistrar::Withdraw(core::net::ISocke
         .kind = AnnounceRefusalKindOf(outcome), .reason = DescribeOutcome(outcome), .leader = RedirectTarget(outcome) } };
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

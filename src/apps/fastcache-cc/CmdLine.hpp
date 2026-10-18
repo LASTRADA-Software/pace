@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Which compiler driver the launcher is fronting.
@@ -1161,4 +1161,4 @@ struct MappedCompileDir
 /// @return For example `exit 2: a.cpp(3): error C2220: the following warning is treated as an error`.
 [[nodiscard]] std::string DescribeFailedPreprocess(int exitCode, std::string_view diagnostics);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

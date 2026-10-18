@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file NodeStatusText.hpp
@@ -129,4 +129,4 @@ struct ConditionMention
 [[nodiscard]] std::optional<std::string> DescribeConditions(
     std::optional<std::vector<CompileCacheWire::NodeConditionFields>> const& conditions);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

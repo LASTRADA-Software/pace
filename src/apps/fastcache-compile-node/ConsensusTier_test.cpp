@@ -15,22 +15,22 @@
 #include "SharedCacheHost.hpp"
 #include "SharedCacheTier.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/MembershipPolicy.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Consensus/RaftConfig.hpp>
-#include <FastCache/Consensus/RaftPeerSession.hpp>
-#include <FastCache/Consensus/RaftPeerTransport.hpp>
-#include <FastCache/Consensus/RaftWire.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/SessionSeal.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Transport/ListenQueue.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/MembershipPolicy.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Consensus/RaftConfig.hpp>
+#include <Pace/Consensus/RaftPeerSession.hpp>
+#include <Pace/Consensus/RaftPeerTransport.hpp>
+#include <Pace/Consensus/RaftWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/SessionSeal.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Transport/ListenQueue.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -82,12 +82,12 @@
 #include <tests/SharedTierFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {
 /// `NodeMembership` reports an unreadable `fleet-open` row here; no case asserts on it.
-FastCache::NullLogger membershipLog;
+Pace::NullLogger membershipLog;
 
 /// A loopback port nothing listens on at the moment of asking: bound, read and released, the way
 /// the cases here state a member's endpoint. One helper rather than a lambda per case.
@@ -148,8 +148,8 @@ class RecordingUpstream final: public Node::ICacheUpstream
     std::vector<CompileCacheWire::WireSharedCacheSource> _seen;
 };
 } // namespace
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -157,9 +157,9 @@ namespace
 /// for the whole binary, so it outlives every tier a case starts. A name another machine could dial,
 /// because a member record holds no other (`IsPeerDialableEndpoint`); nothing in this file dials it.
 /// @return The source.
-[[nodiscard]] FastCache::Cc::IAdvertisedEndpointSource const& TestAdvertised()
+[[nodiscard]] Pace::Cc::IAdvertisedEndpointSource const& TestAdvertised()
 {
-    static FastCache::Node::AnnouncedEndpoint const advertised { "office:6674" };
+    static Pace::Node::AnnouncedEndpoint const advertised { "office:6674" };
     return advertised;
 }
 
@@ -167,9 +167,9 @@ namespace
 /// tier started with stands and no pass reads a move. One object for the whole binary, so it
 /// outlives every tier a case starts.
 /// @return The source.
-[[nodiscard]] FastCache::Cc::IAdvertisedEndpointSource const& TestRaftAdvertised()
+[[nodiscard]] Pace::Cc::IAdvertisedEndpointSource const& TestRaftAdvertised()
 {
-    static FastCache::Node::AnnouncedEndpoint const advertised { std::string {} };
+    static Pace::Node::AnnouncedEndpoint const advertised { std::string {} };
     return advertised;
 }
 
@@ -282,18 +282,18 @@ TEST_CASE("A role line names the term it happened in", "[node][consensus]")
     // Issue #117: the dump of an intermittent election showed three nodes moving
     // between roles and gave no way to tell one re-election from five, because the
     // line carried no term at all.
-    using FastCache::Distributed::SchedulerRole;
+    using Pace::Distributed::SchedulerRole;
 
-    CHECK(DescribeRole(SchedulerRole::Leader, FastCache::Consensus::Term { .value = 4 }, "")
+    CHECK(DescribeRole(SchedulerRole::Leader, Pace::Consensus::Term { .value = 4 }, "")
           == "consensus: this node is now the leader in term 4");
 
-    CHECK(DescribeRole(SchedulerRole::Follower, FastCache::Consensus::Term { .value = 4 }, "127.0.0.1:6674")
+    CHECK(DescribeRole(SchedulerRole::Follower, Pace::Consensus::Term { .value = 4 }, "127.0.0.1:6674")
           == "consensus: this node is now a follower in term 4 of 127.0.0.1:6674");
 
     // A node that knows no leader has no endpoint to name, and the line must not
     // grow an empty " of " where one would go -- that reads as a redirect to
     // nowhere rather than as an election in progress.
-    CHECK(DescribeRole(SchedulerRole::Undecided, FastCache::Consensus::Term { .value = 5 }, "")
+    CHECK(DescribeRole(SchedulerRole::Undecided, Pace::Consensus::Term { .value = 5 }, "")
           == "consensus: this node is now undecided in term 5");
 }
 
@@ -302,11 +302,11 @@ TEST_CASE("A demotion names the term, the peer, and what this node was", "[node]
     // The three facts the CI dump was missing. The role is the CONSENSUS one:
     // `pre-candidate` and `candidate` both read as `undecided` to the scheduler,
     // and a deposed LEADER is the case worth spotting at a glance.
-    auto const cause = FastCache::Consensus::TermAdoption { .previousTerm = FastCache::Consensus::Term { .value = 1 },
-                                                            .previousRole = FastCache::Consensus::Role::Leader,
+    auto const cause = Pace::Consensus::TermAdoption { .previousTerm = Pace::Consensus::Term { .value = 1 },
+                                                            .previousRole = Pace::Consensus::Role::Leader,
                                                             .from = "n3" };
 
-    CHECK(DescribeTermAdoption(FastCache::Consensus::Term { .value = 2 }, cause)
+    CHECK(DescribeTermAdoption(Pace::Consensus::Term { .value = 2 }, cause)
           == "consensus: term 2 arrived from n3; this node was leader in term 1");
 }
 
@@ -742,7 +742,7 @@ TEST_CASE("Silence is measured on the roster's clock, whatever clock the driver 
                                                .schedulerEndpoint = {},
                                                .schedulerEndpointHistory = Cluster::SchedulerEndpointHistory::NeverAnnounced,
                                                .seat = Cluster::MemberSeat::Voter,
-                                               .publicKey = FastCache::Testing::TestKeyPair("n1").PublicKey() } };
+                                               .publicKey = Pace::Testing::TestKeyPair("n1").PublicKey() } };
     roster.Adopt(state);
     rosterClock.advance(std::chrono::hours { 3 });
     REQUIRE(roster.Isolated());
@@ -1241,7 +1241,7 @@ TEST_CASE("The consensus listener a tier binds itself has the deep accept queue,
 {
     // The third listener #1679 names, read back from the KERNEL rather than from the options a
     // helper returns: a tier that bound with a bare `ListenOptions` would leave core-cpp's 128.
-    auto const ceiling = FastCache::Testing::KernelListenCeiling();
+    auto const ceiling = Pace::Testing::KernelListenCeiling();
     if (!ceiling.has_value())
         SKIP("this platform cannot report a listening socket's queue limit");
     if (*ceiling <= core::net::ListenOptions {}.backlog)
@@ -1280,7 +1280,7 @@ TEST_CASE("The consensus listener a tier binds itself has the deep accept queue,
     INFO("start refused: " << RefusalOf(started));
     REQUIRE(started.has_value());
 
-    auto const limits = FastCache::Testing::ListenQueueLimitsOnPort(port);
+    auto const limits = Pace::Testing::ListenQueueLimitsOnPort(port);
     REQUIRE(limits.has_value());
     CHECK(Unwrap(limits) == std::vector { std::min(ListenQueueDepth, *ceiling) });
 }
@@ -1663,7 +1663,7 @@ TEST_CASE("A node refusing its leader's snapshot says so as an Alert condition, 
     auto const refusal = Consensus::RaftDriver::InstallRefusal {
         .index = Consensus::LogIndex { .value = 812 },
         .leader = "n1",
-        .reason = FastCache::UnsupportedFormatVersion("cluster state encoding version 6 (this build reads 5)")
+        .reason = Pace::UnsupportedFormatVersion("cluster state encoding version 6 (this build reads 5)")
     };
 
     ReportInstallRefusal(refusal, logger, &conditions);
@@ -3171,7 +3171,7 @@ TEST_CASE("A forgotten learner hears its key revoked through its own tier, from 
     //
     // Its rate, not a run: `scripts/flake-rate.sh --runs 50` over this case's tag passed 50 of 50 (N=50,
     // so a rate below about 1 in 50 is not excluded) on Linux clang-debug, 32 cores, with the whole
-    // FastCacheTest suite running at -j32 beside it for the full 316 s (nine complete passes).
+    // PaceTest suite running at -j32 beside it for the full 316 s (nine complete passes).
     constexpr auto Learner = Consensus::RaftWire::SessionDirection::TwoWay;
     auto const firstBackoff = Consensus::DialBackoffOf(Learner).initial;
     auto const within = std::chrono::duration_cast<std::chrono::milliseconds>(

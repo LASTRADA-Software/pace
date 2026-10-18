@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeToolchains.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Platform/EnvironmentTestUtils.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Platform/EnvironmentTestUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,10 +27,10 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Cc::Testing::ScriptedToolchainHost;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Cc::Testing::ScriptedToolchainHost;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -61,8 +61,8 @@ class ScopedStateDir
     }
 
   private:
-    FastCache::Testing::ScratchDirectory _dir;
-    FastCache::Testing::ScopedEnv _env;
+    Pace::Testing::ScratchDirectory _dir;
+    Pace::Testing::ScopedEnv _env;
 };
 
 /// A discovery that reports whatever a case wrote down.
@@ -946,7 +946,7 @@ TEST_CASE("NodeToolchains: the witness is the identity's own evidence and is pro
     // A real directory, because the stamp reaches the filesystem with no seam in front
     // of it and an unstattable stand-in would leave `Watchable()` false -- which is
     // exactly the state a witness that recorded nothing would also be in.
-    FastCache::Testing::ScratchDirectory tree { "fc-node-witness" };
+    Pace::Testing::ScratchDirectory tree { "fc-node-witness" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("clang", "#!/bin/sh\n");
     auto const compiler = (tree / "clang").string();
@@ -1003,7 +1003,7 @@ TEST_CASE("NodeToolchains: never probed and probed-but-unstampable stay two stat
     // Nothing today branches on the difference, which is why nothing noticed. This
     // pins it anyway: restoring a distinction after something starts depending on it
     // is a schema change, and keeping it costs an `optional`.
-    FastCache::Testing::ScratchDirectory tree { "fc-node-two-states" };
+    Pace::Testing::ScratchDirectory tree { "fc-node-two-states" };
     tree.Write("inc/a.hpp", "content");
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
@@ -1122,7 +1122,7 @@ TEST_CASE("NodeToolchains: a toolchain patched under a running node is noticed",
     // pre-upgrade digest while spawning the post-upgrade compiler. Clients receive
     // objects built by a compiler they did not key against and store them in the
     // shared cache under the old key, where the whole fleet reads them.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-node-stale" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-node-stale" };
     auto const compiler = scratch.Path() / "cc";
     auto const headers = scratch.Path() / "include";
     std::filesystem::create_directories(headers);
@@ -1315,7 +1315,7 @@ TEST_CASE("NodeToolchains: a node serving nothing can still find a compiler agai
 
 TEST_CASE("ClaimsReloadedBetween: the reload-to-resurvey join, which main.cpp cannot assert", "[node][toolchains]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
     // #587. Both decisions either side of this were tested and the step CONNECTING
     // them was verified only by reading, because it was an expression in a file that
@@ -1412,7 +1412,7 @@ TEST_CASE("ClaimsReloadedBetween: the reload-to-resurvey join, which main.cpp ca
 
 TEST_CASE("SurveyVoiceFor: only the timer sweep whispers", "[node][toolchains]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
     // The case #993 is about: the unconditional sweep comes round on a timer and
     // finds the same compilers it found a quarter of an hour ago. It is the ONLY
@@ -1433,10 +1433,10 @@ TEST_CASE("SurveyVoiceFor: only the timer sweep whispers", "[node][toolchains]")
 
 TEST_CASE("NarrationLevel: quieting a survey must not quieten what it found", "[node][toolchains]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
-    CHECK(NarrationLevel(SurveyVoice::Announce) == FastCache::LogLevel::Info);
-    CHECK(NarrationLevel(SurveyVoice::Routine) == FastCache::LogLevel::Debug);
+    CHECK(NarrationLevel(SurveyVoice::Announce) == Pace::LogLevel::Info);
+    CHECK(NarrationLevel(SurveyVoice::Routine) == Pace::LogLevel::Debug);
 
     // The distinction this rests on: `Routine` lowers the NARRATION only. A toolchain
     // that changed, one no longer served, and a survey abandoned because the node is
@@ -1444,7 +1444,7 @@ TEST_CASE("NarrationLevel: quieting a survey must not quieten what it found", "[
     // level off those sites, so this asserts the property that makes it checkable --
     // Routine is strictly quieter than Announce, and never silent.
     CHECK(NarrationLevel(SurveyVoice::Routine) < NarrationLevel(SurveyVoice::Announce));
-    CHECK(NarrationLevel(SurveyVoice::Routine) >= FastCache::LogLevel::Debug);
+    CHECK(NarrationLevel(SurveyVoice::Routine) >= Pace::LogLevel::Debug);
 }
 
 TEST_CASE("NodeToolchains: an empty survey says WHICH of the two empties it is", "[node][toolchains]")

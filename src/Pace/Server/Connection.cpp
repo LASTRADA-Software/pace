@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Protocol/CompileCacheHandler.hpp>
+#include <Pace/Protocol/MemcachedBinary.hpp>
+#include <Pace/Protocol/MemcachedText.hpp>
+#include <Pace/Protocol/ProtocolAutodetect.hpp>
+#include <Pace/Protocol/RedisResp.hpp>
+#include <Pace/Server/Connection.hpp>
+
+#include <format>
+#include <memory>
+#include <string>
+#include <utility>
+
+namespace Pace
+{
+
+Connection::Connection(std::unique_ptr<core::net::ISocket> socket, ConnectionHoldings held) noexcept:
+    _socket { std::move(socket) },
+    _held { held }
+{
+}
+
+core::async::Task<void> Connection::Run()
+{
+    // Decorate this connection's logger with the client source (its IP) when
+    // --log-source is on. SourceLogger forwards unchanged for an empty source,
+    // so a connection with no known peer (or with the flag off) is unaffected.
+    // `sourceTag` lives in this coroutine frame and outlives every co_await, so
+    // both the decorator and the storage-tag view below can reference it.
+    auto sourceTag = std::string {};
+    if (_held.logSource == LogSource::Yes)
+    {
+        if (auto const peer = _socket->peerAddress(); !peer.empty())
+            sourceTag = std::format("[{}]", peer);
+    }
+    SourceLogger log { _held.logger, sourceTag };
+
+    // Wire the session collaborators for trace logging:
+    //  - `logger`   : connection-level lines (accept line, non-data commands).
+    //  - `sourceTag`: published to Detail::storageSourceTag by handlers so the
+    //                 TracingStorage `storage:` line carries the same client IP.
+    // Data operations are logged once, on the storage line — not here.
+    _held.session.logger = &log;
+    _held.session.sourceTag = sourceTag;
+
+    // Drive any transport handshake (TLS) before reading application bytes.
+    // No-op for plaintext sockets; runs on this per-connection coroutine so a
+    // slow or stalled handshake never blocks the accept loop.
+    if (auto const handshake = co_await _socket->handshakeIfNeeded(); !handshake.has_value())
+    {
+        log.Logf(LogLevel::Debug, "Connection: handshake failed: {}", handshake.error().toString());
+        _socket->close();
+        co_return;
+    }
+
+    auto detect = co_await DetectProtocol(_socket.get());
+    if (!detect.has_value())
+    {
+        log.Logf(LogLevel::Debug, "Connection: autodetect failed: {}", detect.error().toString());
+        _socket->close();
+        co_return;
+    }
+
+    // One Trace line per accepted connection, recording the negotiated
+    // protocol. Gated on --log-everything so the default trace output is just
+    // the per-operation storage lines; with --log-source it carries the IP.
+    if (_held.session.logEverything)
+        log.Logf(LogLevel::Trace, "connection accepted ({})", ToStringView(detect->flavor));
+
+    switch (detect->flavor)
+    {
+        case ProtocolFlavor::MemcachedText: {
+            MemcachedTextHandler handler;
+            co_await handler.Run(_socket.get(), &_held.engine, std::move(detect->primer), _held.session);
+            break;
+        }
+        case ProtocolFlavor::MemcachedBinary: {
+            MemcachedBinaryHandler handler;
+            co_await handler.Run(_socket.get(), &_held.engine, std::move(detect->primer), _held.session);
+            break;
+        }
+        case ProtocolFlavor::RedisResp: {
+            RedisRespHandler handler;
+            co_await handler.Run(_socket.get(), &_held.engine, std::move(detect->primer), _held.session);
+            break;
+        }
+        case ProtocolFlavor::CompileCache: {
+            CompileCacheHandler handler;
+            co_await handler.Run(_socket.get(), &_held.engine, std::move(detect->primer), _held.session);
+            break;
+        }
+        case ProtocolFlavor::Unknown:
+            log.Log(LogLevel::Warn, "Connection: unknown protocol; closing");
+            break;
+    }
+
+    // Not a bare `Close()`: a handler that refused a request it had not finished reading
+    // returns with the rest of it unread, and closing then resets the connection and
+    // destroys the refusal before a Windows client reads it (#1554).
+    (void) co_await CloseLingering(_socket.get(), _held.session.reactor, Linger);
+    co_return;
+}
+
+} // namespace Pace

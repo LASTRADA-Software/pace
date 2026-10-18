@@ -1,6 +1,6 @@
 # Platform integration, service registration and configuration
 
-Rules for `src/FastCache/Platform/` and `src/FastCache/Config/`, plus the CLI
+Rules for `src/Pace/Platform/` and `src/Pace/Config/`, plus the CLI
 option tables both binaries drive their parsing and help from.
 
 Read this before touching `ServiceControl`, `IDaemonHost`, `DefaultConfigPath`,
@@ -802,7 +802,7 @@ readable and silently ignored. Every rule below has already been one of them.
   not start (ci-fix2). **And a failed step leaves nothing behind from the steps before it**, because
   Windows Installer undoes no custom action: each registration and each remember write has a
   ROLLBACK twin scheduled just before it -- a registration the transaction created is removed, one
-  it re-applied is registered again from the values it found remembered (`FastCache*Before`, read by
+  it re-applied is registered again from the values it found remembered (`Pace*Before`, read by
   searches of their own, since AppSearch leaves a stated property alone where it finds nothing), and
   each value is written back or deleted as found. Without the twins, remembering after registering
   was R-B's defect: a failed write rolled the files back under services it had registered. The node's
@@ -1443,7 +1443,7 @@ readable and silently ignored. Every rule below has already been one of them.
   or documented but rejected. `CliOptions()` is now the single source of truth,
   and the help column is *derived* from `primary`/`alias`/`operand` rather than
   restated. Rendering lives in `Cli/UsageDoc`, which must stay dependency-free:
-  `fastcache-cc` compiles it in rather than linking `FastCache`, so an include
+  `fastcache-cc` compiles it in rather than linking `Pace`, so an include
   of anything from `Config/` there breaks the launcher's link, not just its
   build. Two remaining hand-written spellings are guarded by tests rather than
   generated: `BuildServiceArgv` (a `ServiceControl_test` case walks

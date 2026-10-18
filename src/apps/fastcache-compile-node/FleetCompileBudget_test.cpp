@@ -6,13 +6,13 @@
 #include "SchedulerLink.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,7 +31,7 @@
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {
@@ -98,7 +98,7 @@ TEST_CASE("A worker whose compiles hold its byte budget is refused at the schedu
     fleet.AddWorkerAddress(std::string { Laptop },
                            Testing::FleetHarness::CompiledReply(Ask({}), std::string { LaptopMachine }));
 
-    auto const cfg = FastCache::Testing::LearnerRegisteringWith(Node::NodeConfig {}, { std::string { Sched } });
+    auto const cfg = Pace::Testing::LearnerRegisteringWith(Node::NodeConfig {}, { std::string { Sched } });
     AtomicMetricsSink workerMetrics;
     NullLogger logger;
     Node::AnnounceTesting::SilentLoadSampler loadSampler;

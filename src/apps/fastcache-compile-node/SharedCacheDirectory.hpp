@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/SharedCacheTarget.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/SharedCacheTarget.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <mutex>
 #include <string>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Where this node reads the fleet's shared cache from, as of the last state it applied.
@@ -94,4 +94,4 @@ void ApplySharedCacheState(Cluster::ClusterState const& state,
                            SharedCacheHost* host,
                            ICacheUpstream* upstream);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

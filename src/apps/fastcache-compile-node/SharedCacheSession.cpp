@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "SharedCacheSession.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <cstddef>
 #include <format>
@@ -11,7 +11,7 @@
 #include <EndpointDial.hpp>
 #include <core/net/SocketDeadline.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -280,4 +280,4 @@ void SharedSessionPool::Give(Cluster::ResolvedSharedCache const& target, std::un
     _idle.push_back(std::make_unique<Idle>(target, std::move(session), _clock.now(), _home.Loop()));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

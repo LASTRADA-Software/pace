@@ -6,9 +6,9 @@
 #include "CliValue.hpp"
 #include "RespClient.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/TicketChoice.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file NodeClient.hpp
@@ -341,4 +341,4 @@ class IEndpointIdentity
 /// @return The reply, or why it is not one.
 [[nodiscard]] std::expected<NodeReply, ExchangeError> DecodeNodeReply(std::span<std::byte const> bytes);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

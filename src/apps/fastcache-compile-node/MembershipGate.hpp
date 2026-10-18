@@ -3,17 +3,17 @@
 
 #include "PeerIdentity.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/LiveWatcher.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/LiveWatcher.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <cstddef>
 #include <optional>
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file MembershipGate.hpp
@@ -142,4 +142,4 @@ inline constexpr std::string_view KeyForgottenWhy =
 // policy that reads as available and describes nothing, which is how a table stops
 // describing the file it is about.
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

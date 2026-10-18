@@ -16,7 +16,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The four bounds a `RemoteUpstream` works to, named where it is built.
@@ -282,4 +282,4 @@ class RemoteUpstream final: public ICacheUpstream
     UpstreamReachability _reachability;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

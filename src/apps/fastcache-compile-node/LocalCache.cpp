@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "LocalCache.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Errors/StorageError.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Errors/StorageError.hpp>
 
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -194,4 +194,4 @@ CacheDropOutcome LocalCache::Drop(std::string_view key)
     return removed.error().code == StorageErrorCode::KeyNotFound ? CacheDropOutcome::Absent : CacheDropOutcome::Failed;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

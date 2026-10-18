@@ -2,8 +2,8 @@
 #include "DashboardLoop.hpp"
 #include "TerminalEventStream.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Utf8.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Utf8.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -36,9 +36,9 @@
 #include <tests/BoundedWait.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Cli;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -183,7 +183,7 @@ template <std::predicate Condition>
 void DrainUntil(core::net::testing::TestLoop& reactor, Condition done, char const* what)
 {
     // Out of the REQUIRE: its macro spells the expression twice, so a move inside it reads as a use after move.
-    auto const reached = FastCache::Testing::DrainUntil(
+    auto const reached = Pace::Testing::DrainUntil(
         reactor,
         what,
         std::move(done),

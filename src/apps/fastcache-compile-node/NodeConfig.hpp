@@ -4,20 +4,20 @@
 #include "NodeDefaults.hpp"
 #include "NodeFormation.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cli/UsageDoc.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Config/SecretProvenance.hpp>
-#include <FastCache/Config/YamlReader.hpp>
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/HostMemory.hpp>
-#include <FastCache/Platform/ServiceControl.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Config/SecretProvenance.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/HostMemory.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Everything this worker was told to be.
@@ -2195,4 +2195,4 @@ using NodePublicPathFlag = PublicPathFlag;
 /// @return The complete help text.
 [[nodiscard]] std::string HelpText(UsageColor color);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

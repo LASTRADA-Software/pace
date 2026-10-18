@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
 
 #include <cstdint>
 #include <format>
@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file CounterMovement.hpp
@@ -65,4 +65,4 @@ using CounterReadings = std::map<std::string_view, std::uint64_t>;
     return moved;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

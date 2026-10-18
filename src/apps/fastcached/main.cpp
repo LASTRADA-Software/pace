@@ -9,48 +9,48 @@
 // SIGINT/SIGTERM and SCM stop trigger graceful shutdown;
 // SIGHUP and SCM PARAMCHANGE trigger config reload.
 
-#include <FastCache/Auth/AuthPolicy.hpp>
-#include <FastCache/Cache/CacheEngine.hpp>
-#include <FastCache/Cache/CowTreeStorage.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cache/LayeredStorage.hpp>
-#include <FastCache/Cache/NotifyingStorage.hpp>
-#include <FastCache/Cache/ReclaimLog.hpp>
-#include <FastCache/Cache/ShardedStorage.hpp>
-#include <FastCache/Cache/TracingStorage.hpp>
-#include <FastCache/Cache/WriteErrorReportingStorage.hpp>
-#include <FastCache/Config/ByteSize.hpp>
-#include <FastCache/Config/CliParser.hpp>
-#include <FastCache/Config/Config.hpp>
-#include <FastCache/Config/ConfigMerge.hpp>
-#include <FastCache/Config/ConfigReloader.hpp>
-#include <FastCache/Config/DefaultConfigPath.hpp>
-#include <FastCache/Config/SecretExposureWatcher.hpp>
-#include <FastCache/Config/YamlReader.hpp>
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/PathKind.hpp>
-#include <FastCache/Core/Version.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/DaemonControls.hpp>
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/Firewall.hpp>
-#include <FastCache/Platform/IDaemonHost.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
-#include <FastCache/Platform/ServiceControl.hpp>
-#include <FastCache/Platform/Terminal.hpp>
-#include <FastCache/Platform/WindowsEventLogger.hpp>
-#include <FastCache/Protocol/KeyspaceNotifier.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Protocol/PubSubRegistry.hpp>
-#include <FastCache/Protocol/RedisMutationObserver.hpp>
-#include <FastCache/Protocol/RedisTransaction.hpp>
-#include <FastCache/Protocol/StreamWaiterRegistry.hpp>
-#include <FastCache/Server/AdminHttpServer.hpp>
-#include <FastCache/Server/DaemonStartupGate.hpp>
-#include <FastCache/Server/ReactorServerLoop.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Auth/AuthPolicy.hpp>
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Cache/CowTreeStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/LayeredStorage.hpp>
+#include <Pace/Cache/NotifyingStorage.hpp>
+#include <Pace/Cache/ReclaimLog.hpp>
+#include <Pace/Cache/ShardedStorage.hpp>
+#include <Pace/Cache/TracingStorage.hpp>
+#include <Pace/Cache/WriteErrorReportingStorage.hpp>
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Config/CliParser.hpp>
+#include <Pace/Config/Config.hpp>
+#include <Pace/Config/ConfigMerge.hpp>
+#include <Pace/Config/ConfigReloader.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Config/SecretExposureWatcher.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/PathKind.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/DaemonControls.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/Firewall.hpp>
+#include <Pace/Platform/IDaemonHost.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
+#include <Pace/Platform/Terminal.hpp>
+#include <Pace/Platform/WindowsEventLogger.hpp>
+#include <Pace/Protocol/KeyspaceNotifier.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Protocol/PubSubRegistry.hpp>
+#include <Pace/Protocol/RedisMutationObserver.hpp>
+#include <Pace/Protocol/RedisTransaction.hpp>
+#include <Pace/Protocol/StreamWaiterRegistry.hpp>
+#include <Pace/Server/AdminHttpServer.hpp>
+#include <Pace/Server/DaemonStartupGate.hpp>
+#include <Pace/Server/ReactorServerLoop.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <core/Profiling.hpp>
 #include <core/async/SyncRun.hpp>
@@ -85,25 +85,25 @@
 namespace
 {
 
-constexpr std::string_view ProgramVersion = FastCache::VersionString;
+constexpr std::string_view ProgramVersion = Pace::VersionString;
 
 /// Read the metrics port from the FASTCACHED_METRICS_PORT environment variable.
 /// This lets a container's daemon CMD and its separate `--healthcheck` probe
 /// agree on a custom port via a single `-e FASTCACHED_METRICS_PORT=...`, without
 /// the static image HEALTHCHECK having to learn the daemon's runtime args.
 ///
-/// Reuses the CLI's `FastCache::ParsePort`, so the environment fallback accepts
+/// Reuses the CLI's `Pace::ParsePort`, so the environment fallback accepts
 /// exactly the same syntax and range as the `--metrics-port` flag.
 /// @return The parsed port, or nullopt when unset/empty/invalid.
 [[nodiscard]] std::optional<std::uint16_t> MetricsPortFromEnv()
 {
-    auto const raw = FastCache::ReadEnvironmentVariable("FASTCACHED_METRICS_PORT");
+    auto const raw = Pace::ReadEnvironmentVariable("FASTCACHED_METRICS_PORT");
     if (!raw.has_value())
         return std::nullopt;
 
     // ParsePort already rejects the empty string, so an unset and a blank
     // variable land in the same place without a second emptiness rule here.
-    auto const parsed = FastCache::ParsePort(*raw);
+    auto const parsed = Pace::ParsePort(*raw);
     if (!parsed.has_value())
         return std::nullopt;
     return *parsed;
@@ -131,26 +131,26 @@ constexpr std::string_view ProgramVersion = FastCache::VersionString;
 /// @param stage The step that refused, whose row says which code a supervisor reads.
 /// @param reason Why this process will not start.
 /// @return What the outcome's reader is answered: a start's @p stage code, or another reader's ending.
-[[nodiscard]] int RefuseUnderService(FastCache::CliResult const& commandLine,
-                                     FastCache::StartStage stage,
+[[nodiscard]] int RefuseUnderService(Pace::CliResult const& commandLine,
+                                     Pace::StartStage stage,
                                      std::string_view reason)
 {
     std::println(std::cerr, "fastcached: {}", reason);
-    if (auto const reader = FastCache::ExitReaderOf(commandLine.outcome); reader != FastCache::ExitReader::Supervisor)
-        return FastCache::RefusalExitCode(reader, stage);
+    if (auto const reader = Pace::ExitReaderOf(commandLine.outcome); reader != Pace::ExitReader::Supervisor)
+        return Pace::RefusalExitCode(reader, stage);
     auto const& config = commandLine.config;
-    auto const code = FastCache::ExitCodeFor(stage);
+    auto const code = Pace::ExitCodeFor(stage);
     auto const host =
         config.daemon
-            ? FastCache::MakeWindowsServiceHost(
-                  config.serviceName, FastCache::ServiceHostOptions { .stop = FastCache::StopPendingPlanFor(std::nullopt) })
+            ? Pace::MakeWindowsServiceHost(
+                  config.serviceName, Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt) })
             : nullptr;
     if (host == nullptr)
         return code;
-    auto const eventLogger = FastCache::MakeWindowsEventLogger(config.serviceName, config.logLevel);
+    auto const eventLogger = Pace::MakeWindowsEventLogger(config.serviceName, config.logLevel);
     if (eventLogger == nullptr)
         return host->Refuse(code);
-    return FastCache::RefuseStart(*host, *eventLogger, reason, code);
+    return Pace::RefuseStart(*host, *eventLogger, reason, code);
 }
 
 /// Install `templatePath` at the machine-wide config location, unless a config
@@ -161,33 +161,33 @@ constexpr std::string_view ProgramVersion = FastCache::VersionString;
 ///         template it could not use and failed for a file it began writing.
 [[nodiscard]] int SeedDefaultConfig(std::string const& templatePath)
 {
-    FastCache::SystemConfigPathProbe const probe;
-    auto const destination = FastCache::SystemConfigPath(probe, FastCache::DaemonApplicationName);
+    Pace::SystemConfigPathProbe const probe;
+    auto const destination = Pace::SystemConfigPath(probe, Pace::DaemonApplicationName);
     auto const seeded = destination.and_then([&](auto const& dest) {
-        return FastCache::SeedConfigFile(templatePath, dest, FastCache::DirectoryPolicy::AdministratorsOnly);
+        return Pace::SeedConfigFile(templatePath, dest, Pace::DirectoryPolicy::AdministratorsOnly);
     });
     if (!seeded.has_value())
     {
         std::println(std::cerr, "fastcached: {}", seeded.error().ToString());
-        return FastCache::CommandExitCode(FastCache::EndingOf(seeded.error().code));
+        return Pace::CommandExitCode(Pace::EndingOf(seeded.error().code));
     }
 
     // The sentence lives beside `SeedConfigFile`, not here: the WORKER seeds too
     // (#397), and two copies of a three-row table is two chances to describe the
     // repaired-permissions outcome as though nothing happened.
-    std::println("fastcached: {}", FastCache::SeedOutcomeSentence(*seeded, *destination));
-    return FastCache::CommandExitCode(FastCache::CommandEnding::Completed);
+    std::println("fastcached: {}", Pace::SeedOutcomeSentence(*seeded, *destination));
+    return Pace::CommandExitCode(Pace::CommandEnding::Completed);
 }
 
 extern "C" void HandleStopSignal(int /*signum*/)
 {
-    FastCache::DaemonControls::Instance().RequestStop();
+    Pace::DaemonControls::Instance().RequestStop();
 }
 
 #if !defined(_WIN32)
 extern "C" void HandleReloadSignal(int /*signum*/)
 {
-    FastCache::DaemonControls::Instance().RequestReload();
+    Pace::DaemonControls::Instance().RequestReload();
 }
 #endif
 
@@ -216,7 +216,7 @@ void InstallStopHandlers()
 /// - Auto (0) for in-memory: fan out (`AutoShardCount`).
 /// - Auto (0) for persistent: fan out **by default** so disk writes
 ///   parallelise, EXCEPT for paths that name a single file
-///   (`FastCache::PathNamesAFile`), which stay single-file for backward
+///   (`Pace::PathNamesAFile`), which stay single-file for backward
 ///   compatibility — the path is used as one file, never `mkdir`-ed over. The
 ///   install-time handover asks the same predicate before it creates anything, so
 ///   what the first start opens and what `--install-service` may create at that
@@ -229,19 +229,19 @@ void InstallStopHandlers()
         return requested;
     if (!usingPersistent)
         return AutoShardCount();
-    return FastCache::PathNamesAFile(storagePath) ? 1 : AutoShardCount();
+    return Pace::PathNamesAFile(storagePath) ? 1 : AutoShardCount();
 }
 
 /// Translate the user-facing StorageDurability into the page-store enum.
-CowTree::FilePageStore::Durability ToPageStoreDurability(FastCache::StorageDurability d) noexcept
+CowTree::FilePageStore::Durability ToPageStoreDurability(Pace::StorageDurability d) noexcept
 {
     switch (d)
     {
-        case FastCache::StorageDurability::Fsync:
+        case Pace::StorageDurability::Fsync:
             return CowTree::FilePageStore::Durability::Fsync;
-        case FastCache::StorageDurability::Batched:
+        case Pace::StorageDurability::Batched:
             return CowTree::FilePageStore::Durability::Batched;
-        case FastCache::StorageDurability::None:
+        case Pace::StorageDurability::None:
             return CowTree::FilePageStore::Durability::None;
     }
     return CowTree::FilePageStore::Durability::Batched;
@@ -250,9 +250,9 @@ CowTree::FilePageStore::Durability ToPageStoreDurability(FastCache::StorageDurab
 /// Translate the config-layer LRU recency policy into the cache backend's enum.
 /// @param r Config recency policy.
 /// @return The corresponding InMemoryLruStorage mode.
-[[nodiscard]] FastCache::LruMode ToLruMode(FastCache::LruRecency r) noexcept
+[[nodiscard]] Pace::LruMode ToLruMode(Pace::LruRecency r) noexcept
 {
-    return r == FastCache::LruRecency::Strict ? FastCache::LruMode::Strict : FastCache::LruMode::Approximate;
+    return r == Pace::LruRecency::Strict ? Pace::LruMode::Strict : Pace::LruMode::Approximate;
 }
 
 /// Build an L1 tier with the configured byte budget and in-memory codec.
@@ -262,9 +262,9 @@ CowTree::FilePageStore::Durability ToPageStoreDurability(FastCache::StorageDurab
 /// @param effective  Merged configuration.
 /// @param maxBytes   Byte budget for this instance (per-shard where sharded).
 /// @return The configured storage.
-[[nodiscard]] std::unique_ptr<FastCache::InMemoryLruStorage> MakeL1(FastCache::Config const& effective, std::size_t maxBytes)
+[[nodiscard]] std::unique_ptr<Pace::InMemoryLruStorage> MakeL1(Pace::Config const& effective, std::size_t maxBytes)
 {
-    auto l1 = std::make_unique<FastCache::InMemoryLruStorage>(
+    auto l1 = std::make_unique<Pace::InMemoryLruStorage>(
         maxBytes, effective.storageMaxValueBytes, ToLruMode(effective.lruRecency));
     // The EFFECTIVE codec, never the configured one. `ParseCompressionCodec` refuses
     // a codec an operator NAMES, so the one route past it is a DEFAULT -- which
@@ -272,7 +272,7 @@ CowTree::FilePageStore::Durability ToPageStoreDurability(FastCache::StorageDurab
     // `FASTCACHED_ENABLE_COMPRESSION` this tier stores plaintext regardless, and
     // resolving here is what lets the banner report that rather than repeat the
     // configuration back.
-    l1->SetCompression({ .codec = FastCache::Compression::EffectiveCodec(effective.memoryCompression),
+    l1->SetCompression({ .codec = Pace::Compression::EffectiveCodec(effective.memoryCompression),
                          .level = effective.memoryCompressionLevel,
                          .minBytes = effective.memoryCompressionMinBytes });
     return l1;
@@ -283,7 +283,7 @@ CowTree::FilePageStore::Durability ToPageStoreDurability(FastCache::StorageDurab
 /// are needed.
 struct StorageBackendBundle
 {
-    std::unique_ptr<FastCache::IStorage> backend;
+    std::unique_ptr<Pace::IStorage> backend;
 };
 
 /// Advice to append to a storage failure when this process cannot write there.
@@ -320,7 +320,7 @@ struct StorageBackendBundle
 ///        what the SCM derives its virtual account from (`Config{}.serviceName`
 ///        would name the wrong account for an install made with `--service-name`).
 /// @return A sentence naming the remedy, or an empty string.
-[[nodiscard]] std::string StorageAccessHint([[maybe_unused]] FastCache::Config const& effective)
+[[nodiscard]] std::string StorageAccessHint([[maybe_unused]] Pace::Config const& effective)
 {
 #if defined(_WIN32)
     if (!effective.daemon)
@@ -402,10 +402,10 @@ struct StorageBackendBundle
 /// @return The sentence to fail with.
 [[nodiscard]] std::string StorageOpenFailure(std::string_view what,
                                              std::string_view path,
-                                             FastCache::Config const& effective,
-                                             FastCache::StorageError const& error)
+                                             Pace::Config const& effective,
+                                             Pace::StorageError const& error)
 {
-    auto const remedy = error.code == FastCache::StorageErrorCode::InUse
+    auto const remedy = error.code == Pace::StorageErrorCode::InUse
                             ? std::string { "\nAnother process already has this store open. A storage path belongs "
                                             "to one daemon: stop the other one, or give this daemon a path of its own." }
                             : StorageAccessHint(effective);
@@ -426,14 +426,14 @@ struct StorageBackendBundle
 /// @param perShardDiskBytes On-disk budget for this shard's L2; 0 is unbounded.
 /// @param logger            Where an unenforceable exclusive claim is reported.
 /// @return The layered shard, or why its store would not open.
-[[nodiscard]] std::expected<std::unique_ptr<FastCache::LayeredStorage>, FastCache::StorageError> BuildLayeredShard(
+[[nodiscard]] std::expected<std::unique_ptr<Pace::LayeredStorage>, Pace::StorageError> BuildLayeredShard(
     std::filesystem::path const& path,
-    FastCache::Config const& effective,
+    Pace::Config const& effective,
     std::size_t perShardBytes,
     std::size_t perShardDiskBytes,
-    FastCache::ILogger& logger)
+    Pace::ILogger& logger)
 {
-    FastCache::CowTreeStorage::Options opts;
+    Pace::CowTreeStorage::Options opts;
     opts.path = path;
     // L2 disk budget: 0 = unbounded (grows as needed); non-zero caps the
     // on-disk tier and makes the CoW tree evict its LRU tail to fit. L1 holds
@@ -445,10 +445,10 @@ struct StorageBackendBundle
     // falls back to storing verbatim for a codec this build lacks, so an
     // unresolved `opts.compression` goes on claiming a codec to everything that
     // reads it back.
-    opts.compression = FastCache::Compression::EffectiveCodec(effective.compression);
+    opts.compression = Pace::Compression::EffectiveCodec(effective.compression);
     opts.compressionLevel = effective.compressionLevel;
     opts.compressionMinBytes = effective.compressionMinBytes;
-    auto opened = FastCache::CowTreeStorage::Open(opts);
+    auto opened = Pace::CowTreeStorage::Open(opts);
     if (!opened.has_value())
         return std::unexpected(opened.error());
 
@@ -456,11 +456,11 @@ struct StorageBackendBundle
     // loud rather than assumed: a guard that silently does nothing reads
     // exactly like one that works.
     if ((*opened)->StoreLockState() == CowTree::FilePageStore::LockState::Unavailable)
-        logger.Logf(FastCache::LogLevel::Warn,
+        logger.Logf(Pace::LogLevel::Warn,
                     "{} is on a filesystem that cannot lock; nothing stops a second daemon opening it",
                     path.string());
     auto l1 = MakeL1(effective, perShardBytes);
-    return std::make_unique<FastCache::LayeredStorage>(std::move(l1), std::move(*opened));
+    return std::make_unique<Pace::LayeredStorage>(std::move(l1), std::move(*opened));
 }
 
 /// The store files a persistent configuration names, in shard order.
@@ -492,15 +492,15 @@ struct StorageBackendBundle
 /// Construct the multi-shard inner storages for a ShardedStorage
 /// wrapper. Handles three shapes: in-memory fan-out, single-file
 /// persistent, and multi-file persistent (directory of shard-NN.cow).
-[[nodiscard]] std::expected<std::vector<std::unique_ptr<FastCache::IStorage>>, std::string> BuildShardedInners(
-    FastCache::Config const& effective,
+[[nodiscard]] std::expected<std::vector<std::unique_ptr<Pace::IStorage>>, std::string> BuildShardedInners(
+    Pace::Config const& effective,
     bool usingPersistent,
     std::size_t physicalShards,
     std::size_t perShardBytes,
     std::size_t perShardDiskBytes,
-    FastCache::ILogger& logger)
+    Pace::ILogger& logger)
 {
-    std::vector<std::unique_ptr<FastCache::IStorage>> inners;
+    std::vector<std::unique_ptr<Pace::IStorage>> inners;
     inners.reserve(physicalShards);
 
     if (!usingPersistent)
@@ -552,11 +552,11 @@ struct StorageBackendBundle
 ///   - Threaded execution: always wrap in ShardedStorage (even at
 ///     shards==1) so workers serialise via the per-shard mutex.
 ///   - Reactor execution: single-shard backends run unwrapped.
-[[nodiscard]] std::expected<StorageBackendBundle, std::string> BuildStorageBackend(FastCache::Config const& effective,
+[[nodiscard]] std::expected<StorageBackendBundle, std::string> BuildStorageBackend(Pace::Config const& effective,
                                                                                    bool usingPersistent,
                                                                                    bool useShardingWrapper,
                                                                                    std::size_t physicalShards,
-                                                                                   FastCache::ILogger& logger)
+                                                                                   Pace::ILogger& logger)
 {
     auto const perShardBytes = physicalShards > 0 ? effective.maxMemoryBytes / physicalShards : effective.maxMemoryBytes;
     // Split the on-disk budget the same way as the RAM budget. 0 stays 0
@@ -571,7 +571,7 @@ struct StorageBackendBundle
             BuildShardedInners(effective, usingPersistent, physicalShards, perShardBytes, perShardDiskBytes, logger);
         if (!inners.has_value())
             return std::unexpected(std::move(inners.error()));
-        bundle.backend = std::make_unique<FastCache::ShardedStorage>(std::move(*inners));
+        bundle.backend = std::make_unique<Pace::ShardedStorage>(std::move(*inners));
         return bundle;
     }
 
@@ -599,7 +599,7 @@ struct StorageBackendBundle
 /// @param storagePath The configured `--storage` path.
 /// @return The store files, or why there are none to convert: transient for a path that is not
 ///         there or a directory that could not be listed, a decision for one that holds no store.
-[[nodiscard]] std::expected<std::vector<std::filesystem::path>, FastCache::UnfinishedCommand> ExistingStorePaths(
+[[nodiscard]] std::expected<std::vector<std::filesystem::path>, Pace::UnfinishedCommand> ExistingStorePaths(
     std::string const& storagePath)
 {
     std::filesystem::path const configured { storagePath };
@@ -608,8 +608,8 @@ struct StorageBackendBundle
     if (std::filesystem::is_regular_file(configured, ec))
         return std::vector<std::filesystem::path> { configured };
     if (!std::filesystem::is_directory(configured, ec))
-        return std::unexpected(FastCache::UnfinishedCommand {
-            .ending = FastCache::CommandEnding::Failed,
+        return std::unexpected(Pace::UnfinishedCommand {
+            .ending = Pace::CommandEnding::Failed,
             .reason = std::format("no store at '{}': it is neither a store file nor a directory of shards",
                                   configured.string()) });
 
@@ -627,12 +627,12 @@ struct StorageBackendBundle
             shards.push_back(entry->path());
     }
     if (ec)
-        return std::unexpected(FastCache::UnfinishedCommand {
-            .ending = FastCache::CommandEnding::Failed,
+        return std::unexpected(Pace::UnfinishedCommand {
+            .ending = Pace::CommandEnding::Failed,
             .reason = std::format("cannot list '{}': {}", configured.string(), ec.message()) });
     if (shards.empty())
         return std::unexpected(
-            FastCache::UnfinishedCommand { .ending = FastCache::CommandEnding::Declined,
+            Pace::UnfinishedCommand { .ending = Pace::CommandEnding::Declined,
                                            .reason = std::format("no shard-NN.cow files under '{}'", configured.string()) });
 
     // Sorted so the report reads in shard order rather than in whatever order
@@ -658,14 +658,14 @@ struct StorageBackendBundle
 /// and so does a configuration with nothing to convert.
 /// @param effective The merged configuration.
 /// @return Process exit code.
-[[nodiscard]] int MigrateConfiguredStorage(FastCache::Config const& effective)
+[[nodiscard]] int MigrateConfiguredStorage(Pace::Config const& effective)
 {
     if (effective.storagePath.empty())
     {
         std::println(std::cerr,
                      "fastcached: --migrate-storage needs --storage: there is no on-disk store to convert "
                      "in a memory-only configuration");
-        return FastCache::CommandExitCode(FastCache::CommandEnding::Declined);
+        return Pace::CommandExitCode(Pace::CommandEnding::Declined);
     }
 
     // What is ON DISK, not what the shard formula predicts. With no explicit
@@ -680,28 +680,28 @@ struct StorageBackendBundle
     if (!paths.has_value())
     {
         std::println(std::cerr, "fastcached: {}", paths.error().reason);
-        return FastCache::CommandExitCode(paths.error().ending);
+        return Pace::CommandExitCode(paths.error().ending);
     }
 
     // Ordered by severity, so the run's ending is the largest a shard came to.
-    auto ending = FastCache::CommandEnding::Completed;
+    auto ending = Pace::CommandEnding::Completed;
     for (auto const& path: *paths)
     {
-        FastCache::CowTreeStorage::Options opts;
+        Pace::CowTreeStorage::Options opts;
         opts.path = path;
         opts.maxValueBytes = effective.storageMaxValueBytes;
 
-        auto const report = FastCache::CowTreeStorage::Migrate(opts);
-        auto const line = FastCache::DescribeMigration(path, report);
+        auto const report = Pace::CowTreeStorage::Migrate(opts);
+        auto const line = Pace::DescribeMigration(path, report);
         if (!report.has_value())
         {
             std::println(std::cerr, "fastcached: {}", line);
-            ending = std::max(ending, FastCache::UnfinishedEnding(report.error().Transient()));
+            ending = std::max(ending, Pace::UnfinishedEnding(report.error().Transient()));
             continue;
         }
         std::println("fastcached: {}", line);
     }
-    return FastCache::CommandExitCode(ending);
+    return Pace::CommandExitCode(ending);
 }
 
 /// Daemon body: holds the actual server lifecycle. Runs under whatever
@@ -715,23 +715,23 @@ struct StorageBackendBundle
 ///        the candidate the same way (#622).
 /// @param commandLine The command line ALONE, parsed: what the operator typed, as
 ///        opposed to what the assembly says was named anywhere.
-int DaemonBody(FastCache::Config const& effective,
-               std::span<FastCache::RejectedCandidate const> rejected,
-               FastCache::ConfigSources const& sources,
-               FastCache::CliResult const& commandLine)
+int DaemonBody(Pace::Config const& effective,
+               std::span<Pace::RejectedCandidate const> rejected,
+               Pace::ConfigSources const& sources,
+               Pace::CliResult const& commandLine)
 {
     // A service gets the event log, everything else gets stderr. The factory answers
     // nullptr wherever there is no event log, which is how this stays one expression
     // rather than a platform branch — and `effective.daemon` rather than "am I on
     // Windows", so a foreground run keeps its terminal output on a machine that has
     // one (#179).
-    FastCache::ConsoleLogger consoleLogger {
-        std::cerr, effective.logLevel, effective.logTimestamps ? FastCache::LogTimestamps::Yes : FastCache::LogTimestamps::No
+    Pace::ConsoleLogger consoleLogger {
+        std::cerr, effective.logLevel, effective.logTimestamps ? Pace::LogTimestamps::Yes : Pace::LogTimestamps::No
     };
     auto const eventLogger =
-        effective.daemon ? FastCache::MakeWindowsEventLogger(effective.serviceName, effective.logLevel) : nullptr;
-    FastCache::ILogger& logger =
-        eventLogger ? static_cast<FastCache::ILogger&>(*eventLogger) : static_cast<FastCache::ILogger&>(consoleLogger);
+        effective.daemon ? Pace::MakeWindowsEventLogger(effective.serviceName, effective.logLevel) : nullptr;
+    Pace::ILogger& logger =
+        eventLogger ? static_cast<Pace::ILogger&>(*eventLogger) : static_cast<Pace::ILogger&>(consoleLogger);
 
     // Through the logger, not just the stderr line main() already printed: a
     // service started by the SCM has no console for that to land on, and this
@@ -739,7 +739,7 @@ int DaemonBody(FastCache::Config const& effective,
     // otherwise be invisible — the daemon serving on built-in defaults while an
     // operator edits a file it has declined to read.
     for (auto const& [path, reason]: rejected)
-        logger.Logf(FastCache::LogLevel::Error, "{}: {}", path.string(), reason);
+        logger.Logf(Pace::LogLevel::Error, "{}: {}", path.string(), reason);
 
     // A secret that came out of a configuration file is only as private as that
     // file. The whole reason to put `requirepass:` there is that a command line
@@ -780,14 +780,14 @@ int DaemonBody(FastCache::Config const& effective,
     // rather than a second check written here: two copies of one rule is the shape
     // #396 and #726 already paid for, and the startup answer is what seeds the memory
     // the reload compares against.
-    FastCache::ConfigReloader reloader { effective, effective.configPath, sources };
+    Pace::ConfigReloader reloader { effective, effective.configPath, sources };
 
     // After the reloader and before anything that can return, because the startup
     // observation happens inside this call. `logger` outlives `reloader` -- it names
     // `consoleLogger` or `eventLogger`, both declared above it, so both are destroyed
     // after it -- which is what the subscriber's capture requires.
-    FastCache::WatchSecretExposure(reloader, commandLine.requirePassExplicit, [&logger](std::string_view warning) {
-        logger.Logf(FastCache::LogLevel::Warn, "{}", warning);
+    Pace::WatchSecretExposure(reloader, commandLine.requirePassExplicit, [&logger](std::string_view warning) {
+        logger.Logf(Pace::LogLevel::Warn, "{}", warning);
     });
 
     core::platform::SteadyClock steadyClock;
@@ -832,19 +832,19 @@ int DaemonBody(FastCache::Config const& effective,
     // they are created before the STORAGE CHAIN, because the reclaim log below
     // is wired into the tiers inside it — a log declared after the backend
     // would be destroyed while those tiers still held a pointer to it.
-    FastCache::PubSubRegistry pubsub;
-    FastCache::StreamWaiterRegistry streamWaiters;
-    FastCache::WatchRegistry watches;
-    auto const eventsMask = FastCache::ParseKeyspaceEvents(effective.notifyKeyspaceEvents);
+    Pace::PubSubRegistry pubsub;
+    Pace::StreamWaiterRegistry streamWaiters;
+    Pace::WatchRegistry watches;
+    auto const eventsMask = Pace::ParseKeyspaceEvents(effective.notifyKeyspaceEvents);
     if (!eventsMask.has_value())
     {
-        logger.Logf(FastCache::LogLevel::Fatal,
+        logger.Logf(Pace::LogLevel::Fatal,
                     "fastcached: invalid --notify-keyspace-events '{}': {}",
                     effective.notifyKeyspaceEvents,
                     eventsMask.error().context);
-        return FastCache::ExitCodeFor(FastCache::StartStage::KeyspaceEvents);
+        return Pace::ExitCodeFor(Pace::StartStage::KeyspaceEvents);
     }
-    FastCache::KeyspaceNotifier keyspaceNotifier { &pubsub, *eventsMask };
+    Pace::KeyspaceNotifier keyspaceNotifier { &pubsub, *eventsMask };
 
     // Connection-level metrics sink, shared by the server loop and the admin
     // HTTP endpoint. Wiring it into RunReactorServer is what actually collects
@@ -852,19 +852,19 @@ int DaemonBody(FastCache::Config const& effective,
     // Declared here rather than beside the engine because the reclaim log below
     // reports its dropped notifications into it, and the log has to outlive the
     // storage chain.
-    FastCache::AtomicMetricsSink metrics;
+    Pace::AtomicMetricsSink metrics;
 
     // The observer every storage mutation reaches, and the log the tiers report
     // their own reclaims into. Both sit above the storage chain in declaration
     // order and therefore outlive it.
-    FastCache::RedisMutationObserver mutationObserver { &watches, &keyspaceNotifier };
-    FastCache::ReclaimLog reclaimLog { &mutationObserver, &metrics };
+    Pace::RedisMutationObserver mutationObserver { &watches, &keyspaceNotifier };
+    Pace::ReclaimLog reclaimLog { &mutationObserver, &metrics };
 
     auto bundle = BuildStorageBackend(effective, usingPersistent, useShardingWrapper, physicalShards, logger);
     if (!bundle.has_value())
     {
-        logger.Logf(FastCache::LogLevel::Fatal, "{}", bundle.error());
-        return FastCache::ExitCodeFor(FastCache::StartStage::Storage);
+        logger.Logf(Pace::LogLevel::Fatal, "{}", bundle.error());
+        return Pace::ExitCodeFor(Pace::StartStage::Storage);
     }
     auto backend = std::move(bundle->backend);
 
@@ -875,14 +875,14 @@ int DaemonBody(FastCache::Config const& effective,
     // at Warn and counts it into Snapshot().writeErrors (Prometheus
     // `fastcached_write_errors_total`). It wraps the raw backend so it observes
     // the true storage result (e.g. the disk error LayeredStorage propagates).
-    FastCache::WriteErrorReportingStorage writeErrorReporter { *backend, logger };
-    FastCache::IStorage* storagePtr = &writeErrorReporter;
+    Pace::WriteErrorReportingStorage writeErrorReporter { *backend, logger };
+    Pace::IStorage* storagePtr = &writeErrorReporter;
 
     // Optionally wrap in TracingStorage when trace logging is requested.
-    std::unique_ptr<FastCache::TracingStorage> tracer;
-    if (effective.logLevel <= FastCache::LogLevel::Trace)
+    std::unique_ptr<Pace::TracingStorage> tracer;
+    if (effective.logLevel <= Pace::LogLevel::Trace)
     {
-        tracer = std::make_unique<FastCache::TracingStorage>(*storagePtr, logger, clock);
+        tracer = std::make_unique<Pace::TracingStorage>(*storagePtr, logger, clock);
         storagePtr = tracer.get();
     }
 
@@ -899,7 +899,7 @@ int DaemonBody(FastCache::Config const& effective,
     // Per-verb keyspace events also stay where they are — the observer
     // publishes only `expired` and `evicted`, which no handler is in a
     // position to fire because no verb is executing when they happen.
-    FastCache::NotifyingStorage notifyingStorage { *storagePtr, &mutationObserver };
+    Pace::NotifyingStorage notifyingStorage { *storagePtr, &mutationObserver };
     // One call wires both halves of the reclaim path: the tiers below record
     // into the log, this decorator drains it once their call has returned and
     // every storage lock is released.
@@ -912,16 +912,16 @@ int DaemonBody(FastCache::Config const& effective,
     // seam where a storage error becomes a reply. Without it
     // `fastcache_cache_malformed_values_total` would stay at zero on the one process
     // that can observe the event (#296).
-    FastCache::CacheEngine engine { *storagePtr, clock, core::platform::defaultSystemWallClock(), &metrics };
+    Pace::CacheEngine engine { *storagePtr, clock, core::platform::defaultSystemWallClock(), &metrics };
 
     auto const durabilityName = [&] {
         switch (effective.storageDurability)
         {
-            case FastCache::StorageDurability::Fsync:
+            case Pace::StorageDurability::Fsync:
                 return std::string_view { "fsync" };
-            case FastCache::StorageDurability::Batched:
+            case Pace::StorageDurability::Batched:
                 return std::string_view { "batched" };
-            case FastCache::StorageDurability::None:
+            case Pace::StorageDurability::None:
                 return std::string_view { "none" };
         }
         return std::string_view { "?" };
@@ -931,12 +931,12 @@ int DaemonBody(FastCache::Config const& effective,
     // SharedAuthSource so a SIGHUP-driven reload can swap in a freshly-built
     // policy without restarting connections; in-flight verifies finish on the
     // policy they captured.
-    auto const makePolicy = [](FastCache::Config const& c) -> std::shared_ptr<FastCache::AuthPolicy const> {
+    auto const makePolicy = [](Pace::Config const& c) -> std::shared_ptr<Pace::AuthPolicy const> {
         if (c.requirePass.empty())
             return {};
-        return std::make_shared<FastCache::AuthPolicy const>(c.authUsername, c.requirePass);
+        return std::make_shared<Pace::AuthPolicy const>(c.authUsername, c.requirePass);
     };
-    FastCache::SharedAuthSource authSource { makePolicy(effective) };
+    Pace::SharedAuthSource authSource { makePolicy(effective) };
 
     reloader.Subscribe([&logger, &notifyingStorage, &authSource, &makePolicy](auto const& /*prev*/, auto const& next) {
         logger.SetMinLevel(next->logLevel);
@@ -965,19 +965,19 @@ int DaemonBody(FastCache::Config const& effective,
 #if defined(FC_TLS_ENABLED)
         if (effective.tlsCertPath.empty() || effective.tlsKeyPath.empty())
         {
-            logger.Logf(FastCache::LogLevel::Fatal, "fastcached: {}", FastCache::DaemonTlsMaterialRefusal);
-            return FastCache::ExitCodeFor(FastCache::StartStage::TlsMaterial);
+            logger.Logf(Pace::LogLevel::Fatal, "fastcached: {}", Pace::DaemonTlsMaterialRefusal);
+            return Pace::ExitCodeFor(Pace::StartStage::TlsMaterial);
         }
         auto created = core::net::makeTlsServerContextFromFiles(effective.tlsCertPath, effective.tlsKeyPath);
         if (!created.has_value())
         {
-            logger.Logf(FastCache::LogLevel::Fatal, "fastcached: TLS init failed: {}", created.error());
-            return FastCache::ExitCodeFor(FastCache::StartStage::TlsLoad);
+            logger.Logf(Pace::LogLevel::Fatal, "fastcached: TLS init failed: {}", created.error());
+            return Pace::ExitCodeFor(Pace::StartStage::TlsLoad);
         }
         tlsContext = std::move(*created);
 #else
-        logger.Logf(FastCache::LogLevel::Fatal, "fastcached: {}", FastCache::DaemonTlsUnavailableRefusal);
-        return FastCache::ExitCodeFor(FastCache::StartStage::TlsUnavailable);
+        logger.Logf(Pace::LogLevel::Fatal, "fastcached: {}", Pace::DaemonTlsUnavailableRefusal);
+        return Pace::ExitCodeFor(Pace::StartStage::TlsUnavailable);
 #endif
     }
 
@@ -999,11 +999,11 @@ int DaemonBody(FastCache::Config const& effective,
     // and the discarded temporary is what GCC 16 reports as a dangling pointer
     // through the span this is about to be read as. An array rather than a vector
     // because the synthetic case is exactly one bind and needs no allocation.
-    std::array<FastCache::BindConfig, 1> const legacyBind { FastCache::BindConfig {
+    std::array<Pace::BindConfig, 1> const legacyBind { Pace::BindConfig {
         .address = effective.bindAddress, .port = effective.port, .tls = effective.tlsEnabled } };
-    auto const bannerBinds = !effective.binds.empty() ? std::span<FastCache::BindConfig const> { effective.binds }
-                                                      : std::span<FastCache::BindConfig const> { legacyBind };
-    auto const bindSummary = FastCache::FormatBindSummary(bannerBinds);
+    auto const bannerBinds = !effective.binds.empty() ? std::span<Pace::BindConfig const> { effective.binds }
+                                                      : std::span<Pace::BindConfig const> { legacyBind };
+    auto const bindSummary = Pace::FormatBindSummary(bannerBinds);
 
     // Both codec fields name what the STORE will do, not what was asked for.
     // `compression=` read `effective.compression` until the worker was found doing
@@ -1023,21 +1023,21 @@ int DaemonBody(FastCache::Config const& effective,
     // not run describes nothing -- the worker's line spells the same rule as `disk
     // off` with no codec after it -- and this is the half that can be absent, since
     // an L1 is built on every path.
-    auto const diskCodec = FastCache::Compression::EffectiveCodec(effective.compression);
-    auto const memoryCodec = FastCache::Compression::EffectiveCodec(effective.memoryCompression);
+    auto const diskCodec = Pace::Compression::EffectiveCodec(effective.compression);
+    auto const memoryCodec = Pace::Compression::EffectiveCodec(effective.memoryCompression);
 
     // And said out loud rather than left to be inferred from a field that now reads
     // `none`. The operator cannot reach this from their own configuration -- the
     // BUILD made the choice -- so the remedy names the build. Only for a half that
     // exists: an in-memory daemon has no on-disk tier for a disk codec to describe.
-    auto const reportCodecFallback = [&logger](std::string_view half, FastCache::CompressionCodec configured) {
-        if (FastCache::Compression::EffectiveCodec(configured) == configured)
+    auto const reportCodecFallback = [&logger](std::string_view half, Pace::CompressionCodec configured) {
+        if (Pace::Compression::EffectiveCodec(configured) == configured)
             return;
-        logger.Logf(FastCache::LogLevel::Warn,
+        logger.Logf(Pace::LogLevel::Warn,
                     "{} compression is configured {} and this build has no such codec, so that tier stores "
                     "plaintext; rebuild with FASTCACHED_ENABLE_COMPRESSION or set the codec to none",
                     half,
-                    FastCache::Compression::NameOf(configured));
+                    Pace::Compression::NameOf(configured));
     };
     reportCodecFallback("memory", effective.memoryCompression);
     if (!effective.storagePath.empty())
@@ -1048,19 +1048,19 @@ int DaemonBody(FastCache::Config const& effective,
     // banner field that reports "off" while a TLS listener is up is the
     // operator-misleading bug — fold `anyTlsBind` into the TLS field below.
     logger.Logf(
-        FastCache::LogLevel::Info,
+        Pace::LogLevel::Info,
         "fastcached {} starting; bind={} max-memory={} config={} storage={} "
         "durability={} compression={} memory-compression={} max-value={} reactors={} shards={}{} auth={} "
         "tls={}",
         ProgramVersion,
         bindSummary,
-        FastCache::FormatByteSize(effective.maxMemoryBytes),
+        Pace::FormatByteSize(effective.maxMemoryBytes),
         effective.configPath.empty() ? std::string_view { "<none>" } : std::string_view { effective.configPath },
         effective.storagePath.empty() ? std::string_view { "<in-memory>" } : std::string_view { effective.storagePath },
         durabilityName,
-        effective.storagePath.empty() ? std::string_view { "<no disk tier>" } : FastCache::Compression::NameOf(diskCodec),
-        FastCache::Compression::NameOf(memoryCodec),
-        FastCache::FormatByteSize(effective.storageMaxValueBytes),
+        effective.storagePath.empty() ? std::string_view { "<no disk tier>" } : Pace::Compression::NameOf(diskCodec),
+        Pace::Compression::NameOf(memoryCodec),
+        Pace::FormatByteSize(effective.storageMaxValueBytes),
         reactorCount,
         physicalShards,
         shardingMode,
@@ -1088,13 +1088,13 @@ int DaemonBody(FastCache::Config const& effective,
     // The accept loops' one registry: a bind whose loop ends says so here, and `/healthz` answers
     // `503` from it rather than `200` over a port that listens and refuses.
     core::net::AcceptLoopHealth acceptLoops;
-    FastCache::ReactorServerOptions serverOpts;
+    Pace::ReactorServerOptions serverOpts;
     // Hand the reactors the very clock the engine reads, so their per-iteration
     // refresh is what keeps it current.
     serverOpts.clock = &clock;
     // The readiness line's fact, handed to the service host: it reports RUNNING on it.
     serverOpts.onServing = [] {
-        FastCache::DaemonControls::Instance().MarkServing();
+        Pace::DaemonControls::Instance().MarkServing();
     };
     // Listener endpoints: prefer the explicit list when given, otherwise
     // synthesise one from the legacy single-bind fields. This keeps the
@@ -1104,15 +1104,15 @@ int DaemonBody(FastCache::Config const& effective,
     // --listen-tls flags. `EffectiveBinds` is that rule, and `DaemonStartupRejection` judged these
     // very endpoints in `main()` -- duplicates included, which SO_REUSEPORT would otherwise let both
     // bind and split traffic between -- before the daemon host was invoked.
-    serverOpts.binds = FastCache::EffectiveBinds(effective);
+    serverOpts.binds = Pace::EffectiveBinds(effective);
     serverOpts.listenBacklog = effective.listenBacklog;
     // The active expiry cycle. The two defaults are asserted equal rather than trusted:
     // `Config` cannot include `Cache/`, so the number is written in both places,
     // and a `--help` line advertising a default the daemon does not use is
     // exactly the kind of drift nothing else would catch.
-    static_assert(FastCache::DefaultActiveExpiryInterval
-                  == std::chrono::duration_cast<std::chrono::milliseconds>(FastCache::ExpiryReaperOptions {}.interval));
-    static_assert(FastCache::DefaultActiveExpiryScanBudget == FastCache::ExpiryReaperOptions::DefaultScanBudget);
+    static_assert(Pace::DefaultActiveExpiryInterval
+                  == std::chrono::duration_cast<std::chrono::milliseconds>(Pace::ExpiryReaperOptions {}.interval));
+    static_assert(Pace::DefaultActiveExpiryScanBudget == Pace::ExpiryReaperOptions::DefaultScanBudget);
     serverOpts.expiry.interval = effective.activeExpiryInterval;
     serverOpts.expiry.scanBudget = effective.activeExpiryScanBudget;
     // One reactor per core (each single-threaded, connections pinned). One
@@ -1121,7 +1121,7 @@ int DaemonBody(FastCache::Config const& effective,
     serverOpts.reactorThreads = reactorCount;
     // Pin reactors to cores when asked (PerCore) and there's more than one;
     // a lone reactor gains nothing from pinning.
-    serverOpts.pinReactorsToCpu = effective.cpuAffinity == FastCache::CpuAffinity::PerCore && reactorCount > 1;
+    serverOpts.pinReactorsToCpu = effective.cpuAffinity == Pace::CpuAffinity::PerCore && reactorCount > 1;
     // When --log-source is set, every connection prefixes its log lines with
     // the client IP.
     serverOpts.logSource = effective.logSource;
@@ -1156,10 +1156,10 @@ int DaemonBody(FastCache::Config const& effective,
     // destructor joins on unwind, and we must guarantee the subscriber
     // table is fully populated before the thread can dispatch a reload.
     reloader.Subscribe([&logger, &keyspaceNotifier](auto const& /*prev*/, auto const& next) {
-        auto const newMask = FastCache::ParseKeyspaceEvents(next->notifyKeyspaceEvents);
+        auto const newMask = Pace::ParseKeyspaceEvents(next->notifyKeyspaceEvents);
         if (!newMask.has_value())
         {
-            logger.Logf(FastCache::LogLevel::Error,
+            logger.Logf(Pace::LogLevel::Error,
                         "config reload: invalid notify-keyspace-events '{}': {} (keeping previous mask)",
                         next->notifyKeyspaceEvents,
                         newMask.error().context);
@@ -1176,7 +1176,7 @@ int DaemonBody(FastCache::Config const& effective,
     // shutdown from invoking a subscriber against freed memory.
     std::atomic<bool> reloaderQuit { false };
     std::jthread reloaderThread { [&reloader, &logger, &reloaderQuit] {
-        auto& controls = FastCache::DaemonControls::Instance();
+        auto& controls = Pace::DaemonControls::Instance();
         while (!reloaderQuit.load(std::memory_order_acquire))
         {
             std::this_thread::sleep_for(std::chrono::milliseconds { 250 });
@@ -1184,9 +1184,9 @@ int DaemonBody(FastCache::Config const& effective,
                 continue;
             auto const result = reloader.Reload();
             if (!result.has_value())
-                logger.Logf(FastCache::LogLevel::Error, "config reload failed: {}", result.error().ToString());
+                logger.Logf(Pace::LogLevel::Error, "config reload failed: {}", result.error().ToString());
             else
-                logger.Log(FastCache::LogLevel::Info, "config reloaded");
+                logger.Log(Pace::LogLevel::Info, "config reloaded");
         }
     } };
 #if defined(FC_TLS_ENABLED)
@@ -1199,8 +1199,8 @@ int DaemonBody(FastCache::Config const& effective,
     // advances when a reactor completes a loop iteration, so a daemon sitting idle would report a
     // frozen uptime until the next request arrived.
     auto const startedAt = steadyClock.now();
-    FastCache::AdminHttpServer::SnapshotProvider const snapshotProvider = [&engine, &steadyClock, startedAt] {
-        return FastCache::MetricsSnapshot {
+    Pace::AdminHttpServer::SnapshotProvider const snapshotProvider = [&engine, &steadyClock, startedAt] {
+        return Pace::MetricsSnapshot {
             .storage = engine.Snapshot(),
             // What the merged view above had to leave out. With `--storage` the backend is an
             // in-memory tier over a CoW tree, and `LayeredStorage::Snapshot()` reports the tree's
@@ -1212,20 +1212,20 @@ int DaemonBody(FastCache::Config const& effective,
             // the field is also what keeps a field added to the middle of the struct from silently
             // defaulting here.
             .host = std::nullopt,
-            .uptime = FastCache::Uptime { std::chrono::duration_cast<std::chrono::seconds>(steadyClock.now() - startedAt) },
+            .uptime = Pace::Uptime { std::chrono::duration_cast<std::chrono::seconds>(steadyClock.now() - startedAt) },
         };
     };
 
     // Live stats over `0xFC`: the cache subject, streamed. Declared before the reactors run and
     // after everything its provider reads, so it outlives every connection and is outlived by
     // what it captures. The endpoint named is the first bind, which is where `0xFC` answers.
-    FastCache::CacheLiveStatsSources const liveSources {
+    Pace::CacheLiveStatsSources const liveSources {
         metrics,
         snapshotProvider,
         serverOpts.binds.empty() ? std::string {}
                                  : std::format("{}:{}", serverOpts.binds.front().address, serverOpts.binds.front().port)
     };
-    FastCache::LiveStream liveStream { liveSources, metrics };
+    Pace::LiveStream liveStream { liveSources, metrics };
     serverOpts.session.liveStats = &liveStream;
 
     // Optional admin HTTP endpoint (/metrics, /healthz) on its own port and
@@ -1233,12 +1233,12 @@ int DaemonBody(FastCache::Config const& effective,
     // below makes the accept loop poll so Shutdown() is observed even on POSIX
     // (where Close() does not unblock a parked accept()) and bounds a stalled
     // client's request read so it cannot wedge the single-threaded endpoint.
-    std::unique_ptr<FastCache::BlockingListener> adminListener;
-    std::unique_ptr<FastCache::AdminHttpServer> adminServer;
+    std::unique_ptr<Pace::BlockingListener> adminListener;
+    std::unique_ptr<Pace::AdminHttpServer> adminServer;
     std::jthread adminThread;
     if (effective.metricsEnabled)
     {
-        adminListener = FastCache::BlockingListener::Bind(effective.metricsBindAddress, effective.metricsPort);
+        adminListener = Pace::BlockingListener::Bind(effective.metricsBindAddress, effective.metricsPort);
         if (!adminListener || !adminListener->IsBound())
         {
             // The `else` below is the whole of the success path, so this branch is
@@ -1247,7 +1247,7 @@ int DaemonBody(FastCache::Config const& effective,
             // endpoint's own (#603), not this call site's: an `Error` here pages an
             // operator for a working daemon, and a level nothing in this tree can
             // reach is a level nothing can hold to its policy.
-            auto const report = FastCache::DescribeToleratedAdminBindFailure(
+            auto const report = Pace::DescribeToleratedAdminBindFailure(
                 effective.metricsBindAddress,
                 effective.metricsPort,
                 adminListener ? adminListener->BindError() : std::string_view { "null listener" });
@@ -1258,15 +1258,15 @@ int DaemonBody(FastCache::Config const& effective,
             // Both values belong to the endpoint rather than to this call site --
             // the worker serves the same server and had grown its own copy of the
             // pair, which is two places for one decision to drift.
-            adminListener->SetTimeouts(FastCache::AdminHttpServer::AcceptPoll, FastCache::AdminHttpServer::RequestTimeout);
+            adminListener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
 
-            adminServer = std::make_unique<FastCache::AdminHttpServer>(
-                *adminListener, metrics, snapshotProvider, logger, steadyClock, acceptLoops, FastCache::DefaultDrainWait());
+            adminServer = std::make_unique<Pace::AdminHttpServer>(
+                *adminListener, metrics, snapshotProvider, logger, steadyClock, acceptLoops, Pace::DefaultDrainWait());
             adminThread = std::jthread { [&adminServer] {
                 CORE_THREAD_NAME("fc-admin");
                 core::async::syncRun(adminServer->Run());
             } };
-            logger.Logf(FastCache::LogLevel::Info,
+            logger.Logf(Pace::LogLevel::Info,
                         "metrics endpoint on http://{}:{}/metrics (and /healthz)",
                         effective.metricsBindAddress,
                         effective.metricsPort);
@@ -1274,7 +1274,7 @@ int DaemonBody(FastCache::Config const& effective,
     }
 
     int const exitCode =
-        FastCache::RunReactorServer(serverOpts, engine, logger, acceptLoops, /*admission*/ nullptr, &metrics);
+        Pace::RunReactorServer(serverOpts, engine, logger, acceptLoops, /*admission*/ nullptr, &metrics);
 
     if (adminServer)
     {
@@ -1302,39 +1302,39 @@ int main(int argc, char const* const* argv)
     // whether it is a service's -- under the SCM the registered line carries `--daemon`, and a
     // refusal that never told the host exits before the SCM hears anything, error 1053 -- and
     // which verb it asked for, wherever the operator typed it relative to the bad token.
-    FastCache::CliResult cli;
-    if (auto const flow = FastCache::ParseCliInto(args, cli); !flow.has_value())
+    Pace::CliResult cli;
+    if (auto const flow = Pace::ParseCliInto(args, cli); !flow.has_value())
     {
         auto const refused =
-            RefuseUnderService(FastCache::RecognisedCli(args), FastCache::StartStage::CommandLine, flow.error().ToString());
-        std::println(std::cerr, "{}", FastCache::CliUsage());
+            RefuseUnderService(Pace::RecognisedCli(args), Pace::StartStage::CommandLine, flow.error().ToString());
+        std::println(std::cerr, "{}", Pace::CliUsage());
         return refused;
     }
     auto const* const parsed = &cli;
 
     switch (parsed->outcome)
     {
-        case FastCache::CliOutcome::ShowVersion:
+        case Pace::CliOutcome::ShowVersion:
             std::println("fastcached {}", ProgramVersion);
-            return FastCache::CommandExitCode(FastCache::CommandEnding::Completed);
-        case FastCache::CliOutcome::ShowHelp:
+            return Pace::CommandExitCode(Pace::CommandEnding::Completed);
+        case Pace::CliOutcome::ShowHelp:
             std::print("{}",
-                       FastCache::CliUsage(FastCache::StdoutSupportsColor() ? FastCache::UsageColor::Colored
-                                                                            : FastCache::UsageColor::Plain));
-            return FastCache::CommandExitCode(FastCache::CommandEnding::Completed);
-        case FastCache::CliOutcome::SeedConfig:
+                       Pace::CliUsage(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored
+                                                                            : Pace::UsageColor::Plain));
+            return Pace::CommandExitCode(Pace::CommandEnding::Completed);
+        case Pace::CliOutcome::SeedConfig:
             return SeedDefaultConfig(parsed->seedConfigTemplate);
-        case FastCache::CliOutcome::Run:
-        case FastCache::CliOutcome::InstallService:
-        case FastCache::CliOutcome::UninstallService:
-        case FastCache::CliOutcome::HealthCheck:
-        case FastCache::CliOutcome::MigrateStorage:
+        case Pace::CliOutcome::Run:
+        case Pace::CliOutcome::InstallService:
+        case Pace::CliOutcome::UninstallService:
+        case Pace::CliOutcome::HealthCheck:
+        case Pace::CliOutcome::MigrateStorage:
             // These all need the effective config assembled below; they branch
             // apart afterwards.
             break;
-        case FastCache::CliOutcome::Last:
+        case Pace::CliOutcome::Last:
             // The table's count, which no option row selects.
-            return RefuseUnderService(*parsed, FastCache::StartStage::NoOutcome, "the command line selected no outcome");
+            return RefuseUnderService(*parsed, Pace::StartStage::NoOutcome, "the command line selected no outcome");
     }
 
     // The config file to read: the one the operator named, or else whichever
@@ -1344,8 +1344,8 @@ int main(int argc, char const* const* argv)
     // path baked into a service's launch arguments would outrank the file itself
     // forever, and InlineCredentialRejection would start naming a path nobody
     // typed.
-    auto const lookup = FastCache::EffectiveConfigPath(
-        parsed->config.configPath, FastCache::SystemConfigPathProbe {}, FastCache::DaemonApplicationName);
+    auto const lookup = Pace::EffectiveConfigPath(
+        parsed->config.configPath, Pace::SystemConfigPathProbe {}, Pace::DaemonApplicationName);
     auto const configPath = lookup.path.string();
 
     // A config that exists and is readable but was passed over anyway has to say
@@ -1372,10 +1372,10 @@ int main(int argc, char const* const* argv)
     // absent key. A container
     // that wants the env form simply omits the config/CLI value, letting both the
     // daemon and its `--healthcheck` probe agree via a single `-e ...`.
-    FastCache::ConfigSources const sources { .args = std::vector<std::string>(args.begin(), args.end()),
+    Pace::ConfigSources const sources { .args = std::vector<std::string>(args.begin(), args.end()),
                                              .metricsPortEnv = MetricsPortFromEnv() };
 
-    auto assembled = FastCache::AssembleEffectiveConfig(configPath, sources);
+    auto assembled = Pace::AssembleEffectiveConfig(configPath, sources);
     if (!assembled.has_value())
     {
         // A file that does not parse is fatal for the command that *serves*,
@@ -1389,21 +1389,21 @@ int main(int argc, char const* const* argv)
         // proceeding on a config this run could not read would convert a
         // different set of files than the daemon opens, or none at all, and
         // report success either way.
-        if (!parsed->config.configPath.empty() || parsed->outcome == FastCache::CliOutcome::Run
-            || parsed->outcome == FastCache::CliOutcome::MigrateStorage)
+        if (!parsed->config.configPath.empty() || parsed->outcome == Pace::CliOutcome::Run
+            || parsed->outcome == Pace::CliOutcome::MigrateStorage)
             // The command line's `--daemon`, since no merged configuration exists to ask.
             return RefuseUnderService(
-                *parsed, FastCache::ConfigurationFileStage(assembled.error().code), assembled.error().ToString());
+                *parsed, Pace::ConfigurationFileStage(assembled.error().code), assembled.error().ToString());
 
         // Ignored, and the PATH ignored with it: re-assembling against no file at
         // all is what leaves `configPath` empty, so nothing later re-reads a file
         // this run declined — the reloader included, since it is handed
         // `effective.configPath`. Assembling with no path cannot fail.
         std::println(std::cerr, "fastcached: ignoring {}: {}", configPath, assembled.error().ToString());
-        assembled = FastCache::AssembleEffectiveConfig({}, sources);
+        assembled = Pace::AssembleEffectiveConfig({}, sources);
     }
 
-    FastCache::Config const& effective = assembled->Configuration();
+    Pace::Config const& effective = assembled->Configuration();
 
     // Converting the store acts on the files and exits; it never runs the daemon
     // body. BEFORE the serving-shape checks below, and after the merge because it
@@ -1412,7 +1412,7 @@ int main(int argc, char const* const* argv)
     // `--listen`/`--notify-keyspace-events` typo would be refusing to let them
     // repair the thing that is actually broken. The node's `--migrate-cache`
     // sits early for the same reason.
-    if (parsed->outcome == FastCache::CliOutcome::MigrateStorage)
+    if (parsed->outcome == Pace::CliOutcome::MigrateStorage)
         return MigrateConfiguredStorage(effective);
 
     // The rules a SERVING daemon is held to -- the bind-flag shape, the keyspace-event grammar and
@@ -1420,16 +1420,16 @@ int main(int argc, char const* const* argv)
     // only, BEFORE handing off to the daemon host (which may fork) so the refusal reaches the
     // operator, and before an install bakes the command line in. `ServingRulesRejection` says
     // which outcomes and in what order; it is in the library, where a test holds it to that.
-    if (auto const rejection = FastCache::ServingRulesRejection(parsed->outcome, *assembled))
-        return RefuseUnderService(*parsed, FastCache::StartStage::StartupRules, *rejection);
+    if (auto const rejection = Pace::ServingRulesRejection(parsed->outcome, *assembled))
+        return RefuseUnderService(*parsed, Pace::StartStage::StartupRules, *rejection);
 
     // Health check: probe the running daemon's /healthz on loopback and exit
     // 0/1. Loopback regardless of the configured metrics bind address, since the
     // probe runs inside the same host/container as the daemon.
-    if (parsed->outcome == FastCache::CliOutcome::HealthCheck)
-        return FastCache::CommandExitCode(core::net::httpHealthProbe("127.0.0.1", effective.metricsPort, "/healthz")
-                                              ? FastCache::CommandEnding::Completed
-                                              : FastCache::CommandEnding::Failed);
+    if (parsed->outcome == Pace::CliOutcome::HealthCheck)
+        return Pace::CommandExitCode(core::net::httpHealthProbe("127.0.0.1", effective.metricsPort, "/healthz")
+                                              ? Pace::CommandEnding::Completed
+                                              : Pace::CommandEnding::Failed);
 
     // Service-control requests act on the service manager and exit; they never
     // run the daemon body.
@@ -1444,8 +1444,8 @@ int main(int argc, char const* const* argv)
     // of a mode-0600 config file into a world-readable service registration.
     // The YAML is still parsed above, so a broken config is still rejected here
     // rather than at first start.
-    if (parsed->outcome == FastCache::CliOutcome::InstallService
-        || parsed->outcome == FastCache::CliOutcome::UninstallService)
+    if (parsed->outcome == Pace::CliOutcome::InstallService
+        || parsed->outcome == Pace::CliOutcome::UninstallService)
     {
         // The command-line config, never the merged one -- see the comment above.
         // Turned into a ServiceSpec here because that is the seam the platform
@@ -1455,7 +1455,7 @@ int main(int argc, char const* const* argv)
         // by what the operator NAMED, and only the parse records that (#349). It is
         // still the command-line-only parse -- `effective` is the merged one and is
         // deliberately never passed here.
-        auto spec = FastCache::MakeDaemonServiceSpec(FastCache::CurrentExecutablePath(), *parsed);
+        auto spec = Pace::MakeDaemonServiceSpec(Pace::CurrentExecutablePath(), *parsed);
 
         // ...and here, deliberately, the MERGED one -- for a purpose the rule
         // above does not cover. Nothing from `effective` is registered: this adds
@@ -1481,51 +1481,51 @@ int main(int argc, char const* const* argv)
         // of an owned path rather than for this one.
         if (!effective.storagePath.empty()
             && !std::ranges::contains(
-                spec.ownedPaths, std::filesystem::path { effective.storagePath }, &FastCache::OwnedPath::path))
-            spec.ownedPaths.push_back(FastCache::OwnedPath {
-                .path = effective.storagePath, .privacy = FastCache::PathPrivacy::Shared, .credentialFiles = {} });
+                spec.ownedPaths, std::filesystem::path { effective.storagePath }, &Pace::OwnedPath::path))
+            spec.ownedPaths.push_back(Pace::OwnedPath {
+                .path = effective.storagePath, .privacy = Pace::PathPrivacy::Shared, .credentialFiles = {} });
         // The firewall follows the registration: opened for what the MERGED configuration binds
         // beyond loopback -- `effective`, for the storage handover's reason above: it adds rules,
         // never a flag -- and closed on removal once the delete succeeded or found no
         // registration, never after a refused one (`WithRemovalFirewall`). The registration is
         // the argument, so it has happened before the firewall is asked.
-        auto const firewall = FastCache::MakeSystemFirewall();
-        auto const result = parsed->outcome == FastCache::CliOutcome::InstallService
-                                ? FastCache::WithRegistrationFirewall(
-                                      FastCache::InstallService(spec, parsed->serviceScope),
+        auto const firewall = Pace::MakeSystemFirewall();
+        auto const result = parsed->outcome == Pace::CliOutcome::InstallService
+                                ? Pace::WithRegistrationFirewall(
+                                      Pace::InstallService(spec, parsed->serviceScope),
                                       firewall.get(),
                                       spec.serviceName,
-                                      FastCache::DaemonFirewallRules(effective, spec.exePath, parsed->firewallAllow))
-                                : FastCache::WithRemovalFirewall(FastCache::UninstallService(spec, parsed->serviceScope),
+                                      Pace::DaemonFirewallRules(effective, spec.exePath, parsed->firewallAllow))
+                                : Pace::WithRemovalFirewall(Pace::UninstallService(spec, parsed->serviceScope),
                                                                  firewall.get(),
                                                                  spec.serviceName);
-        if (result.Ending() == FastCache::CommandEnding::Completed)
+        if (result.Ending() == Pace::CommandEnding::Completed)
             std::println("fastcached: {}", result.message);
         else
             std::println(std::cerr, "fastcached: {}", result.message);
         return result.ExitCode();
     }
 
-    std::unique_ptr<FastCache::IDaemonHost> host;
+    std::unique_ptr<Pace::IDaemonHost> host;
     if (effective.daemon)
     {
 #if defined(_WIN32)
         // RUNNING once every acceptor is armed (`serverOpts.onServing` below), so `net start` answers
         // for a daemon that serves rather than for a process that is up.
-        host = FastCache::MakeWindowsServiceHost(
+        host = Pace::MakeWindowsServiceHost(
             effective.serviceName,
-            FastCache::ServiceHostOptions { .stop = FastCache::StopPendingPlanFor(std::nullopt),
-                                            .readiness = FastCache::ServiceReadiness::BodySignals });
+            Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt),
+                                            .readiness = Pace::ServiceReadiness::BodySignals });
 #else
         // `/`, stated rather than defaulted. This daemon executes nothing, so no
         // path-mapping rule is ever derived from its working directory and the
         // classical answer is right for it -- unlike the compile node, which spawns
         // a compiler and states a directory of its own (#784).
-        host = FastCache::MakePosixDaemonHost(effective.pidfile, "/");
+        host = Pace::MakePosixDaemonHost(effective.pidfile, "/");
 #endif
     }
     if (!host)
-        host = std::make_unique<FastCache::ForegroundHost>();
+        host = std::make_unique<Pace::ForegroundHost>();
 
     return host->Run(
         [&effective, &lookup, &sources, &parsed] { return DaemonBody(effective, lookup.rejected, sources, *parsed); });

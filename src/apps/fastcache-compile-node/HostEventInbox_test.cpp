@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "HostEventInbox.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Platform/HostEvents.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,8 +12,8 @@
 #include <core/platform/Clock.hpp>
 #include <tests/SteppedDrainWait.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
 using Testing::SteppedDrainWait;
 

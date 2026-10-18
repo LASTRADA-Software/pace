@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 TEST_CASE("A rendered depfile names the target the build asked for", "[dependency-output]")
 {

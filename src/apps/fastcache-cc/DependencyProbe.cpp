@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -389,4 +389,4 @@ DependencySet KeyDependencySet(std::span<std::string const> rawPaths,
     return out;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -19,8 +19,8 @@
 /// `HmacSha256` is deliberately not measured here: an HMAC is two hashes over the message's
 /// length, so the per-engine hash rate is the figure that transfers.
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Sha256.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Sha256.hpp>
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -35,7 +35,7 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {

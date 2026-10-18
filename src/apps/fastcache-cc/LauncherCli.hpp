@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cli/UsageDoc.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -10,7 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// What the launcher was asked to do.
@@ -218,4 +218,4 @@ struct EnvVarSpec
 /// @return The complete usage text, ending in a newline.
 [[nodiscard]] std::string HelpText(UsageColor color = UsageColor::Plain);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -5,11 +5,11 @@
 #include "StubObjectTestSupport.hpp"
 #include "WorkerProtocol.hpp"
 
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Distributed/LeaseSigner.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/LeaseSigner.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -39,10 +39,10 @@
 #include <tests/ScriptedSocket.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using FastCache::Testing::Unwrap;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Cc;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -54,9 +54,9 @@ namespace
 /// once and would let whichever case ran first silence the rest -- a coupling to
 /// Catch2's ordering that is invisible until it fails.
 /// @return A notice with no sink.
-[[nodiscard]] FastCache::Cc::CredentialNotice& Unwatched()
+[[nodiscard]] Pace::Cc::CredentialNotice& Unwatched()
 {
-    static FastCache::Cc::CredentialNotice notice = FastCache::Cc::CredentialNotice::Silent();
+    static Pace::Cc::CredentialNotice notice = Pace::Cc::CredentialNotice::Silent();
     return notice;
 }
 
@@ -238,9 +238,9 @@ constexpr std::uint64_t GrantTerm = 4;
                                    std::uint64_t epoch = GrantTerm,
                                    std::string_view serial = "17")
 {
-    return FastCache::Distributed::MintLeaseToken(
+    return Pace::Distributed::MintLeaseToken(
         TestSigner(),
-        FastCache::Distributed::LeaseClaims { .serial = std::string { serial },
+        Pace::Distributed::LeaseClaims { .serial = std::string { serial },
                                               .endpoint = std::string { endpoint },
                                               .fingerprint = std::string { fingerprint },
                                               .key = "obj-abc",
@@ -300,7 +300,7 @@ class RecordingRefusals final: public IJobRefusalObserver
 struct Fixture
 {
     StubRunner runner;
-    FastCache::Testing::ScratchDirectory scratch { "fc-wp" };
+    Pace::Testing::ScratchDirectory scratch { "fc-wp" };
     CompileJobRunner jobs;
     AtomicMetricsSink metrics;
 
@@ -556,7 +556,7 @@ TEST_CASE("A worker refuses AUTH with the one code the client steps over", "[wor
     // REGISTER and never joined the fleet at all (#340).
     //
     // Asserted by VALUE: the enumerator both ends name is the only thing holding this
-    // contract together, and `fastcache-cc` links none of `FastCache`.
+    // contract together, and `fastcache-cc` links none of `Pace`.
     Fixture fix;
 
     auto const auth = Wire::EncodeAuth(Wire::AuthRequest { .username = "bob", .secret = "s3cret" });
@@ -732,7 +732,7 @@ TEST_CASE("The envelope ceiling is the surface's own, not a figure this class as
     // the frame length, so a listener with a smaller request cap has to say so or the
     // two disagree about how much memory one request may cost.
     StubRunner runner;
-    FastCache::Testing::ScratchDirectory const scratch { "fc-wp" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-wp" };
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     constexpr std::size_t TinyCap = 8;
@@ -1004,7 +1004,7 @@ TEST_CASE("A compile is counted from start to finish", "[worker-protocol][metric
     // and passes, silent about the reason it does not know, which is the guard shape
     // `RowsInEnumeratorOrder` exists to reject.
     std::size_t refusalCounters = 0;
-    for (auto const& row: FastCache::CounterTable)
+    for (auto const& row: Pace::CounterTable)
     {
         if (!row.prometheusName.starts_with("fastcache_worker_jobs_refused_"))
             continue;
@@ -1432,7 +1432,7 @@ TEST_CASE("A lease that has expired past the skew slack is refused", "[worker-pr
     Fixture fix { { Wire::IdentityCodec }, LeasePolicy::Verifying };
 
     auto const stale =
-        GrantFor(ThisWorker, "gcc-13", -(FastCache::Distributed::LeaseTokenClockSkewSlack + std::chrono::seconds { 1 }));
+        GrantFor(ThisWorker, "gcc-13", -(Pace::Distributed::LeaseTokenClockSkewSlack + std::chrono::seconds { 1 }));
     auto const answer = fix.worker.Answer(CompileFrame("gcc-13", DefaultSource, { Wire::IdentityCodec }, stale));
     REQUIRE(answer.has_value());
 
@@ -2119,7 +2119,7 @@ TEST_CASE("The real runner is what a correlation comes from", "[worker-protocol]
     // the REAL `CompileJobRunner` end to end and recomputes the digest the way a client
     // will -- from what it asked for, against what came back.
     StubRunner runner;
-    FastCache::Testing::ScratchDirectory const scratch { "fc-wp-corr" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-wp-corr" };
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
@@ -2530,7 +2530,7 @@ namespace
 struct RosterWorker
 {
     StubRunner runner;
-    FastCache::Testing::ScratchDirectory scratch { "fc-wp-roster" };
+    Pace::Testing::ScratchDirectory scratch { "fc-wp-roster" };
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     Testing::FixedLeaseRoster roster { { "scheduler" } }; ///< Declared before `worker`, which borrows it.

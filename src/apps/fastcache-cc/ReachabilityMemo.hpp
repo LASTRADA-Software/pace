@@ -6,8 +6,8 @@
 #include "Dispatch.hpp"
 #include "Stats.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -19,7 +19,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Where a reachability memo is kept between launcher processes.
@@ -271,4 +271,4 @@ inline constexpr std::string_view RememberedUnreachableReason = "the scheduler w
     return DispatchRecording { .reason = RememberedUnreachableReason, .outcome = DispatchOutcome::Unreachable };
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

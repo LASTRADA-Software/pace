@@ -4,11 +4,11 @@
 #include "EnrollAutoApprove.hpp"
 #include "NodeConditions.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -24,7 +24,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How many machines may be waiting at once.
@@ -500,4 +500,4 @@ class EnrollmentWindow
     core::platform::SteadyTimePoint _autoApproveArmedAt {};
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

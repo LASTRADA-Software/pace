@@ -6,9 +6,9 @@
 #include "Stats.hpp"
 #include "ToolchainProbe.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -28,7 +28,7 @@
 #include <tuple>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -1470,4 +1470,4 @@ ToolchainIdentity CachedToolchainFingerprint(IProcessRunner& runner,
     return ToolchainIdentity { .fingerprint = fingerprint, .defect = defect, .evidence = std::move(evidence) };
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

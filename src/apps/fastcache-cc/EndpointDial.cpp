@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "EndpointDial.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <chrono>
 #include <memory>
@@ -13,7 +13,7 @@
 #include <core/async/SyncRun.hpp>
 #include <core/net/TcpClient.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 core::async::Task<std::unique_ptr<core::net::ISocket>> DialEndpoint(core::net::IConnector* connector,
@@ -53,4 +53,4 @@ std::unique_ptr<core::net::ISocket> DialEndpointBlocking(core::net::BlockingConn
     return core::async::syncRun(DialEndpoint(&connector, hostPort, options));
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -3,9 +3,9 @@
 #include "../fastcache-cc/WorkerProtocol.hpp"
 #include "NodeProofClient.hpp"
 
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Distributed/NodeProof.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Distributed/NodeProof.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -17,7 +17,7 @@
 #include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -308,4 +308,4 @@ NodeProofAttempt NodeProofClient::Prove(SealedFrameSocket& peer) const
     return core::async::syncRun(ProveAsync(&peer, &_trust));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

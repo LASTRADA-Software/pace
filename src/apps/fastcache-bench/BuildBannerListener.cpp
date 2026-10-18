@@ -75,15 +75,15 @@ class BuildBannerListener: public Catch::EventListenerBase
     void testRunStarting(Catch::TestRunInfo const& testRunInfo) override
     {
         (void) testRunInfo;
-        std::cerr << FastCache::Bench::RenderBuildBanner(_reading);
+        std::cerr << Pace::Bench::RenderBuildBanner(_reading);
     }
 
     /// Writes one line per figure, naming the `mean` so no column can be mistaken for it.
     /// @param benchmarkStats What Catch2 measured.
     void benchmarkEnded(Catch::BenchmarkStats<> const& benchmarkStats) override
     {
-        std::cerr << FastCache::Bench::RenderFigure(
-            FastCache::Bench::Figure { .name = benchmarkStats.info.name,
+        std::cerr << Pace::Bench::RenderFigure(
+            Pace::Bench::Figure { .name = benchmarkStats.info.name,
                                        .meanNanoseconds = benchmarkStats.mean.point.count(),
                                        .estimatedNanoseconds = benchmarkStats.info.estimatedDuration,
                                        .samples = benchmarkStats.samples.size() },
@@ -95,15 +95,15 @@ class BuildBannerListener: public Catch::EventListenerBase
     void testRunEnded(Catch::TestRunStats const& testRunStats) override
     {
         (void) testRunStats;
-        std::cerr << FastCache::Bench::RenderVerdict(_reading);
+        std::cerr << Pace::Bench::RenderVerdict(_reading);
     }
 
   private:
     /// Read once: the answer cannot change while the process runs, and it allocates.
-    FastCache::Bench::BuildConfiguration _reading = FastCache::Bench::CurrentBuildConfiguration();
+    Pace::Bench::BuildConfiguration _reading = Pace::Bench::CurrentBuildConfiguration();
 
     /// Derived once from `_reading`, for the per-figure marker.
-    FastCache::Bench::StandingReason _reason = FastCache::Bench::ReasonFor(_reading);
+    Pace::Bench::StandingReason _reason = Pace::Bench::ReasonFor(_reading);
 };
 
 } // namespace

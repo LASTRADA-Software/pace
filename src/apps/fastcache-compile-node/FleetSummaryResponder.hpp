@@ -3,10 +3,10 @@
 
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file FleetSummaryResponder.hpp
@@ -168,4 +168,4 @@ class FleetSummaryResponder final: public IFrameResponder
     Ed25519KeyPair const& _identity;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

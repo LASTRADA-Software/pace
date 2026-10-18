@@ -9,8 +9,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 using PathCanon::Grammar;
 
 namespace

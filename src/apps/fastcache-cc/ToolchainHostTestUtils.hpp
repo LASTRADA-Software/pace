@@ -17,7 +17,7 @@
 /// have installed. Header-only so each test translation unit gets its own
 /// `inline` copies without an extra link target, the same arrangement as
 /// `Platform/EnvironmentTestUtils.hpp`.
-namespace FastCache::Cc::Testing
+namespace Pace::Cc::Testing
 {
 
 /// `IToolchainHost` over an in-memory filesystem, registry and environment.
@@ -349,4 +349,4 @@ class ScriptedToolchainHost final: public IToolchainHost
     std::vector<std::string> _searchPath;
 };
 
-} // namespace FastCache::Cc::Testing
+} // namespace Pace::Cc::Testing

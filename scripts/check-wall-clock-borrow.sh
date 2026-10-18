@@ -75,21 +75,21 @@ if [ "${1:-}" = "--self-test" ]; then
     # @param 1 tree dir, 2 extra content for a second header (may be empty)
     _tree()
     {
-        mkdir -p "$1/src/FastCache/Core" "$1/src/FastCache/Distributed"
-        cat > "$1/src/FastCache/Core/Clock.hpp" <<"HDR"
+        mkdir -p "$1/src/Pace/Core" "$1/src/Pace/Distributed"
+        cat > "$1/src/Pace/Core/Clock.hpp" <<"HDR"
 class WallClockRef
 {
     IWallClock const* _wall;
 };
 HDR
-        cat > "$1/src/FastCache/Distributed/Holder.hpp" <<"HDR"
+        cat > "$1/src/Pace/Distributed/Holder.hpp" <<"HDR"
 class Holder
 {
     WallClockRef _wall;
 };
 HDR
         if [ -n "$2" ]; then
-            printf "%s" "$2" > "$1/src/FastCache/Distributed/Extra.hpp"
+            printf "%s" "$2" > "$1/src/Pace/Distributed/Extra.hpp"
         fi
     }
 
@@ -125,9 +125,9 @@ class Fine
         # Two empty lists agree perfectly. With the guard type gone the scan matches
         # nothing, and a clean verdict would then describe a tree it never read.
         c="$work/empty-$mode"; mkdir -p "$c"
-        mkdir -p "$c/src/FastCache/Core"
+        mkdir -p "$c/src/Pace/Core"
         printf "class Nothing {};
-" > "$c/src/FastCache/Core/Clock.hpp"
+" > "$c/src/Pace/Core/Clock.hpp"
         _case "no-guarded-member-anywhere-is-refused" "$c" 1 "stopped matching" "$mode"
     done
 
@@ -153,7 +153,7 @@ refuse()
 # is core-cpp's `<core/platform/Clock.hpp>` since #1596, outside this tree, so the exemption
 # matches nothing here -- and a member may be spelled with its namespace, which the patterns
 # below accept, since outside core-cpp that is how the type is named.
-exempt="src/FastCache/Core/Clock.hpp"
+exempt="src/Pace/Core/Clock.hpp"
 
 # File set, with the MODE stated in the output and asserted on both sides -- a
 # synthetic tree is not a git repository, so a check that silently falls back tests

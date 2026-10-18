@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/ServiceControl.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// What each of the service manager's calls answers. Every field defaults to the call
@@ -347,4 +347,4 @@ class ScriptedLaunchdCalls final: public ILaunchdCalls
     std::vector<std::string> _calls;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

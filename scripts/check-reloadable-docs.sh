@@ -125,7 +125,7 @@ readonly TableArrayMarker="std::to_array<OptionSpec"
 # be closed silently by adding a marker somewhere.
 SubjectTable='
 fastcache-compile-node|src/apps/fastcache-compile-node/NodeConfig.cpp
-fastcached|src/FastCache/Config/CliParser.cpp
+fastcached|src/Pace/Config/CliParser.cpp
 '
 
 # The option table a subject is checked against, into `TableFor` -- a global rather than
@@ -177,7 +177,7 @@ refuse() {
 # which is how `NodeConfig.cpp` lays most of its rows out. `CliParser.cpp` uses the
 # compact style, where the open brace shares the `.primary` line and the row closes with a
 # trailing ` },` on its last field, so that pattern matches ZERO of its 48 rows -- `grep -c
-# '\.primary = "' src/FastCache/Config/CliParser.cpp`, the pattern stated because a census
+# '\.primary = "' src/Pace/Config/CliParser.cpp`, the pattern stated because a census
 # without one cannot be re-derived and drifts silently. Pointed at the daemon, the old walk
 # returned an empty set, which `check_subject`'s "the option table yielded no
 # Reloadable::Yes row" refuses -- correctly, and not for the reason a reader would have
@@ -902,14 +902,14 @@ if [[ "${1:-}" == "--self-test" ]]; then
         local dTable="${5-$2}" dDocs="${6-$3}" dCount="${7-$4}"
 
         mkdir -p "${at}/src/apps/fastcache-compile-node" "${at}/docs/tools" "${at}/packaging/config" \
-            "${at}/src/FastCache/Config" "${at}/docs/snippets" "${at}/scripts/lib"
+            "${at}/src/Pace/Config" "${at}/docs/snippets" "${at}/scripts/lib"
 
         _artefacts "$at" fastcache-compile-node \
             src/apps/fastcache-compile-node/NodeConfig.cpp docs/tools/node.md packaging/config/node.yaml \
             "$nodeTable" "$nodeDocs" "$nodeCount" expanded
 
         _artefacts "$at" fastcached \
-            src/FastCache/Config/CliParser.cpp docs/snippets/reload-matrix.md packaging/config/fastcached.yaml \
+            src/Pace/Config/CliParser.cpp docs/snippets/reload-matrix.md packaging/config/fastcached.yaml \
             "$dTable" "$dDocs" "$dCount" compact
 
         # The tree states its third-party roots (#1370), or every case is refused for

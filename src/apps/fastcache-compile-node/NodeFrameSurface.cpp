@@ -16,13 +16,13 @@
 #include "SharedCacheResponder.hpp"
 #include "WorkerTier.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <format>
 #include <optional>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 SurfaceComponents ComposeSurfaceComponents(CacheTier* cache,
@@ -207,4 +207,4 @@ std::expected<std::unique_ptr<NodeFrameSurface>, NodeRefusal> StartNodeSurfaceOr
                                                               "regardless")) };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

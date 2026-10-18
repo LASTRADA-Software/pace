@@ -7,9 +7,9 @@
 // any component on the merged listener, and `EveryNodeOwners` fills in the owners every built node
 // has, walking the same `FamilyRoutes` column `StartNodeSurfaceOrExplain` asks.
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -27,10 +27,10 @@
 #include <apps/fastcache-compile-node/Responders.hpp>
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node::SurfaceFakes
+namespace Pace::Node::SurfaceFakes
 {
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 /// A responder that records what it was asked and answers by name.
 ///
@@ -301,4 +301,4 @@ class EveryNodeOwners
     std::deque<NamedResponder> _standIns; ///< A deque, so each stand-in keeps its address.
 };
 
-} // namespace FastCache::Node::SurfaceFakes
+} // namespace Pace::Node::SurfaceFakes

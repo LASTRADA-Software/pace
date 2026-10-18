@@ -15,11 +15,11 @@
 /// concern (byte budget, sharding + locking, the CacheEngine facade) so the
 /// report can attribute nanoseconds to features rather than guessing.
 
-#include <FastCache/Cache/CacheEngine.hpp>
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cache/ShardedStorage.hpp>
-#include <FastCache/Core/StringHash.hpp>
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/ShardedStorage.hpp>
+#include <Pace/Core/StringHash.hpp>
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -42,7 +42,7 @@
 
 #include <core/platform/Clock.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {

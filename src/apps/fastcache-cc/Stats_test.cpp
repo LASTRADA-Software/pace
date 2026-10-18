@@ -9,9 +9,9 @@
 
 #include "Stats.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Platform/Environment.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Platform/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -39,7 +39,7 @@
     #include <unistd.h>
 #endif
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -77,7 +77,7 @@ class ScopedStateDir
     ScopedStateDir& operator=(ScopedStateDir&&) = delete;
 
   private:
-    FastCache::Testing::ScratchDirectory _scratch { "fastcache-cc-test" };
+    Pace::Testing::ScratchDirectory _scratch { "fastcache-cc-test" };
 
 #if defined(_WIN32)
     static constexpr char const* VariableName = "LOCALAPPDATA";
@@ -89,7 +89,7 @@ class ScopedStateDir
     {
         // The tree's one environment reader, which the launcher compiles in: `std::getenv` is
         // deprecated under the MSVC CRT, and clang-cl's analyser rejects it there.
-        return FastCache::ReadEnvironmentVariable(VariableName);
+        return Pace::ReadEnvironmentVariable(VariableName);
     }
 
     static void Set(std::string const& value)
@@ -348,7 +348,7 @@ TEST_CASE("Every kind of decline is tallied under a reason of its own")
     // is the defect, one layer along, and is invisible to any assertion that only
     // looks at one cause.
     std::vector<std::string_view> reasons;
-    for (auto const cause: FastCache::Enumerators<DeclineCause>())
+    for (auto const cause: Pace::Enumerators<DeclineCause>())
     {
         auto const recording = RecordingFor(DispatchStatus::Declined, cause);
 
@@ -360,7 +360,7 @@ TEST_CASE("Every kind of decline is tallied under a reason of its own")
         reasons.push_back(recording.reason);
     }
 
-    REQUIRE(reasons.size() == FastCache::EnumeratorCount<DeclineCause>);
+    REQUIRE(reasons.size() == Pace::EnumeratorCount<DeclineCause>);
 
     // The discrimination itself. Each assertion above holds for a build that answers
     // one sentence for all of them; only this one rejects it.
@@ -394,13 +394,13 @@ TEST_CASE("A refusal code this launcher does not know is not reported as one it 
     // header knows. So the guard is that an unknown byte does not land on a real
     // cause -- reported as, say, `NoCapacity`, it would send an operator to buy
     // machines because a newer fleet said something this build cannot read.
-    constexpr auto FromTheFuture = static_cast<FastCache::CompileCacheWire::ErrorCode>(0xFE);
+    constexpr auto FromTheFuture = static_cast<Pace::CompileCacheWire::ErrorCode>(0xFE);
     CHECK(DeclineCauseFor(FromTheFuture) == DeclineCause::Unrecognised);
 
     // And a code it DOES know is classified, or the guard above would pass on a
     // build that answered `Unrecognised` for everything.
-    CHECK(DeclineCauseFor(FastCache::CompileCacheWire::ErrorCode::NoWorker) == DeclineCause::NoToolchain);
-    CHECK(DeclineCauseFor(FastCache::CompileCacheWire::ErrorCode::NoCapacity) == DeclineCause::NoCapacity);
+    CHECK(DeclineCauseFor(Pace::CompileCacheWire::ErrorCode::NoWorker) == DeclineCause::NoToolchain);
+    CHECK(DeclineCauseFor(Pace::CompileCacheWire::ErrorCode::NoCapacity) == DeclineCause::NoCapacity);
 }
 
 TEST_CASE("ToStringView names every dispatch token")
@@ -506,12 +506,12 @@ TEST_CASE("The specifics column is cut between characters and holds no C1 contro
     auto const entries = ParseLog("");
     REQUIRE(entries.size() == 2);
     auto const& cut = entries[0].dispatchSpecifics;
-    CHECK(FastCache::IsValidUtf8(cut));
+    CHECK(Pace::IsValidUtf8(cut));
     // The whole character went rather than half of it, and the cut is still marked.
     CHECK(cut == std::string(AsciiBeforeStraddle, 'p') + "...");
 
     auto const& reduced = entries[1].dispatchSpecifics;
-    CHECK(FastCache::IsValidUtf8(reduced));
+    CHECK(Pace::IsValidUtf8(reduced));
     CHECK_FALSE(reduced.contains("\xc2\x9b"));
     CHECK(reduced == "argument -a 31m-b and ? a lone byte, and caf\xc3\xa9 kept");
 }
@@ -1027,7 +1027,7 @@ TEST_CASE("FormatReport emits no ANSI escapes when plain")
     ScopedStateDir const scoped;
     AppendRecord(MakeRecord(Outcome::Hit, "main", "a.cpp", 10));
 
-    auto const report = FormatReport("", FastCache::UsageColor::Plain);
+    auto const report = FormatReport("", Pace::UsageColor::Plain);
     CHECK_FALSE(report.contains("\x1b["));
 }
 
@@ -1036,7 +1036,7 @@ TEST_CASE("FormatReport colors the hit count when colored")
     ScopedStateDir const scoped;
     AppendRecord(MakeRecord(Outcome::Hit, "main", "a.cpp", 10));
 
-    auto const report = FormatReport("", FastCache::UsageColor::Colored);
+    auto const report = FormatReport("", Pace::UsageColor::Colored);
     CHECK(report.contains("\x1b["));
     // The colored count still contains the plain digits, so a caller stripping
     // ANSI escapes recovers byte-identical text to the plain report.
@@ -1050,7 +1050,7 @@ TEST_CASE("FormatReport colors the unavailable count as a warning")
     record.detail = "connect failed";
     AppendRecord(record);
 
-    auto const report = FormatReport("", FastCache::UsageColor::Colored);
+    auto const report = FormatReport("", Pace::UsageColor::Colored);
     CHECK(report.contains("CACHE NOT REACHED"));
     CHECK(report.contains("\x1b["));
 }
@@ -1133,7 +1133,7 @@ TEST_CASE("A line this build writes names its format version and round-trips eve
     CHECK(read.dispatchSpecifics == record.dispatchSpecifics);
     CHECK(read.timestampUnixSeconds == 1'790'000'000);
     REQUIRE(read.exitCode.has_value());
-    CHECK(FastCache::Testing::Unwrap(read.exitCode) == 2);
+    CHECK(Pace::Testing::Unwrap(read.exitCode) == 2);
 }
 
 TEST_CASE("A line without a version is read by arity as the launcher that wrote it meant", "[stats][log-format]")

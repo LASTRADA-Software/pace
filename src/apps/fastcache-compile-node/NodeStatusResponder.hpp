@@ -11,11 +11,11 @@
 #include "SchedulingRedirect.hpp"
 #include "SharedCacheStatus.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -29,7 +29,7 @@
 #include <WorkerProtocol.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 struct NodeConfig;
@@ -605,4 +605,4 @@ class ConfiguredNodeStatus final: public INodeStatusSource
     NodeRuntimeSources _sources;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

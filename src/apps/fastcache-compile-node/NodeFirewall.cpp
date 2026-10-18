@@ -3,10 +3,10 @@
 #include "NodeIdentity.hpp"
 #include "NodeStateFiles.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <array>
 #include <cstddef>
@@ -16,7 +16,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -190,4 +190,4 @@ ServiceControlResult InstallNodeService(NodeConfig const& merged,
                                       firewall);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

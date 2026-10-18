@@ -9,11 +9,11 @@
 #include "NodeIdentity.hpp"
 #include "NodeMembership.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Config/ConfigReloader.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Config/ConfigReloader.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <expected>
 #include <functional>
@@ -21,7 +21,7 @@
 #include <span>
 #include <string>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The node's reloader: `NodeConfig`, read through the option table, guarded by its
@@ -122,4 +122,4 @@ struct ReloadBasis
 /// the secret-file check startup-only on the binary that holds five such files.
 void ApplyReloadRequest(NodeReloader* reloader, NodeMembership& membership, NodeConditions& conditions, ILogger& logger);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

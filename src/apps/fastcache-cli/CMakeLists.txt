@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # fastcache-cli — the operator's client for the cache and the compile fleet.
 #
-# Links the whole FastCache library, the way fastcached and compile-cache-testclient
+# Links the whole Pace library, the way fastcached and compile-cache-testclient
 # do, because it needs the library's own types rather than a copy of them: Cluster's
 # state codec, FleetView's shared column table, and MetricsCatalog. That is the
 # opposite choice from fastcache-cc, which deliberately links nothing so it can be
 # spawned per translation unit with a static CRT — and it is the right one here,
 # because this binary runs once when a person types a command.
 #
-# Linking FastCache also brings the WIN32_LEAN_AND_MEAN / NOMINMAX / _WIN32_WINNT trio
+# Linking Pace also brings the WIN32_LEAN_AND_MEAN / NOMINMAX / _WIN32_WINNT trio
 # transitively (they are PUBLIC on that target), which is why — unlike the launcher —
 # nothing here re-declares them.
 
@@ -81,7 +81,7 @@ endif()
 
 add_executable(fastcache-cli main.cpp ${_fc_cli_sources})
 target_include_directories(fastcache-cli PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(fastcache-cli PRIVATE FastCache)
+target_link_libraries(fastcache-cli PRIVATE Pace)
 if(TARGET core::tui)
     target_link_libraries(fastcache-cli PRIVATE core::tui)
 endif()
@@ -98,8 +98,8 @@ install(TARGETS fastcache-cli
 
 # The command line, the verb handlers, the formatters and the stats ladder's choice are
 # all pure functions over injected seams, so they are unit-testable with no daemon and
-# no socket. Its own binary rather than rows in FastCacheTest: the library's test glob
-# only reaches src/FastCache.
+# no socket. Its own binary rather than rows in PaceTest: the library's test glob
+# only reaches src/Pace.
 if(FASTCACHED_BUILD_TESTS)
     add_executable(fastcache-cli-tests
         ${_fc_cli_sources}
@@ -132,7 +132,7 @@ if(FASTCACHED_BUILD_TESTS)
         ${_fc_cli_tui_tests}
     )
     target_include_directories(fastcache-cli-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(fastcache-cli-tests PRIVATE FastCache Catch2::Catch2WithMain)
+    target_link_libraries(fastcache-cli-tests PRIVATE Pace Catch2::Catch2WithMain)
     if(TARGET core::tui)
         target_link_libraries(fastcache-cli-tests PRIVATE core::tui)
     endif()

@@ -11,8 +11,8 @@
 #include <string>
 #include <utility>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

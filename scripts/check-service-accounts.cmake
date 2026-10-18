@@ -56,7 +56,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 set(FastCachedServiceAccounts
-    "FASTCACHED_MACOS_SERVICE_ACCOUNT|src/FastCache/Platform/ServiceControl.cpp|The fastcached daemon. A system-wide launchd job with no UserName runs as root, and this one owns the cache storage every client's data lands in."
+    "FASTCACHED_MACOS_SERVICE_ACCOUNT|src/Pace/Platform/ServiceControl.cpp|The fastcached daemon. A system-wide launchd job with no UserName runs as root, and this one owns the cache storage every client's data lands in."
     "FASTCACHED_MACOS_NODE_ACCOUNT|src/apps/fastcache-compile-node/NodeConfig.cpp|The compile worker. Deliberately NOT the daemon's: a worker runs a compiler on input that arrived over the network, so sharing one account would let a compromised compile rewrite every cached object."
 )
 

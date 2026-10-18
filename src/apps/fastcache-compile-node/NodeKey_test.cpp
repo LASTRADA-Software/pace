@@ -2,12 +2,12 @@
 #include "NodeIdentity.hpp"
 #include "NodeKey.hpp"
 
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Platform/FileTrust.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -44,12 +44,12 @@
     #include <unistd.h>
 #endif
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ScratchDirectory;
-using FastCache::Testing::ScriptedConfigPathProbe;
-using FastCache::Testing::ScriptedNodeKeyGuard;
-using FastCache::Testing::ScriptedSecureRandom;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ScratchDirectory;
+using Pace::Testing::ScriptedConfigPathProbe;
+using Pace::Testing::ScriptedNodeKeyGuard;
+using Pace::Testing::ScriptedSecureRandom;
 
 namespace
 {

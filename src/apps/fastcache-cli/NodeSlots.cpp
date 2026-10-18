@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeSlots.hpp"
 
-#include <FastCache/Platform/HostLoad.hpp>
+#include <Pace/Platform/HostLoad.hpp>
 
 #include <algorithm>
 #include <limits>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -100,4 +100,4 @@ std::optional<NodeSlots> NodeSlotsOf(StatsReading const* previous, StatsReading 
     return slots;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

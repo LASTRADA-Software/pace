@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AtomicFile.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/ReplacingRename.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/ReplacingRename.hpp>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -19,7 +19,7 @@
 #include <system_error>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -302,4 +302,4 @@ std::uint64_t CurrentProcessId() noexcept
 #endif
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

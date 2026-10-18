@@ -2,14 +2,14 @@
 #include "Responders.hpp"
 #include "SchedulingRedirect.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LeaderRedirect.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LeaderRedirect.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -34,13 +34,13 @@
 #include <tests/VerbFamilies.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ErrorOf;
-using FastCache::Testing::PayloadOf;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ErrorOf;
+using Pace::Testing::PayloadOf;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

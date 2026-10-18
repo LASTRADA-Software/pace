@@ -6,12 +6,12 @@
 #include "NodeConfig.hpp"
 #include "SchedulerLink.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/RouteProbe.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/RouteProbe.hpp>
 
 #include <array>
 #include <atomic>
@@ -33,7 +33,7 @@
 /// The one place that decides which address this node is reachable at right now, and the only
 /// writer of the two endpoints it publishes (the `0xFC` one and the Raft one).
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Literal IP hosts worth probing before the default route (e.g. applied schedulers given as IPs).
@@ -365,4 +365,4 @@ class EndpointResolver final: public IHostEventSink, public IEndpointRefresh
     std::vector<IEndpointMoveSink*> _watchers; ///< Guarded by `_watchMutex`.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

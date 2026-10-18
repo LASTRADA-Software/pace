@@ -6,7 +6,7 @@
 #include <format>
 #include <ranges>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -178,4 +178,4 @@ std::string Frame(std::string_view title,
     return frame;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -3,9 +3,9 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include <WorkerProtocol.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Whether a supervisor handed this worker its listening socket.
@@ -178,4 +178,4 @@ inline constexpr std::string_view ReloadWidensUncheckedWorkerRefusal =
 [[nodiscard]] std::function<std::expected<void, ConfigError>(NodeConfig const&, NodeConfig const&)> ReloadCheckWith(
     LeaseCheckInForce const& inForce);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

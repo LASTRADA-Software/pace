@@ -4,9 +4,9 @@
 #include "NodeConfig.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
 
 #include <cstdint>
 #include <string>
@@ -16,7 +16,7 @@
 
 #include <WorkerProtocol.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file NodeAudience.hpp
@@ -82,4 +82,4 @@ class NodeAudience final: public Distributed::IAudience
     ILocalityOracle const& _locality;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

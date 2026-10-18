@@ -6,11 +6,11 @@
 #include "NodeKey.hpp"
 #include "OperatorCredentials.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/EnrollRequestSignature.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/EnrollRequestSignature.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -33,11 +33,11 @@
 #include <tests/TicketFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

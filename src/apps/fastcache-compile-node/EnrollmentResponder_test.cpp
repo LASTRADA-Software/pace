@@ -4,17 +4,17 @@
 #include "EnrollmentWindow.hpp"
 #include "Responders.hpp"
 
-#include <FastCache/Cluster/EnrollAdmissionSignature.hpp>
-#include <FastCache/Cluster/EnrollRequestSignature.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/Base64.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/EnrollAdmissionSignature.hpp>
+#include <Pace/Cluster/EnrollRequestSignature.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/Base64.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -45,12 +45,12 @@
 #include <tests/SecureRandomFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ListedMembership;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ListedMembership;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

@@ -7,10 +7,10 @@
 #include "SharedCacheSession.hpp"
 #include "SharedCacheStatus.hpp"
 
-#include <FastCache/Cluster/SharedCacheTarget.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/SharedCacheTarget.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstddef>
 #include <functional>
@@ -26,7 +26,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The private tier's upstream when the fleet's `shared-cache` setting names another machine.
@@ -190,4 +190,4 @@ class SharedCacheUpstream final: public ICacheUpstream, public ISharedCacheStatu
     std::string _detail; ///< Guarded by `_mutex`.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

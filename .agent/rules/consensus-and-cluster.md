@@ -1,6 +1,6 @@
 # Consensus and cluster membership
 
-Rules for `src/FastCache/Consensus/` and `src/FastCache/Cluster/`: Raft itself,
+Rules for `src/Pace/Consensus/` and `src/Pace/Cluster/`: Raft itself,
 the LAN discovery beacon and the identity-key challenge after it, the Raft peer wire and the
 handshake every connection on it proves each end's identity key with, the replicated
 cluster configuration, and the admin verbs that change it.
@@ -461,7 +461,7 @@ Every rule below has already been a bug.
     purpose (`RaftPeerSignatureLabels`, `NodeProofSignatureLabels`, each
     `EachRowItsOwnConstruction`), so its interface cannot be handed another protocol's.
     The one door the type cannot close is `Ed25519KeyPair::Sign`, which takes raw bytes:
-    `IdentityKeyLabel_test` counts every `.Sign(` / `->Sign(` under `src/FastCache` and
+    `IdentityKeyLabel_test` counts every `.Sign(` / `->Sign(` under `src/Pace` and
     `src/apps` against a row per file, `SignLabelled`'s the only raw one, and FAILS OPEN
     for a signature spelled any other way (a member pointer, `std::invoke`).
   - **The label is a FIELD, not a prefix glued onto the first one.** It goes through the same

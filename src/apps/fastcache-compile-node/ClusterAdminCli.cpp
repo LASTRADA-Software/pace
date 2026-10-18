@@ -2,8 +2,8 @@
 #include "CacheProtocol.hpp"
 #include "ClusterAdminCli.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <format>
@@ -12,7 +12,7 @@
 
 #include <core/async/SyncRun.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -343,4 +343,4 @@ std::expected<std::string, UnfinishedCommand> RunClusterAdmin(NodeConfig const& 
         request.action, ClusterExchange { .outcome = std::move(answered->outcome), .missing = missing }, answered->endpoint);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// One translation unit a worker has been asked to compile.
@@ -775,4 +775,4 @@ class CompileJobRunner final: public ICompileJobRunner
 /// @return The flags, in table order; empty for every ordinary deployment.
 [[nodiscard]] std::vector<std::string_view> ScratchRootUnmappableFlags(std::string_view scratchRoot);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

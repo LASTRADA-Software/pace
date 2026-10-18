@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file RespClient.hpp
@@ -257,4 +257,4 @@ class IExchange
 [[nodiscard]] std::expected<RespValue, ExchangeError> Call(IExchange& exchange,
                                                            std::initializer_list<std::string_view> argv);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

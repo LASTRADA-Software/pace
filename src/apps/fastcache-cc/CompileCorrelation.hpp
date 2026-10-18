@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Ties a COMPILE reply to the COMPILE request that asked for it.
@@ -146,4 +146,4 @@ struct CorrelatedCompile
     return digest.ToHex();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

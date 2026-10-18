@@ -16,7 +16,7 @@
 #include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
 /// @file DashboardRig.hpp
@@ -91,7 +91,7 @@ class CollectingSink final: public IFrameSink
     reactor.drain();
 
     REQUIRE(result.has_value());
-    return FastCache::Testing::Unwrap(result);
+    return Pace::Testing::Unwrap(result);
 }
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

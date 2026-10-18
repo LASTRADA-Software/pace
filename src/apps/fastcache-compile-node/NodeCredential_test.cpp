@@ -8,12 +8,12 @@
 #include "NodeProofClient.hpp"
 #include "RemoteUpstream.hpp"
 
-#include <FastCache/Config/YamlReader.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Config/YamlReader.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -69,13 +69,13 @@
 // alone. A source that rotates while every site ignores it is precisely the bug, and a
 // case asserting the source would pass under it.
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 constexpr std::string_view FirstSecret = "secret-before-rotation";
 constexpr std::string_view SecondSecret = "secret-after-rotation";
@@ -122,7 +122,7 @@ class RotatingCredential final: public ICredentialSource
     /// `SecureString` for the reason the production holders are: this fake stands in for a
     /// credential source, and a test double spelling a credential the unsafe way is how the
     /// unsafe spelling gets copied back into production (#1125).
-    FastCache::SecureString _secret;
+    Pace::SecureString _secret;
 };
 
 /// The bytes a client sends when it presents @p secret before @p command.
@@ -640,7 +640,7 @@ struct NodeSource
 [[nodiscard]] std::vector<NodeSource> NodeSourcesWithoutComments()
 {
     std::filesystem::path const nodeDir =
-        std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
     REQUIRE(std::filesystem::is_directory(nodeDir));
 
     // A COMMENT is not a call site, and several files here discuss `Cc::Credential`

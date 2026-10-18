@@ -4,8 +4,8 @@
 #include "CliAnswer.hpp"
 #include "CliValue.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file StatsSource.hpp
@@ -198,4 +198,4 @@ class IStatsGatherer
     [[nodiscard]] virtual std::vector<StatsAttempt> Gather() = 0;
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

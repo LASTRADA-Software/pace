@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// One header in the toolchain's own include tree, as the fingerprint sees it.
@@ -87,4 +87,4 @@ inline constexpr std::string_view FingerprintSchema = "toolchain-v3";
                                                       std::string_view driverGrammar,
                                                       std::vector<ToolchainFile> files);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

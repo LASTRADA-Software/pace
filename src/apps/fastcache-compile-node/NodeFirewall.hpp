@@ -5,8 +5,8 @@
 #include "NodeFormation.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Platform/Firewall.hpp>
-#include <FastCache/Platform/ServiceControl.hpp>
+#include <Pace/Platform/Firewall.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
 
 #include <expected>
 #include <filesystem>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How the firewall spells a surface's protocol.
@@ -180,4 +180,4 @@ class StateDirectoryFormationReader final: public IKeptFormationReader
     std::function<ServiceControlResult(ServiceSpec const&)> const& uninstall,
     IFirewall* firewall);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

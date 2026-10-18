@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "RemoteUpstream.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <format>
 #include <memory>
@@ -11,7 +11,7 @@
 #include <core/net/SocketAddress.hpp>
 #include <core/net/SocketDeadline.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 UpstreamReachability::UpstreamReachability(core::platform::IClock const& clock,
@@ -237,4 +237,4 @@ core::async::Task<UpstreamStore> RemoteUpstream::Store(std::string_view key, std
     co_return outcome.kind == Cc::CacheOutcomeKind::Hit ? UpstreamStore::Stored : UpstreamStore::Declined;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -731,7 +731,7 @@ non-zero**, so the miss does not present as an empty result — it presents as a
 **deterministic red**, identical on every iteration, which is exactly what a real
 reproducible failure looks like.
 
-Re-measured against a built `FastCacheTest` rather than taken from the tickets,
+Re-measured against a built `PaceTest` rather than taken from the tickets,
 both directions, because a subject with no control cannot tell *this name matches
 nothing* from *my quoting is broken* — the first attempt's control picked the
 `--list-tests` header instead of a case and reported `No tests ran` for the
@@ -926,7 +926,7 @@ carried its own abbreviation of that reasoning, so why the idiom exists was
 reconstructible from some and not from others, and an author who found a terse
 copy had nothing telling them a plain dereference was not simply better. It is
 header-only and includes only `<optional>`, so the launcher's and worker's test
-binaries can use it without linking `FastCache`. `std::expected` is **not**
+binaries can use it without linking `Pace`. `std::expected` is **not**
 covered by that check, so a `*result` after `REQUIRE(result.has_value())` stays as
 it is — routing it through `Unwrap` does not even compile.
 
@@ -968,7 +968,7 @@ and what got it there is worth keeping:
     looks random. `ctest -R unique-temp-paths`.
 - **The fifth one happened because the shared fix was somewhere it could not be
   included from.** `UniqueScratchPath` lived in `src/apps/fastcache-cc/`, which
-  `FastCacheTest` does not have on its include path, so the one suite that could
+  `PaceTest` does not have on its include path, so the one suite that could
   not reach it re-derived it. A helper is shared only if it sits where everything
   that needs it can include from; `src` is on all three test targets' paths, which
   is why this and `tests/Unwrap.hpp` live together.

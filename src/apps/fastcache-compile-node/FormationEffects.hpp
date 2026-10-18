@@ -4,10 +4,10 @@
 #include "EnrollClient.hpp"
 #include "FormationController.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <cstddef>
 #include <expected>
@@ -16,7 +16,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file FormationEffects.hpp
@@ -135,4 +135,4 @@ namespace FastCache::Node
                                                                                    Cluster::IFormationStore& store,
                                                                                    IStoreArchiver& archiver);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

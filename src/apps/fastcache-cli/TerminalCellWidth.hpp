@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TerminalCellWidth.hpp
@@ -27,4 +27,4 @@ namespace FastCache::Cli
 /// @return The width in cells.
 [[nodiscard]] std::size_t TerminalCellWidth(std::string_view text) noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

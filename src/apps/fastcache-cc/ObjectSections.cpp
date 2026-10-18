@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "ObjectSections.hpp"
 
-#include <FastCache/Core/Endian.hpp>
+#include <Pace/Core/Endian.hpp>
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -610,4 +610,4 @@ std::optional<ObjectSections> ReadObjectSections(std::span<std::byte const> imag
     return ObjectSections { .format = ObjectFormat::Coff, .sections = std::move(walk.sections) };
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

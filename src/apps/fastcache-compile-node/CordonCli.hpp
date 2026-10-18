@@ -5,7 +5,7 @@
 #include "NodeSurfaces.hpp"
 #include "OneShotAnswer.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <expected>
 #include <string>
@@ -14,7 +14,7 @@
 #include <CacheProtocol.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Where a `--cordon` run on this machine dials its own node.
@@ -56,4 +56,4 @@ namespace FastCache::Node
 /// @return What to print, or what went wrong and where the answer came from (`AnswerSource`).
 [[nodiscard]] std::expected<std::string, UnfinishedCommand> RunCordonAdmin(NodeConfig const& cfg, CordonCommand command);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

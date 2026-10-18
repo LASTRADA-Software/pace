@@ -14,13 +14,13 @@
 #include "SchedulerLink.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -40,7 +40,7 @@
 #include <tests/ScriptedSocket.hpp>
 #include <tests/Unwrap.hpp>
 
-namespace FastCache::Node::AnnounceTesting
+namespace Pace::Node::AnnounceTesting
 {
 
 /// The address a node in these cases advertises.
@@ -164,7 +164,7 @@ struct AnnounceFixture
     /// @return Every request the round sent.
     [[nodiscard]] std::vector<std::pair<std::uint8_t, std::vector<std::byte>>> AnnounceTo(std::vector<std::byte> replies)
     {
-        FastCache::Testing::ScriptedSocket scheduler { std::move(replies) };
+        Pace::Testing::ScriptedSocket scheduler { std::move(replies) };
         (void) AnnounceOnce(Round(), scheduler, SchedulersOf(cfg, AsConfigured).front());
         return FramesIn(scheduler.Sent());
     }
@@ -177,7 +177,7 @@ struct AnnounceFixture
 {
     auto const link = SchedulerLink::For(schedulers);
     REQUIRE(link.has_value());
-    return FastCache::Testing::Unwrap(link);
+    return Pace::Testing::Unwrap(link);
 }
 
-} // namespace FastCache::Node::AnnounceTesting
+} // namespace Pace::Node::AnnounceTesting

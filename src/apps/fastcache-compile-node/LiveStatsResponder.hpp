@@ -3,11 +3,11 @@
 
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -20,7 +20,7 @@
 
 #include <core/net/EventLoop.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file LiveStatsResponder.hpp
@@ -198,4 +198,4 @@ class LiveStatsResponder final: public IFrameResponder, public IFrameStream, pri
     LiveStream _stream;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

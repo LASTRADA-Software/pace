@@ -6,12 +6,12 @@
 #include "LiveStats.hpp"
 #include "NodeStatusText.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Distributed/MembershipWire.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/MembershipWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -29,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -2826,4 +2826,4 @@ Answer RunVerb(VerbSpec const& verb, VerbContext const& context)
     return answer;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

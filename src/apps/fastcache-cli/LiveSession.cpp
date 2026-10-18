@@ -17,7 +17,7 @@
 
 #include <core/async/ResumeOn.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -414,4 +414,4 @@ void EndAbandonedSession(SessionEnding const& ending, IAbandonedExit& exit)
     exit.Exit(ExitCodeOf(ending.answer.outcome));
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

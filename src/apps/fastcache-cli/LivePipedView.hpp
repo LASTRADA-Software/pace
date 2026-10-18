@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file LivePipedView.hpp
@@ -124,4 +124,4 @@ class PipedRecordView final: public IDashboardView
     std::size_t _rows { 0 };
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

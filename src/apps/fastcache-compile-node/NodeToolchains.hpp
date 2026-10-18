@@ -3,7 +3,7 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <cstdint>
 #include <map>
@@ -20,7 +20,7 @@
 #include <ToolchainProbe.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How loudly a survey narrates itself.
@@ -613,4 +613,4 @@ enum class ClaimsReloaded : std::uint8_t
                                                  RecheckDepth depth = RecheckDepth::WhenEvidenceMoved,
                                                  SurveyVoice voice = SurveyVoice::Announce);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

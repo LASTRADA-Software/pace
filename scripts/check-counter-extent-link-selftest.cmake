@@ -34,8 +34,8 @@ foreach(required FASTCACHED_SOURCE_DIR FASTCACHED_SCRATCH_DIR FASTCACHED_CXX_COM
 endforeach()
 
 set(check "${FASTCACHED_SOURCE_DIR}/scripts/check-counter-extent-link.cmake")
-set(header "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.hpp")
-set(definition "${FASTCACHED_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.cpp")
+set(header "${FASTCACHED_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.hpp")
+set(definition "${FASTCACHED_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.cpp")
 foreach(input IN ITEMS "${check}" "${header}" "${definition}")
     if(NOT EXISTS "${input}")
         message(FATAL_ERROR "missing: ${input}")
@@ -74,8 +74,8 @@ set(skipped FALSE)
 # @param outSkipped Set TRUE when the check skipped.
 function(fastcached_run_case name headerBody definitionBody outObjected outOutput outSkipped)
     set(tree "${root}/${name}")
-    file(WRITE "${tree}/src/FastCache/Metrics/IMetricsSink.hpp" "${headerBody}")
-    file(WRITE "${tree}/src/FastCache/Metrics/IMetricsSink.cpp" "${definitionBody}")
+    file(WRITE "${tree}/src/Pace/Metrics/IMetricsSink.hpp" "${headerBody}")
+    file(WRITE "${tree}/src/Pace/Metrics/IMetricsSink.cpp" "${definitionBody}")
     set(arguments
         "-DFASTCACHED_SOURCE_DIR=${tree}" "-DFASTCACHED_SCRATCH_DIR=${tree}/s"
         "-DFASTCACHED_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}" "-DFASTCACHED_CONFIGS=Debug")

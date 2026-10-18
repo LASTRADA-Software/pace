@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/StopSignal.hpp>
+#include <Pace/Platform/StopSignal.hpp>
 
 #include <core/async/AsyncQueue.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
 /// A stop signal a case fires by hand.
@@ -83,4 +83,4 @@ class ScriptedStopSignal final: public IStopSignal
     int _waits { 0 };
 };
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

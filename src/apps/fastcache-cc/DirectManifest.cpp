@@ -2,10 +2,10 @@
 #include "DirectManifest.hpp"
 #include "KeyDigest.hpp"
 
-#include <FastCache/Core/ByteAppender.hpp>
-#include <FastCache/Core/ByteCursor.hpp>
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/Core/ByteAppender.hpp>
+#include <Pace/Core/ByteCursor.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@
 #include <system_error>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 namespace
 {
@@ -1045,4 +1045,4 @@ std::string ComputeHeaderStateDigest(std::string_view manifestKey, DirectManifes
     return digest.ToHex();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

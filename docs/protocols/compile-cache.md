@@ -41,7 +41,7 @@ Those two declared lengths are what make the protocol extensible. A receiver
 that does not recognise an opcode can skip exactly `payloadLength` bytes, answer
 with a typed error, and stay in sync — so adding a verb is not a breaking change,
 and a refusal is a *reply* rather than a dropped connection. Both sides frame
-through one shared module, `src/FastCache/Protocol/CompileCacheWire.hpp`, so the
+through one shared module, `src/Pace/Protocol/CompileCacheWire.hpp`, so the
 daemon, the launcher, and the test client cannot disagree about the layout.
 
 ### Statuses

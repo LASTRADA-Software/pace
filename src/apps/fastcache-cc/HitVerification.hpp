@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Deciding whether a cache hit is one of the sampled ones, and what came of it.
@@ -172,4 +172,4 @@ struct HitComparison
                                                 std::filesystem::path const& served,
                                                 IAtomicWriteFiles& files);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

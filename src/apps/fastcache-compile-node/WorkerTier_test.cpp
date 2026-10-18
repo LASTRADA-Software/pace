@@ -12,15 +12,15 @@
 #include "WorkerTier.hpp"
 #include "WorkerTierTestFixture.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -56,8 +56,8 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 using WorkerTierFixture = WorkerTierTesting::WorkerTierFixture;
 using WorkerTierTesting::Worker;
@@ -262,7 +262,7 @@ TEST_CASE("A reloaded allowlist re-judges the refused-arguments row", "[node][wo
     NodeConditions conditions;
     NullLogger logger;
     auto runner = Cc::MakeProcessRunner();
-    FastCache::Testing::ScratchDirectory scratch { "fc-adopt-allowlist" };
+    Pace::Testing::ScratchDirectory scratch { "fc-adopt-allowlist" };
     Cc::CompileJobRunner jobs { *runner, scratch.Path(), { { "gcc", "/opt/none/g++" } }, Cc::ToolchainSurvey::Completed() };
     std::vector<std::string> inForce;
     RefusedArgumentsReport report { conditions, logger, inForce };

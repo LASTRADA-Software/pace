@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -23,7 +23,7 @@
 #include <apps/fastcache-compile-node/SharedCacheTier.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file SharedTierFakes.hpp
@@ -299,4 +299,4 @@ class MemoryOpener final: public Node::ISharedTierOpener
     return EncodeCompileValue(compiled);
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

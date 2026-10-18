@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeRefusal.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,8 +17,8 @@
 
 #include <tests/CheckoutPaths.hpp>
 
-using FastCache::ProcessExit;
-using FastCache::Node::NodeRefusalCause;
+using Pace::ProcessExit;
+using Pace::Node::NodeRefusalCause;
 
 namespace
 {
@@ -79,7 +79,7 @@ constexpr auto CauseVerdicts = std::to_array<CauseVerdict>({
 /// @return Its bytes; the case has failed when it cannot be read.
 [[nodiscard]] std::string NodeMain()
 {
-    auto const path = std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps"
+    auto const path = std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps"
                       / "fastcache-compile-node" / "main.cpp";
     REQUIRE(std::filesystem::exists(path));
     // Through the stream buffer, for `PosixDaemonHost_test`'s measured reason.
@@ -110,14 +110,14 @@ constexpr auto CauseVerdicts = std::to_array<CauseVerdict>({
 
 TEST_CASE("A node's start gives up as a refusal only when the next start reaches the same verdict", "[node][startup][exit]")
 {
-    for (auto const cause: FastCache::Enumerators<NodeRefusalCause>())
+    for (auto const cause: Pace::Enumerators<NodeRefusalCause>())
         CHECK(std::ranges::count(CauseVerdicts, cause, &CauseVerdict::cause) == 1);
 
     for (auto const& verdict: CauseVerdicts)
     {
         INFO(static_cast<int>(verdict.cause) << ": " << verdict.why);
-        CHECK(FastCache::Node::ExitOf(verdict.cause) == verdict.exit);
-        CHECK(FastCache::Node::ExitCodeFor(verdict.cause) == FastCache::ExitCodeOf(verdict.exit));
+        CHECK(Pace::Node::ExitOf(verdict.cause) == verdict.exit);
+        CHECK(Pace::Node::ExitCodeFor(verdict.cause) == Pace::ExitCodeOf(verdict.exit));
     }
 }
 

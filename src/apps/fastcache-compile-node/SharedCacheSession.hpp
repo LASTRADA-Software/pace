@@ -5,10 +5,10 @@
 #include "NodeProofClient.hpp"
 #include "ReactorHome.hpp"
 
-#include <FastCache/Cluster/SharedCacheTarget.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/SealedFrameSocket.hpp>
+#include <Pace/Cluster/SharedCacheTarget.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/SealedFrameSocket.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -23,7 +23,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How long the handshake at the dial hint may take: as short as the hint's dial, and for the same
@@ -283,4 +283,4 @@ class SharedSessionPool
     std::vector<std::unique_ptr<Idle>> _idle;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

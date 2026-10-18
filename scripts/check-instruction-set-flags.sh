@@ -45,7 +45,7 @@ set -u
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cmake_command="cmake"
 # A first-party unit every shipping configuration compiles, as the `instruction-set-flags-plant` ctest plants.
-plant_unit="src/FastCache/Core/Sha256.cpp"
+plant_unit="src/Pace/Core/Sha256.cpp"
 
 # A path as the native cmake reads it. Git Bash hands POSIX spellings (`/d/a/...`) to a Windows program only through
 # its argument conversion, which the call below switches off, so the conversion is done here, explicitly.
@@ -157,7 +157,7 @@ SelfTest() {
     cat > "$tmp/warns" <<'EOF'
 #!/bin/bash
 case "$*" in
-    *FASTCACHED_PLANT_UNIT*) echo '-- instruction-set-flags: plant: `-msha` planted into src/FastCache/Core/Sha256.cpp (1 entr(y/ies)) refused as it must; 1 first-party unit(s) judged; 0 unplanted problem(s) left to the unplanted run' ;;
+    *FASTCACHED_PLANT_UNIT*) echo '-- instruction-set-flags: plant: `-msha` planted into src/Pace/Core/Sha256.cpp (1 entr(y/ies)) refused as it must; 1 first-party unit(s) judged; 0 unplanted problem(s) left to the unplanted run' ;;
     *) echo '-- instruction-set-flags: 1 first-party unit(s) judged, none carries a global instruction-set flag; 0 unit(s) outside src/ declined' ;;
 esac
 echo 'CMake Warning at x.cmake:1 (message):'
@@ -182,7 +182,7 @@ case "$*" in
     *FASTCACHED_PLANT_UNIT*)
         echo 'CMake Error at /r/scripts/check-instruction-set-flags.cmake:419 (message):'
         echo '  instruction-set-flags: 1 problem(s) in `db`:'
-        echo '    plant: `-msha` planted into `src/FastCache/Core/Sha256.cpp` was ACCEPTED -- the check cannot see the flag it exists to refuse'
+        echo '    plant: `-msha` planted into `src/Pace/Core/Sha256.cpp` was ACCEPTED -- the check cannot see the flag it exists to refuse'
         exit 1
         ;;
 esac

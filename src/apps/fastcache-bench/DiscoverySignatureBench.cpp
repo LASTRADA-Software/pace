@@ -12,13 +12,13 @@
 /// any case runs (`BuildBannerListener.cpp`); whoever quotes one states the host, its load and the
 /// sample count, which no binary can read off itself.
 
-#include <FastCache/Cluster/DiscoveryWire.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/IdentityKeyLabel.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Core/Sha256.hpp>
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/DiscoveryWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/IdentityKeyLabel.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Core/Sha256.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -30,7 +30,7 @@
 #include <string>
 #include <string_view>
 
-using namespace FastCache;
+using namespace Pace;
 
 TEST_CASE("bench: the signature work discovery does per answer, per proof and per cookie", "[!benchmark][discovery]")
 {

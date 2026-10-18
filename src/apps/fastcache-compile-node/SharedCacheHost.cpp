@@ -2,7 +2,7 @@
 #include "SharedCacheHost.hpp"
 #include "SharedCacheTier.hpp"
 
-#include <FastCache/Cluster/SharedCacheTarget.hpp>
+#include <Pace/Cluster/SharedCacheTarget.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::string OutlivedHostMessage(std::size_t borrowers)
@@ -210,4 +210,4 @@ void SharedCacheHost::Report(SharedCacheHostStatus const& status)
         _conditions->Clear(NodeCondition::SharedCacheUnavailable);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

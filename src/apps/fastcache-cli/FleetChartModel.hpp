@@ -4,7 +4,7 @@
 #include "DashboardLoop.hpp"
 #include "HistoryChart.hpp"
 
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <array>
 #include <cstddef>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 struct FleetDocument;
@@ -132,4 +132,4 @@ struct ChartBand
                                            std::size_t width,
                                            std::size_t height);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

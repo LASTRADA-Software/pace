@@ -83,7 +83,7 @@ set(FastCachedCounterPrefilter "ounter")
 # count, adds a second place a `Counter` becomes a number, which is the decision #1366
 # exists to make deliberate. No row may contain a ';'.
 set(FastCachedCounterConverters
-    "FastCache/Metrics/IMetricsSink.hpp|2|CounterIndex, the one conversion, and CounterCount, the extent every Counter-keyed table is sized by. The header is included by fastcache-cc, which does not link FastCache, so the extent is a cast here rather than EnumeratorCount."
+    "Pace/Metrics/IMetricsSink.hpp|2|CounterIndex, the one conversion, and CounterCount, the extent every Counter-keyed table is sized by. The header is included by fastcache-cc, which does not link Pace, so the extent is a cast here rather than EnumeratorCount."
 )
 
 # Which files count as source. Tests included: a test that indexes a table by a cast
@@ -339,7 +339,7 @@ if(violationCount GREATER 0)
         "${violationReport}\n\n"
         "What an index at or past Counter::Last means is stated on IMetricsSink::Carries, and a "
         "cast written here answers none of it. Reach a table keyed by the enum through "
-        "CounterCells::Find, or ask CounterIndex (src/FastCache/Metrics/IMetricsSink.hpp) and "
+        "CounterCells::Find, or ask CounterIndex (src/Pace/Metrics/IMetricsSink.hpp) and "
         "handle its absent answer; a loop that only needs distinct values can number its rows "
         "itself. Only these may convert:\n\n"
         "${table}\n"

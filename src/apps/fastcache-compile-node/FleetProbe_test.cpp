@@ -2,9 +2,9 @@
 #include "EndpointDialerTestUtils.hpp"
 #include "FleetProbe.hpp"
 
-#include <FastCache/Cluster/FleetSummarySignature.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/FleetSummarySignature.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,13 +28,13 @@
 #include <tests/SecureRandomFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using CompileCacheWire::FleetState;
 using CompileCacheWire::FleetSummary;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

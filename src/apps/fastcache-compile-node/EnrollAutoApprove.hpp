@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -18,7 +18,7 @@
 /// the operator is watching; the leader refuses it again, because a peer may send anything.
 /// Both read `AutoApproveRefusals`, so each rule has exactly one sentence. A header of its own
 /// so the option table can reach it without the enrollment list it belongs to.
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The longest an auto-approve window may be armed for.
@@ -85,4 +85,4 @@ static_assert(RowsInEnumeratorOrder(AutoApproveRefusals, &AutoApproveRefusalRow:
     return std::nullopt;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

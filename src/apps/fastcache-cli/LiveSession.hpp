@@ -14,8 +14,8 @@
 #include "SixelEncoder.hpp"
 #include "TerminalEvents.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Platform/StopSignal.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Platform/StopSignal.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -30,7 +30,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file LiveSession.hpp
@@ -383,4 +383,4 @@ void EndAbandonedSession(SessionEnding const& ending, IAbandonedExit& exit);
 /// @return How it ended.
 [[nodiscard]] SessionEnding RunLiveStatsSession(VerbContext const& context, LiveSessionSeat const& seat);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

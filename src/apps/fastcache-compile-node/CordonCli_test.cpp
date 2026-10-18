@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CordonCli.hpp"
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -14,11 +14,11 @@
 #include <tests/ScriptedSocket.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

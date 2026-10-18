@@ -3,8 +3,8 @@
 #include "NodeFormation.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <algorithm>
 #include <expected>
@@ -17,7 +17,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -437,4 +437,4 @@ std::string DescribeFormationMode(NodeConfig const& cfg)
     return std::format("mode: {}", name);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -5,9 +5,9 @@
 #include "NodeConditions.hpp"
 #include "SharedCacheResponder.hpp"
 
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,8 +25,8 @@
 #include <tests/NodeConditionFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
 
 namespace Wire = CompileCacheWire;

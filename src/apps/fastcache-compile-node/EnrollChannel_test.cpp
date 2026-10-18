@@ -3,9 +3,9 @@
 #include "EnrollChannel.hpp"
 #include "EnrollClient.hpp"
 
-#include <FastCache/Cluster/EnrollAdmissionSignature.hpp>
-#include <FastCache/Cluster/EnrollRequestSignature.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/EnrollAdmissionSignature.hpp>
+#include <Pace/Cluster/EnrollRequestSignature.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -24,8 +24,8 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace Wire = CompileCacheWire;
 

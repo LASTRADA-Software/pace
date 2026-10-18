@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # fastcache-compile-node — the compile worker for distributed builds.
 #
-# Unlike fastcache-cc, this one LINKS the FastCache library, and deliberately: it
+# Unlike fastcache-cc, this one LINKS the Pace library, and deliberately: it
 # is a daemon, and "the same daemon capabilities as fastcached" means the same
 # listener, socket, TLS, logging and (in a later phase) service-management code
 # rather than a second implementation of each. The launcher avoids the library
@@ -9,7 +9,7 @@
 # critical path; a worker starts once and then lives, so the trade is the opposite.
 #
 # It reuses the launcher's own pieces by compiling those sources in, the same way
-# fastcache-cc compiles in a few FastCache leaves. They are the client-side and
+# fastcache-cc compiles in a few Pace leaves. They are the client-side and
 # worker-side halves of one protocol, and a second copy of either is how the two
 # ends drift apart.
 #
@@ -116,7 +116,7 @@ add_executable(fastcache-compile-node
 target_include_directories(fastcache-compile-node PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
     "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cc")
-target_link_libraries(fastcache-compile-node PRIVATE FastCache)
+target_link_libraries(fastcache-compile-node PRIVATE Pace)
 target_compile_definitions(fastcache-compile-node PRIVATE
     FASTCACHE_NODE_VERSION="${FASTCACHED_VERSION_STRING}")
 if(WIN32)
@@ -312,7 +312,7 @@ if(FASTCACHED_BUILD_TESTS)
         "${CMAKE_SOURCE_DIR}/src"
         "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cc"
         "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cli")
-    target_link_libraries(fastcache-compile-node-tests PRIVATE FastCache Catch2::Catch2)
+    target_link_libraries(fastcache-compile-node-tests PRIVATE Pace Catch2::Catch2)
     # The launchd label the macOS uninstaller boots this worker's job out by,
     # handed to the test so it compares the packaging's value against the one the
     # binary derives -- rather than against a literal of its own, which would

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "EnrollmentWindow.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <algorithm>
 #include <format>
@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace Wire = CompileCacheWire;
@@ -539,4 +539,4 @@ std::uint64_t EnrollmentWindow::SecondsSince(core::platform::SteadyTimePoint sin
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(now - since).count());
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

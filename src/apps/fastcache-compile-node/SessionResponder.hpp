@@ -3,11 +3,11 @@
 
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -21,7 +21,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file SessionResponder.hpp
@@ -202,4 +202,4 @@ class SessionResponder final: public IFrameResponder
     IMetricsSink& _metrics;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -12,7 +12,7 @@
 
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The private tier's upstream on the machine the fleet's `shared-cache` setting names: the shared
@@ -66,4 +66,4 @@ class InProcessSharedUpstream final: public ICacheUpstream
     SharedCacheHost::Borrow _host;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -9,15 +9,15 @@
 #include "Responders.hpp"
 #include "WorkerLease.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -57,11 +57,11 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ScratchDirectory;
-using FastCache::Testing::Unwrap;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ScratchDirectory;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

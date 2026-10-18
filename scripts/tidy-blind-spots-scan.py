@@ -93,7 +93,7 @@ if not best:
 # for it. The TLS socket and its tests are core-cpp's since #1596, and no unit left here is
 # empty without TLS, so that axis has no subject in this tree -- which is also why a
 # build's TLS setting no longer changes the blind set this table records.
-for control, why in (("src/FastCache/Server/Server.cpp",
+for control, why in (("src/Pace/Server/Server.cpp",
                       "the measurement is broken, not the tree -- check `nm`"),):
     if control in best and best[control] <= 2:
         print(f"!ERROR positive control {control} measured as blind "

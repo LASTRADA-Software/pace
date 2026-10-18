@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeActivation.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <format>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 NodeRefusal UnreadableActivatedBindRefusal()
@@ -43,4 +43,4 @@ std::expected<void, NodeRefusal> AdoptActivatedBind(NodeConfig& cfg, std::option
     return AdoptActivatedBind(cfg, *bound);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

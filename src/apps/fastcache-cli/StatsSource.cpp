@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "StatsSource.hpp"
 
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -10,7 +10,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -224,4 +224,4 @@ Answer ChooseStats(std::span<StatsAttempt const> attempts)
     return answer;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

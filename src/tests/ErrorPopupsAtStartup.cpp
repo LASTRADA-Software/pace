@@ -65,7 +65,7 @@ struct SuppressBeforeUserInitializers
     SuppressBeforeUserInitializers() noexcept
     {
         if (SuppressionRequested())
-            FastCache::Testing::SuppressWindowsErrorPopups();
+            Pace::Testing::SuppressWindowsErrorPopups();
     }
 };
 

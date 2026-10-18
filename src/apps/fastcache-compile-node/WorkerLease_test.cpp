@@ -5,13 +5,13 @@
 #include "NodeRoster.hpp"
 #include "WorkerLease.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseSigner.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseSigner.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,8 +28,8 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

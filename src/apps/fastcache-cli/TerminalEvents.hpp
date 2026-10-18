@@ -5,7 +5,7 @@
 #include "DashboardLoop.hpp"
 #include "TerminalCapabilities.hpp"
 
-#include <FastCache/Cli/UsageDoc.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
 
 #include <expected>
 #include <memory>
@@ -14,7 +14,7 @@
 #include <core/async/IExecutor.hpp>
 #include <core/async/Task.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TerminalEvents.hpp
@@ -167,4 +167,4 @@ struct StartedTerminal
 [[nodiscard]] core::async::Task<std::expected<StartedTerminal, std::string>> StartTerminal(
     std::unique_ptr<UnstartedTerminal> terminal);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

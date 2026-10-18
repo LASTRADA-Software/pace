@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "LiveStats.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <format>
 #include <string>
@@ -11,7 +11,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -212,4 +212,4 @@ Answer LiveStatsVerb(VerbContext const& context)
     }));
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

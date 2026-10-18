@@ -10,14 +10,14 @@
 #include "Responders.hpp"
 #include "SessionResponder.hpp"
 
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -47,7 +47,7 @@
 #include <tests/SurfaceOwnerFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {
@@ -96,7 +96,7 @@ TEST_CASE("A credentialled client reaches a node and still gets its answer", "[n
     // component answering `AUTH`, the real cache responder answering the command pipelined behind
     // it, and the real `Cc::CacheProtocol` on the other end of a real socket. The two binaries link
     // nothing in common -- `fastcache-cc` compiles `CompileCacheWire.hpp` in and links none of
-    // `FastCache` -- so this is the one place both are present.
+    // `Pace` -- so this is the one place both are present.
     //
     // The node checks no password, so the session component answers `AUTH` `NoPolicy`: `Ok`,
     // establishing nothing. The contract this file pins is the launcher's: a token-configured

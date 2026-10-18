@@ -3,12 +3,12 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/StateFiles.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/StateFiles.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -17,7 +17,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Where the identity this node runs under came from.
@@ -307,4 +307,4 @@ static_assert(RowsInEnumeratorOrder(NodeIdentityFaultStages, [](NodeIdentityFaul
 /// @param identity What this node runs as.
 void ApplyNodeIdentity(NodeConfig& cfg, NodeIdentity const& identity);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

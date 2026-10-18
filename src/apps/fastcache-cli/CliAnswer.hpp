@@ -3,8 +3,8 @@
 
 #include "CliValue.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// What one command invocation concluded.
@@ -164,4 +164,4 @@ struct Answer
 /// @param remarks The connections' remarks, in the order they were made.
 void PrependRemarks(Answer& answer, std::span<std::string const> remarks);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

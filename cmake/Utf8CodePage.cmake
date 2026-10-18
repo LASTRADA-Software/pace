@@ -34,9 +34,9 @@
 #
 # `activeCodePage` is honoured from Windows 10 1903 / Server 2022. An older host
 # ignores it in SILENCE, which is the one thing a build-time setting must not be
-# allowed to be -- so `FastCache::NarrowTextIsUtf8()` reports the outcome rather
+# allowed to be -- so `Pace::NarrowTextIsUtf8()` reports the outcome rather
 # than the intent, and a Catch2 case asserts it. See
-# src/FastCache/Platform/NarrowText.hpp.
+# src/Pace/Platform/NarrowText.hpp.
 #
 # ## What the COMPILER thinks a narrow literal is
 #

@@ -23,8 +23,8 @@
 #include <utility>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -1078,7 +1078,7 @@ TEST_CASE("Where bytes are bytes, a legacy path is reconciled exactly as any oth
     // break builds that work today, which is why `pathsAreUtf8` is a property of
     // the HOST rather than a rule the launcher applies everywhere.
     auto resolver = FakeResolver { {} };
-    RootReconciler reconciler { "/x/src", "/x/build", resolver, FastCache::NarrowTextPolicy {} };
+    RootReconciler reconciler { "/x/src", "/x/build", resolver, Pace::NarrowTextPolicy {} };
 
     CHECK(reconciler.Path("/x/src/gr\xFC"
                           "n/a.h")
@@ -1096,7 +1096,7 @@ TEST_CASE("Where a path must be UTF-8, a tool's own code page is what reads it")
     // a stored object under a zero exit code.
     auto resolver = FakeResolver { {} };
     RootReconciler reconciler {
-        "/x/src", "/x/build", resolver, FastCache::NarrowTextPolicy { .pathsAreUtf8 = true, .toolCodePage = 1252U }
+        "/x/src", "/x/build", resolver, Pace::NarrowTextPolicy { .pathsAreUtf8 = true, .toolCodePage = 1252U }
     };
 
     // Already UTF-8: through untouched, on every platform, and the case a modern
@@ -1126,7 +1126,7 @@ TEST_CASE("A path this host cannot read as text is returned verbatim and counted
     // UTF-8 throws on these rather than mis-naming a file. The count is what
     // main.cpp declines the compile on; nothing here decides that.
     auto resolver = FakeResolver { {} };
-    RootReconciler reconciler { "/x/src", "/x/build", resolver, FastCache::NarrowTextPolicy { .pathsAreUtf8 = true } };
+    RootReconciler reconciler { "/x/src", "/x/build", resolver, Pace::NarrowTextPolicy { .pathsAreUtf8 = true } };
 
     CHECK(reconciler.Path("/x/src/gr\xFC"
                           "n/a.h")

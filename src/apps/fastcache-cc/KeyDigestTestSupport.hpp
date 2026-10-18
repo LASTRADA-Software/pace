@@ -12,7 +12,7 @@
 #include <ranges>
 #include <string>
 
-namespace FastCache::Cc::Test
+namespace Pace::Cc::Test
 {
 
 /// A deterministic byte source shared by the key-strength cases in
@@ -81,4 +81,4 @@ class SplitMix64
     return out;
 }
 
-} // namespace FastCache::Cc::Test
+} // namespace Pace::Cc::Test

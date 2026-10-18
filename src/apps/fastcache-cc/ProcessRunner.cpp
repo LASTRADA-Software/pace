@@ -40,7 +40,7 @@
     #endif
 #endif
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -820,4 +820,4 @@ std::unique_ptr<IProcessRunner> MakeProcessRunner()
 #endif
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

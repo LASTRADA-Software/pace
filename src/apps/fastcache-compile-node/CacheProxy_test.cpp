@@ -4,14 +4,14 @@
 #include "Responders.hpp"
 #include "SharedTierProfile.hpp"
 
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -32,14 +32,14 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ErrorOf;
-using FastCache::Testing::PayloadOf;
-using FastCache::Testing::StatusOf;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ErrorOf;
+using Pace::Testing::PayloadOf;
+using Pace::Testing::StatusOf;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

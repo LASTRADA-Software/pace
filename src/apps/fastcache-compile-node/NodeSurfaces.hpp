@@ -3,9 +3,9 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
 
 #include <array>
 #include <cstddef>
@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// A port this node LISTENS on.
@@ -594,4 +594,4 @@ struct SurfaceReport
 /// @return The worksheet, and the startup table's refusal when there is one.
 [[nodiscard]] SurfaceReport ReportSurfaces(NodeConfig const& cfg);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

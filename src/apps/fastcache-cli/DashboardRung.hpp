@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardRung.hpp
@@ -40,4 +40,4 @@ enum class RenderRung : std::uint8_t
     Last,
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

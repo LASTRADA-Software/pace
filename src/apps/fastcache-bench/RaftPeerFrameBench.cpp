@@ -22,13 +22,13 @@
 /// build *optimised* -- which `NDEBUG` does not say, since `-O0 -DNDEBUG` defines it and
 /// optimises nothing (#1439).
 
-#include <FastCache/Consensus/RaftPeerServer.hpp>
-#include <FastCache/Consensus/RaftWire.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Core/SessionSeal.hpp>
-#include <FastCache/Core/Sha256.hpp>
-#include <FastCache/Core/WireFields.hpp>
+#include <Pace/Consensus/RaftPeerServer.hpp>
+#include <Pace/Consensus/RaftWire.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Core/SessionSeal.hpp>
+#include <Pace/Core/Sha256.hpp>
+#include <Pace/Core/WireFields.hpp>
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -40,8 +40,8 @@
 #include <span>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Consensus;
+using namespace Pace;
+using namespace Pace::Consensus;
 
 namespace
 {

@@ -20,7 +20,7 @@ track anything:
                AND (c) RESTORES what it wrote
 
     (a) .replace( | io.open(..,'w'/'wb') | sed -i | perl -pi | git apply
-    (b) ctest | ninja | cmake --build | FastCacheTest | *-tests | run-check.sh
+    (b) ctest | ninja | cmake --build | PaceTest | *-tests | run-check.sh
         | check-<name>.sh/.cmake
     (c) git checkout/restore -- | shutil.copy*/move | cp *.bak/.orig/.pristine
         | write-back of a saved buffer | git stash
@@ -119,7 +119,7 @@ mutation it never made.
 `check-mutation-harness-selftest.py` drives staged trees, which is what makes it
 a hygiene check that needs no compiler. Staged fixtures prove a tool RUNS; only a
 real target catches a wrong one -- `launcher-replay-e2e.sh` is this repository's
-standing example. So this was also driven against `src/FastCache/Net/ReadSlot.hpp`
+standing example. So this was also driven against `src/Pace/Net/ReadSlot.hpp`
 with real ninja and real ctest, removing the `assert` in `ClaimReadSlot` so the
 must-die `read-slot-guard-canary` SURVIVES:
 
@@ -148,7 +148,7 @@ The plan format is documented in `_load_plan`. A worked one, from the run above:
 
     {
       "root": "<the worktree>",
-      "subject": "src/FastCache/Net/ReadSlot.hpp",
+      "subject": "src/Pace/Net/ReadSlot.hpp",
       "build": ["ninja", "-C", "out/build/reg", "read-slot-guard-canary"],
       "run": ["ctest", "--test-dir", "out/build/reg",
               "-R", "^read-slot-guard-canary$"],

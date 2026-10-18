@@ -6,8 +6,8 @@
 #include "Stats.hpp"
 #include "TicketCredentials.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileReplySeal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileReplySeal.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -36,10 +36,10 @@
 #include <tests/TicketFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using FastCache::Testing::Unwrap;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Cc;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -51,9 +51,9 @@ namespace
 /// once and would let whichever case ran first silence the rest -- a coupling to
 /// Catch2's ordering that is invisible until it fails.
 /// @return A notice with no sink.
-[[nodiscard]] FastCache::Cc::CredentialNotice& Unwatched()
+[[nodiscard]] Pace::Cc::CredentialNotice& Unwatched()
 {
-    static FastCache::Cc::CredentialNotice notice = FastCache::Cc::CredentialNotice::Silent();
+    static Pace::Cc::CredentialNotice notice = Pace::Cc::CredentialNotice::Silent();
     return notice;
 }
 

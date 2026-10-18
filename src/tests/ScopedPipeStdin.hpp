@@ -9,7 +9,7 @@
     #include <unistd.h>
 #endif
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Replace standard input with the read end of a pipe for the duration of a case.
@@ -81,4 +81,4 @@ struct ScopedPipeStdin
     bool installed { false };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

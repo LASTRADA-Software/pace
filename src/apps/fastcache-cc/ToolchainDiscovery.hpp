@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// One compiler a machine turned out to have.
@@ -247,4 +247,4 @@ class IToolchainDiscovery
 /// @return A discovery walking the layout table.
 [[nodiscard]] std::unique_ptr<IToolchainDiscovery> MakeToolchainDiscovery(IToolchainHost& host, IProcessRunner& runner);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

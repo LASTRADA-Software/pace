@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.28)
 # ## Why this is a check and not a review item (#1209)
 #
 # `fastcache-cc-tests` sat outside the sanitized scope for as long as it existed.
-# No tag could have reached it: the launcher does not link the FastCache library,
+# No tag could have reached it: the launcher does not link the Pace library,
 # so it is a separate binary, and the gate's other rows name binaries that cannot
 # contain its cases. `scripts/check-tsan-scope.cmake` could not see it either --
 # that check asks whether a scoped test CASE carries a tag the gate selects, which

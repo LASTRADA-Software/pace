@@ -14,9 +14,9 @@
 #include <utility>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
 
 namespace
 {

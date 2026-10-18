@@ -2,13 +2,13 @@
 #include "FleetTextResponder.hpp"
 #include "Responders.hpp"
 
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -29,12 +29,12 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ListedMembership;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ListedMembership;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

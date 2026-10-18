@@ -956,9 +956,9 @@ function Show-MsiLog([string] $Path) {
     # property dump of a transaction that ended, and an action that ran with Return="ignore" -- the
     # node's registration among them -- leaves its failure only here.
     Write-Host '--- the package actions ---'
-    foreach ($line in @($lines -match 'FastCache\w+' -match 'Action (start|ended)|returned actual error|CustomAction|Error 1[0-9]{3}')) { Write-Host $line }
+    foreach ($line in @($lines -match 'Pace\w+' -match 'Action (start|ended)|returned actual error|CustomAction|Error 1[0-9]{3}')) { Write-Host $line }
     Write-Host '--- the tail ---'
-    $tail = 'Action (start|ended)|CustomAction|ServiceControl|FastCache|returned actual error|Note: 1: 1(4|7)[0-9][0-9]|Installation (success|failed)|error'
+    $tail = 'Action (start|ended)|CustomAction|ServiceControl|Pace|returned actual error|Note: 1: 1(4|7)[0-9][0-9]|Installation (success|failed)|error'
     foreach ($line in @($lines -match $tail | Select-Object -Last 60)) { Write-Host $line }
 }
 

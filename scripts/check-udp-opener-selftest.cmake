@@ -34,8 +34,8 @@ set(ran 0)
 set(failures "")
 
 set(discoveryTier "src/apps/fastcache-compile-node/DiscoveryTier.cpp")
-set(routeProbe "src/FastCache/Platform/RouteProbe.cpp")
-set(otherFile "src/FastCache/Cluster/Other.cpp")
+set(routeProbe "src/Pace/Platform/RouteProbe.cpp")
+set(otherFile "src/Pace/Cluster/Other.cpp")
 
 # The baseline tree: the two permitted openers (discovery's, and the route probe's connect-only one), a file that opens nothing, and a vendored root.
 function(fastcached_udp_tree name outVar)
@@ -45,7 +45,7 @@ function(fastcached_udp_tree name outVar)
     file(WRITE "${tree}/${discoveryTier}"
         "#include \"DiscoveryTier.hpp\"\n    auto opened = core::net::openSharedPortUdpSocket(host, beacon, reply);\n")
     file(WRITE "${tree}/${routeProbe}" "    auto fd = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);\n")
-    file(WRITE "${tree}/${otherFile}" "#include <FastCache/Cluster/Other.hpp>\n")
+    file(WRITE "${tree}/${otherFile}" "#include <Pace/Cluster/Other.hpp>\n")
     file(WRITE "${tree}/vendor/elsewhere/socket.hpp" "int s = ::socket(AF_INET, SOCK_DGRAM, 0);\n")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
@@ -134,7 +134,7 @@ file(APPEND "${tree}/${otherFile}" "    auto const reopenUdpSocketCount = 0;\n")
 fastcached_udp_judge(nameContainsPrimitive "${tree}" accept "${accepted}")
 
 fastcached_udp_tree(testFile tree)
-file(WRITE "${tree}/src/FastCache/Cluster/Other_test.cpp" "auto socket = core::net::openUdpSocket(host, 0);\n")
+file(WRITE "${tree}/src/Pace/Cluster/Other_test.cpp" "auto socket = core::net::openUdpSocket(host, 0);\n")
 file(WRITE "${tree}/src/tests/Datagram.hpp" "int s = ::socket(AF_INET, SOCK_DGRAM, 0);\n")
 fastcached_udp_judge(testFile "${tree}" accept "${accepted}")
 

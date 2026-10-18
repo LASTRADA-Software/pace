@@ -4,7 +4,7 @@
 #include "Dispatch.hpp"
 #include "HitVerification.hpp"
 
-#include <FastCache/Cli/UsageDoc.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -15,7 +15,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// What the launcher did with one compile — the outcome recorded per invocation.
@@ -368,4 +368,4 @@ void AppendRecord(Record const& record);
 /// Delete the log. @return True when the log is gone afterwards.
 [[nodiscard]] bool ResetLog();
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

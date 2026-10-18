@@ -8,7 +8,7 @@
 #include <system_error>
 #include <tuple>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -92,4 +92,4 @@ std::string RefusalNoticeLine(std::string_view endpoint, PersistentRefusal const
                        row.remedy);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

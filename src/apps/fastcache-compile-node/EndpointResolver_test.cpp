@@ -7,11 +7,11 @@
 #include "NodeFormation.hpp"
 #include "SchedulerLink.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/RouteProbe.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/RouteProbe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -36,8 +36,8 @@
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

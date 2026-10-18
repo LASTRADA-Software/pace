@@ -19,10 +19,10 @@
 #include "NodePresenceTier.hpp"
 #include "SchedulerLink.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/ProvenIdentity.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,9 +37,9 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using namespace FastCache::Node::AnnounceTesting;
+using namespace Pace;
+using namespace Pace::Node;
+using namespace Pace::Node::AnnounceTesting;
 
 namespace
 {

@@ -1,7 +1,7 @@
 # Wire formats, protocol handlers and sockets
 
-Rules for `src/FastCache/Protocol/`, `src/FastCache/Net/` and the shared framing
-in `src/FastCache/Core/`.
+Rules for `src/Pace/Protocol/`, `src/Pace/Net/` and the shared framing
+in `src/Pace/Core/`.
 
 Read this before touching `CompileCacheWire`, `WireFrame`/`WireFields`,
 `CompileCacheHandler`, `TcpClient`, `BlockingSocket`/`BlockingConnector`, or any
@@ -182,7 +182,7 @@ Every rule below has already been a bug.
   client, and the thing that had to stop being duplicated was the *layout*.
 - **`Protocol/CompileCacheWire.hpp` must stay header-only and dependency-free.**
   Same constraint as `Cli/UsageDoc`, same reason: `fastcache-cc` does not link
-  the `FastCache` library, so an include of anything from `Net/`, `Cache/`,
+  the `Pace` library, so an include of anything from `Net/`, `Cache/`,
   `Async/` or `Config/` there breaks the launcher's **link**, not merely its
   build. Being header-only is also what keeps it free — it costs no row in
   `_fc_cc_core`. The dependency runs *out* of `ProtocolAutodetect.hpp` (which
@@ -354,7 +354,7 @@ Every rule below has already been a bug.
   - **It lives in `Core/WireFields.hpp` beside `FieldPrefixSize`**, which is usually the
     answer to its `minBytesEach`, and which that header already argues must stay
     header-only and dependency-free because `fastcache-cc` compiles it in *without
-    linking `FastCache`*. A guard under `CompileCache/` was invisible to `Protocol/`,
+    linking `Pace`*. A guard under `CompileCache/` was invisible to `Protocol/`,
     `Cluster/DiscoveryWire` and `Consensus/RaftWire` — the decoders that share this
     grammar and will grow the next declared count.
   - **It refuses; it does not clamp.** `reserve(min(count, cap))` keeps a provably
@@ -805,7 +805,7 @@ Every rule below has already been a bug.
     remember. No default, because a default argument on a virtual binds statically
     and would silently differ between a call through the base and one through the
     derived type.
-  - **The launcher still does not LINK `FastCache`, and that rule survived
+  - **The launcher still does not LINK `Pace`, and that rule survived
     intact.** The four `Net` rows added to `_fc_cc_core` reach only
     `Net/NetError.hpp`, `Async/Task.hpp` and `Core/Profiling.hpp`, all
     header-only and all std-only, so the launcher stays free of yaml-cpp, OpenSSL
@@ -1949,7 +1949,7 @@ Every rule below has already been a bug.
       the only spelling of *abandon* that is not `Close()`.
   - **It is watched refusing, and the hazard has no other coverage at all.** Measured
     while landing the guard: a probe at all six arm sites reported ZERO double-arms
-    across `FastCacheTest` (2073 cases) and `fastcache-compile-node-tests`, and no
+    across `PaceTest` (2073 cases) and `fastcache-compile-node-tests`, and no
     script fixture drives a blocking RESP verb or a subscription over a real socket
     -- so nothing in the suite can see this, which is the ticket's own point.
     `read-slot-guard-canary` (now core-cpp's `socket-contract-canary`) double-arms a REAL

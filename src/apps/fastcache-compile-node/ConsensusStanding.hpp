@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Consensus/RaftTypes.hpp>
+#include <Pace/Consensus/RaftTypes.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <optional>
 #include <shared_mutex>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Whether the state this node's consensus applied has caught up with the log it recovered at start.
@@ -159,4 +159,4 @@ class ConsensusStandingSlot final: public IConsensusStandingSource
     IConsensusStandingSource const* _source { nullptr };
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

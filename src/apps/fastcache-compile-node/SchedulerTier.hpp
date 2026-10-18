@@ -7,13 +7,13 @@
 #include "NodeRefusal.hpp"
 #include "Responders.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseSigner.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseSigner.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -30,7 +30,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class NodeIoLoop;
@@ -269,4 +269,4 @@ class SchedulerTier
     std::jthread _conditionWatch;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -5,16 +5,16 @@
 #include "LiveStatsResponder.hpp"
 #include "NodeStatusResponder.hpp"
 
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Server/AdminHttpServer.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Server/AdminHttpServer.hpp>
 
 #include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What a node's live stats are read from.
@@ -102,4 +102,4 @@ class NodeLiveStatsSources final: public ILiveStatsSources
 /// @return The probe: the cluster's members, the registry and leadership.
 [[nodiscard]] LiveEventProbe ProbeFleet(Distributed::FleetSnapshot const& snapshot);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

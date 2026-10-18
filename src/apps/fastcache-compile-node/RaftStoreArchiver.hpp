@@ -3,14 +3,14 @@
 
 #include "FormationController.hpp"
 
-#include <FastCache/Core/StateFiles.hpp>
+#include <Pace/Core/StateFiles.hpp>
 
 #include <expected>
 #include <filesystem>
 #include <string>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file RaftStoreArchiver.hpp
@@ -78,4 +78,4 @@ class RaftStoreArchiver final: public IStoreArchiver
     std::filesystem::path _directory;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

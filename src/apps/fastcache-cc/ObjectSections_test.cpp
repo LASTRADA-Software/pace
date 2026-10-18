@@ -16,9 +16,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using namespace FastCache::Cc::Test;
+using namespace Pace;
+using namespace Pace::Cc;
+using namespace Pace::Cc::Test;
 
 namespace
 {

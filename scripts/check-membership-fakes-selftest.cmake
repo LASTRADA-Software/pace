@@ -57,7 +57,7 @@ find_package(Git QUIET)
 # real `;` would split one row into two before any parser saw it.
 set(twoFakesHeader
     "#pragma once\n"
-    "namespace FastCache::Testing\n{\n"
+    "namespace Pace::Testing\n{\n"
     "class ListedMembership final: public Distributed::IMembershipOracle\n{\n}~sc~\n"
     "class FixedMembership final: public Distributed::IMembershipOracle\n{\n}~sc~\n"
     "} // namespace\n")
@@ -66,7 +66,7 @@ string(REPLACE ";" "" twoFakesHeader "${twoFakesHeader}")
 # A header that defines no implementation at all: the shape that makes the check's pattern
 # report a clean tree for the wrong reason.
 set(noFakesHeader
-    "#pragma once\n// The fakes used to be here.\nnamespace FastCache::Testing\n{\n} // namespace\n")
+    "#pragma once\n// The fakes used to be here.\nnamespace Pace::Testing\n{\n} // namespace\n")
 
 set(subject_uses-shared
     "#include <tests/MembershipFakes.hpp>\n"

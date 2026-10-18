@@ -63,8 +63,8 @@ if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(refusalHeader "src/FastCache/Protocol/SurfaceRefusal.hpp")
-set(wireHeader "src/FastCache/Protocol/CompileCacheWire.hpp")
+set(refusalHeader "src/Pace/Protocol/SurfaceRefusal.hpp")
+set(wireHeader "src/Pace/Protocol/CompileCacheWire.hpp")
 set(root "${FASTCACHED_SCRATCH_DIR}/worker-refusals-selftest")
 file(REMOVE_RECURSE "${root}")
 
@@ -82,7 +82,7 @@ set(failures "")
 function(fastcached_make_tree name extraPath extraBody outVar)
     set(tree "${root}/${name}")
     file(REMOVE_RECURSE "${tree}")
-    file(MAKE_DIRECTORY "${tree}/src/FastCache/Protocol")
+    file(MAKE_DIRECTORY "${tree}/src/Pace/Protocol")
     configure_file("${FASTCACHED_SOURCE_DIR}/${refusalHeader}" "${tree}/${refusalHeader}" COPYONLY)
     configure_file("${FASTCACHED_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
     if(NOT extraPath STREQUAL "")
@@ -133,13 +133,13 @@ endfunction()
 # 1. Clean: one ordinary surface that refuses through the counted spelling.
 set(cleanBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
-std::vector<std::byte> AnswerSomething(FastCache::IMetricsSink& metrics)
+std::vector<std::byte> AnswerSomething(Pace::IMetricsSink& metrics)
 {
-    return FastCache::Cc::Refuse(metrics,
-                                 FastCache::Cc::SurfaceRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame,
-                                                                 .counter = FastCache::IMetricsSink::Counter::Nothing },
+    return Pace::Cc::Refuse(metrics,
+                                 Pace::Cc::SurfaceRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame,
+                                                                 .counter = Pace::IMetricsSink::Counter::Nothing },
                                  "synthetic");
 }
 ]==])
@@ -159,7 +159,7 @@ endif()
 #    file was invisible by construction, and five real sites accumulated that way.
 set(bareCallBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 std::vector<std::byte> AnswerSomething()
 {
@@ -204,12 +204,12 @@ endif()
 #    "none awaiting triage", so this assertion is not simply always-fatal.
 set(untriagedBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 std::vector<std::byte> AnswerSomething()
 {
-    return FastCache::Cc::RefuseUntriaged(
-        FastCache::Cc::UntriagedRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame, .issue = 4242 });
+    return Pace::Cc::RefuseUntriaged(
+        Pace::Cc::UntriagedRefusal { .code = CompileCacheWire::ErrorCode::MalformedFrame, .issue = 4242 });
 }
 ]==])
 fastcached_make_tree("untriaged" "src/apps/some-new-surface/NewSurface.cpp" "${untriagedBody}" tree)
@@ -243,11 +243,11 @@ endif()
 #    readings as the total would put the same silence back under a number.
 set(unnamedIssueBody [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 std::vector<std::byte> AnswerSomething()
 {
-    return FastCache::Cc::RefuseUntriaged(someRowFromSomewhereElse);
+    return Pace::Cc::RefuseUntriaged(someRowFromSomewhereElse);
 }
 ]==])
 fastcached_make_tree("issue-unnamed" "src/apps/some-new-surface/NewSurface.cpp" "${unnamedIssueBody}" tree)
@@ -264,19 +264,19 @@ endif()
 #    must object to a spelling it does not know.
 set(tree "${root}/spelling-added")
 file(REMOVE_RECURSE "${tree}")
-file(MAKE_DIRECTORY "${tree}/src/FastCache/Protocol")
+file(MAKE_DIRECTORY "${tree}/src/Pace/Protocol")
 configure_file("${FASTCACHED_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
 file(READ "${FASTCACHED_SOURCE_DIR}/${refusalHeader}" refusalContent)
 string(APPEND refusalContent [==[
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 [[nodiscard]] inline std::vector<std::byte> RefuseDeferred(UncountedRefusal const& refusal,
                                                            std::string_view detail = {})
 {
     return CompileCacheWire::EncodeErrorReply(refusal.code, detail);
 }
-} // namespace FastCache::Cc
+} // namespace Pace::Cc
 ]==])
 file(WRITE "${tree}/${refusalHeader}" "${refusalContent}")
 fastcached_run_check("${tree}" objected output)
@@ -296,7 +296,7 @@ endif()
 #    getting wrong, and the one a passing check hides.
 set(tree "${root}/scan-broken")
 file(REMOVE_RECURSE "${tree}")
-file(MAKE_DIRECTORY "${tree}/src/FastCache/Protocol")
+file(MAKE_DIRECTORY "${tree}/src/Pace/Protocol")
 configure_file("${FASTCACHED_SOURCE_DIR}/${wireHeader}" "${tree}/${wireHeader}" COPYONLY)
 file(WRITE "${tree}/${refusalHeader}" [==[
 // SPDX-License-Identifier: Apache-2.0

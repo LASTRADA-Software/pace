@@ -4,8 +4,8 @@
 #include "PathResolve.hpp"
 #include "RootAliases.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Drop a trailing separator from a layout root.
@@ -296,4 +296,4 @@ class RootReconciler
     std::size_t _unreadablePaths { 0 };
 };
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

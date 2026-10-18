@@ -212,7 +212,7 @@ function Get-E2ELauncherStateRows([string]$Path = $script:LauncherStateSource, [
     }
     if ($branch) { throw $shape }
     $source = $kept -join "`n"
-    $reads = [regex]::Matches($source, '(\w+) = FastCache::ReadEnvironmentVariable\("([A-Z_]+)"\)')
+    $reads = [regex]::Matches($source, '(\w+) = Pace::ReadEnvironmentVariable\("([A-Z_]+)"\)')
     $bases = [regex]::Matches($source, 'base = \*(\w+)(?:\s*\+\s*"([^"]*)")?\s*;')
     $rows = @()
     foreach ($read in $reads) {

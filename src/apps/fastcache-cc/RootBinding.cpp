@@ -4,7 +4,7 @@
 #include "RootBinding.hpp"
 #include "RootReconciler.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -800,4 +800,4 @@ FetchedObject ResolveFetchedObject(std::span<std::byte const> payload,
     return followed(std::move(*boundValue));
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -3,14 +3,14 @@
 #include "LiveStatsResponder.hpp"
 #include "MembershipGate.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -287,4 +287,4 @@ core::async::Task<std::vector<std::byte>> LiveStatsResponder::Serve(std::span<st
     co_return co_await _stream.Serve(frame, std::move(peer), sink, this, &_reactor);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

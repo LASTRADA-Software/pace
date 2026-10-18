@@ -7,7 +7,7 @@
 #include "ToolchainFingerprint.hpp"
 #include "ToolchainHost.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Discovering a toolchain's include tree, and digesting it into a fingerprint.
@@ -925,4 +925,4 @@ struct ToolchainIdentity
                                                            IParallelFor& parallel,
                                                            bool forceRefresh = false);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -3,8 +3,8 @@
 
 #include "CacheTierProfile.hpp"
 
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +16,7 @@
 #include <core/async/Task.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 // Declared, not included: an upstream hands one out and says nothing else about it.
@@ -296,4 +296,4 @@ class LocalCache
     CacheTierProfile _counters;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

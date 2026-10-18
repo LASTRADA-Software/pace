@@ -12,9 +12,9 @@
 // rather than an aside. A node with `--slots=0` registers nothing, so before `NodeAnnounce`
 // existed there was no verb through which any of this could have been arranged -- the fixture
 // itself is the evidence that the old shape could not express the fact.
-#include <FastCache/Distributed/FleetHistory.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Protocol/NodeConditionWire.hpp>
+#include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Protocol/NodeConditionWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,8 +31,8 @@
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Testing;
+using namespace Pace;
+using namespace Pace::Testing;
 
 namespace
 {

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # No first-party C++ walks an enum's enumerators by hand now that
-# `src/FastCache/Core/EnumTable.hpp` offers `Enumerators<Enum>()`.
+# `src/Pace/Core/EnumTable.hpp` offers `Enumerators<Enum>()`.
 #
 # ## Why the seam exists
 #
@@ -69,8 +69,8 @@ if(NOT DEFINED FASTCACHED_SOURCE_DIR OR FASTCACHED_SOURCE_DIR STREQUAL "")
     message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
 endif()
 
-set(seamHeader "src/FastCache/Core/EnumTable.hpp")
-set(seamTest "src/FastCache/Core/EnumTable_test.cpp")
+set(seamHeader "src/Pace/Core/EnumTable.hpp")
+set(seamTest "src/Pace/Core/EnumTable_test.cpp")
 
 # --------------------------------------------------------------------------
 # The anchor: the seam this check exists to enforce must still be there.
@@ -183,7 +183,7 @@ if(violations)
     message("    for (auto const value: Enumerators<Enum>())        // all of them")
     message("    for (auto const value: Enumerators(Enum::Third))   // from one onwards")
     message("")
-    message("both from FastCache/Core/EnumTable.hpp, and drop the static_cast the index")
+    message("both from Pace/Core/EnumTable.hpp, and drop the static_cast the index")
     message("forced on the body. Enumerators(from) | std::views::reverse walks backwards.")
     message("")
     message("This does NOT say every EnumeratorCount use is wrong. A bounds check on a value")

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <optional>
 #include <span>
@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// The inputs that determine a shared cache key. Two machines that produce the
@@ -198,4 +198,4 @@ struct KeyInputs
 [[nodiscard]] std::optional<std::string> UnkeyableArgument(std::span<std::string const> args,
                                                            PathCanon::Layout const& layout);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

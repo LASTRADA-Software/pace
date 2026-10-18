@@ -32,7 +32,7 @@ decides *who*, because that is what keeps three branches from colliding.
 |---|---|
 | **L — launcher** | `src/apps/fastcache-cc/` |
 | **N — node** | `src/apps/fastcache-compile-node/` |
-| **D — library, tests, packaging** | `src/FastCache/{Distributed,Consensus,Cluster}/`, `scripts/`, `packaging/`, `.github/` |
+| **D — library, tests, packaging** | `src/Pace/{Distributed,Consensus,Cluster}/`, `scripts/`, `packaging/`, `.github/` |
 
 A ticket spanning two lanes is **split into two tickets** with an explicit ordering, or held
 until the blocking lane lands. The manager sequences those; developers never coordinate

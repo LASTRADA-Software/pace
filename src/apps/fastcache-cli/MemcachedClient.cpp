@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -403,4 +403,4 @@ bool ValidTextToken(std::string_view text) noexcept
     });
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -5,9 +5,9 @@
 #include "CompileJob.hpp"
 #include "FileBytes.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/PeerText.hpp>
-#include <FastCache/Protocol/NodeConditionWire.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/PeerText.hpp>
+#include <Pace/Protocol/NodeConditionWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -24,7 +24,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -1611,4 +1611,4 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
     return outcome;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

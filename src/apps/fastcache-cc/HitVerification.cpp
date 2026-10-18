@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -20,7 +20,7 @@ namespace
     /// two machines in one fleet could sample different translation units and a
     /// reproduction on one would not reproduce on the other -- which is the single
     /// thing somebody chasing a wrong object needs. `Core/MurmurHash3` would do, and
-    /// is not reachable: `fastcache-cc` does not link `FastCache`, compiling in only a
+    /// is not reachable: `fastcache-cc` does not link `Pace`, compiling in only a
     /// few dependency-free leaves, and a sampling rule is not worth widening that set
     /// for. Four lines of a fully specified hash is the cheaper of the two.
     ///
@@ -181,4 +181,4 @@ HitComparison RestoreServedObject(std::filesystem::path const& aside,
     return inconclusive({});
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

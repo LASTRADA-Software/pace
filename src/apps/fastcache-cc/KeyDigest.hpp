@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Endian.hpp>
-#include <FastCache/Core/MurmurHash3.hpp>
+#include <Pace/Core/Endian.hpp>
+#include <Pace/Core/MurmurHash3.hpp>
 
 #include <array>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// What a piece of a key is. The byte is folded into the digest ahead of the
@@ -142,4 +142,4 @@ class KeyDigest
     MurmurHash3 _digest;
 };
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

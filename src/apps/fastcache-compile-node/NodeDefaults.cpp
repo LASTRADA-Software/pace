@@ -3,8 +3,8 @@
 #include "NodeConfig.hpp"
 #include "NodeDefaults.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,7 +18,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -438,4 +438,4 @@ bool ServiceManagerHandsOverStateDirectory() noexcept
         StateDirectoryRows, [](StateDirectoryRow const& row) { return row.origin == StateDirectoryOrigin::ServiceManager; });
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

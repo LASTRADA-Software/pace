@@ -1156,12 +1156,12 @@ determinism rests on.
     three of which were fine. The **test binaries** had no backstop: `RunTarget`
     checks the timeout, the tag filter and the assertion count, and not one of those
     distinguishes an instrumented run from an uninstrumented one, so an
-    uninstrumented `FastCacheTest` ran, reported assertions, exited 0, and the gate
+    uninstrumented `PaceTest` ran, reported assertions, exited 0, and the gate
     printed *all scoped targets clean*. A fix covering only the canary would have
     closed the issue with its stated harm untouched.
     **The obvious per-function symbols are the wrong ones.** `__tsan_func_entry`,
     `__tsan_read` and `__tsan_write` are emitted per instrumented *function*, so an
-    object whose TU has no functions carries none -- six of `FastCacheTest`'s 135,
+    object whose TU has no functions carries none -- six of `PaceTest`'s 135,
     the platform-gated `Iocp*`, `Kqueue*` and `Tls*` files that compile to nothing
     on Linux. They do carry `__tsan_init` and a `tsan.module_ctor`: instrumented,
     with nothing to instrument. A rule built on the hooks needs an empty-TU
@@ -3290,9 +3290,9 @@ makes it anyway and says so there.
   the entry above, and `NOLINT` is not the alternative here either.
 
 - **A return type is not part of a function's name on Linux, and MSVC's mangling
-  hides that.** `Core/HostPort.hpp` added an `inline FastCache::ParsePort(
+  hides that.** `Core/HostPort.hpp` added an `inline Pace::ParsePort(
   std::string_view)` returning `std::optional<std::uint16_t>` while
-  `Config/CliParser` already had a `FastCache::ParsePort(std::string_view)`
+  `Config/CliParser` already had a `Pace::ParsePort(std::string_view)`
   returning `std::expected<std::uint16_t, ConfigError>`. That is **not an
   overload**, and no compiler can say so: each translation unit sees exactly one
   of the two declarations, so both compile, and the Itanium ABI does not encode a
@@ -3310,7 +3310,7 @@ makes it anyway and says so there.
   - **A standalone reproducer will not reproduce it**, because the bug is in the
     *link*, not the code: the same calls compiled against the header alone are
     correct and pass under ASan. What identified it was `nm -C` on the library
-    object, showing a strong `T FastCache::ParsePort(...)` that the test binary
+    object, showing a strong `T Pace::ParsePort(...)` that the test binary
     had no business resolving to.
   - **The two implementations were not merged**, deliberately. The CLI's version
     distinguishes "not a number" from "out of range" because an operator needs
@@ -3476,7 +3476,7 @@ makes it anyway and says so there.
   kept only when `HeaderFilterRegex` takes the header's path *as clang spells it on
   that host*, and clang joins an include directory to a header name with the host's
   separator: a cl or clang-cl database reports `D:\...\src\tests\X.hpp`, or
-  `D:\...\src\FastCache/Core/X.hpp` where `-I...\src` meets a `/` include. The
+  `D:\...\src\Pace/Core/X.hpp` where `-I...\src` meets a `/` include. The
   pattern wrote every separator as `/`, so the `clang-tidy-windows` leg discarded
   every first-party header finding as non-user code and reported clean -- measured
   with the pinned 22.1.8, native, over both Windows databases, by a planted `g_`
@@ -3737,7 +3737,7 @@ makes it anyway and says so there.
 
 - **`activeCodePage` is honoured from Windows 10 1903 / Server 2022 and ignored in
   silence below it**, which is the one thing a build-time setting must not be
-  allowed to be. `FastCache::NarrowTextIsUtf8()` reports the OUTCOME rather than the
+  allowed to be. `Pace::NarrowTextIsUtf8()` reports the OUTCOME rather than the
   intent, a Catch2 case asserts it — red at code page 1252, green at 65001 — and the
   node names the active code page in a parse refusal when it is not UTF-8, which on
   such a host is the whole answer and no other surface would ever give it.
@@ -5694,7 +5694,7 @@ counterfactual did.
 The repair is the same idiom as everywhere else here -- **read the literal from the
 file that owns it, never restate it.** The check now reads the `predicts` column out
 of `cmake/portable/CompileCache.cmake` and `UnsupportedVersion`'s `.name` out of
-`src/FastCache/Protocol/CompileCacheWire.hpp` and asserts they agree, which also
+`src/Pace/Protocol/CompileCacheWire.hpp` and asserts they agree, which also
 closed a pre-existing coupling nobody had connected: the launcher reports the wire
 name, and a rename there would have disarmed the warning with every test green.
 
@@ -6340,7 +6340,7 @@ from the level above it.
 `Async/` files. That is what the check was written for.
 
 **Then the SCOPE was wrong.** It named three directories. A `std::thread` census over
-`FastCacheTest`'s own sources finds **nineteen** threaded files with **eleven** in no row
+`PaceTest`'s own sources finds **nineteen** threaded files with **eleven** in no row
 and under no tag — every threaded `Net/` test among them, which is `BlockingListener`'s
 module and so the module the tree's one observed race (#260) came out of, reached only
 because the node binary is run whole (#316).
@@ -6621,7 +6621,7 @@ Windows under a deny-read access list — the same status, the same line. It als
 tracked file DELETED from the work tree without a word, stderr included, and never searches
 a symlink. Each of those is a file left out of an answer, and **a file left out of an
 answer is a file PASSED**: the reviewer's plant, `::htonl(` in a `chmod 000`
-`src/FastCache/Core/Endian.hpp`, made the byte-order check exit 0 through the seam when the
+`src/Pace/Core/Endian.hpp`, made the byte-order check exit 0 through the seam when the
 per-file read it replaced had refused.
 
 So `fastcached_tracked_files` (`scripts/lib/CheckCommon.cmake`) owes an ACCOUNT of every file

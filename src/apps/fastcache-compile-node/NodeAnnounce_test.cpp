@@ -21,14 +21,14 @@
 #include "NodeRoster.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -62,14 +62,14 @@
 #include <tests/SecureRandomFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
-using namespace FastCache::Node::AnnounceTesting;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
+using namespace Pace::Node::AnnounceTesting;
 
 namespace
 {
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 /// Where it ends up once it learns its external address.
 inline constexpr std::string_view MovedNode = "nat.example:7700";
@@ -1063,7 +1063,7 @@ TEST_CASE("The test-support include check fires on a planted include and passes 
 
     // And through the file reader the scan uses, over a planted production file: a commented-out
     // include is no include, a live one is found at its line.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-test-support-include" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-test-support-include" };
     auto const planted = scratch.Path() / "Planted.cpp";
     {
         // Binary, so the planted file is LF as every file in this tree is (`.gitattributes`); text mode
@@ -1103,7 +1103,7 @@ TEST_CASE("The node lends ONE SchedulerReachability to both announce loops", "[n
     // scan reads includes such a header (`TestSupportIncludeOf`, self-tested above). Its reach is this
     // directory, where the headers live.
     std::filesystem::path const nodeDir =
-        std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
     REQUIRE(std::filesystem::is_directory(nodeDir));
 
     std::regex const mention { R"(\bSchedulerReachability\b)" };

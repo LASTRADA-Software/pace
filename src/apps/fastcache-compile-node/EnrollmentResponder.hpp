@@ -4,14 +4,14 @@
 #include "EnrollmentWindow.hpp"
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file EnrollmentResponder.hpp
@@ -368,4 +368,4 @@ class EnrollmentResponder final: public IFrameResponder
     ILogger& _logger;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

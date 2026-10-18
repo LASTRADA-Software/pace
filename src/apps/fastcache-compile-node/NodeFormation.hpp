@@ -4,14 +4,14 @@
 #include "EnrollmentAbsence.hpp"
 #include "SchedulerLink.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -31,7 +31,7 @@
 /// configuration learns from it: which consensus runs, whether the Raft port opens, whether the
 /// scheduler is served and where the worker registers. Every one of those is a column of
 /// `Cluster::NodeModeTable`, read here rather than switched on.
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 struct NodeConfig;
@@ -392,4 +392,4 @@ inline constexpr std::string_view FormationRecordGone =
 /// @return `mode: <name>`, with why when no record has been minted.
 [[nodiscard]] std::string DescribeFormationMode(NodeConfig const& cfg);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

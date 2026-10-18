@@ -44,9 +44,9 @@
 - Modify: `src/apps/fastcache-cc/CMakeLists.txt`: add `InputFiles.cpp` to `_fc_cc_sources` (after `HitVerification.cpp`) and `InputFiles_test.cpp` to `fastcache-cc-tests` (after `HitVerification_test.cpp`).
 
 **Interfaces:**
-- Consumes: `FastCache::Cc::HashFileContents(std::string_view)` (`DirectManifest.hpp`) and `FastCache::PathFromNarrowText(std::string_view)` (`FastCache/Platform/NarrowText.hpp`, already in `_fc_cc_core`).
+- Consumes: `Pace::Cc::HashFileContents(std::string_view)` (`DirectManifest.hpp`) and `Pace::PathFromNarrowText(std::string_view)` (`Pace/Platform/NarrowText.hpp`, already in `_fc_cc_core`).
 - Produces:
-  - `using FastCache::Cc::FileInstant = std::int64_t;` (nanoseconds since the Unix epoch);
+  - `using Pace::Cc::FileInstant = std::int64_t;` (nanoseconds since the Unix epoch);
   - `struct FileIdentity { FileInstant changeTime; std::uint64_t size; std::uint64_t volumeId; std::uint64_t fileIdHigh; std::uint64_t fileIdLow; }` with a defaulted `operator==`;
   - `class IInputFiles` with `Identify(std::string_view) const -> std::optional<FileIdentity>`, `Hash(std::string_view) const -> std::string` and `Now() const -> FileInstant`;
   - `MakeDiskInputFiles() -> std::unique_ptr<IInputFiles>`.
@@ -76,7 +76,7 @@
     #include <unistd.h>
 #endif
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -88,7 +88,7 @@ TEST_CASE("A change time is on the seam's own clock, in its own unit", "[input-f
 {
     // Catches a wrong epoch (1601 vs 1970) or a wrong scale (100 ns vs 1 ns), both of which
     // would put every change time decades away from Now() and make the T0 rule vacuous.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-clock" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-clock" };
     scratch.Write("a.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const identity = files->Identify((scratch / "a.hpp").string());
@@ -100,7 +100,7 @@ TEST_CASE("A change time is on the seam's own clock, in its own unit", "[input-f
 
 TEST_CASE("A file written after an instant has a change time at or after it", "[input-files]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-after" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-after" };
     scratch.Write("a.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const before = files->Now();
@@ -114,7 +114,7 @@ TEST_CASE("A file written after an instant has a change time at or after it", "[
 TEST_CASE("CopyFileW keeps the last-write time and still moves the change time", "[input-files]")
 {
     // #1650's deterministic variant: an mtime-only identity cannot see this copy at all.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-copy" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-copy" };
     scratch.Write("old.hpp", "MESSAGE_V1_OLD\n");
     scratch.Write("new.hpp", "MESSAGE_V2_NEW\n");
     auto const oldPath = scratch / "old.hpp";
@@ -135,7 +135,7 @@ TEST_CASE("CopyFileW keeps the last-write time and still moves the change time",
 #else
 TEST_CASE("Setting a file's modification time back still moves its change time", "[input-files]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-utimens" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-utimens" };
     scratch.Write("a.hpp", "MESSAGE_V1_OLD\n");
     auto const path = (scratch / "a.hpp").string();
     auto const files = MakeDiskInputFiles();
@@ -151,7 +151,7 @@ TEST_CASE("Setting a file's modification time back still moves its change time",
 
 TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-files]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-symlink" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-symlink" };
     scratch.Write("a.hpp", "same\n");
     scratch.Write("b.hpp", "same\n");
     auto const link = scratch / "h.hpp";
@@ -169,7 +169,7 @@ TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-
 
 TEST_CASE("A rename over a file changes its identity, same bytes and size", "[input-files]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-rename" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-rename" };
     scratch.Write("h.hpp", "same\n");
     scratch.Write("h.tmp", "same\n");
     auto const files = MakeDiskInputFiles();
@@ -183,7 +183,7 @@ TEST_CASE("A rename over a file changes its identity, same bytes and size", "[in
 
 TEST_CASE("A missing file has no identity and no hash", "[input-files]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-missing" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-missing" };
     auto const files = MakeDiskInputFiles();
     auto const absent = (scratch / "absent.hpp").string();
     CHECK_FALSE(files->Identify(absent).has_value());
@@ -194,7 +194,7 @@ TEST_CASE("A non-ASCII path is identified", "[input-files]")
 {
     // Review focus 1: a path the seam could not open would make every TU under it Unwitnessed,
     // which silently stops caching it.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-input-files-utf8" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-utf8" };
     scratch.Write("header-\xC3\xBC.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const path = (scratch.Path().string() + "/header-\xC3\xBC.hpp");
@@ -203,7 +203,7 @@ TEST_CASE("A non-ASCII path is identified", "[input-files]")
 }
 ```
 
-On Windows `scratch.Path().string()` must return UTF-8. The process code page is UTF-8 (`build-and-toolchain.md`). If `Path().string()` is not UTF-8 on this toolchain, build the path with `FastCache::Utf8FromNarrowText` or the helper `ScratchPath.hpp` uses. Do not weaken the case.
+On Windows `scratch.Path().string()` must return UTF-8. The process code page is UTF-8 (`build-and-toolchain.md`). If `Path().string()` is not UTF-8 on this toolchain, build the path with `Pace::Utf8FromNarrowText` or the helper `ScratchPath.hpp` uses. Do not weaken the case.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -224,7 +224,7 @@ Expected: a compile error, because `InputFiles.hpp` does not exist.
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// An instant on the clock a filesystem stamps change times with: nanoseconds since the Unix
@@ -289,7 +289,7 @@ class IInputFiles
 /// @return The implementation.
 [[nodiscard]] std::unique_ptr<IInputFiles> MakeDiskInputFiles();
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc
 ```
 
 - [ ] **Step 4: Write the implementation**
@@ -302,7 +302,7 @@ class IInputFiles
 
 #include "DirectManifest.hpp"
 
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -313,7 +313,7 @@ class IInputFiles
 
 #include <cstring>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -435,7 +435,7 @@ std::unique_ptr<IInputFiles> MakeDiskInputFiles()
     return std::make_unique<DiskInputFiles>();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc
 ```
 
 - [ ] **Step 5: Register the files in CMake**
@@ -484,7 +484,7 @@ git commit -s -m "cc: an input file's identity, content and clock behind one sea
   - `class IManifestContent` with `HashAsKeyed(std::string_view resolvedPath) const -> std::expected<std::string, ManifestFault>`;
   - a new last field of `ManifestInputs`: `IManifestContent const& content;`;
   - `ProjectDependencyPaths(std::span<std::string const> reportedPaths, std::string_view workingDirectory, PathCanon::Layout const& layout) -> std::vector<std::string>`;
-  - test-only `FastCache::Cc::Test::HashedWhenAsked`.
+  - test-only `Pace::Cc::Test::HashedWhenAsked`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -501,7 +501,7 @@ git commit -s -m "cc: an input file's identity, content and clock behind one sea
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc::Test
+namespace Pace::Cc::Test
 {
 
 /// Hashes each file at the moment `BuildManifest` asks. That is RECORD time, which is what
@@ -553,7 +553,7 @@ class ScriptedContent final: public IManifestContent
     mutable std::vector<std::string> _asked;
 };
 
-} // namespace FastCache::Cc::Test
+} // namespace Pace::Cc::Test
 ```
 
 Append to `src/apps/fastcache-cc/DirectManifest_test.cpp` (and add `#include "ManifestContentTestSupport.hpp"` beside the other local includes):
@@ -564,11 +564,11 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
     // #1650: the hashes BuildManifest recorded were read AFTER the compile, so a save during it
     // paired the new content with the old object. The content source is the witness in
     // production; this proves BuildManifest no longer reads the files itself.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-content-source" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-source" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     auto const source = (root / "src" / "a.cpp").string();
     auto const header = (root / "src" / "header.hpp").string();
     auto const resolvedSource = ResolveAgainst(source, root.string(), layout);
@@ -599,11 +599,11 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
 
 TEST_CASE("A content source's refusal names its path and its fault", "[direct-manifest][1650]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-content-refusal" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-content-refusal" };
     scratch.Write("src/header.hpp", "#pragma once\n");
     scratch.Write("src/a.cpp", "#include \"header.hpp\"\n");
     auto const& root = scratch.Path();
-    FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
     auto const source = (root / "src" / "a.cpp").string();
     auto const header = (root / "src" / "header.hpp").string();
     auto const resolvedHeader = ResolveAgainst(header, root.string(), layout);
@@ -626,9 +626,9 @@ TEST_CASE("A content source's refusal names its path and its fault", "[direct-ma
 
 TEST_CASE("ProjectDependencyPaths keeps project headers, resolved, and drops toolchain ones", "[direct-manifest][1650]")
 {
-    FastCache::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
     auto const& root = scratch.Path();
-    FastCache::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
                                                 .buildTree = (root / "out").string() };
     auto const project = (root / "src" / "inc" / ".." / "h.hpp").string();
     auto const toolchain = (root / "sdk" / "vector").string();
@@ -853,7 +853,7 @@ The table rows, in enumerator order:
 
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -1091,8 +1091,8 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
 {
     // Spec invariant 1, at the seam: identities differ in every field between the two
     // checkouts (and between two machines), and nothing of them may reach the record.
-    FastCache::Testing::ScratchDirectory const scratchA { "fc-witness-share-a" };
-    FastCache::Testing::ScratchDirectory const scratchB { "fc-witness-share-b-deeper" };
+    Pace::Testing::ScratchDirectory const scratchA { "fc-witness-share-a" };
+    Pace::Testing::ScratchDirectory const scratchB { "fc-witness-share-b-deeper" };
     std::string encoded[2];
     std::string manifestKeys[2];
     for (auto const index: { 0, 1 })
@@ -1101,7 +1101,7 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
         scratch.Write("src/h.hpp", "#pragma once\nint h();\n");
         scratch.Write("src/a.cpp", "#include \"h.hpp\"\nint a() { return h(); }\n");
         auto const& root = scratch.Path();
-        FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+        Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
         auto const source = (root / "src" / "a.cpp").string();
         auto const header = (root / "src" / "h.hpp").string();
         auto const resolvedSource = ResolveAgainst(source, root.string(), layout);
@@ -1137,7 +1137,7 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
 }
 ```
 
-If clang-tidy rejects the C array `std::string encoded[2]`, use `std::array<std::string, 2>`. If it rejects `index` in the ternary, select the scratch with `std::array<FastCache::Testing::ScratchDirectory const*, 2>`. Keep the assertions.
+If clang-tidy rejects the C array `std::string encoded[2]`, use `std::array<std::string, 2>`. If it rejects `index` in the ternary, select the scratch with `std::array<Pace::Testing::ScratchDirectory const*, 2>`. Keep the assertions.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1153,7 +1153,7 @@ static_assert(RowsInEnumeratorOrder(StabilityTable, &StabilityRow::stability),
               "StabilityTable must hold one row per InputStability, in enumerator order");
 ```
 
-Take `EnumTable` and `RowsInEnumeratorOrder` from `<FastCache/Core/EnumTable.hpp>`, as `DirectManifest.hpp` does. `StabilityFinding` has a defaulted `operator==`. `InputWitness`'s private members are:
+Take `EnumTable` and `RowsInEnumeratorOrder` from `<Pace/Core/EnumTable.hpp>`, as `DirectManifest.hpp` does. `StabilityFinding` has a defaulted `operator==`. `InputWitness`'s private members are:
 
 ```cpp
     struct Entry
@@ -1443,7 +1443,7 @@ The stub classifies its own argv, from argv[1] on:
 
 `src/tests/MidCompileEditStub.cpp`. Forward through `CreateProcessW` with the verbatim command-line tail on Windows (the issue's `wrapcl.cpp` shows the tail extraction), and through `posix_spawn` plus `waitpid` on POSIX. Exit with the child's code. Classify by walking `std::span { argv, static_cast<std::size_t>(argc) }.subspan(1)` with range-for. Perform the copy with `std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing)`, then remove the trigger.
 
-Doxygen-comment the file's purpose: #1650's reproduction, the editor's save landing where the launcher cannot see it. It needs no FastCache library and no Catch2.
+Doxygen-comment the file's purpose: #1650's reproduction, the editor's save landing where the launcher cannot see it. It needs no Pace library and no Catch2.
 
 - [ ] **Step 2: Register it**
 

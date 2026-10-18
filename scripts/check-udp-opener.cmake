@@ -2,7 +2,7 @@
 #
 # Only the files in `FastCachedUdpOpenerUnits` below open a UDP socket: discovery's, in
 # `src/apps/fastcache-compile-node/DiscoveryTier.cpp`, the one socket that RECEIVES; and the route
-# probe's, in `src/FastCache/Platform/RouteProbe.cpp`, which only `connect()`s to read the kernel's
+# probe's, in `src/Pace/Platform/RouteProbe.cpp`, which only `connect()`s to read the kernel's
 # source-address choice, sends and receives nothing, and is closed at once.
 #
 # ## Why this is a rule
@@ -68,7 +68,7 @@ endif()
 # rule rather than about this check.
 set(FastCachedUdpOpenerUnits
     "src/apps/fastcache-compile-node/DiscoveryTier.cpp|discovery's shared beacon socket and its private reply socket, the sockets the program-scoped udp/any firewall rule exists for"
-    "src/FastCache/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice, and it never sends or receives, so no firewall rule is involved"
+    "src/Pace/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice, and it never sends or receives, so no firewall rule is involved"
 )
 
 # What counts as opening a UDP socket.

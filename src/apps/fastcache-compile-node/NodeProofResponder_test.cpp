@@ -4,11 +4,11 @@
 #include "NodeProofResponder.hpp"
 #include "Responders.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/NodeProof.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodeProof.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,14 +30,14 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ErrorOf;
-using FastCache::Testing::StatusOf;
-using FastCache::Testing::TestKeyPair;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ErrorOf;
+using Pace::Testing::StatusOf;
+using Pace::Testing::TestKeyPair;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

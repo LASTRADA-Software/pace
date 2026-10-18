@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -21,7 +21,7 @@
 
 #include <WorkerProtocol.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What `CompileCapacity::TryTakeSlot` decided about one compile.
@@ -584,4 +584,4 @@ namespace CompileRefusal
 /// buffer a multi-megabyte preprocessed translation unit on the way to being refused.
 inline constexpr std::string_view NotAMemberWhy = "this worker compiles for its own machine and its cluster";
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

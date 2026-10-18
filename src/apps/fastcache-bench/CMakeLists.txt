@@ -24,7 +24,7 @@ add_executable(fastcache-bench
     StorageBench.cpp
     StreamCodecBench.cpp
 )
-target_link_libraries(fastcache-bench PRIVATE FastCache Catch2::Catch2WithMain)
+target_link_libraries(fastcache-bench PRIVATE Pace Catch2::Catch2WithMain)
 
 # What the build system was ASKED for, so the banner can print it as a LABEL.
 #

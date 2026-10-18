@@ -36,8 +36,8 @@
 #include <ToolchainProbe.hpp>
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 
 namespace
 {

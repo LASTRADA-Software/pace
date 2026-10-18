@@ -43,7 +43,7 @@
 #
 # ## Fails closed
 #
-# The same stripping and matching run over `src/FastCache/Platform/`, where these calls
+# The same stripping and matching run over `src/Pace/Platform/`, where these calls
 # LIVE, and must recognise at least one there. A scanner that recognises none of the
 # tokens where they are known to be would report every CLI file clean, and that clean
 # report would look exactly like this one. The control is found by scanning, not by a
@@ -69,7 +69,7 @@ endif()
 # rows are validated against.
 set(FastCachedAmbientTokens "getenv" "isatty" "ioctl" "GetConsoleMode")
 set(subjectRoot "src/apps/fastcache-cli")
-set(controlRoot "src/FastCache/Platform")
+set(controlRoot "src/Pace/Platform")
 set(exemptionTable "scripts/cli-ambient-read-exemptions.txt")
 
 # Walk a file line by line WITHOUT building a CMake list of lines, strip comments, and

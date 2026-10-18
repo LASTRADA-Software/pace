@@ -20,7 +20,7 @@
 
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 using namespace std::chrono_literals;
 
 namespace
@@ -64,14 +64,14 @@ TEST_CASE("Unreachable workers are capped at the lease's exclusion limit, newest
     for (auto const i: std::views::iota(0, 20))
         memo.Note(MemoKind::WorkerUnreached, std::format("w{}:6676", i), Noon + std::chrono::seconds { i });
     auto const fresh = memo.Fresh(MemoKind::WorkerUnreached, Noon + 20s);
-    REQUIRE(fresh.size() == FastCache::CompileCacheWire::MaxLeaseExclusions);
+    REQUIRE(fresh.size() == Pace::CompileCacheWire::MaxLeaseExclusions);
     CHECK(fresh.front() == "w19:6676"); // newest first
     CHECK(fresh.back() == "w4:6676");
 
     // Noting an endpoint again moves it, it does not duplicate it.
     memo.Note(MemoKind::WorkerUnreached, "w4:6676", Noon + 21s);
     auto const moved = memo.Fresh(MemoKind::WorkerUnreached, Noon + 21s);
-    CHECK(moved.size() == FastCache::CompileCacheWire::MaxLeaseExclusions);
+    CHECK(moved.size() == Pace::CompileCacheWire::MaxLeaseExclusions);
     CHECK(moved.front() == "w4:6676");
 
     // A worker entry lives about a minute.
@@ -162,7 +162,7 @@ TEST_CASE("A memo is saved only when it changed, and the file store round-trips"
     CHECK(store.Writes() == 1);
     CHECK(ReachabilityMemo::Load(store).Remembers(MemoKind::SchedulerUnreached, Scheduler, Noon));
 
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-memo" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-memo" };
     auto const disk = MakeDiskFiles();
     FileMemoStore file { scratch / "reachability.memo", *disk };
     CHECK_FALSE(file.Read().has_value()); // absent is nothing, not an error
@@ -207,7 +207,7 @@ TEST_CASE("The file store replaces an existing memo and leaves no temp file behi
 {
     // The atomicity argument rests on the rename REPLACING a file that is already there
     // -- the ordinary case, since every launcher after the first writes over the last one.
-    FastCache::Testing::ScratchDirectory const scratch { "fc-cc-memo-replace" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-cc-memo-replace" };
     auto const disk = MakeDiskFiles();
     FileMemoStore file { scratch / "reachability.memo", *disk };
     REQUIRE(file.Write("fastcache-cc reachability 1\nscheduler-unreached 1 first:1\n"));

@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc::Test
+namespace Pace::Cc::Test
 {
 
 /// Building COFF object images for tests, in ONE place.
@@ -199,4 +199,4 @@ inline void PutLe(std::vector<std::byte>& bytes, std::size_t at, std::size_t wid
              { .name = ".chks64", .data = std::move(sourceHash) } };
 }
 
-} // namespace FastCache::Cc::Test
+} // namespace Pace::Cc::Test

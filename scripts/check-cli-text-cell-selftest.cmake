@@ -85,7 +85,7 @@ set(baseFactorySource
 "// SPDX-License-Identifier: Apache-2.0
 #include \"CliValue.hpp\"
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 Cell TextCell(std::string text)
@@ -95,14 +95,14 @@ Cell TextCell(std::string text)
     return Cell { .kind = CellKind::Binary, .lexical = Base64Encode(text) };
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli
 ")
 
 set(baseRendererSource
 "// SPDX-License-Identifier: Apache-2.0
 #include \"CliFormat.hpp\"
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 void AppendJsonCell(Cell const& cell, std::string& out)
 {
@@ -116,7 +116,7 @@ void AppendJsonCell(Cell const& cell, std::string& out)
             out += \"null\";
     }
 }
-} // namespace FastCache::Cli
+} // namespace Pace::Cli
 ")
 
 set(baseTestSource

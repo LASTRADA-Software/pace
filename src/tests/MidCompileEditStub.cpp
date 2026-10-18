@@ -13,7 +13,7 @@
 //
 // The e2e fixtures (`scripts/compile-cache-e2e.sh`, `src/apps/fastcache-cc/run-launcher-e2e.ps1`)
 // copy it into a directory of its own under the REAL compiler's file name, because the launcher
-// picks its driver grammar by that name. It needs no FastCache library and no Catch2, and it is
+// picks its driver grammar by that name. It needs no Pace library and no Catch2, and it is
 // never installed.
 //
 // ## Driven by the environment

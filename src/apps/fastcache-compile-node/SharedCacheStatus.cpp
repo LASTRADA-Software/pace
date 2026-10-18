@@ -2,14 +2,14 @@
 #include "SharedCacheHost.hpp"
 #include "SharedCacheStatus.hpp"
 
-#include <FastCache/Cluster/SharedCacheTarget.hpp>
+#include <Pace/Cluster/SharedCacheTarget.hpp>
 
 #include <format>
 #include <string>
 
 #include <WorkerProtocol.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -135,4 +135,4 @@ Wire::SharedCacheStatusFields NodeSharedCacheStatus::ReportFor(SharedCacheTarget
     return SharedCacheStatusOf(target, _fleet, _host, _advertised.Current());
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

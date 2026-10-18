@@ -4,7 +4,7 @@
 #include "FleetReading.hpp"
 #include "SocketExchange.hpp"
 
-#include <FastCache/Core/NumericText.hpp>
+#include <Pace/Core/NumericText.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -107,4 +107,4 @@ Value FleetKpiFigures(DashboardModel const& model)
     return RecordValue(std::move(fields));
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -13,8 +13,8 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::TestClient;
+using namespace Pace;
+using namespace Pace::TestClient;
 
 namespace
 {

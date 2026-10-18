@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "FleetReadGate.hpp"
 
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,8 +10,8 @@
 #include <string>
 #include <string_view>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

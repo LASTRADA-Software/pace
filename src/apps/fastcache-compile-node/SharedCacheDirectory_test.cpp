@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "SharedCacheDirectory.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,8 +10,8 @@
 
 #include <tests/RaftPeerKeyFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using Source = CompileCacheWire::WireSharedCacheSource;
 
 namespace

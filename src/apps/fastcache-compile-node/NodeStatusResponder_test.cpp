@@ -9,19 +9,19 @@
 #include "Responders.hpp"
 #include "SchedulingRedirect.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LeaderRedirect.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LeaderRedirect.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -48,13 +48,13 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ListedMembership;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ListedMembership;
+using Pace::Testing::Unwrap;
 using namespace std::chrono_literals;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

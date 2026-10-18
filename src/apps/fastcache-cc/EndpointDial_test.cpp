@@ -16,7 +16,7 @@
 
 #include <core/async/SyncRun.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 using namespace std::chrono_literals;
 
 namespace

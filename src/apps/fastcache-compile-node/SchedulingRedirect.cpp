@@ -2,7 +2,7 @@
 #include "Responders.hpp"
 #include "SchedulingRedirect.hpp"
 
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -209,4 +209,4 @@ std::vector<std::byte> SchedulingRedirectResponder::EndpointRefusalReply(Endpoin
     return Cc::RefuseWithoutCounter({ .code = ErrorCodeFor(refusal), .rationale = row.rationale }, detail);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

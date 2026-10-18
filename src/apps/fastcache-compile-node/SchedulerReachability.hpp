@@ -5,8 +5,8 @@
 #include "NodeProofClient.hpp"
 #include "SchedulerLink.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -22,7 +22,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How often a setback that LASTS is said above Debug, and how often one scheduler may be said at
@@ -337,4 +337,4 @@ class SchedulerReachability
     std::map<Opening, core::platform::SteadyTimePoint> _opened;                  ///< Last opening above Debug.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

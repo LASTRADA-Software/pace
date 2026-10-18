@@ -15,7 +15,7 @@
 
 #include "BuildBanner.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,8 +27,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Bench;
+using namespace Pace;
+using namespace Pace::Bench;
 
 namespace
 {

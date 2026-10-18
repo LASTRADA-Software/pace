@@ -7,7 +7,7 @@
 
 #include <core/tui/Sixel.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TuiSixelEncoder.cpp
@@ -54,4 +54,4 @@ std::expected<std::unique_ptr<ISixelEncoder>, std::string> MakeSixelEncoder()
     return std::make_unique<TuiSixelEncoder>();
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

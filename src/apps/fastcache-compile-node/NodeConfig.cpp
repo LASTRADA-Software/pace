@@ -12,22 +12,22 @@
 #include "Responders.hpp"
 #include "SharedCacheResponder.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/SeedSources.hpp>
-#include <FastCache/Config/ByteSize.hpp>
-#include <FastCache/Config/CompressionValues.hpp>
-#include <FastCache/Config/DefaultConfigPath.hpp>
-#include <FastCache/Config/FileOptions.hpp>
-#include <FastCache/Config/SecretProvenance.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Errors/ConfigError.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Platform/Firewall.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/SeedSources.hpp>
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Config/CompressionValues.hpp>
+#include <Pace/Config/DefaultConfigPath.hpp>
+#include <Pace/Config/FileOptions.hpp>
+#include <Pace/Config/SecretProvenance.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Errors/ConfigError.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Platform/Firewall.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -46,7 +46,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -4566,4 +4566,4 @@ std::string HelpText(UsageColor color)
     return RenderUsage({ .sections = sections }, color, substitutions);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

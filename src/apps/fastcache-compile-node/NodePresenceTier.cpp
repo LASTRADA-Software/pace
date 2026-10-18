@@ -5,7 +5,7 @@
 // Its own header FIRST and in a group of its own, for `WorkerLease.cpp`'s reason.
 #include "HostEventInbox.hpp"
 
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -14,12 +14,12 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
 {
-    namespace Wire = FastCache::CompileCacheWire;
+    namespace Wire = Pace::CompileCacheWire;
 
     /// What this machine says about itself: the endpoint, the capacity, the load and the
     /// history buckets nobody has taken yet.
@@ -280,4 +280,4 @@ PresenceWakeReason PresenceWake::WaitOut(std::stop_token const& stop, std::chron
     return PresenceWakeReason::HostEvent;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -11,15 +11,15 @@
 #include "NodeMembership.hpp"
 #include "SchedulerTier.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Core/Version.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Distributed/UnservedToolchains.hpp>
-#include <FastCache/Distributed/WorkerRegistry.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Distributed/UnservedToolchains.hpp>
+#include <Pace/Distributed/WorkerRegistry.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -38,14 +38,14 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 /// `NodeMembership` reports an unreadable `fleet-open` row here; no case asserts on it.
 namespace
 {
-FastCache::NullLogger membershipLog;
+Pace::NullLogger membershipLog;
 }
-using namespace FastCache::Node;
+using namespace Pace::Node;
 
 namespace
 {

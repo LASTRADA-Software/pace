@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "SocketExchange.hpp"
 
-#include <FastCache/Core/ConnectCeiling.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Protocol/TicketChoice.hpp>
+#include <Pace/Core/ConnectCeiling.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
 
 #include <array>
 #include <charconv>
@@ -16,7 +16,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/TcpClient.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -587,4 +587,4 @@ std::expected<HttpResponse, ExchangeError> HttpGet(Endpoint const& endpoint,
     return HttpResponse { .status = status, .body = raw.substr(headEnd + 4) };
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

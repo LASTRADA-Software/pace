@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -10,7 +10,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Reports how fast the toolchain hash is going, while it is going.
@@ -158,4 +158,4 @@ class ToolchainHashProgress
     std::atomic<core::platform::SteadyTimePoint> _nextAt;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

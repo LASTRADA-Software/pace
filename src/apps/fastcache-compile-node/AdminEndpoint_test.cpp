@@ -3,15 +3,15 @@
 #include "NodeConditions.hpp"
 #include "NodeIdentity.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/FleetChart.hpp>
-#include <FastCache/Distributed/FleetText.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/FleetChart.hpp>
+#include <Pace/Distributed/FleetText.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -44,11 +44,11 @@
 #include <tests/UnreadablePath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
-using FastCache::Testing::ScriptedHostFacts;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::ScriptedHostFacts;
+using Pace::Testing::Unwrap;
 
 namespace
 {

@@ -8,8 +8,8 @@
 #include "SocketExchange.hpp"
 #include "StatsSource.hpp"
 
-#include <FastCache/Cache/CacheEngine.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -20,7 +20,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file CliVerbs.hpp
@@ -470,4 +470,4 @@ struct VerbSpec
 /// @return The answer to report.
 [[nodiscard]] Answer RunNodeFallback(VerbSpec const& verb, VerbContext const& context, RemoteKind kind, Answer primary);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

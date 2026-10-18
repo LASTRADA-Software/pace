@@ -8,16 +8,16 @@
 #include "NodeRefusal.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cluster/DiscoveryService.hpp>
-#include <FastCache/Cluster/MembershipPolicy.hpp>
-#include <FastCache/Cluster/PeerDirectory.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/ThrottledReport.hpp>
-#include <FastCache/Consensus/IRaftPeerKeys.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
+#include <Pace/Cluster/DiscoveryService.hpp>
+#include <Pace/Cluster/MembershipPolicy.hpp>
+#include <Pace/Cluster/PeerDirectory.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/ThrottledReport.hpp>
+#include <Pace/Consensus/IRaftPeerKeys.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -36,7 +36,7 @@
 #include <core/net/IDatagramSocket.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What this node says about itself, from its configuration and formation record: its cluster,
@@ -354,4 +354,4 @@ class DiscoveryTier
                                                SurfaceEndpoint const& reply,
                                                std::string_view why);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

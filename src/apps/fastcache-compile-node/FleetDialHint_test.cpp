@@ -6,14 +6,14 @@
 #include "SchedulerLink.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -38,7 +38,7 @@
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {
@@ -439,7 +439,7 @@ TEST_CASE("A heartbeat reports what the audience accepts, so a hint names a new 
     fleet.VerifyTicketsAtWorker(std::string { Laptop }, audience, Sched);
     fleet.VerifyTicketsAtWorker(std::string { NewAddress }, audience, Sched);
 
-    auto const cfg = FastCache::Testing::LearnerRegisteringWith(Node::NodeConfig {}, { std::string { Sched } });
+    auto const cfg = Pace::Testing::LearnerRegisteringWith(Node::NodeConfig {}, { std::string { Sched } });
     AtomicMetricsSink workerMetrics;
     NullLogger logger;
     SilentLoadSampler loadSampler;

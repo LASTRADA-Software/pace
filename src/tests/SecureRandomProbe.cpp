@@ -21,9 +21,9 @@
 // Prints one `nonce <64 hex>` line per draw. Exits 0 when every draw succeeded, 2 when a draw
 // failed (naming the failure), 64 for a usage error.
 
-#include <FastCache/Core/IRandomSource.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Nonce.hpp>
+#include <Pace/Core/IRandomSource.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Nonce.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -45,11 +45,11 @@ namespace
 /// -- `SystemRandomSource` draws written big-endian -- given the seed a host whose
 /// `std::random_device` answers zero hands it. Routed through the real `DrawNonce` so the only
 /// thing the control changes is the SOURCE. It exists here and nowhere else.
-class SeededEngineSource final: public FastCache::ISecureRandom
+class SeededEngineSource final: public Pace::ISecureRandom
 {
   public:
-    /// @copydoc FastCache::ISecureRandom::Fill
-    [[nodiscard]] std::expected<void, FastCache::SecureRandomError> Fill(std::span<std::byte> out) override
+    /// @copydoc Pace::ISecureRandom::Fill
+    [[nodiscard]] std::expected<void, Pace::SecureRandomError> Fill(std::span<std::byte> out) override
     {
         auto draw = std::uint64_t { 0 };
         auto remaining = std::size_t { 0 };
@@ -67,7 +67,7 @@ class SeededEngineSource final: public FastCache::ISecureRandom
     }
 
   private:
-    FastCache::SystemRandomSource _engine { 0 };
+    Pace::SystemRandomSource _engine { 0 };
 };
 
 /// Lowercase hex.
@@ -102,9 +102,9 @@ int main(int argc, char** argv)
         }
     }
 
-    std::unique_ptr<FastCache::ISecureRandom> random;
+    std::unique_ptr<Pace::ISecureRandom> random;
     if (source == "os")
-        random = std::make_unique<FastCache::SystemSecureRandom>();
+        random = std::make_unique<Pace::SystemSecureRandom>();
     else if (source == "seeded-engine")
         random = std::make_unique<SeededEngineSource>();
     else
@@ -115,7 +115,7 @@ int main(int argc, char** argv)
 
     for ([[maybe_unused]] auto const draw: std::views::iota(std::size_t { 0 }, count))
     {
-        auto const nonce = FastCache::DrawNonce(*random);
+        auto const nonce = Pace::DrawNonce(*random);
         if (!nonce.has_value())
         {
             std::println(stderr, "secure-random-probe: a draw failed: {}", nonce.error().ToString());

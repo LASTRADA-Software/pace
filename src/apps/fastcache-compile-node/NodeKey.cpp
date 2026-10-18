@@ -3,11 +3,11 @@
 #include "NodeKey.hpp"
 #include "NodeStateFiles.hpp"
 
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Core/Owner.hpp>
-#include <FastCache/Core/WireFields.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Core/Owner.hpp>
+#include <Pace/Core/WireFields.hpp>
 
 #include <algorithm>
 #include <array>
@@ -28,7 +28,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -312,7 +312,7 @@ std::expected<void, Consensus::DirectorySyncFailure> FileTrustNodeKeyGuard::Sync
 
 std::expected<bool, std::error_code> FileTrustNodeKeyGuard::OthersMayWrite(std::filesystem::path const& entry)
 {
-    return FastCache::OthersMayWrite(entry);
+    return Pace::OthersMayWrite(entry);
 }
 
 SecretExposure FileTrustNodeKeyGuard::Protect(std::filesystem::path const& file)
@@ -745,4 +745,4 @@ std::expected<NodeKey, NodeKeyRefusal> ResolveNodeKeyFor(NodeConfig const& cfg,
     return ResolveNodeKey(NodeStateDirectory(cfg), random, guard);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

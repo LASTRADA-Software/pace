@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 core::async::Task<FrameReply> SharedCacheResponder::Answer(std::span<std::byte const> frame, PeerIdentity peer)
@@ -91,4 +91,4 @@ SharedCacheService::SharedCacheService(NodeConfig const& cfg,
 {
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -188,7 +188,7 @@ endif()
 # there and this warning goes silent with every test still green. That is the
 # coupling `check-tsan-scope` exists for, in a different file.
 set(_module "${FASTCACHED_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
-set(_wire "${FASTCACHED_SOURCE_DIR}/src/FastCache/Protocol/CompileCacheWire.hpp")
+set(_wire "${FASTCACHED_SOURCE_DIR}/src/Pace/Protocol/CompileCacheWire.hpp")
 foreach(_f "${_module}" "${_wire}")
     if(NOT EXISTS "${_f}")
         message(FATAL_ERROR "check-version-fallback-warning: ${_f} does not exist")

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/FleetText.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/FleetText.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -20,7 +20,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What a node says about each 0xFC exchange it answers, and at which level.
@@ -264,7 +264,7 @@ static_assert(EveryLogLevelIsExplained(), "a level chosen without a reason canno
 /// `CompileCacheWire.hpp` names every OP and every ERROR CODE and does not name the
 /// four statuses, so this is the first place that needs to. Kept here rather than
 /// pushed into the wire header because a name for a log line is a server concern and
-/// that header is compiled into `fastcache-cc` without linking `FastCache`.
+/// that header is compiled into `fastcache-cc` without linking `Pace`.
 struct StatusNameRow
 {
     CompileCacheWire::Status code; ///< The wire byte.
@@ -589,4 +589,4 @@ inline void NoteVersionRefusal(ILogger& logger,
                 payload->second);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

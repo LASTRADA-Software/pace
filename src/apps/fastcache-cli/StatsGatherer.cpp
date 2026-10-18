@@ -7,7 +7,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -292,4 +292,4 @@ std::vector<StatsAttempt> LadderGatherer::Gather()
     return std::vector<StatsAttempt> { AskMetrics(), AskNodeMetrics(), AskInfo() };
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

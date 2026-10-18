@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Write the dependency record a compile would have written, from paths somebody
@@ -115,4 +115,4 @@ namespace FastCache::Cc
 /// @return The notes, each line ending in CRLF; empty for an empty set.
 [[nodiscard]] std::string RenderShowIncludes(std::span<std::string const> dependencyPaths, std::string_view marker);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

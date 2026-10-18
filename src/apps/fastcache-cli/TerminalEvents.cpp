@@ -2,7 +2,7 @@
 #include "TerminalEventStream.hpp"
 #include "TerminalEvents.hpp"
 
-#include <FastCache/Platform/Terminal.hpp>
+#include <Pace/Platform/Terminal.hpp>
 
 #include <array>
 #include <atomic>
@@ -17,7 +17,7 @@
 #include <core/tui/TerminalProtocols.hpp>
 #include <core/tui/runtime/TerminalInputSource.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -249,4 +249,4 @@ core::async::Task<std::expected<StartedTerminal, std::string>> StartTerminal(std
     co_return co_await StartTerminalDevice(std::move(parts.device), parts.pool, parts.resumeOn);
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -22,7 +22,7 @@
 // script. `scripts/tsan-gate.sh` refuses to believe a clean suite until this
 // program has reported a race and exited non-zero.
 //
-// It is deliberately NOT linked against `FastCache`. It answers "is the
+// It is deliberately NOT linked against `Pace`. It answers "is the
 // toolchain instrumenting and reporting", which must stay answerable even when
 // the library does not build.
 //

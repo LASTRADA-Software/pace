@@ -4,8 +4,8 @@
 #include "CliAnswer.hpp"
 #include "DashboardFrame.hpp"
 
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include <core/async/Task.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardEvent.hpp
@@ -201,4 +201,4 @@ class IDashboardEventSource
     virtual void Close() noexcept = 0;
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

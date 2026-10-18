@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
 
 #include <cstdint>
 #include <optional>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file NodeSlots.hpp
@@ -52,4 +52,4 @@ struct NodeSlots
 /// @return The slots, or nullopt when @p now carries no host at all (the daemon).
 [[nodiscard]] std::optional<NodeSlots> NodeSlotsOf(StatsReading const* previous, StatsReading const& now) noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

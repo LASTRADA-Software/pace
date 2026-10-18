@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "TicketCredentials.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/SecureBytes.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -12,7 +12,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace Wire = CompileCacheWire;
@@ -217,4 +217,4 @@ DispatchRecording RecordedReason(DispatchResult const& result, RefusalRecord con
     return recording;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

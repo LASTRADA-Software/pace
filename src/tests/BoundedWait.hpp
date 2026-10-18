@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <catch2/catch_message.hpp>
 
@@ -28,7 +28,7 @@
 #include <core/net/SleepUntil.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// How long a test waits for another thread before it calls that thread hung.
@@ -489,4 +489,4 @@ class OffThreadWaits
     std::vector<std::string> _accounts;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

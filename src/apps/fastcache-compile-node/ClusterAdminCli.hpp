@@ -5,7 +5,7 @@
 #include "NodeConfig.hpp"
 #include "OneShotAnswer.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
 
 #include <cstddef>
 #include <expected>
@@ -18,7 +18,7 @@
 #include <TicketCredentials.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Frame the request this action makes.
@@ -106,4 +106,4 @@ struct ClusterExchange
     Cc::ICredentialFor& credentials,
     IEndpointDialer& dialer = DefaultOneShotDialer());
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

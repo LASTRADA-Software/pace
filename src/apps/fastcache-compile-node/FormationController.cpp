@@ -5,11 +5,11 @@
 #include "NodeConfig.hpp"
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Cluster/EnrollAdmissionSignature.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Cluster/SelfForgotten.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/PeerText.hpp>
+#include <Pace/Cluster/EnrollAdmissionSignature.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Cluster/SelfForgotten.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/PeerText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -24,7 +24,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace Wire = CompileCacheWire;
@@ -1405,4 +1405,4 @@ void FormationController::Reform(FireOutcome outcome)
         _parts.reform.RequestReform();
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

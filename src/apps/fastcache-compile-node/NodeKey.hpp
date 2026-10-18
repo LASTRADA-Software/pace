@@ -3,14 +3,14 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Core/StateFiles.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Core/StateFiles.hpp>
+#include <Pace/Platform/FileTrust.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -22,7 +22,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The file inside a state directory that holds this node's identity key (#178).
@@ -545,4 +545,4 @@ enum class KeyMoment : std::uint8_t
                                                                        ISecureRandom& random,
                                                                        INodeKeyFileGuard& guard);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

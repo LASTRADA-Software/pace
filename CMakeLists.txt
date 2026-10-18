@@ -84,7 +84,7 @@ set(FASTCACHED_MACOS_PREFIX "opt/fastcached"
 # nothing, so macOS believed fastcached was still installed forever.
 #
 # The bundle id must match LaunchdLabelPrefix + the lowercased default service
-# name in src/FastCache/Platform/ServiceControl.cpp: the daemon derives its own
+# name in src/Pace/Platform/ServiceControl.cpp: the daemon derives its own
 # launchd label from its --service-name, and the installer scripts look the job
 # up by that label. ServiceControl_test.cpp pins the derivation.
 #
@@ -132,7 +132,7 @@ set(FASTCACHED_MACOS_LINKED_TOOLS "fastcached fastcache-cc fastcache-compile-nod
 
 # The machine-wide configuration directory. Declared here, not in packaging/,
 # for the same scoping reason as the macOS variables above: packaging/ installs
-# the file into it and src/FastCache/ compiles the very same path into the
+# the file into it and src/Pace/ compiles the very same path into the
 # daemon's default lookup, and two sibling subdirectories cannot see each
 # other's set(). Spelled without a leading slash to match the other install
 # destinations, which are relative to CMAKE_INSTALL_PREFIX.
@@ -194,7 +194,7 @@ option(FASTCACHED_ENABLE_TLS "Enable TLS support (requires OpenSSL)" OFF)
 # `--compression none`). When explicitly built OFF, no compression library is
 # fetched or linked, the codec table degrades to identity-only, and selecting
 # zstd/lz4 from config becomes a clean startup error. Our code keys off the
-# FC_COMPRESSION_ENABLED compile definition (set in src/FastCache/CMakeLists.txt).
+# FC_COMPRESSION_ENABLED compile definition (set in src/Pace/CMakeLists.txt).
 option(FASTCACHED_ENABLE_COMPRESSION "Enable on-disk value compression (zstd + lz4)" ON)
 
 # Tracy profiler. TRACY_ENABLE is Tracy's own gate; reusing the name means the
@@ -574,7 +574,7 @@ include(InstructionSetProbe)
 # targets defined AFTER it. So a dependency added above is built with no sanitizer at all in every
 # sanitizer configuration unless something hands it the flags. That was measured once, on the
 # vendored endo TUI this project carried before core-cpp (#134): an object of it in the ASan build
-# carried no `-fsanitize` and 0 `__asan` symbols, beside a `FastCache` object carrying both, and a
+# carried no `-fsanitize` and 0 `__asan` symbols, beside a `Pace` object carrying both, and a
 # ThreadSanitizer run of `fastcache-cli-tests` reported that binary's own objects instrumented
 # while the terminal wait on the pool was not.
 #
@@ -627,7 +627,7 @@ if(SANITIZER_COMPILE_OPTIONS)
 endif()
 
 # ----------------------------------------------------------------------------
-# Test wiring is enabled early so all subdirectories (CowTree, FastCache,
+# Test wiring is enabled early so all subdirectories (CowTree, Pace,
 # src/tests) can register their CTest test executables via
 # catch_discover_tests().
 
@@ -678,31 +678,31 @@ endif()
 # exit codes again is a red rather than a silent false GREEN. The whole argument is in
 # `.agent/rules/testing.md`.
 # ----------------------------------------------------------------------------
-# Sibling libraries (no dependency on FastCache).
+# Sibling libraries (no dependency on Pace).
 
 add_subdirectory(src/CowTree)
 
 # ----------------------------------------------------------------------------
-# Library target: all FastCache code lives here (so both the executable and
+# Library target: all Pace code lives here (so both the executable and
 # the test binary link it).
 
-add_library(FastCache STATIC)
-target_include_directories(FastCache PUBLIC
+add_library(Pace STATIC)
+target_include_directories(Pace PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
-target_compile_features(FastCache PUBLIC cxx_std_23)
-target_link_libraries(FastCache PUBLIC yaml-cpp::yaml-cpp)
-target_link_libraries(FastCache PUBLIC CowTree)
+target_compile_features(Pace PUBLIC cxx_std_23)
+target_link_libraries(Pace PUBLIC yaml-cpp::yaml-cpp)
+target_link_libraries(Pace PUBLIC CowTree)
 
 # The coroutine vocabulary and the event loop, sockets and clock every layer is written against:
-# core-cpp's (#1596). PUBLIC, because FastCache's headers name their types.
-target_link_libraries(FastCache PUBLIC core::async core::net)
+# core-cpp's (#1596). PUBLIC, because Pace's headers name their types.
+target_link_libraries(Pace PUBLIC core::async core::net)
 
-# PRIVATE: no FastCache header includes a Monocypher header, so nothing that links FastCache
+# PRIVATE: no Pace header includes a Monocypher header, so nothing that links Pace
 # compiles against it -- `Core/Ed25519.hpp` and its siblings are the seam, and `ctest -R
 # crypto-seam` refuses any other first-party file reaching past them.
-target_link_libraries(FastCache PRIVATE fastcache-monocypher)
+target_link_libraries(Pace PRIVATE fastcache-monocypher)
 
 # Tracy is linked PUBLIC so the Tracy include dirs propagate transitively to the
 # fastcached executable (thread naming in main.cpp). core-cpp's `core::base` links
@@ -710,21 +710,21 @@ target_link_libraries(FastCache PRIVATE fastcache-monocypher)
 # is linked and every `<core/Profiling.hpp>` macro compiles to nothing -- a
 # strictly zero-cost build.
 if(TRACY_ENABLE)
-    target_link_libraries(FastCache PUBLIC Tracy::TracyClient)
+    target_link_libraries(Pace PUBLIC Tracy::TracyClient)
 endif()
 
 # Substitute the version triple/string into Core/Version.hpp at configure
 # time. The generated header lives under the build dir so it never gets
 # checked in.
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/FastCache/Core/Version.hpp.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/FastCache/Core/Version.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Pace/Core/Version.hpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/Pace/Core/Version.hpp"
     @ONLY
 )
 
 # The checkout's paths, for the test cases that read a file out of it -- generated
 # here, before src/apps, because fastcache-compile-node-tests needs it as much as
-# FastCacheTest does. A header and never a compile definition: the header says why.
+# PaceTest does. A header and never a compile definition: the header says why.
 #
 # PROJECT_SOURCE_DIR rather than CMAKE_SOURCE_DIR: the two differ the moment this tree
 # is consumed with add_subdirectory(), and a documentation check would then iterate a
@@ -740,7 +740,7 @@ endif()
 
 if(WIN32)
     # iphlpapi: GetAdaptersAddresses, behind Platform/LocalAddresses. PUBLIC for the
-    # same reason ws2_32 is -- every executable that links FastCache asks the cache
+    # same reason ws2_32 is -- every executable that links Pace asks the cache
     # surface who a caller is, and a private link would leave that unresolved in each
     # of them.
     #
@@ -749,15 +749,15 @@ if(WIN32)
     #
     # ole32 + oleaut32: COM and BSTRs, behind Platform/WindowsFirewall -- the
     # INetFwPolicy2 rules a service registration opens and an uninstall removes.
-    target_link_libraries(FastCache PUBLIC ws2_32 iphlpapi bcrypt ole32 oleaut32)
-    target_compile_definitions(FastCache PUBLIC
+    target_link_libraries(Pace PUBLIC ws2_32 iphlpapi bcrypt ole32 oleaut32)
+    target_compile_definitions(Pace PUBLIC
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _WIN32_WINNT=0x0A00
     )
 endif()
 
-add_subdirectory(src/FastCache)
+add_subdirectory(src/Pace)
 
 # ----------------------------------------------------------------------------
 # Executables. Every binary lives under src/apps/<name>/ and declares its own
@@ -780,7 +780,7 @@ add_subdirectory(src/apps)
 # ----------------------------------------------------------------------------
 # Installation of the project docs, under the standard GNUInstallDirs prefix
 # (share/doc/fastcached/). Each executable installs itself into bin/ from its
-# own subdirectory. The FastCache/CowTree static libraries and headers are
+# own subdirectory. The Pace/CowTree static libraries and headers are
 # intentionally not installed: they PUBLIC-link an un-installed CPM yaml-cpp,
 # so exporting a consumable SDK is out of scope.
 

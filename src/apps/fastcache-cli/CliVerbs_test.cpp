@@ -3,7 +3,7 @@
 #include "LiveSession.hpp"
 #include "ScriptedExchange.hpp"
 
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -14,9 +14,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
 
 namespace
 {
@@ -188,7 +188,7 @@ TEST_CASE("get --raw hands over the bytes and renders nothing", "[cli][verbs]")
 
     REQUIRE(answer.rawPayload.has_value());
     // Untouched: the one escape from the text/base64 classification.
-    CHECK(FastCache::Testing::Unwrap(answer.rawPayload) == bytes);
+    CHECK(Pace::Testing::Unwrap(answer.rawPayload) == bytes);
     CHECK(answer.value.shape == Shape::Empty);
 }
 

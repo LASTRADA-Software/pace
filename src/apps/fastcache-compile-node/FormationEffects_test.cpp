@@ -3,12 +3,12 @@
 #include "FormationEffects.hpp"
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -32,8 +32,8 @@
 #include <tests/SecureRandomFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using Cluster::NodeMode;
 using Testing::LearnerIn;
 using Testing::OfficeRosterWith;

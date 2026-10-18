@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 OutcomeSpec const* DescriptorOf(Outcome outcome) noexcept
@@ -53,4 +53,4 @@ void PrependRemarks(Answer& answer, std::span<std::string const> remarks)
     answer.advisories = std::move(said);
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

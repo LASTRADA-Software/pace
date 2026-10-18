@@ -3,11 +3,11 @@
 #include "NodeStateFiles.hpp"
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Platform/FileTrust.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -492,4 +492,4 @@ std::optional<Platform::ReplaceRoute> ReportReplaceRoute(std::filesystem::path c
     return probed->route;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

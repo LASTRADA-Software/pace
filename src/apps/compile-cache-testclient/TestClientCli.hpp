@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cli/UsageDoc.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -10,7 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::TestClient
+namespace Pace::TestClient
 {
 
 /// The compiler `--compiler` defaults to.
@@ -73,4 +73,4 @@ struct Args
 /// @return The complete usage text, ending in a newline.
 [[nodiscard]] std::string HelpText(UsageColor color = UsageColor::Plain);
 
-} // namespace FastCache::TestClient
+} // namespace Pace::TestClient

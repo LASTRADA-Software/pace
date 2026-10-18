@@ -6,13 +6,13 @@
 #include "SharedCacheHost.hpp"
 #include "SharedCacheTier.hpp"
 
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,14 +31,14 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::AStoredObject;
-using FastCache::Testing::MemoryOpener;
-using FastCache::Testing::NamingSharedCache;
-using FastCache::Testing::StatusOf;
-using FastCache::Testing::Unwrap;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::AStoredObject;
+using Pace::Testing::MemoryOpener;
+using Pace::Testing::NamingSharedCache;
+using Pace::Testing::StatusOf;
+using Pace::Testing::Unwrap;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

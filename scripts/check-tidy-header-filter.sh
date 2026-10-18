@@ -121,7 +121,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
             failures=$((failures + 1))
         fi
     }
-    planted="src/FastCache/Core/Base64.hpp
+    planted="src/Pace/Core/Base64.hpp
 src/tests/ScratchPath.hpp
 src/apps/fastcache-cc/Cache.hpp
 src/CowTree/Tree.hpp"
@@ -133,8 +133,8 @@ src/CowTree/Tree.hpp"
     # PLANTED: the filter as it was before this check existed. The miss is named as a
     # SPELLING, because every header is taken as a POSIX path.
     Expect "a /-only filter misses the backslash spelling" 1 \
-        "uncovered 0/4 src/FastCache/Core/Base64.hpp (windows spelling)" \
-        '.*/src/(CowTree|FastCache|apps|tests)/.*' "$lane" "$planted"
+        "uncovered 0/4 src/Pace/Core/Base64.hpp (windows spelling)" \
+        '.*/src/(CowTree|Pace|apps|tests)/.*' "$lane" "$planted"
     # `pipe_lines_into`, the one way these libraries hand a string to an external filter
     # (#1630): it answers with the FILTER's status under this script's `set -euo pipefail` --
     # 0, 1, an error, a signal's 128+n -- and a `grep -q` that stops at its first line over
@@ -196,7 +196,7 @@ src/CowTree/Tree.hpp"
         fi
     }
     KilledOver "a coverage grep killed is the check failing (status 2), never 'uncovered'" \
-        "FastCache" "check-failed coverage"
+        "Pace" "check-failed coverage"
     KilledOver "a dependency-reach grep killed is the check failing, never a leak" \
         "_deps" "check-failed dependency reach"
     KilledOver "a third-party-reach grep killed is the check failing, never a leak" \
@@ -208,13 +208,13 @@ src/CowTree/Tree.hpp"
     # PLANTED: both separators as two separate copies, which the remedy warns against --
     # still blind to MSVC's backslashed include directory and slashed `#include` name.
     Expect "two copies of the pattern miss the MSVC mix" 1 \
-        "uncovered 0/4 src/FastCache/Core/Base64.hpp (msvc spelling)" \
-        '(.*/src/(CowTree|FastCache|apps|tests)/.*|.*\\src\\(CowTree|FastCache|apps|tests)\\.*)' \
+        "uncovered 0/4 src/Pace/Core/Base64.hpp (msvc spelling)" \
+        '(.*/src/(CowTree|Pace|apps|tests)/.*|.*\\src\\(CowTree|Pace|apps|tests)\\.*)' \
         "$lane" "$planted"
     # PLANTED: #1040's pattern, anchored on a directory name. Missed in EVERY spelling, so no
     # spelling is named -- this one is about where the checkout lives.
     Expect "a layout-anchored filter misses a lane worktree, naming no spelling" 1 \
-        "uncovered 0/4 src/FastCache/Core/Base64.hpp" \
+        "uncovered 0/4 src/Pace/Core/Base64.hpp" \
         '.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*' "$lane" "$planted"
     # PLANTED: the widening a separator fix tempts -- any `src` directory at all.
     Expect "a filter taking any src directory reaches a dependency" 1 \

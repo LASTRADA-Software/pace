@@ -20,7 +20,7 @@
     #include <unistd.h>
 #endif
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -397,4 +397,4 @@ std::filesystem::path ScratchBaseDirectory()
     return std::filesystem::temp_directory_path() / "fastcache-compile-node";
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

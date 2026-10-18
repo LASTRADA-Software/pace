@@ -10,13 +10,13 @@
 #include "SharedCacheSession.hpp"
 #include "SharedCacheUpstream.hpp"
 
-#include <FastCache/Cache/CowTreeStorage.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cache/LayeredStorage.hpp>
-#include <FastCache/Cache/ShardedStorage.hpp>
-#include <FastCache/Cache/WriteErrorReportingStorage.hpp>
-#include <FastCache/Config/ByteSize.hpp>
-#include <FastCache/Core/Compression.hpp>
+#include <Pace/Cache/CowTreeStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/LayeredStorage.hpp>
+#include <Pace/Cache/ShardedStorage.hpp>
+#include <Pace/Cache/WriteErrorReportingStorage.hpp>
+#include <Pace/Config/ByteSize.hpp>
+#include <Pace/Core/Compression.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -33,7 +33,7 @@
 
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -667,4 +667,4 @@ std::expected<std::string, UnfinishedCommand> MigrateDiskTier(NodeConfig const& 
     return line;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

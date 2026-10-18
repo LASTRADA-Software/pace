@@ -3,7 +3,7 @@
 
 #include "CacheTierProfile.hpp"
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The node's own tier: this machine's `FETCH`, `STORE` and `CACHE-DROP`, counted on the
@@ -28,4 +28,4 @@ inline constexpr CacheTierProfile PrivateTierProfile {
 
 static_assert(StatesEveryMember(PrivateTierProfile), "the private tier's profile states every column");
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

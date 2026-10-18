@@ -5,11 +5,11 @@
 #include "CodecEnvelope.hpp"
 #include "CompileJob.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -25,7 +25,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Where a worker's advertised endpoint is read, at the moment it is PRESENTED.
@@ -347,7 +347,7 @@ class WorkerProtocol
     /// reached for: a worker under test counts into one the test can read, and the
     /// interface is header-only and depends on nothing but the standard library,
     /// so including it costs `fastcache-cc` — which compiles this file in without
-    /// linking `FastCache` — nothing at link time.
+    /// linking `Pace` — nothing at link time.
     /// @param refusals Told of every job the runner refused, beside the counter; must outlive
     ///        this. Required: see `IJobRefusalObserver`.
     /// @param maxDecompressedBytes Ceiling on what a request's codec envelope may
@@ -700,4 +700,4 @@ class WorkerRegistrar
     CompileCacheWire::LoadFields const& load = {},
     std::span<CompileCacheWire::JoinMemoFields const> joinMemos = {});
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

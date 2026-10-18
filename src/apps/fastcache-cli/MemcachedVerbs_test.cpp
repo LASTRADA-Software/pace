@@ -3,7 +3,7 @@
 #include "CliVerbs.hpp"
 #include "ScriptedExchange.hpp"
 
-#include <FastCache/Core/Utf8.hpp>
+#include <Pace/Core/Utf8.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,9 +11,9 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
 
 // The memcached-text verbs, against scripted replies written in the server's own
 // vocabulary. Its own file rather than rows in `CliVerbs_test.cpp`: these all share one

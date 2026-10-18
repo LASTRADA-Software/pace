@@ -15,18 +15,18 @@
 /// zero, and one that has served for months, every counter ten digits long -- and the conditions
 /// are part of every line printed.
 
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Consensus/RaftNode.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Distributed/WorkerRegistry.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Consensus/RaftNode.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Distributed/WorkerRegistry.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -43,7 +43,7 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache;
+using namespace Pace;
 using namespace std::chrono_literals;
 
 namespace

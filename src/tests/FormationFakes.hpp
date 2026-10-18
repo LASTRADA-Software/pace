@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/ChallengeCookies.hpp>
-#include <FastCache/Cluster/ChallengeIssuer.hpp>
-#include <FastCache/Cluster/DiscoveryWire.hpp>
-#include <FastCache/Cluster/FleetSummarySignature.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/ProvenFleetSummary.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Cluster/SplitEvidence.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ChallengeCookies.hpp>
+#include <Pace/Cluster/ChallengeIssuer.hpp>
+#include <Pace/Cluster/DiscoveryWire.hpp>
+#include <Pace/Cluster/FleetSummarySignature.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/ProvenFleetSummary.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Cluster/SplitEvidence.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -42,8 +42,8 @@
 /// its cases pass, and the facts these carry -- that a proven summary is one a SIGNATURE verified,
 /// that an observer is handed every fleet -- are exactly what a copy would get wrong.
 ///
-/// Library-level only: `src/FastCache` tests include this, and must not reach an app header.
-namespace FastCache::Testing
+/// Library-level only: `src/Pace` tests include this, and must not reach an app header.
+namespace Pace::Testing
 {
 
 /// This node's summary, as a case scripts it: what `IFleetSummarySource::Current` answers until
@@ -406,4 +406,4 @@ class InMemoryFormationStore final: public Cluster::IFormationStore
     std::optional<std::string> _failure;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

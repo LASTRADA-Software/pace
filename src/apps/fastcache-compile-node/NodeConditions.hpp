@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/NodeConditionWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/NodeConditionWire.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -28,7 +28,7 @@
 /// The log lines stay. The table is an additional carrier, not a replacement: a line is what a
 /// person watching startup reads, and the table is what somebody arriving later can ask for.
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Which condition a row describes.
@@ -517,4 +517,4 @@ void EvaluateProcessConditions(NodeConditions& conditions, IMetricsSink const& m
 /// @param conditions Where the row is answered; must outlive @p health.
 void WatchAcceptLoops(core::net::AcceptLoopHealth& health, NodeConditions& conditions);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

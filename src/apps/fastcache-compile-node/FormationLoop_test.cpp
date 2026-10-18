@@ -7,11 +7,11 @@
 #include "NodeMembership.hpp"
 #include "NodeReload.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Core/Errors/ConsensusError.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Core/Errors/ConsensusError.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -34,15 +34,15 @@
 #include <tests/SecureRandomFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {
 /// A body that served until it was asked to stop, as `WorkerBody` ends one.
-constexpr auto Served = FastCache::ExitCodeOf(FastCache::ProcessExit::Served);
+constexpr auto Served = Pace::ExitCodeOf(Pace::ProcessExit::Served);
 /// A formation that could not be adopted: the start's `Formation` stage.
-constexpr auto FormationRefused = FastCache::ExitCodeFor(FastCache::StartStage::Formation);
+constexpr auto FormationRefused = Pace::ExitCodeFor(Pace::StartStage::Formation);
 } // namespace
 
 namespace

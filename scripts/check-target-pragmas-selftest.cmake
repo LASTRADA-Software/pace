@@ -30,7 +30,7 @@ set(mismatches "")
 function(fastcached_tree name out)
     set(root "${FASTCACHED_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${root}")
-    file(WRITE "${root}/src/FastCache/Core/Unit.cpp" "int Unit() { return 1; }\n")
+    file(WRITE "${root}/src/Pace/Core/Unit.cpp" "int Unit() { return 1; }\n")
     set(${out} "${root}" PARENT_SCOPE)
 endfunction()
 
@@ -66,11 +66,11 @@ function(fastcached_judge name root refuses expected)
 endfunction()
 
 fastcached_tree(pragmaOnceOnly root)
-file(WRITE "${root}/src/FastCache/Core/Unit.hpp" "#pragma once\nint Unit();\n")
+file(WRITE "${root}/src/Pace/Core/Unit.hpp" "#pragma once\nint Unit();\n")
 fastcached_judge(pragmaOnceOnly "${root}" OFF "2 source(s) under src/ carry no target pragma (0 got past the prefilter)")
 
 fastcached_tree(pragmaInComment root)
-file(WRITE "${root}/src/FastCache/Core/Notes.hpp" [==[
+file(WRITE "${root}/src/Pace/Core/Notes.hpp" [==[
 #pragma once
 // Never write #pragma GCC target("sha") here: it reaches every function after it.
 /* #pragma clang attribute push (__attribute__((target("avx2"))), apply_to = function) */
@@ -80,9 +80,9 @@ fastcached_judge(pragmaInComment "${root}" OFF "2 source(s) under src/ carry no 
 # The tree's one legitimate spelling, copied from the hardware SHA-256 path (#1420), with a diagnostic pragma
 # whose comment names a target attribute: that line gets past the prefilter, so the scanner judges the file.
 fastcached_tree(perFunctionAttributes root)
-file(WRITE "${root}/src/FastCache/Core/Sha256.cpp" [==[
+file(WRITE "${root}/src/Pace/Core/Sha256.cpp" [==[
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Sha256.hpp>
+#include <Pace/Core/Sha256.hpp>
 
 #pragma GCC diagnostic ignored "-Wattributes" // a target attribute an older GCC does not know is not an error
 
@@ -123,27 +123,27 @@ file(WRITE "${root}/src/FastCache/Core/Sha256.cpp" [==[
 fastcached_judge(perFunctionAttributes "${root}" OFF "2 source(s) under src/ carry no target pragma (1 got past the prefilter)")
 
 fastcached_tree(pragmaGcc root)
-file(WRITE "${root}/src/FastCache/Core/Fast.cpp" "#include <x.hpp>\n#pragma GCC target(\"sha\")\nint Fast() { return 3; }\n")
-fastcached_judge(pragmaGcc "${root}" ON "src/FastCache/Core/Fast.cpp:2: a target pragma enables an instruction set")
+file(WRITE "${root}/src/Pace/Core/Fast.cpp" "#include <x.hpp>\n#pragma GCC target(\"sha\")\nint Fast() { return 3; }\n")
+fastcached_judge(pragmaGcc "${root}" ON "src/Pace/Core/Fast.cpp:2: a target pragma enables an instruction set")
 
 fastcached_tree(pragmaClangIndented root)
-file(WRITE "${root}/src/FastCache/Core/Fast.hpp" [==[
+file(WRITE "${root}/src/Pace/Core/Fast.hpp" [==[
 #pragma once
   #  pragma clang attribute push (__attribute__((target("avx2"))), apply_to = function)
 ]==])
-fastcached_judge(pragmaClangIndented "${root}" ON "src/FastCache/Core/Fast.hpp:2: a target pragma")
+fastcached_judge(pragmaClangIndented "${root}" ON "src/Pace/Core/Fast.hpp:2: a target pragma")
 
 # A block comment between the words: stripping turns it into a space, and the prefilter still admits the line.
 fastcached_tree(pragmaBehindBlockComment root)
-file(WRITE "${root}/src/FastCache/Core/Fast.cpp" "#pragma/**/GCC target(\"avx2\")\n")
-fastcached_judge(pragmaBehindBlockComment "${root}" ON "src/FastCache/Core/Fast.cpp:1: a target pragma")
+file(WRITE "${root}/src/Pace/Core/Fast.cpp" "#pragma/**/GCC target(\"avx2\")\n")
+fastcached_judge(pragmaBehindBlockComment "${root}" ON "src/Pace/Core/Fast.cpp:1: a target pragma")
 
 fastcached_tree(pragmaInConfiguredTemplate root)
-file(WRITE "${root}/src/FastCache/Core/Version.hpp.in" "#pragma once\n#pragma GCC target(\"avx2\")\n")
-fastcached_judge(pragmaInConfiguredTemplate "${root}" ON "src/FastCache/Core/Version.hpp.in:2: a target pragma")
+file(WRITE "${root}/src/Pace/Core/Version.hpp.in" "#pragma once\n#pragma GCC target(\"avx2\")\n")
+fastcached_judge(pragmaInConfiguredTemplate "${root}" ON "src/Pace/Core/Version.hpp.in:2: a target pragma")
 
 fastcached_tree(noSources root)
-file(REMOVE "${root}/src/FastCache/Core/Unit.cpp")
+file(REMOVE "${root}/src/Pace/Core/Unit.cpp")
 file(WRITE "${root}/src/README.md" "#pragma GCC target(\"sha\") in prose\n")
 fastcached_judge(noSources "${root}" ON "no C or C++ source under")
 

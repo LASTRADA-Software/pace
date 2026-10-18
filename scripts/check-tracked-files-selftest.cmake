@@ -650,15 +650,15 @@ endfunction()
 
 # 17a. Unreadable: tracked, present, and this process cannot open it.
 set(unreadableTree "${FASTCACHED_SCRATCH_DIR}/unreadable")
-set(lockedFile "${unreadableTree}/src/FastCache/Core/Endian.hpp")
+set(lockedFile "${unreadableTree}/src/Pace/Core/Endian.hpp")
 MakeReadable("${lockedFile}")
 StageTree("${unreadableTree}"
-    "src/FastCache/Core/Bytes.hpp|plain bytes"
-    "src/FastCache/Core/Endian.hpp|return ::htonl(value)")
+    "src/Pace/Core/Bytes.hpp|plain bytes"
+    "src/Pace/Core/Endian.hpp|return ::htonl(value)")
 MakeRepository("${unreadableTree}" TRUE)
 MakeUnreadable("${lockedFile}" unreadableBit)
 if(unreadableBit)
-    set(lockedRefusal "cannot judge a file it cannot read -- src/FastCache/Core/Endian.hpp in .* tracked, present, and not readable")
+    set(lockedRefusal "cannot judge a file it cannot read -- src/Pace/Core/Endian.hpp in .* tracked, present, and not readable")
     ExpectRefusalIn("unreadableGitText" "${lockedRefusal}" "${unreadableTree}" "${GIT_EXECUTABLE}"
         "GLOBS \"src/*\" FILES_OUT files MODE_OUT mode CONTAINING \"htonl(\" CONTAINING_OUT holding")
     ExpectRefusalIn("unreadableGitBytes" "${lockedRefusal}" "${unreadableTree}" "${GIT_EXECUTABLE}"

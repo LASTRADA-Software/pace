@@ -5,8 +5,8 @@
 #include "NodeConfig.hpp"
 #include "OneShotAnswer.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <array>
 #include <chrono>
@@ -23,7 +23,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file EnrollClient.hpp
@@ -234,4 +234,4 @@ struct JoinerIdentity
                                                                            Cc::ICredentialFor& credentials,
                                                                            IEndpointDialer& dialer = DefaultOneShotDialer());
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

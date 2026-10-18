@@ -10,7 +10,7 @@
 #include <core/net/SharedPortDatagram.hpp>
 #include <core/net/testing/InMemoryDatagram.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The port every node in a test segment listens for beacons on.
@@ -43,4 +43,4 @@ inline constexpr std::uint16_t TestBeaconPort = 6681;
         .value_or(nullptr);
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

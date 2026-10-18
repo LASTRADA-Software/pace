@@ -16,7 +16,7 @@
     #include <windows.h>
 #endif
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -351,4 +351,4 @@ std::unique_ptr<IPathResolver> MakePathResolver()
     return std::make_unique<MemoizingPathResolver>();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

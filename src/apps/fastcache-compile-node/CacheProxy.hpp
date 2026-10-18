@@ -3,8 +3,8 @@
 
 #include "LocalCache.hpp"
 
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstddef>
 #include <span>
@@ -12,7 +12,7 @@
 
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Turns one `0xFC` request into one reply, for a node's own cache tier.
@@ -78,4 +78,4 @@ class CacheProxy
     IMetricsSink& _metrics;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

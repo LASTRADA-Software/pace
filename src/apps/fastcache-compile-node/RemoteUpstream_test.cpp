@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "RemoteUpstream.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,13 +28,13 @@
 #include <core/platform/Clock.hpp>
 #include <tests/ScriptedSocket.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 constexpr std::chrono::milliseconds RefreshInterval { 30'000 };
 constexpr std::chrono::milliseconds ConnectTimeout { 1'000 };

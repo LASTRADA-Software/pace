@@ -11,7 +11,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// One generation of a versioned digest contract: what NAMED it, and the digest
@@ -243,4 +243,4 @@ void RequireLiveGenerationIsLast(Key live, std::span<Generation<Key> const> rows
     CHECK(RenderGenerationKey(live) == RenderGenerationKey(rows.back().key));
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

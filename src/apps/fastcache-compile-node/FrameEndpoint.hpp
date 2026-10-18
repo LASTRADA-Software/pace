@@ -5,16 +5,16 @@
 #include "NodeSurfaces.hpp"
 #include "PeerIdentity.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/Nonce.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/NodeProof.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheAuth.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/Nonce.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/NodeProof.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheAuth.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -32,7 +32,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/IListener.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class NodeIoLoop;
@@ -1431,4 +1431,4 @@ class FrameEndpoint
     std::string _boundEndpoint;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -3,7 +3,7 @@
 #include "NodeFormation.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <cstdio>
 #include <format>
@@ -15,7 +15,7 @@
 
 #include <core/net/SharedPortDatagram.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -549,4 +549,4 @@ std::expected<std::unique_ptr<DiscoveryTier>, NodeRefusal> StartDiscoveryOrExpla
         formation);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

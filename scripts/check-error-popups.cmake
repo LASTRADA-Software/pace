@@ -33,7 +33,7 @@
 #
 # A launched executable that is neither covered nor exempt is REFUSED, by name. So is
 # every way of not being able to ask: no manifest, an empty one, a reason this reader
-# cannot carry, and an anchor (`FastCacheTest`) that is not launched-and-covered, since a
+# cannot carry, and an anchor (`PaceTest`) that is not launched-and-covered, since a
 # derivation that proves nothing about the one executable certain to be there proves
 # nothing at all. A generator that writes no `build.ninja` is a SKIP, naming it -- the
 # presets all use Ninja, and a reader claiming to parse a format it does not is worse.

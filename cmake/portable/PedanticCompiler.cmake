@@ -246,10 +246,10 @@ if(${PEDANTIC_COMPILER_WERROR})
         # ([#805](https://github.com/LASTRADA-Software/fastcached/issues/805)):
         #
         #   * `-Warray-bounds=` in `EncodeCompileValue`
-        #     (`src/FastCache/CompileCache/CompileValue.cpp`), out of
+        #     (`src/Pace/CompileCache/CompileValue.cpp`), out of
         #     `stl_uninitialized.h`.
         #   * `-Wmaybe-uninitialized` in
-        #     `src/FastCache/Server/AdminHttpServer_test.cpp`, inside libstdc++'s
+        #     `src/Pace/Server/AdminHttpServer_test.cpp`, inside libstdc++'s
         #     own `_Any_data` union, when an `AdminRoute` is copied out of an
         #     `initializer_list`.
         #

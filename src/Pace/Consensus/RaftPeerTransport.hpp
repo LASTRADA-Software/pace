@@ -1,0 +1,848 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Consensus/IRaftInboundLinks.hpp>
+#include <Pace/Consensus/IRaftMessageSink.hpp>
+#include <Pace/Consensus/IRaftPeerIdentity.hpp>
+#include <Pace/Consensus/IRaftTransport.hpp>
+#include <Pace/Consensus/RaftConfig.hpp>
+#include <Pace/Consensus/RaftPeerRefusals.hpp>
+#include <Pace/Consensus/RaftSessionLink.hpp>
+#include <Pace/Consensus/RaftTypes.hpp>
+#include <Pace/Consensus/RaftWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+#include <core/async/AsyncQueue.hpp>
+#include <core/async/StopToken.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IConnector.hpp>
+#include <core/platform/Clock.hpp>
+
+namespace Pace::Consensus
+{
+
+/// Where a peer can be reached.
+struct PeerEndpoint
+{
+    NodeId id;                ///< The member this address belongs to.
+    std::string host;         ///< Hostname or literal address.
+    std::uint16_t port { 0 }; ///< TCP port of that node's peer listener.
+};
+
+/// What learning a peer did.
+///
+/// Named rather than reported as a `bool`, because a caller reconciling a member
+/// set against what it already dials wants to log the two interesting cases and
+/// say nothing at all about the third — and "a peer that moved" and "a peer nobody
+/// knew" are different sentences to an operator reading why a cluster changed
+/// shape.
+enum class PeerChange : std::uint8_t
+{
+    Added = 0,   ///< A peer nobody knew; its sender starts now.
+    Readdressed, ///< A known peer that has moved; the live connection is dropped.
+    Unchanged,   ///< Already known, at exactly this address.
+
+    /// This node's own record, which a member set always contains.
+    ///
+    /// Its own row rather than a shared "refused", because it is the one outcome a
+    /// caller must stay silent about: a reconciler hands over the whole member set
+    /// on every pass, so folding it in with the row below would make a healthy
+    /// fleet log its own id once a second forever -- or make an operator suppress
+    /// the line that says the transport is shutting down.
+    Self,
+
+    Stopping, ///< The transport is stopping; nothing new is dialled.
+};
+
+/// Why `RaftPeerTransport::Send` dropped a message it had no way to deliver.
+///
+/// **Private: never transmitted or persisted**, so the enumerators carry no values. Two rows,
+/// each named for what the transport OBSERVED, because the two mean different things to an
+/// operator: a peer that dials in (`PeerLink::DialsIn`, as the node's `LearnMembers` reads it
+/// out of `StandingTable`) with no session open is a learner that is offline, the ordinary life
+/// of a laptop; a peer the transport cannot place at all -- neither dialled nor dialling in --
+/// is an id nothing gave this node a way to reach, which no amount of waiting fixes.
+enum class SendDrop : std::uint8_t
+{
+    NoSession,   ///< The peer dials in, and no session of its is attached.
+    UnknownPeer, ///< The peer is neither dialled by this transport nor one it was told dials in.
+    Last,        ///< Not a drop, and has no row.
+};
+
+/// How long a sender waits before redialling a peer, for one shape of session.
+struct DialBackoffRow
+{
+    RaftWire::SessionDirection direction; ///< The shape of session this row dials.
+    std::chrono::milliseconds initial;    ///< The first wait, and the wait after a session that carried frames.
+    std::chrono::milliseconds cap;        ///< The longest wait doubling may reach.
+};
+
+/// How long a sender waits before redialling, by the shape of session it dials. Doubling, capped.
+///
+/// ## A voter's dial is FLAT, deliberately
+///
+/// Raft's whole recovery story is that a partition heals and replication resumes on the next
+/// heartbeat; a backoff that grows to minutes turns a five-second network blip into a cluster
+/// that stays degraded long after the network is fine. The cost of being wrong in that direction
+/// is one connect attempt per interval per unreachable voter, which is nothing -- so the one-way
+/// row's cap IS its initial wait, and doubling it changes nothing.
+///
+/// ## A learner's dial GROWS
+///
+/// A learner is the end that dials, and it is the laptop: offline for hours, asleep, on a network
+/// that reaches no voter. Dialling every voter four times a second for all of that is a radio kept
+/// awake for nothing. So it waits one second after a failed attempt, doubling to thirty, and goes
+/// back to one second after any session that carried a frame each way -- a learner that was
+/// talking is one whose voter is up.
+inline constexpr EnumTable<RaftWire::SessionDirection, DialBackoffRow> DialBackoffTable { {
+    { .direction = RaftWire::SessionDirection::OneWay,
+      .initial = std::chrono::milliseconds { 250 },
+      .cap = std::chrono::milliseconds { 250 } },
+    { .direction = RaftWire::SessionDirection::TwoWay,
+      .initial = std::chrono::seconds { 1 },
+      .cap = std::chrono::seconds { 30 } },
+} };
+
+static_assert(RowsInEnumeratorOrder(DialBackoffTable, &DialBackoffRow::direction),
+              "DialBackoffTable must hold one row per SessionDirection, in enumerator order");
+
+/// The backoff row for @p direction.
+/// @param direction Never `Last`.
+/// @return Its row.
+[[nodiscard]] constexpr DialBackoffRow const& DialBackoffOf(RaftWire::SessionDirection direction) noexcept
+{
+    return DialBackoffTable[static_cast<std::size_t>(direction)];
+}
+
+/// How many of the leader's heartbeat intervals a learner's two-way session may hear nothing for
+/// before its dialler ends it and redials: 100, which is five seconds at `DefaultHeartbeatInterval`.
+///
+/// A leader writes every learner at least once per heartbeat (`RaftNode` replicates to both sets),
+/// so a hundred missed in a row is not a slow leader -- it is a session whose other end is gone.
+/// That is what a laptop wakes into: the leader aborted its end during the sleep and never dials a
+/// learner, so every send there is `SendDrop::NoSession`, and a reader with no bound parks on the
+/// half-open socket forever -- the roster, a forget and the `shared-cache` setting stop arriving
+/// until the process restarts (W-3). The bound must not depend on a power event, which a machine
+/// does not always report; this one is the session's own clock.
+///
+/// The cost is stated rather than hidden: a learner dials EVERY voter two-way, and a voter that is
+/// not leading writes it nothing, so those sessions end at this bound too and are redialled on the
+/// growing backoff (`DialBackoffTable`) -- one handshake per voter per half-minute or so. Counted as
+/// `DiallerRefusal::SessionSilent` and logged at Debug, because it is the ordinary life of such a
+/// session; a leader's session ending this way is the case the bound exists for.
+inline constexpr std::uint32_t LearnerSessionSilentHeartbeats = 100;
+
+/// How long a dialled session may hear nothing, for one shape of session.
+struct SessionIdleRow
+{
+    RaftWire::SessionDirection direction; ///< The shape of session this row bounds.
+
+    /// The bound, in the leader's heartbeat intervals; zero arms none.
+    std::uint32_t silentHeartbeats;
+};
+
+/// The idle bound a dialler holds its session's READER to, by the shape of session it dials --
+/// `DialBackoffTable`'s sibling, and for its reason a column per direction rather than a branch.
+///
+/// **A one-way session arms none, and must not.** Its dialler reads nothing after the verdict: it
+/// only writes, a dead peer fails one of those writes, and the reply rides the other member's own
+/// dial -- so silence on it is its normal state, and a bound there would end every voter's session
+/// every few seconds. Only a two-way dialler is the PASSIVE end of its session.
+inline constexpr EnumTable<RaftWire::SessionDirection, SessionIdleRow> SessionIdleTable { {
+    { .direction = RaftWire::SessionDirection::OneWay, .silentHeartbeats = 0 },
+    { .direction = RaftWire::SessionDirection::TwoWay, .silentHeartbeats = LearnerSessionSilentHeartbeats },
+} };
+
+static_assert(RowsInEnumeratorOrder(SessionIdleTable, &SessionIdleRow::direction),
+              "SessionIdleTable must hold one row per SessionDirection, in enumerator order");
+
+/// How long a dialled session of @p direction may hear nothing before its dialler ends it.
+/// @param direction The shape of session dialled; never `Last`.
+/// @param heartbeat The leader's heartbeat interval the bound is a multiple of.
+/// @return The bound; zero when the direction arms none.
+[[nodiscard]] constexpr std::chrono::milliseconds SessionIdleBound(RaftWire::SessionDirection direction,
+                                                                   std::chrono::milliseconds heartbeat) noexcept
+{
+    return heartbeat * SessionIdleTable[static_cast<std::size_t>(direction)].silentHeartbeats;
+}
+
+/// The wait after @p previous, for a session of @p direction: doubled, within the row's bounds.
+/// @param direction The shape of session being dialled.
+/// @param previous The wait just taken.
+/// @return The next wait, never below the row's `initial` nor above its `cap`.
+[[nodiscard]] std::chrono::milliseconds NextBackoff(RaftWire::SessionDirection direction,
+                                                    std::chrono::milliseconds previous) noexcept;
+
+/// How long the transport waits and how much it will hold, in one place.
+///
+/// A struct rather than five constructor parameters because they are one
+/// decision — how patient this node is with an unreachable peer — and because a
+/// caller reading `.dialTimeout` at the call site cannot transpose it with
+/// `.reconnectBackoff`, which two adjacent `milliseconds` arguments invite.
+struct PeerTransportOptions
+{
+    /// How long a single dial may take before it is abandoned.
+    ///
+    /// Bounded rather than left to the OS, whose default runs to minutes: a
+    /// sender that cannot abandon a dial cannot notice the peer coming back, and
+    /// cannot be stopped.
+    std::chrono::milliseconds dialTimeout { 1000 };
+
+    /// How long to wait after a failed attempt before dialling again, pinned.
+    ///
+    /// Zero means `DialBackoffTable`'s row for `direction`, which is what production uses. A
+    /// test may pin one wait instead, so a case about something else is not also a case about
+    /// doubling.
+    std::chrono::milliseconds reconnectBackoff { 0 };
+
+    /// How many messages may wait for one peer before the oldest are dropped.
+    ///
+    /// A bound, not a target. `IRaftTransport` is best-effort by contract, so
+    /// dropping is *correct* rather than merely tolerable — the algorithm
+    /// assumes any message may be lost and recovers on the next heartbeat. What
+    /// is not tolerable is unbounded growth: a peer that is down for an hour
+    /// would otherwise accumulate an hour of heartbeats, and the memory that
+    /// costs is memory the compile cache wanted.
+    std::size_t maxQueuedPerPeer { 256 };
+
+    /// How long an acceptor may take to challenge and then to answer this node's proof.
+    ///
+    /// `RaftWire::HandshakeBound`, the number the accepting end holds a dialler to. A
+    /// connection that runs out of it is abandoned and counted, and the sender backs off
+    /// and redials exactly as for any dropped connection. Non-positive arms no deadline,
+    /// for a test driving a reactor nothing turns.
+    std::chrono::milliseconds handshakeBound { RaftWire::HandshakeBound };
+
+    /// Which shape of session this transport dials, signed into every proof it makes.
+    ///
+    /// `OneWay` is a voter's: it only writes, and a reply rides the other member's own dial.
+    /// `TwoWay` is a learner's, which nobody dials: the acceptor writes to it on the same
+    /// connection, and this end reads what arrives there.
+    RaftWire::SessionDirection direction { RaftWire::SessionDirection::OneWay };
+
+    /// The leader's heartbeat interval, which a dialled session's idle bound is a multiple of
+    /// (`SessionIdleBound`). `DefaultHeartbeatInterval`, which is `RaftConfig`'s default and what
+    /// production runs; a test states it so the bound is a number it can step the clock to.
+    std::chrono::milliseconds heartbeatInterval { DefaultHeartbeatInterval };
+};
+
+/// Told that an acceptor proved its id and answered, SIGNED, that this node's own key is revoked.
+///
+/// Called on the reactor's thread, once per such verdict. It records and returns; anything slower
+/// is posted elsewhere by whoever set it.
+using OwnKeyRevokedObserver = std::function<void(NodeId const& acceptor)>;
+
+/// `IRaftTransport` over real sockets, one coroutine per peer on the reactor.
+///
+/// ## This used to be a thread per peer, and the note said why
+///
+/// It said the reactor exists for thousands of clients this process did not
+/// dial, while peers are a handful known at configuration time -- and that
+/// "dialling is the operation the reactor has no seam for, and adding
+/// non-blocking connect to three backends to save five threads would be paying
+/// the cost in the wrong currency". Three things were wrong with that.
+///
+/// The seam is not hypothetical and consensus is not paying for it:
+/// `core::net::IConnector` is coroutine-shaped and `core::net::makeConnector`'s connector implements it on all
+/// three backends, built for the launcher and the health probe.
+///
+/// It was never about saving threads. Thread-per-peer is only *expressible* over
+/// a blocking socket, because the write was driven by `core::async::syncRun` -- and this
+/// codebase already records, as the first of five defects found the first time
+/// consensus was run, that `core::async::syncRun` throws the instant its task really
+/// suspends. So the decision pinned the outbound half of this component to
+/// `core::net::BlockingSocket` for good while the inbound half was already on the reactor:
+/// two socket implementations in one class, chosen by direction.
+///
+/// And it hid a hang. The transport passes no I/O timeout, deliberately -- see
+/// `dialTimeout` -- so over a blocking socket there is no `SO_SNDTIMEO`, and a
+/// peer that accepts and then stops reading parks the sender in `::send` once the
+/// socket buffer fills. `Stop()` cleared the outbox, notified the condition
+/// variable, and then joined a thread that was not waiting on it. The socket was
+/// a local of the sender, so nothing else could close it. `~RaftPeerTransport`
+/// blocked forever and the node died to SIGKILL.
+///
+/// The rule the old note leaned on is **preserved, not abandoned**: no reactor
+/// thread ever blocks. Nothing in the new sender blocks; it suspends. What
+/// changes is that one component now has one lifecycle model, one socket
+/// implementation, and closes what it opened.
+///
+/// ## A peer is sent nothing until it has proved its id (#1308, #178)
+///
+/// Each connection runs `RaftPeerSession`'s handshake before the first message: this end
+/// answers the acceptor's challenge with a proof naming the member it dialled, and reads
+/// the acceptor's signed verdict. Only an `Accepted` verdict that verifies under the key the
+/// roster holds for that member starts the session -- and only then does the peer count in
+/// `ConnectedPeers()` -- so an address that no longer answers as the member, or answers as a
+/// machine this node holds no key for, is sent no Raft message at all. Every other ending
+/// moves its own counter (`DiallerRefusals`), the signed refusals under their own names, so a
+/// stale address book or a shared identity is never reported as a key problem. Every frame
+/// after the verdict carries its tag.
+///
+/// And before each frame is sealed, the roster is asked whether it still holds the key the
+/// acceptor proved the session with (`IRaftPeerIdentity::StillProves`). A key revoked since
+/// ends the session there, and the redial is judged against the roster as it is then.
+///
+/// ## A peer that dials in is written to on ITS session, and never dialled
+///
+/// A learner sits behind NAT, a VPN or a laptop lid, so an address for it would answer nothing.
+/// It dials this node two-way instead, and `RaftPeerServer` attaches that session here
+/// (`IRaftInboundLinks`). `Send` to a peer this transport does not dial rides that session;
+/// with none attached, the message is dropped and counted on the `SendDrop` row for what was
+/// seen -- a peer `LearnDialsIn` placed is `NoSession`, any other `UnknownPeer` -- exactly as
+/// for a peer that is unreachable, and nothing is dialled. Each attached session has a sender
+/// of its own, the only writer on its socket: the server's loop only reads it.
+///
+/// Those senders are detached coroutines rather than `Task`s the map owns, because the map DOES
+/// lose entries -- a session that ends is detached -- and destroying a suspended `Task` frees a
+/// frame the reactor may still point into, the reason `Peer` is never erased. Each holds its own
+/// share of its entry, ends when the entry's outbox is closed, and is counted, so `Stop()` waits
+/// for it like any other sender.
+///
+/// ## A learner's transport dials TWO-WAY, and reads what comes back
+///
+/// The other end of the section above. With `PeerTransportOptions::direction` `TwoWay` every proof
+/// asks the acceptor to write on the connection too, and each session runs a READER beside the
+/// writer: `ReadProvenSession`, the loop the acceptor runs, delivering into the `inbound` sink. The
+/// reader is the handshake's own `ByteReader` carried on, because the acceptor's first frame can
+/// arrive in the same read as its verdict and a fresh reader would never see it. Both halves pull
+/// `StillProves` on every frame, so a forget ends the session at its next frame whichever end speaks.
+///
+/// The two share one socket and end together. A reader that ends closes the socket and pushes a
+/// ZERO-LENGTH frame onto the outbox, which the writer reads as "the session ended" (no real frame
+/// is empty: every one has a header); a writer that ends closes the socket, which completes the
+/// parked read. The session returns only once BOTH have finished, so neither outlives the socket.
+/// A signed verdict saying this node's own key is revoked is handed to `ObserveOwnKeyRevoked`'s
+/// observer: that is how a learner offline through its forget learns of it.
+///
+/// ## Send never blocks and may drop
+///
+/// `Send` appends to a bounded queue and returns. It does not wait for a
+/// connection, a write, or an acknowledgement, because a driver that waited
+/// would let one unreachable follower stall a leader that has a quorum without
+/// it -- turning a fault Raft tolerates into one it does not. When the queue is
+/// full the **oldest** message is dropped rather than the newest: what is waiting
+/// behind a dead connection is stale by definition, and the newest AppendEntries
+/// subsumes every older one for that peer.
+///
+/// It also never resumes the sender inline. `Send` is reached from
+/// `RaftDriver::Deliver`, which holds the driver's mutex, and a queue that
+/// resumed its consumer there would run the sender's next step inside that lock
+/// -- see `core::async::AsyncQueue`, where that invariant lives.
+class RaftPeerTransport final: public IRaftTransport, public IRaftInboundLinks
+{
+  public:
+    /// How often a refused dial to one peer is logged, at most. Counted every time.
+    static constexpr std::chrono::seconds RefusalReportInterval { 60 };
+
+    /// Construct over its collaborators; all must outlive the transport.
+    ///
+    /// The id this node dials as is the identity's (`IRaftPeerIdentity::Self`), so a message
+    /// addressed to it is refused rather than looped through a socket -- one source for the id,
+    /// rather than a parameter that could name somebody the proofs do not.
+    /// @param peers Where each other member can be reached.
+    /// @param reactor The loop every sender runs on. Named before the connector
+    ///        because the connector's sockets are pinned to it.
+    /// @param connector How to dial; injected so tests need no network. Must be
+    ///        one whose sockets belong to `reactor`.
+    /// @param inbound Where a message an acceptor writes back on a TWO-WAY session is delivered.
+    ///        Never reached by a one-way transport. A transport exists before the driver it
+    ///        delivers into, so a caller with no driver yet passes a `ForwardingSink` it binds later.
+    /// @param logger Where connection state changes are reported.
+    /// @param metrics Where a refused dial is counted.
+    /// @param identity Who this node is, what its proofs are signed with, and what an
+    ///        acceptor's verdicts are checked against.
+    /// @param random Where each connection's nonce and ephemeral key come from. A connection
+    ///        this node cannot draw them for is abandoned before it proves anything (#1527).
+    /// @param options Timeouts, queue bound, and which way sessions flow.
+    RaftPeerTransport(std::vector<PeerEndpoint> peers,
+                      core::net::EventLoop& reactor,
+                      core::net::IConnector& connector,
+                      IRaftMessageSink& inbound,
+                      ILogger& logger,
+                      IMetricsSink& metrics,
+                      IRaftPeerIdentity const& identity,
+                      ISecureRandom& random,
+                      PeerTransportOptions options = {});
+
+    RaftPeerTransport(RaftPeerTransport const&) = delete;
+    RaftPeerTransport(RaftPeerTransport&&) = delete;
+    RaftPeerTransport& operator=(RaftPeerTransport const&) = delete;
+    RaftPeerTransport& operator=(RaftPeerTransport&&) = delete;
+
+    /// Stops every sender and waits for it. Safe to call after `Stop()`.
+    ~RaftPeerTransport() override;
+
+    /// Be told when an acceptor that proved its id answers that this node's own key is revoked.
+    ///
+    /// Set before `Start`, from the thread that constructs and starts the transport: the
+    /// observer is read on the reactor's thread without a lock, and `Start` submitting the
+    /// senders is what orders the two.
+    /// @param observer Called on the reactor's thread with the acceptor's id; may be empty.
+    void ObserveOwnKeyRevoked(OwnKeyRevokedObserver observer);
+
+    /// Wake every ATTACHED session -- one a peer dialled in on -- whose key no longer proves, so its
+    /// sender asks the roster without waiting for a frame. Safe from any thread.
+    ///
+    /// Why: each session asks `StillProves` before every frame, and a forgotten LEARNER's has no next
+    /// frame -- the leader sends a member it no longer counts nothing, and a learner never campaigns
+    /// -- so it never dials again to hear the signed `OwnKeyRevoked`. Woken, its sender closes the
+    /// session, and the learner, whose two-way session has a reader, redials into the verdict.
+    ///
+    /// The wake is internal: a zero-length entry both senders read through one step that asks the
+    /// roster first and seals only a message, so it never reaches the wire or spends a sequence number.
+    ///
+    /// **Sessions this node DIALLED are not woken, and must not be "completed" to include them.** A
+    /// forgotten member learns only from the verdict on a dial of ITS OWN, so closing one this node
+    /// dialled teaches the acceptor nothing -- and the sender redials after its backoff, message or
+    /// not, turning one idle socket into a refused handshake every backoff forever. A dialler learns
+    /// at its next write: a forgotten voter's election timer sends one, since nobody heartbeats it.
+    void RecheckProofs();
+
+    /// Begin dialling peers. Idempotent.
+    ///
+    /// Each sender is a **lazy** `core::async::Task` submitted to the reactor rather than a
+    /// `core::async::DetachedTask`, and that is not a style choice: a detached task starts
+    /// eagerly on whichever thread constructed it, which here is whatever calls
+    /// `Start()` -- typically before the reactor's own thread exists. Submitting
+    /// a lazy task means the body's first instruction runs on the reactor thread,
+    /// which is what makes "a peer's socket is touched only from the reactor"
+    /// true, and everything else here follows from that.
+    void Start();
+
+    /// Learn where a peer answers, or that it has moved. Any thread.
+    ///
+    /// **This is what makes a cluster growable at all.** The member set used to be
+    /// fixed at construction, so a node the cluster agreed to admit at runtime was
+    /// one nobody dialled — counted towards a quorum it could never contribute to,
+    /// which is a cluster that stops forming one. Adding a peer here is the other
+    /// half of `RaftNode::ProposeMembership`, and neither is safe without the
+    /// other.
+    ///
+    /// Idempotent, so the natural caller — a reconciler comparing the cluster's
+    /// replicated member set against what this node dials, on every pass of its own
+    /// loop — hands over the same peers repeatedly and grows nothing.
+    ///
+    /// A peer that has **moved** keeps its outbox and its queued messages and is
+    /// simply dialled somewhere else: its live connection is closed, so the next
+    /// write fails, the sender backs off exactly as it does for any dropped
+    /// connection, and it redials the new address. Replacing the peer outright
+    /// would mean destroying a coroutine frame the reactor may still point into,
+    /// which is the one thing that cannot be done from here.
+    ///
+    /// The redial therefore happens at the next *message* rather than at once: a
+    /// sender parked on its outbox is not woken by a socket closing under it. That
+    /// costs a member nothing — the next heartbeat is one interval away — and a
+    /// peer nobody is sending to does not care which address it is not being sent
+    /// to.
+    ///
+    /// A peer is never *forgotten*, and that is deliberate. A member removed from
+    /// the configuration is sent nothing, so its sender parks on an outbox nobody
+    /// pushes to and costs one idle connection until this process restarts. Ending
+    /// it early needs a per-peer cancellation and a sweep for frames that have
+    /// finished, which is machinery bought for a socket.
+    /// @param where The peer and where it answers.
+    /// @return What this did.
+    PeerChange Learn(PeerEndpoint where);
+
+    /// Close every dialled and attached session so senders redial; the transport keeps running.
+    ///
+    /// Called when this node's own address moved: a session it dialled from the old address is a
+    /// path the network no longer routes, and a write into it fails only once some timeout notices.
+    /// Closed instead, so each sender redials -- at its next *message*, for `Learn`'s reason: a sender
+    /// parked on its outbox is not woken by its socket closing. Nothing is forgotten and no outbox is
+    /// closed: every peer stays dialled, with what is queued for it. Any thread.
+    ///
+    /// No-op unless Running with a sender running, for the lifetime reason `Learn` gives: the
+    /// closing is a detached task on the reactor, and one submitted to a loop nobody drives -- or
+    /// after a stop -- is a frame nobody frees.
+    void ResetSessions();
+
+    /// Learn which peers reach this node by dialling in (`PeerLink::DialsIn`). Any thread.
+    ///
+    /// **Replaces** what the last call said, because the caller -- the node's `LearnMembers`,
+    /// reading each member's seat's link out of the state -- hands over the whole set on every
+    /// pass: a learner promoted to voter, or forgotten, stops dialling in. It changes nothing
+    /// about who is dialled or written to; it decides only which `SendDrop` row a message
+    /// with nowhere to go is counted on, so a learner that is offline is never reported as a
+    /// peer nothing can reach, or the reverse.
+    /// @param peers Every peer that dials in.
+    void LearnDialsIn(std::vector<NodeId> peers);
+
+    /// @return How many peers this transport currently dials, self excluded.
+    [[nodiscard]] std::size_t PeerCount() const noexcept;
+
+    /// @return Every peer this transport currently dials, self excluded, sorted by id.
+    [[nodiscard]] std::vector<NodeId> DialTargets() const;
+
+    /// @return Which way the sessions this transport dials flow.
+    [[nodiscard]] RaftWire::SessionDirection Direction() const noexcept
+    {
+        return _options.direction;
+    }
+
+    /// Ask every sender to finish, without waiting. Any thread, including the
+    /// reactor's.
+    ///
+    /// Three things, in this order, because each closes a different suspension
+    /// point: cancel the stop token (which cancels every backoff's one park),
+    /// close every outbox, an attached session's included (which wakes a sender
+    /// parked on `Pop` at once), and close every live socket, an attached
+    /// session's included, **on the reactor's thread**
+    /// (which is the only thing that completes a parked write, since no I/O
+    /// timeout is armed). The last must be on that thread because on epoll and
+    /// kqueue `core::net::ISocket::Close` completes a parked awaitable by resuming its
+    /// coroutine inline -- so closing from elsewhere would run a sender on the
+    /// wrong thread. IOCP routes cancellation back through the port and does
+    /// not, which is exactly what would make that a bug visible only on POSIX.
+    void RequestStop() noexcept;
+
+    /// `RequestStop()`, then wait for every sender to finish. Idempotent, and
+    /// called by the destructor.
+    ///
+    /// **Must not be called from the reactor's thread**: it waits for coroutines
+    /// that can only progress there. Bounded rather than indefinite, because a
+    /// stuck peer must not turn a stop into a hang -- the shape this transport
+    /// used to have.
+    void Stop() noexcept;
+
+    /// @return How many peer senders have not yet finished. For teardown
+    ///         assertions; a production caller reading this is asking a question
+    ///         whose answer is stale before it returns.
+    [[nodiscard]] std::size_t SendersRunning() const noexcept;
+
+    /// @copydoc IRaftTransport::Send
+    ///
+    /// A peer this transport dials first; then a session that peer dialled in on; and with
+    /// neither, a drop counted on its `SendDrop` row. Never a dial of a peer it was not given.
+    void Send(NodeId const& to, RaftMessage message) override;
+
+    /// @copydoc IRaftInboundLinks::Attach
+    ///
+    /// Starts the session's sender on the calling thread, which is the reactor's. An earlier
+    /// session for the same peer is closed: the newer proof supersedes it. Refused once the
+    /// transport is stopping, so no sender starts that `Stop()` has already stopped waiting
+    /// for; the server's reader goes on reading such a session until it ends.
+    void Attach(std::shared_ptr<RaftSessionLink> link) override;
+
+    /// @copydoc IRaftInboundLinks::Detach
+    ///
+    /// Closes that session's outbox, which ends its sender. An entry holding a NEWER link for the
+    /// same peer is left alone: a learner that redialled must survive its old session's teardown.
+    void Detach(RaftSessionLink const& link) noexcept override;
+
+    /// @return How many peers are reached through a session they dialled in on.
+    [[nodiscard]] std::size_t InboundLinks() const noexcept;
+
+    /// @return How many senders for attached sessions have not yet finished. For teardown
+    ///         assertions, as `SendersRunning()` is.
+    [[nodiscard]] std::size_t InboundSendersRunning() const noexcept;
+
+    /// How many messages were dropped because their peer dials in and has no session attached:
+    /// a learner that is offline, or one that has not dialled yet (`SendDrop::NoSession`).
+    ///
+    /// Also counted in `DroppedMessages()`, which is every drop; this is the part of it the
+    /// transport could not have avoided by being faster.
+    /// @return The cumulative count.
+    [[nodiscard]] std::uint64_t DroppedNoSession() const noexcept
+    {
+        return DroppedFor(SendDrop::NoSession);
+    }
+
+    /// How many messages were dropped because this transport cannot place their peer: it
+    /// neither dials it nor was told it dials in (`SendDrop::UnknownPeer`). Also counted in
+    /// `DroppedMessages()`.
+    /// @return The cumulative count.
+    [[nodiscard]] std::uint64_t DroppedUnknownPeer() const noexcept
+    {
+        return DroppedFor(SendDrop::UnknownPeer);
+    }
+
+    /// How many messages have been dropped for want of queue space.
+    ///
+    /// Exposed because a drop is invisible otherwise: Raft recovers from loss,
+    /// so a fleet dropping steadily looks healthy while running slower than it
+    /// should. A non-zero and growing count is an operator's signal that a peer
+    /// is not keeping up.
+    /// @return The cumulative drop count across all peers.
+    [[nodiscard]] std::uint64_t DroppedMessages() const noexcept
+    {
+        return _dropped.load(std::memory_order_relaxed);
+    }
+
+    /// How many peers currently hold an open connection.
+    /// @return The connected peer count.
+    [[nodiscard]] std::size_t ConnectedPeers() const noexcept
+    {
+        return _connected.load(std::memory_order_relaxed);
+    }
+
+  private:
+    /// One peer's outbox and the coroutine that drains it.
+    ///
+    /// Non-movable, because it owns an `core::async::AsyncQueue` (which holds a mutex) and a
+    /// `core::async::Task`. The `unique_ptr` indirection in `_peers` is therefore
+    /// load-bearing rather than incidental -- worth saying, because flattening
+    /// the map to hold `Peer` by value is the obvious tidy-up and it does not
+    /// compile.
+    struct Peer
+    {
+        /// Where to dial.
+        ///
+        /// The `id` is fixed at construction — it is this peer's key in `_peers` —
+        /// while `host` and `port` are guarded by `_peersMutex`, because a peer
+        /// that moves is re-addressed in place rather than replaced. A sender reads
+        /// them through `AddressOf` rather than directly, so the copy it dials with
+        /// is taken under that lock and the `co_await` is not.
+        PeerEndpoint endpoint;
+
+        core::async::AsyncQueue<std::vector<std::byte>> outbox; ///< Framed messages awaiting the wire.
+
+        /// The live connection, or null.
+        ///
+        /// **Reactor-thread only.** Written by this peer's sender and read by the
+        /// shutdown closer, which hops onto the reactor before touching it -- so
+        /// there is nothing here to synchronise. That is the property the lazy
+        /// `core::async::Task` in `Start()` buys.
+        std::unique_ptr<core::net::ISocket> socket;
+
+        /// The sender. Lazy, so it cannot start on whichever thread called
+        /// `Start()`.
+        core::async::Task<void> sender;
+
+        /// When a refused dial to this peer may next be logged. Reactor-thread only,
+        /// like `socket`.
+        ///
+        /// Per peer, because the sender redials after every backoff: one address
+        /// that answers without the key would otherwise write a Warn four times a second
+        /// for as long as it stays wrong, burying every other line. The counter moves
+        /// on every refusal regardless.
+        core::platform::SteadyTimePoint nextRefusalReport {};
+
+        /// @param where Where to dial.
+        /// @param reactor Loop the outbox posts wake-ups to.
+        /// @param options Queue bound and overflow policy.
+        Peer(PeerEndpoint where, core::net::EventLoop& reactor, core::async::AsyncQueueOptions options):
+            endpoint { std::move(where) },
+            outbox { reactor, options }
+        {
+        }
+    };
+
+    /// An attached session's queue of framed messages awaiting the wire.
+    using InboundOutbox = core::async::AsyncQueue<std::vector<std::byte>>;
+
+    /// One session a peer dialled in on, its outbox, and nothing else.
+    ///
+    /// Shared between the map and the session's sender, which is a detached coroutine: an entry
+    /// the map drops on a detach lives on until that sender has seen its outbox close and ended.
+    ///
+    /// ## Who may own the link, and why `Send` may not
+    ///
+    /// The link owns the accepted SOCKET, which must be destroyed on the reactor's thread. Every
+    /// holder of an `InboundPeer` -- the map entry, erased by `Attach` and `Detach`; the sender;
+    /// `CloseSockets`' snapshot of the links -- lets go on that thread, and so does the server's
+    /// connection coroutine, the link's other owner. `Send` runs on ANY thread -- the driver's,
+    /// the reconciler's, a proposal's -- and holds what it looked up across `RaftWire::Encode`,
+    /// which for an InstallSnapshot is not quick. Had it copied the `InboundPeer`, a session
+    /// ending meanwhile would leave `Send`'s copy the LAST, and the socket would be destroyed on
+    /// the proposing thread while the reactor ran. So the outbox has its own share and `Send`
+    /// copies only that: a queue destroyed off the reactor is harmless, since by then the sender,
+    /// the only thing ever parked on it, has finished.
+    struct InboundPeer
+    {
+        std::shared_ptr<RaftSessionLink> link; ///< The session; the only way to reach this peer.
+
+        /// Framed messages awaiting the wire. Its own share, for `Send`: see above.
+        std::shared_ptr<InboundOutbox> outbox;
+
+        /// @param session The session.
+        /// @param reactor Loop the outbox posts wake-ups to when nothing else is current.
+        /// @param options Queue bound and overflow policy.
+        InboundPeer(std::shared_ptr<RaftSessionLink> session,
+                    core::net::EventLoop& reactor,
+                    core::async::AsyncQueueOptions options):
+            link { std::move(session) },
+            outbox { std::make_shared<InboundOutbox>(reactor, options) }
+        {
+        }
+    };
+
+    /// The queue bound and overflow policy every outbox shares, dialled or attached.
+    /// @return The options.
+    [[nodiscard]] core::async::AsyncQueueOptions OutboxOptions() const noexcept;
+
+    /// Count a message dropped for want of any way to reach its peer, on its row.
+    /// @param to The peer it was for.
+    /// @param drop What was seen.
+    void NoteSendDrop(NodeId const& to, SendDrop drop) noexcept;
+
+    /// @param drop A drop.
+    /// @return How many messages were dropped on that row.
+    [[nodiscard]] std::uint64_t DroppedFor(SendDrop drop) const noexcept
+    {
+        return _sendDrops[static_cast<std::size_t>(drop)].load(std::memory_order_relaxed);
+    }
+
+    /// Note that an attached session's sender has finished. Reactor thread only.
+    void NoteInboundSenderFinished() noexcept;
+
+    /// @return Whether any sender, dialled or attached, has not yet finished.
+    [[nodiscard]] bool AnySenderRunning() const noexcept;
+
+    /// Where `peer` currently answers, read under `_peersMutex`.
+    ///
+    /// By value, because the point is to stop holding the lock before the dial
+    /// suspends. A sender that read `peer->endpoint` directly would be racing
+    /// `Learn`, which re-addresses a peer that has moved.
+    /// @param peer Whose address to read.
+    /// @return A copy of it.
+    [[nodiscard]] PeerEndpoint AddressOf(Peer const& peer) const;
+
+    /// Submit `peer`'s sender to the reactor and count it. `_peersMutex` must be
+    /// held.
+    /// @param peer The peer to start dialling.
+    void StartSender(Peer& peer);
+
+    /// Note that a sender has finished. Reactor thread only.
+    void NoteSenderFinished() noexcept;
+
+    /// Report a sender that threw, without throwing. Reactor thread only.
+    /// @param peer Which peer's sender it was.
+    void NoteSenderThrew(NodeId const& peer) noexcept;
+
+    /// Count a refused dial, and log it at most once per `RefusalReportInterval` per peer.
+    /// Reactor thread only.
+    /// @param peer The peer that was dialled.
+    /// @param where Where it was dialled.
+    /// @param refusal Which refusal.
+    /// @param detail What was seen, for the log line.
+    void NoteDialRefusal(Peer& peer, PeerEndpoint const& where, DiallerRefusal refusal, std::string_view detail);
+
+    /// Say that this node could not prove its id to a peer for a reason of its OWN, at most
+    /// once per `RefusalReportInterval` per peer. Reactor thread only.
+    ///
+    /// **Not a `DiallerRefusal`, and it moves no counter**: every row there names something
+    /// about the peer, and this names this node -- an id no handshake can carry, or a
+    /// generator that cannot draw a nonce (#1527). It is every connection to every peer, so
+    /// it is said as an Error.
+    /// @param peer The peer that was dialled.
+    /// @param where Where it was dialled.
+    /// @param reason Why this node could not, completing "cannot prove its id to ...: ".
+    void NoteOwnFault(Peer& peer, PeerEndpoint const& where, std::string_view reason);
+
+    friend struct PeerSenderAccess;
+
+    IRaftPeerIdentity const& _identity;
+    NodeId _self;
+    core::net::EventLoop& _reactor;
+    core::net::IConnector& _connector;
+    IRaftMessageSink& _sink; ///< Where a two-way session's reader delivers.
+    ILogger& _logger;
+    IMetricsSink& _metrics;
+    ISecureRandom& _random;
+    PeerTransportOptions _options;
+
+    /// Told of a signed `OwnKeyRevoked` verdict. Set before `Start`; read on the reactor only.
+    OwnKeyRevokedObserver _onOwnKeyRevoked;
+
+    /// Cancelled by `RequestStop`; observed by every backoff and loop condition.
+    core::async::StopSource _stop;
+
+    /// Guards `_peers`, each peer's `host`/`port`, and `_lifecycle`.
+    ///
+    /// `_peers` used to be built at construction and never touched again, so
+    /// everything read it unlocked — and a cluster could not grow, because the one
+    /// thing this class could not do was learn a member the cluster had just
+    /// agreed to admit. It is now written by `Learn` from whatever thread
+    /// reconciles the member set, and read by `Send` from the driver's, so the
+    /// map needs a lock.
+    ///
+    /// **Shared**, for the reason `Distributed::MembershipOracle` gives for the
+    /// identical shape: the readers are `Send` (once per peer per heartbeat, and
+    /// reached while the driver's own mutex is held) and each sender's dial, while
+    /// the writer is a reconciler pass that on a healthy fleet changes nothing.
+    /// Serializing those readers against each other over a map none of them
+    /// modifies would put the reactor's thread in front of the driver's for no
+    /// reason at all.
+    ///
+    /// Held only across the map operation, and never across a push, a dial, a write
+    /// or a socket close. A close no longer runs the woken sender inside it -- core-cpp
+    /// resumes it in the loop's next drain (0.2.1, guarantee G2) -- but a lock held across
+    /// any of these is still a lock `Send`, and therefore the driver's mutex, waits behind.
+    /// Taking a `Peer*` under the lock and using it outside is safe because a peer
+    /// is never *erased*: the pointer a lookup hands back stays valid for this
+    /// transport's life.
+    mutable std::shared_mutex _peersMutex;
+
+    /// Peers by id, self excluded.
+    std::map<NodeId, std::unique_ptr<Peer>> _peers;
+
+    /// Peers reached through a session they dialled in on, by id; guarded by `_peersMutex`.
+    ///
+    /// Unlike `_peers`, entries ARE erased -- on a detach -- which is why each is shared with its
+    /// sender rather than owning it.
+    std::map<NodeId, std::shared_ptr<InboundPeer>> _inbound;
+
+    /// The peers the last `LearnDialsIn` said dial in; guarded by `_peersMutex`. What tells a
+    /// learner with no session (`SendDrop::NoSession`) from a peer nothing placed.
+    std::set<NodeId> _dialsIn;
+
+    /// Where this transport is in its life, read and written under `_peersMutex`.
+    ///
+    /// One value rather than a `bool` beside the cancellation token, because `Learn`
+    /// has one question with three answers: a peer added before `Start` must be
+    /// submitted by `Start`, one added after must submit itself, and one added after
+    /// a stop must be refused — otherwise it is either never dialled, dialled twice,
+    /// or left as a sender nobody ever finishes. Deciding that against two variables
+    /// guarded by different things is an interlock held together by a comment.
+    enum class Lifecycle : std::uint8_t
+    {
+        Idle = 0, ///< Constructed; `Start` has not run.
+        Running,  ///< Senders are submitted as peers are learned.
+        Stopping, ///< `RequestStop` has run; nothing new is dialled.
+    };
+
+    Lifecycle _lifecycle { Lifecycle::Idle };
+    std::atomic<std::uint64_t> _dropped { 0 };
+    std::array<std::atomic<std::uint64_t>, EnumeratorCount<SendDrop>> _sendDrops {}; ///< One per `SendDrop`.
+    std::atomic<std::size_t> _connected { 0 };
+
+    /// How many attached sessions' senders are still running: counted apart from
+    /// `_sendersRunning`, which answers for the peers this transport dials, and waited for by
+    /// `Stop()` beside it.
+    std::atomic<std::size_t> _inboundSendersRunning { 0 };
+
+    /// How many senders are still running. The cross-thread view of the same
+    /// question `core::async::Task::IsReady` answers, which cannot be asked from another
+    /// thread while the reactor may be resuming it.
+    std::atomic<std::size_t> _sendersRunning { 0 };
+
+    /// The reactor's own thread, recorded the first time a sender runs, so
+    /// `Stop()` can assert it is not being called from there -- a wait for
+    /// coroutines that only that thread can advance. Turns a hang into a failed
+    /// assertion in the debug preset for the price of one comparison.
+    std::atomic<std::thread::id> _reactorThread {};
+};
+
+} // namespace Pace::Consensus

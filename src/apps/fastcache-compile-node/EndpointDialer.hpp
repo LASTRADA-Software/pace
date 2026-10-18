@@ -16,7 +16,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How this node opens a connection to an endpoint it was told to DIAL.
@@ -163,4 +163,4 @@ using LeaderAsk = std::function<Cc::CacheOutcome(core::net::ISocket& socket, std
 /// @return `a:1, b:2`, or an empty string for an empty list.
 [[nodiscard]] std::string JoinEndpoints(std::span<std::string const> endpoints);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

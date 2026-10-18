@@ -3,7 +3,7 @@
 
 #include "NodeConditions.hpp"
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <array>
 #include <cstddef>
@@ -27,7 +27,7 @@
 /// which flag was to reproduce a dispatch by hand. The remedy -- `--allow-compile-arg`, or leaving
 /// those compiles local -- needs exactly the name nothing reported.
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Raises `refused-compile-arguments` naming what this worker refused, and logs each argument once.
@@ -121,4 +121,4 @@ class RefusedArgumentsReport final: public Cc::IJobRefusalObserver
     bool _saidOverflow {};        ///< Whether the past-the-cap line was written. Guarded by `_mutex`.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

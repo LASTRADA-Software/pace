@@ -37,7 +37,7 @@ set(mismatches "")
 function(fastcached_tree name out)
     set(root "${FASTCACHED_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${root}")
-    file(WRITE "${root}/src/FastCache/Core/Unit.cpp" "int Unit() { return 1; }\n")
+    file(WRITE "${root}/src/Pace/Core/Unit.cpp" "int Unit() { return 1; }\n")
     file(WRITE "${root}/vendor/endo/tui/V.cpp" "int V() { return 2; }\n")
     file(MAKE_DIRECTORY "${root}/build")
     set(${out} "${root}" PARENT_SCOPE)
@@ -54,7 +54,7 @@ endfunction()
 
 # A database of the first-party unit compiled by @p command, plus the vendored unit compiled cleanly.
 function(fastcached_unit_database root command)
-    fastcached_entry("${root}" "src/FastCache/Core/Unit.cpp" "${command}" unit)
+    fastcached_entry("${root}" "src/Pace/Core/Unit.cpp" "${command}" unit)
     fastcached_entry("${root}" "vendor/endo/tui/V.cpp" "/usr/bin/c++ -O2 -c V.cpp" vendored)
     file(WRITE "${root}/build/compile_commands.json" "[\n${unit},\n${vendored}\n]\n")
 endfunction()
@@ -113,8 +113,8 @@ set(gxx "/usr/bin/g++ -O2 -DNDEBUG")
 set(clangxx "/usr/bin/clang++ -O2")
 set(cl "C:/VS/bin/cl.exe /nologo /O2")
 set(clangcl "C:/LLVM/bin/clang-cl.exe /O2")
-set(tail "-c ../src/FastCache/Core/Unit.cpp")
-set(plant "-DFASTCACHED_PLANT_UNIT=src/FastCache/Core/Unit.cpp")
+set(tail "-c ../src/Pace/Core/Unit.cpp")
+set(plant "-DFASTCACHED_PLANT_UNIT=src/Pace/Core/Unit.cpp")
 set(judged "none carries a global instruction-set flag")
 
 # name|refuses|expected|extra -D argument|command. One first-party unit compiled by the command, one vendored
@@ -126,9 +126,9 @@ set(UnitCases
     "modmapDeclined|OFF|1 module-map response file(s) declined||${gxx} @CMakeFiles/Core.dir/Unit.cpp.o.modmap ${tail}"
     "clIgnoresGccFlag|OFF|${judged}||${cl} -msha ${tail}"
     "gccIgnoresClSpelling|OFF|${judged}||${gxx} -arch:AVX2 ${tail}"
-    "plantRefusedGnu|OFF|`-msha` planted into src/FastCache/Core/Unit.cpp (1 entr(y/ies)) refused as it must|${plant}|${gxx} ${tail}"
-    "plantRefusedClangCl|OFF|`-msha`, `/arch:AVX2` planted into src/FastCache/Core/Unit.cpp (1 entr(y/ies)) refused as it must|${plant}|${clangcl} ${tail}"
-    "gnuSha|ON|src/FastCache/Core/Unit.cpp: `-msha`, because||${clangxx} -msha ${tail}"
+    "plantRefusedGnu|OFF|`-msha` planted into src/Pace/Core/Unit.cpp (1 entr(y/ies)) refused as it must|${plant}|${gxx} ${tail}"
+    "plantRefusedClangCl|OFF|`-msha`, `/arch:AVX2` planted into src/Pace/Core/Unit.cpp (1 entr(y/ies)) refused as it must|${plant}|${clangcl} ${tail}"
+    "gnuSha|ON|src/Pace/Core/Unit.cpp: `-msha`, because||${clangxx} -msha ${tail}"
     "gnuSse41|ON|`-msse4.1`, because||${clangxx} -msse4.1 ${tail}"
     "gnuMarchNative|ON|`-march=native`, because it selects a CPU||${gxx} -march=native ${tail}"
     "gnuMcpu|ON|`-mcpu=apple-m1`, because it selects a CPU||${clangxx} -mcpu=apple-m1 ${tail}"
@@ -165,7 +165,7 @@ set(UnitCases
     "unknownDriver|ON|compiled by `icpx`, a driver DriverRows does not name||/opt/intel/bin/icpx -O2 ${tail}"
     "responseUnreadable|ON|cannot read response file `@missing.rsp`||${gxx} @missing.rsp ${tail}"
     "plantUnitUnreadable|ON|is in this database, but none of its 1 entr(y/ies) could be read|${plant}|/opt/intel/bin/icpx -O2 ${tail}"
-    "plantUnitAbsent|ON|so the plant was never judged The plant is a flag this check places itself and must refuse, so nothing in the tree needs changing|-DFASTCACHED_PLANT_UNIT=src/FastCache/Core/Elsewhere.cpp|${gxx} ${tail}"
+    "plantUnitAbsent|ON|so the plant was never judged The plant is a flag this check places itself and must refuse, so nothing in the tree needs changing|-DFASTCACHED_PLANT_UNIT=src/Pace/Core/Elsewhere.cpp|${gxx} ${tail}"
 )
 foreach(row IN LISTS UnitCases)
     fastcached_row_fields("${row}" caseName caseRefuses caseExpected caseExtra caseCommand)
@@ -177,7 +177,7 @@ endforeach()
 # ---------------------------------------------------------------- cases that need more than one command
 
 fastcached_tree(vendoredDeclined root)
-fastcached_entry("${root}" "src/FastCache/Core/Unit.cpp" "${gxx} ${tail}" unit)
+fastcached_entry("${root}" "src/Pace/Core/Unit.cpp" "${gxx} ${tail}" unit)
 fastcached_entry("${root}" "vendor/endo/tui/V.cpp" "/usr/bin/c++ -msha -c V.cpp" vendored)
 file(WRITE "${root}/build/compile_commands.json" "[\n${unit},\n${vendored}\n]\n")
 fastcached_judge(vendoredDeclined "${root}" OFF "batched (1 batch(es))" "1 unit(s) outside src/ declined (first: ${root}/vendor/endo/tui/V.cpp)")
@@ -185,14 +185,14 @@ fastcached_judge(vendoredDeclined "${root}" OFF "batched (1 batch(es))" "1 unit(
 # The plant run answers only whether a planted flag is still refused: a real violation on another unit is the
 # unplanted run's red, and must not make the plant run red as well.
 fastcached_tree(plantBesideRealViolation root)
-file(WRITE "${root}/src/FastCache/Core/Other.cpp" "int Other() { return 3; }\n")
-fastcached_entry("${root}" "src/FastCache/Core/Unit.cpp" "${gxx} ${tail}" unit)
-fastcached_entry("${root}" "src/FastCache/Core/Other.cpp" "${gxx} -mavx2 -c ../src/FastCache/Core/Other.cpp" other)
+file(WRITE "${root}/src/Pace/Core/Other.cpp" "int Other() { return 3; }\n")
+fastcached_entry("${root}" "src/Pace/Core/Unit.cpp" "${gxx} ${tail}" unit)
+fastcached_entry("${root}" "src/Pace/Core/Other.cpp" "${gxx} -mavx2 -c ../src/Pace/Core/Other.cpp" other)
 file(WRITE "${root}/build/compile_commands.json" "[\n${unit},\n${other}\n]\n")
 fastcached_judge(plantBesideRealViolation "${root}" OFF "batched (1 batch(es))"
-    "`-msha` planted into src/FastCache/Core/Unit.cpp (1 entr(y/ies)) refused as it must; 2 first-party unit(s) judged; 1 unplanted problem(s) left to the unplanted run"
+    "`-msha` planted into src/Pace/Core/Unit.cpp (1 entr(y/ies)) refused as it must; 2 first-party unit(s) judged; 1 unplanted problem(s) left to the unplanted run"
     "${plant}")
-fastcached_judge(realViolationUnplanted "${root}" ON "batched (1 batch(es))" "src/FastCache/Core/Other.cpp: `-mavx2`, because")
+fastcached_judge(realViolationUnplanted "${root}" ON "batched (1 batch(es))" "src/Pace/Core/Other.cpp: `-mavx2`, because")
 # A refusal of the TREE sends its reader to the tree; the plant runs above send theirs to the check.
 fastcached_judge(realViolationRemedy "${root}" ON "batched (1 batch(es))" "An instruction set is asked for per function")
 
@@ -240,7 +240,7 @@ fastcached_judge(unparseable "${root}" ON unread "cannot be parsed as a compile 
 
 fastcached_tree(noCommand root)
 file(WRITE "${root}/build/compile_commands.json"
-    "[\n{\n  \"directory\": \"${root}/build\",\n  \"arguments\": [\"g++\", \"-msha\"],\n  \"file\": \"${root}/src/FastCache/Core/Unit.cpp\"\n}\n]\n")
+    "[\n{\n  \"directory\": \"${root}/build\",\n  \"arguments\": [\"g++\", \"-msha\"],\n  \"file\": \"${root}/src/Pace/Core/Unit.cpp\"\n}\n]\n")
 fastcached_judge(noCommand "${root}" ON "batched (1 batch(es))" "its entry has no `command`")
 
 fastcached_tree(missingDatabase root)
@@ -254,7 +254,7 @@ fastcached_judge(missingDatabase "${root}" ON unread "does not exist, so no flag
 # @p layout names the fixture; @p flags go on the first-party command.
 function(fastcached_layout root layout flags)
     set(command "${gxx} ${flags} ${tail}")
-    set(unitPath "${root}/src/FastCache/Core/Unit.cpp")
+    set(unitPath "${root}/src/Pace/Core/Unit.cpp")
     set(vendored "{\n  \"directory\": \"${root}/build\",\n  \"command\": \"/usr/bin/c++ -O2 -c V.cpp\",\n  \"file\": \"${root}/vendor/endo/tui/V.cpp\"\n}")
     if(layout STREQUAL "noLineBreak")
         set(text "[{\"directory\": \"${root}/build\", \"command\": \"${command}\", \"file\": \"${unitPath}\"}]")
@@ -282,22 +282,22 @@ foreach(row IN LISTS FallbackLayouts)
     fastcached_row_fields("${row}" layout reason)
     fastcached_tree(${layout}Refused root)
     fastcached_layout("${root}" ${layout} "-msha")
-    fastcached_judge(${layout}Refused "${root}" ON "whole-document (fallback: ${reason}" "src/FastCache/Core/Unit.cpp: `-msha`, because")
+    fastcached_judge(${layout}Refused "${root}" ON "whole-document (fallback: ${reason}" "src/Pace/Core/Unit.cpp: `-msha`, because")
     fastcached_tree(${layout}Plant root)
     fastcached_layout("${root}" ${layout} "")
     fastcached_judge(${layout}Plant "${root}" OFF "whole-document (fallback: ${reason}"
-        "`-msha` planted into src/FastCache/Core/Unit.cpp (1 entr(y/ies)) refused as it must" "${plant}")
+        "`-msha` planted into src/Pace/Core/Unit.cpp (1 entr(y/ies)) refused as it must" "${plant}")
 endforeach()
 
 # CMake's layout across real cuts: three entries of about 41 KB against a BatchBytes of 64 KB make three batches, and
 # the flag sits in the last one, which only a cut that kept every entry whole can reach.
 fastcached_tree(batchedAcrossCuts root)
 string(REPEAT "-DPAD=0123456789 " 2400 pad)
-fastcached_entry("${root}" "src/FastCache/Core/Unit.cpp" "${gxx} ${pad}${tail}" first)
-fastcached_entry("${root}" "src/FastCache/Core/Second.cpp" "${gxx} ${pad}-c ../src/FastCache/Core/Second.cpp" second)
-fastcached_entry("${root}" "src/FastCache/Core/Third.cpp" "${gxx} ${pad}-msha -c ../src/FastCache/Core/Third.cpp" third)
+fastcached_entry("${root}" "src/Pace/Core/Unit.cpp" "${gxx} ${pad}${tail}" first)
+fastcached_entry("${root}" "src/Pace/Core/Second.cpp" "${gxx} ${pad}-c ../src/Pace/Core/Second.cpp" second)
+fastcached_entry("${root}" "src/Pace/Core/Third.cpp" "${gxx} ${pad}-msha -c ../src/Pace/Core/Third.cpp" third)
 file(WRITE "${root}/build/compile_commands.json" "[\n${first},\n${second},\n${third}\n]\n")
-fastcached_judge(batchedAcrossCuts "${root}" ON "batched (3 batch(es))" "src/FastCache/Core/Third.cpp: `-msha`, because")
+fastcached_judge(batchedAcrossCuts "${root}" ON "batched (3 batch(es))" "src/Pace/Core/Third.cpp: `-msha`, because")
 
 if(NOT mismatches STREQUAL "")
     message(FATAL_ERROR "instruction-set-flags-selftest: ${ran} case(s) ran, and these did not judge as they must:${mismatches}")

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Protocol/ProvenIdentity.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Who is at the other end of a connection, as an admission policy sees it.
@@ -15,6 +15,6 @@ namespace FastCache::Node
 /// this one is now admitted by what its connection PROVED or presented -- a session proof or a
 /// verified ticket -- so the facts travel together, as `ConnectionFacts`, and a policy cannot read
 /// one and forget another. An alias of the one struct the live-stream path holds too.
-using PeerIdentity = FastCache::ConnectionFacts;
+using PeerIdentity = Pace::ConnectionFacts;
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

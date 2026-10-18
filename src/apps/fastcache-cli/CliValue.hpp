@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file CliValue.hpp
@@ -206,4 +206,4 @@ struct Value
 /// @return The field, or nullptr. Non-owning; valid while @p value is unmodified.
 [[nodiscard]] Field const* FindField(Value const& value, std::string_view name) noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -7,7 +7,7 @@
 /// @file LiveNodeConfig.hpp
 /// Where a component that judges this node's configuration reads the one in force NOW.
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The configuration this node runs by now, read at the moment it is needed.
@@ -61,4 +61,4 @@ class LiveNodeConfig final: public INodeConfigSource
     NodeReloader const* _reloader; ///< The live snapshot's owner, or null.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -3,8 +3,8 @@
 #
 # The launcher only needs the path-canonicalization + compile-value codec, the
 # shared usage renderer, and the two leaf platform probes -- none of which have
-# third-party dependencies. We compile those few FastCache sources directly into
-# the tool rather than linking the whole FastCache static library, so the
+# third-party dependencies. We compile those few Pace sources directly into
+# the tool rather than linking the whole Pace static library, so the
 # launcher pulls in NO vcpkg deps (zstd, lz4, yaml-cpp). That keeps it a small,
 # self-contained binary and lets it link the CRT statically without a
 # runtime-library mismatch against vcpkg objects.
@@ -36,22 +36,22 @@
 # The remaining CRC32C users are all daemon-side page and record checksums.
 
 set(_fc_cc_core
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Cli/Duration.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Cli/UsageDoc.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/CompileCache/PathCanon.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/CompileCache/CompileValue.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Core/Base64.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Core/Compression.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Core/CpuFeatures.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Core/Ed25519.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Core/SecureBytes.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Core/Sha256.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Metrics/IMetricsSink.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Platform/Environment.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Platform/NarrowText.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Platform/Registry.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Platform/ReplacingRename.cpp"
-    "${CMAKE_SOURCE_DIR}/src/FastCache/Platform/Terminal.cpp")
+    "${CMAKE_SOURCE_DIR}/src/Pace/Cli/Duration.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Cli/UsageDoc.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/CompileCache/PathCanon.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/CompileCache/CompileValue.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Core/Base64.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Core/Compression.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Core/CpuFeatures.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Core/Ed25519.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Core/SecureBytes.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Core/Sha256.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Platform/Environment.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Platform/NarrowText.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Platform/Registry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Platform/ReplacingRename.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Platform/Terminal.cpp")
 
 # The launcher's TCP client -- the blocking pair it dials with, and the event loop and
 # connector it dials through without blocking -- is core-cpp's `core::net` (#1596), linked
@@ -60,7 +60,7 @@ set(_fc_cc_core
 # (compile-cache-testclient) was IPv4-literal-only, unbounded and unprotected against SIGPIPE.
 #
 # It costs the launcher nothing it was avoiding. The rule this file exists to protect is that
-# fastcache-cc does not LINK FastCache -- so it stays free of yaml-cpp and OpenSSL -- and
+# fastcache-cc does not LINK Pace -- so it stays free of yaml-cpp and OpenSSL -- and
 # `core::net` links only core-cpp's own base, platform and async libraries and the platform's
 # threads and sockets. core-cpp's TLS is a separate target, `core::net_tls`, which this does not
 # link.
@@ -78,7 +78,7 @@ set(_fc_cc_core
 
 # Core/Sha256.cpp and Core/Base64.cpp are what a signed lease token was made of when
 # it was an HMAC under the retired pre-shared key, and Base64 still renders it as text; Sha256
-# keys the spent-grant set (src/FastCache/Distributed/LeaseToken.hpp). The worker's
+# keys the spent-grant set (src/Pace/Distributed/LeaseToken.hpp). The worker's
 # protocol is WorkerProtocol.cpp, which lives in THIS directory and is compiled into
 # both binaries, so the verification half is linked into a launcher build too.
 #
@@ -220,7 +220,7 @@ endif()
 # for, and it needs the platform's thread support linked to get it.
 #
 # NOT a departure from the rule this file exists to protect. That rule is about not
-# linking FastCache and therefore not dragging in yaml-cpp, OpenSSL or the reactor's
+# linking Pace and therefore not dragging in yaml-cpp, OpenSSL or the reactor's
 # transitive world; the C++ standard library's own threading support is not that
 # kind of dependency, and a static launcher still links no third-party code. It is
 # named explicitly rather than left to glibc folding pthread into libc since 2.34 --
@@ -241,8 +241,8 @@ endif()
 # the launcher can dial without blocking -- see `core::net::IConnector`.
 #
 # WIN32_LEAN_AND_MEAN / NOMINMAX / _WIN32_WINNT are NOT optional and NOT
-# inherited: they are PUBLIC on the FastCache target, and this binary
-# deliberately does not link FastCache. Without them the Windows build fails
+# inherited: they are PUBLIC on the Pace target, and this binary
+# deliberately does not link Pace. Without them the Windows build fails
 # outright on the first translation unit that reaches <windows.h> before
 # <winsock2.h>, which pulls in winsock.h first -- the
 # classic redefinition. Platform/Terminal.cpp already includes <windows.h> here
@@ -259,7 +259,7 @@ if(FASTCACHED_STATIC_LAUNCHER AND MSVC)
     # carry one.
     #
     # DEBUG IS THE EXCEPTION, and it is not a preference. zstd and lz4 are CPM-built
-    # here and take CMake's default runtime (the DLL one), because the FastCache
+    # here and take CMake's default runtime (the DLL one), because the Pace
     # library links the very same static libraries and the daemon's vcpkg
     # dependencies are dynamic-CRT builds -- so those two targets cannot both be
     # satisfied by one setting. In Release nothing breaks: the CRT entry points zstd
@@ -285,7 +285,7 @@ install(TARGETS fastcache-cc
 )
 
 # Unit tests for the reusable launcher pieces (parsing, keying, statistics, and
-# the platform seams). Like the launcher itself these avoid the FastCache
+# the platform seams). Like the launcher itself these avoid the Pace
 # library, so the test binary stays dependency-light — Catch2 is the only extra.
 if(FASTCACHED_BUILD_TESTS)
     add_executable(fastcache-cc-tests
@@ -339,7 +339,7 @@ if(FASTCACHED_BUILD_TESTS)
     target_include_directories(fastcache-cc-tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
     if(WIN32)
         # Same reason as the launcher's: this target compiles the same
-        # ${_fc_cc_core} rows and links FastCache no more than the launcher does.
+        # ${_fc_cc_core} rows and links Pace no more than the launcher does.
         target_compile_definitions(fastcache-cc-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     endif()
     target_link_libraries(fastcache-cc-tests PRIVATE Catch2::Catch2 Threads::Threads fastcache-monocypher core::async core::net)

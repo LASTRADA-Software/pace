@@ -3,8 +3,8 @@
 
 #include "CacheProtocol.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/ProcessExit.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Where a one-shot network verb's answer came from -- a cluster command, an enrollment command,
@@ -111,4 +111,4 @@ static_assert(RowsInEnumeratorOrder(AnswerSourceRows, [](AnswerSourceRow const& 
     return Unanswered(SourceOf(outcome), std::move(reason));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

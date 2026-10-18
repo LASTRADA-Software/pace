@@ -5,9 +5,9 @@
 #include "LocalCache.hpp"
 #include "NodeConfig.hpp"
 
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <cstddef>
 #include <expected>
@@ -21,7 +21,7 @@
 #include <core/async/Task.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The fleet's shared tier: one store, read through to nothing, answering the fleet cache verbs.
@@ -136,4 +136,4 @@ class DiskSharedTierOpener final: public ISharedTierOpener
     ILogger& _logger;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

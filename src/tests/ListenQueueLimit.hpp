@@ -18,7 +18,7 @@
     #include <netinet/tcp.h>
 #endif
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The accept-queue limits the KERNEL recorded for every listening TCP socket this process holds
@@ -94,4 +94,4 @@ namespace FastCache::Testing
     return std::nullopt;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

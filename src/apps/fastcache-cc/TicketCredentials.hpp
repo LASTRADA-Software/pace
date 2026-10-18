@@ -5,9 +5,9 @@
 #include "Dispatch.hpp"
 #include "Stats.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/TicketChoice.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// @file TicketCredentials.hpp
@@ -262,4 +262,4 @@ class CredentialedExchange final: public IEndpointExchange
 /// @return The state to record and its fixed reason.
 [[nodiscard]] DispatchRecording RecordedReason(DispatchResult const& result, RefusalRecord const& refusals) noexcept;
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

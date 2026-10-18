@@ -8,7 +8,7 @@
 #include <format>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::expected<std::unique_ptr<NodeRoster>, NodeRefusal> NodeRoster::Build(NodeConfig const& cfg,
@@ -108,4 +108,4 @@ std::optional<Cluster::Roster> NodeRoster::HeldRoster() const
     return _state->Held();
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

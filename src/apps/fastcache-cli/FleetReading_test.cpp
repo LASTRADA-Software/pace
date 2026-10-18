@@ -3,7 +3,7 @@
 #include "FleetReading.hpp"
 #include "SocketExchange.hpp"
 
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,9 +15,9 @@
 #include <string_view>
 #include <utility>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Distributed;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Distributed;
 
 namespace
 {

@@ -5,7 +5,7 @@
 
 #include <optional>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The fleet's shared tier: `SHARED-FETCH` and `SHARED-STORE`, counted on the `NodeSharedCache*`
@@ -32,4 +32,4 @@ inline constexpr CacheTierProfile SharedTierProfile {
 
 static_assert(StatesEveryMember(SharedTierProfile), "the shared tier's profile states every column");
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -12,7 +12,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -204,4 +204,4 @@ std::vector<std::string> ChartTextRows(std::span<std::optional<double> const> sh
     return lines;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

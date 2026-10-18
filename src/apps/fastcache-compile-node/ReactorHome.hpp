@@ -5,7 +5,7 @@
 
 #include <core/net/EventLoop.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The reactor a component's sockets belong to, and where they go when the component does.
@@ -39,4 +39,4 @@ class IReactorHome
     virtual void Retire(std::shared_ptr<void> owned) = 0;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

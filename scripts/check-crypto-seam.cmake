@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # No first-party file includes a Monocypher header except the Core units that ARE the seam:
-# `src/FastCache/Core/Ed25519.cpp` and `src/FastCache/Core/X25519.cpp` (#178).
+# `src/Pace/Core/Ed25519.cpp` and `src/Pace/Core/X25519.cpp` (#178).
 #
 # ## Why a seam, and why a check rather than a build rule
 #
@@ -15,8 +15,8 @@
 # place to get each of them wrong, and nothing about a green build says it was.
 #
 # The build cannot say it: the include directories are PUBLIC on `fastcache-monocypher`, as they
-# must be for the two units to reach them, and FastCache links the library PRIVATE -- which keeps
-# the headers from FastCache's CONSUMERS but not from any file inside FastCache itself. So it is a
+# must be for the two units to reach them, and Pace links the library PRIVATE -- which keeps
+# the headers from Pace's CONSUMERS but not from any file inside Pace itself. So it is a
 # scan, in the default ctest set, like `ranges-seam`.
 #
 # ## What is scanned, and what counts as an include
@@ -64,8 +64,8 @@ endif()
 # ---------------------------------------------------------------------------
 # The files permitted past the seam, each with the reason it is one of them. `<path>|<reason>`.
 set(FastCachedCryptoSeamUnits
-    "src/FastCache/Core/Ed25519.cpp|RFC 8032 Ed25519 key pairs, signing and verification, over monocypher-ed25519.h"
-    "src/FastCache/Core/X25519.cpp|RFC 7748 X25519 public keys and shared secrets, refusing the all-zero result"
+    "src/Pace/Core/Ed25519.cpp|RFC 8032 Ed25519 key pairs, signing and verification, over monocypher-ed25519.h"
+    "src/Pace/Core/X25519.cpp|RFC 7748 X25519 public keys and shared secrets, refusing the all-zero result"
 )
 
 set(permittedPaths "")
@@ -147,7 +147,7 @@ if(violations OR stale)
         message("  STALE permitted row -- ${entry}")
     endforeach()
     message("")
-    message("Monocypher is reached through src/FastCache/Core/Ed25519.hpp, X25519.hpp and Hkdf.hpp,")
+    message("Monocypher is reached through src/Pace/Core/Ed25519.hpp, X25519.hpp and Hkdf.hpp,")
     message("and only Ed25519.cpp and X25519.cpp may include its headers. For a violation: call the")
     message("Core primitive instead, and if it does not offer what you need, ADD it there -- beside")
     message("the RFC vectors that check it -- rather than reaching past it. Adding a permitted row")

@@ -2,7 +2,7 @@
 #include "Dispatch.hpp"
 #include "LauncherCli.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
+#include <Pace/Cli/Duration.hpp>
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -564,4 +564,4 @@ std::string HelpText(UsageColor color)
     return RenderUsage({ .sections = sections }, color, substitutions);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

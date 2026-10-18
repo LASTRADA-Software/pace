@@ -11,7 +11,7 @@
 
 #include <CompileJob.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -201,4 +201,4 @@ void RefusedArgumentsReport::RaiseLocked()
     _conditions.Raise(NodeCondition::RefusedCompileArguments, ListDetail(lead, arguments));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

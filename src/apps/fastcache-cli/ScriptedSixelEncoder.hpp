@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
 /// @file ScriptedSixelEncoder.hpp
@@ -68,4 +68,4 @@ class ScriptedSixelEncoder final: public ISixelEncoder
     std::vector<SixelRequest> _requests {};
 };
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

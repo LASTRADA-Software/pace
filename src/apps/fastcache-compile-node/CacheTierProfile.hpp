@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The cache verb pair a profile row names, or UNSTATED.
@@ -169,4 +169,4 @@ enum class UpstreamCounting : std::uint8_t
     return counted == 0 ? UpstreamCounting::None : UpstreamCounting::Partial;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

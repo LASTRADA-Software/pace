@@ -2,10 +2,10 @@
 #include "NodeProofClient.hpp"
 #include "NodeProofResponder.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Distributed/NodeProof.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Distributed/NodeProof.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -339,4 +339,4 @@ NodeProofVerdict NodeProofResponder::Verify(NodeHandshake const& handshake, std:
     return sealed(Wire::EncodeReply(Wire::Status::Ok, {}), std::move(identity));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

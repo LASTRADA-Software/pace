@@ -3,8 +3,8 @@
 #include "PrivateTierProfile.hpp"
 #include "SharedTierProfile.hpp"
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -12,7 +12,7 @@
 #include <format>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -440,4 +440,4 @@ core::async::Task<std::vector<std::byte>> CacheProxy::Answer(std::span<std::byte
                                        "on their own ports");
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

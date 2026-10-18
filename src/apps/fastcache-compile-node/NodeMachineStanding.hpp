@@ -4,13 +4,13 @@
 #include "EnrollmentWindow.hpp"
 #include "NodeRoster.hpp"
 
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <optional>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file NodeMachineStanding.hpp
@@ -69,4 +69,4 @@ class NodeMachineStanding final: public IMachineStandingSource
     EnrollmentWindow const* _window;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -2,9 +2,9 @@
 #include "ArgumentDenials.hpp"
 #include "CmdLine.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -15,7 +15,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 namespace
 {
@@ -2045,4 +2045,4 @@ std::string DescribeFailedPreprocess(int exitCode, std::string_view diagnostics)
     return std::format("exit {}: {}", exitCode, PrintableArgument(chosen));
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

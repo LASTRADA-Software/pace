@@ -3,16 +3,16 @@
 #include "SocketExchange.hpp"
 #include "StatsSource.hpp"
 
-#include <FastCache/Core/WireFields.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
 
 #include <format>
 #include <span>
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -230,4 +230,4 @@ void NodeSubscription::Leave() noexcept
         _exchange->ShutdownWrite();
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

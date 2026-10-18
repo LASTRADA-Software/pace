@@ -2,9 +2,9 @@
 #include "NodeFormation.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,9 +21,9 @@
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {

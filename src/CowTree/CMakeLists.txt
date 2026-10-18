@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # CowTree — standalone copy-on-write B+tree library.
 #
-# Sibling of src/FastCache/ with no dependency on FastCache. Other
+# Sibling of src/Pace/ with no dependency on Pace. Other
 # projects can pick this up by add_subdirectory()'ing it and linking
 # the `CowTree` target.
 

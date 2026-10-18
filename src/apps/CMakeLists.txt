@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Executables. Every shipped or shippable binary lives under src/apps/<name>/;
-# the libraries they link (FastCache, CowTree) are siblings under src/.
+# the libraries they link (Pace, CowTree) are siblings under src/.
 #
 # Each app is one row in the table below: a directory, the option that gates
 # it, that option's default, the install component it ships under on Windows,

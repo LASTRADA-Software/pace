@@ -38,7 +38,7 @@
 /// from `BuildFactTable` on purpose; `_DEBUG` covers the MSVC debug runtime, which is what a
 /// CMake `Debug` configuration actually switches, and no row claims to answer for libc++.
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <array>
 #include <cstddef>
@@ -48,7 +48,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Bench
+namespace Pace::Bench
 {
 
 /// What kind of thing a compile-time fact says about a build.
@@ -382,4 +382,4 @@ static_assert(RowsInEnumeratorOrder(MarkerTable, &MarkerRow::standing),
 /// @return The configuration, read from the compiler's own predefined macros.
 [[nodiscard]] BuildConfiguration CurrentBuildConfiguration();
 
-} // namespace FastCache::Bench
+} // namespace Pace::Bench

@@ -7,18 +7,18 @@
 #include "NodeRoster.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Distributed/FleetHistory.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
-#include <FastCache/Server/AdminHttpServer.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
+#include <Pace/Server/AdminHttpServer.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <algorithm>
 #include <array>
@@ -51,7 +51,7 @@ class ITlsContext;
 } // namespace core::net
 #endif
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class CacheTier;
@@ -153,7 +153,7 @@ struct NodeScrapeSources
 ///
 /// @param path The file to read.
 /// @return The secret, or why it could not be used.
-[[nodiscard]] std::expected<FastCache::SecureString, NodeRefusal> ReadSecretFile(std::filesystem::path const& path);
+[[nodiscard]] std::expected<Pace::SecureString, NodeRefusal> ReadSecretFile(std::filesystem::path const& path);
 
 /// Read the dashboard credential out of the file an operator named.
 ///
@@ -710,4 +710,4 @@ struct AdminSurface
 ///         used. An unreadable file is refused, never read as "no credential".
 [[nodiscard]] std::expected<AdminCredential, NodeRefusal> LoadDashboardCredentialOrExplain(NodeConfig const& cfg);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

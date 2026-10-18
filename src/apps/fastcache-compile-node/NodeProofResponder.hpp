@@ -4,11 +4,11 @@
 #include "ConsensusStanding.hpp"
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file NodeProofResponder.hpp
@@ -260,4 +260,4 @@ class NodeProofResponder final: public IFrameResponder, public INodeProver
     ILogger& _logger;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "FleetDocument.hpp"
 
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,9 +10,9 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Distributed;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Distributed;
 
 namespace
 {

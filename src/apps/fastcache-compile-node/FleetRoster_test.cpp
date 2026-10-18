@@ -7,9 +7,9 @@
 //
 // The case names the rule whose removal turns it red, and has a GREEN control beside it under the
 // same break -- the harness rule: a case that cannot fail for the reason it exists is not evidence.
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,10 +20,10 @@
 #include <tests/FleetHarness.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 using namespace std::chrono_literals;
-using FastCache::Testing::FleetHarness;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::FleetHarness;
+using Pace::Testing::Unwrap;
 
 namespace
 {

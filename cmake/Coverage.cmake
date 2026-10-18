@@ -17,7 +17,7 @@
 #   cmake --build --preset clang-coverage --target coverage
 #
 # Source-based coverage rather than gcov, and the reason is the shape of this
-# suite rather than a preference. `catch_discover_tests(FastCacheTest)` gives
+# suite rather than a preference. `catch_discover_tests(PaceTest)` gives
 # every one of ~2000 TEST_CASEs its own process, the script-driven tests in
 # src/tests spawn daemons and launchers besides, and CI runs the lot at
 # CTEST_PARALLEL_LEVEL=4. gcov merges its counters into a shared .gcda per object

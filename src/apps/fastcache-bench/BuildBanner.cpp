@@ -12,7 +12,7 @@
 
 #include "BuildBanner.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
 #include <array>
@@ -24,7 +24,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Bench
+namespace Pace::Bench
 {
 
 namespace
@@ -401,4 +401,4 @@ BuildConfiguration CurrentBuildConfiguration()
                                 .optimiserEvidence = EvidenceHere };
 }
 
-} // namespace FastCache::Bench
+} // namespace Pace::Bench

@@ -4,7 +4,7 @@ fastcached implements a subset of the Redis command set over both RESP2
 and RESP3. A connection starts in RESP2; `HELLO 3` upgrades it.
 
 The authoritative list is `CommandTable` in
-`src/FastCache/Protocol/RedisResp.cpp` (**66 CommandTable rows**) plus `AUTH`,
+`src/Pace/Protocol/RedisResp.cpp` (**66 CommandTable rows**) plus `AUTH`,
 `QUIT` and `RESET`, which `Dispatch` handles ahead of the table because they
 carry side-effects beyond a plain reply. The tables below are checked against that
 table by `ctest -R resp-command-docs`, so a verb added to one and not the

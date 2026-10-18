@@ -8,7 +8,7 @@
 
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -89,4 +89,4 @@ void NodeIoLoop::NoteLoopFinished() noexcept
         _reactor.stop();
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -5,12 +5,12 @@
 #include "EnrollmentAbsence.hpp"
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/SchedulerProtocol.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -26,7 +26,7 @@
 #include <WorkerProtocol.hpp>
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace Detail
@@ -1660,4 +1660,4 @@ class MergedResponder final: public IFrameResponder
     SurfaceComponents _components;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

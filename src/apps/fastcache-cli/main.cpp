@@ -19,10 +19,10 @@
 #include "StatsGatherer.hpp"
 #include "TerminalCellWidth.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Platform/Environment.hpp>
-#include <FastCache/Platform/StopSignal.hpp>
-#include <FastCache/Platform/Terminal.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/StopSignal.hpp>
+#include <Pace/Platform/Terminal.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -48,8 +48,8 @@
 namespace
 {
 
-using namespace FastCache;
-using namespace FastCache::Cli;
+using namespace Pace;
+using namespace Pace::Cli;
 
 /// This binary's own name, for the one-line diagnostics.
 constexpr std::string_view ProgramName = "fastcache-cli";
@@ -74,7 +74,7 @@ constexpr std::string_view ProgramName = "fastcache-cli";
 /// this process's environment.
 /// @param path The file.
 /// @return The secret, or the reason it could not be read.
-[[nodiscard]] std::expected<FastCache::SecureString, std::string> ReadSecretFile(std::string const& path)
+[[nodiscard]] std::expected<Pace::SecureString, std::string> ReadSecretFile(std::string const& path)
 {
     std::ifstream file { path, std::ios::binary };
     if (!file.is_open())
@@ -92,8 +92,8 @@ constexpr std::string_view ProgramName = "fastcache-cli";
     // refusal smuggled in by a security change. The chunk is itself secure storage, so no
     // stack buffer keeps a copy either.
     constexpr std::size_t ReadChunkBytes = 4096;
-    FastCache::SecureCharBuffer secret;
-    FastCache::SecureCharBuffer chunk(ReadChunkBytes);
+    Pace::SecureCharBuffer secret;
+    Pace::SecureCharBuffer chunk(ReadChunkBytes);
     while (file.read(chunk.data(), static_cast<std::streamsize>(chunk.size())) || file.gcount() > 0)
     {
         secret.insert(secret.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(file.gcount()));
@@ -114,7 +114,7 @@ constexpr std::string_view ProgramName = "fastcache-cli";
         secret.pop_back();
     if (secret.empty())
         return std::unexpected(std::format("{} is empty", path));
-    return FastCache::SecureString { std::string_view { secret.data(), secret.size() } };
+    return Pace::SecureString { std::string_view { secret.data(), secret.size() } };
 }
 
 /// Write bytes to stdout with no translation.
@@ -618,7 +618,7 @@ int main(int argc, char* argv[])
     //    is three hundred lines below -- and it has already been misread that way once,
     //    which would have made a heap-residue follow-up read as a disclosure.
     //  - `dashboardToken` (`Protocol/CompileCacheWire.hpp`) genuinely cannot: that header
-    //    is header-only because the launcher does not link `FastCache`, and
+    //    is header-only because the launcher does not link `Pace`, and
     //    `SecureBytes.hpp` needs `SecureBytes.cpp` for `SecureZero`, so naming it there
     //    would put a link requirement on every consumer of the wire grammar. An explicit
     //    `std::string` there says exactly where the covered part stops.

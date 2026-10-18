@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/HostLoad.hpp>
 
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A machine a test can describe, standing in for the one it runs on.
@@ -75,4 +75,4 @@ class FixedHostCounters final: public IHostCounterSource
     }
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

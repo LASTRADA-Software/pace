@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/AnnouncedEndpoints.hpp>
-#include <FastCache/Cluster/BeaconDestinations.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/DiscoveryService.hpp>
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/MembershipPolicy.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/PeerDirectory.hpp>
-#include <FastCache/Cluster/RosterKeys.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/AnnouncedEndpoints.hpp>
+#include <Pace/Cluster/BeaconDestinations.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/DiscoveryService.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/MembershipPolicy.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/PeerDirectory.hpp>
+#include <Pace/Cluster/RosterKeys.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -96,7 +96,7 @@
 /// rather than this one's. A start is judged as `main` judges one, and a reform goes through
 /// production's own `AdoptForReform` -- adopted again, judged by the startup rules, published -- paced
 /// by `NextReformPace`, then a fresh body.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A deterministic random source that never repeats a draw: a counter run through SplitMix64,
@@ -1306,4 +1306,4 @@ class FormationHarness
     std::map<std::string, std::unique_ptr<Machine>> _machines;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

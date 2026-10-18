@@ -21,15 +21,15 @@
 #include "SharedCacheUpstream.hpp"
 #include "WorkerTierTestFixture.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -64,9 +64,9 @@
 #include <tests/SkewedMetricsSink.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -75,9 +75,9 @@ namespace Wire = CompileCacheWire;
 /// Where a tier under test says its `0xFC` port answers: what its founding record states. One object
 /// for the whole binary, so it outlives every tier a case starts.
 /// @return The source.
-[[nodiscard]] FastCache::Cc::IAdvertisedEndpointSource const& TestAdvertised()
+[[nodiscard]] Pace::Cc::IAdvertisedEndpointSource const& TestAdvertised()
 {
-    static FastCache::Node::AnnouncedEndpoint const advertised { "127.0.0.1:6674" };
+    static Pace::Node::AnnouncedEndpoint const advertised { "127.0.0.1:6674" };
     return advertised;
 }
 
@@ -85,9 +85,9 @@ namespace Wire = CompileCacheWire;
 /// tier started with stands and no pass reads a move. One object for the whole binary, so it
 /// outlives every tier a case starts.
 /// @return The source.
-[[nodiscard]] FastCache::Cc::IAdvertisedEndpointSource const& TestRaftAdvertised()
+[[nodiscard]] Pace::Cc::IAdvertisedEndpointSource const& TestRaftAdvertised()
 {
-    static FastCache::Node::AnnouncedEndpoint const advertised { std::string {} };
+    static Pace::Node::AnnouncedEndpoint const advertised { std::string {} };
     return advertised;
 }
 
@@ -308,7 +308,7 @@ TEST_CASE("The process scope asks the scrape's own question about a skewed build
     SECTION("a sink with no slot for a row raises it, naming the series")
     {
         auto const missing = IMetricsSink::Counter::ConnectionsAdmissionRejected;
-        FastCache::Testing::SkewedMetricsSink metrics { missing };
+        Pace::Testing::SkewedMetricsSink metrics { missing };
         NodeConditions conditions;
         EvaluateProcessConditions(conditions, metrics);
         CHECK(conditions.StateOf(NodeCondition::CounterTableSkew) == Wire::ConditionState::Raised);
@@ -344,7 +344,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     // configuration it runs and the third over a state directory, through this machine's files.
     EvaluateProcessConditions(conditions, metrics);
     EvaluateHostNameCondition(conditions, Testing::FirstStart(NodeConfig {}));
-    FastCache::Testing::ScratchDirectory const replaceState { "conditions-replace-route" };
+    Pace::Testing::ScratchDirectory const replaceState { "conditions-replace-route" };
     Consensus::SystemDurableFiles replaceFiles;
     Platform::SystemReplacingRename const replaceRename;
     REQUIRE(ReportReplaceRoute(replaceState.Path(), replaceFiles, replaceRename, logger, metrics, conditions).has_value());
@@ -363,8 +363,8 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     core::platform::ManualClock proverRosterClock;
     auto const proverRoster = NodeRoster::Build(proving, proverRosterClock, nullptr);
     REQUIRE(proverRoster.has_value());
-    auto const proverKey = FastCache::Testing::TestKeyPair("n1");
-    FastCache::Testing::ScriptedSecureRandom proofRandom;
+    auto const proverKey = Pace::Testing::TestKeyPair("n1");
+    Pace::Testing::ScriptedSecureRandom proofRandom;
     NodeProofClient const prover { "n1", proverKey, *Unwrap(proverRoster), &membership, &conditions, proofRandom };
 
     // The scheduler scope: a scheduler, signing with its identity key (#178), started the way `main`
@@ -379,7 +379,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
                                           wallClock,
                                           metrics,
                                           logger,
-                                          FastCache::Testing::TestKeyPair("n1"),
+                                          Pace::Testing::TestKeyPair("n1"),
                                           conditions,
                                           SchedulerConditionInterval);
     REQUIRE(scheduler.has_value());
@@ -396,7 +396,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     // The consensus scope's own tier (#1552): one voter over a state directory of its own,
     // started the way `main` starts it and with the registry, because it answers
     // `unreadable-leader-snapshot` as its driver starts.
-    FastCache::Testing::ScratchDirectory consensusState { "conditions-consensus" };
+    Pace::Testing::ScratchDirectory consensusState { "conditions-consensus" };
     // Held and handed to the tier, so the peer port is not free between choosing and serving it.
     auto raftHeld = BlockingListener::Bind("127.0.0.1", 0);
     REQUIRE(raftHeld);
@@ -407,7 +407,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     clusteredNode.raftListen = std::format("127.0.0.1:{}", raftPort);
     clusteredNode.raftSelf = "127.0.0.1";
     clusteredNode.clusterDir = consensusState / "state";
-    clusteredNode.identityPublicKey = FastCache::Testing::TestKeyPair("n1").PublicKey(); // what a formation states
+    clusteredNode.identityPublicKey = Pace::Testing::TestKeyPair("n1").PublicKey(); // what a formation states
     // Its lease roster, built as `main` builds it: it answers `consensus-leader-silent`, from the
     // start and at every consensus pass.
     core::platform::SteadyClock const rosterClock;
@@ -417,7 +417,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
         clusteredNode,
         TestAdvertised(),
         TestRaftAdvertised(),
-        FastCache::Testing::TestKeyPair("n1"),
+        Pace::Testing::TestKeyPair("n1"),
         [](Distributed::SchedulerRole, std::string_view, std::uint64_t) {},
         [&roster](Cluster::ClusterState const& state) { (*roster)->Applied(state); },
         [&roster](Distributed::LeaderReading const& reading, std::chrono::milliseconds) {
@@ -446,7 +446,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
 
     // And its reading side, the upstream a node the setting does not name reads through: it answers
     // `shared-cache-unproven` from its construction, since nothing has failed to reach one yet.
-    auto const readerKey = FastCache::Testing::TestKeyPair("n1");
+    auto const readerKey = Pace::Testing::TestKeyPair("n1");
     SystemSecureRandom readerRandom;
     NamedMachineTrust const readerTrust { "n1", readerKey.PublicKey() };
     NodeProofClient const reader { "n1", readerKey, readerTrust, nullptr, nullptr, readerRandom };
@@ -461,16 +461,16 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
 
     // The formation, built the way `main` builds it over the consensus node: it answers
     // `formation-move-refused` as its controller starts.
-    FastCache::Testing::InMemoryFormationStore formationStore;
+    Pace::Testing::InMemoryFormationStore formationStore;
     Cluster::FleetEndpointsFile formationEndpoints { consensusState.Path() };
     ReformRequest reform;
     core::platform::ManualWallClock formationWall;
-    FastCache::Testing::ScriptedSecureRandom formationRandom { FastCache::Testing::ScriptedSecureRandom::Ascending(64) };
-    FastCache::Testing::UnreachableDialer formationDialer;
-    FastCache::Testing::ScriptedSrvResolver formationSrv;
-    FastCache::Testing::ManualClockWait formationWait;
+    Pace::Testing::ScriptedSecureRandom formationRandom { Pace::Testing::ScriptedSecureRandom::Ascending(64) };
+    Pace::Testing::UnreachableDialer formationDialer;
+    Pace::Testing::ScriptedSrvResolver formationSrv;
+    Pace::Testing::ManualClockWait formationWait;
     auto const formationBody =
-        FormationBody { .record = FastCache::Testing::Minted("c-n1", 500),
+        FormationBody { .record = Pace::Testing::Minted("c-n1", 500),
                         .durables = FormationDurables { formationStore,
                                                         formationEndpoints,
                                                         reform,
@@ -480,7 +480,7 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
                                                                                 .srv = formationSrv,
                                                                                 .wait = formationWait } },
                         .reloader = nullptr };
-    auto const formationKey = std::optional { FastCache::Testing::TestKeyPair("n1") }; // what its Enroll is signed with
+    auto const formationKey = std::optional { Pace::Testing::TestKeyPair("n1") }; // what its Enroll is signed with
     auto const formation = MakeFormationRuntime(clusteredNode,
                                                 formationKey,
                                                 formationBody,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "TerminalCapabilities.hpp"
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 RenderRung ChooseRenderRung(TerminalCapabilities const& capabilities) noexcept
@@ -13,4 +13,4 @@ RenderRung ChooseRenderRung(TerminalCapabilities const& capabilities) noexcept
     return RenderRung::Ascii;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

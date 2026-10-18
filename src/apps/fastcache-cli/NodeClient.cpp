@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeClient.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/LeaderRedirect.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/LeaderRedirect.hpp>
 
 #include <array>
 #include <format>
@@ -10,10 +10,10 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -216,4 +216,4 @@ std::expected<NodeReply, ExchangeError> DecodeNodeReply(std::span<std::byte cons
     return reply;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

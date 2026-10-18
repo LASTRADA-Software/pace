@@ -17,7 +17,7 @@
 #include <core/net/testing/ParkingReadableSocket.hpp>
 #include <tests/ScriptedSocket.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Hands back one scripted socket per dial, and records where it was asked to go.
@@ -118,4 +118,4 @@ class ScriptedDialer final: public Node::IEndpointDialer
     std::size_t _next { 0 };
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc::Test
+namespace Pace::Cc::Test
 {
 
 /// Write a stub object wherever an argv asks for one, for a fake compiler.
@@ -41,4 +41,4 @@ inline void WriteStubObject(std::span<std::string const> argv, std::string_view 
     }
 }
 
-} // namespace FastCache::Cc::Test
+} // namespace Pace::Cc::Test

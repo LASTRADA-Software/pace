@@ -6,7 +6,7 @@
 #include <span>
 #include <string>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Deciding whether two object files are the same compile, when the bytes differ.
@@ -92,4 +92,4 @@ struct ObjectComparisonResult
 [[nodiscard]] ObjectComparisonResult CompareObjectImages(std::span<std::byte const> served,
                                                          std::span<std::byte const> fresh);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

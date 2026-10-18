@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "StreamGrammar.hpp"
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,9 +12,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Cc;
+using Pace::Testing::Unwrap;
 
 namespace
 {

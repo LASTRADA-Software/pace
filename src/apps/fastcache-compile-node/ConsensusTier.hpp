@@ -14,24 +14,24 @@
 #include "SharedCacheDirectory.hpp"
 #include "SharedCacheHost.hpp"
 
-#include <FastCache/Cluster/AnnouncedEndpoints.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/ClusterStateMachine.hpp>
-#include <FastCache/Cluster/MembershipPolicy.hpp>
-#include <FastCache/Cluster/RosterKeys.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Consensus/ForwardingSink.hpp>
-#include <FastCache/Consensus/IRaftPeerIdentity.hpp>
-#include <FastCache/Consensus/RaftDriver.hpp>
-#include <FastCache/Consensus/RaftPeerServer.hpp>
-#include <FastCache/Consensus/RaftPeerTransport.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/IRandomSource.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/AnnouncedEndpoints.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/ClusterStateMachine.hpp>
+#include <Pace/Cluster/MembershipPolicy.hpp>
+#include <Pace/Cluster/RosterKeys.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Consensus/ForwardingSink.hpp>
+#include <Pace/Consensus/IRaftPeerIdentity.hpp>
+#include <Pace/Consensus/RaftDriver.hpp>
+#include <Pace/Consensus/RaftPeerServer.hpp>
+#include <Pace/Consensus/RaftPeerTransport.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/IRandomSource.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <core/net/AcceptLoopHealth.hpp>
 #include <core/net/PlatformLoop.hpp>
@@ -39,8 +39,8 @@
 // For `ConsensusStatus`, which is the shape a scrape reports this node's own quorum
 // in. Defined beside `MetricsSnapshot` rather than here because the renderer is what
 // has to know its shape, and `/metrics` is the one surface every node already serves.
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/PrometheusFormatter.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/PrometheusFormatter.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -62,7 +62,7 @@
 #include <core/net/Sockets.hpp>
 #include <core/net/ThreadedAddressResolver.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class SchedulingLeaderPublisher;
@@ -1162,4 +1162,4 @@ struct SharedCacheListeners
     NodeConditions* conditions,
     FormationHooks hooks);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

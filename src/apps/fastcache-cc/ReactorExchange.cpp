@@ -13,7 +13,7 @@
 #include <core/net/SocketDeadline.hpp>
 #include <core/net/ThreadedAddressResolver.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -309,4 +309,4 @@ std::unique_ptr<IEndpointExchange> MakeTcpExchange(CredentialNotice& notice)
     return std::make_unique<TcpExchange>(notice);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

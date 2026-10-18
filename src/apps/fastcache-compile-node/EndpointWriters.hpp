@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstdint>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Every function on a framed endpoint that may put bytes on a connection.
@@ -141,4 +141,4 @@ inline constexpr EnumTable<EndpointWriter, EndpointWriterRow> EndpointWriterTabl
 
 static_assert(RowsInEnumeratorOrder(EndpointWriterTable, [](EndpointWriterRow const& row) { return row.writer; }));
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

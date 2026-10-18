@@ -5,9 +5,9 @@
 // than `registered` -- while it cannot know.
 #include "NodeSlots.hpp"
 
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Platform/HostLoad.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,9 +17,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Cli;
+using Pace::Testing::Unwrap;
 
 namespace
 {

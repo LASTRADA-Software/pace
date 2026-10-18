@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/Registry.hpp>
+#include <Pace/Platform/Registry.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// The instruction set a machine executes NATIVELY.
@@ -222,4 +222,4 @@ class IToolchainHost
 /// @return The joined path, `/`-separated throughout.
 [[nodiscard]] std::string JoinPath(std::string_view directory, std::string_view relative);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

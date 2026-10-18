@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Collapsing `..` out of the note paths a build system reads.
@@ -108,4 +108,4 @@ namespace FastCache::Cc
 /// @return The region with each note's path collapsed; @p text unchanged when nothing matched.
 [[nodiscard]] std::string CollapseNotePaths(std::string_view text, PathCanon::Grammar grammar, std::string_view marker);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

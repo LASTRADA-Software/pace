@@ -3,12 +3,12 @@
 
 #include "NodeConfig.hpp"
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <iosfwd>
 #include <memory>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Build the console logger this node's configuration asks for.
@@ -39,4 +39,4 @@ namespace FastCache::Node
 /// @return The logger, never null.
 [[nodiscard]] std::unique_ptr<ConsoleLogger> MakeNodeConsoleLogger(std::ostream& sink, NodeConfig const& cfg);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

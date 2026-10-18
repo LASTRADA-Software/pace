@@ -3,7 +3,7 @@
 #include "CompileJob.hpp"
 #include "StubObjectTestSupport.hpp"
 
-#include <FastCache/Protocol/NodeConditionWire.hpp>
+#include <Pace/Protocol/NodeConditionWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -31,9 +31,9 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache::Cc;
-using FastCache::Testing::ScratchDirectory;
-using FastCache::Testing::Unwrap;
+using namespace Pace::Cc;
+using Pace::Testing::ScratchDirectory;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -1835,7 +1835,7 @@ TEST_CASE("A refusal naming more arguments than fit counts the rest, and keeps e
         many.push_back(std::format("-fdistinct-refused-argument-{:02}", index));
     auto const error = JobError::RejectedArgumentsNaming(many, Flavor::Gcc);
 
-    CHECK(error.detail.size() <= FastCache::CompileCacheWire::MaxConditionDetailBytes);
+    CHECK(error.detail.size() <= Pace::CompileCacheWire::MaxConditionDetailBytes);
     CHECK(error.detail.starts_with("arguments -fdistinct-refused-argument-00, "));
     CHECK(error.detail.ends_with(" are not on this worker's accepted-flag list for its driver family"));
     auto const said = static_cast<std::size_t>(
@@ -2325,7 +2325,7 @@ TEST_CASE("A shallow rule over a deep build directory still distributes", "[comp
 
     auto const mapped = MappedCompileDirectory(argv, DriverFamily::Gnu, deep);
     REQUIRE(mapped.has_value());
-    auto const& pair = FastCache::Testing::Unwrap(mapped);
+    auto const& pair = Pace::Testing::Unwrap(mapped);
 
     // The value that actually travels is longer than the old ceiling, which is the
     // whole point -- if this ever stops holding the case has stopped testing anything.

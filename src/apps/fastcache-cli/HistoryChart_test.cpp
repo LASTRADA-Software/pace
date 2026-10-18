@@ -16,8 +16,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache::Cli;
-using FastCache::Cli::Testing::FakeCellWidth;
+using namespace Pace::Cli;
+using Pace::Cli::Testing::FakeCellWidth;
 
 namespace
 {

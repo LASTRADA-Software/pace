@@ -6,22 +6,22 @@
 #include "FleetProbe.hpp"
 #include "NodeConditions.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/FormationTransitions.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/SeedSources.hpp>
-#include <FastCache/Cluster/SplitEvidence.hpp>
-#include <FastCache/Consensus/RaftTypes.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/FormationTransitions.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/SeedSources.hpp>
+#include <Pace/Cluster/SplitEvidence.hpp>
+#include <Pace/Consensus/RaftTypes.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -39,7 +39,7 @@
 #include <WorkerProtocol.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file FormationController.hpp
@@ -445,4 +445,4 @@ class FormationController final:
     core::platform::SteadyTimePoint _nextFollowAt;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

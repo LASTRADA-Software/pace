@@ -2,13 +2,13 @@
 #include "DashboardPanels.hpp"
 #include "NodeClient.hpp"
 
-#include <FastCache/Cache/IStorage.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cache/IStorage.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <array>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -491,4 +491,4 @@ PanelSpec const& FleetPanel() noexcept
     return FleetSpec;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

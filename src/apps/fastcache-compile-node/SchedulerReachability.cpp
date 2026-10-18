@@ -8,7 +8,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -159,4 +159,4 @@ void SchedulerReachability::Forget(core::platform::SteadyTimePoint now)
     std::erase_if(_opened, [&stale](auto const& entry) { return stale(entry.second); });
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

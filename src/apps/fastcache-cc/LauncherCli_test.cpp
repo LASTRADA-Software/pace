@@ -2,8 +2,8 @@
 #include "Dispatch.hpp"
 #include "LauncherCli.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Cli/UsageTestUtils.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/UsageTestUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,11 +15,11 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache::Cc;
-using FastCache::Arity;
-using FastCache::FormatDuration;
-using FastCache::UsageColor;
-using FastCache::Testing::StripAnsi;
+using namespace Pace::Cc;
+using Pace::Arity;
+using Pace::FormatDuration;
+using Pace::UsageColor;
+using Pace::Testing::StripAnsi;
 
 namespace
 {
@@ -322,8 +322,8 @@ TEST_CASE("the two ENVIRONMENT row groups share one column")
     // Anchored on each row's own indent: FASTCACHE_ADDR is also named in the
     // prose below the rows, and a bare search would find whichever came first.
     auto const help = HelpText();
-    auto const first = FastCache::Testing::DescriptionColumnOf(help, "FASTCACHE_ADDR");
-    auto const second = FastCache::Testing::DescriptionColumnOf(help, "XDG_STATE_HOME, HOME");
+    auto const first = Pace::Testing::DescriptionColumnOf(help, "FASTCACHE_ADDR");
+    auto const second = Pace::Testing::DescriptionColumnOf(help, "XDG_STATE_HOME, HOME");
     REQUIRE(first != std::string_view::npos);
     REQUIRE(second != std::string_view::npos);
     CHECK(first == second);

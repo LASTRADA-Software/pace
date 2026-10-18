@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/SecureBytes.hpp>
+#include <Pace/Core/SecureBytes.hpp>
 
 #include <chrono>
 #include <cstdint>
 #include <format>
 #include <string>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file CliEndpoint.hpp
@@ -83,4 +83,4 @@ struct NodeCredentials
     Endpoint mintFrom {};
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

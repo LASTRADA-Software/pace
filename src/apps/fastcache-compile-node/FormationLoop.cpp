@@ -3,7 +3,7 @@
 #include "FormationLoop.hpp"
 #include "NodeRefusal.hpp"
 
-#include <FastCache/Platform/ProcessExit.hpp>
+#include <Pace/Platform/ProcessExit.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +11,7 @@
 #include <format>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 void ReformRequest::RequestReform()
@@ -241,4 +241,4 @@ std::expected<std::optional<int>, std::string> ActivationHold::ForBody() const
     return _descriptors.Duplicate(*_inherited).transform([](int copy) { return std::optional { copy }; });
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

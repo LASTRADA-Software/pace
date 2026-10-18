@@ -6,11 +6,11 @@
 #include "NodeFormation.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -26,9 +26,9 @@
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {

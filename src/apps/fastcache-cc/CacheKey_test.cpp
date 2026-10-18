@@ -20,11 +20,11 @@
 
 #include <tests/RetiredGenerations.hpp>
 
-using namespace FastCache::Cc;
-using FastCache::Cc::Test::DigestQuarters;
-using FastCache::Cc::Test::SplitMix64;
-using FastCache::Testing::Generation;
-using FastCache::Testing::RequireNoRetiredDigest;
+using namespace Pace::Cc;
+using Pace::Cc::Test::DigestQuarters;
+using Pace::Cc::Test::SplitMix64;
+using Pace::Testing::Generation;
+using Pace::Testing::RequireNoRetiredDigest;
 
 namespace
 {
@@ -591,7 +591,7 @@ TEST_CASE("UnkeyableArgument refuses a drive-relative path that no root can toke
     // replay guard skips it, and a header moved inside it is neither re-keyed nor
     // noticed. The command line is where that is caught before direct mode can
     // serve a manifest an older launcher recorded under the old rules.
-    FastCache::PathCanon::Layout const windows { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\build)" };
+    Pace::PathCanon::Layout const windows { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\build)" };
     auto const refuse = [&windows](std::vector<std::string> const& args) {
         return UnkeyableArgument(std::span<std::string const> { args }, windows);
     };
@@ -623,7 +623,7 @@ TEST_CASE("UnkeyableArgument refuses a drive-relative path that no root can toke
 
 TEST_CASE("UnkeyableArgument leaves every path a root can place alone")
 {
-    FastCache::PathCanon::Layout const windows { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\build)" };
+    Pace::PathCanon::Layout const windows { .sourceRoot = R"(C:\src\proj)", .buildTree = R"(C:\src\proj\build)" };
     auto const refuse = [&windows](std::vector<std::string> const& args) {
         return UnkeyableArgument(std::span<std::string const> { args }, windows);
     };
@@ -652,7 +652,7 @@ TEST_CASE("UnkeyableArgument keeps a drive-relative ROOT working")
     // drive-relative root the path canonicalizes to a token that is portable
     // exactly because the consumer substitutes its own root — refusing on the
     // anchor alone would silently un-key a whole layout that works today.
-    FastCache::PathCanon::Layout const driveRelative { .sourceRoot = R"(C:src\proj)", .buildTree = R"(C:src\proj\build)" };
+    Pace::PathCanon::Layout const driveRelative { .sourceRoot = R"(C:src\proj)", .buildTree = R"(C:src\proj\build)" };
     std::vector<std::string> const under { R"(/IC:src\proj\inc)", R"(C:src\proj\u.cpp)" };
     CHECK(UnkeyableArgument(std::span<std::string const> { under }, driveRelative) == std::nullopt);
 
@@ -668,7 +668,7 @@ TEST_CASE("UnkeyableArgument is inert under a POSIX layout")
     // and the rule is decided by the LAYOUT and never by the host, so a Windows
     // host must reach the same answer. A `/`-led argument is a path there, not an
     // option, which is why the introducers are the layout's too.
-    FastCache::PathCanon::Layout const posix { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
+    Pace::PathCanon::Layout const posix { .sourceRoot = "/home/dev/proj", .buildTree = "/home/dev/proj/build" };
     std::vector<std::string> const args { "-IC:foo", "C:foo/u.cpp", "/usr/include/x.h", "-I/Infra/inc" };
     CHECK(UnkeyableArgument(std::span<std::string const> { args }, posix) == std::nullopt);
 }

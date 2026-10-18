@@ -4,7 +4,7 @@
 #include "NodeMachineStanding.hpp"
 #include "NodeStatusResponder.hpp"
 
-#include <FastCache/Cluster/Roster.hpp>
+#include <Pace/Cluster/Roster.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file MachineStandingTestUtils.hpp
@@ -62,4 +62,4 @@ class FixedStanding final: public Node::IMachineStandingSource
     std::vector<std::string> _pending;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

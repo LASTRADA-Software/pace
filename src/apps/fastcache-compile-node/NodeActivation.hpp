@@ -4,7 +4,7 @@
 #include "NodeConfig.hpp"
 #include "NodeRefusal.hpp"
 
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <expected>
 #include <optional>
@@ -14,7 +14,7 @@
 /// the socket's, so every endpoint derived from that bind -- the advertised one first -- describes
 /// the socket clients actually reach.
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The refusal a start gives when the socket a supervisor handed over will not say which address
@@ -45,4 +45,4 @@ namespace FastCache::Node
 [[nodiscard]] std::expected<void, NodeRefusal> AdoptActivatedBind(NodeConfig& cfg,
                                                                   std::optional<BoundEndpoint> const& bound);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -3,9 +3,9 @@
 #include "ToolchainHostTestUtils.hpp"
 #include "ToolchainProbe.hpp"
 
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Platform/EnvironmentTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Platform/EnvironmentTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,9 +30,9 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using namespace FastCache::Cc::Testing;
+using namespace Pace;
+using namespace Pace::Cc;
+using namespace Pace::Cc::Testing;
 
 namespace
 {
@@ -241,7 +241,7 @@ TEST_CASE("An unset INCLUDE yields no paths", "[toolchain-probe]")
 
 TEST_CASE("Probing records every file relative to its own root", "[toolchain-probe]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-relative" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-relative" };
     tree.Write("a/x.hpp", "content-x");
     tree.Write("a/nested/y.hpp", "content-y");
 
@@ -260,8 +260,8 @@ TEST_CASE("The same tree at two prefixes fingerprints identically", "[toolchain-
     // The whole reason paths are relative. Two machines with the same toolchain
     // at different install prefixes must agree, or distribution is disabled
     // between exactly the machines it exists to connect.
-    FastCache::Testing::ScratchDirectory one { "fc-tcp-prefix-one" };
-    FastCache::Testing::ScratchDirectory two { "fc-tcp-prefix-two" };
+    Pace::Testing::ScratchDirectory one { "fc-tcp-prefix-one" };
+    Pace::Testing::ScratchDirectory two { "fc-tcp-prefix-two" };
 
     // The second root sits DELIBERATELY deeper. A prefix that differed only in its
     // last component would still pass if the code folded absolute paths on a
@@ -286,7 +286,7 @@ TEST_CASE("The same tree at two prefixes fingerprints identically", "[toolchain-
 
 TEST_CASE("A header edited on disk changes the fingerprint through a real walk", "[toolchain-probe]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-changed" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-changed" };
     tree.Write("inc/a.hpp", "original");
     std::vector<std::string> const roots { (tree / "inc").string() };
     auto const before =
@@ -313,7 +313,7 @@ TEST_CASE("One LLVM install's two driver grammars fingerprint differently", "[to
     // that cannot read its arguments: a GNU driver handed `/std:c++20` reads it as a
     // filename, the job fails and the client falls back locally, so distribution was
     // silently off for that family with no counter moving.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-grammar" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-grammar" };
     tree.Write("inc/a.hpp", "#define SHARED 1");
     std::vector<std::string> const roots { (tree / "inc").string() };
     auto const files = WalkSerially(roots).files;
@@ -359,7 +359,7 @@ TEST_CASE("A missing search root is skipped, not fatal", "[toolchain-probe]")
     // Drivers list paths they WOULD search; `/usr/local/include` is routinely
     // absent. Failing on one would make the fingerprint unavailable on a
     // perfectly ordinary machine.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-missing-root" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-missing-root" };
     tree.Write("inc/a.hpp", "x");
 
     std::vector<std::string> const roots { (tree / "does-not-exist").string(), (tree / "inc").string() };
@@ -1027,7 +1027,7 @@ TEST_CASE("A stamp follows a search root's modification time", "[toolchain-probe
     // the two readings are identical and the test fails for a reason that has
     // nothing to do with the stamp. Setting it states the property directly:
     // whatever the filesystem reports for this root is folded into the stamp.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-stamp-root" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-stamp-root" };
     tree.Write("inc/a.hpp", "x");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
@@ -1053,7 +1053,7 @@ TEST_CASE("A stamp changes when the compiler binary changes size", "[toolchain-p
     // Size as well as mtime, because a toolchain restored from an archive can
     // carry its original timestamps -- an upgrade that moves no clock but
     // certainly moves the bytes.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-stamp-size" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-stamp-size" };
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const before = ComputeToolchainStamp("cc 1.0", compiler, {});
@@ -1071,7 +1071,7 @@ TEST_CASE("A stamp changes when the compiler binary changes size", "[toolchain-p
 
 TEST_CASE("A stamp changes when the banner changes", "[toolchain-probe]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-stamp-banner" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-stamp-banner" };
     tree.Write("cc", "#!/bin/sh\n");
     std::vector<std::string> const roots {};
     auto const compiler = (tree / "cc").string();
@@ -1147,7 +1147,7 @@ class CountingRunner final: public IProcessRunner
 ///
 /// @param state The scratch state directory the launcher was pointed at.
 /// @return The directory holding `*.fingerprint` entries.
-[[nodiscard]] std::filesystem::path CacheDirectory(FastCache::Testing::ScratchDirectory const& state)
+[[nodiscard]] std::filesystem::path CacheDirectory(Pace::Testing::ScratchDirectory const& state)
 {
     return std::filesystem::path { state.Path().string() } / "fastcache-cc" / "toolchains";
 }
@@ -1155,14 +1155,14 @@ class CountingRunner final: public IProcessRunner
 
 TEST_CASE("A cached fingerprint is reused rather than rewalked", "[toolchain-probe]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-cache-hit" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-cache-hit" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cache-hit-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cache-hit-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     CountingRunner runner { VerboseNaming(root) };
     ScriptedToolchainHost host;
@@ -1185,14 +1185,14 @@ TEST_CASE("A compiler invoked by bare name still caches its fingerprint", "[tool
     // translation unit. Resolving the name for the stamp and the cache file also
     // gives the two spellings of one compiler ONE cache entry rather than two whose
     // contents are identical and each of which the other misses.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-cache-bare" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-cache-bare" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cache-bare-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cache-bare-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     // The scripted host is what turns `cc` into that path, exactly as a real PATH
     // lookup would; the real filesystem underneath is what the stamp then stats.
@@ -1230,14 +1230,14 @@ TEST_CASE("A compiler invoked by bare name still caches its fingerprint", "[tool
 
 TEST_CASE("A changed toolchain invalidates the cached fingerprint", "[toolchain-probe]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-cache-invalidate" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-cache-invalidate" };
     tree.Write("inc/a.hpp", "original");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const includeDir = std::filesystem::path { tree.Path().string() } / "inc";
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cache-invalidate-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cache-invalidate-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     CountingRunner runner { VerboseNaming(includeDir.string()) };
     ScriptedToolchainHost host;
@@ -1262,14 +1262,14 @@ TEST_CASE("A forced refresh ignores a cached value", "[toolchain-probe]")
     // What --print-toolchain-fingerprint relies on: it exists to answer "why did
     // no worker match", and a cached answer cannot tell a genuine difference from
     // a stale entry.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-cache-force" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-cache-force" };
     tree.Write("inc/a.hpp", "original");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cache-force-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cache-force-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     CountingRunner runner { VerboseNaming(root) };
     ScriptedToolchainHost host;
@@ -1290,13 +1290,13 @@ TEST_CASE("No state directory still yields a fingerprint", "[toolchain-probe]")
 {
     // A machine with nowhere to persist must still be able to dispatch. Caching
     // is an optimization; the fingerprint is not.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-cache-nowhere" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-cache-nowhere" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScopedEnv const env { StateVariable, "" };
+    Pace::Testing::ScopedEnv const env { StateVariable, "" };
     CountingRunner runner { VerboseNaming(root) };
     ScriptedToolchainHost host;
     CHECK(!CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang)).fingerprint.empty());
@@ -1343,7 +1343,7 @@ class SequencedRunner final: public IProcessRunner
 ///
 /// @param state The scratch state directory the launcher was pointed at.
 /// @return The stored fingerprint, or empty when no entry exists.
-[[nodiscard]] std::string StoredFingerprint(FastCache::Testing::ScratchDirectory const& state)
+[[nodiscard]] std::string StoredFingerprint(Pace::Testing::ScratchDirectory const& state)
 {
     auto const directory = CacheDirectory(state);
     std::error_code ec;
@@ -1435,14 +1435,14 @@ TEST_CASE("A fingerprint from a probe that never ran is refused, not returned as
     // first again across five node startups, with nothing at either end saying so.
     // The include probe is the unstable half -- it spawns a process, and a spawn can
     // fail for reasons that have nothing to do with the toolchain.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-unrun" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-unrun" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-unrun-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-unrun-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     auto const good = CompileRun { .exitCode = 0, .out = {}, .err = VerboseNaming(root) };
     SequencedRunner runner { { good, NeverSpawned(), NeverSpawned(), good } };
@@ -1486,12 +1486,12 @@ TEST_CASE("A driver that answered with no roots is still cached", "[toolchain-pr
     // a compiler that cannot be asked its version and has no derivable include tree
     // is that on every run -- so re-walking it buys nothing, and only the probe that
     // did NOT RUN is excluded from the cache.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-noevidence" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-noevidence" };
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-noevidence-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-noevidence-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     // Exit 0 with no search list: the driver ANSWERED, and listed nothing.
     CountingRunner runner { "" };
@@ -1519,14 +1519,14 @@ TEST_CASE("A fingerprint carries the evidence it was derived from", "[toolchain-
     // hash of exactly these, so anything else here would be a caller recording
     // evidence for a fingerprint that does not describe it -- a toolchain watching
     // roots its own identity does not cover, which is silent from both ends.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-evidence" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-evidence" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-evidence-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-evidence-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     // A real version line, so the identity is `Usable` and this case is about the
     // evidence rather than about a defect.
@@ -1556,7 +1556,7 @@ TEST_CASE("A fingerprint carries the evidence it was derived from", "[toolchain-
         auto const identity = CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang));
         REQUIRE(identity.Usable());
         REQUIRE(identity.evidence.has_value());
-        auto const& evidence = FastCache::Testing::Unwrap(identity.evidence);
+        auto const& evidence = Pace::Testing::Unwrap(identity.evidence);
 
         CHECK(evidence.compiler == expectedCompiler);
         CHECK(evidence.banner == banner);
@@ -1581,7 +1581,7 @@ TEST_CASE("A fingerprint carries the evidence it was derived from", "[toolchain-
         REQUIRE(hit.fingerprint == cold.fingerprint);
 
         REQUIRE(hit.evidence.has_value());
-        auto const& evidence = FastCache::Testing::Unwrap(hit.evidence);
+        auto const& evidence = Pace::Testing::Unwrap(hit.evidence);
         CHECK(evidence.compiler == expectedCompiler);
         CHECK(evidence.banner == banner);
         CHECK(evidence.roots == expectedRoots);
@@ -1596,13 +1596,13 @@ TEST_CASE("A fingerprint carries the evidence it was derived from", "[toolchain-
 
 TEST_CASE("An identity nothing measured carries no evidence", "[toolchain-probe]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-evidence-unrun" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-evidence-unrun" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-evidence-unrun-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-evidence-unrun-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
     ScriptedToolchainHost host;
 
     constexpr std::string_view banner = "clang version 20.1.8";
@@ -1633,7 +1633,7 @@ TEST_CASE("An identity nothing measured carries no evidence", "[toolchain-probe]
 
         REQUIRE(identity.Usable());
         REQUIRE(identity.evidence.has_value());
-        CHECK(FastCache::Testing::Unwrap(identity.evidence).roots.empty());
+        CHECK(Pace::Testing::Unwrap(identity.evidence).roots.empty());
     }
 }
 
@@ -1645,7 +1645,7 @@ TEST_CASE("A header that could not be read leaves the walk incomplete and uncach
     // contents -- so before this the short digest was written under a stamp that
     // still validated, and every later run hit it without walking anything. There was
     // no self-correcting run to wait for.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-partial" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-partial" };
     tree.Write("inc/readable.hpp", "content");
     tree.Write("inc/locked.hpp", "secret");
     tree.Write("cc", "#!/bin/sh\n");
@@ -1677,8 +1677,8 @@ TEST_CASE("A header that could not be read leaves the walk incomplete and uncach
     CHECK_FALSE(scan.complete);
 
     // And the identity built on it is refused and left out of the cache.
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-partial-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-partial-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
     CountingRunner runner { VerboseNaming(includeDir.string()) };
     ScriptedToolchainHost host;
 
@@ -2067,7 +2067,7 @@ TEST_CASE("A driver that exits non-zero can still have named its target", "[tool
 
 TEST_CASE("A toolchain label says what the compiler is, where a fingerprint cannot", "[cc][toolchain][label]")
 {
-    using FastCache::Cc::ToolchainLabel;
+    using Pace::Cc::ToolchainLabel;
 
     // #194. Two MSVC toolsets on one machine are two opaque hashes on `/fleet`, and
     // an ordinary Visual Studio update leaves exactly that. The label is what tells
@@ -2116,7 +2116,7 @@ TEST_CASE("A toolchain label says what the compiler is, where a fingerprint cann
 
 TEST_CASE("A real toolchain's label is one a scheduler records", "[cc][toolchain][label]")
 {
-    using FastCache::Cc::ToolchainLabel;
+    using Pace::Cc::ToolchainLabel;
 
     // A scheduler refuses a lease whose label is not UTF-8 or is longer than it records, and the
     // launcher then sends the lease with no label at all -- so a real compiler whose label fell
@@ -2143,8 +2143,8 @@ TEST_CASE("A real toolchain's label is one a scheduler records", "[cc][toolchain
         auto const label = ToolchainLabel(compiler, banner);
         INFO(label);
         CHECK_FALSE(label.empty());
-        CHECK(label.size() <= FastCache::CompileCacheWire::MaxToolchainLabelBytes);
-        CHECK(FastCache::IsValidUtf8(label));
+        CHECK(label.size() <= Pace::CompileCacheWire::MaxToolchainLabelBytes);
+        CHECK(Pace::IsValidUtf8(label));
     }
 }
 
@@ -2501,7 +2501,7 @@ namespace
 /// @param stlUpdate What the toolset's `yvals_core.h` says.
 /// @param sdkHeader What the SDK's `windows.h` says.
 /// @return The `cl.exe` the toolset holds.
-[[nodiscard]] std::string WriteMsvcInstall(FastCache::Testing::ScratchDirectory const& machine,
+[[nodiscard]] std::string WriteMsvcInstall(Pace::Testing::ScratchDirectory const& machine,
                                            ScriptedToolchainHost& host,
                                            std::string_view stlUpdate,
                                            std::string_view sdkHeader)
@@ -2637,7 +2637,7 @@ class ClangProbeRunner final: public IProcessRunner
 /// @param otherRoot The other search root, relative to @p machine.
 /// @param otherContent What that root's `vector` says.
 /// @return The driver, its resource directory and the search list.
-[[nodiscard]] ClangMachine WriteClangInstall(FastCache::Testing::ScratchDirectory const& machine,
+[[nodiscard]] ClangMachine WriteClangInstall(Pace::Testing::ScratchDirectory const& machine,
                                              ScriptedToolchainHost& host,
                                              std::string_view resourceHeader,
                                              std::string_view otherRoot,
@@ -2701,10 +2701,10 @@ TEST_CASE("An installed Visual Studio language pack does not split cl", "[toolch
     // into `VC\Tools\MSVC\<version>\include\de-DE`. The banner already names the toolset
     // and its target; the trees are the toolset `cl` lives in and an SDK it borrows,
     // and a worker opens neither for a preprocessed compile.
-    FastCache::Testing::ScratchDirectory english { "fc-tcp-langpack-en" };
-    FastCache::Testing::ScratchDirectory german { "fc-tcp-langpack-de" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-langpack-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory english { "fc-tcp-langpack-en" };
+    Pace::Testing::ScratchDirectory german { "fc-tcp-langpack-de" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-langpack-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost englishHost;
     ScriptedToolchainHost germanHost;
@@ -2735,10 +2735,10 @@ TEST_CASE("cl is identified without its toolset's and SDK's header contents", "[
     // patched STL header under one banner is not a case a worker can get wrong,
     // because it compiles the text the CLIENT preprocessed against the client's own
     // headers.
-    FastCache::Testing::ScratchDirectory one { "fc-tcp-cl-content-1" };
-    FastCache::Testing::ScratchDirectory two { "fc-tcp-cl-content-2" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cl-content-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory one { "fc-tcp-cl-content-1" };
+    Pace::Testing::ScratchDirectory two { "fc-tcp-cl-content-2" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cl-content-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost oneHost;
     ScriptedToolchainHost twoHost;
@@ -2756,7 +2756,7 @@ TEST_CASE("cl is identified without its toolset's and SDK's header contents", "[
     auto const discovered = DiscoverIncludePaths(reference, twoHost, twoCl, DriverOf(Flavor::Cl)).roots;
     REQUIRE(discovered.size() == 4);
     REQUIRE(b.evidence.has_value());
-    CHECK(FastCache::Testing::Unwrap(b.evidence).roots == discovered);
+    CHECK(Pace::Testing::Unwrap(b.evidence).roots == discovered);
 }
 
 TEST_CASE("Two cl toolsets are told apart by their banners", "[toolchain-probe][fingerprint-tree]")
@@ -2764,9 +2764,9 @@ TEST_CASE("Two cl toolsets are told apart by their banners", "[toolchain-probe][
     // The direction the fix must not break. The trees used to be what separated two
     // toolsets; since #195 the banner names the version AND the target, and with the
     // trees gone (#1656) it is the whole of what separates them -- so it has to.
-    FastCache::Testing::ScratchDirectory machine { "fc-tcp-cl-banners" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cl-banners-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory machine { "fc-tcp-cl-banners" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cl-banners-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost host;
     auto const cl = WriteMsvcInstall(machine, host, "#define _MSVC_STL_UPDATE 202506L\n", "// sdk\n");
@@ -2793,9 +2793,9 @@ TEST_CASE("A cl that cannot be asked its version is no identity, whatever its la
     // grammar, which is the identity of every MSVC ever installed. A located layout
     // used to rescue it, because the tree it folded was evidence; nothing is folded
     // now.
-    FastCache::Testing::ScratchDirectory machine { "fc-tcp-cl-noevidence" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-cl-noevidence-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory machine { "fc-tcp-cl-noevidence" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-cl-noevidence-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost host;
     auto const cl = WriteMsvcInstall(machine, host, "#define _MSVC_STL_UPDATE 202506L\n", "// sdk\n");
@@ -2815,11 +2815,11 @@ TEST_CASE("A clang targeting MSVC is identified by its own tree, not the MSVC it
     // directory plus the VC toolset and the SDK, so it split the fleet exactly as `cl`
     // did. `clang-cl` never did, because `ClangResourceLayout` folds only the resource
     // tree; a GNU-grammar clang targeting MSVC now folds the same and nothing else.
-    FastCache::Testing::ScratchDirectory one { "fc-tcp-clang-msvc-1" };
-    FastCache::Testing::ScratchDirectory two { "fc-tcp-clang-msvc-2" };
-    FastCache::Testing::ScratchDirectory three { "fc-tcp-clang-msvc-3" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-clang-msvc-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory one { "fc-tcp-clang-msvc-1" };
+    Pace::Testing::ScratchDirectory two { "fc-tcp-clang-msvc-2" };
+    Pace::Testing::ScratchDirectory three { "fc-tcp-clang-msvc-3" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-clang-msvc-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost oneHost;
     ScriptedToolchainHost twoHost;
@@ -2851,7 +2851,7 @@ TEST_CASE("A clang targeting MSVC is identified by its own tree, not the MSVC it
     // The search list is still the evidence, borrowed roots included: only the digest
     // narrowed.
     REQUIRE(second.evidence.has_value());
-    CHECK(FastCache::Testing::Unwrap(second.evidence).roots == b.roots);
+    CHECK(Pace::Testing::Unwrap(second.evidence).roots == b.roots);
 }
 
 TEST_CASE("A clang targeting anything else still folds every tree it searches", "[toolchain-probe][fingerprint-tree]")
@@ -2859,11 +2859,11 @@ TEST_CASE("A clang targeting anything else still folds every tree it searches", 
     // The narrowness of #1656. On Linux the `-v` list is libstdc++, which the driver
     // reads and which two machines can differ in under one `--version` -- the case the
     // include-tree fingerprint exists for. It stays folded.
-    FastCache::Testing::ScratchDirectory one { "fc-tcp-clang-linux-1" };
-    FastCache::Testing::ScratchDirectory two { "fc-tcp-clang-linux-2" };
-    FastCache::Testing::ScratchDirectory three { "fc-tcp-clang-linux-3" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-clang-linux-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory one { "fc-tcp-clang-linux-1" };
+    Pace::Testing::ScratchDirectory two { "fc-tcp-clang-linux-2" };
+    Pace::Testing::ScratchDirectory three { "fc-tcp-clang-linux-3" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-clang-linux-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost oneHost;
     ScriptedToolchainHost twoHost;
@@ -2893,9 +2893,9 @@ TEST_CASE("An MSVC-targeting clang whose resource probe cannot run is refused an
     // The #225 shape one layer down. The digest would cover no tree where every machine
     // that ran the probe covers the resource directory, so it is a different value that
     // looks like an identity -- named, never served, never written.
-    FastCache::Testing::ScratchDirectory machine { "fc-tcp-clang-unrun" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-clang-unrun-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory machine { "fc-tcp-clang-unrun" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-clang-unrun-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost host;
     auto const clang = WriteClangInstall(machine, host, "// clang 22\n", "msvc/include", "// STL\n");
@@ -2918,9 +2918,9 @@ TEST_CASE("cl, clang-cl and an MSVC-targeting clang++ stay three toolchains",
     // that separates them -- and a worker running the wrong one reads `/std:c++20` as a
     // file (#226). `cl` is held to the same banner here too, which no real `cl` prints,
     // so that nothing but the row can separate it.
-    FastCache::Testing::ScratchDirectory machine { "fc-tcp-three-drivers" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-three-drivers-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory machine { "fc-tcp-three-drivers" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-three-drivers-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost host;
     auto const clang = WriteClangInstall(machine, host, "// clang 22\n", "msvc/include", "// STL\n");
@@ -2948,7 +2948,7 @@ TEST_CASE("cl, clang-cl and an MSVC-targeting clang++ stay three toolchains",
 TEST_CASE("A stamp names the fingerprint schema it validates", "[toolchain-probe][fingerprint-tree]")
 {
     // Everything else held equal, so the schema is the only thing that can move it.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-stamp-schema" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-stamp-schema" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
@@ -2968,14 +2968,14 @@ TEST_CASE("A cache entry another fingerprint schema wrote is recomputed, not ser
     // the schema a launcher kept handing out the old value under a stamp that still
     // validated, against a worker that had restarted onto the new rules. Planted rather
     // than produced, because the old build is not here.
-    FastCache::Testing::ScratchDirectory tree { "fc-tcp-schema-plant" };
+    Pace::Testing::ScratchDirectory tree { "fc-tcp-schema-plant" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("cc", "#!/bin/sh\n");
     auto const compiler = (tree / "cc").string();
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-schema-plant-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-schema-plant-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     CountingRunner runner { VerboseNaming(root) };
     ScriptedToolchainHost host;
@@ -2983,7 +2983,7 @@ TEST_CASE("A cache entry another fingerprint schema wrote is recomputed, not ser
     auto const real = CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang));
     REQUIRE(real.Usable());
     REQUIRE(real.evidence.has_value());
-    auto const& evidence = FastCache::Testing::Unwrap(real.evidence);
+    auto const& evidence = Pace::Testing::Unwrap(real.evidence);
 
     // The one entry that call wrote, overwritten with a fingerprint nothing computes.
     auto const entry = [&] {
@@ -3021,9 +3021,9 @@ TEST_CASE("One MSVC-targeting clang fingerprints alike under the gcc and the cla
     // dispatch is banner-corrected -- so one binary reaches both rows, through one
     // cache file per grammar. The two rows must therefore answer alike for it, or a
     // worker and its clients split on which row they happened to read.
-    FastCache::Testing::ScratchDirectory machine { "fc-tcp-gcc-clang-row" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-gcc-clang-row-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory machine { "fc-tcp-gcc-clang-row" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-gcc-clang-row-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost host;
     auto const clang = WriteClangInstall(machine, host, "// clang 22\n", "msvc/include", "// STL\n");
@@ -3047,9 +3047,9 @@ TEST_CASE("An MSVC-targeting clang that folds no tree and cannot name itself is 
     // banner over no tree is the driver's NAME and its grammar -- every install alike,
     // which is `NoEvidence` asked of the tree the digest actually folded. Not cached
     // either, because a later hit asks only discovery's roots and would serve it.
-    FastCache::Testing::ScratchDirectory machine { "fc-tcp-clang-folded-nothing" };
-    FastCache::Testing::ScratchDirectory state { "fc-tcp-clang-folded-nothing-state" };
-    FastCache::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+    Pace::Testing::ScratchDirectory machine { "fc-tcp-clang-folded-nothing" };
+    Pace::Testing::ScratchDirectory state { "fc-tcp-clang-folded-nothing-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
 
     ScriptedToolchainHost host;
     auto const clang = WriteClangInstall(machine, host, "// clang 22\n", "msvc/include", "// STL\n");

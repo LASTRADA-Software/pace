@@ -85,8 +85,8 @@ set(FastCachedCorruptStorePage "docs/operations/corrupt-store.md")
 # No row may contain a `;` -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
 set(FastCachedDiagnosticFragments
-    "StorageError(code=|src/FastCache/Core/Errors/StorageError.hpp|StorageError(code={} system={} context={})|The rendering the page quotes character for character. The whole format string is pinned deliberately: this IS the verbatim quote, so a change-detector is what it needs."
-    "context=FilePageStore::Open|src/FastCache/Cache/CowTreeStorage.cpp|\"FilePageStore::Open\"|The context token an operator matches against. Nothing else in this tree produces it, so a rename would leave the page naming a context that no longer exists."
+    "StorageError(code=|src/Pace/Core/Errors/StorageError.hpp|StorageError(code={} system={} context={})|The rendering the page quotes character for character. The whole format string is pinned deliberately: this IS the verbatim quote, so a change-detector is what it needs."
+    "context=FilePageStore::Open|src/Pace/Cache/CowTreeStorage.cpp|\"FilePageStore::Open\"|The context token an operator matches against. Nothing else in this tree produces it, so a rename would leave the page naming a context that no longer exists."
     "failed to open storage '|src/apps/fastcached/main.cpp|failed to open {} '{}'|The daemon's one composer. The quoted `'{}'` is the field that matters -- it carries the path the operator needs to act on."
     "failed to open shard '|src/apps/fastcached/main.cpp|failed to open {} '{}'|The --storage-shards variant, which names the ONE damaged file. Same composer, different `what` argument."
     "--cache-dir |src/apps/fastcache-compile-node/CacheTier.cpp|--cache-dir {}|The node prefixes its tier's refusal with the flag the operator actually typed."

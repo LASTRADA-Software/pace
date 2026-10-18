@@ -5,8 +5,8 @@
 #include "IProcessRunner.hpp"
 #include "LauncherCli.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +14,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Where the `/showIncludes` marker this build emits and matches came from.
@@ -264,4 +264,4 @@ inline constexpr std::string_view MarkerDiscoveryRequest = "auto";
                                                                 std::string const& compiler,
                                                                 DriverSpec const& driver);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -2,7 +2,7 @@
 #include "DirectManifest.hpp"
 #include "ReplayGuard.hpp"
 
-#include <FastCache/Platform/NarrowText.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <array>
 #include <filesystem>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -187,4 +187,4 @@ std::optional<std::string> MissingReplayedDependency(std::span<TextRegion const>
     return std::nullopt;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

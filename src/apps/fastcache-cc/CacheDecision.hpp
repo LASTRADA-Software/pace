@@ -3,13 +3,13 @@
 
 #include "CacheProtocol.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// What the launcher does with a FETCH, as a function of what came back.
@@ -270,4 +270,4 @@ enum class HitDisposition : std::uint8_t
     return FetchObservation::HitObjectUnwritable;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

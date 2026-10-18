@@ -7,11 +7,11 @@
 #include "NodeMembership.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cli/Options.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
-#include <FastCache/Platform/ServiceControl.hpp>
+#include <Pace/Cli/Options.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/FileTrust.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,14 +41,14 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
-using FastCache::Testing::ScriptedConfigPathProbe;
-using FastCache::Testing::ScriptedHostNaming;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::ScriptedConfigPathProbe;
+using Pace::Testing::ScriptedHostNaming;
+using Pace::Testing::Unwrap;
 using Privilege = ScriptedConfigPathProbe::Privilege;
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

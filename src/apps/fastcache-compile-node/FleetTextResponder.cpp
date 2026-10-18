@@ -3,14 +3,14 @@
 #include "FleetTextResponder.hpp"
 #include "MembershipGate.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -249,4 +249,4 @@ std::vector<std::byte> FleetTextResponder::EndpointRefusalReply(EndpointRefusal 
     return AnswerRefusal(_metrics, ErrorCodeFor(refusal), row.policy, detail);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

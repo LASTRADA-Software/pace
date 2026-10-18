@@ -4,16 +4,16 @@
 #include "NodeDefaults.hpp"
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/PeerText.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/PeerText.hpp>
 
 #include <algorithm>
 #include <format>
 #include <string>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -290,4 +290,4 @@ std::expected<Cluster::FormationRecord, std::string> ResumeFormation(Cluster::Fo
     return record;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -19,16 +19,16 @@
 #include "ScratchClaim.hpp"
 #include "WorkerLease.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -55,7 +55,7 @@
 #include <core/async/ThreadPoolExecutor.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class CacheTier;
@@ -520,4 +520,4 @@ class WorkerTier
     EndpointMoveWatch _moveWatch;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -3,9 +3,9 @@
 
 #include "CliValue.hpp"
 
-#include <FastCache/Cli/UsageDoc.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Cli/UsageDoc.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -13,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// How an answer is written to stdout.
@@ -157,4 +157,4 @@ struct RenderOptions
 /// @return The field with those four characters spelled out.
 [[nodiscard]] std::string EscapeTsvField(std::string_view field);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

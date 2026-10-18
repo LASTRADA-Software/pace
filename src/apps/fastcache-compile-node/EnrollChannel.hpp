@@ -8,7 +8,7 @@
 #include <span>
 #include <string_view>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file EnrollChannel.hpp
@@ -72,4 +72,4 @@ class DialledEnrollChannel final: public IEnrollChannel
     Ed25519KeyPair const& _identity;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

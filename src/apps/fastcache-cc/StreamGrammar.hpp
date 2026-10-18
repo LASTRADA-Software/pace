@@ -3,9 +3,9 @@
 
 #include "CmdLine.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// The grammar to tag a stored TEXT REGION with, per compiler flavor.
@@ -44,4 +44,4 @@ namespace FastCache::Cc
     return PathCanon::Grammar::MsvcStream;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

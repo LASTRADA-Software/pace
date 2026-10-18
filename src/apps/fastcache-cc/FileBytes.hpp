@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Read a whole file as bytes.
@@ -47,4 +47,4 @@ namespace FastCache::Cc
     return out;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

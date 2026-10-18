@@ -40,55 +40,55 @@ area/launcher:
 area/compile-cache:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/CompileCache/**'
-          - 'src/FastCache/Protocol/CompileCache*'
+          - 'src/Pace/CompileCache/**'
+          - 'src/Pace/Protocol/CompileCache*'
           - 'src/apps/compile-cache-testclient/**'
           - 'scripts/compile-cache-e2e.sh'
 
 area/distributed:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Distributed/**'
+          - 'src/Pace/Distributed/**'
           - 'src/apps/fastcache-compile-node/**'
           - 'scripts/dist-compile-e2e.*'
 
 area/cluster:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Consensus/**'
-          - 'src/FastCache/Cluster/**'
+          - 'src/Pace/Consensus/**'
+          - 'src/Pace/Cluster/**'
 
 area/protocol:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Protocol/**'
-          - 'src/FastCache/Auth/**'
+          - 'src/Pace/Protocol/**'
+          - 'src/Pace/Auth/**'
           - 'src/apps/fastcache-cli/**'
 
 area/net:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Transport/**'
-          - 'src/FastCache/Server/**'
+          - 'src/Pace/Transport/**'
+          - 'src/Pace/Server/**'
 
 area/storage:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Cache/**'
+          - 'src/Pace/Cache/**'
           - 'src/CowTree/**'
 
 area/platform:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Platform/**'
-          - 'src/FastCache/Config/**'
-          - 'src/FastCache/Cli/**'
+          - 'src/Pace/Platform/**'
+          - 'src/Pace/Config/**'
+          - 'src/Pace/Cli/**'
           - 'src/apps/fastcached/**'
 
 area/observability:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Metrics/**'
+          - 'src/Pace/Metrics/**'
           - 'src/apps/fastcache-cli/**'
           - 'scripts/fastcache-cli-e2e.sh'
 
@@ -117,7 +117,7 @@ area/build:
 area/core:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/FastCache/Core/**'
+          - 'src/Pace/Core/**'
 
 # The `os/` rows name files that exist only for one host -- its packaging, its
 # service integration, its scripts. They deliberately do NOT name the per-platform

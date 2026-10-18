@@ -66,10 +66,10 @@ endif()
 set(baseCliSource
 "// SPDX-License-Identifier: Apache-2.0
 /// The behavioural half of the getenv/isatty/ioctl/GetConsoleMode scan.
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 int Clean() { return 0; }
-} // namespace FastCache::Cli
+} // namespace Pace::Cli
 ")
 
 set(basePlatformSource
@@ -128,7 +128,7 @@ function(fastcached_stage_and_run name target path content exemptions outOutput)
     else()
         file(MAKE_DIRECTORY "${tree}/src/apps/fastcache-cli")
     endif()
-    file(WRITE "${tree}/src/FastCache/Platform/Terminal.cpp" "${platformText}")
+    file(WRITE "${tree}/src/Pace/Platform/Terminal.cpp" "${platformText}")
     if(writeTable)
         if(exemptions STREQUAL "-")
             file(WRITE "${tree}/scripts/cli-ambient-read-exemptions.txt" "${tableHeader}")

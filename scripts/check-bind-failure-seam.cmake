@@ -21,7 +21,7 @@
 # ## What is scanned, and what is not
 #
 # `src/apps/fastcache-compile-node/` only. The daemon binds too --
-# `src/apps/fastcached/main.cpp` and `src/FastCache/Server/ReactorServerLoop.cpp`
+# `src/apps/fastcached/main.cpp` and `src/Pace/Server/ReactorServerLoop.cpp`
 # each decide a bind failure inline -- and they are deliberately NOT covered here:
 # `BindFailurePolicy` lives in the node's own `NodeSurfaces.hpp`, which the library
 # and the daemon cannot include. Widening this scan without first moving the seam

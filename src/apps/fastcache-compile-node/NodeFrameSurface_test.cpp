@@ -32,27 +32,27 @@
 #include "SharedCacheResponder.hpp"
 #include "WorkerTierTestFixture.hpp"
 
-#include <FastCache/Cache/CacheEngine.hpp>
-#include <FastCache/Cache/InMemoryLruStorage.hpp>
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/WireFrame.hpp>
-#include <FastCache/Distributed/MachineTicket.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
-#include <FastCache/Protocol/CompileCacheHandler.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Protocol/SessionContext.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/WireFrame.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/CompileCacheHandler.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Protocol/SessionContext.hpp>
+#include <Pace/Server/AdminCredential.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -108,18 +108,18 @@
 #include <tests/VerbFamilies.hpp>
 #include <tests/WireReply.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 // Shared rather than spelled here: this was one of five private copies of the same
 // reply readers, byte-identical once the `Wire` alias is expanded. `MessageOf` below
 // stays local -- it reads the error payload's TEXT, which is a different question the
 // shared header deliberately does not answer.
-using FastCache::Testing::ErrorOf;
-using FastCache::Testing::StatusOf;
+using Pace::Testing::ErrorOf;
+using Pace::Testing::StatusOf;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -194,7 +194,7 @@ using SurfaceFakes::NamedResponder;
     auto const pair = core::net::testing::InMemorySocketPair::create();
     CompileCacheHandler daemon;
     REQUIRE(core::async::syncRun(core::net::sendAll(pair.client.get(), frame)));
-    REQUIRE(FastCache::Testing::ShutdownWrite(*pair.client).has_value());
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
     core::async::syncRun(daemon.Run(pair.server.get(), &engine, {}, SessionContext {}));
     auto const head = core::async::syncRun(core::net::receiveExactly(pair.client.get(), Wire::ReplyHeaderSize));
     REQUIRE(head.has_value());
@@ -388,7 +388,7 @@ TEST_CASE("(#290) one peer on one listener has a FETCH refused and a COMPILE adm
     NodeIoLoop io;
     CapturingLogger logger;
     NeverSpawns runner;
-    FastCache::Testing::ScratchDirectory const scratch { "fc-290-acceptance" };
+    Pace::Testing::ScratchDirectory const scratch { "fc-290-acceptance" };
     Cc::CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() };
     Cc::WorkerProtocol protocol { jobs,    Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
                                   metrics, Cc::IgnoreJobRefusals() };

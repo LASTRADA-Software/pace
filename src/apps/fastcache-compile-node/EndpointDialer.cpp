@@ -8,7 +8,7 @@
 #include <EndpointDial.hpp>
 #include <core/net/BlockingConnector.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 BlockingEndpointDialer::BlockingEndpointDialer(std::chrono::milliseconds ioTimeout) noexcept:
@@ -103,4 +103,4 @@ std::string JoinEndpoints(std::span<std::string const> endpoints)
     return joined;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

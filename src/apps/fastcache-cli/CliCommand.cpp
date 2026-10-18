@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CliCommand.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -1006,4 +1006,4 @@ std::string HelpText(UsageColor color)
     return RenderUsage({ .sections = sections }, color, substitutions);
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -4,7 +4,7 @@
 #include "ScriptedExchange.hpp"
 #include "SocketExchange.hpp"
 
-#include <FastCache/Protocol/TicketChoice.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,11 +22,11 @@
 #include <tests/ScriptedSocket.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Cli;
+using Pace::Testing::Unwrap;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -62,7 +62,7 @@ class ScriptedNodes
     void Serve(std::string endpoint, std::vector<std::byte> replies)
     {
         _sockets.insert_or_assign(std::move(endpoint),
-                                  std::make_unique<FastCache::Testing::ScriptedSocket>(std::move(replies)));
+                                  std::make_unique<Pace::Testing::ScriptedSocket>(std::move(replies)));
     }
 
     /// @return A dial over the scripted sockets.
@@ -104,7 +104,7 @@ class ScriptedNodes
     }
 
   private:
-    std::map<std::string, std::unique_ptr<FastCache::Testing::ScriptedSocket>> _sockets;
+    std::map<std::string, std::unique_ptr<Pace::Testing::ScriptedSocket>> _sockets;
     std::vector<std::string> _dialled;
     std::vector<DialTimeouts> _timeouts; ///< One per dial, in the order of `_dialled`.
 };

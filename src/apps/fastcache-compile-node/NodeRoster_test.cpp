@@ -4,13 +4,13 @@
 #include "NodeMembership.hpp"
 #include "NodeRoster.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/NodeMode.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/StateLeaseRoster.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/NodeMode.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/StateLeaseRoster.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,12 +30,12 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 using namespace std::chrono_literals;
 
 namespace Wire = CompileCacheWire;
-using FastCache::Testing::TestKeyPair;
+using Pace::Testing::TestKeyPair;
 
 namespace
 {

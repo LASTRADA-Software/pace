@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/BoundedDrain.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
 
 #include <chrono>
 #include <cstddef>
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// An `IDrainWait` whose sleeps cost more than they asked for, by a factor the
@@ -68,4 +68,4 @@ class OverrunningDrainWait final: public IDrainWait
     core::platform::SteadyTimePoint _now {}; ///< The clock `Now` reads.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

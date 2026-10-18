@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -79,4 +79,4 @@ std::string RenderShowIncludes(std::span<std::string const> dependencyPaths, std
     return out;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

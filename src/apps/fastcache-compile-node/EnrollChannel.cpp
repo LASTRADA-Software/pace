@@ -2,7 +2,7 @@
 #include "EnrollChannel.hpp"
 #include "NodeCredential.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <format>
 #include <string>
@@ -11,7 +11,7 @@
 #include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace Wire = CompileCacheWire;
@@ -39,4 +39,4 @@ EnrollReading DialledEnrollChannel::Poll(std::string_view endpoint,
         Cc::ExchangeFramed(client.get(), &notice, EncodeSignedEnroll(self, _identity, nonce), NoCredential())));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

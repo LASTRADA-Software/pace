@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <Pace/Core/SessionSeal.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <core/async/Task.hpp>
+#include <core/net/ISocket.hpp>
+
+namespace Pace
+{
+
+/// Which end of a `0xFC` connection a sealing socket sits at, which decides the header shape of
+/// what it reads and of what it writes: a server reads requests and writes replies, a caller the
+/// reverse.
+///
+/// **PRIVATE: persisted and transmitted nowhere.**
+enum class SealedFrameEnd : std::uint8_t
+{
+    Server, ///< Reads request frames, writes reply frames.
+    Caller, ///< Writes request frames, reads reply frames.
+};
+
+/// Why a sealed connection stopped reading.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** Three answers rather than one, because only the
+/// first is the event the seal exists to catch; the other two are a peer that is not speaking this
+/// grammar at all, which an operator reads differently.
+enum class SealFault : std::uint8_t
+{
+    BadTag,    ///< A frame's tag did not verify: injected, altered, replayed, reordered or dropped.
+    Oversized, ///< A frame declared more payload than this end will hold before it can check a tag.
+    Unframed,  ///< A header that is not this protocol's: nothing after it can be located.
+    /// A frame this end would have to hold, unverified, beyond what its owner's in-flight budget
+    /// has room for. **Not KNOWN to be a forgery**, which is not the same as known not to be one:
+    /// the header is refused before its tag is read, so an injector that declares a large length
+    /// turns what would have been a `BadTag` into this, and the verb whose surface answers and
+    /// counts it (`RefusedVerb`) is a byte nobody verified. Observability, not safety: the
+    /// connection ends either way and nothing of the frame is accepted.
+    OverBudget,
+    Last, ///< Not a fault, and has no row: the length of a table keyed by one.
+};
+
+/// @param fault A fault.
+/// @return What an operator reads about it.
+[[nodiscard]] std::string_view DescribeSealFault(SealFault fault) noexcept;
+
+/// Where a sealed end charges the bytes it holds before it can check a frame's tag.
+///
+/// **The tag follows the payload**, so a sealed frame is held WHOLE before anything about it --
+/// its verb, its admission, the surface's own byte budget -- can be asked. Charged nowhere, that is
+/// `maxPayload` per connection outside every budget: the per-request cap made per-connection, the
+/// defect the in-flight budget exists to close. So the end charges its owner's budget for a frame
+/// the moment its header says how large it is, and refuses one the budget has no room for, before
+/// a byte of its payload is kept.
+class ISealedFrameBudget
+{
+  public:
+    virtual ~ISealedFrameBudget() = default;
+
+    ISealedFrameBudget() = default;
+    ISealedFrameBudget(ISealedFrameBudget const&) = delete;
+    ISealedFrameBudget& operator=(ISealedFrameBudget const&) = delete;
+    ISealedFrameBudget(ISealedFrameBudget&&) = delete;
+    ISealedFrameBudget& operator=(ISealedFrameBudget&&) = delete;
+
+    /// Charge @p bytes, or refuse without charging anything.
+    /// @param bytes A whole frame's size.
+    /// @return Whether it was charged.
+    [[nodiscard]] virtual bool TryHold(std::size_t bytes) noexcept = 0;
+
+    /// Give back @p bytes a successful `TryHold` charged.
+    /// @param bytes Exactly what was charged.
+    virtual void Release(std::size_t bytes) noexcept = 0;
+};
+
+/// An `core::net::ISocket` that seals every `0xFC` frame it writes and checks every one it reads, once a
+/// connection has proved its identity (#178).
+///
+/// ## Why a decorator
+///
+/// Every frame after `ProveNode`, both ways, carries a `SealedFrameTagBytes` tag after its payload
+/// under a per-direction session key (`Distributed::NodeProof`). The endpoint has five sanctioned
+/// writers and one reader, and the client exchanges through `Cc::Exchange`; a seal applied at each
+/// of those would be a second code path per writer, and the one that forgot would put an unsealed
+/// frame on a sealed connection. So the socket seals, and nothing above it changes: a connection
+/// is wrapped when it opens, passes bytes straight through until a proof engages it, and from then
+/// on hands its reader only frames whose tag has verified.
+///
+/// ## Engaged per direction
+///
+/// `SealReceiving` and `SealSending` are separate because the two ends switch at different points:
+/// the server engages both after it verifies the proof and then writes the `Ok` sealed, while the
+/// caller must READ that `Ok` sealed although it wrote `ProveNode` in the clear. A caller therefore
+/// engages receiving before it sends the proof, and sending once the `Ok` arrives.
+///
+/// ## What a reader is handed
+///
+/// Header and payload, exactly the bytes an unsealed peer would have sent -- the tag is consumed
+/// here -- and nothing of a frame until the WHOLE frame has verified. A frame whose declared payload
+/// exceeds `maxPayload` is a fault rather than a refusal: it cannot be verified without being held,
+/// and a proven peer that sends one is not running this build's caps. A fault ends the stream: the
+/// read that meets it, and every read after it, fails, and the owner closes the connection -- never
+/// answers it, which is what makes an injected verb worth nothing.
+///
+/// ## Contracts it keeps
+///
+/// `Read`'s buffer must be non-empty (`core::net::contract::requireReadBuffer`, first statement). `Read` and
+/// `WaitReadable` share the raw socket's one read operation, as every transport's do, and
+/// `CancelRead` retires a parked read by forwarding, exactly as `TlsSocket`'s does. At most one
+/// read and one write may be in flight at once, which the endpoint's one-reader and one-writer
+/// rules already guarantee.
+class SealedFrameSocket final: public core::net::ISocket
+{
+  public:
+    /// @param raw The connection; owned.
+    /// @param end Which end this is, which decides the header shape read and written.
+    /// @param maxPayload The largest payload a sealed frame read here may declare.
+    /// @param budget Where the bytes of a frame held before its tag can be checked are charged, or
+    ///        nullptr for an end with no budget to charge -- a caller reading a reply it asked for.
+    ///        Must outlive this. REQUIRED rather than defaulted, so a server end cannot be built
+    ///        uncharged by omission.
+    SealedFrameSocket(std::unique_ptr<core::net::ISocket> raw,
+                      SealedFrameEnd end,
+                      std::size_t maxPayload,
+                      ISealedFrameBudget* budget);
+
+    SealedFrameSocket(SealedFrameSocket const&) = delete;
+    SealedFrameSocket(SealedFrameSocket&&) = delete;
+    SealedFrameSocket& operator=(SealedFrameSocket const&) = delete;
+    SealedFrameSocket& operator=(SealedFrameSocket&&) = delete;
+    /// Gives back whatever a frame still not whole was holding.
+    ~SealedFrameSocket() override;
+
+    /// Check every frame read from now on under @p key. Call with no read in flight.
+    /// @param key The key the PEER seals under.
+    void SealReceiving(SessionKey key);
+
+    /// Seal every frame written from now on under @p key. Call with no write in flight.
+    /// @param key The key this end seals under.
+    void SealSending(SessionKey key);
+
+    /// @return Whether both directions are sealed.
+    [[nodiscard]] bool Sealed() const noexcept;
+
+    /// @return Why reading stopped, or nothing while it has not.
+    [[nodiscard]] std::optional<SealFault> Fault() const noexcept;
+
+    /// The verb a frame refused `SealFault::OverBudget` named, as its unverified header said.
+    ///
+    /// Unverified, so it chooses which surface ANSWERS the refusal and counts it, and nothing else:
+    /// the answer goes out sealed, to whoever holds the session key, and the connection then ends.
+    /// @return The verb, or nothing when reading has not stopped over budget.
+    [[nodiscard]] std::optional<std::uint8_t> RefusedVerb() const noexcept;
+
+    /// The bytes a frame refused `SealFault::OverBudget` would have held.
+    /// @return The frame's size, header and tag included; 0 when reading has not stopped over budget.
+    [[nodiscard]] std::size_t RefusedBytes() const noexcept;
+
+    [[nodiscard]] core::net::IoAwaitable read(std::span<std::byte> buffer) override;
+    [[nodiscard]] core::net::IoAwaitable write(std::span<std::byte const> buffer) override;
+    [[nodiscard]] core::net::IoAwaitable writeVectored(std::span<std::span<std::byte const> const> segments,
+                                                       std::shared_ptr<void const> keepAlive = {}) override;
+    [[nodiscard]] core::net::ResultAwaitable<void> handshakeIfNeeded() override;
+
+    /// @copydoc ISocket::WaitReadable
+    ///
+    /// Verified bytes not yet handed out answer at once; otherwise the raw socket answers. The tag
+    /// changes nothing about how a peer says goodbye -- its FIN is the raw EOF -- so delegating
+    /// does not reopen #712's TLS problem.
+    [[nodiscard]] core::net::IoAwaitable waitReadable() override;
+
+    /// @copydoc ISocket::CancelRead
+    ///
+    /// Forwarded, which retires a parked pump too: its raw read completes `Cancelled`, and the
+    /// pump hands that to whoever awaited this socket.
+    void cancelRead() noexcept override;
+
+    [[nodiscard]] std::string peerAddress() const override;
+    void close() noexcept override;
+    [[nodiscard]] core::net::ResultAwaitable<void> shutdownWrite() override;
+    void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override;
+    [[nodiscard]] bool isClosed() const noexcept override;
+
+  private:
+    /// Move every whole, verified frame out of `_pending` into `_released`.
+    /// @return The fault that stopped it, or nothing.
+    [[nodiscard]] std::optional<SealFault> ReleaseWholeFrames();
+
+    /// Copy verified bytes into @p out.
+    /// @param out Where to.
+    /// @return How many.
+    [[nodiscard]] std::size_t TakeReleased(std::span<std::byte> out);
+
+    /// @return How many verified bytes wait to be handed out.
+    [[nodiscard]] std::size_t ReleasedBytes() const noexcept;
+
+    /// Append @p segments to what this end has written, and seal every frame now whole.
+    /// @param segments What the caller wrote.
+    /// @return How many bytes that was, or the error when a header this end wrote is not a frame.
+    [[nodiscard]] core::net::IoResult SealWhatIsWhole(std::span<std::span<std::byte const> const> segments);
+
+    /// The error every read reports once a fault has stopped the stream.
+    /// @return It.
+    [[nodiscard]] core::net::NetError FaultError() const;
+
+    core::async::Task<core::net::IoResult> PumpRead(std::span<std::byte> out);
+    core::async::Task<core::net::IoResult> PumpWrite(std::size_t reported);
+
+    /// Start a pump for a sealed write of @p reported caller bytes whose frames wait in `_outReady`.
+    /// @param reported What the caller is told was written.
+    /// @return The awaitable.
+    [[nodiscard]] core::net::IoAwaitable StartWrite(std::size_t reported);
+
+    /// Give back what the frame still being gathered holds, if anything.
+    void ReleaseHeld() noexcept;
+
+    std::unique_ptr<core::net::ISocket> _raw;
+    SealedFrameEnd _end;
+    std::size_t _maxPayload;
+    ISealedFrameBudget* _budget;
+    std::size_t _held { 0 };                  ///< What the frame at the front of `_pending` has charged.
+    std::size_t _refusedBytes { 0 };          ///< What an over-budget frame would have held.
+    std::optional<std::uint8_t> _refusedVerb; ///< What an over-budget frame's header named.
+
+    std::optional<FrameOpener> _opener;
+    std::optional<FrameSealer> _sealer;
+
+    std::vector<std::byte> _inScratch; ///< One raw read's worth, allocated when receiving is sealed.
+    std::vector<std::byte> _pending;   ///< Raw bytes read and not yet a whole frame.
+    std::vector<std::byte> _released;  ///< Verified header and payload bytes not yet handed out.
+    std::size_t _releasedOffset { 0 }; ///< How much of `_released` has been handed out.
+    std::optional<SealFault> _fault;   ///< Why reading stopped.
+
+    std::vector<std::byte> _outPending; ///< Bytes written that do not yet make a whole frame.
+    std::vector<std::byte> _outReady;   ///< Sealed frames not yet on the wire.
+};
+
+} // namespace Pace

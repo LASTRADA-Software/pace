@@ -3,12 +3,12 @@
 #include "LivePipedView.hpp"
 #include "ScriptedDashboardEvents.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Core/MachineName.hpp>
-#include <FastCache/Core/NumericText.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Core/MachineName.hpp>
+#include <Pace/Core/NumericText.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,10 +31,10 @@
 #include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
+using Pace::Testing::Unwrap;
 
 namespace
 {

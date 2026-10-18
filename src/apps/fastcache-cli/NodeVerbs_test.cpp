@@ -6,16 +6,16 @@
 #include "ScriptedExchange.hpp"
 #include "StatsGatherer.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Distributed/MembershipWire.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Metrics/MetricsCatalog.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
-#include <FastCache/Transport/NativeListen.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/MetricsCatalog.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -45,15 +45,15 @@
 #include <tests/HexBytes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using FastCache::Testing::Unwrap;
-using namespace FastCache::Cli::Testing;
+using namespace Pace;
+using namespace Pace::Cli;
+using Pace::Testing::Unwrap;
+using namespace Pace::Cli::Testing;
 
 // `CacheWire` and not `Wire`: `Cli::Wire` is this tool's own enum of the three transports, and a
 // `namespace Wire` alias beside it is ambiguous at every use. Nor `Cc`, which `using namespace
-// FastCache` already brings in as the launcher's namespace (`Protocol/TicketChoice.hpp`).
-namespace CacheWire = FastCache::CompileCacheWire;
+// Pace` already brings in as the launcher's namespace (`Protocol/TicketChoice.hpp`).
+namespace CacheWire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -1583,7 +1583,7 @@ class BorrowedNode final: public INodeExchange
         return _node->Advisories();
     }
 
-    [[nodiscard]] std::optional<FastCache::Cc::MintFailure> MissingTicket() const override
+    [[nodiscard]] std::optional<Pace::Cc::MintFailure> MissingTicket() const override
     {
         return _node->MissingTicket();
     }
@@ -1793,10 +1793,10 @@ TEST_CASE("fleet redirected to a leader it could not mint for says the mint fail
     // that this machine's node did not answer `MINT-TICKET` -- rides the seam back. Its
     // `NotAMember` is then the missing ticket's doing, and is worded as that.
     auto const said = std::format("{} (at 127.0.0.1:6674: cannot reach it)",
-                                  FastCache::Cc::ReasonFor(FastCache::Cc::MintFailure::Unreachable));
+                                  Pace::Cc::ReasonFor(Pace::Cc::MintFailure::Unreachable));
     ScriptedNodeExchange follower { { Refusal(CacheWire::ErrorCode::NotLeader, "10.0.0.2:6674") }, "10.0.0.7:6674" };
     ScriptedNodeExchange leader { { Refusal(CacheWire::ErrorCode::NotAMember, "not a member") }, "10.0.0.2:6674" };
-    leader.OpenedWithoutTicket(FastCache::Cc::MintFailure::Unreachable, said);
+    leader.OpenedWithoutTicket(Pace::Cc::MintFailure::Unreachable, said);
     ScriptedDialer dial { { &leader } };
 
     auto const answer = RunFleet(follower, &dial, { "workers" });
@@ -1807,7 +1807,7 @@ TEST_CASE("fleet redirected to a leader it could not mint for says the mint fail
         core::findIfOrNull(answer.advisories, [](std::string const& line) { return line.contains("does not know"); });
     REQUIRE(refusal != nullptr);
     CHECK(refusal->contains("10.0.0.2:6674"));
-    CHECK(refusal->contains(FastCache::Cc::ReasonFor(FastCache::Cc::MintFailure::Unreachable)));
+    CHECK(refusal->contains(Pace::Cc::ReasonFor(Pace::Cc::MintFailure::Unreachable)));
 }
 
 TEST_CASE("fleet relays a leader's NotAMember in its own words when a ticket was presented", "[cli][node][fleet][ticket]")
@@ -3021,7 +3021,7 @@ TEST_CASE("`node` reports the identity key whole, and absent on a node that hold
     // (Python's `base64.urlsafe_b64encode`, padding stripped) -- so the cell is pinned to an
     // answer the one encoder did not produce.
     auto key = CacheWire::NodeRuntimeFields {};
-    key.identityPublicKey = FastCache::Testing::ArrayFromHex<CacheWire::IdentityPublicKeyBytes>(
+    key.identityPublicKey = Pace::Testing::ArrayFromHex<CacheWire::IdentityPublicKeyBytes>(
         "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
 
     ScriptedNodeExchange keyed { { StatusReply(

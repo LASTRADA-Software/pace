@@ -6,7 +6,7 @@
 
 #include <CacheProtocol.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What this worker PRESENTS to its peers, asked afresh at every exchange.
@@ -150,4 +150,4 @@ class ConfiguredCredential final: public ICredentialSource
     return Cc::Credential {};
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

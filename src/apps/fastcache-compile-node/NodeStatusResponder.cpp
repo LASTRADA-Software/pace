@@ -4,12 +4,12 @@
 #include "NodeStatusResponder.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Distributed/MachineStanding.hpp>
-#include <FastCache/Distributed/MembershipWire.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/MachineStanding.hpp>
+#include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -19,7 +19,7 @@
 #include <string>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -648,4 +648,4 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
     return fields;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 bool SerialParallelFor::Run(std::size_t count, std::function<void(std::size_t)> const& slice)
@@ -91,4 +91,4 @@ bool ThreadedParallelFor::Run(std::size_t count, std::function<void(std::size_t)
     return ok.load(std::memory_order_relaxed);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

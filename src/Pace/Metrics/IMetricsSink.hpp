@@ -1,0 +1,1838 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <array>
+#include <atomic>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string_view>
+
+namespace Pace
+{
+
+/// Counter-style metrics sink for facts the *connection* layer knows.
+///
+/// Designed thin on purpose: only counters today; histograms and gauges come
+/// later if/when needed. Implementations must be thread-safe.
+///
+/// ## What belongs here, and what does not
+///
+/// Command counts, hit/miss splits and evictions do **not**: those are
+/// `StorageStats`, produced by the storage that actually performs them, and that
+/// is what `stats`, `INFO` and `/metrics` all report. This enum used to carry a
+/// second set of enumerators for the same concepts — `CmdGet`, `CmdSet`,
+/// `CmdDelete`, `GetHits`, `GetMisses`, `Evictions`, `BytesIn`, `BytesOut` — and
+/// not one of them was incremented anywhere in the tree, so each exported a
+/// permanent zero under a name an operator would reasonably read as the real
+/// count. They are removed rather than wired up: a second source of truth for a
+/// number `StorageStats` already owns is the thing to avoid, not to complete.
+///
+/// Every remaining enumerator needs a row in `Metrics/MetricsCatalog.hpp`, which
+/// `static_assert`s that it has one — that is what makes a new counter reach
+/// `/metrics` by construction rather than by somebody remembering.
+class IMetricsSink
+{
+  public:
+    IMetricsSink() = default;
+    IMetricsSink(IMetricsSink const&) = delete;
+    IMetricsSink(IMetricsSink&&) = delete;
+    IMetricsSink& operator=(IMetricsSink const&) = delete;
+    IMetricsSink& operator=(IMetricsSink&&) = delete;
+    virtual ~IMetricsSink() = default;
+
+    /// **TRANSMITTED: the ordinals travel** (#1399). A live-stats snapshot carries every counter
+    /// BY POSITION: `StatsReading::counters` is indexed by this enum and `EncodeStatsReading`
+    /// writes it in ordinal order with no name beside it. Until #1399 this said *ordinals are
+    /// private, reorder freely* (#308) -- true then, when `AtomicMetricsSink`'s array below was
+    /// the only ordinal use -- and the sentence outlived the fact.
+    ///
+    /// **What keeps a reorder safe is DETECTION, not a frozen order.** `StatsReadingLayout` folds
+    /// every `MetricsCatalog` row's exported name in row order, and the catalog follows this enum
+    /// row for row (`RowsInEnumeratorOrder`). So inserting, removing or moving an enumerator
+    /// moves the digest, and a node and a client of different orders refuse each other by name
+    /// (`StatsReadingFault::ForeignLayout`) rather than reading one counter's figure as its
+    /// neighbour's. The case "An IMetricsSink counter travels at its ordinal and a reordered enum
+    /// is refused as a foreign layout" pins both halves. Before production-ready a reorder is
+    /// therefore ALLOWED: it is a layout change, so the pinned layout constant moves in the same
+    /// change, and nodes and live-stats clients upgrade together.
+    ///
+    /// **Not to be mistaken for "invisible".** `/metrics` and the fleet history name a counter by
+    /// the catalog's exported name and do not move -- which is why a reorder LOOKS free -- but
+    /// every live-stats client of the old order stops reading this node. Nor is the digest a
+    /// licence past the production-ready declaration, when a reorder becomes a wire break.
+    ///
+    /// **No `= N` column**, deliberately: the table indexes by value, so values stay dense and in
+    /// order whatever they say, and an insertion renumbers every later row either way -- a
+    /// column would assert a stability it cannot deliver, while the digest refuses every order
+    /// change, a snapshot field's included. Only `ConnectionsTotal = 0` carries a value
+    /// (`readability-enum-initial-value`'s accepted form), and an omission is a build failure:
+    /// `MetricsCatalog` is an `EnumTable` guarded by `RowsInEnumeratorOrder`.
+    enum class Counter : std::uint8_t
+    {
+        ConnectionsTotal = 0,
+        ConnectionsAdmissionRejected,
+        /// Subset of `ConnectionsTotal` that came in on a TLS-flagged
+        /// bind. Lets operators attribute traffic to plaintext vs TLS
+        /// without a per-bind label dimension (the IMetricsSink
+        /// interface is intentionally counter-only, no labels). Sum:
+        ///   connections_total_plaintext = ConnectionsTotal − ConnectionsTotalTls
+        ConnectionsTotalTls,
+        /// Subset of `ConnectionsAdmissionRejected` that came in on a
+        /// TLS-flagged bind. Pairs with ConnectionsTotalTls.
+        ConnectionsAdmissionRejectedTls,
+        /// Lease requests the scheduler answered with a worker. The numerator of
+        /// "is distribution actually happening", and meaningless without the
+        /// refusals below it -- a fleet where every lease is granted and a fleet
+        /// nobody asks look identical on this counter alone.
+        DispatchLeasesGranted,
+        /// Leases a client resolved when its job ended, however it ended.
+        ///
+        /// The pair of `DispatchLeasesGranted`, and the difference between the two
+        /// is the outstanding count. Its absence is what let a whole missing
+        /// transition go unnoticed: every lease was granted, none was ever
+        /// resolved, and the only number saying so was one nobody exported. A
+        /// granted count that climbs while this one stays flat means clients are
+        /// dying mid-job, or are older than this verb.
+        DispatchLeasesReleased,
+        /// Lease requests refused because no registered worker matched the
+        /// toolchain. The counter that says a fleet is MISCONFIGURED rather than
+        /// busy: it rises when workers are up but nobody can use them, which is
+        /// the failure mode a fingerprint mismatch produces and the one that is
+        /// otherwise invisible from both ends.
+        DispatchLeasesNoWorker,
+        /// Lease requests refused because every matching worker was full of this
+        /// fleet's own work. Rising here means the fleet is too small, which is a
+        /// different decision from the line above and must not be summed with it.
+        DispatchLeasesNoCapacity,
+        /// Lease requests refused because matching workers had slots free on paper
+        /// and had withdrawn them -- their machines are busy with something else, or
+        /// out of scratch space.
+        ///
+        /// The third arm of the same split, and the one whose absence would be worst:
+        /// folded into `DispatchLeasesNoCapacity` it reads as "the fleet is too
+        /// small", so an operator whose build hosts have all filled their scratch
+        /// disks would go and buy machines rather than free 200 MB. Rising here with
+        /// a flat `NoCapacity` is a fleet that is big enough and unavailable.
+        DispatchLeasesWithdrawn,
+        /// Lease requests refused because every matching worker was on the client's own
+        /// exclusion list -- workers it could not reach a moment ago. Answered `no-worker`
+        /// on the wire and NEVER counted there: this is the network between clients and
+        /// machines, that one is a toolchain nobody serves.
+        DispatchLeasesAllExcluded,
+        /// Lease requests refused because another client already held a lease for
+        /// this key. Not a failure: it is duplicate-work suppression doing its
+        /// job, and the clients it refuses compile locally.
+        DispatchLeasesDuplicate,
+        /// Workers currently registered, as a running total of registrations
+        /// accepted. A gauge would be the better shape and this interface is
+        /// counter-only by design, so this counts events rather than membership:
+        /// it rises on every re-registration, which is itself the signal worth
+        /// watching -- a fleet that re-registers constantly is a fleet whose
+        /// heartbeats are not arriving.
+        DispatchWorkerRegistrations,
+        /// Registrations refused because the worker did not announce itself in
+        /// UTF-8. Beside the accepted count rather than beside the lease refusals,
+        /// deliberately: this is not a statement about the fleet's capacity, it is
+        /// a peer that cannot be recorded, and it is the ONLY trace such a peer
+        /// leaves on the leader -- a node whose `--toolchain` override carries a
+        /// stray byte otherwise vanishes from the fleet with nothing saying why.
+        DispatchWorkerRegistrationsMalformed,
+        /// Registrations **accepted** whose endpoint names a host other than the
+        /// one the registration arrived from.
+        ///
+        /// Not a refusal, and the distinction is the whole point of the counter
+        /// (#242). A registration asserts, unchecked, where work for a toolchain
+        /// should be sent, and nothing today ties that claim to the connection
+        /// carrying it -- but an exact match refuses a great many legitimate
+        /// configurations, starting with the fleet this project's own
+        /// getting-started page builds. Whether a strict rule is viable depends on
+        /// how often real deployments mismatch, which nobody currently knows. This
+        /// is the number that answers it.
+        ///
+        /// A rise is therefore not a fault to be chased. A fleet whose workers
+        /// advertise DNS names, sit behind NAT, are multi-homed or reach the
+        /// scheduler over a VPN will report every registration here and be working
+        /// perfectly.
+        DispatchWorkerEndpointMismatch,
+        /// Workers dropped for having stopped heartbeating.
+        ///
+        /// The counterpart of `DispatchWorkerRegistrations`, and the fleet's only
+        /// trace of a machine going away: expiry used to be a filter that hid a
+        /// worker from `Pick` while leaving its entry in place, so losing a machine
+        /// was invisible from every direction. Rising steadily beside a rising
+        /// registration count is a fleet whose heartbeats are not arriving rather
+        /// than one that is growing.
+        DispatchWorkersExpired,
+        /// Registrations a worker retired deliberately, by `Op::Withdraw`.
+        ///
+        /// Kept apart from `DispatchWorkersExpired` because the two say opposite
+        /// things about a fleet's health: an expiry is a machine that stopped
+        /// answering, which is an incident, while a withdrawal is a machine that
+        /// re-surveyed and said so, which is the system working. Summing them would
+        /// make every routine toolchain upgrade look like a heartbeat failure --
+        /// exactly the reading `DispatchWorkersExpired`'s own note exists to protect.
+        ///
+        /// It is also the before/after measurement for
+        /// [#573](https://github.com/LASTRADA-Software/fastcached/issues/573): a
+        /// withdrawal that lands is a 90-second dispatch window that did not happen.
+        DispatchWorkersWithdrawn,
+        /// Leases freed because the worker holding them was dropped.
+        ///
+        /// Distinct from `DispatchLeasesReleased`, which is a client reporting its
+        /// own job done. This is work nobody will ever report: the machine went
+        /// away mid-job, and every one of these keys was being refused
+        /// `AlreadyInFlight` until it was reclaimed. Rising here says a build lost
+        /// part of its distribution, which is a different thing to fix from a fleet
+        /// that is merely full.
+        DispatchLeasesReclaimed,
+        /// Releases refused because the token presented was not signed by this
+        /// cluster.
+        ///
+        /// The scheduler's own half of `WorkerJobsRefusedLeaseUnauthorized`, and its
+        /// own counter for the same reason the worker's refusals are split: this one
+        /// is about **who** asked, not about what the fleet could do. Deliberately
+        /// not folded into the `UnknownLease` refusals beside it, which name a token
+        /// this cluster issued and has since forgotten. This one was never issued at
+        /// all.
+        ///
+        /// Those refusals are no longer uncounted, and this sentence used to say they
+        /// were: one of the three now moves `DispatchLeasesReleasedLate` (#1074). The
+        /// split above is unaffected -- it was never about whether the neighbour
+        /// counted, but about who is being described -- and summing the two is still
+        /// wrong.
+        DispatchLeasesUnauthorized,
+        /// Releases that arrived after their own lease had already expired.
+        ///
+        /// **The fleet's only evidence that its lease bound is shorter than its
+        /// slowest translation unit**, and the reason this counter exists at all: the
+        /// release path answered all three of its refusals with one wire code and no
+        /// counter, on the stated grounds that it is "a statement about one client's
+        /// timing, not about the fleet's capacity". That is right about capacity and
+        /// beside the point about fit -- and fit is what nothing else here can
+        /// observe, so a site asking whether `DefaultCompileLeaseTimeout` suits its
+        /// build had no instrument to ask with (#1074).
+        ///
+        /// **Not a count of leases that expired.** One that is never reported at all
+        /// -- the client died, which is the ordinary reason a lease lapses -- reaches
+        /// nothing here; `DispatchLeasesReclaimed` is the nearest thing to that, and
+        /// it answers a different question again. This counts a client that *did*
+        /// come back and was too late, which is the only shape that says a real
+        /// compile ran longer than the bound. Read it as a ratio against
+        /// `DispatchLeasesReleased`: a fleet where it is a steady fraction of
+        /// releases has a bound that does not fit its work.
+        ///
+        /// Its two siblings on that path stay uncounted, and deliberately: each has
+        /// several causes, so a rise in either would name no one condition. See
+        /// `LeaseTable::ReleaseRefusal`, which carries the enumeration.
+        DispatchLeasesReleasedLate,
+
+        /// Frames refused at the FLEET SCHEDULER's port for naming a protocol version
+        /// this build does not serve.
+        ///
+        /// The scheduler's own half of `WorkerFramesRefusedUnsupportedVersion`, and a
+        /// separate counter for the reason every split on this surface has one: the
+        /// two ports are reached by different peers for different purposes, and a
+        /// worker built against another release is a different operator problem from a
+        /// client that is. Rising during a staggered upgrade is expected and bounded;
+        /// rising afterwards names a node that never came back.
+        DispatchFramesRefusedUnsupportedVersion,
+
+        /// Frames naming an opcode this build has no row for, at the scheduler's port.
+        ///
+        /// Stepped over rather than fatal by design -- the framing exists so a receiver
+        /// can skip a verb it does not know, which is what lets a newer client talk to
+        /// an older scheduler. So a rise is either that, or somebody walking the opcode
+        /// space; both are worth seeing on the surface that carries lease grants.
+        DispatchFramesRefusedUnknownOpcode,
+
+        /// Frames naming a verb this scheduler does not serve, at the scheduler's port.
+        ///
+        /// A CACHE verb arriving here, answered `DispatchNotPermitted` rather than
+        /// `UnknownOpcode`: the verb exists and is served on another port, and telling
+        /// a client it is unknown would say this daemon is too OLD when it is merely
+        /// the wrong port. A rise is a misconfigured client, which is a thing an
+        /// operator fixes rather than a thing they wait out.
+        DispatchFramesRefusedNotPermitted,
+
+        /// Frames whose declared payload length did not match what arrived, at the
+        /// scheduler's port.
+        ///
+        /// **Not the same refusal as `SchedulerService`'s uncounted `MalformedFrame`,
+        /// and that is the point.** The service refuses a payload it could not make
+        /// sense of, and deliberately counts nothing for it because a broken client's
+        /// noise must stay out of the numbers a fleet is sized from. This one is a
+        /// frame whose own header disagrees with itself, before any verb is routed --
+        /// a different event with the same wire code. A table keyed on the CODE could
+        /// not hold both, which is exactly why the row rather than the code is the
+        /// unit (#327, #494).
+        DispatchFramesRefusedTruncated,
+
+        /// Compiles handed to the runner.
+        ///
+        /// **Their difference with `WorkerJobsCompleted` is NOT the in-flight
+        /// count**, which this said until #307. EVERY runner refusal — one per
+        /// `JobRefusal`, which is `RefusalTable`'s length and not a list anybody
+        /// keeps here; it was written out as four and was stale by #264 —
+        /// increments this and then returns without reaching
+        /// `WorkerJobsCompleted`, so the difference gains one permanently per
+        /// refusal. The counters are monotone, so nothing retracts it, and it is
+        /// worst exactly where it hurts most: an unknown fingerprint is documented
+        /// as the commonest setup failure, so the most misconfigured machine reads
+        /// the highest load, forever, while idle.
+        ///
+        /// **In-flight is `fastcache_node_slots_busy`**, a gauge sampled at scrape
+        /// time. That is not a workaround invented for this: `PrometheusFormatter`
+        /// had already declined to derive it from these two, because they are
+        /// incremented by different components and a scrape landing between them
+        /// reports a phantom job — right on average and wrong at exactly the moment
+        /// somebody is looking. Two comments in this tree disagreed, and this was
+        /// the one that was wrong.
+        ///
+        /// Balancing the pair on the refusal path is not the fix either:
+        /// `WorkerJobsCompleted` is the `_count` half of a duration with
+        /// `WorkerCompileMillisTotal`, so counting a refusal there would drag
+        /// `rate(sum)/rate(count)` — the average compile time — toward zero with
+        /// jobs that never ran. Counting inside the runner was also considered and
+        /// deliberately rejected; see the call site.
+        ///
+        /// Slots *configured* is not here at all: it is configuration rather than a
+        /// measurement, and pushing it through a counter would mean incrementing to
+        /// its value at startup.
+        WorkerJobsStarted,
+        /// Compiles that finished, whatever the compiler concluded. A compiler
+        /// that ran and rejected the code did its job; that is the client's
+        /// answer, not a worker failure, and it is deliberately not a refusal.
+        WorkerJobsCompleted,
+        /// Total wall time spent compiling, in milliseconds.
+        ///
+        /// The `_sum` half of a duration, with `WorkerJobsCompleted` as `_count` —
+        /// which is exactly how a Prometheus histogram reports one, so
+        /// `rate(sum)/rate(count)` is the average compile time and this interface
+        /// stays counter-only. A gauge would answer a different and less useful
+        /// question: the duration of whichever compile happened to finish last.
+        WorkerCompileMillisTotal,
+
+        /// Compiles whose client had gone before the reply could be written.
+        ///
+        /// **The delivery failed, not the compile**, which is why this does not
+        /// displace `WorkerJobsCompleted`: the compiler ran, produced an object and
+        /// charged this machine for it, and only the handover found nobody there.
+        /// Folding the two would make an abandoned delivery look like a compile that
+        /// never happened, and an operator watching a completion rate would read a
+        /// fleet losing clients as a machine getting slower.
+        ///
+        /// A rise here is a client-side story -- builds cancelled, `Ctrl-C`, a CI
+        /// runner reclaimed mid-job -- and what it saves is the object write, which
+        /// #223 measured at 84 MB for one translation unit. It is emphatically NOT a
+        /// refusal: nothing was declined and no reply was sent, so it carries no wire
+        /// code and belongs to no `SurfaceRefusal` row.
+        WorkerJobsAbandonedClientGone,
+
+        /// Jobs refused because no compiler here matches the client's fingerprint.
+        /// The worker's own half of `DispatchLeasesNoWorker`: rising here means
+        /// the fleet is misconfigured, and it is the commonest setup failure.
+        WorkerJobsRefusedUnknownFingerprint,
+        /// Jobs refused over an argument this worker will not pass to a compiler.
+        WorkerJobsRefusedRejectedArgument,
+        /// Jobs refused because the scratch directory could not be prepared.
+        /// An operational fault — a full or read-only disk — and nothing the
+        /// client or the fleet's configuration can fix.
+        WorkerJobsRefusedScratchUnavailable,
+        /// Jobs refused because the compiler could not be spawned at all.
+        /// Distinct from a compiler that ran and failed: this one says the
+        /// toolchain this worker advertises is not actually usable here.
+        WorkerJobsRefusedSpawnFailed,
+        /// Jobs refused because this worker cannot classify the compiler its own
+        /// configuration names. Its own counter rather than folded into
+        /// `WorkerJobsRefusedSpawnFailed`, because the remedies differ: that one is
+        /// a path to fix, this one is a toolchain this build does not recognise.
+        WorkerJobsRefusedCompilerUnclassified,
+        /// Jobs refused because this worker had not finished surveying its
+        /// toolchains. Its own counter rather than folded into
+        /// `WorkerJobsRefusedUnknownFingerprint`, because the two send an operator
+        /// to opposite conclusions: one says the fleet is matching wrongly, the
+        /// other says a node is still starting.
+        WorkerJobsRefusedSurveyInFlight,
+        /// Jobs refused because every slot was busy.
+        ///
+        /// Not a fault and deliberately its own counter: it is the worker's half
+        /// of `DispatchLeasesNoCapacity`, and summing it with the four above would
+        /// hide a misconfigured toolchain behind a busy machine — the same reason
+        /// the scheduler splits no-worker from no-capacity.
+        WorkerJobsRefusedNoSlot,
+
+        /// Connections refused because the caller is neither on this machine nor a
+        /// member of this cluster.
+        ///
+        /// The anti-leeching rule at the compile port, and its own counter because
+        /// it is the only refusal here that is about **who** rather than about what:
+        /// the four above describe a job this worker could not do, while a rise in
+        /// this one means something is trying to spend a machine it has no claim on.
+        /// An operator reads it very differently, which is the whole reason the
+        /// refusals are split.
+        WorkerJobsRefusedNotAMember,
+        WorkerJobsRefusedEndpointBusy,
+
+        /// Jobs refused because this worker had begun stopping.
+        ///
+        /// Its own series and not `no_slot`, because an operator acts on the two
+        /// oppositely: `no_slot` says buy machines or lower the fan-out, this says
+        /// wait -- the node is draining and a client that retries will find another
+        /// worker or this one restarted. Summed together, a rolling restart reads as
+        /// a fleet that is permanently too small.
+        ///
+        /// Only the merged `0xFC` surface can produce it. The dedicated compile port
+        /// closes its listener to stop, so a client meets a closed port rather than a
+        /// refusal; the merged listener carries three verb families and goes on
+        /// serving the other two, so this one has to be refused in words.
+        WorkerJobsRefusedStopping,
+
+        /// Jobs refused because an operator cordoned this worker (#1303).
+        ///
+        /// Its own series and not `stopping`, although both say "a node is being taken
+        /// out": a stop ends within `--drain-timeout`, while a cordon lasts until a person
+        /// lifts it, so a rise here that never ends is a machine somebody forgot. And not
+        /// `no_slot`, for `stopping`'s reason.
+        ///
+        /// It rises only between the cordon and the scheduler hearing of it -- the next
+        /// heartbeat, which a cordon sends at once -- and from clients that dial this port
+        /// directly. A steady rise therefore says the scheduler is not reading this worker's
+        /// heartbeat.
+        WorkerJobsRefusedCordoned,
+
+        /// Cordon requests refused because they came from another machine.
+        ///
+        /// Whether a machine's CPU serves the fleet is decided on that machine, so the verb
+        /// answers this machine only, exactly as the cache tier does. A rise means somebody
+        /// is trying to take a machine they are not on out of the fleet.
+        WorkerCordonsRefusedNotLocal,
+
+        /// Frames refused before a job existed at all.
+        ///
+        /// A family of their own rather than more `WorkerJobsRefused*`, because they
+        /// answer a different question: the job refusals describe work this worker
+        /// could not do, while these describe a frame it could not read. A rise in
+        /// the job family points at the fleet's configuration; a rise here points at
+        /// what is on the wire -- a peer built against another version, a broken
+        /// framing, or something probing the port.
+        ///
+        /// Every refusal `WorkerProtocol` can answer with has one, and
+        /// `worker-refusals-counted` is what keeps that true: a refusal answered on
+        /// the wire while nothing rises is how a port being probed looks, on
+        /// `/metrics`, exactly like a port nobody is talking to (#327).
+
+        /// The request named a protocol version outside this build's range.
+        WorkerFramesRefusedUnsupportedVersion,
+        /// The frame was shorter than the payload length its own header declared.
+        ///
+        /// Its own counter although it shares `MalformedFrame` on the wire with
+        /// `WorkerFramesRefusedMalformedPayload` below, and the split is the point:
+        /// a truncated frame is a framing or transport fault, or a peer sending
+        /// deliberate nonsense, while a payload that will not decode is a version or
+        /// encoding mismatch between two ends that agree on the framing. One code,
+        /// because a client acts on both the same way; two counters, because an
+        /// operator does not.
+        WorkerFramesRefusedTruncated,
+        /// The opcode is in no row of `OpTable`.
+        WorkerFramesRefusedUnknownOpcode,
+        /// A verb this endpoint knowingly does not implement, such as `AUTH` on a
+        /// worker that checks no credential. Distinct from the opcode being unknown:
+        /// this one is a verb that exists and is not served here.
+        WorkerFramesRefusedUnimplementedVerb,
+        /// A verb served elsewhere on this node, sent to the compile surface.
+        WorkerFramesRefusedNotPermitted,
+        /// The payload did not decode into the fields its verb requires.
+        WorkerFramesRefusedMalformedPayload,
+        /// The frame's own header declared a payload larger than this surface
+        /// accepts, so it was refused without being read.
+        ///
+        /// **The cheapest probe there is**, and the reason it needs its own counter
+        /// rather than leaning on the envelope refusals: this check needs a header,
+        /// where `WorkerJobsRefusedEnvelopeDeclaredTooLarge` needs a whole frame to
+        /// have been sent and read. An operator alerting only on the envelope series
+        /// watches a client hammer the node with oversized declarations, sees the
+        /// node refuse every one correctly, and concludes it is not being probed
+        /// (#326).
+        WorkerFramesRefusedPayloadTooLarge,
+
+        /// Jobs refused while opening the request's codec envelope, one counter per
+        /// reason — the same split, and for the same argument, that `EnvelopeError`
+        /// makes one layer down.
+        ///
+        /// These used to be answered on the wire and counted nowhere, so a fleet
+        /// being probed with envelope bombs (issue #241, the reason the ceiling
+        /// exists) emitted `payload-too-large` replies while `/metrics` stayed
+        /// perfectly flat. A refusal a worker returns and does not count is a
+        /// refusal an operator can only find by reading a client's log.
+        ///
+        /// Split rather than summed into one `..._bad_envelope_total`, because the
+        /// four name four different things to go and do, and a sum is exactly what
+        /// hides the one that matters:
+        ///
+        /// - `DeclaredTooLarge` is somebody attacking this port, or a client
+        ///   configured with a request ceiling larger than this worker's. Nothing
+        ///   honest declares an expansion above the cap by accident.
+        /// - `UnsupportedCodec` is two honest processes built differently — a
+        ///   client compiled with zstd talking to a worker that was not. It is a
+        ///   packaging problem, and every one of these cost a local compile.
+        /// - `Malformed` is a peer whose framing this build cannot parse: a version
+        ///   skew, or something that is not this protocol at all.
+        /// - `Corrupt` is framing this build parsed and bytes that then did not
+        ///   expand to their declared length — a codec version skew or a link
+        ///   damaging payloads, which is a different investigation from all three
+        ///   above and the only one that implicates the transport.
+        WorkerJobsRefusedEnvelopeMalformed,
+        WorkerJobsRefusedEnvelopeUnsupportedCodec,
+        WorkerJobsRefusedEnvelopeDeclaredTooLarge,
+        WorkerJobsRefusedEnvelopeCorrupt,
+
+        /// Jobs refused because the lease presented was not signed by this cluster.
+        ///
+        /// The one counter here that is unambiguously a security signal rather than
+        /// a capacity or configuration one: membership decided the caller may reach
+        /// this port, and the lease decides the scheduler actually sent them. A
+        /// sustained rise is somebody probing the compile port, or -- far more often
+        /// -- a launcher built before signed leases, which presents a bare serial
+        /// that cannot authenticate. The two are indistinguishable here by design;
+        /// what tells them apart is whether the rise tracks a rollout.
+        WorkerJobsRefusedLeaseUnauthorized,
+        /// Jobs refused because this worker has not registered, so it knows no fleet.
+        ///
+        /// A few of these at startup are ordinary: a node serves before its first
+        /// heartbeat round has registered it. A rise that does not stop means the
+        /// scheduler is unreachable and this node is compiling nothing while looking
+        /// alive, which no other counter distinguishes from an idle fleet.
+        WorkerJobsRefusedLeaseUnregistered,
+        /// Jobs refused because an AUTHENTIC lease came from a different fleet.
+        ///
+        /// Its own counter rather than a share of the one above, because the operator
+        /// action is different and specific: a voter one fleet trusts signs for another,
+        /// which is the ordinary outcome of copying a working state directory to a second
+        /// site or cloning staging from production. Nothing else produces this. Before #322 the token bound no cluster
+        /// identity, so those grants verified and the other fleet's workers simply compiled them.
+        WorkerJobsRefusedLeaseWrongCluster,
+        /// Jobs refused because an AUTHENTIC lease had ALREADY BEEN SPENT here.
+        ///
+        /// Again its own, and again because the action differs: a lease is single-use
+        /// by construction -- one grant per lease, presented in one COMPILE frame with
+        /// no retry -- so a token arriving twice at one worker is a replay and never an
+        /// honest client. Expected to read exactly zero, which makes any rise at all
+        /// worth looking at.
+        ///
+        /// It replaces `WorkerJobsRefusedLeaseStaleEpoch`, retired with
+        /// [#614](https://github.com/LASTRADA-Software/fastcached/issues/614): the
+        /// refusal that counter described can no longer happen, because a worker now
+        /// ADOPTS a scheduler term that went backwards instead of refusing it. A series
+        /// reading zero because its event is impossible and one reading zero because
+        /// the event did not happen are two facts nobody can tell apart from a graph.
+        WorkerJobsRefusedLeaseReplayed,
+        /// Jobs refused because an AUTHENTIC lease named a different worker.
+        ///
+        /// Almost never a replay and almost always a fleet whose registered endpoint
+        /// is not the one clients dial -- a NAT, or a hostname registered where an
+        /// address resolves. Counted apart from the refusal above precisely because
+        /// the actions differ: one is somebody attacking, the other is somebody's
+        /// `--scheduler-advertise` being wrong.
+        WorkerJobsRefusedLeaseEndpointMismatch,
+        /// Jobs refused because an AUTHENTIC lease had expired.
+        ///
+        /// Not a capacity fact. A lease's expiry bounds how long a captured token is
+        /// useful; a worker's slots bound what it will run. A rise on one machine
+        /// and nowhere else is that machine's clock drifting, which is why the check
+        /// carries skew slack and why this is worth seeing per node.
+        WorkerJobsRefusedLeaseExpired,
+
+        /// Times this worker adopted a scheduler term that went BACKWARDS.
+        ///
+        /// Since [#614](https://github.com/LASTRADA-Software/fastcached/issues/614) a
+        /// lower term is ADOPTED rather than refused -- replay is closed by grants being
+        /// spendable once -- so it costs the fleet nothing, and the event would otherwise
+        /// be invisible on the machine it happened to.
+        ///
+        /// **This does NOT mean somebody reset a cluster, and an earlier spelling of this
+        /// row said it did.** Two causes produce it and a worker cannot tell them apart
+        /// from the token: a grant minted before a leadership change and delivered after
+        /// one -- which is ORDINARY, because a client holds its grant across a preprocess
+        /// and a large upload while an election happens inside that window -- or a
+        /// scheduler whose Raft directory was wiped, whose cluster was re-bootstrapped,
+        /// or which had consensus turned off.
+        ///
+        /// **The RATE is what separates them.** Occasional single counts that track
+        /// elections are the first; a sustained rise, especially fleet-wide and against
+        /// no election, is the second. A row claiming "zero except on the day somebody
+        /// resets a cluster" would be false on any fleet that elects, and would teach an
+        /// operator to ignore the series that is supposed to tell them their scheduler
+        /// lost its state.
+        ///
+        /// Not a refusal, so it is deliberately not in `LeaseRefusalTable`. It is the
+        /// scrapeable half of the line `SchedulerTermRegressionNotice` prints.
+        WorkerSchedulerTermRegressions,
+
+        /// Scratch roots this worker took over from a node that died without
+        /// cleaning up.
+        ///
+        /// A worker claims its scratch root exclusively at startup and holds the
+        /// claim for the life of the process, so a root whose lock is free but whose
+        /// contents are not is one whose owner is gone -- including via the
+        /// abandoned-drain `_Exit`, which by design bypasses every destructor.
+        /// Reclaiming it is correct and needs no reasoning about staleness.
+        ///
+        /// Counted because it is otherwise invisible. The startup REFUSAL to claim a
+        /// root at all is deliberately not counted: that path exits the process, so
+        /// nothing would ever scrape the number -- an operator learns about it by the
+        /// node not starting, and the log line names which of the two refusals it was.
+        WorkerScratchRootsReclaimed,
+
+        /// Bytes of request payload read from clients, and of reply written back.
+        /// The pair is what says whether a codec negotiation is doing anything:
+        /// preprocessed text in against object bytes out.
+        WorkerBytesReceived,
+        WorkerBytesReturned,
+
+        /// The node's own cache tier, which exists so a local rebuild on a slow or
+        /// bad network does not go to the wire at all.
+        ///
+        /// Hits and misses are the node's OWN tier, before any upstream is asked;
+        /// `NodeCacheUpstreamHits` is how often the shared cache answered what this
+        /// node could not. The three together are what say whether the local tier is
+        /// earning its disk: a high upstream-hit rate against a low local-hit rate is
+        /// a tier too small to hold this machine's working set, which is a different
+        /// problem from a fleet that is missing a lot.
+        NodeCacheHits,
+        NodeCacheMisses,
+        NodeCacheUpstreamHits,
+
+        /// A value the shared cache supplied that the local tier then refused. Costs
+        /// one future round trip rather than a build, so it is counted rather than
+        /// reported -- but a rate that stays high means the tier is misconfigured
+        /// (unwritable path, a cap below the objects being stored) and is silently
+        /// doing nothing.
+        NodeCacheFillFailures,
+
+        /// A local write that failed. Distinct from the fill failure above because
+        /// this one IS reported to the client: it is the write that must not be lost.
+        NodeCacheStoreFailures,
+
+        /// What the fleet got. Best-effort by contract -- the local write already
+        /// succeeded -- so a failure here costs the fleet a shared entry and costs
+        /// this machine nothing. Split from the local counters precisely so an
+        /// operator can tell "my node is fine, the fleet is unreachable" from "my
+        /// node is broken", which are different things to go and fix.
+        NodeCacheUpstreamStores,
+        NodeCacheUpstreamStoreFailures,
+
+        /// The fleet cache verbs on this node's merged listener, served while the `shared-cache`
+        /// setting names this machine; every refusal is its own row because each sends
+        /// an operator somewhere different.
+        NodeSharedCacheHits,
+        NodeSharedCacheMisses,
+        NodeSharedCacheStoreFailures,
+        NodeSharedCacheRequestsRefusedNotAMember,
+        NodeSharedCacheRequestsRefusedNotServing,
+        NodeSharedCacheRequestsRefusedPayloadTooLarge,
+        NodeSharedCacheRequestsRefusedEndpointBusy,
+        NodeSharedCacheRequestsRefusedUnsupportedVersion,
+        NodeSharedCacheRequestsRefusedMalformedPayload,
+        NodeSharedCacheRequestsRefusedForeignGeneration,
+
+        /// This node reading through to the named machine: a peer that proved ANOTHER key is
+        /// counted apart from one that proved nothing, because the first is an impostor or a
+        /// re-addressed host and the second is a network; and every handshake is counted, because
+        /// a kept-open session is supposed to make them rare.
+        NodeSharedCacheProofsRefusedWrongKey,
+        NodeSharedCacheProofsFailed,
+        NodeSharedCacheUnresolved,
+        NodeSharedCacheStaleHints,
+        NodeSharedCacheSessionsOpened,
+
+        /// Cache requests refused because the caller is not on this machine (#287).
+        ///
+        /// The node's tier is this machine's entire build output, so it is served to
+        /// this machine and to nothing else -- a rule of the **verb**, independent of
+        /// what the surface is bound to and of any member list. Counted because the
+        /// tightening withdrew access a fleet peer used to have: an operator whose
+        /// peers stopped getting hits needs one number that says so, and without it
+        /// the only evidence is a client-side hit rate that fell for no visible
+        /// reason. On a loopback bind it stays at zero forever, which is the answer
+        /// to "is this happening to me".
+        ///
+        /// That last sentence stopped being the whole story when the cache and
+        /// scheduler surfaces merged (#290), and stopped being true at all when the
+        /// zero-config defaults bound EVERY node's port to the wildcard. On a node
+        /// clients are pointed at for the scheduler, peers reach the same port the
+        /// cache verbs arrive on and a rise is ORDINARY rather than a signal -- it is
+        /// the tightening working; anywhere else a rise means something off-box is
+        /// asking. The counter is the same fact either way; which reading applies is a
+        /// property of the node, and the help text says so rather than promising a
+        /// zero the defaults made false.
+        NodeCacheRequestsRefusedNotLocal,
+
+        /// An operator verb refused because the caller is not a fleet member: `node-status`,
+        /// `node-metrics`, and `explain-admission` asked about a MACHINE. Asked about the
+        /// caller's own connection, `explain-admission` is answered to anyone and moves nothing.
+        NodeStatusRequestsRefusedNotAMember,
+
+        /// An operator verb whose header declared more payload than it may carry.
+        ///
+        /// **`node-status` and `node-metrics` are fieldless** -- they have nothing to ask
+        /// with -- and their `OpTable` rows bound them to `MaxControlPayload` rather than
+        /// to the session cap, so a header declaring more against either did not come from
+        /// a client of this tree at any version: it is a probe, or a caller that has
+        /// confused the verb with a cache one. **`explain-admission` carries one subject**,
+        /// an id or a 43-character key, under its own `MaxExplainAdmissionPayload`, and is
+        /// reachable before admission: a rise from it is an operand no roster could name, or
+        /// a stranger probing the port.
+        ///
+        /// **Never summed with `NodeCacheRequestsRefusedPayloadTooLarge`.** They share
+        /// a wire code, a port and nothing else -- that one is what a misconfigured
+        /// launcher storing large objects produces, and this one has no innocent
+        /// explanation.
+        NodeStatusRequestsRefusedPayloadTooLarge,
+
+        /// An operator verb refused because the surface had no bytes left in flight.
+        ///
+        /// The diagnostic verbs are the ones an operator reaches for when a node is in
+        /// trouble, and this is the node answering *I am too busy to tell you what I
+        /// am*. It names the REQUEST that was refused rather than the load that
+        /// exhausted the budget -- usually the cache's traffic on a node holding a tier,
+        /// or compile uploads still being read on a worker (a running compile has handed its
+        /// reservation to the compile budget by then), since the listener's ceiling folds to the
+        /// largest owner's (the compile budget wherever it exceeds the cache's 256 MiB, #1667).
+        ///
+        /// A rise here is therefore read together with
+        /// `NodeCacheRequestsRefusedEndpointBusy` rather than summed with it: this one
+        /// says the diagnosis failed, that one says why.
+        NodeStatusRequestsRefusedEndpointBusy,
+
+        /// An `explain-admission` whose payload is not exactly one field naming its subject
+        /// ([#1471](https://github.com/LASTRADA-Software/fastcached/issues/1471)). The verb is
+        /// reachable before admission, so a caller the node refuses can move this too.
+        ///
+        /// Counted rather than uncounted, because a rise means something an operator acts on and
+        /// it is not what a healthy caller produces: the CLI encodes this verb through
+        /// `EncodeExplainAdmissionRequest`, which cannot build a malformed one. So a rise is
+        /// either a client of another build or somebody probing the port by hand, and the two
+        /// are told apart by whether anything else on this surface is refusing at the same time.
+        ///
+        /// Its own row rather than `NodeStatusRequestsRefusedMalformed`: that verb is fieldless,
+        /// so the two refusals cannot arise from the same mistake, and one counter for two
+        /// unrelated causes is the thing `Refuse`'s per-row rule exists to prevent.
+        NodeAdmissionExplanationsRefusedMalformed,
+
+        /// A cache verb whose header declared more payload than the surface will
+        /// buffer, so nothing was read.
+        ///
+        /// **The cheapest probe there is**: twenty-four bytes and no body. It is also
+        /// the frame ceiling that fires on a real node, which is why it is a row at
+        /// all -- the merged `0xFC` listener asks the component owning the verb, and
+        /// until #491 the cache's answer moved nothing, so an operator alerting on
+        /// `fastcache_worker_frames_refused_payload_too_large_total` watched a flat
+        /// graph while the port was being hammered (#326's scenario, one surface
+        /// over).
+        ///
+        /// **Never summed with `WorkerFramesRefusedPayloadTooLarge`.** Both answer
+        /// `payload-too-large` and a client does the same thing about both; an
+        /// operator does not, because the two name different subsystems on one port
+        /// and one of them is what a misconfigured launcher produces.
+        NodeCacheRequestsRefusedPayloadTooLarge,
+
+        /// A cache verb that would not fit in the bytes the surface already holds in
+        /// flight.
+        ///
+        /// **The byte-budget refusal a node with a tier actually reaches.**
+        /// `MergedResponder::MaxInFlightBytes()` folds to the largest owner's budget:
+        /// the cache's 256 MiB, or a worker's compile budget wherever that exceeds it --
+        /// five or more slots, a raised `--compile-request-max`, or a typed
+        /// `--compile-inflight-max` (#1667) -- where cache reads may hold up to that.
+        /// Either way a `STORE` is what runs into it.
+        ///
+        /// **Never summed with `WorkerJobsRefusedEndpointBusy` or
+        /// `NodeFrameConnectionsRefusedAtCapacity`.** Three refusals answer
+        /// `endpoint-busy` on this listener and an operator does three different
+        /// things: shrink the objects being stored, add compile capacity, raise a
+        /// connection ceiling.
+        NodeCacheRequestsRefusedEndpointBusy,
+
+        /// A cache request whose wire version this build cannot decode.
+        ///
+        /// A client compiled against another release, and every one of its exchanges
+        /// fails. Counted because the only other evidence is a cache that looks
+        /// permanently cold: the launcher steps over a refused `FETCH` and compiles
+        /// locally, so the build stays correct and merely stops being fast, which is
+        /// the failure shape this tree has paid for before.
+        NodeCacheRequestsRefusedUnsupportedVersion,
+
+        /// A `FETCH` or `STORE` body this build could not decode.
+        ///
+        /// The frame was well formed -- its declared length arrived in full -- and the
+        /// payload inside it was not. That is a client-library or version mismatch
+        /// between two ends that agree on the framing, or somebody malforming bodies
+        /// on purpose; either way no healthy launcher produces one.
+        ///
+        /// **Its own row rather than any other `malformed-frame` counter.** The code
+        /// is shared by a truncated compile frame, an undecodable compile payload and
+        /// two `AUTH` payloads; the row is the refusal and not the code, so a table
+        /// keyed on the code could not hold them.
+        NodeCacheRequestsRefusedMalformedPayload,
+
+        /// A `STORE` refused because its value names a canonicalization generation
+        /// this build does not implement.
+        ///
+        /// The near-twin of `...RefusedUnsupportedVersion` one enumerator up, and
+        /// counted for the same reason: that one is a client at another WIRE version,
+        /// this is a value at another VALUE-FORMAT generation, and an operator does
+        /// the same thing about both -- find the machine that is out of step and
+        /// finish or roll back the upgrade.
+        ///
+        /// **Its baseline is zero and that is what makes it readable.** A fleet is
+        /// permanently mid-upgrade ([#173]), so it might look like ordinary traffic --
+        /// but a CONVERGED fleet produces none, so the series is zero, then a burst
+        /// while a rollout spans a `CompileValueVersion` bump, then zero again, and any
+        /// rise is a real event with a date on it. Not "the byte has never moved": it
+        /// moved to 2 at #547, which is when this series started doing work rather than
+        /// when it stopped meaning anything. That is the opposite of the `AUTH` refusal
+        /// this tier deliberately leaves uncounted, which a healthy launcher emits once
+        /// per exchange for a whole build.
+        ///
+        /// It is also what makes #483's decision auditable. Refusing a foreign
+        /// generation buys correctness by giving up hits, and without this series
+        /// nobody can see what that trade costs -- the refusal is invisible to the
+        /// launcher, which reports a miss and compiles locally.
+        NodeCacheRequestsRefusedForeignGeneration,
+
+        /// Connections turned away because the `0xFC` listener already holds every
+        /// connection it will.
+        ///
+        /// **Never summed with `WorkerJobsRefusedEndpointBusy`**, which shares its
+        /// wire code (`endpoint-busy`) and nothing else. That one says one request was
+        /// too big for the bytes currently in flight and a smaller or later one would
+        /// be served; this says the surface has no room for another *conversation* at
+        /// all. An operator raises a connection ceiling for one and looks at request
+        /// sizes for the other.
+        ///
+        /// Counted by the endpoint rather than by a surface, because it is decided at
+        /// accept -- before a header exists -- so it names no verb and no owning
+        /// component can be asked for it.
+        NodeFrameConnectionsRefusedAtCapacity,
+
+        /// Node proofs that verified under an identity key the cluster holds live, so a connection
+        /// was admitted by WHICH MACHINE it proved it is rather than by where it dialled from, and is
+        /// sealed from then on (#178,
+        /// [#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428)).
+        ///
+        /// **The positive half, and it is not decoration.** Every other row about this exchange
+        /// counts a refusal, and a fleet where the proof is configured but never taken reads
+        /// identically on all of them to a fleet where it works perfectly: zero refusals. So
+        /// this is what says the route is live, and the pair with `NodeProofsRejected` is what
+        /// says whether a refused proof is a rollout mistake on one machine or somebody forging.
+        ///
+        /// Counted per EXCHANGE, never per verb: a connection that proves once and then sends
+        /// forty heartbeats moves this once. What it measures is how often a machine's identity
+        /// was established, which is per connection by construction.
+        NodeProofsAccepted,
+
+        /// Node proofs whose signature did not verify under the identity key they presented.
+        ///
+        /// A client of another build, or somebody forging a proof. Asked BEFORE the roster, so a
+        /// caller who cannot sign learns nothing about which ids and keys the cluster holds -- and
+        /// a machine the cluster simply never admitted lands in `NodeProofsRefusedUnknownKey`
+        /// instead, because its signature is sound (#178).
+        NodeProofsRejected,
+
+        /// `ProveNode` frames that arrived with no challenge outstanding on their connection.
+        ///
+        /// Never asked for one, or already spent one. Not a security signal and it says so:
+        /// what moves it is a client that has the exchange wrong, which is a version or
+        /// client-library fault. Summed with the rejection above it would hide a forgery
+        /// inside an old client's traffic.
+        NodeProofsUnchallenged,
+
+        /// `NodeChallenge` and `ProveNode` payloads that would not decode into their fixed-width fields.
+        ///
+        /// Apart from the rejection above: a peer that cannot form the frame is a mismatch, and one
+        /// forming it correctly and failing to verify is the security question.
+        NodeProofsMalformed,
+
+        /// Reclaim reports the buffer between the storage tiers and the keyspace
+        /// notifier could not hold, so the `expired` / `evicted` events for those
+        /// keys were never published.
+        ///
+        /// Exported because absent is not zero here either: without it a
+        /// subscriber seeing no `expired` frame cannot tell "nothing expired"
+        /// from "the buffer overflowed". It rises when one call reclaims more
+        /// than the bound at once, which in practice means a `maxmemory` shrink
+        /// on a large cache.
+        KeyspaceReclaimEventsDropped,
+
+        /// Sweeps the active expiry cycle has run.
+        ///
+        /// The denominator for the line below, and on its own the answer to "is
+        /// the cycle running at all" -- which is otherwise indistinguishable
+        /// from "nothing has expired", since both publish no events and reclaim
+        /// nothing. A flat count here on a daemon serving traffic means the
+        /// cycle is disabled or wedged.
+        ExpiryCycles,
+        /// Entries the active expiry cycle reclaimed.
+        ///
+        /// Keys that lapsed and that no client would ever have touched again,
+        /// so nothing else would have reclaimed them. Rising here alongside a
+        /// rising `KeyspaceReclaimEventsDropped` means the sweep is finding
+        /// more per cycle than the notification buffer can carry, and the
+        /// `expired` events for the excess are being lost.
+        ExpiryKeysReclaimed,
+
+        /// Stored values that did not decode as the type their flags claim (#296).
+        ///
+        /// **Its own counter because the alternative is a lie or a silence.** These
+        /// used to be reported as `StorageErrorCode::Corrupt`, so a client planting a
+        /// malformed set moved `fastcached_write_errors_total` and wrote a "storage
+        /// write failed" line -- an unprivileged client driving the disk-failure
+        /// signal on a healthy store. Taking the code away without adding this would
+        /// have traded a wrong signal for no signal at all: the operator would then
+        /// see nothing while clients sent nonsense.
+        ///
+        /// Read it as "clients are sending malformed sets or streams", never as a
+        /// statement about the disk -- what says the disk is failing is
+        /// `fastcached_write_errors_total` beside a `Corrupt` in the log, and this
+        /// counter exists precisely so those two never share a line again.
+        ///
+        /// Both the read and the write path count here: a malformed value is found by
+        /// whichever verb decodes it first, and SMEMBERS reaches it as readily as
+        /// SADD.
+        CacheMalformedValues,
+
+        /// Frames refused at the DAEMON's `0xFC` port for naming a protocol version
+        /// this build does not serve.
+        ///
+        /// The daemon's own half of `WorkerFramesRefusedUnsupportedVersion` and
+        /// `DispatchFramesRefusedUnsupportedVersion`. Three surfaces speak this wire
+        /// and each counts its own, because "which port did the mismatched peer
+        /// reach" is the first thing an operator needs and a shared counter cannot
+        /// say it.
+        CacheFramesRefusedUnsupportedVersion,
+
+        /// Frames naming an opcode this build has no row for, at the daemon's
+        /// `0xFC` port.
+        CacheFramesRefusedUnknownOpcode,
+
+        /// Frames refused before their payload was read, for declaring more than the
+        /// session or the verb allows.
+        ///
+        /// Both ceilings, deliberately: the session-wide cap and the per-verb one are
+        /// two spellings of "more than you may send" and an operator acts on them
+        /// identically -- raise a limit, or find the client that is wrong about it.
+        CacheFramesRefusedPayloadTooLarge,
+
+        /// Frames refused for arriving on a connection that has not authenticated.
+        ///
+        /// Distinct from `CacheCredentialsRejected`, which is a credential PRESENTED
+        /// and refused. This one is a verb attempted without presenting anything, and
+        /// the two send an operator to different places: a wrong password against a
+        /// client that never learned it needs one.
+        CacheFramesRefusedUnauthenticated,
+
+        /// Requests whose payload did not decode as the verb they named.
+        ///
+        /// One counter for STORE and FETCH, following the worker surface's own split
+        /// rather than inventing a finer one: "a verb's payload would not decode" is a
+        /// single operator-facing fact about a broken or mismatched client, and the
+        /// verb is in the log line beside it. AUTH is the exception below, because a
+        /// malformed credential is a security signal rather than a client defect.
+        CacheFramesRefusedMalformedPayload,
+
+        /// AUTH requests whose payload did not decode.
+        ///
+        /// Split from `CacheFramesRefusedMalformedPayload` for the reason the worker
+        /// surface splits it: garbage aimed at the credential verb is what a scanner
+        /// produces, and summing it with ordinary client defects would bury exactly
+        /// the series somebody is watching for.
+        CacheFramesRefusedMalformedCredential,
+
+        /// Credentials presented to the daemon's `0xFC` port and refused.
+        ///
+        /// The signal a password-guessing client produces. Counted separately from
+        /// every framing refusal above because it is the one that means somebody is
+        /// trying rather than misconfigured.
+        CacheCredentialsRejected,
+
+        /// STOREs refused because the value is not a compile value at all.
+        ///
+        /// This server speaks the whole protocol and canonicalizes what it stores; a
+        /// value it cannot decode is a client writing something else to a compile
+        /// cache. Distinct from `CacheMalformedValues`, which is the memcached and
+        /// Redis path's own answer for a set or stream whose bytes contradict the
+        /// flags that describe them.
+        CacheStoresRefusedNotACompileValue,
+
+        /// STOREs refused for naming a canonicalization generation this build does
+        /// not implement.
+        ///
+        /// The daemon's half of `NodeCacheRequestsRefusedForeignGeneration`, and the
+        /// only signal that a fleet is MIXED rather than broken: a rise here names a
+        /// rolling upgrade in progress, and it stopping names one that finished.
+        CacheStoresRefusedForeignGeneration,
+
+        /// STOREs that reached the engine and failed to be written.
+        ///
+        /// Not a refusal of the client's making, and the only one of this surface's
+        /// arms that is about THIS machine rather than about whoever is talking to
+        /// it: a full disk, a read-only mount, a backend that has stopped accepting
+        /// writes. Nothing else counted it -- `fastcached_write_errors_total` is
+        /// named in this file's own history and no longer exists.
+        CacheStoresFailed,
+
+        /// Connections the frame surface swept before the peer had named a verb.
+        ///
+        /// The pre-header window (`FrameServer::HeaderTimeout`, five seconds), armed
+        /// at accept and again before every header read. A peer counted here told the
+        /// surface nothing at all, which is why this is the ENDPOINT's row and not any
+        /// responder's: there is no verb to attribute it to, and a row that named one
+        /// could sum with a verb-attributed refusal that means something else.
+        ///
+        /// **Not an ordinary event**, though it looks like it might be. `RunOneExchange`
+        /// opens a connection, sends immediately, reads the reply and closes, so no
+        /// honest client of this surface idles across the window. A rise is a peer that
+        /// connected and did not speak -- a scanner, a health probe pointed at the
+        /// wrong port, or a client wedged before its first write.
+        ///
+        /// **Never summed with `FrameAnswerDeadlineSweeps`.** That one says a request
+        /// this surface accepted outran its own budget, which is a fleet problem; this
+        /// one says somebody knocked and said nothing, which is background noise on any
+        /// reachable port. Sharing a row would bury the first under the second.
+        FrameRequestDeadlineSweeps,
+
+        /// Connections the frame surface swept after the peer had named a verb.
+        ///
+        /// The verb's own window (`IFrameResponder::RequestTimeout`), armed once the
+        /// header decodes -- a round trip for a scheduler verb, and
+        /// `DefaultCompileLeaseTimeout` for a compile.
+        ///
+        /// **This is the rare, load-bearing one.** For a compile it means a translation
+        /// unit outran the lease it was granted under, so the object it would have
+        /// produced is one the scheduler may already have re-granted to somebody else.
+        /// Before this existed the connection was closed silently and the only trace was
+        /// a Debug log line carrying an undifferentiated total, so a site whose units are
+        /// genuinely longer than the grant could only INFER that from builds that got
+        /// slower.
+        ///
+        /// A rise is a question about the lease timeout, never about this worker's
+        /// speed. See the issue linked from `FrameServer::CloseOverdue`.
+        FrameAnswerDeadlineSweeps,
+
+        /// Swept connections whose peer was told, in a frame, why it was swept.
+        ///
+        /// A second tally of a second event, never a redefinition of the row above:
+        /// that one counts the sweep, this one counts a refusal that went out. Both
+        /// are events that happened, so zero is the truth about a node that swept
+        /// nothing -- what is being modelled here is not an absence.
+        ///
+        /// **It cannot equal `FrameAnswerDeadlineSweeps` and is not meant to.** A
+        /// refusal can only be written by the connection itself, from the one place
+        /// that owns the write side, and only a connection parked INSIDE the
+        /// responder can be reached that way. One parked on the socket -- dribbling a
+        /// header, dribbling a declared payload -- is ended by the close, which is the
+        /// write side gone; it is swept, counted above, and told nothing. The gap
+        /// between the two rows is therefore a real quantity: how many swept peers
+        /// were left to infer it, which is the state #523 set out to shrink and did
+        /// not set out to eliminate.
+        ///
+        /// A peer that had already hung up also lands in the gap: the refusal is
+        /// written, the write fails, and nothing is counted. That is right -- this row
+        /// says a peer was TOLD, and a frame nobody received told nobody.
+        FrameDeadlineRefusalsSent,
+
+        /// Peers the watch saw leave while the connection could still act on it.
+        ///
+        /// **The observation, where `WorkerJobsAbandonedClientGone` is the decision**,
+        /// and they are two rows because the gap between them is the only thing that
+        /// separates three outcomes that used to be one silence: a peer that went and
+        /// was noticed, a peer that went and was not, and a peer whose departure was
+        /// noticed and deliberately not filed. This row rises on the second and third
+        /// alike; that one rises on the third alone. So `departures - abandoned` is
+        /// what was suppressed on purpose -- an empty reply, or a socket this node
+        /// closed itself -- and a client that vanished unnoticed is this row staying
+        /// flat while the object went out anyway
+        /// ([#691](https://github.com/LASTRADA-Software/fastcached/issues/691)).
+        ///
+        /// **Not once per exchange**, which is what would bury it. Every ordinary
+        /// client hangs up too -- `Cc::RunOneExchange` reads its reply and closes --
+        /// and its watcher reaches "gone" just the same; by then the connection has
+        /// already asked the watch what it learned, and a departure after that is not
+        /// counted here. What is left is the mid-answer case this surface exists to
+        /// notice: a cancelled build, a `Ctrl-C`, a CI runner reclaimed with the
+        /// compile still running.
+        ///
+        /// It is never below the row it is read against, by construction: the mark
+        /// that stops this counting is set AFTER the flags are read.
+        FramePeerWatchDepartures,
+
+        /// Every peer departure the watch reached, before either suppression.
+        ///
+        /// **The denominator the row above cannot supply for itself.**
+        /// `FramePeerWatchDepartures` staying flat is the ordinary healthy reading AND
+        /// what a watch that never armed, never concluded or never fired its arms looks
+        /// like, and no amount of staring at one row separates them -- which is this
+        /// tree's rule that a count of BAD things needs a separate assertion that the
+        /// good things exist. This row is that assertion: it rises once per watched
+        /// exchange whose peer went away, which on a healthy surface is once per
+        /// compile, so an operator reading zero here knows the mechanism is not running
+        /// rather than that nobody left.
+        ///
+        /// `observed - departures` is what the two guards suppressed: an ordinary
+        /// hang-up the connection had already read the watch for, or a socket this node
+        /// closed itself. It is therefore never below `FramePeerWatchDepartures`, by
+        /// construction rather than by convention -- the same statement increments this
+        /// and then decides that one.
+        ///
+        /// It does NOT count a watch that concluded because the peer sent BYTES: that
+        /// is a pipelined request, not a departure, and it reaches neither row.
+        FramePeerWatchDeparturesObserved,
+
+        /// Of the departures above, the ones where the peer RESET rather than said
+        /// goodbye.
+        ///
+        /// **A subset of `FramePeerWatchDepartures`, under the same two suppressions**,
+        /// so it is never above that row and `departures - abortive` is exactly the
+        /// graceful half. A sibling rather than a split, because splitting would change
+        /// what an existing row means for anyone already scraping it and a fleet here is
+        /// permanently mid-upgrade
+        /// ([#173](https://github.com/LASTRADA-Software/fastcached/issues/173)); the
+        /// total stays comparable across the change.
+        ///
+        /// **Only one of the two halves is worth an alert, which is the whole point of
+        /// separating them.** A graceful departure mid-answer is ordinary and its rate
+        /// means nothing -- a build cancelled, a `Ctrl-C`, a CI runner reclaimed, all
+        /// day. An abortive one is a crashing client, a machine losing its route, or a
+        /// middlebox resetting long-lived connections: three causes an operator can act
+        /// on, none of which look like normal churn. Summed into one row the signal that
+        /// means something sits under the signal that never does.
+        ///
+        /// The distinction is the transport's and not this code's guess:
+        /// `WaitReadable` answers an ERROR for an abortive close and `0` for EOF, on
+        /// epoll, kqueue and IOCP alike
+        /// ([#673](https://github.com/LASTRADA-Software/fastcached/issues/673)), and
+        /// `WatchPeer` keeps those two arms apart for exactly this reason.
+        FramePeerWatchDeparturesAbortive,
+
+        /// ENROLL requests refused because the pending list was full, so nothing was
+        /// recorded.
+        ///
+        /// **Not a capacity problem and never summed with `EndpointBusy`'s series.** The
+        /// window is ungated by decision -- the explicit approve is the gate -- so
+        /// anybody who can reach an open window can fill the list, and the bound refuses
+        /// rather than evicting precisely so that a flooder cannot push the real joiner
+        /// off the list an operator is reading. A rise is therefore one of exactly two
+        /// things: a rollout larger than the bound, which an operator fixes by approving
+        /// in batches, or somebody filling it on purpose while a window is open. Both are
+        /// worth an operator's attention within the minute, which no other series here
+        /// can claim.
+        EnrollmentRequestsRefusedFull,
+
+        /// ENROLL payloads that arrived in full and would not decode.
+        ///
+        /// Its own series rather than any other malformed-frame counter, which describe a
+        /// truncated compile frame, an undecodable compile payload, two AUTH payloads and
+        /// the cache tier's bodies. This one is the pre-auth surface's, and that is what
+        /// makes it read differently: a client of this tree sends two length-prefixed
+        /// fields, so a body that splits into anything else came from no version of this
+        /// software, and the peer had presented nothing when it sent it.
+        EnrollmentRequestsRefusedMalformed,
+
+        /// ENROLL requests refused because the key they asked under is one the cluster has
+        /// REVOKED (#1555) -- a machine an operator forgot, asking to come back as itself.
+        ///
+        /// Refused at the door rather than recorded, because no approval could admit it: the
+        /// cluster refuses a revoked key by name, so a row for it is one the operator reading
+        /// the list cannot act on, and `Pending` would keep the machine polling for an answer
+        /// that cannot come. Expected once after a forget of a machine that is still running;
+        /// a steady rate is a removed machine nobody stopped, which is worth the same attention
+        /// as `fastcache_raft_peer_connections_refused_revoked_key_total` on the peer wire.
+        EnrollmentRequestsRefusedRevokedKey,
+
+        /// ENROLL requests refused because their signature does not verify under the key they ask
+        /// with -- a request the key's holder did not make.
+        ///
+        /// The id and the key are public, so anybody can poll under a joiner's pair; what they
+        /// cannot do is sign, and an unsigned poll is what once let a stranger set the endpoint a
+        /// joiner's member record kept. Not ordinary on any deployment: a joiner of this tree signs
+        /// every request with the key it states. A rise is somebody polling under another machine's
+        /// identity -- or a joiner whose key file and stated key disagree.
+        EnrollmentRequestsRefusedForged,
+
+        /// ENROLL-CONTROL requests refused because the caller is not a fleet member.
+        ///
+        /// **Somebody trying to approve themselves.** The window admits strangers by
+        /// design and the approval is what it withholds, so this is the refusal that
+        /// carries the whole security argument for the pair -- a peer that reaches this
+        /// has found an open window and gone on to ask for the decision as well. Not
+        /// ordinary on any deployment: an operator running the verb is either listed or
+        /// is being told to be.
+        ///
+        /// Never summed with `NodeStatusRequestsRefusedNotAMember`, which shares the wire
+        /// code and describes somebody asking a node what it is.
+        EnrollmentControlRefusedNotAMember,
+
+        /// Rosters handed to an admitted joiner (#178).
+        ///
+        /// **The event the feature exists to perform**: a machine an operator approved by
+        /// name, whose admission the leader's own roster now records, being told who else is
+        /// in the cluster. It rises once per poll that is answered `Approved`, and a joiner
+        /// stops polling at the first -- so during a rollout it rises about once per machine
+        /// and stops, and a rise on a settled fleet is an operator adding a machine.
+        ///
+        /// No secret crosses with it, which is why it replaced a counter of cluster keys handed
+        /// over rather than keeping that name: the roster is every member's PUBLIC key.
+        ///
+        EnrollmentRostersServed,
+
+        /// Discovery proofs that verified under a key this node's roster does not record for
+        /// the id they claimed (#178). Reported, and never desired.
+        ///
+        /// **The counter for LAN auto-admission ending.** Before #178 a proof of the shared key
+        /// was a proof of membership, so anything that held it was desired onto the cluster;
+        /// now a proof names a KEY, and a key the cluster never admitted is a machine to tell
+        /// an operator about -- by name, key and address, in the log -- rather than one to add.
+        /// A rise is a machine on the segment that wants to join and has not been enrolled, or
+        /// one that was wiped and minted a new key under an old id.
+        DiscoveryProofsRefusedUnknownKey,
+
+        /// Discovery proofs that verified under a key the roster has REVOKED (#178).
+        ///
+        /// Its own row rather than one with the unknown key above, because the two send an
+        /// operator opposite ways: that one is a machine to consider admitting, this one is a
+        /// machine that was removed and is still announcing itself. Only the holder of the key
+        /// could have signed the proof, so naming it is no oracle.
+        DiscoveryProofsRefusedRevokedKey,
+
+        /// Discovery proofs whose signature did not verify under the key they carried (#178).
+        ///
+        /// Not a machine to admit and not a removed one: whoever sent it does not hold the key
+        /// it presented. A healthy segment produces none, so a rise is somebody forging, or a
+        /// build that signs a different message -- which the version byte should have refused.
+        DiscoveryProofsRefusedForged,
+
+        /// Discovery beacons that reached a bound (`Cluster::DiscoveryBounds`): an entry nothing
+        /// vouches for displaced -- the least recently heard unrostered peer, the oldest fleet that
+        /// proved nothing -- or a new fleet dropped because every remembered fleet has proven
+        /// itself. A challenge is held by no table (`Cluster::ChallengeCookies`), so none is here.
+        ///
+        /// A beacon is unauthenticated, so every table it grows is one anything on the segment can
+        /// try to fill by inventing ids; each overflow is counted here rather than logged, since
+        /// logging would hand the same datagram a disk to fill. One series for every bound: the
+        /// count says a flood is under way, not which table it reached. A healthy segment produces
+        /// none; a rise is somebody flooding the beacon port, or a segment far larger than one
+        /// broadcast domain should carry.
+        DiscoveryBeaconsOverBound,
+
+        /// Discovery replies not sent: a challenge or a proof that would have been larger than
+        /// the datagram that provoked it, or a proof past the answer budget (`Cluster::WorkBudgets`,
+        /// the source host's share and then everybody's).
+        ///
+        /// A reply goes to whatever address its request came FROM, which the sender typed, so a
+        /// reply larger than its request would be an amplifier and an unlimited one a signing
+        /// oracle. Counted rather than logged, since anything on the segment can provoke it. Two
+        /// builds of this project never produce the size case against each other; a rise is
+        /// somebody sending challenges by hand, a flood of them, or -- once per change, and gone by
+        /// the next beacon round -- a node whose summary grew between its beacon and its answer.
+        DiscoveryRepliesWithheld,
+
+        /// Discovery proofs whose signature was not checked: each answered a challenge this node
+        /// issued and had not spent, but the check budget (`Cluster::WorkBudgets`, the source
+        /// host's share and then everybody's) was spent, or the challenge had already failed
+        /// `Cluster::MaxForgeriesPerChallenge` checks. A forgery spends no challenge, so without
+        /// these one live challenge bought a signature check per datagram. The next beacon round
+        /// asks again.
+        DiscoveryProofChecksWithheld,
+
+        /// A live-stats stream this node granted and began pushing to. (#1399)
+        LiveSubscriptionsOpened,
+        /// A snapshot rendered for a live-stats subject, once per subject per tick however many watch it. (#1399)
+        LiveSnapshotsRendered,
+        /// A snapshot a slow subscriber never received, sent to it as a gap. (#1399)
+        LiveSnapshotsSkipped,
+        /// A live stream ended because re-gating refused its peer. (#1399)
+        LiveSubscriptionsRevoked,
+        /// A fleet stream ended because this node stopped leading. (#1399)
+        LiveSubscriptionsEndedNotLeader,
+        /// A live subscription refused because the node already streams to its maximum. (#1399)
+        LiveSubscriptionsRefusedAtCapacity,
+        /// A fleet subscription refused for a missing or wrong dashboard credential. (#1399)
+        LiveSubscriptionsRefusedUnauthenticated,
+        /// A live stream ended because one push stayed unwritten past its bound. (#1399)
+        LiveSubscriptionsStalled,
+        /// A live stream the watching client closed. (#1399)
+        LiveSubscriptionsEndedByClient,
+        /// A live stream whose watching client reset the connection rather than closing it. (#1399)
+        LiveSubscriptionsEndedByReset,
+        /// A live subscription refused because its peer is not a fleet member. (#1399)
+        LiveSubscriptionsRefusedNotAMember,
+        /// A SUBSCRIBE whose fields did not decode, or that named a subject this build does not serve. (#1399)
+        LiveSubscriptionsRefusedMalformed,
+        /// A SUBSCRIBE header that declared more than the control payload it is bounded to. (#1399)
+        LiveSubscriptionsRefusedPayloadTooLarge,
+        /// A SUBSCRIBE refused because the listener's in-flight byte budget was full. (#1399)
+        LiveSubscriptionsRefusedEndpointBusy,
+
+        /// A FLEET-TEXT refused because its peer is not a fleet member. (#1391)
+        FleetTextRequestsRefusedNotAMember,
+        /// A FLEET-TEXT refused for a missing or wrong dashboard credential. (#1391)
+        FleetTextRequestsRefusedUnauthenticated,
+        /// A FLEET-TEXT whose fields did not decode. (#1391)
+        FleetTextRequestsRefusedMalformed,
+        /// A FLEET-TEXT header that declared more than the control payload it is bounded to. (#1391)
+        FleetTextRequestsRefusedPayloadTooLarge,
+        /// A FLEET-TEXT refused because the listener's in-flight byte budget was full. (#1391)
+        FleetTextRequestsRefusedEndpointBusy,
+
+        /// A Raft peer connection whose first frame was not a proof this build can read. (#1308)
+        RaftPeerConnectionsRefusedNoHandshake,
+        /// A Raft peer connection that did not prove its id within the handshake bound. (#1308)
+        RaftPeerConnectionsRefusedHandshakeTimeout,
+        /// A Raft peer connection whose proof did not verify under the key held for its id. (#1308, #178)
+        RaftPeerConnectionsRefusedProof,
+        /// A Raft dialler that proved its id but dialled another member. (#1308)
+        RaftPeerConnectionsRefusedWrongTarget,
+        /// A Raft dialler that proved this node's own id, holding its private key. (#1308, #178)
+        RaftPeerConnectionsRefusedOwnId,
+        /// A Raft session frame whose tag did not verify, which ends the connection. (#1308)
+        RaftPeerFramesRefusedTag,
+        /// A verified Raft message naming a sender other than the connection's proven dialler. (#1308)
+        RaftPeerFramesRefusedSender,
+        /// A verified Raft frame this build cannot read, which ends the connection.
+        RaftPeerFramesRefusedUnreadable,
+        /// A Raft frame declaring more payload than this node buffers, which ends the connection.
+        RaftPeerFramesRefusedOverCap,
+        /// A Raft frame whose header did not decode, which ends the connection.
+        RaftPeerFramesRefusedBadMagic,
+        /// A Raft peer connection closed because the listener already serves its maximum. (#1308)
+        RaftPeerConnectionsRefusedFull,
+        /// A Raft dial whose acceptor did not challenge or answer within the handshake bound. (#1308)
+        RaftPeerDialsRefusedTimeout,
+        /// A Raft dial whose acceptor opened with something other than a challenge this build reads. (#1308)
+        RaftPeerDialsRefusedNoChallenge,
+        /// A Raft dial whose acceptor's verdict did not verify under the key held for its id. (#1308, #178)
+        RaftPeerDialsRefusedAcceptorProof,
+        /// A Raft dial answered, signed, by a member other than the one dialled. (#1308)
+        RaftPeerDialsRefusedWrongTarget,
+        /// A Raft dial refused, signed, because the acceptor proved this node's own id from it. (#1308, #178)
+        RaftPeerDialsRefusedOwnId,
+        /// A Raft dial the acceptor closed after this node's proof, with no signed verdict. (#1308)
+        RaftPeerDialsEndedByAcceptor,
+
+        /// A CLUSTER-ADMIT naming an identity key that does not parse, refused before anything
+        /// was proposed. Both of this project's clients parse the key where it is typed, so a
+        /// rise names a client that does not -- one whose members would otherwise join with no
+        /// identity while their operator was shown a key. (#178)
+        ClusterAdmissionsRefusedMalformedKey,
+
+        /// A Raft peer connection whose proof claimed an id this node holds no key for. (#178)
+        RaftPeerConnectionsRefusedUnknownKey,
+        /// A Raft peer connection proved with a key the cluster has revoked. (#178)
+        RaftPeerConnectionsRefusedRevokedKey,
+        /// A proven Raft peer connection this node closed because the cluster no longer holds its key. (#178)
+        RaftPeerConnectionsEndedKeyWithdrawn,
+        /// A Raft dial answered by a member this node holds no key for. (#178)
+        RaftPeerDialsRefusedAcceptorKeyUnknown,
+        /// A Raft dial answered by a member whose key the cluster has revoked. (#178)
+        RaftPeerDialsRefusedAcceptorKeyRevoked,
+        /// A Raft dial refused, by a verified verdict, because the cluster revoked this node's key. (#178)
+        RaftPeerDialsRefusedOwnKeyRevoked,
+        /// A proven Raft dial this node ended because the cluster no longer holds the acceptor's key. (#178)
+        RaftPeerDialsEndedKeyWithdrawn,
+        /// A two-way Raft session this node dialled, ended because a frame the acceptor wrote failed its tag.
+        RaftPeerDialsEndedFrameTag,
+        /// A two-way Raft session this node dialled, ended because a verified message named another sender.
+        RaftPeerDialsEndedFrameSender,
+        /// A two-way Raft session this node dialled, ended on a verified frame this build cannot read.
+        RaftPeerDialsEndedFrameUnreadable,
+        /// A two-way Raft session this node dialled, ended on a frame declaring more than this node buffers.
+        RaftPeerDialsEndedFrameOverCap,
+        /// A two-way Raft session this node dialled, ended on a frame whose header did not decode.
+        RaftPeerDialsEndedFrameBadMagic,
+        /// A two-way Raft session this node dialled that carried nothing for its idle bound, so
+        /// this node closed it and redials (`SessionIdleTable`): a session to a voter that is not
+        /// leading, or a half-open one whose other end went away while this machine slept.
+        RaftPeerDialsEndedSilent,
+        /// A Raft message dropped for a peer that dials in (a learner, by its seat's link) and has
+        /// no session attached: offline, or not yet dialled.
+        RaftSendsDroppedNoSession,
+        /// A Raft message dropped for a peer this node can place nowhere: it neither dials it nor
+        /// was told it dials in.
+        RaftSendsDroppedUnknownPeer,
+        /// A Raft session closed because the same id proved a newer one -- a two-way session by
+        /// the transport, a one-way session by the acceptor: a member that reconnected, or -- at a
+        /// steady rate -- two machines sharing one identity key.
+        RaftInboundSessionsSuperseded,
+
+        /// A grant refused because the state this worker applied records no voter's key yet. (#178)
+        WorkerJobsRefusedLeaseNoRoster,
+        /// A grant refused because this worker has heard from no leader its applied configuration
+        /// counts for longer than `Distributed::LeaderSilenceBound`. (#178)
+        WorkerJobsRefusedLeaseIsolated,
+        /// A grant whose signature verifies under a key the cluster revoked. (#178)
+        WorkerJobsRefusedLeaseSignerRevoked,
+
+        /// A node proof whose signature verified under a key this cluster does not hold for the id
+        /// it named: a machine nobody admitted, or one presenting a key other than its own. (#178)
+        NodeProofsRefusedUnknownKey,
+        /// A node proof whose signature verified under a key this cluster REVOKED: the forgotten
+        /// machine itself, still dialling in. The connection is kept and marked, and every later
+        /// verb on it is refused as that machine's. (#178)
+        NodeProofsRefusedRevokedKey,
+        /// A verb refused, at any door, because the connection proved an identity key the cluster
+        /// revoked, or presented a ticket signed by one -- whatever its address: the removed
+        /// MACHINE. A machine is forgotten by its key, so this is the one forgotten-machine
+        /// refusal. Only a proof is TOLD it; a ticket's holder, who may have captured it, gets the
+        /// stranger's words, and off `--fleet-open` this counter is the one place the two are told
+        /// apart; under the flag the refusal itself tells them, since a stranger is served. (#178, #1555)
+        NodeRequestsRefusedKeyRevoked,
+        /// A proven connection closed because a frame's seal did not verify: something between the
+        /// two ends injected, altered, replayed or reordered a frame. Never answered -- an injected
+        /// verb is what the seal exists to make worthless. (#178)
+        NodeSealedFramesRefused,
+        /// A verb only a machine that proved its identity may send -- REGISTER, NODE-ANNOUNCE,
+        /// HEARTBEAT, WITHDRAW -- refused on a connection that proved none that is live. (#178)
+        SchedulerRequestsRefusedNodeIdentityRequired,
+        /// Enrollment requests the leader forgot because the machine stopped asking for
+        /// `PendingRowLifetime` before anybody decided about it. A machine switched off or given up
+        /// while waiting; one that asks again is recorded afresh.
+        EnrollmentRequestsExpired,
+        /// Joiners an operator admitted by name with `--enroll-approve`, counted once the cluster
+        /// agreed to record them.
+        EnrollmentApprovalsManual,
+        /// Joiners an armed `--enroll-auto-approve` deadline admitted, counted apart from the
+        /// manual ones because the audit question after a window is *who got in while nobody was
+        /// looking*.
+        EnrollmentApprovalsAuto,
+        /// ENROLL requests refused because their source host already held
+        /// `MaxPendingEnrollmentsPerHost` undecided rows. Apart from the full-list row because the
+        /// cause is one address asking a lot rather than many machines waiting, which is what a
+        /// flood looks like.
+        EnrollmentRequestsRefusedHostCap,
+        /// Rows `--enroll-clear` dropped: requests nobody had decided about, forgotten on an
+        /// operator's word.
+        EnrollmentRequestsCleared,
+        /// Approvals refused because the key they named is not the key the row holds: the
+        /// machine asking under that id now is not the one the operator compared -- most often
+        /// because the compared one stopped asking and another took its id.
+        EnrollmentApprovalsRefusedKeyMismatch,
+        /// ENROLL requests refused because the id they named is longer than `MaxIdBytes`, the bound
+        /// every id this fleet carries is held to. Refused where the id ENTERS: a row holding one is
+        /// a row `--enroll-reject` cannot name, removable only by clearing every honest row with it.
+        EnrollmentRequestsRefusedIdTooLong,
+        /// Times this node decided to ask another fleet to admit it: a solitary node that proved an
+        /// older or established fleet it yields to, and recorded the join before asking.
+        FormationYields,
+        /// Joins this node gave up because the fleet it asked stopped answering for
+        /// `PendingGiveUpAfter`. It stays in its own cluster and may ask again.
+        FormationJoinsAbandoned,
+        /// Admissions a pending node did not believe: the roster it was handed does not record it
+        /// under its own key, or records no member under the key that proved the fleet it asked. No
+        /// dissolve follows; the node stays in its own cluster. Only admissions whose signature
+        /// held reach this check: an unsigned or forged one is `FormationAdmissionsUnverified`.
+        FormationAdmissionsRefused,
+
+        /// A machine ticket this node verified and spent: AUTH on that connection speaks for the
+        /// machine it names.
+        NodeTicketsAccepted,
+        /// A machine ticket whose bytes are not one: a client of another version, or none of ours.
+        NodeTicketsRefusedMalformed,
+        /// A genuine machine ticket whose machine id or audience is not UTF-8, refused before it is
+        /// compared, logged or rendered.
+        NodeTicketsRefusedNotUtf8,
+        /// A machine ticket refused because this node holds no current roster to check it against.
+        NodeTicketsRefusedNoRoster,
+        /// A machine ticket naming a machine the roster holds no live key for, signed by no revoked
+        /// key: a machine not admitted.
+        NodeTicketsRefusedUnknownMachine,
+        /// A machine ticket naming an admitted machine and not signed by that machine's key.
+        NodeTicketsRefusedForged,
+        /// A machine ticket signed by a key the cluster revoked: the forgotten machine itself.
+        NodeTicketsRefusedRevoked,
+        /// A genuine machine ticket minted for an endpoint other than this node.
+        NodeTicketsRefusedWrongAudience,
+        /// A genuine machine ticket outside the acceptance window, past it or too far ahead of it, or
+        /// expiring no later than a spend this node has already let go of.
+        NodeTicketsRefusedExpired,
+        /// A genuine machine ticket this node had already spent.
+        NodeTicketsRefusedReplayed,
+        /// A genuine machine ticket refused because this node's spent set is full of live entries.
+        NodeTicketsRefusedSpentSetFull,
+
+        /// Machine tickets this node signed for a process on this machine (MINT-TICKET).
+        ///
+        /// The positive half of the four mint refusals below, and the figure a fleet's ticket traffic
+        /// starts from: every ticket some node accepts was minted by one of these.
+        NodeTicketsMinted,
+        /// MINT-TICKET asked from anywhere but loopback: a ticket is minted for this machine's own
+        /// processes only, judged from the connection's peer address, so the request is refused
+        /// before anything is signed.
+        NodeTicketMintsRefusedNotLocal,
+        /// MINT-TICKET whose audience will not decode, is not UTF-8 text (which every verifier
+        /// refuses), or names no one machine -- loopback, a wildcard, or no host at all -- so the
+        /// ticket would be spendable at any node.
+        NodeTicketMintsRefusedMalformed,
+        /// MINT-TICKET on a node that holds no identity key, so it has nothing to sign with.
+        NodeTicketMintsRefusedNoKey,
+        /// MINT-TICKET this node could not draw a nonce for (#1527): a fact about this machine's
+        /// random source, answered as a refusal rather than a weaker ticket.
+        NodeTicketMintsRefusedNoRandom,
+
+        /// An operator's control verb -- a cluster admission, forget or setting -- from a caller
+        /// `--fleet-open` alone admitted, refused `IdentifiedCallerRequired`. The caller is a member
+        /// and asked to change the fleet anyway, so on an open node this is somebody trying the
+        /// decision half of the policy.
+        SchedulerRequestsRefusedIdentifiedCallerRequired,
+        /// An `ENROLL-CONTROL` -- approve, reject, auto-approve, clear, list -- from a caller
+        /// `--fleet-open` alone admitted: an anonymous caller trying to decide who joins. Kept apart
+        /// from `EnrollmentControlRefusedNotAMember`, which is a caller nothing admitted at all.
+        EnrollmentControlRefusedIdentifiedCallerRequired,
+        /// An operator's control verb -- a cluster admission, forget or setting -- from an IDENTIFIED
+        /// caller whose machine holds no voter's seat, refused `OperatorStandingRequired`: a learner's
+        /// machine ticket or proven key. A ticket proves a fleet machine, never an operator, so a rise
+        /// is a process on a fleet machine trying to decide the fleet.
+        SchedulerRequestsRefusedOperatorStandingRequired,
+        /// An `ENROLL-CONTROL` -- approve, reject, auto-approve, clear, list -- from an identified
+        /// caller whose machine holds no voter's seat: a learner deciding who joins. Kept apart from
+        /// `EnrollmentControlRefusedIdentifiedCallerRequired`, an anonymous caller.
+        EnrollmentControlRefusedOperatorStandingRequired,
+
+        /// Lease requests refused because a string they carried -- the key, the toolchain
+        /// fingerprint, or the label a person reads that toolchain by -- is not UTF-8. The lease-side
+        /// twin of `DispatchWorkerRegistrationsMalformed`: a lease refused `no-worker` is recorded for
+        /// the leader's `unserved-toolchain` condition and a granted one is listed with its key, so
+        /// what a lease names enters the fleet's state and is gated where it enters. This project's
+        /// launcher sends only a label it checked, so a rise names a client that does not.
+        DispatchLeasesMalformed,
+        /// Lease requests refused because a string they carried is longer than a scheduler records:
+        /// the key (`CompileCacheWire::MaxLeaseKeyBytes`), the toolchain fingerprint
+        /// (`MaxToolchainFingerprintBytes`) or its label (`MaxToolchainLabelBytes`). Each is kept, so
+        /// each has a ceiling far below the frame's. Apart from `DispatchLeasesMalformed` because the
+        /// two have different causes: that one is bytes that are not text, this one text longer than
+        /// anything a real client writes -- and this project's launcher sends neither.
+        DispatchLeasesFieldTooLong,
+
+        /// Registrations refused because a field they carried is longer than a scheduler records:
+        /// the fingerprint, endpoint, version, toolchain label, display name or codec list, each
+        /// against its `CompileCacheWire` ceiling. Every one is kept in the worker's entry. Apart from
+        /// `DispatchWorkerRegistrationsMalformed`, which counts bytes that are not text: this one is
+        /// a field longer than anything this project's nodes send.
+        DispatchWorkerRegistrationsFieldTooLong,
+        /// Machine announcements (NODE-ANNOUNCE) refused because their endpoint or version is longer
+        /// than a scheduler records. Both are kept in the machine's row on the fleet page. A condition
+        /// row's fields have ceilings too, but over the wire the decoder refuses an overlong one first,
+        /// as a malformed frame that no counter moves for -- so this counts those only for a caller
+        /// of the service in the same process. This project's nodes send none that long, so a rise
+        /// names a peer that does.
+        DispatchNodeAnnouncementsFieldTooLong,
+        /// Answers -- an admission, a refusal or a not-yet -- a pending node refused because their
+        /// signature did not bind them to the fleet it asked: none, one that does not verify over its
+        /// own request and the outcome stated, or a genuine one by a key it never proved for that
+        /// fleet. Each counts as no answer. A roster is public, so this -- not the roster's content --
+        /// is what stops an answer the fleet did not give.
+        FormationAdmissionsUnverified,
+        /// Proven fleets a solitary node would have asked to admit it and did not, because
+        /// `--fleet-id` pins it to another cluster. Once per proof, so a fleet that keeps beaconing
+        /// keeps counting: the attack the pin stops looks like exactly this.
+        FormationYieldsRefusedPin,
+        /// Moves into another cluster a pinned node refused: an approval from a fleet its pin does
+        /// not admit, or its fleet's order to dissolve into one. No state changes; once per answer
+        /// or per order.
+        FormationAdmissionsRefusedPin,
+        /// Serving bodies that found, at their start, that a state file in this node's directory is
+        /// replaced by the classic rename: the POSIX-semantics one was refused (`ProbeReplaceRoute`).
+        /// On Windows a reader holding a state file open then makes its replace fail.
+        StateFileReplacesFellBack,
+
+        /// Serving bodies that found, as they started, that the filesystem holding this node's state
+        /// directory cannot sync a directory at all, so a replaced state file is not known to survive a
+        /// power loss there (`Consensus::MeansDirectorySyncUnsupported`). Every replace still lands --
+        /// such a volume used to refuse them all -- and the warning names the directory and the answer.
+        StateDirectorySyncsUnsupported,
+
+        /// A node proof this node could not judge YET, answered `RosterNotYetApplied` rather than
+        /// `NodeProofsRefusedUnknownKey`: its consensus had not applied the log it recovered at start,
+        /// so its key roster could lack a key its cluster holds. A few at every start are the boot
+        /// order; a count that keeps rising is a node that cannot elect, or cannot hear its leader.
+        NodeProofsRefusedRosterNotYetApplied,
+
+        /// Times this node's advertised `0xFC` endpoint moved: the address it routes from changed
+        /// (a DHCP renewal, Wi-Fi to wired, another network) or a reload re-pinned `--advertise`.
+        /// Written by `EndpointResolver` alone, the endpoint's sole publisher.
+        NodeEndpointChanges,
+        /// Times this node's advertised Raft endpoint moved, for the same two reasons; the Raft
+        /// half of `NodeEndpointChanges`, counted apart because only a voter's move re-addresses it
+        /// in the cluster's record.
+        NodeRaftEndpointChanges,
+
+        Last,
+    };
+
+    /// Increment the named counter by 1 (or `by`).
+    virtual void Increment(Counter counter, std::uint64_t by = 1) noexcept = 0;
+
+    /// Read the current value of a counter.
+    [[nodiscard]] virtual std::uint64_t Read(Counter counter) const noexcept = 0;
+
+    /// Whether this sink can represent @p counter at all.
+    ///
+    /// Asked of the SINK rather than computed by the caller, because a caller that
+    /// tested `counter < Counter::Last` would be asking its OWN build -- the one
+    /// that already believes the row exists -- and would answer yes every time.
+    ///
+    /// What this does NOT do, stated here because the claim is easy to overstate
+    /// and this header already argues the narrow version of it further down: it is
+    /// not a guarantee. `AtomicMetricsSink::Carries` is an inline function emitted
+    /// weakly by every translation unit, and an enum skew is an ODR violation
+    /// within one link, so the definition the linker keeps may be the one compiled
+    /// against the NEWER, longer enum -- and then this answers `true` for exactly
+    /// the rows it exists to catch. An ODR-skewed build is unsound in both
+    /// directions. What this buys is the direction where the SINK's shorter
+    /// definition wins, which is the same direction the bounds check covers, and
+    /// in that direction it turns a plausible zero into a named omission.
+    ///
+    /// A `false` is never an ordinary runtime condition. It means the catalogue
+    /// and the sink were compiled against different versions of `Counter`, so the
+    /// build is inconsistent rather than misused (#1332, #1353). Callers report
+    /// it; they do not route around it.
+    ///
+    /// It is a separate question from `Read`, which answers `0` for such a counter
+    /// because it must return something and reading past the array is worse. `0`
+    /// is indistinguishable from an honest tally of nothing, which is what makes
+    /// this predicate necessary rather than redundant.
+    ///
+    /// @param counter The counter a caller is about to name.
+    /// @return Whether this build's sink has a slot for it.
+    [[nodiscard]] virtual bool Carries(Counter counter) const noexcept = 0;
+};
+
+/// How many counters this build can represent: the extent of every table keyed by `IMetricsSink::Counter`.
+///
+/// Spelled once, here rather than as `EnumeratorCount<Counter>`: this header is included by
+/// `fastcache-cc`'s `WorkerProtocol.hpp` and `CodecEnvelope.hpp`, which do not link Pace, so
+/// pulling in `Core/EnumTable.hpp` -- and with it `<ranges>`, `<algorithm>` and `<functional>` --
+/// would be the wrong trade for one constant.
+inline constexpr std::size_t CounterCount = static_cast<std::size_t>(IMetricsSink::Counter::Last);
+
+namespace CounterSkew
+{
+    /// A type that is different for every counter count, so a function taking one is a different linker
+    /// symbol for every count.
+    /// @tparam Count The count.
+    template <std::size_t Count>
+    struct Extent
+    {
+    };
+
+    /// The link-time half of the counter-skew guard (#1361). Defined exactly once, in `Metrics/IMetricsSink.cpp`,
+    /// for the count THAT file was compiled against.
+    ///
+    /// A unit compiled against a different `Counter` asks for a different symbol, and the link fails naming this
+    /// function and the count the stale unit saw -- rather than succeeding with two extents of every table keyed by
+    /// the enum, which is an ODR violation no run-time check is sound against (see `AtomicMetricsSink::SlotOf`).
+    ///
+    /// The count is a PARAMETER type, never a return type: a return type is not part of a function's mangled name
+    /// on Linux, so two counts would name one symbol and link silently.
+    /// @return true.
+    [[nodiscard]] bool RequireExtent(Extent<CounterCount> /*extent*/) noexcept;
+} // namespace CounterSkew
+
+/// Every unit that includes this header asks, at static initialisation, for the counter count it was compiled
+/// against (#1361).
+///
+/// `static`, and that is the mechanism rather than style. With internal linkage every such unit owns its own
+/// initializer calling `CounterSkew::RequireExtent`, and that call survives every optimisation level: the callee
+/// is external and its result unknown to the compiler. `ctest -R counter-extent-link` builds a unit against a copy
+/// of this header with one more enumerator, in Debug and Release, and requires the link to fail.
+///
+/// The two tempting shapes both LINK a skewed unit, measured with that fixture on 2026-09-14 (MSVC 14.51, g++ and
+/// clang++-22 on Ubuntu 24.04):
+/// - `inline` instead of `static` is one COMDAT whose name carries no count. clang++ linked the skewed unit in
+///   Debug and Release, because the linker kept the healthy unit's copy; MSVC and g++ happened not to.
+/// - Referencing the function without calling it (`&CounterSkew::RequireExtent != nullptr`) is folded away.
+///   g++ and clang++ linked it in both configurations, MSVC in Release.
+///
+/// Costs one no-op call per including unit, once, at start-up; nothing on any path that counts.
+[[maybe_unused]] static bool const CounterExtentLinked = CounterSkew::RequireExtent({});
+
+/// The index @p counter occupies in a table keyed by `IMetricsSink::Counter`, or absent when this
+/// build has no such row.
+///
+/// **The one place in this tree that turns a `Counter` into an index** (#1366), which
+/// `ctest -R counter-index-seam` enforces. An absent answer is what `IMetricsSink::Carries`
+/// describes, and is stated there rather than here. Every table keyed by the enum reaches its rows
+/// through this -- `CounterCells` for storage, `DescriptorOf` for the catalogue -- so a new one has an
+/// obvious thing to call rather than a cast with no diagnostic.
+/// @param counter The counter a caller named.
+/// @return Its index, or `std::nullopt` at or past `Counter::Last`.
+[[nodiscard]] constexpr std::optional<std::size_t> CounterIndex(IMetricsSink::Counter counter) noexcept
+{
+    auto const index = static_cast<std::size_t>(counter);
+    if (index >= CounterCount)
+        return std::nullopt;
+    return index;
+}
+
+/// One value per `IMetricsSink::Counter`, reachable only BY the counter.
+///
+/// There is no integer subscript, deliberately: a table keyed by the enum and indexed by a
+/// hand-written cast is the shape `CounterIndex` exists to replace, and a cast whose operand is a
+/// template parameter is invisible to any text scan -- so here it does not compile instead (#1366).
+/// @tparam Cell What each counter holds.
+template <typename Cell>
+class CounterCells
+{
+  public:
+    /// The cell for @p counter.
+    /// @param counter The counter a caller named.
+    /// @return Its cell, or nullptr when this build has no row for it.
+    [[nodiscard]] constexpr Cell* Find(IMetricsSink::Counter counter) noexcept
+    {
+        auto const index = CounterIndex(counter);
+        return index.has_value() ? &_cells[*index] : nullptr;
+    }
+
+    /// The cell for @p counter.
+    /// @param counter The counter a caller named.
+    /// @return Its cell, or nullptr when this build has no row for it.
+    [[nodiscard]] constexpr Cell const* Find(IMetricsSink::Counter counter) const noexcept
+    {
+        auto const index = CounterIndex(counter);
+        return index.has_value() ? &_cells[*index] : nullptr;
+    }
+
+    /// Every cell in enumerator order, for an encoding that carries the table by POSITION.
+    ///
+    /// Not a way to reach one counter's cell: a position here means "the next row", and a caller that
+    /// computes one from a `Counter` is back to the cast this type exists to remove.
+    /// @return The cells.
+    [[nodiscard]] constexpr std::span<Cell, CounterCount> Positional() noexcept
+    {
+        return _cells;
+    }
+
+    /// Every cell in enumerator order, for an encoding that carries the table by POSITION.
+    /// @return The cells.
+    [[nodiscard]] constexpr std::span<Cell const, CounterCount> Positional() const noexcept
+    {
+        return _cells;
+    }
+
+    /// Every cell equal, in order.
+    [[nodiscard]] constexpr bool operator==(CounterCells const&) const = default;
+
+  private:
+    std::array<Cell, CounterCount> _cells {};
+};
+
+/// Default atomic-counter sink.
+///
+/// `Counter` is a closed enum and every caller names an enumerator, so an index
+/// at or past `Counter::Last` is not a bad argument -- it is a build in which two
+/// translation units disagree about how many counters there are. `_counters`'
+/// extent is `Counter::Last` too, so such a build also disagrees about
+/// `sizeof(AtomicMetricsSink)`, which is an ODR violation rather than a stale
+/// guard.
+///
+/// It is reachable in practice: while #1298 added seven counters, a unit compiled
+/// before the enum grew still carried a definition bounded by the OLD `Last`, and
+/// every counter at the new highest ordinal was dropped. Deleting the two
+/// obviously-affected objects did not clear it; only rebuilding the target's 120
+/// objects did. Everything measured in between had to be discarded.
+///
+/// What that cost was not the drop, it was the SILENCE. Answering `0` for *this
+/// build cannot represent that counter* collapses it with *no such event has
+/// happened*, and the second is what every reader of `/metrics` takes a zero to
+/// mean -- `.agent/rules/metrics-and-observability.md`, where absent is not zero
+/// and a counter is a tally whose zero is the truth about events that never
+/// happened. An acceptance case failed with its counter reading zero while the
+/// refusal it counted was demonstrably correct on the wire, and the zero pointed
+/// at the code rather than at the build.
+class AtomicMetricsSink final: public IMetricsSink
+{
+  public:
+    /// @note Dropping is the only thing this can do, and that is a constraint
+    ///       rather than a decision: an increment has no return value and this
+    ///       sink has no channel to report on, so there is nowhere for the
+    ///       condition `Carries` names to go from here. The counter is not
+    ///       written -- the alternative is an out-of-range atomic write -- and in
+    ///       a RELEASE build the drop is therefore silent here by necessity,
+    ///       which is exactly why `Carries` exists for callers to ask first. It
+    ///       is not silent everywhere: `SlotOf` asserts, so a debug build
+    ///       aborts at this site rather than dropping. See `Carries`' contract on
+    ///       `IMetricsSink`; it is stated there rather than restated here.
+    void Increment(Counter counter, std::uint64_t by = 1) noexcept override
+    {
+        if (auto* const slot = SlotOf(_counters, counter))
+            slot->fetch_add(by, std::memory_order_relaxed);
+    }
+
+    /// @note The `0` an unrepresentable counter reads back is indistinguishable
+    ///       from an honest tally of nothing, and this function cannot fix that --
+    ///       telling the two apart needs the RETURN TYPE to say so, which is every
+    ///       caller of `IMetricsSink::Read`. What closes the reporting half is
+    ///       `Carries` below: a caller that renders a whole table asks FIRST and
+    ///       never reaches this `0` for a row the sink has no slot for (#1353).
+    [[nodiscard]] std::uint64_t Read(Counter counter) const noexcept override
+    {
+        auto const* const slot = SlotOf(_counters, counter);
+        return slot != nullptr ? slot->load(std::memory_order_relaxed) : 0;
+    }
+
+    /// @note No assert here, unlike the accessors: ASKING whether a counter is
+    ///       carried is a legitimate question with a legitimate `false`, and it is
+    ///       the question a caller asks precisely so it does not have to reach an
+    ///       accessor it should not call.
+    [[nodiscard]] bool Carries(Counter counter) const noexcept override
+    {
+        return CounterIndex(counter).has_value();
+    }
+
+  private:
+    /// The slot @p counter occupies in @p counters, or nullptr when this build cannot represent it.
+    ///
+    /// Both accessors go through it, and a third added later -- a `Snapshot()`, a test-only
+    /// `Reset()` -- has an obvious thing to call rather than reaching `_counters` with no
+    /// diagnostic, which is the same silence class this is about. A template so the const and the
+    /// mutable accessor share one body.
+    ///
+    /// The assert is a PROGRAMMER ERROR rather than a condition to handle, so a
+    /// debug build aborts at the site instead of reporting one metric that will
+    /// not move hundreds of milliseconds later. `noexcept` rules out the
+    /// exception this project would otherwise raise for a violated precondition.
+    ///
+    /// The bounds check STAYS in release rather than being replaced by the assert,
+    /// because removing it would turn a silent zero into an out-of-range atomic
+    /// write on the path where the array is the longer of the two -- a
+    /// memory-safety bug introduced to make a reporting bug louder.
+    ///
+    /// It is NOT a guarantee, and the claim is worth stating narrowly: these are
+    /// inline functions emitted weakly by every TU, so a skewed build can also
+    /// link the definition compiled against the NEW, longer enum against storage
+    /// allocated by a TU that saw the OLD, shorter array -- and then this check
+    /// accepts an ordinal past the real extent and writes past the object anyway.
+    /// An ODR-skewed build is unsound in both directions. What this check buys is
+    /// the direction where the stale definition wins; what the assert buys is the
+    /// odds of somebody NOTICING, which is what was missing.
+    ///
+    /// @tparam Cells `CounterCells<std::atomic<std::uint64_t>>`, const or not.
+    /// @param counters This sink's storage.
+    /// @param counter The counter a caller named.
+    /// @return Its slot, or nullptr past this build's range.
+    template <typename Cells>
+    [[nodiscard]] static auto SlotOf(Cells& counters, Counter counter) noexcept -> decltype(counters.Find(counter))
+    {
+        auto* const slot = counters.Find(counter);
+        assert(slot != nullptr
+               && "counter past Counter::Last -- two translation units disagree about the enum, "
+                  "so this build is inconsistent rather than misused (#1332)");
+        return slot;
+    }
+
+    CounterCells<std::atomic<std::uint64_t>> _counters {};
+};
+
+} // namespace Pace

@@ -18,9 +18,9 @@
 #include <tests/BoundedWait.hpp>
 #include <tests/ScopedPipeStdin.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using FastCache::Testing::ScopedPipeStdin;
+using namespace Pace;
+using namespace Pace::Cli;
+using Pace::Testing::ScopedPipeStdin;
 
 namespace
 {
@@ -37,7 +37,7 @@ template <std::predicate Condition>
 void DrainUntil(core::net::testing::TestLoop& reactor, Condition done, char const* what)
 {
     // Out of the REQUIRE: its macro spells the expression twice, so a move inside it reads as a use after move.
-    auto const reached = FastCache::Testing::DrainUntil(
+    auto const reached = Pace::Testing::DrainUntil(
         reactor,
         what,
         std::move(done),

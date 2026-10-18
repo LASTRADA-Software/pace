@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// A part of a checkout an object can name, and which a bound key then folds.
@@ -100,4 +100,4 @@ class RootAliasList
     std::vector<RootAlias> _entries;
 };
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

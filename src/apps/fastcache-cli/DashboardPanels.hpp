@@ -3,7 +3,7 @@
 
 #include "DashboardPanel.hpp"
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardPanels.hpp
@@ -37,4 +37,4 @@ namespace FastCache::Cli
 /// @return The spec; static storage.
 [[nodiscard]] PanelSpec const& FleetPanel() noexcept;
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

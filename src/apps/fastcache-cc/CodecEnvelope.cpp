@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CodecEnvelope.hpp"
 
-#include <FastCache/Core/Compression.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/Compression.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <array>
 #include <concepts>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -237,4 +237,4 @@ std::expected<std::string, EnvelopeError> UnenvelopeText(std::span<std::byte con
     return OpenAs<std::string>(field, maxRawBytes);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -2,7 +2,7 @@
 #include "ToolchainHost.hpp"
 #include "ToolchainHostTestUtils.hpp"
 
-#include <FastCache/Platform/EnvironmentTestUtils.hpp>
+#include <Pace/Platform/EnvironmentTestUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,9 +23,9 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-using namespace FastCache::Cc::Testing;
+using namespace Pace;
+using namespace Pace::Cc;
+using namespace Pace::Cc::Testing;
 
 namespace
 {
@@ -61,7 +61,7 @@ TEST_CASE("The scripted host reads a path spelled with either separator", "[tool
 
     auto const contents = host.ReadTextFile(R"(C:\Kits\10\version.txt)");
     REQUIRE(contents.has_value());
-    CHECK(FastCache::Testing::Unwrap(contents) == "10.0.26100.0");
+    CHECK(Pace::Testing::Unwrap(contents) == "10.0.26100.0");
     CHECK(host.DirectoryExists(R"(C:\Kits\10)"));
 }
 
@@ -123,13 +123,13 @@ TEST_CASE("A scripted search path resolves a bare name and passes a path through
 
     auto const resolved = host.ResolveOnSearchPath("cl.exe");
     REQUIRE(resolved.has_value());
-    CHECK(FastCache::Testing::Unwrap(resolved) == "C:/VS/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe");
+    CHECK(Pace::Testing::Unwrap(resolved) == "C:/VS/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe");
 
     // A name that already spells a location is not a search-path lookup, and
     // treating it as one would be a second, wrong answer.
     auto const passedThrough = host.ResolveOnSearchPath("D:/elsewhere/cl.exe");
     REQUIRE(passedThrough.has_value());
-    CHECK(FastCache::Testing::Unwrap(passedThrough) == "D:/elsewhere/cl.exe");
+    CHECK(Pace::Testing::Unwrap(passedThrough) == "D:/elsewhere/cl.exe");
 
     CHECK_FALSE(host.ResolveOnSearchPath("nosuchcompiler").has_value());
     CHECK_FALSE(host.ResolveOnSearchPath("").has_value());
@@ -149,7 +149,7 @@ TEST_CASE("A bare name resolves to the .exe beside it", "[toolchain-host]")
 
     auto const resolved = host.ResolveOnSearchPath("cl");
     REQUIRE(resolved.has_value());
-    CHECK(FastCache::Testing::Unwrap(resolved) == "C:/VS/bin/cl.exe");
+    CHECK(Pace::Testing::Unwrap(resolved) == "C:/VS/bin/cl.exe");
 }
 
 TEST_CASE("An extensionless wrapper does not shadow the real executable", "[toolchain-host]")
@@ -166,12 +166,12 @@ TEST_CASE("An extensionless wrapper does not shadow the real executable", "[tool
 
     auto const resolved = host.ResolveOnSearchPath("cl");
     REQUIRE(resolved.has_value());
-    CHECK(FastCache::Testing::Unwrap(resolved) == "C:/msys64/usr/bin/cl.exe");
+    CHECK(Pace::Testing::Unwrap(resolved) == "C:/msys64/usr/bin/cl.exe");
 }
 
 TEST_CASE("The real host tells a directory from a file and lists each", "[toolchain-host]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tch-listing" };
+    Pace::Testing::ScratchDirectory tree { "fc-tch-listing" };
     tree.Write("bin/marker.txt", "hello");
     tree.Write("include/header.h", "#pragma once\n");
 
@@ -197,7 +197,7 @@ TEST_CASE("The real host tells a directory from a file and lists each", "[toolch
 
 TEST_CASE("The real host reads a text file whole and reports an absent one", "[toolchain-host]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tch-read" };
+    Pace::Testing::ScratchDirectory tree { "fc-tch-read" };
     // A trailing newline is what `Microsoft.VCToolsVersion.default.txt` actually
     // carries, and it comes back rather than being trimmed here -- trimming is the
     // caller's decision, and a reader that did it silently would make a file whose
@@ -207,7 +207,7 @@ TEST_CASE("The real host reads a text file whole and reports an absent one", "[t
     auto const host = MakeToolchainHost();
     auto const contents = host->ReadTextFile((tree.Path() / "version.txt").string());
     REQUIRE(contents.has_value());
-    CHECK(FastCache::Testing::Unwrap(contents) == "14.51.36231\r\n");
+    CHECK(Pace::Testing::Unwrap(contents) == "14.51.36231\r\n");
 
     CHECK_FALSE(host->ReadTextFile((tree.Path() / "absent.txt").string()).has_value());
 
@@ -221,7 +221,7 @@ TEST_CASE("The real host reads a text file whole and reports an absent one", "[t
 
 TEST_CASE("The real host resolves this process's own executable on PATH", "[toolchain-host]")
 {
-    FastCache::Testing::ScratchDirectory tree { "fc-tch-search" };
+    Pace::Testing::ScratchDirectory tree { "fc-tch-search" };
 #if defined(_WIN32)
     tree.Write("bin/fc-probe.exe", "not really a program");
     auto const executable = tree / "bin/fc-probe.exe";
@@ -244,11 +244,11 @@ TEST_CASE("The real host resolves this process's own executable on PATH", "[tool
 
     // The variable is restored afterwards rather than removed, which matters in a
     // binary whose other cases spawn compilers.
-    FastCache::Testing::ScopedEnv const path { "PATH", (tree.Path() / "bin").string() };
+    Pace::Testing::ScopedEnv const path { "PATH", (tree.Path() / "bin").string() };
 
     auto const resolved = host->ResolveOnSearchPath(bareName);
     REQUIRE(resolved.has_value());
-    CHECK(std::filesystem::path { FastCache::Testing::Unwrap(resolved) }.filename() == executable.filename());
+    CHECK(std::filesystem::path { Pace::Testing::Unwrap(resolved) }.filename() == executable.filename());
 
     CHECK_FALSE(host->ResolveOnSearchPath("fc-definitely-not-installed").has_value());
 }
@@ -333,11 +333,11 @@ TEST_CASE("The real host reaches the same registry the platform leaf does", "[to
 TEST_CASE("The real host reads the environment through the shared leaf", "[toolchain-host]")
 {
     auto const host = MakeToolchainHost();
-    FastCache::Testing::ScopedEnv const set { "FASTCACHE_TOOLCHAIN_HOST_PROBE", "present" };
+    Pace::Testing::ScopedEnv const set { "FASTCACHE_TOOLCHAIN_HOST_PROBE", "present" };
 
     auto const value = host->Environment("FASTCACHE_TOOLCHAIN_HOST_PROBE");
     REQUIRE(value.has_value());
-    CHECK(FastCache::Testing::Unwrap(value) == "present");
+    CHECK(Pace::Testing::Unwrap(value) == "present");
 
     CHECK_FALSE(host->Environment("FASTCACHE_TOOLCHAIN_HOST_ABSENT").has_value());
 }

@@ -6,7 +6,7 @@
 # `-Werror=null-dereference` inside `<streambuf>` itself. It is a false positive, and
 # one this project cannot silence: warnings are errors here and the rule is to fix
 # them at the source rather than suppress them. The house spelling is a sized read --
-# `FastCache::Cc::ReadFileBytes` in `src/apps/fastcache-cc/FileBytes.hpp` for bytes,
+# `Pace::Cc::ReadFileBytes` in `src/apps/fastcache-cc/FileBytes.hpp` for bytes,
 # `out << in.rdbuf()` for text -- which is also one allocation and one read instead of
 # a per-character loop with geometric regrowth and then a full-size copy. The
 # workaround is the better implementation regardless of the warning.
@@ -205,7 +205,7 @@ if(violations)
     message("")
     message("Use the house spelling instead:")
     message("")
-    message("  bytes  ->  FastCache::Cc::ReadFileBytes(path)   (apps/fastcache-cc/FileBytes.hpp)")
+    message("  bytes  ->  Pace::Cc::ReadFileBytes(path)   (apps/fastcache-cc/FileBytes.hpp)")
     message("  text   ->  std::ostringstream out; out << in.rdbuf();")
     message("")
     message("Neither is only a workaround -- both are one allocation and one read,")

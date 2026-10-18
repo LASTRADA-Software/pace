@@ -1,0 +1,2048 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Auth/AuthPolicy.hpp>
+#include <Pace/Cache/CacheEngine.hpp>
+#include <Pace/Cache/CowTreeStorage.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+#include <Pace/Cache/LayeredStorage.hpp>
+#include <Pace/Cache/NotifyingStorage.hpp>
+#include <Pace/Cache/ShardedStorage.hpp>
+#include <Pace/Cache/StorageTestUtils.hpp>
+#include <Pace/Cache/WriteErrorReportingStorage.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/Endian.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/WireFields.hpp>
+#include <Pace/Distributed/LeaseTable.hpp>
+#include <Pace/Distributed/WorkerRegistry.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/CompileCacheAuth.hpp>
+#include <Pace/Protocol/CompileCacheHandler.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/KeyspaceNotifier.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Protocol/ProtocolAutodetect.hpp>
+#include <Pace/Protocol/PubSubRegistry.hpp>
+#include <Pace/Protocol/RedisMutationObserver.hpp>
+#include <Pace/Protocol/RedisTransaction.hpp>
+#include <Pace/Protocol/SessionContext.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <core/async/SyncRun.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/testing/InMemorySocket.hpp>
+#include <core/net/testing/ParkingReadableSocket.hpp>
+#include <core/net/testing/TestLoop.hpp>
+#include <core/platform/Clock.hpp>
+#include <tests/ForeignGenerationValue.hpp>
+#include <tests/HalfClose.hpp>
+#include <tests/SocketDoubles.hpp>
+#include <tests/Unwrap.hpp>
+
+using namespace Pace;
+using namespace std::chrono_literals;
+using Pace::Testing::Unwrap;
+using PathCanon::Grammar;
+namespace Wire = Pace::CompileCacheWire;
+
+namespace
+{
+
+/// Fixture: a paired in-memory socket, an engine over in-memory storage, and
+/// the compile-cache handler driving the server end.
+struct CcFixture
+{
+    core::platform::ManualClock clock;
+    InMemoryLruStorage storage { 0 };
+    CacheEngine engine { storage, clock };
+    core::net::testing::InMemorySocketPair pair = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler;
+};
+
+/// @param payload Bytes to write. Taken by value: a coroutine must not hold a
+///                reference parameter across a suspend point.
+core::async::Task<bool> WriteBytes(core::net::ISocket* socket, std::vector<std::byte> payload)
+{
+    auto const r = co_await socket->write(std::span<std::byte const> { payload.data(), payload.size() });
+    co_return r.has_value();
+}
+
+core::async::Task<std::vector<std::byte>> ReadAvailable(core::net::ISocket* socket)
+{
+    std::vector<std::byte> out;
+    while (true)
+    {
+        std::vector<std::byte> chunk(512);
+        auto const r = co_await socket->read(std::span<std::byte> { chunk.data(), chunk.size() });
+        if (!r.has_value() || *r == 0)
+            break;
+        out.insert(out.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*r));
+        if (*r < chunk.size())
+            break;
+    }
+    co_return out;
+}
+
+/// Read exactly `count` reply bytes.
+///
+/// ReadAvailable stops as soon as a Read returns less than its chunk size,
+/// which cannot express "the reply is an exact multiple of the chunk" — there
+/// it would loop and park on a Read that nothing will ever satisfy. When the
+/// expected length is known up front (a FETCH hit is 1 + 4 + payload), asking
+/// for exactly that many bytes sidesteps the guesswork entirely.
+/// @param socket Socket to read from.
+/// @param count Exact byte count expected.
+/// @return The bytes read; shorter than `count` if the peer stopped early.
+core::async::Task<std::vector<std::byte>> ReadExactlyN(core::net::ISocket* socket, std::size_t count)
+{
+    std::vector<std::byte> out;
+    out.reserve(count);
+    while (out.size() < count)
+    {
+        std::vector<std::byte> chunk(count - out.size());
+        auto const r = co_await socket->read(std::span<std::byte> { chunk.data(), chunk.size() });
+        if (!r.has_value() || *r == 0)
+            break;
+        out.insert(out.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*r));
+    }
+    co_return out;
+}
+
+/// Drive request bytes through the handler and return the raw reply bytes.
+/// Half-closes the client write side so the handler sees EOF.
+/// @param fix The fixture.
+/// @param request The request bytes; may contain several concatenated frames.
+/// @param session Session knobs (payload cap, logger).
+/// @return Everything the handler wrote back.
+std::vector<std::byte> ExchangeWith(CcFixture& fix, std::vector<std::byte> const& request, SessionContext session)
+{
+    REQUIRE(core::async::syncRun(WriteBytes(fix.pair.client.get(), request)));
+    REQUIRE(Pace::Testing::ShutdownWrite(*fix.pair.client).has_value());
+    core::async::syncRun(fix.handler.Run(fix.pair.server.get(), &fix.engine, /*primingBytes*/ {}, session));
+    // Close the server side before draining, as Connection does once a handler
+    // returns. Without it a rejection that closes WITHOUT replying — a foreign
+    // magic, the one case that still cannot be answered — leaves the drain
+    // parked on a read nothing will ever satisfy.
+    REQUIRE(Pace::Testing::ShutdownWrite(*fix.pair.server).has_value());
+    return core::async::syncRun(ReadAvailable(fix.pair.client.get()));
+}
+
+/// Drive one batch of request bytes through the handler with default session
+/// settings.
+std::vector<std::byte> Exchange(CcFixture& fix, std::vector<std::byte> const& request)
+{
+    return ExchangeWith(fix, request, SessionContext {});
+}
+
+/// Concatenate several request frames into one stream, so a single handler run
+/// can be asked to answer more than one command — the only way to observe
+/// "reply and continue" given that one Run consumes EOF and returns.
+std::vector<std::byte> Concat(std::initializer_list<std::vector<std::byte>> frames)
+{
+    std::vector<std::byte> out;
+    for (auto const& frame: frames)
+        out.insert(out.end(), frame.begin(), frame.end());
+    return out;
+}
+
+/// One decoded reply.
+///
+/// Carries its own validity rather than being wrapped in an optional. Catch2's
+/// REQUIRE is a macro that clang-tidy's optional analysis cannot see through, so
+/// every `REQUIRE(x.has_value())` followed by `x->…` reads as an unchecked
+/// access; a plain flag keeps these helpers assertable without a `value_or`
+/// dance at each of two dozen call sites.
+struct ReplyFrame
+{
+    bool present { false };                     ///< False when no such reply was decoded.
+    Wire::Status status { Wire::Status::Miss }; ///< Meaningful only when `present`.
+    std::vector<std::byte> payload;
+};
+
+/// Split a raw reply stream into frames using each frame's *declared* length.
+///
+/// This is the client half of the drainability contract, and asserting through
+/// it is what makes the contract real: a reader that knows nothing but the
+/// header can step over any reply, whatever command produced it and whether it
+/// succeeded, missed or was refused. The pre-version format could not do this —
+/// a miss was a bare byte and an error carried an undeclared trailing message.
+/// @param bytes The raw stream.
+/// @return One entry per complete frame found.
+std::vector<ReplyFrame> SplitReplies(std::span<std::byte const> bytes)
+{
+    std::vector<ReplyFrame> frames;
+    std::size_t offset = 0;
+    while (offset + Wire::ReplyHeaderSize <= bytes.size())
+    {
+        auto const header = Wire::DecodeReplyHeader(bytes.subspan(offset, Wire::ReplyHeaderSize));
+        if (!header.has_value())
+            break;
+        offset += Wire::ReplyHeaderSize;
+        if (bytes.size() - offset < header->payloadLength)
+            break;
+        auto const payload = bytes.subspan(offset, header->payloadLength);
+        frames.push_back(
+            ReplyFrame { .present = true, .status = header->status, .payload = { payload.begin(), payload.end() } });
+        offset += header->payloadLength;
+    }
+    return frames;
+}
+
+/// Decode the single reply expected from an exchange.
+/// @param bytes The raw stream.
+/// @return The reply; `present` is false unless there was exactly one.
+ReplyFrame SoleReply(std::span<std::byte const> bytes)
+{
+    auto frames = SplitReplies(bytes);
+    if (frames.size() != 1)
+        return ReplyFrame {};
+    return std::move(frames.front());
+}
+
+/// The four string fields of a STORE frame. Named rather than positional so the
+/// same-typed fields cannot be transposed at a call site.
+struct StoreFields
+{
+    std::string_view key;
+    std::string_view prefetchGroup;
+    std::string_view srcRoot;
+    std::string_view buildTree;
+};
+
+/// Build a STORE frame around an already-encoded value.
+///
+/// The raw-bytes half of `StoreFrame`, for the cases whose whole point is a value
+/// that is NOT a well-formed current-generation `CompileValue` -- junk bytes, and a
+/// value stamped with a generation this build does not implement. Those cannot be
+/// expressed as a `CompileValue`, so the typed overload cannot serve them.
+///
+/// It exists rather than three inline `Wire::EncodeStore` calls because that is
+/// exactly what `StoreFields` was introduced to prevent: `srcRoot` and `buildTree`
+/// are both `std::string_view`, so transposing them at a call site compiles
+/// silently, and a named field cannot be transposed.
+/// @param fields The four string fields.
+/// @param value Value bytes, already encoded (or deliberately not a valid encoding).
+/// @param version Wire version to encode at.
+/// @return The framed STORE request.
+std::vector<std::byte> RawStoreFrame(StoreFields const& fields,
+                                     std::span<std::byte const> value,
+                                     Wire::WireVersion version = Wire::CurrentVersion)
+{
+    return Wire::EncodeStore(Wire::StoreRequest { .key = fields.key,
+                                                  .prefetchGroup = fields.prefetchGroup,
+                                                  .srcRoot = fields.srcRoot,
+                                                  .buildTree = fields.buildTree,
+                                                  .value = value },
+                             version);
+}
+
+/// Build a STORE frame through the shared wire module, so these tests exercise
+/// the same encoder the launcher ships rather than a second implementation that
+/// could agree with the handler while both disagree with the client.
+std::vector<std::byte> StoreFrame(StoreFields const& fields,
+                                  CompileValue const& value,
+                                  Wire::WireVersion version = Wire::CurrentVersion)
+{
+    auto const encoded = EncodeCompileValue(value);
+    return RawStoreFrame(fields, encoded, version);
+}
+
+/// Bytes that are not a compile value at all.
+///
+/// Named because two cases need the same "not a compile value" input and because
+/// what makes these two bytes qualify is **not** the leading `0xEE`. Since #483
+/// `DecodeCompileValue` runs `DecodeAfterGeneration` BEFORE it judges the version
+/// byte -- a leading byte that is not ours is on its own no evidence of another
+/// generation, and reading it that way once called every opaque blob foreign. So a
+/// well-framed payload behind `0xEE` decodes as `ForeignGeneration`, not as this.
+///
+/// What qualifies here is the LAYOUT: two bytes cannot hold the `u32` object length
+/// that must follow the generation, so the frame does not hold together behind the
+/// leading byte and `DecodeCompileValue` answers `NotACompileValue`.
+///
+/// That distinction is load-bearing rather than pedantic. Making this payload "more
+/// realistic" by putting a well-formed blob behind `0xEE` would silently turn the
+/// junk arm into a second foreign-generation arm, and re-pointing its expectation to
+/// match would delete the guard against the opposite collapse that the case exists
+/// to hold.
+[[nodiscard]] std::vector<std::byte> NotACompileValueBytes()
+{
+    return { std::byte { 0xEE }, std::byte { 0xEE } };
+}
+
+/// Build a FETCH frame.
+std::vector<std::byte> FetchFrame(std::string_view key, Wire::WireVersion version = Wire::CurrentVersion)
+{
+    return Wire::EncodeFetch(key, version);
+}
+
+/// Decode a FETCH hit reply into a CompileValue.
+/// @param reply The raw reply stream.
+/// @return The value; `present` is false unless the reply was a decodable hit.
+struct FetchedValue
+{
+    bool present { false };
+    CompileValue value;
+};
+
+FetchedValue DecodeFetchHit(std::span<std::byte const> reply)
+{
+    auto const frame = SoleReply(reply);
+    if (!frame.present || frame.status != Wire::Status::Ok)
+        return {};
+    auto decoded = DecodeCompileValue(frame.payload);
+    if (!decoded.has_value())
+        return {};
+    return FetchedValue { .present = true, .value = *std::move(decoded) };
+}
+
+/// The code and message carried by an Error reply.
+struct DecodedError
+{
+    bool present { false };
+    Wire::ErrorCode code { Wire::ErrorCode::MalformedFrame };
+    std::string message;
+};
+
+DecodedError ErrorOf(ReplyFrame const& frame)
+{
+    if (!frame.present || frame.status != Wire::Status::Error)
+        return {};
+    auto const decoded = Wire::DecodeErrorPayload(frame.payload);
+    if (!decoded.has_value())
+        return {};
+    return DecodedError { .present = true, .code = decoded->first, .message = std::string { decoded->second } };
+}
+
+} // namespace
+
+TEST_CASE("STORE canonicalizes showIncludes; FETCH returns the canonical form", "[compile-cache][handler]")
+{
+    CcFixture fix;
+
+    CompileValue v;
+    v.objectBlob = { std::byte { 0xDE }, std::byte { 0xAD } };
+    v.textRegions.push_back({ .grammar = Grammar::ShowIncludes,
+                              .bytes = "Note: including file: "
+                                       R"(C:\ci\deep\src\a.h)"
+                                       "\r\n" });
+
+    // STORE from a deep "CI" layout.
+    auto const storeReply = Exchange(fix,
+                                     StoreFrame({ .key = "obj-hash",
+                                                  .prefetchGroup = "envCI",
+                                                  .srcRoot = R"(C:\ci\deep\src)",
+                                                  .buildTree = R"(C:\ci\deep\build)" },
+                                                v));
+    auto const storeFrame = SoleReply(storeReply);
+    REQUIRE(storeFrame.present);
+    CHECK(storeFrame.status == Wire::Status::Ok);
+
+    // FETCH: the value must be canonical (no machine path), object blob intact.
+    // The first handler consumed EOF and returned, so drive a fresh handler
+    // over the SAME engine (same storage) for the fetch.
+    core::net::testing::InMemorySocketPair pair2 = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler2;
+    REQUIRE(core::async::syncRun(WriteBytes(pair2.client.get(), FetchFrame("obj-hash"))));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair2.client).has_value());
+    SessionContext session {};
+    core::async::syncRun(handler2.Run(pair2.server.get(), &fix.engine, {}, session));
+    auto const fetchReply = core::async::syncRun(ReadAvailable(pair2.client.get()));
+
+    auto const decoded = DecodeFetchHit(fetchReply);
+    REQUIRE(decoded.present);
+    auto const& fetched = decoded.value;
+    REQUIRE(fetched.textRegions.size() == 1);
+    CHECK(fetched.textRegions[0].bytes.contains("<SRCROOT>/a.h"));
+    CHECK_FALSE(fetched.textRegions[0].bytes.contains(R"(ci\deep)"));
+    CHECK(fetched.objectBlob == std::vector<std::byte> { std::byte { 0xDE }, std::byte { 0xAD } });
+}
+
+// Every other handler test uses a two-byte object blob, so nothing here ever
+// exercised a reply big enough to matter. A FETCH reply declares its length up
+// front, which means a transport that delivers fewer bytes than declared leaves
+// the client blocked forever rather than failing — the failure mode that took
+// down a real build. This pins the protocol end of that contract: what STORE
+// accepted is exactly what FETCH hands back, at a size well past any buffer.
+TEST_CASE("STORE/FETCH round-trips an object blob larger than 1 MiB", "[compile-cache][handler][large]")
+{
+    CcFixture fix;
+
+    // Deliberately not a round number: a reply whose length is an exact
+    // multiple of a reader's chunk size is its own (separate) trap, and the
+    // odd size also makes an off-by-one in the framing visible.
+    constexpr std::size_t BlobByteCount = (1024U * 1024U) + 4099U;
+    CompileValue v;
+    v.objectBlob.resize(BlobByteCount);
+    for (auto const i: std::views::iota(std::size_t { 0 }, BlobByteCount))
+        v.objectBlob[i] = static_cast<std::byte>((i * 31U) & 0xFF);
+    v.textRegions.push_back({ .grammar = Grammar::ShowIncludes,
+                              .bytes = "Note: including file: "
+                                       R"(C:\ci\deep\src\big.h)"
+                                       "\r\n" });
+
+    auto const storeReply = Exchange(fix,
+                                     StoreFrame({ .key = "big-obj",
+                                                  .prefetchGroup = "envCI",
+                                                  .srcRoot = R"(C:\ci\deep\src)",
+                                                  .buildTree = R"(C:\ci\deep\build)" },
+                                                v));
+    auto const storeFrame = SoleReply(storeReply);
+    REQUIRE(storeFrame.present);
+    REQUIRE(storeFrame.status == Wire::Status::Ok);
+
+    core::net::testing::InMemorySocketPair pair2 = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler2;
+    REQUIRE(core::async::syncRun(WriteBytes(pair2.client.get(), FetchFrame("big-obj"))));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair2.client).has_value());
+    SessionContext session {};
+    core::async::syncRun(handler2.Run(pair2.server.get(), &fix.engine, {}, session));
+
+    // Read the 5-byte header first so the declared length drives the rest: that
+    // is exactly what a real client does, so a truncated reply shows up here as
+    // a short read instead of as a hang.
+    auto const headerBytes = core::async::syncRun(ReadExactlyN(pair2.client.get(), Wire::ReplyHeaderSize));
+    REQUIRE(headerBytes.size() == Wire::ReplyHeaderSize);
+    auto const header = Wire::DecodeReplyHeader(headerBytes);
+    REQUIRE(header.has_value());
+    REQUIRE(Unwrap(header).status == Wire::Status::Ok);
+    auto const declared = Unwrap(header).payloadLength;
+    REQUIRE(declared > 1024U * 1024U);
+
+    auto const payload = core::async::syncRun(ReadExactlyN(pair2.client.get(), declared));
+    REQUIRE(payload.size() == declared);
+
+    // value_or keeps the access unguarded-safe: static analysis cannot see a
+    // has_value() guard through Catch2's REQUIRE macro.
+    auto const decoded = DecodeCompileValue(std::span<std::byte const> { payload });
+    REQUIRE(decoded.has_value());
+    auto const fetched = decoded.value_or(CompileValue {});
+    REQUIRE(fetched.objectBlob.size() == BlobByteCount);
+    CHECK(fetched.objectBlob == v.objectBlob);
+    REQUIRE(fetched.textRegions.size() == 1);
+    CHECK(fetched.textRegions[0].bytes.contains("<SRCROOT>/big.h"));
+}
+
+TEST_CASE("FETCH of an absent key replies miss", "[compile-cache][handler]")
+{
+    CcFixture fix;
+    auto const reply = Exchange(fix, FetchFrame("nope"));
+    auto const frame = SoleReply(reply);
+    REQUIRE(frame.present);
+    CHECK(frame.status == Wire::Status::Miss);
+    CHECK(frame.payload.empty());
+}
+
+// --- versioning and rejection ----------------------------------------------
+//
+// The point of the versioned header is that a peer this build cannot serve gets
+// a diagnosable ANSWER. A silent close, which is what the pre-version format
+// could only manage, is indistinguishable from a dead connection — so a
+// mismatched install looked exactly like a flaky network and a cache that never
+// warmed up.
+
+TEST_CASE("A request at an unsupported wire version is rejected, not dropped", "[compile-cache][handler][version]")
+{
+    CcFixture fix;
+    constexpr auto TooNew = static_cast<Wire::WireVersion>(Wire::CurrentVersion + 1);
+
+    auto const reply = Exchange(fix, FetchFrame("k", TooNew));
+    auto const frame = SoleReply(reply);
+    REQUIRE(frame.present);
+
+    auto const error = ErrorOf(frame);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::UnsupportedVersion);
+
+    // A rejection that does not say what WOULD work cannot be acted on: this
+    // message is the only thing an operator with a mismatched install sees.
+    CHECK(error.message.contains(std::to_string(static_cast<unsigned>(TooNew))));
+    CHECK(error.message.contains(std::to_string(static_cast<unsigned>(Wire::CurrentVersion))));
+}
+
+TEST_CASE("An unknown opcode is rejected but the connection survives", "[compile-cache][handler][version]")
+{
+    // The load-bearing test for the declared payload length: the server can only
+    // answer the second command if it stepped over the first by exactly the
+    // length that frame declared. This is what makes adding a verb in a later
+    // version a non-breaking change.
+    CcFixture fix;
+
+    CompileValue value;
+    value.objectBlob = { std::byte { 0x42 } };
+    REQUIRE(fix.engine.Set("k", EncodeCompileValue(value), /*flags=*/0, /*exptime=*/0).has_value());
+
+    // A frame with a verb this build does not know, carrying a real payload.
+    auto unknown = FetchFrame("payload-the-server-must-skip");
+    unknown[2] = std::byte { 0xEE };
+
+    auto const replies = SplitReplies(ExchangeWith(fix, Concat({ unknown, FetchFrame("k") }), SessionContext {}));
+
+    REQUIRE(replies.size() == 2);
+
+    auto const error = ErrorOf(replies.at(0));
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::UnknownOpcode);
+
+    CHECK(replies.at(1).status == Wire::Status::Ok);
+    CHECK_FALSE(replies.at(1).payload.empty());
+}
+
+TEST_CASE("A retired opcode is refused UnknownOpcode at the surface, counted, and the connection survives",
+          "[compile-cache][handler][retired]")
+{
+    // `RetiredOpcodes` pins that no ROW claims 0x16, 0x17 or 0x1D; this pins what a SURFACE answers a
+    // frame naming one: `UnknownOpcode`, as for any byte no row claims -- never a friendlier
+    // refusal special-cased for the retired verbs, which a peer built before the retirement
+    // would read under the old verb's name.
+    for (auto const byte: Wire::RetiredOpcodes)
+    {
+        INFO("opcode " << static_cast<int>(byte));
+        CcFixture fix;
+        AtomicMetricsSink metrics;
+        SessionContext session {};
+        session.metrics = &metrics;
+
+        CompileValue value;
+        value.objectBlob = { std::byte { 0x42 } };
+        REQUIRE(fix.engine.Set("k", EncodeCompileValue(value), /*flags=*/0, /*exptime=*/0).has_value());
+
+        auto retired = FetchFrame("payload-the-server-must-skip");
+        retired[2] = std::byte { byte };
+
+        auto const replies = SplitReplies(ExchangeWith(fix, Concat({ retired, FetchFrame("k") }), session));
+        REQUIRE(replies.size() == 2);
+        auto const error = ErrorOf(replies.at(0));
+        REQUIRE(error.present);
+        CHECK(error.code == Wire::ErrorCode::UnknownOpcode);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedUnknownOpcode) == 1);
+
+        // The frame was stepped over by its declared length, so the request behind it is served.
+        CHECK(replies.at(1).status == Wire::Status::Ok);
+    }
+}
+
+TEST_CASE("A FETCH miss and a rejected FETCH are distinguishable", "[compile-cache][handler][version]")
+{
+    // Both were the byte 0x00 before the format carried a status space, so a
+    // version-rejected client saw an endlessly cold cache and no diagnostic.
+    CcFixture missFixture;
+    auto const miss = SoleReply(Exchange(missFixture, FetchFrame("absent")));
+    REQUIRE(miss.present);
+    CHECK(miss.status == Wire::Status::Miss);
+
+    CcFixture rejectedFixture;
+    auto const rejected =
+        SoleReply(Exchange(rejectedFixture, FetchFrame("absent", static_cast<Wire::WireVersion>(Wire::CurrentVersion + 1))));
+    REQUIRE(rejected.present);
+    CHECK(rejected.status == Wire::Status::Error);
+
+    CHECK(miss.status != rejected.status);
+}
+
+TEST_CASE("A refused STORE is drainable without knowing the command", "[compile-cache][handler][version]")
+{
+    // The error payload declares its length, so a client that reads only the
+    // reply header can skip it and stay in sync. Without that, the trailing
+    // message desynchronised any connection that carried a second command.
+    CcFixture fix;
+
+    // A STORE whose value is not a compile value at all.
+    auto const junk = NotACompileValueBytes();
+    auto const badStore = RawStoreFrame({ .key = "k", .prefetchGroup = "", .srcRoot = "", .buildTree = "" }, junk);
+
+    auto const replies = SplitReplies(ExchangeWith(fix, Concat({ badStore, FetchFrame("anything") }), SessionContext {}));
+
+    REQUIRE(replies.size() == 2);
+    auto const error = ErrorOf(replies.at(0));
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::MalformedValue);
+    CHECK(replies.at(1).status == Wire::Status::Miss);
+}
+
+TEST_CASE("A foreign value generation and a malformed value are refused by DIFFERENT codes", "[compile-cache][handler]")
+{
+    // #544. Both arms in ONE case, and driven down ONE connection, because the
+    // property is a difference and a difference needs both halves in view.
+    //
+    // Which collapse each arm catches, since neither catches both. The foreign
+    // assertion catches a collapse back onto `MalformedValue` -- the state this
+    // ticket found. The junk assertion catches the opposite collapse, where a later
+    // change routes everything it cannot canonicalize to the new code; nothing else
+    // in this file would notice that, and it is the easier mistake to make now that
+    // the new code exists. That is why the junk arm is here and not left to the case
+    // above: absence of the negative is not the positive.
+    //
+    // There is deliberately no `foreignError.code != junkError.code` line. It cannot
+    // fail while the two assertions below pass -- two distinct enumerators are
+    // distinct -- so it would read as the guard while guarding nothing. The renumbering
+    // it looks like it covers is covered where it can be: the BYTE pins in
+    // `CompileCacheWire_test.cpp`.
+    //
+    // The conflation this closes is the one `.agent/rules/storage.md` records for
+    // `Corrupt` against `UnsupportedFormatVersion`, met on the wire instead of on
+    // disk: two machines at different generations are a fleet MID-UPGRADE and nothing
+    // is damaged, but the remedy an operator reaches for on a cache reporting
+    // malformed values is to wipe it.
+    //
+    // The value below is stamped one generation FORWARD because that is the direction
+    // a test can synthesise honestly -- it is this build's own framing, restamped.
+    // The refusal itself is direction-neutral (`DecodeCompileValue` refuses any
+    // `version != CompileValueVersion`), and since #547 took the byte to 2 the
+    // direction actually in the field is the other one: gen-1 launchers against gen-2
+    // servers. Nothing here should be read as making this a newer-peer-only answer.
+    CcFixture fix;
+
+    // A value a launcher of another generation would have written: encoded through the
+    // real encoder, so the framing is honest, then restamped. What separates it from the
+    // junk arm is the LAYOUT, not the leading byte. Which byte carries the generation is
+    // known in `src/tests/ForeignGenerationValue.hpp` and nowhere else (#649).
+    auto const foreign = Testing::ForeignGenerationValue();
+
+    // Both refusals and then a FETCH, on one connection: each refusal declares its own
+    // length, so a client that reads only headers stays in sync across both of them.
+    auto const replies = SplitReplies(ExchangeWith(
+        fix,
+        Concat(
+            { RawStoreFrame({ .key = "k-foreign", .prefetchGroup = "", .srcRoot = "/src", .buildTree = "/build" }, foreign),
+              RawStoreFrame({ .key = "k-junk", .prefetchGroup = "", .srcRoot = "/src", .buildTree = "/build" },
+                            NotACompileValueBytes()),
+              FetchFrame("k-foreign") }),
+        SessionContext {}));
+    REQUIRE(replies.size() == 3);
+
+    auto const foreignError = ErrorOf(replies.at(0));
+    REQUIRE(foreignError.present);
+    CHECK(foreignError.code == Wire::ErrorCode::ForeignValueGeneration);
+
+    // The message is the whole of the operator's diagnostic, so it names BOTH
+    // generations rather than restating the code in words.
+    CHECK(foreignError.message == ForeignGenerationMessage(Testing::ForeignGeneration));
+
+    // The companion: bytes that are not a compile value at all keep `MalformedValue`,
+    // whose meaning this ticket deliberately leaves alone.
+    auto const junkError = ErrorOf(replies.at(1));
+    REQUIRE(junkError.present);
+    CHECK(junkError.code == Wire::ErrorCode::MalformedValue);
+
+    // Refused means nothing was written. A miss rather than the bytes coming back is
+    // what says the value was not stored uncanonicalized -- which is the harm the
+    // refusal exists to prevent, not a side effect of it.
+    CHECK(replies.at(2).status == Wire::Status::Miss);
+}
+
+TEST_CASE("A version-14 AUTH in its own two-field grammar is refused by number, never read as malformed",
+          "[compile-cache][handler][version]")
+{
+    // What a client built before the office-fleet flag day sends: AUTH as two fields (username,
+    // secret), at version byte 0x0E. Refused on the NUMBER, before the payload is read -- so the
+    // answer names the range rather than calling a version mismatch a malformed frame, and no field is
+    // ever taken for the credential kind the version-15 grammar puts first.
+    CcFixture fix;
+    // clang-format off: the grid IS the old grammar -- one wire field per row.
+    auto const older = std::vector<std::byte> {
+        std::byte { 0xFC }, std::byte { 0x0E }, std::byte { 0x03 },             // magic, version 14, op = Auth
+        std::byte { 0x00 }, std::byte { 0x00 }, std::byte { 0x00 }, std::byte { 0x0A }, // payload = (4+0) + (4+2)
+        std::byte { 0x00 }, std::byte { 0x00 }, std::byte { 0x00 }, std::byte { 0x00 }, // username = ""
+        std::byte { 0x00 }, std::byte { 0x00 }, std::byte { 0x00 }, std::byte { 0x02 }, // secret, 2 bytes
+        std::byte { 'p' }, std::byte { 'w' },
+    };
+    // clang-format on
+    auto const frame = SoleReply(Exchange(fix, older));
+    REQUIRE(frame.present);
+    auto const error = ErrorOf(frame);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::UnsupportedVersion);
+    CHECK(error.code != Wire::ErrorCode::MalformedFrame);
+    CHECK(error.message == "unsupported wire version 14; this server speaks 15..15");
+}
+
+TEST_CASE("A wire version change mid-connection is rejected", "[compile-cache][handler][version]")
+{
+    CcFixture fix;
+    auto const first = FetchFrame("a", Wire::CurrentVersion);
+    auto const second = FetchFrame("b", static_cast<Wire::WireVersion>(Wire::CurrentVersion + 1));
+
+    auto const replies = SplitReplies(ExchangeWith(fix, Concat({ first, second }), SessionContext {}));
+
+    REQUIRE(replies.size() == 2);
+    CHECK(replies.at(0).status == Wire::Status::Miss);
+    auto const error = ErrorOf(replies.at(1));
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::UnsupportedVersion);
+}
+
+TEST_CASE("An oversize declared payload is rejected before it is read", "[compile-cache][handler][version]")
+{
+    // The declared total is checked against the cap up front. The pre-version
+    // format could only discover this field by field, after the reader had
+    // already taken the memory.
+    CcFixture fix;
+    SessionContext tinySession {};
+    tinySession.maxPayloadBytes = 8;
+
+    auto const reply = ExchangeWith(fix, FetchFrame("a-key-longer-than-the-cap"), tinySession);
+    auto const frame = SoleReply(reply);
+    REQUIRE(frame.present);
+
+    auto const error = ErrorOf(frame);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::PayloadTooLarge);
+    // Naming both numbers is the point of the message: it is the only thing that
+    // tells an operator which way to move --storage-max-value.
+    CHECK(error.message.contains("exceeds cap 8"));
+}
+
+TEST_CASE("An oversize frame is refused but the connection survives", "[compile-cache][handler][version]")
+{
+    // The half that broke a build. Refusing an over-cap frame *without* reading
+    // its body leaves the sender writing into a socket the server has stopped
+    // reading and then closed, so it never sees the refusal it was answered
+    // with -- it sees its own write fail, and before issue #68 died of SIGPIPE
+    // doing so. Stepping over the body is what turns a dropped connection into
+    // an answer, exactly as it does for an unknown opcode.
+    CcFixture fix;
+    SessionContext tinySession {};
+    tinySession.maxPayloadBytes = 8;
+
+    auto const replies =
+        SplitReplies(ExchangeWith(fix, Concat({ FetchFrame("a-key-longer-than-the-cap"), FetchFrame("k") }), tinySession));
+    REQUIRE(replies.size() == 2);
+
+    auto const error = ErrorOf(replies[0]);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::PayloadTooLarge);
+    // The second command was read from the right offset, which is only possible
+    // if the first frame's body was consumed in full.
+    CHECK(replies[1].status == Wire::Status::Miss);
+}
+
+TEST_CASE("A frame too large even to discard is still answered, then closed", "[compile-cache][handler][version]")
+{
+    // The drain is bounded, so past the bound the server goes back to replying
+    // and closing. The reply still goes out first: a sender that has already
+    // finished writing can read it, and one that has not loses nothing it would
+    // have had before.
+    // Same cap as the case above, and a key long enough that its frame lands on
+    // the far side of the drain allowance -- which is what makes the bound
+    // itself observable rather than merely written down. The cap cannot go
+    // lower to get there: a cap under the 7-byte request header would fail the
+    // header read instead, before there is a frame to have an opinion about.
+    CcFixture fix;
+    SessionContext tinySession {};
+    tinySession.maxPayloadBytes = 8; // drain allowance is a small multiple of this
+
+    auto const replies = SplitReplies(
+        ExchangeWith(fix, Concat({ FetchFrame("a-key-far-past-the-drain-bound"), FetchFrame("k") }), tinySession));
+    REQUIRE(replies.size() == 1);
+
+    auto const error = ErrorOf(replies[0]);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::PayloadTooLarge);
+}
+
+TEST_CASE("A frame whose fields do not fill its declared payload is rejected", "[compile-cache][handler][version]")
+{
+    // The declared total and the per-field lengths are redundant by design;
+    // disagreement is a typed refusal rather than a silent reinterpretation.
+    auto const good = FetchFrame("ab");
+
+    SECTION("declared payload longer than the fields supply")
+    {
+        CcFixture fix;
+        auto frame = good;
+        frame.push_back(std::byte { 0x00 });                                    // one trailing byte...
+        frame[6] = static_cast<std::byte>(static_cast<unsigned>(frame[6]) + 1); // ...and a length that admits it
+
+        auto const reply = SoleReply(Exchange(fix, frame));
+        REQUIRE(reply.present);
+        auto const error = ErrorOf(reply);
+        REQUIRE(error.present);
+        CHECK(error.code == Wire::ErrorCode::MalformedFrame);
+    }
+
+    SECTION("field length overruns the declared payload")
+    {
+        CcFixture fix;
+        auto frame = good;
+        frame[10] = static_cast<std::byte>(0xFF); // field claims 255 bytes, payload holds 2
+
+        auto const reply = SoleReply(Exchange(fix, frame));
+        REQUIRE(reply.present);
+        auto const error = ErrorOf(reply);
+        REQUIRE(error.present);
+        CHECK(error.code == Wire::ErrorCode::MalformedFrame);
+    }
+}
+
+TEST_CASE("Every op in the table is dispatched", "[compile-cache][handler][version]")
+{
+    // Dispatch is a switch (one per protocol, per the project's rule), so this
+    // walks the table and requires each row to reach a handler — the same
+    // table-versus-code drift guard used for the CLI flag table.
+    for (auto const& row: Wire::OpTable)
+    {
+        CcFixture fix;
+
+        // A minimal well-formed frame for this op: the right number of empty fields.
+        std::vector<std::byte> payload;
+        for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, row.fieldCount))
+            payload.insert(payload.end(), 4, std::byte { 0x00 });
+
+        std::vector<std::byte> frame { Wire::Magic,
+                                       static_cast<std::byte>(Wire::CurrentVersion),
+                                       static_cast<std::byte>(row.code) };
+        std::array<std::byte, sizeof(std::uint32_t)> lengthBytes {};
+        WriteBigEndian<std::uint32_t>(lengthBytes, static_cast<std::uint32_t>(payload.size()));
+        frame.insert(frame.end(), lengthBytes.begin(), lengthBytes.end());
+        frame.insert(frame.end(), payload.begin(), payload.end());
+
+        auto const reply = SoleReply(Exchange(fix, frame));
+        REQUIRE(reply.present);
+
+        // Whatever it answers, it must not be "I do not know this verb".
+        if (auto const error = ErrorOf(reply); error.present)
+            CHECK(error.code != Wire::ErrorCode::UnknownOpcode);
+    }
+}
+
+TEST_CASE("The daemon refuses a fleet read by name and sends it to the fleet's scheduler", "[compile-cache][handler]")
+{
+    // #1391. `DispatchNotPermitted` and never `UnknownOpcode`: the fleet is served by a compile
+    // node that schedules, and a client told the verb is unknown would conclude this daemon is too
+    // old. The WORDS are the half the generic refusal lacks -- a relocated verb with no row is
+    // refused with the same code and no destination.
+    CcFixture fix;
+    auto const reply = SoleReply(Exchange(fix, Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .section = "kpi" })));
+    REQUIRE(reply.present);
+    auto const error = ErrorOf(reply);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::DispatchNotPermitted);
+    CHECK(error.message.contains("the fleet's scheduler, a fastcache-compile-node"));
+}
+
+TEST_CASE("The daemon refuses an admission explanation by name and sends it to a compile node", "[compile-cache][handler]")
+{
+    // #1471, and the sibling of the fleet case above. The generic walk only asserts the
+    // refusal is not `UnknownOpcode`; this asserts WHICH refusal, which is the half that
+    // distinguishes a working daemon from one that has quietly stopped answering.
+    //
+    // `DispatchNotPermitted` and NOT `NoCluster`, which the cluster and enrollment rows take:
+    // admission is a property of the PROCESS being asked -- which routes it would admit a host
+    // through -- so a client told `NoCluster` goes looking for consensus it does not need,
+    // when the answer is that it asked the wrong binary.
+    CcFixture fix;
+    auto const reply = SoleReply(Exchange(fix, Wire::EncodeExplainAdmissionRequest("pc-07")));
+    REQUIRE(reply.present);
+    auto const error = ErrorOf(reply);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::DispatchNotPermitted);
+    CHECK(error.code != Wire::ErrorCode::NoCluster);
+    // The WORDS, for the fleet case's reason: a relocated verb with no row is refused with the
+    // same code and names no destination, so the code alone cannot tell the two apart.
+    CHECK(error.message.contains("fastcache-compile-node"));
+}
+
+TEST_CASE("The daemon refuses a fleet summary by name and sends it to a compile node", "[compile-cache][handler][formation]")
+{
+    // WHICH refusal, not merely that there was one. `NoCluster` with the enrollment rows: a fleet
+    // summary asks which fleet a machine is in, and this daemon belongs to none. `UnimplementedVerb`
+    // would send a joiner off to upgrade a daemon that is current.
+    CcFixture fix;
+    auto const reply =
+        SoleReply(Exchange(fix, Wire::EncodeFleetSummaryRequest(std::array<std::byte, Wire::NodeChallengeBytes> {})));
+    REQUIRE(reply.present);
+    auto const error = ErrorOf(reply);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::NoCluster);
+    CHECK(error.code != Wire::UnimplementedVerb);
+    CHECK(error.message.contains("fastcache-compile-node"));
+}
+
+TEST_CASE("The daemon refuses a ticket mint by name and sends it to a compile node", "[compile-cache][handler]")
+{
+    // A cache holds no machine identity to sign a ticket from, so this endpoint answers the
+    // same way it answers every other verb that asks about the PROCESS rather than about a
+    // cached object: `DispatchNotPermitted`, naming the compile node that does hold one.
+    CcFixture fix;
+    auto const reply = SoleReply(Exchange(fix, Wire::EncodeMintTicketRequest("office.corp:6674")));
+    REQUIRE(reply.present);
+    auto const error = ErrorOf(reply);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::DispatchNotPermitted);
+    CHECK(error.message.contains("fastcache-compile-node"));
+}
+
+TEST_CASE("The daemon refuses the fleet cache verbs by name and names the machine that serves them",
+          "[compile-cache][handler][shared-cache]")
+{
+    // The new-verb checklist's daemon half: a missing switch arm DROPS the frame (and on MSVC does not
+    // fail the build), and a missing RelocatedVerbs row answers the generic refusal naming nobody.
+    // `NotSharedCache`, never `UnknownOpcode`: a client told the verb is unknown concludes this build is
+    // too old, when it asked a fastcached for what only the named compile node serves.
+    auto const store = Wire::StoreRequest { .key = "k", .prefetchGroup = {}, .srcRoot = {}, .buildTree = {}, .value = {} };
+    for (auto const& frame:
+         { Wire::EncodeFetchAs(Wire::FleetSharedCacheVerbs, "k"), Wire::EncodeStoreAs(Wire::FleetSharedCacheVerbs, store) })
+    {
+        // A fixture per verb: an exchange half-closes the client, so one fixture answers one batch.
+        CcFixture fix;
+        auto const reply = SoleReply(Exchange(fix, frame));
+        REQUIRE(reply.present);
+        auto const error = ErrorOf(reply);
+        REQUIRE(error.present);
+        CHECK(error.code == Wire::ErrorCode::NotSharedCache);
+        // The ROW's words, for the fleet case's reason: `NotSharedCache`'s own default message says
+        // "shared-cache" too, so only the destination proves the RelocatedVerbs row answered.
+        CHECK(error.message.contains("fastcache-compile-node"));
+    }
+}
+
+TEST_CASE("A dropped frame is logged", "[compile-cache][handler][version]")
+{
+    // Every other handler reports a frame drop through the session logger; this
+    // one reported nothing at all, so a rejection was invisible to the operator
+    // as well as to the client.
+    CcFixture fix;
+    CapturingLogger logger { LogLevel::Trace };
+    SessionContext session {};
+    session.logger = &logger;
+
+    auto frame = FetchFrame("k");
+    frame[0] = std::byte { 0x80 }; // a magic that is not ours
+
+    (void) ExchangeWith(fix, frame, session);
+
+    auto const records = logger.Snapshot();
+    CHECK(std::ranges::any_of(records, [](auto const& record) { return record.message.contains("compile-cache"); }));
+}
+
+TEST_CASE("Cross-depth: value stored from a deep layout localizes for a shallow consumer",
+          "[compile-cache][handler][crossdepth]")
+{
+    CcFixture fix;
+
+    CompileValue v;
+    v.objectBlob = { std::byte { 0x01 } };
+    v.textRegions.push_back({ .grammar = Grammar::ShowIncludes,
+                              .bytes = "Note: including file: "
+                                       R"(C:\ci\deep\runner\src\inc\x.h)"
+                                       "\r\n" });
+
+    // Produced at a deep path (CI runner nested deeper).
+    auto const storeReply = Exchange(fix,
+                                     StoreFrame({ .key = "k",
+                                                  .prefetchGroup = "envCI",
+                                                  .srcRoot = R"(C:\ci\deep\runner\src)",
+                                                  .buildTree = R"(C:\ci\deep\runner\build)" },
+                                                v));
+    auto const storeFrame = SoleReply(storeReply);
+    REQUIRE(storeFrame.present);
+    REQUIRE(storeFrame.status == Wire::Status::Ok);
+
+    // Fetch the canonical value and localize it as a SHALLOW consumer would.
+    core::net::testing::InMemorySocketPair pair2 = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler2;
+    REQUIRE(core::async::syncRun(WriteBytes(pair2.client.get(), FetchFrame("k"))));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair2.client).has_value());
+    SessionContext session {};
+    core::async::syncRun(handler2.Run(pair2.server.get(), &fix.engine, {}, session));
+    auto const reply = core::async::syncRun(ReadAvailable(pair2.client.get()));
+
+    auto const decoded = DecodeFetchHit(reply);
+    REQUIRE(decoded.present);
+    auto const& fetched = decoded.value;
+    REQUIRE(fetched.textRegions.size() == 1);
+
+    PathCanon::Layout const consumer { .sourceRoot = R"(D:\project)", .buildTree = R"(D:\project\build)" };
+    auto const localized = PathCanon::LocalizeRegion(fetched.textRegions[0].bytes, Grammar::ShowIncludes, consumer);
+    CHECK(localized.contains(R"(D:\project\inc\x.h)"));
+    CHECK_FALSE(localized.contains(R"(ci\deep)"));
+}
+
+namespace
+{
+
+/// A single valid compile value for prefetch group tests.
+CompileValue SampleValue()
+{
+    CompileValue v;
+    v.objectBlob = { std::byte { 0x7F } };
+    v.textRegions.push_back({ .grammar = Grammar::ShowIncludes,
+                              .bytes = "Note: including file: "
+                                       R"(C:\src\h.h)"
+                                       "\r\n" });
+    return v;
+}
+
+/// Store `key` under `prefetch group` via a fresh handler over `engine`.
+void StoreVia(CacheEngine& engine, std::string_view key, std::string_view prefetchGroup)
+{
+    core::net::testing::InMemorySocketPair pair = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler;
+    auto const frame = StoreFrame(
+        { .key = key, .prefetchGroup = prefetchGroup, .srcRoot = R"(C:\src)", .buildTree = R"(C:\build)" }, SampleValue());
+    REQUIRE(core::async::syncRun(WriteBytes(pair.client.get(), frame)));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
+    SessionContext session {};
+    core::async::syncRun(handler.Run(pair.server.get(), &engine, {}, session));
+    (void) core::async::syncRun(ReadAvailable(pair.client.get()));
+}
+
+} // namespace
+
+TEST_CASE("FETCH of a prefetch group member warms the rest of the prefetch group into L1",
+          "[compile-cache][handler][prefetch]")
+{
+    core::platform::ManualClock clock;
+    auto l1 = std::make_unique<InMemoryLruStorage>(0);
+    auto l2 = std::make_unique<InMemoryLruStorage>(0);
+    LayeredStorage layered { std::move(l1), std::move(l2) };
+    CacheEngine engine { layered, clock };
+
+    // Store three prefetch group members.
+    StoreVia(engine, "k1", "envCI");
+    StoreVia(engine, "k2", "envCI");
+    StoreVia(engine, "k3", "envCI");
+
+    // Evict the L1 mirror so members live only in L2 (cold L1).
+    layered.L1().EraseIfPresent("k1");
+    layered.L1().EraseIfPresent("k2");
+    layered.L1().EraseIfPresent("k3");
+    REQUIRE_FALSE(layered.L1().Peek("k2", clock.now())->found);
+    REQUIRE_FALSE(layered.L1().Peek("k3", clock.now())->found);
+
+    // Fetch the leading key: triggers a group prefetch of k2/k3 into L1.
+    core::net::testing::InMemorySocketPair pair = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler;
+    REQUIRE(core::async::syncRun(WriteBytes(pair.client.get(), FetchFrame("k1"))));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
+    SessionContext session {};
+    core::async::syncRun(handler.Run(pair.server.get(), &engine, {}, session));
+    (void) core::async::syncRun(ReadAvailable(pair.client.get()));
+
+    // k2 and k3 are now warm in L1 (a direct L1 Peek finds them).
+    CHECK(layered.L1().Peek("k2", clock.now())->found);
+    CHECK(layered.L1().Peek("k3", clock.now())->found);
+}
+
+// --- authentication ---------------------------------------------------------
+//
+// This handler was the only one in the tree that never consulted
+// SessionContext::CurrentAuth(): a daemon started with --requirepass gated
+// memcached text, memcached binary and RESP, and served the compile cache to
+// anyone. These cases are what keep that from being reintroduced by anybody who
+// adds a verb without noticing the gate.
+
+namespace
+{
+
+/// A session requiring `secret`, with the policy reachable through a live source
+/// so the handler exercises the same rotation-capable path the daemon uses.
+///
+/// Returned as a pair because `SessionContext` holds a borrowed `IAuthSource*`:
+/// the source has to outlive the session, and handing back both makes that the
+/// caller's visible obligation rather than a dangling pointer waiting to happen.
+struct AuthedSession
+{
+    std::unique_ptr<SharedAuthSource> source;
+    SessionContext session;
+};
+
+[[nodiscard]] AuthedSession RequireSecret(std::string_view username, std::string_view secret)
+{
+    auto source = std::make_unique<SharedAuthSource>(
+        std::make_shared<AuthPolicy const>(std::string { username }, std::string { secret }));
+    SessionContext session {};
+    session.authSource = source.get();
+    return AuthedSession { .source = std::move(source), .session = session };
+}
+
+/// Build an AUTH frame.
+[[nodiscard]] std::vector<std::byte> AuthFrame(std::string_view username,
+                                               std::string_view secret,
+                                               Wire::WireVersion version = Wire::CurrentVersion)
+{
+    return Wire::EncodeAuth(Wire::AuthRequest { .username = username, .secret = secret }, version);
+}
+
+} // namespace
+
+TEST_CASE("The daemon cannot verify a machine, so a ticket is no password", "[protocol][auth][ticket]")
+{
+    // The ticket's bytes ARE the configured password, so only the kind can refuse it: a ticket
+    // whose bytes differ would be rejected by the password comparison alone, and the case could
+    // not tell the two rules apart.
+    auto const ticket =
+        Wire::EncodeAuth(Wire::AuthRequest { .kind = Wire::AuthKind::MachineTicket, .username = {}, .secret = "s3cret" });
+    auto const payload = std::span { ticket }.subspan(Wire::RequestHeaderSize);
+    auto const policy = AuthPolicy { std::string {}, SecureString { std::string_view { "s3cret" } } };
+    CHECK(CheckCredential(&policy, payload) == CredentialOutcome::Rejected);
+    CHECK(CheckCredential(nullptr, payload) == CredentialOutcome::NoPolicy);
+
+    // A kind this build does not know is a frame it could not parse, never a wrong password: a
+    // client of another release must not read as somebody guessing.
+    auto const unknownKind = std::array { std::byte { 0x03 } };
+    auto const unknown = WireFields::Encode(
+        { std::span<std::byte const> { unknownKind }, WireFields::AsBytes(""), WireFields::AsBytes("s3cret") });
+    CHECK(CheckCredential(&policy, unknown) == CredentialOutcome::Malformed);
+
+    // The control: the same bytes as a password are accepted.
+    auto const password = Wire::EncodeAuth(Wire::AuthRequest { .username = {}, .secret = "s3cret" });
+    CHECK(CheckCredential(&policy, std::span { password }.subspan(Wire::RequestHeaderSize)) == CredentialOutcome::Accepted);
+}
+
+TEST_CASE("Every gated verb is refused before AUTH, and the connection survives", "[compile-cache][handler][auth]")
+{
+    // Both gated verbs in one stream: the point is not that FETCH is refused but
+    // that the refusal is a *reply* the peer can read and step over, so a second
+    // command still gets an answer. A gate that closed the connection would pass
+    // a single-command assertion and fail this one.
+    CcFixture fix;
+    auto authed = RequireSecret("", "s3cret");
+
+    CompileValue v;
+    v.objectBlob = { std::byte { 0x01 } };
+    auto const reply = ExchangeWith(
+        fix,
+        Concat({ FetchFrame("k"),
+                 StoreFrame({ .key = "k", .prefetchGroup = "g", .srcRoot = "/src", .buildTree = "/build" }, v) }),
+        authed.session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    for (auto const& frame: frames)
+    {
+        auto const error = ErrorOf(frame);
+        REQUIRE(error.present);
+        CHECK(error.code == Wire::ErrorCode::Unauthenticated);
+    }
+}
+
+TEST_CASE("An unauthenticated FETCH stores nothing and leaks nothing", "[compile-cache][handler][auth]")
+{
+    // The refusal must be a refusal, not a slow serve: assert on the engine, not
+    // only on the reply. A gate that replied Unauthenticated *after* doing the
+    // work would satisfy the case above.
+    CcFixture fix;
+    auto authed = RequireSecret("", "s3cret");
+
+    CompileValue v;
+    v.objectBlob = { std::byte { 0xAB }, std::byte { 0xCD } };
+    (void) ExchangeWith(fix,
+                        StoreFrame({ .key = "gated", .prefetchGroup = "g", .srcRoot = "/src", .buildTree = "/build" }, v),
+                        authed.session);
+
+    auto const got = fix.engine.Get("gated");
+    REQUIRE(got.has_value());
+    CHECK_FALSE(got->found);
+}
+
+TEST_CASE("A correct AUTH opens the connection for the commands pipelined behind it", "[compile-cache][handler][auth]")
+{
+    // Written as ONE stream rather than an exchange per frame, because that is
+    // exactly how the launcher sends it: AUTH and the real command go out in a
+    // single write and both replies are read afterwards. If the handler ever
+    // required a round trip between them, this case is what fails.
+    CcFixture fix;
+    auto authed = RequireSecret("", "s3cret");
+
+    CompileValue v;
+    v.objectBlob = { std::byte { 0x11 }, std::byte { 0x22 } };
+    auto const reply =
+        ExchangeWith(fix,
+                     Concat({ AuthFrame("", "s3cret"),
+                              StoreFrame({ .key = "k", .prefetchGroup = "g", .srcRoot = "/src", .buildTree = "/build" }, v),
+                              FetchFrame("k") }),
+                     authed.session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 3);
+    CHECK(frames[0].status == Wire::Status::Ok); // AUTH accepted
+    CHECK(frames[1].status == Wire::Status::Ok); // STORE landed
+    REQUIRE(frames[2].status == Wire::Status::Ok);
+
+    auto const decoded = DecodeCompileValue(frames[2].payload);
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->objectBlob == v.objectBlob);
+}
+
+TEST_CASE("A wrong secret is refused and does not open the connection", "[compile-cache][handler][auth]")
+{
+    CcFixture fix;
+    auto authed = RequireSecret("", "s3cret");
+
+    auto const reply = ExchangeWith(fix, Concat({ AuthFrame("", "wrong"), FetchFrame("k") }), authed.session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+
+    auto const authError = ErrorOf(frames[0]);
+    REQUIRE(authError.present);
+    CHECK(authError.code == Wire::ErrorCode::Unauthenticated);
+
+    // The command behind it is still gated — a failed attempt must not count as
+    // an attempt made.
+    auto const fetchError = ErrorOf(frames[1]);
+    REQUIRE(fetchError.present);
+    CHECK(fetchError.code == Wire::ErrorCode::Unauthenticated);
+}
+
+TEST_CASE("A named user authenticates with its username, and the secret alone does not", "[compile-cache][handler][auth]")
+{
+    SECTION("username and secret together are accepted")
+    {
+        CcFixture fix;
+        auto authed = RequireSecret("builder", "s3cret");
+        auto const reply = ExchangeWith(fix, AuthFrame("builder", "s3cret"), authed.session);
+        CHECK(SoleReply(reply).status == Wire::Status::Ok);
+    }
+    SECTION("a wrong username with the right secret is refused")
+    {
+        CcFixture fix;
+        auto authed = RequireSecret("builder", "s3cret");
+        auto const reply = ExchangeWith(fix, AuthFrame("intruder", "s3cret"), authed.session);
+        CHECK(ErrorOf(SoleReply(reply)).code == Wire::ErrorCode::Unauthenticated);
+    }
+}
+
+TEST_CASE("With auth disabled a credential is accepted and ignored", "[compile-cache][handler][auth]")
+{
+    // A launcher configured with FASTCACHE_TOKEN must keep working against a
+    // daemon that requires none — otherwise setting a token becomes a breaking
+    // change against every unauthenticated daemon in a mixed fleet, which is
+    // precisely the migration this feature has to survive.
+    CcFixture fix;
+    auto const reply = Exchange(fix, Concat({ AuthFrame("", "any-token"), FetchFrame("absent") }));
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    CHECK(frames[0].status == Wire::Status::Ok);
+    CHECK(frames[1].status == Wire::Status::Miss);
+}
+
+TEST_CASE("Enabling auth by reload gates a connection that is already open", "[compile-cache][handler][auth]")
+{
+    // The policy is resolved per command from the live source, so a SIGHUP that
+    // *enables* auth reaches connections that are already open. Getting this
+    // wrong is silent: seeding a per-connection "authenticated" flag from the
+    // policy at connect time -- the obvious spelling -- leaves every connection
+    // that predates the reload exempt for its whole life, which on a long-lived
+    // pool is indistinguishable from auth simply not working.
+    //
+    // Driven through a source that arms itself after its first read. That leans
+    // on the loop reading the policy exactly once per command, which is a stated
+    // property of the handler rather than an accident: the gate and the verify
+    // must see the same policy, so they share one read.
+    struct ArmingSource final: IAuthSource
+    {
+        std::shared_ptr<AuthPolicy const> policy;
+        mutable int reads { 0 };
+
+        [[nodiscard]] std::shared_ptr<AuthPolicy const> Current() const noexcept override
+        {
+            ++reads;
+            return reads >= 2 ? policy : std::shared_ptr<AuthPolicy const> {};
+        }
+    };
+
+    CcFixture fix;
+    ArmingSource source;
+    source.policy = std::make_shared<AuthPolicy const>(std::string {}, std::string { "s3cret" });
+    SessionContext session {};
+    session.authSource = &source;
+
+    auto const reply = ExchangeWith(fix, Concat({ FetchFrame("k"), FetchFrame("k") }), session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    // Before the reload: served normally (a miss, since nothing is stored).
+    CHECK(frames[0].status == Wire::Status::Miss);
+    // After it: the same command on the same connection is now gated.
+    auto const error = ErrorOf(frames[1]);
+    REQUIRE(error.present);
+    CHECK(error.code == Wire::ErrorCode::Unauthenticated);
+}
+
+TEST_CASE("A verified credential survives a secret rotation", "[compile-cache][handler][auth]")
+{
+    // The other direction, and deliberately the opposite answer: a peer that
+    // proved the credential current when it connected keeps its access when the
+    // secret is rotated under it. Re-gating on rotation would fail every
+    // in-flight build the moment an operator rotates, which is what makes
+    // rotation something nobody dares do. Redis behaves the same way.
+    struct RotatingSource final: IAuthSource
+    {
+        std::shared_ptr<AuthPolicy const> first;
+        std::shared_ptr<AuthPolicy const> second;
+        mutable int reads { 0 };
+
+        [[nodiscard]] std::shared_ptr<AuthPolicy const> Current() const noexcept override
+        {
+            ++reads;
+            return reads <= 1 ? first : second;
+        }
+    };
+
+    CcFixture fix;
+    RotatingSource source;
+    source.first = std::make_shared<AuthPolicy const>(std::string {}, std::string { "old-secret" });
+    source.second = std::make_shared<AuthPolicy const>(std::string {}, std::string { "new-secret" });
+    SessionContext session {};
+    session.authSource = &source;
+
+    auto const reply = ExchangeWith(fix, Concat({ AuthFrame("", "old-secret"), FetchFrame("k") }), session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    CHECK(frames[0].status == Wire::Status::Ok);   // proved against the old secret
+    CHECK(frames[1].status == Wire::Status::Miss); // still served after rotation
+}
+
+TEST_CASE("A gated frame is drained by its declared length, not buffered", "[compile-cache][handler][auth]")
+{
+    // The gate runs before the payload is read: an unauthenticated peer could
+    // otherwise pipeline frames declaring the full payload cap and make the
+    // server allocate all of it per frame before being told to authenticate.
+    // Observable as framing rather than as footprint — a handler that failed to
+    // step over the refused body would find the next header inside it and drop
+    // the connection instead of answering the second command.
+    CcFixture fix;
+    auto authed = RequireSecret("", "s3cret");
+
+    CompileValue big;
+    big.objectBlob.assign(64 * 1024, std::byte { 0x5A });
+    auto const reply = ExchangeWith(
+        fix,
+        Concat({ StoreFrame({ .key = "big", .prefetchGroup = "g", .srcRoot = "/src", .buildTree = "/build" }, big),
+                 FetchFrame("after") }),
+        authed.session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    CHECK(ErrorOf(frames[0]).code == Wire::ErrorCode::Unauthenticated);
+    CHECK(ErrorOf(frames[1]).code == Wire::ErrorCode::Unauthenticated);
+}
+
+TEST_CASE("An oversize AUTH is refused on its own ceiling, not the session's", "[compile-cache][handler][auth]")
+{
+    // AUTH is the one verb deliberately reachable before authentication, which
+    // makes it the one hole in the pre-auth allocation gate. Without a ceiling of
+    // its own it is read with `ReadExactly(payloadLength)` bounded only by
+    // `maxPayloadBytes` -- 256 MiB by default -- so an unauthenticated peer gets
+    // exactly the allocation the gate exists to deny, through the door the gate
+    // holds open. A credential does not need 256 MiB.
+    //
+    // Two frames, because the refusal must also be recoverable: the oversize body
+    // is drained by its declared length, so the command behind it still gets an
+    // answer rather than the connection being dropped.
+    CcFixture fix;
+    auto authed = RequireSecret("", "s3cret");
+
+    std::string const huge(Wire::MaxAuthPayload + 1, 'x');
+    auto const reply = ExchangeWith(fix, Concat({ AuthFrame("", huge), FetchFrame("k") }), authed.session);
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+
+    auto const authError = ErrorOf(frames[0]);
+    REQUIRE(authError.present);
+    CHECK(authError.code == Wire::ErrorCode::PayloadTooLarge);
+    // The message must name the verb whose ceiling was hit, not the session cap:
+    // an operator reading "exceeds cap 268435456" for a 4 KiB limit learns nothing.
+    CHECK(authError.message.contains("auth"));
+
+    // Still gated, and still answering.
+    CHECK(ErrorOf(frames[1]).code == Wire::ErrorCode::Unauthenticated);
+}
+
+TEST_CASE("A credential right up against the ceiling is still accepted", "[compile-cache][handler][auth]")
+{
+    // The bound must be a bound, not an off-by-one that quietly rejects the
+    // largest legal credential. The overhead is measured off the encoder rather than
+    // counted by hand, so a field added to AUTH moves it here too.
+    CcFixture fix;
+    auto const overhead = AuthFrame("", "").size() - Wire::RequestHeaderSize;
+    std::string const atTheCeiling(Wire::MaxAuthPayload - overhead, 'x');
+    auto authed = RequireSecret("", atTheCeiling);
+
+    auto const reply = ExchangeWith(fix, AuthFrame("", atTheCeiling), authed.session);
+    CHECK(SoleReply(reply).status == Wire::Status::Ok);
+}
+
+TEST_CASE("A gated verb keeps the operator's cap, not the AUTH ceiling", "[compile-cache][handler][auth]")
+{
+    // The per-op ceiling must not leak onto verbs that legitimately carry an
+    // object file. A STORE larger than MaxAuthPayload is ordinary traffic, and a
+    // shared ceiling would cap every cached object at 4 KiB.
+    CcFixture fix;
+
+    CompileValue v;
+    v.objectBlob.assign(Wire::MaxAuthPayload * 4, std::byte { 0x7E });
+    auto const reply =
+        Exchange(fix, StoreFrame({ .key = "big", .prefetchGroup = "g", .srcRoot = "/src", .buildTree = "/build" }, v));
+
+    CHECK(SoleReply(reply).status == Wire::Status::Ok);
+    auto const got = fix.engine.Get("big");
+    REQUIRE(got.has_value());
+    CHECK(got->found);
+}
+
+// --- distributed execution: answered, never served ---------------------------
+
+TEST_CASE("The cache refuses every scheduling verb, and says where they went", "[compile-cache][handler][distributed]")
+{
+    // `fastcached` is a cache and nothing else. The fleet's scheduler moved to
+    // `fastcache-compile-node`, because handing out capacity is a
+    // decision only one node may make at a time and nothing here can establish which
+    // node that is.
+    //
+    // The verbs keep their place in `OpTable` and keep getting a TYPED refusal rather
+    // than being dropped, and both halves matter. A client built against an older
+    // daemon has to learn why its scheduling stopped: a closed connection is
+    // indistinguishable from a dead host, and an unknown opcode would say this daemon
+    // is too old when it is in fact too new.
+    CcFixture fix;
+
+    auto const reply = ExchangeWith(
+        fix,
+        Concat({ Wire::EncodeLease(Wire::LeaseRequest { .fingerprint = "gcc", .key = "k", .acceptedCodecs = {} }),
+                 Wire::EncodeRegister(
+                     Wire::RegisterRequest { .fingerprint = "gcc", .endpoint = "h:1", .slots = 1, .acceptedCodecs = {} }),
+                 Wire::EncodeHeartbeat("w1", 0),
+                 Wire::EncodeRelease(Wire::ReleaseRequest { .leaseToken = "l1", .key = "k" }) }),
+        SessionContext {});
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 4);
+    for (auto const& frame: frames)
+    {
+        CHECK(ErrorOf(frame).code == Wire::ErrorCode::DispatchNotPermitted);
+        // A refusal that cannot say what would have worked cannot be acted on.
+        CHECK(ErrorOf(frame).message.contains("fastcache-compile-node"));
+    }
+}
+
+TEST_CASE("A compile sent to the cache is refused with its own message", "[compile-cache][handler][distributed]")
+{
+    // Distinct wording, because "you sent the job to the cache instead of to the
+    // worker the lease named" is a different client bug from "this is not a
+    // scheduler", and both would otherwise present as one unexplained refusal.
+    CcFixture fix;
+
+    auto const reply = ExchangeWith(fix,
+                                    Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "t",
+                                                                               .fingerprint = "gcc",
+                                                                               .args = {},
+                                                                               .source = {},
+                                                                               .acceptedCodecs = {},
+                                                                               .sourceName = "t.cpp",
+                                                                               .compileDir = {},
+                                                                               .compileDirReplacement = {},
+                                                                               .sourceRoot = {},
+                                                                               .sourceRootReplacement = {} }),
+                                    SessionContext {});
+
+    auto const refusal = ErrorOf(SoleReply(reply));
+    CHECK(refusal.code == Wire::ErrorCode::DispatchNotPermitted);
+    CHECK(refusal.message.contains("does not execute compiles"));
+}
+
+TEST_CASE("An oversize control frame is refused on the control ceiling", "[compile-cache][handler][distributed]")
+{
+    // Unchanged by the scheduler's departure, and deliberately kept: the ceiling is a
+    // property of the FRAMING rather than of who answers the verb, and the payload is
+    // still drained so the connection stays usable for whatever was pipelined behind
+    // it. A refusal that left bytes on the socket would desynchronize the stream,
+    // which is the defect the declared-length header exists to prevent.
+    CcFixture fix;
+
+    std::string const huge(Wire::MaxControlPayload + 1, 'k');
+    auto const reply = ExchangeWith(
+        fix,
+        Concat({ Wire::EncodeLease(Wire::LeaseRequest { .fingerprint = "gcc-13", .key = huge, .acceptedCodecs = {} }),
+                 Wire::EncodeLease(Wire::LeaseRequest { .fingerprint = "gcc-13", .key = "k", .acceptedCodecs = {} }) }),
+        SessionContext {});
+
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    CHECK(ErrorOf(frames[0]).code == Wire::ErrorCode::PayloadTooLarge);
+    CHECK(ErrorOf(frames[0]).message.contains("lease"));
+    // Still answering afterwards, which is the point of draining rather than closing.
+    CHECK(ErrorOf(frames[1]).code == Wire::ErrorCode::DispatchNotPermitted);
+}
+
+TEST_CASE("The daemon's 0xFC refusals are counted, and the three malformed-frame arms are told apart",
+          "[protocol][compilecache][metrics]")
+{
+    // #494's daemon half. Every refusal in this file passed through one private
+    // `ReplyError(socket, code, message)` funnel -- twelve of them, across nine codes
+    // -- so a counter at the funnel would have collapsed twelve refusals into one
+    // series. THREE of the twelve answer `MalformedFrame`, which is precisely the case
+    // a table keyed on the code cannot hold. The funnel now takes a row and each call
+    // site states its own.
+    //
+    // The sink arrives through `SessionContext::metrics`, which is nullable by
+    // contract; the null case is asserted separately below.
+    AtomicMetricsSink metrics;
+    SessionContext session {};
+    session.metrics = &metrics;
+
+    SECTION("a STORE whose payload will not decode")
+    {
+        CcFixture fix;
+        // Well FRAMED and undecodable: the declared length matches what arrives, so
+        // the reader hands the payload over and the STORE decoder is what refuses.
+        // A truncated frame would exercise the read path instead, which closes the
+        // connection without replying and counts nothing by design.
+        std::vector<std::byte> frame(Wire::RequestHeaderSize + 1);
+        WireFrame::PutHeader(
+            frame, Wire::Magic, Wire::CurrentVersion, static_cast<std::uint8_t>(Wire::Op::Store), /*payloadLength=*/1);
+        frame.back() = std::byte { 0xFF };
+
+        (void) ExchangeWith(fix, frame, session);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedMalformedPayload) >= 1);
+        // And NOT the credential series, which is the split that matters: garbage at
+        // the credential verb is what a scanner produces, and summing the two would
+        // bury it under ordinary client defects.
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedMalformedCredential) == 0);
+    }
+
+    SECTION("a malformed AUTH payload, which is NOT the ordinary malformed-payload arm")
+    {
+        // **The section that was missing, and its absence was invisible.** The STORE
+        // case above asserts the credential counter stayed at zero -- which is true
+        // there for the trivial reason that nothing sent an AUTH, so it would pass
+        // just as happily with both arms wired to one counter. That is the
+        // absence-of-the-negative trap: a zero proves nothing unless something could
+        // have made it non-zero.
+        //
+        // So this drives the credential arm directly. Garbage aimed at the credential
+        // verb is what a scanner produces, and burying it under ordinary client
+        // defects is exactly what the split exists to prevent.
+        CcFixture fix;
+        auto authed = RequireSecret("", "s3cret");
+        authed.session.metrics = &metrics;
+
+        std::vector<std::byte> frame(Wire::RequestHeaderSize + 1);
+        WireFrame::PutHeader(
+            frame, Wire::Magic, Wire::CurrentVersion, static_cast<std::uint8_t>(Wire::Op::Auth), /*payloadLength=*/1);
+        frame.back() = std::byte { 0xFF };
+
+        (void) ExchangeWith(fix, frame, authed.session);
+
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedMalformedCredential) == 1);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedMalformedPayload) == 0);
+    }
+
+    SECTION("a credential presented and refused")
+    {
+        // Distinct again from the arm above: this one PRESENTED a credential and got
+        // it wrong. A wrong password and a client that never learned it needs one send
+        // an operator to different places.
+        CcFixture fix;
+        auto authed = RequireSecret("", "s3cret");
+        authed.session.metrics = &metrics;
+
+        (void) ExchangeWith(fix, AuthFrame("", "wrong"), authed.session);
+
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheCredentialsRejected) == 1);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedMalformedCredential) == 0);
+    }
+
+    SECTION("an unknown opcode")
+    {
+        CcFixture fix;
+        std::array<std::byte, Wire::RequestHeaderSize> frame {};
+        WireFrame::PutHeader(frame, Wire::Magic, Wire::CurrentVersion, /*kindRaw=*/0xEE, /*payloadLength=*/0);
+
+        (void) ExchangeWith(fix, std::vector<std::byte> { frame.begin(), frame.end() }, session);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedUnknownOpcode) == 1);
+    }
+
+    SECTION("a version this build does not serve")
+    {
+        CcFixture fix;
+        std::array<std::byte, Wire::RequestHeaderSize> frame {};
+        WireFrame::PutHeader(
+            frame, Wire::Magic, static_cast<Wire::WireVersion>(0xFE), static_cast<std::uint8_t>(Wire::Op::Fetch), 0);
+
+        (void) ExchangeWith(fix, std::vector<std::byte> { frame.begin(), frame.end() }, session);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedUnsupportedVersion) == 1);
+    }
+
+    SECTION("a declared payload over the session cap")
+    {
+        CcFixture fix;
+        SessionContext small = session;
+        small.maxPayloadBytes = 8;
+
+        std::array<std::byte, Wire::RequestHeaderSize> frame {};
+        WireFrame::PutHeader(
+            frame, Wire::Magic, Wire::CurrentVersion, static_cast<std::uint8_t>(Wire::Op::Fetch), /*payloadLength=*/4096);
+
+        (void) ExchangeWith(fix, std::vector<std::byte> { frame.begin(), frame.end() }, small);
+        CHECK(metrics.Read(IMetricsSink::Counter::CacheFramesRefusedPayloadTooLarge) == 1);
+    }
+}
+
+TEST_CASE("A daemon refusal with nothing collecting still answers", "[protocol][compilecache][metrics]")
+{
+    // **`SessionContext::metrics` is nullable by contract** -- "a scheduler must
+    // schedule whether or not anyone is scraping it" -- and its own documentation
+    // refuses a null-object default, because a discarding sink and an absent one would
+    // be indistinguishable at the call site.
+    //
+    // So the guard is real and has to be exercised: with no sink the refusal must be
+    // answered exactly as it is with one. A crash here would mean a daemon started
+    // without metrics dies on its first malformed frame, which is the shape this
+    // nullability exists to avoid and the reason a null-object default was refused.
+    CcFixture fix;
+    SessionContext none {};
+    REQUIRE(none.metrics == nullptr);
+
+    std::array<std::byte, Wire::RequestHeaderSize> frame {};
+    WireFrame::PutHeader(frame, Wire::Magic, Wire::CurrentVersion, /*kindRaw=*/0xEE, /*payloadLength=*/0);
+
+    auto const reply = ExchangeWith(fix, std::vector<std::byte> { frame.begin(), frame.end() }, none);
+    CHECK_FALSE(reply.empty());
+}
+
+namespace
+{
+
+/// Run the handler to completion on the reactor, recording that it returned.
+core::async::DetachedTask RunHandlerOn(
+    CompileCacheHandler* handler, core::net::ISocket* socket, CacheEngine* engine, SessionContext session, bool* returned)
+{
+    co_await handler->Run(socket, engine, {}, session);
+    *returned = true;
+}
+
+/// Read exactly one reply frame the handler is known to have written.
+/// @param socket The client end.
+/// @return The frame, header included.
+core::async::Task<std::vector<std::byte>> ReadOneFrame(core::net::ISocket* socket)
+{
+    auto frame = co_await ReadExactlyN(socket, Wire::ReplyHeaderSize);
+    auto const header = Wire::DecodeReplyHeader(frame);
+    if (!header.has_value())
+        co_return frame;
+    auto const payload = co_await ReadExactlyN(socket, header->payloadLength);
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    co_return frame;
+}
+
+/// The push a frame carries, or nullopt for any other reply.
+[[nodiscard]] std::optional<Wire::PushView> PushOf(std::span<std::byte const> frame)
+{
+    auto const header = Wire::DecodeReplyHeader(frame);
+    if (!header.has_value() || header->status != Wire::Status::Push)
+        return std::nullopt;
+    return Wire::DecodePush(frame.subspan(Wire::ReplyHeaderSize));
+}
+
+/// The kind of a push frame, or nullopt for any other reply.
+[[nodiscard]] std::optional<Wire::PushKind> PushKindOf(std::span<std::byte const> frame)
+{
+    auto const push = PushOf(frame);
+    return push.has_value() ? std::optional { push->kind } : std::nullopt;
+}
+
+/// A SUBSCRIBE frame at @p subject's floor.
+[[nodiscard]] std::vector<std::byte> SubscribeTo(Wire::LiveSubject subject)
+{
+    return Wire::EncodeSubscribeRequest(
+        Wire::SubscribeRequest { .subject = subject, .cadenceMillis = 500, .dashboardToken = {} });
+}
+
+/// A daemon session that streams live stats over a manual clock, and a server end whose readable
+/// wait PARKS -- which the in-memory socket never does, and a subscription is defined by.
+///
+/// Declared in the order clang-tidy's padding check asks for, and safe to unwind in it: a stream
+/// parked on the reactor's timer is freed without being resumed, and what its frame's destruction
+/// touches it owns (`LiveStream::_active`); the parking sockets go after the reactor, retiring a
+/// write or a watch that holds only its own share of what it touches, and `writes` before the
+/// `server` it wraps.
+struct StreamingRig
+{
+    CcFixture fix;
+    core::net::testing::ParkingReadableSocket server { *fix.pair.server };
+    Pace::Testing::ParkingWritableSocket writes { server }; ///< What the handler runs on.
+    CacheLiveStatsSources const sources { metrics, [] { return MetricsSnapshot {}; }, "cache.test:6380" };
+    core::net::testing::TestLoop reactor { fix.clock };
+    AtomicMetricsSink metrics;
+    LiveStream live { sources, metrics };
+    bool returned { false };
+
+    /// @return A session that streams through this rig.
+    [[nodiscard]] SessionContext Session() noexcept
+    {
+        SessionContext session {};
+        session.reactor = &reactor;
+        session.metrics = &metrics;
+        session.liveStats = &live;
+        return session;
+    }
+
+    /// Move the clock on and let everything due run.
+    void Advance(std::chrono::milliseconds by)
+    {
+        fix.clock.advance(by);
+        reactor.drain();
+    }
+};
+
+} // namespace
+
+TEST_CASE("The daemon streams the cache subject, and a goodbye ends the stream", "[compile-cache][handler][livestats]")
+{
+    StreamingRig rig;
+    REQUIRE(core::async::syncRun(WriteBytes(rig.fix.pair.client.get(), SubscribeTo(Wire::LiveSubject::Cache))));
+    RunHandlerOn(&rig.fix.handler, &rig.writes, &rig.fix.engine, rig.Session(), &rig.returned);
+    rig.reactor.drain();
+
+    auto const subscribed = core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()));
+    auto const grant = PushOf(subscribed);
+    REQUIRE(grant.has_value());
+    REQUIRE(Unwrap(grant).kind == Wire::PushKind::Subscribed);
+    auto const granted = Wire::DecodeLiveSubscribed(Unwrap(grant).fields);
+    REQUIRE(granted.has_value());
+    CHECK(Unwrap(granted).statsLayout == StatsReadingLayout);
+    CHECK(Unwrap(granted).endpoint == "cache.test:6380");
+
+    // The body is the daemon's own reading, in the binary a client decodes.
+    auto const first = core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()));
+    auto const push = PushOf(first);
+    REQUIRE(push.has_value());
+    REQUIRE(Unwrap(push).kind == Wire::PushKind::Snapshot);
+    auto const snapshot = Wire::DecodeLiveSnapshot(Unwrap(push).fields);
+    REQUIRE(snapshot.has_value());
+    CHECK(DecodeStatsReading(Unwrap(snapshot).body).has_value());
+
+    rig.Advance(500ms);
+    CHECK(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Snapshot);
+    REQUIRE_FALSE(rig.returned);
+
+    // The watcher is parked on the server end, as a subscriber's always is; EOF resolves it.
+    REQUIRE(rig.server.isWatchParked());
+    rig.server.resolveReadable(0);
+    rig.Advance(500ms);
+
+    CHECK(rig.returned);
+    CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsEndedByClient) == 1);
+    CHECK(rig.server.watchesOrphaned() == 0);
+}
+
+TEST_CASE("A stream on a connection that never authenticated ends when the daemon starts requiring one",
+          "[compile-cache][handler][livestats]")
+{
+    StreamingRig rig;
+    SharedAuthSource source {};
+    auto session = rig.Session();
+    session.authSource = &source;
+
+    SECTION("a connection that proved nothing is revoked, named and counted")
+    {
+        REQUIRE(core::async::syncRun(WriteBytes(rig.fix.pair.client.get(), SubscribeTo(Wire::LiveSubject::Cache))));
+        RunHandlerOn(&rig.fix.handler, &rig.writes, &rig.fix.engine, session, &rig.returned);
+        rig.reactor.drain();
+        REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Subscribed);
+        REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Snapshot);
+
+        source.Store(std::make_shared<AuthPolicy const>(std::string {}, std::string { "s3cret" }));
+        rig.Advance(500ms);
+
+        auto const terminal = SoleReply(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get())));
+        REQUIRE(terminal.present);
+        CHECK(terminal.status == Wire::Status::Error);
+        CHECK(ErrorOf(terminal).code == Wire::ErrorCode::Unauthenticated);
+        CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsRevoked) == 1);
+        // Retired by the handler, not left for the connection's close.
+        CHECK(rig.server.watchesRetiredByCancel() == 1);
+        CHECK(rig.server.watchesOrphaned() == 0);
+    }
+
+    SECTION("a connection that proved a secret keeps its stream when the secret rotates")
+    {
+        source.Store(std::make_shared<AuthPolicy const>(std::string {}, std::string { "old-secret" }));
+        REQUIRE(core::async::syncRun(WriteBytes(
+            rig.fix.pair.client.get(), Concat({ AuthFrame("", "old-secret"), SubscribeTo(Wire::LiveSubject::Cache) }))));
+        RunHandlerOn(&rig.fix.handler, &rig.writes, &rig.fix.engine, session, &rig.returned);
+        rig.reactor.drain();
+        REQUIRE(SoleReply(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))).status == Wire::Status::Ok);
+        REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Subscribed);
+        REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Snapshot);
+
+        source.Store(std::make_shared<AuthPolicy const>(std::string {}, std::string { "new-secret" }));
+        rig.Advance(500ms);
+        CHECK(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Snapshot);
+        CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsRevoked) == 0);
+    }
+
+    // Ended either way, so nothing is left parked on the rig's reactor when it goes.
+    rig.server.resolveReadable(0);
+    REQUIRE(Pace::Testing::ShutdownWrite(*rig.fix.pair.client).has_value());
+    rig.Advance(500ms);
+    CHECK(rig.returned);
+}
+
+TEST_CASE("The daemon refuses a subject it does not stream by name, and serves what follows",
+          "[compile-cache][handler][livestats]")
+{
+    StreamingRig rig;
+    auto const reply =
+        ExchangeWith(rig.fix, Concat({ SubscribeTo(Wire::LiveSubject::Fleet), FetchFrame("k") }), rig.Session());
+    auto const frames = SplitReplies(reply);
+    REQUIRE(frames.size() == 2);
+    CHECK(frames[0].status == Wire::Status::Error);
+    CHECK(ErrorOf(frames[0]).code == Wire::ErrorCode::DispatchNotPermitted);
+    CHECK(frames[1].status == Wire::Status::Miss);
+    CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsOpened) == 0);
+}
+
+TEST_CASE("A request pipelined behind a daemon subscription ends the stream in order, and is answered",
+          "[compile-cache][handler][livestats]")
+{
+    // Written together, so the reader holds the FETCH before the stream begins -- where a read
+    // watch would park on bytes already taken off the socket and never learn of them.
+    StreamingRig rig;
+    REQUIRE(core::async::syncRun(
+        WriteBytes(rig.fix.pair.client.get(), Concat({ SubscribeTo(Wire::LiveSubject::Cache), FetchFrame("k") }))));
+    REQUIRE(Pace::Testing::ShutdownWrite(*rig.fix.pair.client).has_value());
+    RunHandlerOn(&rig.fix.handler, &rig.writes, &rig.fix.engine, rig.Session(), &rig.returned);
+    rig.Advance(500ms);
+
+    CHECK(rig.server.watchesArmed() == 0);
+    REQUIRE(rig.returned);
+    REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Subscribed);
+    auto frame = core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()));
+    while (PushKindOf(frame).has_value())
+        frame = core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()));
+    CHECK(SoleReply(frame).status == Wire::Status::Ok);
+    CHECK(SoleReply(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))).status == Wire::Status::Miss);
+}
+
+TEST_CASE("A daemon subscriber that stops reading is cut off at its hold and counted as a stall",
+          "[compile-cache][handler][livestats]")
+{
+    StreamingRig rig;
+    REQUIRE(core::async::syncRun(WriteBytes(rig.fix.pair.client.get(), SubscribeTo(Wire::LiveSubject::Cache))));
+    RunHandlerOn(&rig.fix.handler, &rig.writes, &rig.fix.engine, rig.Session(), &rig.returned);
+    rig.reactor.drain();
+    REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Subscribed);
+    REQUIRE(PushKindOf(core::async::syncRun(ReadOneFrame(rig.fix.pair.client.get()))) == Wire::PushKind::Snapshot);
+
+    // The next tick's push parks at 500 ms. Its hold is the stream's, which at the cache floor is
+    // the write-stall floor itself.
+    rig.writes.StopReading();
+    rig.Advance(500ms);
+    REQUIRE(rig.writes.IsWriteParked());
+    rig.Advance(Wire::MinLiveStreamWriteStall - 1ms);
+    CHECK_FALSE(rig.returned);
+    CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsStalled) == 0);
+
+    rig.Advance(1ms);
+    CHECK(rig.returned);
+    CHECK(rig.writes.WritesRetiredByClose() == 1);
+    CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsStalled) == 1);
+    CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsEndedByReset) == 0);
+    CHECK(rig.metrics.Read(IMetricsSink::Counter::LiveSubscriptionsEndedByClient) == 0);
+}
+
+// --- cache-drop (#1276) ---------------------------------------------------------
+//
+// The daemon SERVES the verb: it holds the key, so "unimplemented" and "served elsewhere"
+// would both be false. Every case below asserts the STORE, not only the reply, because a
+// drop whose reply was right while the object stayed readable is the failure an operator
+// running a repair could not see.
+
+namespace
+{
+
+/// Keeps what a keyspace channel was sent.
+class CapturingPushes final: public ISubscriber
+{
+  public:
+    void Deliver(PushMessage message) override
+    {
+        messages.push_back(std::move(message));
+    }
+
+    std::vector<PushMessage> messages;
+};
+
+/// Watch @p key on @p watches as a Redis client about to MULTI would.
+/// @param watches The registry the observer dirties.
+/// @param engine Where the key's current CAS is read.
+/// @param key The watched key.
+/// @return The handle, clean.
+[[nodiscard]] std::shared_ptr<WatchHandle> WatchKey(WatchRegistry& watches, CacheEngine& engine, std::string_view key)
+{
+    auto handle = std::make_shared<WatchHandle>();
+    handle->Remember(key, engine.PeekCas(key).value_or(CasToken { 0 }));
+    REQUIRE(watches.Register(handle, key));
+    REQUIRE_FALSE(handle->IsDirty());
+    return handle;
+}
+
+/// Send @p request over a fresh connection to a handler over @p engine, and read every reply.
+/// @param engine The engine the handler serves.
+/// @param request One or more frames.
+/// @param session The connection's session.
+/// @return The replies, in order.
+[[nodiscard]] std::vector<ReplyFrame> ExchangeOn(CacheEngine& engine,
+                                                 std::vector<std::byte> const& request,
+                                                 SessionContext session = {})
+{
+    core::net::testing::InMemorySocketPair pair = core::net::testing::InMemorySocketPair::create();
+    CompileCacheHandler handler;
+    REQUIRE(core::async::syncRun(WriteBytes(pair.client.get(), request)));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
+    core::async::syncRun(handler.Run(pair.server.get(), &engine, {}, session));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair.server).has_value());
+    return SplitReplies(core::async::syncRun(ReadAvailable(pair.client.get())));
+}
+
+} // namespace
+
+TEST_CASE("A CACHE-DROP removes the key, and a second one is a miss rather than an error",
+          "[compile-cache][handler][cache-drop]")
+{
+    CcFixture fix;
+    StoreVia(fix.engine, "dropme", "g");
+    REQUIRE(fix.engine.Get("dropme")->found);
+
+    auto const replies = ExchangeOn(
+        fix.engine, Concat({ Wire::EncodeCacheDrop("dropme"), Wire::EncodeCacheDrop("dropme"), FetchFrame("dropme") }));
+    REQUIRE(replies.size() == 3);
+    CHECK(replies[0].status == Wire::Status::Ok);
+    CHECK(replies[1].status == Wire::Status::Miss);
+    CHECK(replies[1].payload.empty());
+    CHECK(replies[2].status == Wire::Status::Miss);
+
+    // Counted by the store, which is what `/metrics` renders: no second tally.
+    CHECK(fix.storage.Snapshot().deleteHits == 1);
+    CHECK(fix.storage.Snapshot().deleteMisses == 1);
+}
+
+TEST_CASE("An unauthenticated CACHE-DROP is refused before its payload and removes nothing",
+          "[compile-cache][handler][cache-drop][auth]")
+{
+    // A drop is a write, gated as a STORE is. The ENGINE is asserted: a gate that refused after
+    // removing would satisfy the reply check alone.
+    CcFixture fix;
+    StoreVia(fix.engine, "guarded", "g");
+    auto authed = RequireSecret("", "s3cret");
+
+    auto const replies = ExchangeOn(fix.engine, Wire::EncodeCacheDrop("guarded"), authed.session);
+    REQUIRE(replies.size() == 1);
+    CHECK(ErrorOf(replies[0]).code == Wire::ErrorCode::Unauthenticated);
+    CHECK(fix.engine.Get("guarded")->found);
+
+    // And authenticated, the same request is served -- so the refusal was the credential's.
+    auto const served =
+        ExchangeOn(fix.engine, Concat({ AuthFrame("", "s3cret"), Wire::EncodeCacheDrop("guarded") }), authed.session);
+    REQUIRE(served.size() == 2);
+    CHECK(served[1].status == Wire::Status::Ok);
+    CHECK_FALSE(fix.engine.Get("guarded")->found);
+}
+
+TEST_CASE("A dropped key is gone from what a FETCH consults through the daemon's own storage chain",
+          "[compile-cache][handler][cache-drop][prefetch]")
+{
+    // The daemon's persistent composition, in `main.cpp`'s order -- `NotifyingStorage` over
+    // `WriteErrorReportingStorage` over a `ShardedStorage` of `LayeredStorage(InMemoryLru,
+    // CowTree)` shards. `BuildStorageBackend` lives in the executable and no test links it, so
+    // the chain is spelled here in that order; a bare tier would answer a question no FETCH
+    // asks. Two copies are made to exist before the drop -- the L2 record and an L1 mirror --
+    // and a group warm runs AFTER it, which is the one path that reads the key without anybody
+    // asking for it.
+    core::platform::ManualClock clock;
+    Testing::TempFile shard0;
+    Testing::TempFile shard1;
+    std::vector<std::unique_ptr<IStorage>> shards;
+    for (auto const* const file: { &shard0, &shard1 })
+    {
+        auto l2 = CowTreeStorage::Open(CowTreeStorage::Options { .path = file->path });
+        REQUIRE(l2.has_value());
+        shards.push_back(std::make_unique<LayeredStorage>(std::make_unique<InMemoryLruStorage>(0), std::move(*l2)));
+    }
+    ShardedStorage sharded { std::move(shards) };
+    CapturingLogger logger;
+    WriteErrorReportingStorage reporting { sharded, logger };
+    NotifyingStorage notifying { reporting, nullptr };
+    CacheEngine engine { notifying, clock };
+
+    StoreVia(engine, "lead", "group");
+    StoreVia(engine, "member", "group");
+    // Resident in L1 as well as on disk.
+    REQUIRE(ExchangeOn(engine, FetchFrame("member")).front().status == Wire::Status::Ok);
+
+    REQUIRE(ExchangeOn(engine, Wire::EncodeCacheDrop("member")).front().status == Wire::Status::Ok);
+
+    // Fetching the leader warms the rest of its group, and the manifest still names the member.
+    REQUIRE(ExchangeOn(engine, FetchFrame("lead")).front().status == Wire::Status::Ok);
+    CHECK(ExchangeOn(engine, FetchFrame("member")).front().status == Wire::Status::Miss);
+    CHECK(reporting.Snapshot().writeErrors == 0);
+}
+
+TEST_CASE("A CACHE-DROP dirties a WATCH on the key and publishes no keyspace event",
+          "[compile-cache][handler][cache-drop][keyspace]")
+{
+    // Through the NOTIFYING decorator, as a memcached `delete` is: a Redis client that WATCHed
+    // the key must see its EXEC abort. And, like that `delete` and a `STORE`, no
+    // `__keyevent@0__:del` -- the event names belong to the Redis verbs that own them.
+    //
+    // Neutered by handing the handler an engine ONE LAYER DOWN, below `NotifyingStorage`: the
+    // key is removed exactly the same and the WATCH stays clean. That arm is kept as a SECTION
+    // rather than run once by hand, so the distinction it proves is on every run.
+    core::platform::ManualClock clock;
+    InMemoryLruStorage inner { 0 };
+    PubSubRegistry registry;
+    auto const delEvents = std::make_shared<CapturingPushes>();
+    static_cast<void>(registry.Subscribe(delEvents, "__keyevent@0__:del"));
+    KeyspaceNotifier notifier { &registry, KeyspaceEvents::Keyevent | KeyspaceEvents::All };
+    WatchRegistry watches;
+    RedisMutationObserver observer { &watches, &notifier };
+    NotifyingStorage notifying { inner, &observer };
+
+    // Watched AFTER the store, because the store is itself a mutation and would dirty a watch
+    // taken before it -- which would pass the first section for the wrong reason.
+    SECTION("through the notifying decorator, as the daemon composes it")
+    {
+        CacheEngine engine { notifying, clock };
+        StoreVia(engine, "watched", "g");
+        auto const handle = WatchKey(watches, engine, "watched");
+
+        REQUIRE(ExchangeOn(engine, Wire::EncodeCacheDrop("watched")).front().status == Wire::Status::Ok);
+        CHECK_FALSE(engine.Get("watched")->found);
+        CHECK(handle->IsDirty());
+        CHECK(delEvents->messages.empty());
+    }
+
+    SECTION("one layer down, which removes the key and tells nobody")
+    {
+        CacheEngine engine { inner, clock };
+        StoreVia(engine, "watched", "g");
+        auto const handle = WatchKey(watches, engine, "watched");
+
+        REQUIRE(ExchangeOn(engine, Wire::EncodeCacheDrop("watched")).front().status == Wire::Status::Ok);
+        CHECK_FALSE(engine.Get("watched")->found);
+        CHECK_FALSE(handle->IsDirty());
+    }
+}

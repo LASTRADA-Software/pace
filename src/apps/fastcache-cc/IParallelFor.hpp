@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <functional>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Runs a fixed number of independent slices and returns when all have finished.
@@ -16,7 +16,7 @@ namespace FastCache::Cc
 ///
 /// ## Why not `core::async::IExecutor`
 ///
-/// `FastCache/Async/IExecutor.hpp` is the **coroutine-resumption** seam -- AGENT.md
+/// `Pace/Async/IExecutor.hpp` is the **coroutine-resumption** seam -- AGENT.md
 /// calls it "the one thing `core::async::ResumeOn` needs" -- and its only method takes a
 /// `std::coroutine_handle<>`. Its one implementation, `core::async::ThreadPoolExecutor`, offers
 /// nothing else, `core::async::ResumeOn` is usable only from inside a coroutine, and `core::async::Task<T>` is
@@ -34,7 +34,7 @@ namespace FastCache::Cc
 /// ambient global, and the correctness requirement below is testable without a race.
 ///
 /// **One consumer, one home.** If a second appears, that is the moment to ask
-/// whether this belongs in `FastCache/` -- not before. A seam moved somewhere
+/// whether this belongs in `Pace/` -- not before. A seam moved somewhere
 /// shared while it has one caller is a shared thing pretending otherwise.
 class IParallelFor
 {
@@ -70,4 +70,4 @@ class IParallelFor
     [[nodiscard]] virtual bool Run(std::size_t count, std::function<void(std::size_t)> const& slice) = 0;
 };
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CacheProtocol.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Protocol/LeaderRedirect.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/LeaderRedirect.hpp>
 
 #include <cstdint>
 #include <format>
@@ -12,7 +12,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/TcpClient.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -359,4 +359,4 @@ core::async::Task<CacheOutcome> CacheStore(core::net::ISocket* client,
     co_return co_await Exchange(client, notice, Wire::EncodeStoreAs(verbs, request), std::move(credential), nullptr);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

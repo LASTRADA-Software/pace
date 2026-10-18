@@ -2,7 +2,7 @@
 #include "DashboardPanels.hpp"
 #include "LivePipedView.hpp"
 
-#include <FastCache/Core/FigureText.hpp>
+#include <Pace/Core/FigureText.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -254,4 +254,4 @@ std::string PipedRecordView::Row(std::vector<Cell> const& cells) const
     return out;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

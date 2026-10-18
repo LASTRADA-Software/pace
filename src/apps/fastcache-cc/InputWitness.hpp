@@ -5,7 +5,7 @@
 #include "InputFiles.hpp"
 #include "Stats.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// What the input witness concluded about one invocation's inputs (#1650).
@@ -255,4 +255,4 @@ class WitnessedManifestContent final: public IManifestContent
     IInputFiles const* _files;
 };
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

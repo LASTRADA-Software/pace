@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/CompileCache/CompileValue.hpp>
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/CompileValue.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Whether a cached compile's *dependency record* is still true on this machine.
@@ -108,4 +108,4 @@ namespace FastCache::Cc
                                                                    PathCanon::Layout const& layout,
                                                                    std::filesystem::path const& workingDirectory);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

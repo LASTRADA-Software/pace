@@ -25,8 +25,8 @@
 
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache::Node;
-using FastCache::Testing::ScratchDirectory;
+using namespace Pace::Node;
+using Pace::Testing::ScratchDirectory;
 
 namespace
 {
@@ -286,17 +286,17 @@ namespace
 /// makes the overlap a fact rather than a hope. Without it one job finishes before
 /// the other starts, nothing is contended, and the case passes having tested
 /// nothing -- which is how the defect survived in the first place.
-class OverlappingEchoRunner final: public FastCache::Cc::IProcessRunner
+class OverlappingEchoRunner final: public Pace::Cc::IProcessRunner
 {
   public:
     static constexpr std::size_t Overlap = 2;
 
-    FastCache::Cc::CompileRun RunCaptureCombined(std::span<std::string const> argv) override
+    Pace::Cc::CompileRun RunCaptureCombined(std::span<std::string const> argv) override
     {
         return RunCaptureSplit(argv);
     }
 
-    FastCache::Cc::CompileRun RunCaptureSplit(std::span<std::string const> argv) override
+    Pace::Cc::CompileRun RunCaptureSplit(std::span<std::string const> argv) override
     {
         std::string source;
         std::string object;
@@ -327,7 +327,7 @@ class OverlappingEchoRunner final: public FastCache::Cc::IProcessRunner
             in.read(text.data(), size);
         }
         std::ofstream { object, std::ios::binary } << text;
-        return FastCache::Cc::CompileRun { .exitCode = 0, .out = {}, .err = {} };
+        return Pace::Cc::CompileRun { .exitCode = 0, .out = {}, .err = {} };
     }
 
   private:
@@ -358,13 +358,13 @@ TEST_CASE("Two nodes compiling at once, each on its own claimed root, keep their
     REQUIRE((*rootA)->Root() != (*rootB)->Root());
 
     OverlappingEchoRunner runner;
-    FastCache::Cc::CompileJobRunner first {
-        runner, (*rootA)->Root(), { { "gcc-13", "/opt/real/g++" } }, FastCache::Cc::ToolchainSurvey::Completed()
+    Pace::Cc::CompileJobRunner first {
+        runner, (*rootA)->Root(), { { "gcc-13", "/opt/real/g++" } }, Pace::Cc::ToolchainSurvey::Completed()
     };
-    FastCache::Cc::CompileJobRunner second {
-        runner, (*rootB)->Root(), { { "gcc-13", "/opt/real/g++" } }, FastCache::Cc::ToolchainSurvey::Completed()
+    Pace::Cc::CompileJobRunner second {
+        runner, (*rootB)->Root(), { { "gcc-13", "/opt/real/g++" } }, Pace::Cc::ToolchainSurvey::Completed()
     };
-    std::array<FastCache::Cc::CompileJobRunner*, OverlappingEchoRunner::Overlap> const runners { &first, &second };
+    std::array<Pace::Cc::CompileJobRunner*, OverlappingEchoRunner::Overlap> const runners { &first, &second };
 
     // Same source NAME, different source TEXT: two machines compiling their own
     // `main.cpp` against one host.
@@ -378,14 +378,14 @@ TEST_CASE("Two nodes compiling at once, each on its own claimed root, keep their
         return out;
     };
 
-    std::array<std::expected<FastCache::Cc::CompileOutcome, FastCache::Cc::JobError>, OverlappingEchoRunner::Overlap>
+    std::array<std::expected<Pace::Cc::CompileOutcome, Pace::Cc::JobError>, OverlappingEchoRunner::Overlap>
         results {};
     std::latch start { static_cast<std::ptrdiff_t>(OverlappingEchoRunner::Overlap) };
     {
         std::vector<std::jthread> threads;
         for (auto const index: std::views::iota(std::size_t { 0 }, OverlappingEchoRunner::Overlap))
             threads.emplace_back([&, index] {
-                auto job = FastCache::Cc::CompileJob { .fingerprint = "gcc-13",
+                auto job = Pace::Cc::CompileJob { .fingerprint = "gcc-13",
                                                        .args = { "-O2" },
                                                        .preprocessed = texts.at(index),
                                                        .sourceName = "a.cpp",
@@ -443,7 +443,7 @@ TEST_CASE("The directory a daemonized node runs in leaves its own prefix-map rul
         // in it is ordinary, and it is #810's subject rather than this one's. So a host
         // that cannot spell it SKIPS: a pass here would report a property nothing
         // established, and a failure would blame this ticket for that one.
-        if (!FastCache::Cc::ScratchRootMappingWarnings(stated).empty())
+        if (!Pace::Cc::ScratchRootMappingWarnings(stated).empty())
             SKIP("this host's temp directory cannot be spelled inside a mapping rule (#810), so the rules "
                  "below cannot be built from it: "
                  + stated);
@@ -452,7 +452,7 @@ TEST_CASE("The directory a daemonized node runs in leaves its own prefix-map rul
         // what clang records, and it is the whole point -- gcc adopts the client's
         // directory out of the preprocessed text, clang leaves this machine's showing.
         auto const rules =
-            FastCache::Cc::WorkerPrefixMapRules(stated, ClientDirectory, Replacement, FastCache::Cc::DriverFamily::Gnu);
+            Pace::Cc::WorkerPrefixMapRules(stated, ClientDirectory, Replacement, Pace::Cc::DriverFamily::Gnu);
         REQUIRE(rules.has_value());
         CHECK(rules->size() == 2);
         CHECK(std::ranges::any_of(*rules, [&](std::string const& rule) {
@@ -470,7 +470,7 @@ TEST_CASE("The directory a daemonized node runs in leaves its own prefix-map rul
         // the shape that makes a test agree with the healthy and the broken state
         // alike.
         auto const rules =
-            FastCache::Cc::WorkerPrefixMapRules("/", ClientDirectory, Replacement, FastCache::Cc::DriverFamily::Gnu);
+            Pace::Cc::WorkerPrefixMapRules("/", ClientDirectory, Replacement, Pace::Cc::DriverFamily::Gnu);
         REQUIRE(rules.has_value());
         CHECK(rules->size() == 1);
         CHECK(

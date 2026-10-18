@@ -5,7 +5,7 @@
 #include <functional>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -111,4 +111,4 @@ std::optional<DrainResult> HostEventInbox::LastSuspendWait() const
     return _lastSuspendWait;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

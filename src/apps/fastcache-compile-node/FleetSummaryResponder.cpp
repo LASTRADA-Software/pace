@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "FleetSummaryResponder.hpp"
 
-#include <FastCache/Cluster/FleetSummarySignature.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/SurfaceRefusal.hpp>
+#include <Pace/Cluster/FleetSummarySignature.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -151,4 +151,4 @@ std::vector<std::byte> FleetSummaryResponder::EndpointRefusalReply(EndpointRefus
     return Cc::RefuseWithoutCounter({ .code = ErrorCodeFor(refusal), .rationale = row.rationale }, detail);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

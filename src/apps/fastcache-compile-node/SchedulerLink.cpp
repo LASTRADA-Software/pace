@@ -5,7 +5,7 @@
 #include <iterator>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 std::optional<SchedulerLink> SchedulerLink::For(std::vector<std::string> configured)
@@ -118,4 +118,4 @@ std::optional<std::string> SchedulerLink::Lost()
     return _current;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

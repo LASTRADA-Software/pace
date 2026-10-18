@@ -12,18 +12,18 @@
 #include "NodeAnnounce.hpp"
 #include "NodeConfig.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/SeedSources.hpp>
-#include <FastCache/Cluster/SplitEvidence.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/StopAwareWait.hpp>
-#include <FastCache/Distributed/IClusterAdmin.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/SrvResolver.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/SeedSources.hpp>
+#include <Pace/Cluster/SplitEvidence.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/SrvResolver.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -41,7 +41,7 @@
 /// @file FormationRuntime.hpp
 /// One serving body's formation, assembled: the controller and the production seams it acts
 /// through, the hooks consensus tells it on, and the thread that beats it.
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// The rules a shaped configuration is judged by: production's are `StartupPolicyRejection`.
@@ -361,4 +361,4 @@ inline constexpr std::string_view FormationNeedsIdentityKey =
 [[nodiscard]] std::unique_ptr<FormationRuntime::Beat> BeginFormation(FormationRuntime* runtime,
                                                                      Distributed::IClusterAdmin* tier);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

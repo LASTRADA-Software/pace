@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/Firewall.hpp>
+#include <Pace/Platform/Firewall.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// An `IFirewall` holding its rules in a vector, for every case that asks what an install or an
@@ -112,4 +112,4 @@ class RecordingFirewall final: public IFirewall
     std::optional<std::size_t> refuseRemoveAt; ///< When set, a removal takes this many of the group's rules, then refuses.
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

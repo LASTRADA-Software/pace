@@ -3,7 +3,7 @@
 
 #include "CliValue.hpp"
 
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <array>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 using Distributed::FleetSection;
@@ -86,4 +86,4 @@ struct FleetDocument
 /// @return The sections, or why the text is not such a document.
 [[nodiscard]] std::expected<FleetDocument, std::string> ParseFleetDocument(std::string_view document);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

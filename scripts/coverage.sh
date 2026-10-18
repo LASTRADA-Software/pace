@@ -79,7 +79,7 @@ first_party="$source_dir/src"
 #   /src/tests/   the shared harness -- test_main, ScratchPath, Unwrap.
 #   _test.cpp     and this is the load-bearing one. Tests in this repository live
 #                 NEXT TO the implementation, so ~150 *_test.cpp files under
-#                 src/FastCache/** and src/apps/** compile straight into the test
+#                 src/Pace/** and src/apps/** compile straight into the test
 #                 binaries. Leave them in and the report measures the tests
 #                 testing themselves: thousands of near-100% lines that move the
 #                 total a long way and mean nothing whatever.

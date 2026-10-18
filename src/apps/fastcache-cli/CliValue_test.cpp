@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
+using namespace Pace;
+using namespace Pace::Cli;
 
 TEST_CASE("an absent cell is not an empty text cell", "[cli][value]")
 {

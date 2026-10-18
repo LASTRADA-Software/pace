@@ -27,7 +27,7 @@
 # ## Outcomes
 #
 # An executable that links Catch2 and is not covered is REFUSED, by name. So is every way
-# of not being able to ask: no link edge that links Catch2 at all, an anchor (`FastCacheTest`)
+# of not being able to ask: no link edge that links Catch2 at all, an anchor (`PaceTest`)
 # that is not among the covered, and an edge carrying a `;` or a `[`, which this reader
 # cannot split safely. A generator that writes no `build.ninja` is a SKIP, naming it.
 #

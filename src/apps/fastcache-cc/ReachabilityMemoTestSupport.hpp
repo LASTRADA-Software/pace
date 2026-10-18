@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Cc::Testing
+namespace Pace::Cc::Testing
 {
 
 /// A memo store held in memory: what two launcher PROCESSES share, as one object two
@@ -47,4 +47,4 @@ class InMemoryMemoStore final: public IMemoStore
     int _writes { 0 };
 };
 
-} // namespace FastCache::Cc::Testing
+} // namespace Pace::Cc::Testing

@@ -63,7 +63,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # The one file the platform entropy source may be reached from. Overridable ONLY so the
 # self-test can stage a tree; a real run never sets it, and the default is the claim.
 if(NOT DEFINED FASTCACHED_RANDOM_SEAM)
-    set(FASTCACHED_RANDOM_SEAM "src/FastCache/Core/IRandomSource.hpp")
+    set(FASTCACHED_RANDOM_SEAM "src/Pace/Core/IRandomSource.hpp")
 endif()
 
 # ---------------------------------------------------------------------------

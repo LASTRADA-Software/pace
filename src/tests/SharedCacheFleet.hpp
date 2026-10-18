@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -49,7 +49,7 @@
 #include <tests/ReactorHomeFakes.hpp>
 #include <tests/SharedTierFakes.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The fleet's shared cache, in process: real `FrameEndpoint`s on loopback serving each cache
@@ -607,4 +607,4 @@ class SharedCacheFleet
     std::vector<std::unique_ptr<ClientNode>> _nodes;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

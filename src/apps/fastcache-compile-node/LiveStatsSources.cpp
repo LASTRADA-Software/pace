@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "LiveStatsSources.hpp"
 
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Metrics/StatsReadingCodec.hpp>
 
 #include <algorithm>
 #include <format>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -119,4 +119,4 @@ LiveEventProbe ProbeFleet(Distributed::FleetSnapshot const& snapshot)
     return probe;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

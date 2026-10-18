@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <functional>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Runs every slice on the calling thread, in order.
@@ -60,4 +60,4 @@ class ThreadedParallelFor final: public IParallelFor
     std::size_t _width;
 };
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

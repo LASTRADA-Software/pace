@@ -123,7 +123,7 @@ secret|the text credential a client presents: Cc::Credential::secret in the laun
 #
 #   `dashboardToken`
 #             -- a real wall, and the reason differs: `Protocol/CompileCacheWire.hpp` is
-#                header-only because the launcher does not LINK `FastCache`, and
+#                header-only because the launcher does not LINK `Pace`, and
 #                `SecureBytes.hpp` needs `SecureBytes.cpp` for `SecureZero`.
 #   `token`   -- far too broad: `PathCanon`'s parser, `CpuFeatures`' banner reader and a
 #                lease's public identifier all spell it, and none is key material. This is
@@ -608,7 +608,7 @@ ScanRoot "$Root"
 if [ -n "$ScanFindings" ]; then
     printf 'A credential is held in a container that does not zero its storage.\n\n'
     printf '%s' "$ScanFindings"
-    printf '\nUse a zeroing container from FastCache/Core/SecureBytes.hpp: SecureByteBuffer for\n'
+    printf '\nUse a zeroing container from Pace/Core/SecureBytes.hpp: SecureByteBuffer for\n'
     printf 'a credential that is BYTES, SecureString for one that is TEXT. Both are std::vector\n'
     printf 'underneath, so every span-taking and string_view-taking interface keeps working,\n'
     printf 'and adopting one is a type change rather than a rewrite.\n'

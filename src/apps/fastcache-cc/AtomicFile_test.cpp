@@ -2,7 +2,7 @@
 #include "AtomicFile.hpp"
 #include "FileBytes.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,8 +31,8 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
+using namespace Pace;
+using namespace Pace::Cc;
 
 namespace
 {

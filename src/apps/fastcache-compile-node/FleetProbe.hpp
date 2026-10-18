@@ -3,11 +3,11 @@
 
 #include "EndpointDialer.hpp"
 
-#include <FastCache/Cluster/ChallengeIssuer.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/SeedSources.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/ChallengeIssuer.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/SeedSources.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -17,7 +17,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file FleetProbe.hpp
@@ -111,4 +111,4 @@ class DialledFleetProbe final: public IFleetProbe
     Cluster::ChallengeIssuer _issuer; ///< Each question's one-use nonce (`IssueNonce`).
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

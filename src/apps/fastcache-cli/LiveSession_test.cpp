@@ -7,9 +7,9 @@
 #include "ScriptedSixelEncoder.hpp"
 #include "TerminalCapabilities.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
-#include <FastCache/Platform/StopSignal.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Platform/StopSignal.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -47,10 +47,10 @@
     #include <csignal>
 #endif
 
-using namespace FastCache;
-using namespace FastCache::Cli;
-using namespace FastCache::Cli::Testing;
-using FastCache::Testing::SteppedDrainWait;
+using namespace Pace;
+using namespace Pace::Cli;
+using namespace Pace::Cli::Testing;
+using Pace::Testing::SteppedDrainWait;
 
 namespace
 {

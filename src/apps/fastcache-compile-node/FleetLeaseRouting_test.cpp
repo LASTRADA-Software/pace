@@ -2,9 +2,9 @@
 #include "NodeConfig.hpp"
 #include "SchedulingRedirect.hpp"
 
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -23,9 +23,9 @@
 #include <tests/FleetHarness.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 using Catch::Matchers::ContainsSubstring;
-using FastCache::Testing::Unwrap;
+using Pace::Testing::Unwrap;
 
 namespace
 {

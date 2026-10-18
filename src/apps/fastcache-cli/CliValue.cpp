@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CliValue.hpp"
 
-#include <FastCache/Core/Base64.hpp>
-#include <FastCache/Core/Utf8.hpp>
+#include <Pace/Core/Base64.hpp>
+#include <Pace/Core/Utf8.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <span>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 Cell AbsentCell() noexcept
@@ -104,4 +104,4 @@ Field const* FindField(Value const& value, std::string_view name) noexcept
     return hit == std::ranges::end(value.fields) ? nullptr : &*hit;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

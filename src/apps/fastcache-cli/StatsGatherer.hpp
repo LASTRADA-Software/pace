@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// Asks every stats source this build knows about.
@@ -114,4 +114,4 @@ class LadderGatherer final: public IStatsGatherer, public IEndpointIdentity
     std::optional<Identification> _identification;
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

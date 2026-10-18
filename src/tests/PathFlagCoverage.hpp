@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Cli/Options.hpp>
+#include <Pace/Cli/Options.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// The operand spelling that makes an option row path-valued.
@@ -159,4 +159,4 @@ template <typename Result>
     return joined;
 }
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

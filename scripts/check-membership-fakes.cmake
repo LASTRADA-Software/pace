@@ -27,7 +27,7 @@
 # about the interface is not read as implementing it:
 #
 #   a `class` or `struct` whose base clause names `IMembershipOracle`, in any spelling
-#   (`IMembershipOracle`, `Distributed::IMembershipOracle`, `FastCache::Distributed::...`),
+#   (`IMembershipOracle`, `Distributed::IMembershipOracle`, `Pace::Distributed::...`),
 #   with or without `final`, and with or without an access specifier.
 #
 # The base clause is bounded by `[^;{]*`, which cannot cross a `;` or a `{` -- so the match is

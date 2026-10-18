@@ -5,7 +5,7 @@
 #include <span>
 #include <string>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// The exit code a `CompileRun` carries when the process could not be spawned.
@@ -155,4 +155,4 @@ class IProcessRunner
 /// @return A runner spawning real child processes.
 [[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner();
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

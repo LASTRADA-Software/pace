@@ -2,8 +2,8 @@
 #include "NodeConditions.hpp"
 #include "RefusedArguments.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,8 +27,8 @@
 #include <tests/CompileReplyFakes.hpp>
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {
@@ -332,7 +332,7 @@ TEST_CASE("A worker refusing an argument on the wire raises the row that names i
     CapturingLogger logger;
     AtomicMetricsSink metrics;
     UnreachedRunner runner;
-    FastCache::Testing::ScratchDirectory scratch { "fc-refused-args" };
+    Pace::Testing::ScratchDirectory scratch { "fc-refused-args" };
     Cc::CompileJobRunner jobs {
         runner, scratch.Path(), { { "msvc", R"(C:\MSVC\bin\Hostx64\x64\cl.exe)" } }, Cc::ToolchainSurvey::Completed()
     };

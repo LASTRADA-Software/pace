@@ -9,7 +9,7 @@
 #include "LivePipedView.hpp"
 #include "NodeClient.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
 #include <array>
@@ -23,7 +23,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file LiveStats.hpp
@@ -376,4 +376,4 @@ struct LivePlan
 /// @return The refusal, or the admitted plan as a record.
 [[nodiscard]] Answer LiveStatsVerb(VerbContext const& context);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

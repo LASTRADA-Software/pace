@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "RespClient.hpp"
 
-#include <FastCache/Core/NumericText.hpp>
+#include <Pace/Core/NumericText.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -11,7 +11,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -295,4 +295,4 @@ std::expected<RespValue, ExchangeError> Call(IExchange& exchange, std::initializ
     return exchange.Call(owned);
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

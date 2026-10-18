@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "Stats.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 // Header-only and std-only, so they add no row to `_fc_cc_core` -- which the
 // launcher's CMakeLists is strict about, since it does not link the library.
 // `Markup.hpp` pulls in `Ranges.hpp` and `Utf8.hpp` and there is no `.cpp` between
 // the three, which is what makes the shared escaper reachable from here at all.
-#include <FastCache/Core/Markup.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Platform/Environment.hpp>
+#include <Pace/Core/Markup.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Platform/Environment.hpp>
 
 #include <algorithm>
 #include <array>
@@ -39,7 +39,7 @@
     #include <unistd.h>
 #endif
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 namespace
 {
@@ -156,13 +156,13 @@ namespace
         // through the one seam that knows about getenv_s.
         std::string base;
 #if defined(_WIN32)
-        if (auto const local = FastCache::ReadEnvironmentVariable("LOCALAPPDATA"); local.has_value())
+        if (auto const local = Pace::ReadEnvironmentVariable("LOCALAPPDATA"); local.has_value())
             base = *local;
 #else
         // XDG_STATE_HOME wins when set; otherwise the spec's default location
         // under $HOME. Neither present means we have nowhere to record.
-        auto const xdg = FastCache::ReadEnvironmentVariable("XDG_STATE_HOME");
-        auto const home = FastCache::ReadEnvironmentVariable("HOME");
+        auto const xdg = Pace::ReadEnvironmentVariable("XDG_STATE_HOME");
+        auto const home = Pace::ReadEnvironmentVariable("HOME");
         if (xdg.has_value() && !xdg->empty())
             base = *xdg;
         else if (home.has_value())
@@ -1583,7 +1583,7 @@ namespace
         {
             // Parenthesized to defeat windows.h's function-style max() macro:
             // this TU is not built with NOMINMAX (it deliberately avoids
-            // linking the FastCache library, which is where that define lives).
+            // linking the Pace library, which is where that define lives).
             auto const scaledHeight = chartHeight * (static_cast<double>(counts[i]) / static_cast<double>(peak));
             auto const barHeight = counts[i] == 0 ? 0.0 : (std::max) (MinBarHeight, scaledHeight);
             result.bars.push_back({
@@ -1900,7 +1900,7 @@ std::string FormatHtmlReport(std::string_view groupFilter)
     //
     // Spelled here rather than taken from `Distributed::HtmlDocumentPrologue`, which is
     // now the one spelling for the library and the node. This is therefore a THIRD copy
-    // and is recorded as one: the launcher does not link `FastCache`, and while its own
+    // and is recorded as one: the launcher does not link `Pace`, and while its own
     // rule -- header-only and std-only, stated at the top of this file -- would admit
     // that header, whether this binary should reach across for a constant is a decision
     // rather than a consequence of adding the tags.
@@ -1989,4 +1989,4 @@ std::string FormatHtmlReport(std::string_view groupFilter)
     return out.str();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

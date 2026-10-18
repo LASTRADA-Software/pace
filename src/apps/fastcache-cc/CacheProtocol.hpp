@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/ConnectCeiling.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/SecureBytes.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/ConnectCeiling.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -20,7 +20,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/KeepAlive.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// How a cache round trip ended.
@@ -622,4 +622,4 @@ inline constexpr std::size_t DefaultMaxStoreBytes = 256ULL * 1024ULL * 1024ULL;
     return limitBytes == 0 || valueBytes <= limitBytes;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

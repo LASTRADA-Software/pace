@@ -25,7 +25,7 @@
 #include <core/tui/Modifier.hpp>
 #include <core/tui/TerminalOutput.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -900,4 +900,4 @@ core::async::Task<std::expected<StartedTerminal, std::string>> StartTerminalDevi
     };
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

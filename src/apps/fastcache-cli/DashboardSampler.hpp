@@ -4,7 +4,7 @@
 #include "CliEndpoint.hpp"
 #include "LiveSubscriber.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <expected>
 #include <thread>
@@ -13,7 +13,7 @@
 #include <core/async/Task.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardSampler.hpp
@@ -86,4 +86,4 @@ struct FrameOutcome
                                                                                core::async::IExecutor* pool,
                                                                                core::async::IExecutor* resumeOn);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -6,11 +6,11 @@
 #include "NodeSlots.hpp"
 #include "NodeStatusText.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/NumericText.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/NumericText.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -34,7 +34,7 @@
 
 #include <core/Ranges.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -3601,4 +3601,4 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     return frame;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

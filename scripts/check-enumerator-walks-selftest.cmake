@@ -48,7 +48,7 @@ endif()
 
 set(seamBody "
 #pragma once
-namespace FastCache
+namespace Pace
 {
 template <typename Enum>
 [[nodiscard]] constexpr auto Enumerators() noexcept
@@ -71,10 +71,10 @@ set(failureCount 0)
 function(Case name expectFail phrase seam)
     set(tree "${FASTCACHED_SCRATCH_DIR}/${name}")
     file(REMOVE_RECURSE "${tree}")
-    file(MAKE_DIRECTORY "${tree}/src/FastCache/Core")
+    file(MAKE_DIRECTORY "${tree}/src/Pace/Core")
     file(MAKE_DIRECTORY "${tree}/scripts/lib")
     configure_file("${roots}" "${tree}/scripts/lib/third-party-roots.txt" COPYONLY)
-    file(WRITE "${tree}/src/FastCache/Core/EnumTable.hpp" "${seam}")
+    file(WRITE "${tree}/src/Pace/Core/EnumTable.hpp" "${seam}")
 
     # Remaining arguments are the planted files.
     math(EXPR last "${ARGC} - 1")
@@ -155,16 +155,16 @@ endfunction()
 # Every accepting case's phrase names the enumeration MODE, which is the only place the
 # check states it -- a refusing case cannot, since it stops before the status line.
 Case(boundsCheckAccepted FALSE "from directory walk" "${seamBody}"
-     "src/FastCache/Wire.hpp|inline bool Known(unsigned raw) { return static_cast<std::size_t>(raw) >= EnumeratorCount<Op>; }")
+     "src/Pace/Wire.hpp|inline bool Known(unsigned raw) { return static_cast<std::size_t>(raw) >= EnumeratorCount<Op>; }")
 
 # A walk spelled through the seam is the point of the seam.
 Case(seamWalkAccepted FALSE "no hand-spelled enumerator walk" "${seamBody}"
-     "src/FastCache/Panel.hpp|inline void Draw() { for (auto const v: Enumerators<Op>()) Use(v); }")
+     "src/Pace/Panel.hpp|inline void Draw() { for (auto const v: Enumerators<Op>()) Use(v); }")
 
 # A COMMENT is not a call site. Without this the check would refuse the prose that explains
 # it, including its own rulebook entry quoted into a header.
 Case(commentAccepted FALSE "no hand-spelled enumerator walk" "${seamBody}"
-     "src/FastCache/Note.hpp|// never write std::views::iota(0, EnumeratorCount<Op>) any more\nint keep = 1;")
+     "src/Pace/Note.hpp|// never write std::views::iota(0, EnumeratorCount<Op>) any more\nint keep = 1;")
 
 # --- and the same two answers in the mode CI actually uses ------------------------------
 
@@ -173,27 +173,27 @@ Case(commentAccepted FALSE "no hand-spelled enumerator walk" "${seamBody}"
 # it: without the assertion a `git init` that silently failed would leave this passing as a
 # second walk-mode case.
 Case(boundsCheckAcceptedGit FALSE "from git ls-files" "${seamBody}"
-     "src/FastCache/Wire.hpp|inline bool Known(unsigned raw) { return static_cast<std::size_t>(raw) >= EnumeratorCount<Op>; }")
+     "src/Pace/Wire.hpp|inline bool Known(unsigned raw) { return static_cast<std::size_t>(raw) >= EnumeratorCount<Op>; }")
 
 # The refusing side of the git mode, and it asserts the MODE rather than the finding: the
 # finding is already covered by its fallback twin, so without this the two cases would be
 # indistinguishable and one of them would be decoration. The check names its scan on the
 # refusal path for exactly this reason.
 Case(iotaRefusedGit TRUE "from git ls-files" "${seamBody}"
-     "src/FastCache/Panel.cpp|void Draw() { for (auto const i: std::views::iota(std::size_t { 0 }, EnumeratorCount<Op>)) Use(static_cast<Op>(i)); }")
+     "src/Pace/Panel.cpp|void Draw() { for (auto const i: std::views::iota(std::size_t { 0 }, EnumeratorCount<Op>)) Use(static_cast<Op>(i)); }")
 
 # --- the refusing direction -------------------------------------------------------------
 
 Case(iotaRefused TRUE "views::iota over EnumeratorCount" "${seamBody}"
-     "src/FastCache/Panel.cpp|void Draw() { for (auto const i: std::views::iota(std::size_t { 0 }, EnumeratorCount<Op>)) Use(static_cast<Op>(i)); }")
+     "src/Pace/Panel.cpp|void Draw() { for (auto const i: std::views::iota(std::size_t { 0 }, EnumeratorCount<Op>)) Use(static_cast<Op>(i)); }")
 
 Case(loopBoundRefused TRUE "a loop bounded by EnumeratorCount" "${seamBody}"
-     "src/FastCache/Panel.cpp|void Draw() { for (std::size_t i = 0; i < EnumeratorCount<Op>; ++i) Use(static_cast<Op>(i)); }")
+     "src/Pace/Panel.cpp|void Draw() { for (std::size_t i = 0; i < EnumeratorCount<Op>; ++i) Use(static_cast<Op>(i)); }")
 
 # The refusal names file AND line, because an assertion on the filename alone passes under a
 # reader that has lost track of where it is.
 Case(refusalNamesTheLine TRUE "Panel.cpp:2:" "${seamBody}"
-     "src/FastCache/Panel.cpp|int keep = 1;\nvoid Draw() { for (auto const i: std::views::iota(0, EnumeratorCount<Op>)) Use(i); }")
+     "src/Pace/Panel.cpp|int keep = 1;\nvoid Draw() { for (auto const i: std::views::iota(0, EnumeratorCount<Op>)) Use(i); }")
 
 # --- the scan refusing to conclude ------------------------------------------------------
 
@@ -201,7 +201,7 @@ Case(refusalNamesTheLine TRUE "Panel.cpp:2:" "${seamBody}"
 # no longer exists, and 'no violations' and 'the rule no longer applies' are different
 # answers.
 Case(anchorMissingRefused TRUE "the seam anchor is missing" "#pragma once\nint nothing = 0;\n"
-     "src/FastCache/Panel.hpp|int keep = 1;")
+     "src/Pace/Panel.hpp|int keep = 1;")
 
 # --- the exemption ----------------------------------------------------------------------
 
@@ -209,7 +209,7 @@ Case(anchorMissingRefused TRUE "the seam anchor is missing" "#pragma once\nint n
 # enumeration REACHED it, which is what stops the exemption being satisfied by a scan that
 # never looked.
 Case(seamHeaderExempt FALSE "no hand-spelled enumerator walk" "${seamBody}"
-     "src/FastCache/Core/EnumTable_test.cpp|void T() { for (auto const i: std::views::iota(0, EnumeratorCount<Op>)) Use(i); }")
+     "src/Pace/Core/EnumTable_test.cpp|void T() { for (auto const i: std::views::iota(0, EnumeratorCount<Op>)) Use(i); }")
 
 # --- the verdict ------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@
 [Tracy](https://github.com/wolfpld/tracy) instrumentation is **opt-in and
 zero-cost when off**: it is gated behind the `TRACY_ENABLE` CMake option
 (default `OFF`). When off, no Tracy header is included, nothing is linked, and
-every profiling macro in `FastCache/Core/Profiling.hpp` collapses to
+every profiling macro in `Pace/Core/Profiling.hpp` collapses to
 `(void) 0` — the default `clang-debug`/`clang-release` binaries are unchanged
 and link zero Tracy symbols.
 
@@ -24,7 +24,7 @@ capturing.
 Instrument code through the wrapper macros, never Tracy directly:
 
 ```cpp
-#include <FastCache/Core/Profiling.hpp>
+#include <Pace/Core/Profiling.hpp>
 
 FC_ZONE_SCOPED;                         // zone named by source location
 FC_ZONE_SCOPED_N("CacheEngine::Get");   // zone with a compile-time literal name

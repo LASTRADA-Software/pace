@@ -11,7 +11,7 @@ narrow interface so the whole thing is testable end-to-end against an
 in-memory transport.
 
 ```
-src/FastCache/
+src/Pace/
   Core/         Errors taxonomy, Clock, HostPort (one parser for
                 `port` / `host:port` / `[v6]:port`), IRandomSource (the randomness seam,
                 beside Clock and for the same reason), ISecureRandom (the OS CSPRNG,
@@ -131,7 +131,7 @@ src/FastCache/
                 I/O, which is what lets every capacity and expiry rule be a
                 ManualClock unit test rather than a sleep. Named Distributed
                 and not Dispatch because RedisResp.cpp already has a Dispatch()
-                that collides under unqualified lookup inside namespace FastCache.
+                that collides under unqualified lookup inside namespace Pace.
                 FleetView renders what the leader can see -- members, machines,
                 workers, per-tier caches and the lease split -- as one page and as
                 JSON, off column tables both renderers walk. Pure with respect to
@@ -282,7 +282,7 @@ src/apps/
                             and never a program: the compiler comes from this
                             node's own `--toolchain` table, which is what keeps a
                             build accelerator from being a remote shell. Links
-                            `FastCache` (unlike the launcher), because it needs
+                            `Pace` (unlike the launcher), because it needs
                             the reactor and the wire. It runs no `Server`: its
                             framed surfaces are `FrameEndpoint`s over one shared
                             `NodeIoLoop`, and its HTTP surface is

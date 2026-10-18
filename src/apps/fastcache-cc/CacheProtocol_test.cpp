@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CacheProtocol.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -20,9 +20,9 @@
 #include <core/async/SyncRun.hpp>
 #include <tests/ScriptedSocket.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Cc;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using namespace Pace::Cc;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -34,9 +34,9 @@ namespace
 /// once and would let whichever case ran first silence the rest -- a coupling to
 /// Catch2's ordering that is invisible until it fails.
 /// @return A notice with no sink.
-[[nodiscard]] FastCache::Cc::CredentialNotice& Unwatched()
+[[nodiscard]] Pace::Cc::CredentialNotice& Unwatched()
 {
-    static FastCache::Cc::CredentialNotice notice = FastCache::Cc::CredentialNotice::Silent();
+    static Pace::Cc::CredentialNotice notice = Pace::Cc::CredentialNotice::Silent();
     return notice;
 }
 

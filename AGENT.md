@@ -12,7 +12,7 @@ The trees below are the at-a-glance map;
 tree with each directory's rationale kept in full.
 
 ```
-src/FastCache/
+src/Pace/
   Core/         Error taxonomy, Clock, HostPort, IRandomSource, ISecureRandom, Logger,
                 BufferPool, Base64, Bytes, Endian, Crc32c, MurmurHash3, Sha256/HMAC,
                 StringHash, Owner, SecureBytes, SessionSeal, Utf8, Markup, Compression,
@@ -68,7 +68,7 @@ src/apps/
   fastcached/               the daemon (FASTCACHED_BUILD_DAEMON, default ON)
   fastcache-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
-                            args; does NOT link the FastCache library (`_fc_cc_core`)
+                            args; does NOT link the Pace library (`_fc_cc_core`)
   fastcache-compile-node/   the compile worker AND the peer service
                             (FASTCACHED_BUILD_NODE, ON); may also be the scheduler, hold
                             a cache tier and run consensus — four surfaces, each off
@@ -580,7 +580,7 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
   `core::net_tls` (#1596), pinned in `CMakeLists.txt`. A defect in them is fixed in core-cpp and
   re-pinned, never worked around here; `Transport/` holds only what core-cpp does not offer yet.
 - `CompileCacheWire.hpp` must stay header-only and dependency-free — the launcher does not link
-  `FastCache` — so it carries cache tiers **positionally**, making `StorageTier`'s enumerator order
+  `Pace` — so it carries cache tiers **positionally**, making `StorageTier`'s enumerator order
   a wire contract.
 - **And an enum SAYS which kind it is at its declaration** — transmitted or persisted, or private —
   because *no comment* means both. The explicit `= N` is the enforcement and is harmful on a
@@ -1329,7 +1329,7 @@ and what they may assume.
   in the shared config). `ctest -R scratch-git`; never EXPORT `GIT_DIR` around a harness.
 - A fleet property that spans two machines needs `src/tests/FleetHarness.hpp`, whose `OnCompile`
   places the interleaving rather than waiting for one. It lives in `src/tests/` because
-  `src/FastCache/` must not include an app header. A harness earns its place by a property shown RED
+  `src/Pace/` must not include an app header. A harness earns its place by a property shown RED
   when its rule is removed — proved beside a case that stays GREEN under the same break.
 - A leader-pinned **mutating** command is put to whoever leads NOW, re-derived, never to an endpoint
   an earlier section recorded, and the retry keys on the answer the caller ASSERTS rather than on a
@@ -1533,7 +1533,7 @@ answers, so neither can carry "there was no probe".
 
 ### Project-specific additions
 - Public headers must be **self-contained** (compile standalone, no PCH dependency).
-- Public symbols live in the `FastCache` namespace.
+- Public symbols live in the `Pace` namespace.
 - Mark `std::expected`-returning APIs `[[nodiscard]]`.
 - Prefer `std::expected<T, SomeError>` over throwing on the public API surface.
 
@@ -1579,7 +1579,7 @@ cmake --preset clang-tsan
 # The targets are the gate's TARGETS rows plus the canary. Nothing checks this list --
 # it had lost two rows -- but the gate refuses to run over a row whose binary was never
 # built, so a short list fails loudly rather than sanitizing less.
-cmake --build --preset clang-tsan --target FastCacheTest fastcache-compile-node-tests fastcache-cc-tests fastcache-cli-tests tsan-canary
+cmake --build --preset clang-tsan --target PaceTest fastcache-compile-node-tests fastcache-cc-tests fastcache-cli-tests tsan-canary
 bash scripts/tsan-gate.sh out/build/clang-tsan
 
 # Linux/macOS — RelWithDebInfo + Tracy profiler (.agent/guides/profiling-tracy.md)
@@ -1630,6 +1630,6 @@ are in [`.agent/rules/packaging-and-release.md`](.agent/rules/packaging-and-rele
 ## Profiling
 
 Tracy instrumentation is opt-in (`TRACY_ENABLE`, default OFF) and collapses to `(void) 0` when off.
-Instrument through the `FC_*` macros in `FastCache/Core/Profiling.hpp`, never Tracy directly — and
+Instrument through the `FC_*` macros in `Pace/Core/Profiling.hpp`, never Tracy directly — and
 never let `FC_ZONE_SCOPED*` straddle a `co_await`. Building the profiling daemon, adding zones and
 analysing a capture: [`.agent/guides/profiling-tracy.md`](.agent/guides/profiling-tracy.md).

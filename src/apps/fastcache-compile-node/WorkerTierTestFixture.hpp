@@ -14,13 +14,13 @@
 #include "ScratchClaim.hpp"
 #include "WorkerTier.hpp"
 
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostInfo.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostInfo.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddressesTestUtils.hpp>
 
 #include <atomic>
 #include <cstddef>
@@ -44,7 +44,7 @@
 #include <tests/ScriptedHostEvents.hpp>
 #include <tests/SteppedDrainWait.hpp>
 
-namespace FastCache::Node::WorkerTierTesting
+namespace Pace::Node::WorkerTierTesting
 {
 
 /// A refresh that publishes nothing and counts how often it was asked: a case publishes on
@@ -160,13 +160,13 @@ inline constexpr std::string_view FleetScheduler = "127.0.0.1:6675";
 /// all of it outliving any tier a case starts.
 struct WorkerTierFixture
 {
-    FastCache::Testing::ScratchDirectory scratch { "fc-worker-tier" };
+    Pace::Testing::ScratchDirectory scratch { "fc-worker-tier" };
     /// Capturing rather than `NullLogger`, so a case that needs to read what the tier logged
     /// -- a withheld toolchain label's Warn among them -- has a record to read.
     CapturingLogger logger;
     AtomicMetricsSink metrics;
     Distributed::OpenMembership membership;
-    FastCache::Testing::ScriptedHostAddresses addresses;
+    Pace::Testing::ScriptedHostAddresses addresses;
     core::platform::ManualClock clock;
     CachedLocalityOracle locality { addresses, clock };
     NodeIoLoop io;
@@ -192,7 +192,7 @@ struct WorkerTierFixture
     /// sets it to a path no debug-prefix-map rule can spell to watch the worker say so.
     std::filesystem::path scratchBase {};
     /// The host, scripted: a case fires what the OS would have.
-    FastCache::Testing::ScriptedHostEvents hostEvents;
+    Pace::Testing::ScriptedHostEvents hostEvents;
     /// Run at each poll of `suspendWait`; empty for none. A case whose heartbeat thread runs may block
     /// here -- boundedly, on the case's own thread -- for something that thread does, so no REAL
     /// deadline races it: the suspend's budget is measured on the stepped clock below.
@@ -203,7 +203,7 @@ struct WorkerTierFixture
     /// races that gap and must not be asserted.
     std::function<void()> suspendPoll;
     /// Where a suspend's bounded wait runs; a case reads how long it took by this clock.
-    FastCache::Testing::SteppedDrainWait suspendWait { [this] {
+    Pace::Testing::SteppedDrainWait suspendWait { [this] {
         if (suspendPoll)
             suspendPoll();
     } };
@@ -217,10 +217,10 @@ struct WorkerTierFixture
     std::vector<std::vector<std::byte>> heartbeatReplies {};
 
     /// The dialer `Dialer()` builds from `heartbeatReplies`; reached through it, never directly.
-    std::optional<FastCache::Testing::ScriptedDialer> builtDialer;
+    std::optional<Pace::Testing::ScriptedDialer> builtDialer;
 
     /// @return How the heartbeat reaches a scheduler; built from `heartbeatReplies` at the first `Start`.
-    [[nodiscard]] FastCache::Testing::ScriptedDialer& Dialer()
+    [[nodiscard]] Pace::Testing::ScriptedDialer& Dialer()
     {
         if (!builtDialer.has_value())
             builtDialer.emplace(heartbeatReplies);
@@ -281,4 +281,4 @@ struct WorkerTierFixture
     }
 };
 
-} // namespace FastCache::Node::WorkerTierTesting
+} // namespace Pace::Node::WorkerTierTesting

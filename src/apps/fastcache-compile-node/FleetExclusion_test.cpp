@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,7 +15,7 @@
 #include <ReachabilityMemoTestSupport.hpp>
 #include <tests/FleetHarness.hpp>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {

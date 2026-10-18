@@ -3,7 +3,7 @@
 #
 # Run a Catch2 binary and say which of FIVE things happened to it.
 #
-#   scripts/run-suite.sh -- out/build/gcc-debug/target/FastCacheTest
+#   scripts/run-suite.sh -- out/build/gcc-debug/target/PaceTest
 #   scripts/run-suite.sh --retries 2 -- <binary> "[frame]"
 #   scripts/run-suite.sh --self-test
 #

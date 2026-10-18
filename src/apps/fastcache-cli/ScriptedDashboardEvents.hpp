@@ -11,7 +11,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 
-namespace FastCache::Cli::Testing
+namespace Pace::Cli::Testing
 {
 
 /// @file ScriptedDashboardEvents.hpp
@@ -115,4 +115,4 @@ class ScriptedDashboardEvents final: public IDashboardEventSource
     bool _closed { false };
 };
 
-} // namespace FastCache::Cli::Testing
+} // namespace Pace::Cli::Testing

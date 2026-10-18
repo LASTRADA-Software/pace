@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "DashboardLoop.hpp"
 
-#include <FastCache/Core/NumericText.hpp>
+#include <Pace/Core/NumericText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@
 #include <string_view>
 #include <utility>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -326,4 +326,4 @@ core::async::Task<DashboardExit> RunDashboard(
     }
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

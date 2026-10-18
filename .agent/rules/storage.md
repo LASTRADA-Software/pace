@@ -208,14 +208,14 @@ snapshot was read as a steady state.
 It is pinned twice, in two suites, and not by accident: `CowTreeStorage_test`
 asks the operator's question — a daemon's store opens, serves, stays quiet, and
 does not spend its surviving slot — and `FilePageStore_test` asks the library's,
-which is the same three facts without FastCache present. The surviving-slot
+which is the same three facts without Pace present. The surviving-slot
 property is therefore pinned in **both**, for two different reasons rather than
 by duplication: `_lastDurableSlot` is a `FilePageStore` member, so the library's
 own guarantee has to be assertable from a suite that links only `CowTree`, while
 the other suite asserts what the same behaviour costs an operator.
 `src/CowTree/` is a standalone sibling that any project can pick up.
 
-What cannot be shared is a TEST helper: `src/tests/` and `src/FastCache/` are off
+What cannot be shared is a TEST helper: `src/tests/` and `src/Pace/` are off
 `CowTreeTests`' include path, which is the boundary that keeps the library
 standalone. That is narrower than "nothing can be shared", and the wider claim was
 in this file first — `src/CowTree/CowTree/` is on **both** suites' paths under the

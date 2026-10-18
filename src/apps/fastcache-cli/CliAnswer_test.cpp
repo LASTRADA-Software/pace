@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
-using namespace FastCache::Cli;
+using namespace Pace;
+using namespace Pace::Cli;
 
 TEST_CASE("the connections' remarks come first and a sentence already said is not said again", "[cli][answer]")
 {

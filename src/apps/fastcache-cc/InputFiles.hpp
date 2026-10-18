@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/BoundedDrain.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
 
 #include <algorithm>
 #include <array>
@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// An instant on the clock a filesystem stamps change times with: nanoseconds since the Unix
@@ -271,4 +271,4 @@ class IRealtimeClocks
 /// @return The implementation.
 [[nodiscard]] std::unique_ptr<IInputFiles> MakeDiskInputFiles();
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

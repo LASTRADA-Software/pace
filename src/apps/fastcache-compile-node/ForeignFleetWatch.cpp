@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "ForeignFleetWatch.hpp"
 
-#include <FastCache/Cluster/Encounter.hpp>
-#include <FastCache/Cluster/PeerDirectory.hpp>
+#include <Pace/Cluster/Encounter.hpp>
+#include <Pace/Cluster/PeerDirectory.hpp>
 
 #include <algorithm>
 #include <format>
@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -320,4 +320,4 @@ void ForeignFleetWatch::PublishHealing(std::string const& own)
                       ListDetail(std::format("this fleet ({}) is one fleet split in two with:", own), splits));
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

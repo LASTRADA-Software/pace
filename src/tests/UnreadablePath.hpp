@@ -7,7 +7,7 @@
 #include <system_error>
 #include <utility>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// A path that is THERE and whose contents this process cannot read, for as long as it is alive.
@@ -68,4 +68,4 @@ class UnreadablePath
     std::filesystem::path _path;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

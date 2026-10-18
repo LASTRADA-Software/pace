@@ -25,12 +25,12 @@
 #include "NodeConfig.hpp"
 #include "NodeMembership.hpp"
 
-#include <FastCache/Cluster/ClusterState.hpp>
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/SchedulerService.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/ProvenIdentity.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -42,8 +42,8 @@
 #include <tests/FleetHarness.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 namespace Wire = CompileCacheWire;
 
 namespace

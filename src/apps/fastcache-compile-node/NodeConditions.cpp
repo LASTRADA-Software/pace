@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "NodeConditions.hpp"
 
-#include <FastCache/Core/PeerText.hpp>
-#include <FastCache/Metrics/StatsReading.hpp>
+#include <Pace/Core/PeerText.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
 
 #include <cassert>
 #include <format>
@@ -11,7 +11,7 @@
 #include <ranges>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -166,4 +166,4 @@ void WatchAcceptLoops(core::net::AcceptLoopHealth& health, NodeConditions& condi
     });
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

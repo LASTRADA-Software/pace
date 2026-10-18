@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "ToolchainFingerprint.hpp"
 
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -216,5 +216,5 @@ TEST_CASE("A fingerprint is a fixed-width hex string", "[toolchain][fingerprint]
     // And a scheduler keeps what a lease names, so it refuses a fingerprint longer than it records:
     // the width asserted above is what `MaxToolchainFingerprintBytes` was sized from, with room to
     // spare, and a real fingerprint the scheduler refused would never be distributed at all.
-    CHECK(fingerprint.size() * 2 <= FastCache::CompileCacheWire::MaxToolchainFingerprintBytes);
+    CHECK(fingerprint.size() * 2 <= Pace::CompileCacheWire::MaxToolchainFingerprintBytes);
 }

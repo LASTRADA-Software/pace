@@ -9,10 +9,10 @@
 #include "SixelEncoder.hpp"
 #include "StatsSource.hpp"
 
-#include <FastCache/Cache/StorageTier.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/MachineName.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/MachineName.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <array>
 #include <chrono>
@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardPanel.hpp
@@ -684,4 +684,4 @@ class PanelView final: public IDashboardView
     bool _typingFilter { false };
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

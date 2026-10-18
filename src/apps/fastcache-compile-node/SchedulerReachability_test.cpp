@@ -8,9 +8,9 @@
 #include "NodeConditions.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -26,9 +26,9 @@
 #include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -282,7 +282,7 @@ TEST_CASE("Each unproved identity maps to its own outcome", "[node][scheduler][r
 TEST_CASE("scheduler-unreachable is raised while a scheduler does not answer and cleared when it does",
           "[node][scheduler][reachability][conditions]")
 {
-    namespace Wire = FastCache::CompileCacheWire;
+    namespace Wire = Pace::CompileCacheWire;
     core::platform::ManualClock clock;
     NodeConditions conditions;
     SchedulerReachability reachability { clock, &conditions };

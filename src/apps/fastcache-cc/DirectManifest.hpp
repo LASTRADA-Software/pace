@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// A direct-mode manifest: what a translation unit included, recorded so a later
@@ -825,4 +825,4 @@ struct ManifestInputs
 /// @return A stable 32-hex-char digest over the manifest key plus every entry.
 [[nodiscard]] std::string ComputeHeaderStateDigest(std::string_view manifestKey, DirectManifest const& manifest);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

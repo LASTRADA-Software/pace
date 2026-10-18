@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Core/PeerText.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Core/PeerText.hpp>
+#include <Pace/Platform/FileTrust.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -189,4 +189,4 @@ std::expected<void, std::string> RaftStoreArchiver::Archive(std::string_view clu
                                          staging.string()) };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

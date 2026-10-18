@@ -5,7 +5,7 @@
 
 #include <core/tui/Unicode.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 std::size_t TerminalCellWidth(std::string_view text) noexcept
@@ -15,4 +15,4 @@ std::size_t TerminalCellWidth(std::string_view text) noexcept
     return static_cast<std::size_t>(std::max(0, core::tui::stringWidth(text)));
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

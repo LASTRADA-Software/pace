@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TerminalCellWidthUnavailable.cpp
@@ -23,4 +23,4 @@ std::size_t TerminalCellWidth(std::string_view /*text*/) noexcept
     std::abort();
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

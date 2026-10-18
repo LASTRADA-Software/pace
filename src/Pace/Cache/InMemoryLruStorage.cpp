@@ -1,0 +1,729 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Cache/IReclaimLog.hpp>
+#include <Pace/Cache/InMemoryLruStorage.hpp>
+
+#include <algorithm>
+#include <charconv>
+#include <cstdint>
+#include <expected>
+#include <iterator>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include <core/Profiling.hpp>
+
+namespace Pace
+{
+
+namespace
+{
+
+    [[nodiscard]] StorageError MakeKeyNotFound()
+    {
+        return StorageError { .code = StorageErrorCode::KeyNotFound, .systemCode = 0, .context = {} };
+    }
+
+    [[nodiscard]] StorageError MakeKeyExists()
+    {
+        return StorageError { .code = StorageErrorCode::KeyExists, .systemCode = 0, .context = {} };
+    }
+
+    [[nodiscard]] StorageError MakeCasMismatch()
+    {
+        return StorageError { .code = StorageErrorCode::CasMismatch, .systemCode = 0, .context = {} };
+    }
+
+    [[nodiscard]] StorageError MakeInvalidArgument(std::string context)
+    {
+        return StorageError { .code = StorageErrorCode::InvalidArgument, .context = std::move(context) };
+    }
+
+    /// True if the entry is alive at `now` given the current liveGeneration.
+    [[nodiscard]] bool IsAlive(CacheEntry const& entry, std::uint64_t liveGen, core::platform::SteadyTimePoint now) noexcept
+    {
+        if (entry.generation < liveGen)
+            return false;
+        if (entry.expiry <= now)
+            return false;
+        return true;
+    }
+
+} // namespace
+
+InMemoryLruStorage::InMemoryLruStorage(std::size_t maxBytes, std::size_t maxValueBytes, LruMode lruMode) noexcept:
+    _maxBytes { maxBytes },
+    _maxValueBytes { maxValueBytes },
+    _lruMode { lruMode }
+{
+}
+
+InMemoryLruStorage::Iterator InMemoryLruStorage::FindAlive(std::string_view key, core::platform::SteadyTimePoint now)
+{
+    auto const indexIt = _index.find(key);
+    if (indexIt == _index.end())
+        return _lru.end();
+
+    auto nodeIt = indexIt->second;
+    if (!IsAlive(nodeIt->entry, _liveGeneration, now))
+    {
+        // Lazy reclaim during lookup. Attribute a never-fetched expiry to
+        // the expired_unfetched counter (generation flushes are not
+        // "expiry" and are excluded).
+        // Both the counter and the event are conditioned on the TTL actually
+        // having lapsed: a generation flush also makes an entry unreachable,
+        // but FLUSHDB already fired its own whole-database event, and naming
+        // every key it swept `expired` reports a TTL that never passed.
+        if (nodeIt->entry.expiry <= now)
+        {
+            if (!nodeIt->entry.fetched)
+                ++_stats.expiredUnfetched;
+            ++_stats.expirations;
+            RecordReclaim(_reclaim, MutationKind::Expire, nodeIt->key);
+        }
+        EraseAt(nodeIt);
+        return _lru.end();
+    }
+
+    // Move to front (most recently used).
+    _lru.splice(_lru.begin(), _lru, nodeIt);
+    return nodeIt;
+}
+
+CacheEntry const* InMemoryLruStorage::FindAliveReadOnly(std::string_view key, core::platform::SteadyTimePoint now) const
+{
+    auto const indexIt = _index.find(key);
+    if (indexIt == _index.end())
+        return nullptr;
+    auto const& entry = indexIt->second->entry;
+    if (!IsAlive(entry, _liveGeneration, now))
+        return nullptr; // leave the expired node in place for PurgeExpired
+    return &entry;
+}
+
+void InMemoryLruStorage::EraseAt(Iterator const& at)
+{
+    // `at` may BE `_sweepCursor`, or the `_index` value naming this node, and this
+    // function moves the one and destroys the other. So it is read here, before
+    // either changes, and never again: everything below works from the node and
+    // its successor, which neither change touches.
+    auto const& node = *at;
+    auto const next = std::next(at);
+    auto const cursorOnNode = _sweepCursor == at;
+
+    // Advanced rather than reset: dropping the sweep back to begin() on every
+    // eviction would restart the pass on a cache under memory pressure, which
+    // is exactly the workload where it matters that the pass finishes.
+    if (cursorOnNode)
+        _sweepCursor = next;
+    _bytesUsed -= node.entry.ValueSize();
+    // Before the erase, because the key it is measured from lives in the node being
+    // dropped.
+    _indexBytes -= IndexBytesFor(node.key.size());
+    _index.erase(node.key);
+    _lru.erase(std::prev(next));
+}
+
+void InMemoryLruStorage::EvictToFit()
+{
+    CORE_ZONE_SCOPED_N("LruStorage::EvictToFit");
+    if (_maxBytes == 0)
+        return;
+    while (_bytesUsed > _maxBytes && !_lru.empty())
+    {
+        auto const victim = std::prev(_lru.end());
+        if (!victim->entry.fetched)
+            ++_stats.evictedUnfetched;
+        // An entry a generation flush already made invisible is being evicted
+        // as bookkeeping, not because memory pressure took a live key: FLUSHDB
+        // fired its own event, and `evicted` on top of that names a second
+        // thing that did not happen to the key. Generation alone settles it, so
+        // this needs no clock -- which is why the check is not `IsAlive`. A
+        // tail entry whose TTL has passed is reported as an eviction, which is
+        // imprecise but not untrue: the key really is gone, and this path has
+        // no `now` to know better.
+        if (victim->entry.generation >= _liveGeneration)
+            RecordReclaim(_reclaim, MutationKind::Evict, victim->key);
+        EraseAt(victim);
+        ++_stats.evictions;
+    }
+    // Memory-pressure timeline so the Tracy viewer shows how close the cache
+    // runs to its byte cap over the course of a workload.
+    CORE_PLOT("lru.bytesUsed", static_cast<std::int64_t>(_bytesUsed));
+}
+
+CasToken InMemoryLruStorage::InsertNew(std::string key,
+                                       std::span<std::byte const> value,
+                                       std::uint32_t flags,
+                                       core::platform::SteadyTimePoint expiry)
+{
+    CORE_ZONE_SCOPED_N("LruStorage::InsertNew");
+    auto const cas = _nextCas++;
+
+    Node node;
+    node.key = std::move(key);
+    node.entry.value = EncodeForStorage(value, node.storedCodec, node.plainSize);
+    node.entry.flags = flags;
+    node.entry.cas = cas;
+    node.entry.expiry = expiry;
+    node.entry.generation = _liveGeneration;
+
+    // Budget the STORED size: the point of compressing is to hold more entries per
+    // byte of RAM, which only happens if the cap counts what is actually resident.
+    auto const storedSize = node.entry.ValueSize();
+
+    _lru.push_front(std::move(node));
+    _index.emplace(_lru.front().key, _lru.begin());
+    _bytesUsed += storedSize;
+    _indexBytes += IndexBytesFor(_lru.front().key.size());
+
+    EvictToFit();
+    return cas;
+}
+
+CasToken InMemoryLruStorage::MutateExisting(Iterator const& it,
+                                            std::span<std::byte const> value,
+                                            std::uint32_t flags,
+                                            core::platform::SteadyTimePoint expiry)
+{
+    CORE_ZONE_SCOPED_N("LruStorage::MutateExisting");
+    _bytesUsed -= it->entry.ValueSize();
+    // Rebind to a fresh immutable buffer (copy-on-write): any reader still
+    // holding the previous SharedValue keeps a valid, unchanged payload. Re-encode
+    // rather than reuse the old codec state — the new value may compress differently
+    // (or not at all), and a stale codec tag would misread it on the next Get.
+    it->entry.value = EncodeForStorage(value, it->storedCodec, it->plainSize);
+    it->entry.flags = flags;
+    it->entry.expiry = expiry;
+    it->entry.generation = _liveGeneration;
+    it->entry.cas = _nextCas++;
+    // A value-rewriting mutation produces a fresh item nobody has read yet.
+    it->entry.stale = false;
+    it->entry.fetched = false;
+    _bytesUsed += it->entry.ValueSize();
+    _lru.splice(_lru.begin(), _lru, it);
+    // Read before the eviction, which may drop this very node -- a value larger than
+    // the whole budget evicts itself -- and with it the `_index` value `it` may be.
+    auto const cas = it->entry.cas;
+    EvictToFit();
+    return cas;
+}
+
+SharedValue InMemoryLruStorage::EncodeForStorage(std::span<std::byte const> value,
+                                                 CompressionCodec& storedCodec,
+                                                 std::size_t& plainSize) const
+{
+    storedCodec = CompressionCodec::Identity;
+    plainSize = value.size();
+
+    // Small values rarely shrink enough to repay a decompress on every read, and a
+    // codec that is not built in must never silently drop data.
+    if (_compression.codec == CompressionCodec::Identity || value.size() < _compression.minBytes
+        || !Compression::IsAvailable(_compression.codec))
+        return MakeSharedValue(value);
+
+    auto packed = Compression::Compress(_compression.codec, value, _compression.level);
+
+    // Keep the plaintext when compression does not actually help; an incompressible
+    // value would otherwise cost both extra bytes and a pointless decompress.
+    if (packed.empty() || packed.size() >= value.size())
+        return MakeSharedValue(value);
+
+    storedCodec = _compression.codec;
+    return MakeSharedValue(packed);
+}
+
+std::vector<std::byte> InMemoryLruStorage::PlaintextBytes(Node const& node) const
+{
+    auto const stored = node.entry.ValueBytes();
+    if (node.storedCodec == CompressionCodec::Identity)
+        return { stored.begin(), stored.end() };
+
+    auto plain = Compression::Decompress(node.storedCodec, stored, node.plainSize);
+    if (!plain.has_value())
+        return {};
+    return std::move(*plain);
+}
+
+CacheEntry InMemoryLruStorage::PlaintextEntry(Node const& node) const
+{
+    if (node.storedCodec == CompressionCodec::Identity)
+        return node.entry;
+
+    auto plain = Compression::Decompress(node.storedCodec, node.entry.ValueBytes(), node.plainSize);
+    if (!plain.has_value())
+    {
+        // A failed decompress means the stored bytes are unusable. Reporting a miss
+        // is the only safe outcome: returning the compressed bytes as if they were
+        // plaintext would hand the caller silent garbage.
+        CacheEntry broken = node.entry;
+        broken.value = {};
+        return broken;
+    }
+
+    CacheEntry entry = node.entry;
+    entry.value = MakeSharedValue(*plain);
+    return entry;
+}
+
+InMemoryLruStorage::Node const* InMemoryLruStorage::FindNodeReadOnly(std::string_view key,
+                                                                     core::platform::SteadyTimePoint now) const
+{
+    auto const it = _index.find(key);
+    if (it == _index.end())
+        return nullptr;
+    auto const& node = *it->second;
+    if (node.entry.generation < _liveGeneration || node.entry.expiry <= now)
+        return nullptr;
+    return &node;
+}
+
+std::expected<GetResult, StorageError> InMemoryLruStorage::Get(std::string_view key, core::platform::SteadyTimePoint now)
+{
+    CORE_ZONE_SCOPED_N("LruStorage::Get");
+
+    if (_lruMode == LruMode::Approximate)
+    {
+        // Shared-read-safe path: ShardedStorage calls this under a *shared*
+        // lock, so it must not mutate `_lru`/`_index` or write the node.
+        // Counters are atomic; promotion + lastAccess/fetched advance are
+        // deferred to the sampled, exclusively-locked PromoteOnRead.
+        //
+        // Exactly one counter is bumped per lookup — the hit or the miss, never
+        // both, and never a separate `cmd_get`, which Snapshot derives as their
+        // sum. Each locked read-modify-write here is ~2 ns of a ~20 ns lookup.
+        auto const* node = FindNodeReadOnly(key, now);
+        if (node == nullptr)
+        {
+            _readGetMisses.fetch_add(1, std::memory_order_relaxed);
+            return GetResult { .found = false, .entry = {} };
+        }
+        _readGetHits.fetch_add(1, std::memory_order_relaxed);
+        // Copy the entry (cheap: the value is a refcounted handle) — unless the tier
+        // is compressed, in which case this decompresses into a fresh buffer. That
+        // allocation is safe under the shared lock because it never touches the
+        // stored node. The returned lastAccess reflects the value *before* this read,
+        // matching the meta `l` semantics; the stored advance happens in
+        // PromoteOnRead.
+        return GetResult { .found = true, .entry = PlaintextEntry(*node) };
+    }
+
+    // Strict path: promote on every read; the caller holds an exclusive lock.
+    ++_stats.cmdGet;
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+    {
+        ++_stats.getMisses;
+        return GetResult { .found = false, .entry = {} };
+    }
+    ++_stats.getHits;
+    // Snapshot the entry as it was *before* this read so the meta `l` flag
+    // reports seconds since the PREVIOUS access; then advance the stored
+    // lastAccess and mark it fetched for the next reader.
+    GetResult result { .found = true, .entry = PlaintextEntry(*it) };
+    it->entry.lastAccess = now;
+    it->entry.fetched = true;
+    return result;
+}
+
+void InMemoryLruStorage::PromoteOnRead(std::string_view key, core::platform::SteadyTimePoint now)
+{
+    // Called under an exclusive lock on a sampled fraction of Approximate-mode
+    // reads. Promote the entry to most-recently-used and advance its access
+    // bookkeeping — the work the shared `Get` deliberately skipped. A miss
+    // (evicted/expired since the read) is a harmless no-op.
+    auto const indexIt = _index.find(key);
+    if (indexIt == _index.end())
+        return;
+    auto const it = indexIt->second;
+    if (!IsAlive(it->entry, _liveGeneration, now))
+        return;
+    _lru.splice(_lru.begin(), _lru, it);
+    it->entry.lastAccess = now;
+    it->entry.fetched = true;
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::Set(std::string_view key,
+                                                              std::vector<std::byte> value,
+                                                              std::uint32_t flags,
+                                                              core::platform::SteadyTimePoint expiry)
+{
+    CORE_ZONE_SCOPED_N("LruStorage::Set");
+    ++_stats.cmdSet;
+    if (ExceedsValueLimit(value.size()))
+        return std::unexpected(MakeStorageError(StorageErrorCode::ValueTooLarge));
+    auto const indexIt = _index.find(key);
+    if (indexIt != _index.end())
+        return MutateExisting(indexIt->second, std::move(value), flags, expiry);
+    return InsertNew(std::string { key }, std::move(value), flags, expiry);
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::Add(std::string_view key,
+                                                              std::vector<std::byte> value,
+                                                              std::uint32_t flags,
+                                                              core::platform::SteadyTimePoint expiry,
+                                                              core::platform::SteadyTimePoint now)
+{
+    if (ExceedsValueLimit(value.size()))
+        return std::unexpected(MakeStorageError(StorageErrorCode::ValueTooLarge));
+    auto const it = FindAlive(key, now);
+    if (it != _lru.end())
+        return std::unexpected(MakeKeyExists());
+    return InsertNew(std::string { key }, std::move(value), flags, expiry);
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::Replace(std::string_view key,
+                                                                  std::vector<std::byte> value,
+                                                                  std::uint32_t flags,
+                                                                  core::platform::SteadyTimePoint expiry,
+                                                                  core::platform::SteadyTimePoint now)
+{
+    if (ExceedsValueLimit(value.size()))
+        return std::unexpected(MakeStorageError(StorageErrorCode::ValueTooLarge));
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+        return std::unexpected(MakeKeyNotFound());
+    return MutateExisting(it, std::move(value), flags, expiry);
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::Append(std::string_view key,
+                                                                 std::span<std::byte const> suffix,
+                                                                 CasToken expected,
+                                                                 core::platform::SteadyTimePoint now)
+{
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+        return std::unexpected(MakeKeyNotFound());
+    if (expected != 0 && it->entry.cas != expected)
+        return std::unexpected(MakeCasMismatch());
+    if (ExceedsValueLimit(it->entry.ValueSize() + suffix.size()))
+        return std::unexpected(MakeStorageError(StorageErrorCode::ValueTooLarge));
+
+    // Plaintext, not the stored bytes: on a compressed tier the stored form is
+    // opaque, and concatenating onto it would produce an undecodable value.
+    auto const existing = PlaintextBytes(*it);
+    std::vector<std::byte> combined;
+    combined.reserve(existing.size() + suffix.size());
+    combined.insert(combined.end(), existing.begin(), existing.end());
+    combined.insert(combined.end(), suffix.begin(), suffix.end());
+    return MutateExisting(it, std::move(combined), it->entry.flags, it->entry.expiry);
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::Prepend(std::string_view key,
+                                                                  std::span<std::byte const> prefix,
+                                                                  CasToken expected,
+                                                                  core::platform::SteadyTimePoint now)
+{
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+        return std::unexpected(MakeKeyNotFound());
+    if (expected != 0 && it->entry.cas != expected)
+        return std::unexpected(MakeCasMismatch());
+    if (ExceedsValueLimit(it->entry.ValueSize() + prefix.size()))
+        return std::unexpected(MakeStorageError(StorageErrorCode::ValueTooLarge));
+
+    auto const existing = PlaintextBytes(*it);
+    std::vector<std::byte> combined;
+    combined.reserve(prefix.size() + existing.size());
+    combined.insert(combined.end(), prefix.begin(), prefix.end());
+    combined.insert(combined.end(), existing.begin(), existing.end());
+    return MutateExisting(it, std::move(combined), it->entry.flags, it->entry.expiry);
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::CompareAndSwap(std::string_view key,
+                                                                         CasToken expected,
+                                                                         std::vector<std::byte> value,
+                                                                         std::uint32_t flags,
+                                                                         core::platform::SteadyTimePoint expiry,
+                                                                         core::platform::SteadyTimePoint now)
+{
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+    {
+        ++_stats.casMisses;
+        return std::unexpected(MakeKeyNotFound());
+    }
+    if (it->entry.cas != expected)
+    {
+        ++_stats.casBadval;
+        return std::unexpected(MakeCasMismatch());
+    }
+    if (ExceedsValueLimit(value.size()))
+        return std::unexpected(MakeStorageError(StorageErrorCode::ValueTooLarge));
+    ++_stats.casHits;
+    return MutateExisting(it, std::move(value), flags, expiry);
+}
+
+std::expected<IStorage::IncrResult, StorageError> InMemoryLruStorage::IncrementOrInitialize(
+    std::string_view key, std::uint64_t magnitude, bool decrement, core::platform::SteadyTimePoint now)
+{
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+    {
+        if (decrement)
+            ++_stats.decrMisses;
+        else
+            ++_stats.incrMisses;
+        return std::unexpected(MakeKeyNotFound());
+    }
+
+    // Decode the existing value as ASCII unsigned 64-bit *before* booking a
+    // hit: a non-numeric value is a client error, not a successful incr/decr.
+    auto const bytes = PlaintextBytes(*it);
+    std::string asText;
+    asText.reserve(bytes.size());
+    for (auto const b: bytes)
+        asText.push_back(static_cast<char>(b));
+
+    std::uint64_t current = 0;
+    auto const [_, ec] = std::from_chars(asText.data(), asText.data() + asText.size(), current);
+    if (ec != std::errc {} || asText.empty())
+        return std::unexpected(MakeInvalidArgument("existing value is not numeric"));
+
+    if (decrement)
+        ++_stats.decrHits;
+    else
+        ++_stats.incrHits;
+
+    // memcached: increment wraps modulo 2^64 (natural for uint64), decrement
+    // saturates at 0. `magnitude` is the full unsigned amount, so deltas in
+    // [2^63, 2^64) are honoured rather than aliasing to the wrong direction.
+    std::uint64_t const updated = [&]() -> std::uint64_t {
+        if (!decrement)
+            return current + magnitude;
+        return magnitude >= current ? 0U : current - magnitude;
+    }();
+
+    auto newText = std::to_string(updated);
+    std::vector<std::byte> newValue;
+    newValue.reserve(newText.size());
+    for (auto const c: newText)
+        newValue.push_back(static_cast<std::byte>(c));
+
+    auto const cas = MutateExisting(it, std::move(newValue), it->entry.flags, it->entry.expiry);
+    return IStorage::IncrResult { .value = updated, .cas = cas };
+}
+
+std::expected<void, StorageError> InMemoryLruStorage::Delete(std::string_view key, core::platform::SteadyTimePoint now)
+{
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+    {
+        ++_stats.deleteMisses;
+        return std::unexpected(MakeKeyNotFound());
+    }
+    EraseAt(it);
+    ++_stats.deleteHits;
+    return {};
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::Touch(std::string_view key,
+                                                                core::platform::SteadyTimePoint newExpiry,
+                                                                core::platform::SteadyTimePoint now)
+{
+    ++_stats.cmdTouch;
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+    {
+        ++_stats.touchMisses;
+        return std::unexpected(MakeKeyNotFound());
+    }
+    it->entry.expiry = newExpiry;
+    it->entry.cas = _nextCas++;
+    it->entry.lastAccess = now;
+    ++_stats.touchHits;
+    return it->entry.cas;
+}
+
+std::expected<GetResult, StorageError> InMemoryLruStorage::Peek(std::string_view key, core::platform::SteadyTimePoint now)
+{
+    // Non-mutating: no LRU promotion, no lastAccess/fetched update, no
+    // stats. Expired / flushed entries read as a miss but are left in
+    // place for the writer-locked PurgeExpired to reclaim.
+    auto const indexIt = _index.find(key);
+    if (indexIt == _index.end())
+        return GetResult { .found = false, .entry = {} };
+    auto const& node = *indexIt->second;
+    if (!IsAlive(node.entry, _liveGeneration, now))
+        return GetResult { .found = false, .entry = {} };
+    return GetResult { .found = true, .entry = PlaintextEntry(node) };
+}
+
+std::expected<CasToken, StorageError> InMemoryLruStorage::MarkStale(std::string_view key,
+                                                                    std::optional<core::platform::SteadyTimePoint> newExpiry,
+                                                                    core::platform::SteadyTimePoint now)
+{
+    auto const it = FindAlive(key, now);
+    if (it == _lru.end())
+        return std::unexpected(MakeKeyNotFound());
+    it->entry.stale = true;
+    if (newExpiry.has_value())
+        it->entry.expiry = *newExpiry;
+    it->entry.cas = _nextCas++;
+    return it->entry.cas;
+}
+
+void InMemoryLruStorage::FlushWithGeneration(core::platform::SteadyTimePoint effectiveAt)
+{
+    // For an immediate flush (now or in the past), bump the generation
+    // right away so all current entries become invisible. For a delayed
+    // flush, record the effective time; entries observed via FindAlive
+    // after effectiveAt has elapsed will be treated as expired by
+    // PurgeExpired, but for simplicity we just bump generation immediately
+    // here. memcached's `flush_all <delay>` is rarely used; if needed, the
+    // engine can schedule the bump on the reactor instead.
+    static_cast<void>(effectiveAt);
+    ++_liveGeneration;
+    ++_stats.cmdFlush;
+}
+
+PurgeOutcome InMemoryLruStorage::PurgeExpired(core::platform::SteadyTimePoint now, PurgeBudget budget)
+{
+    CORE_ZONE_SCOPED_N("LruStorage::PurgeExpired");
+
+    // A full pass is `startSize` steps from wherever the last one stopped,
+    // wrapping once at the end -- which examines every entry that was here when
+    // the call began, whether or not the cursor happened to start at the front.
+    // Sizing the pass up front rather than testing against `_lru.end()` in the
+    // loop is what makes "did I see everything?" answerable at all: the loop
+    // erases as it goes, so the end keeps moving.
+    auto const startSize = _lru.size();
+    auto const scanLimit = budget.ScanLimitOver(startSize);
+    PurgeOutcome outcome { .completedPass = scanLimit >= startSize };
+
+    while (outcome.scanned < scanLimit)
+    {
+        if (_sweepCursor == _lru.end())
+        {
+            _sweepCursor = _lru.begin();
+            if (_sweepCursor == _lru.end())
+                break; // The sweep emptied the list.
+        }
+
+        // Advanced BEFORE the erase below, so this loop never dangles its own
+        // cursor and `EraseAt`'s fix-up is left to handle only the erases that
+        // arrive from somewhere else.
+        auto const victim = _sweepCursor++;
+        if (IsAlive(victim->entry, _liveGeneration, now))
+        {
+            ++outcome.scanned;
+            continue;
+        }
+
+        if (budget.PurgeExhausted(outcome.purged))
+        {
+            // Out of reclaim budget holding a victim. Rewind onto it and leave
+            // it where it is: counting it as scanned would let the pass report
+            // completion having walked past an entry it never dealt with.
+            _sweepCursor = victim;
+            outcome.completedPass = false;
+            return outcome;
+        }
+
+        // Conditioned on the TTL, not on liveness: see FindAlive above.
+        if (victim->entry.expiry <= now)
+        {
+            if (!victim->entry.fetched)
+                ++_stats.expiredUnfetched;
+            ++_stats.expirations;
+            RecordReclaim(_reclaim, MutationKind::Expire, victim->key);
+        }
+        EraseAt(victim);
+        ++outcome.scanned;
+        ++outcome.purged;
+    }
+    return outcome;
+}
+
+void InMemoryLruStorage::SetReclaimLog(IReclaimLog* log)
+{
+    _reclaim = log;
+}
+
+StorageStats InMemoryLruStorage::Snapshot() const noexcept
+{
+    _stats.itemCount = _lru.size();
+    _stats.bytesUsed = _bytesUsed;
+    _stats.bytesLimit = _maxBytes;
+    _stats.indexBytes = _indexBytes;
+    // Wholly resident, so "now" and "at capacity" are one question with one answer.
+    // Reported rather than left at zero, because a consumer summing the projection
+    // across tiers would otherwise read this tier as costing nothing.
+    _stats.indexBytesAtCapacity = _indexBytes;
+    // Fold in the atomic read-path counters (Approximate mode bumps these
+    // instead of the plain `_stats` members). Snapshot runs under the shard's
+    // exclusive lock, so the structure reads are stable; the atomics are read
+    // relaxed.
+    auto stats = _stats;
+    auto const readHits = _readGetHits.load(std::memory_order_relaxed);
+    auto const readMisses = _readGetMisses.load(std::memory_order_relaxed);
+    // `cmd_get` is hits + misses by construction: the read path bumps exactly
+    // one of the two per lookup, and the Strict path bumps `_stats` members in
+    // the same pairing. Deriving it here is what lets the hot path carry one
+    // atomic instead of two.
+    stats.cmdGet += readHits + readMisses;
+    stats.getHits += readHits;
+    stats.getMisses += readMisses;
+    return stats;
+}
+
+void InMemoryLruStorage::Resize(std::size_t newMaxBytes)
+{
+    _maxBytes = newMaxBytes;
+    EvictToFit();
+}
+
+void InMemoryLruStorage::InsertVerbatim(std::string_view key, CacheEntry entry)
+{
+    // Bypass the CAS / generation machinery and store the entry as the
+    // caller supplied it. The whole point is to mirror a lower-tier
+    // entry without rewriting its identity.
+    //
+    // "Verbatim" refers to that IDENTITY (cas, generation, expiry), not to the
+    // value's storage form: this is the path LayeredStorage uses to mirror every
+    // L2 read into L1, so skipping the codec here would leave the in-memory tier
+    // entirely uncompressed in exactly the configuration that needs it most.
+    CompressionCodec storedCodec = CompressionCodec::Identity;
+    std::size_t plainSize = 0;
+    // Hold the incoming handle while encoding: EncodeForStorage reads a span into it,
+    // so assigning straight back into entry.value would depend on argument-lifetime
+    // subtleties for its correctness.
+    SharedValue const incoming = entry.value;
+    entry.value = EncodeForStorage(incoming.Bytes(), storedCodec, plainSize);
+
+    auto const indexIt = _index.find(key);
+    if (indexIt != _index.end())
+    {
+        auto const nodeIt = indexIt->second;
+        _bytesUsed -= nodeIt->entry.ValueSize();
+        nodeIt->entry = std::move(entry);
+        nodeIt->storedCodec = storedCodec;
+        nodeIt->plainSize = plainSize;
+        _bytesUsed += nodeIt->entry.ValueSize();
+        _lru.splice(_lru.begin(), _lru, nodeIt);
+        EvictToFit();
+        return;
+    }
+    Node node;
+    node.key = std::string { key };
+    node.entry = std::move(entry);
+    node.storedCodec = storedCodec;
+    node.plainSize = plainSize;
+    auto const size = node.entry.ValueSize();
+    _lru.push_front(std::move(node));
+    _index.emplace(_lru.front().key, _lru.begin());
+    _bytesUsed += size;
+    _indexBytes += IndexBytesFor(_lru.front().key.size());
+    EvictToFit();
+}
+
+void InMemoryLruStorage::EraseIfPresent(std::string_view key)
+{
+    auto const indexIt = _index.find(key);
+    if (indexIt == _index.end())
+        return;
+    EraseAt(indexIt->second);
+}
+
+} // namespace Pace

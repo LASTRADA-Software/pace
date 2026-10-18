@@ -5,8 +5,8 @@
 #include "NodeClient.hpp"
 #include "RespClient.hpp"
 
-#include <FastCache/Metrics/StatsReading.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Metrics/StatsReading.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include <optional>
 #include <string>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 class NodeExchange;
@@ -177,4 +177,4 @@ class NodeSubscription final: public ILiveSubscription
     bool _left { false };
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

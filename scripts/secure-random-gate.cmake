@@ -136,7 +136,7 @@ if(NOT repeated EQUAL 0)
     message(FATAL_ERROR
         "secure-random-gate: the operating system's generator repeated ${repeated} of ${total} nonces across "
         "${Processes} processes (run:nonce): ${repeats}. A restarted acceptor re-issuing an earlier run's challenge "
-        "is exactly what #1527 closes; see FastCache/Core/ISecureRandom.hpp")
+        "is exactly what #1527 closes; see Pace/Core/ISecureRandom.hpp")
 endif()
 
 message(STATUS "secure-random-gate: ${total} nonces from ${Processes} processes, none repeated and none zero")

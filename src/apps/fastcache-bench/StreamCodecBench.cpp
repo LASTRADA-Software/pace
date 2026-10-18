@@ -19,7 +19,7 @@
 /// 32-byte `std::string` is the amplification that stops `reserve(count)` from being
 /// the free answer even though #309 made `count` safe.
 
-#include <FastCache/Cache/StreamCodec.hpp>
+#include <Pace/Cache/StreamCodec.hpp>
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-using namespace FastCache;
+using namespace Pace;
 
 namespace
 {

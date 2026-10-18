@@ -10,7 +10,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Dial an endpoint written as one string, e.g. `"127.0.0.1:6674"`.
@@ -74,4 +74,4 @@ namespace FastCache::Cc
                                                                        std::string_view hostPort,
                                                                        core::net::DialOptions options);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

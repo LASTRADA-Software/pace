@@ -2,12 +2,12 @@
 #include "FormationRuntime.hpp"
 #include "NodeDefaults.hpp"
 
-#include <FastCache/Core/StopAwareWait.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
 
 #include <format>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 void LateClusterAdmin::Attach(Distributed::IClusterAdmin* admin) noexcept
@@ -246,4 +246,4 @@ std::unique_ptr<FormationRuntime::Beat> BeginFormation(FormationRuntime* runtime
     return std::make_unique<FormationRuntime::Beat>(runtime);
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

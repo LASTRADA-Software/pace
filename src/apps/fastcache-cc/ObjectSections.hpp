@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 /// Walking an object file's sections, in ONE place, for the two readers that need it.
@@ -139,4 +139,4 @@ struct ObjectSections
 ///         out completely.
 [[nodiscard]] std::optional<ObjectSections> ReadObjectSections(std::span<std::byte const> image);
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

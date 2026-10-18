@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 std::string ComputeToolchainFingerprint(std::string_view compilerBanner,
@@ -43,4 +43,4 @@ std::string ComputeToolchainFingerprint(std::string_view compilerBanner,
     return digest.ToHex();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

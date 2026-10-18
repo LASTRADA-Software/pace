@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "SixelEncoder.hpp"
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file SixelEncoderUnavailable.cpp
@@ -17,4 +17,4 @@ std::expected<std::unique_ptr<ISixelEncoder>, std::string> MakeSixelEncoder()
         std::string { "this fastcache-cli was built without the terminal UI (FASTCACHED_BUILD_TUI=OFF)" });
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

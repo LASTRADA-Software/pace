@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "TerminalEvents.hpp"
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TerminalEventsUnavailable.cpp
@@ -38,4 +38,4 @@ core::async::Task<std::expected<StartedTerminal, std::string>> StartTerminal(std
     co_return std::unexpected(std::string { Unavailable });
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

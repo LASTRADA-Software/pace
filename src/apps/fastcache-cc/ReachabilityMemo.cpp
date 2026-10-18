@@ -11,7 +11,7 @@
 #include <system_error>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -223,4 +223,4 @@ std::filesystem::path ReachabilityMemoPath()
     return dir.empty() ? std::filesystem::path {} : dir / "reachability.memo";
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

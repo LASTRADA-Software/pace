@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -52,7 +52,7 @@
 /// This is `CowTree::FilePageStore`'s rule applied to a directory rather than a
 /// store file, and it diverges from that one deliberately in a single place -- see
 /// `ScratchClaimRefusal::Unavailable`.
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Why a worker could not claim a scratch root.
@@ -206,4 +206,4 @@ inline constexpr std::size_t DefaultMaxScratchRoots = 64;
 /// @return The base directory; the caller creates it.
 [[nodiscard]] std::filesystem::path ScratchBaseDirectory();
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

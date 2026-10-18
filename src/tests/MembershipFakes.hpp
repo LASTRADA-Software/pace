@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Ed25519.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Protocol/ProvenIdentity.hpp>
+#include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -23,7 +23,7 @@
 
 #include <tests/RaftPeerKeyFakes.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// Which hosts a route can honestly answer for when it answers by HOST -- the only question a
@@ -109,7 +109,7 @@ inline void RequireHonestLabel(Distributed::MembershipParticipant participant, s
 /// which admission route it stands for, and each is a separate chance to name the wrong one.
 ///
 /// `src/tests/` rather than beside one of the six: this implements a *library* interface, so
-/// `MembershipOracle_test.cpp` is a caller too and `src/FastCache/` must not include an app
+/// `MembershipOracle_test.cpp` is a caller too and `src/Pace/` must not include an app
 /// header. Same argument as `src/tests/FleetHarness.hpp`.
 class ListedMembership final: public Distributed::IMembershipOracle
 {
@@ -388,4 +388,4 @@ struct OpenFleetFold
     ~OpenFleetFold() = default;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

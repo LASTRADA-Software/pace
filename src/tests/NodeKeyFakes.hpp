@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/FileTrust.hpp>
+#include <Pace/Platform/FileTrust.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -22,7 +22,7 @@
 /// Shared rather than written per file: every case resolving a key goes through it, and a copy
 /// that answered `Protect` differently would make those cases pass whatever the resolver did
 /// with the answer.
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// What a `ScriptedNodeKeyGuard` answers. Every field is REQUIRED: a case that does not care
@@ -250,4 +250,4 @@ class ScriptedNodeKeyGuard final: public Node::INodeKeyFileGuard
     std::optional<Consensus::DirectorySyncFailure> _syncFailure;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

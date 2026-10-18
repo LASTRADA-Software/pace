@@ -4,10 +4,10 @@
 #include "NodeKey.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Platform/Firewall.hpp>
-#include <FastCache/Platform/ServiceControl.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Platform/Firewall.hpp>
+#include <Pace/Platform/ServiceControl.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,8 +28,8 @@
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
 namespace
 {

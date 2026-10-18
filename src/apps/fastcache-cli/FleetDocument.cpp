@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -172,4 +172,4 @@ std::expected<FleetDocument, std::string> ParseFleetDocument(std::string_view do
     return parsed;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

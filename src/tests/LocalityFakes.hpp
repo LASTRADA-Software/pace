@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Platform/LocalAddresses.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
 
 #include <algorithm>
 #include <initializer_list>
@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// @file LocalityFakes.hpp
@@ -47,4 +47,4 @@ class ThisMachineIs final: public ILocalityOracle
     std::vector<std::string> _hosts;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

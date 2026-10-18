@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "FleetReadGate.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
+#include <Pace/Core/HostPort.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 FleetReadVerdict DecideFleetRead(std::optional<LiveLeadership> const& leadership,
@@ -27,4 +27,4 @@ FleetReadVerdict DecideFleetRead(std::optional<LiveLeadership> const& leadership
     return { .decision = FleetReadDecision::Admitted, .detail = {} };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

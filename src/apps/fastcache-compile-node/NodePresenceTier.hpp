@@ -11,13 +11,13 @@
 #include "SchedulerLink.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostEvents.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostEvents.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -30,7 +30,7 @@
 
 #include <WorkerProtocol.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// What the presence loop borrows from the node. All of it outlives the loop.
@@ -283,4 +283,4 @@ class NodePresence
     std::jthread _thread;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

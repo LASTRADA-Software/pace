@@ -20,7 +20,7 @@
 
 #include <tests/ScratchPath.hpp>
 
-using namespace FastCache::Cc;
+using namespace Pace::Cc;
 
 namespace
 {
@@ -337,8 +337,8 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
 {
     // Spec invariant 1, at the seam: identities differ in every field between the two
     // checkouts (and between two machines), and nothing of them may reach the record.
-    FastCache::Testing::ScratchDirectory const scratchA { "fc-witness-share-a" };
-    FastCache::Testing::ScratchDirectory const scratchB { "fc-witness-share-b-deeper" };
+    Pace::Testing::ScratchDirectory const scratchA { "fc-witness-share-a" };
+    Pace::Testing::ScratchDirectory const scratchB { "fc-witness-share-b-deeper" };
     std::array<std::string, 2> encoded;
     std::array<std::string, 2> manifestKeys;
     for (auto const index: { std::size_t { 0 }, std::size_t { 1 } })
@@ -348,7 +348,7 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
         scratch.Write("src/h.hpp", "#pragma once\nint h();\n");
         scratch.Write("src/a.cpp", "#include \"h.hpp\"\nint a() { return h(); }\n");
         auto const& root = scratch.Path();
-        FastCache::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
+        Pace::PathCanon::Layout const layout { .sourceRoot = root.string(), .buildTree = (root / "out").string() };
         auto const source = (root / "src" / "a.cpp").string();
         auto const header = (root / "src" / "h.hpp").string();
         auto const resolvedSource = ResolveAgainst(source, root.string(), layout);

@@ -7,7 +7,7 @@
 #include <iterator>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 StabilityRow const& RowOf(InputStability stability) noexcept
@@ -152,4 +152,4 @@ std::expected<std::string, ManifestFault> WitnessedManifestContent::HashAsKeyed(
     return hash;
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

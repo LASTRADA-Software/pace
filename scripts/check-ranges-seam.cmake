@@ -3,7 +3,7 @@
 # No first-party C++ calls a range algorithm that core-cpp's `<core/Ranges.hpp>` wraps
 # directly: `std::ranges::iota` is spelled `core::ranges::Iota`, `std::ranges::fold_left`
 # is spelled `core::ranges::FoldLeft`, and so on for every facility that header wraps. It was
-# `src/FastCache/Core/Ranges.hpp` until #1596 moved it into core-cpp; see `seamHeader` below.
+# `src/Pace/Core/Ranges.hpp` until #1596 moved it into core-cpp; see `seamHeader` below.
 #
 # ## Why the seam exists
 #
@@ -115,11 +115,11 @@ if(DEFINED FASTCACHED_RANGES_SEAM_HEADER)
     set(anchors "")
     set(exemptExpected 0)
 else()
-    set(seamHeader "src/FastCache/Core/Ranges.hpp")
+    set(seamHeader "src/Pace/Core/Ranges.hpp")
     set(seamHeaderPath "${FASTCACHED_SOURCE_DIR}/${seamHeader}")
     string(REGEX REPLACE "\\.hpp$" "_test.cpp" seamTest "${seamHeader}")
-    set(seamSpelling "FastCache::Ranges")
-    set(seamInclude "FastCache/Core/Ranges.hpp")
+    set(seamSpelling "Pace::Ranges")
+    set(seamInclude "Pace/Core/Ranges.hpp")
     set(anchors "${seamHeader};${seamTest}")
     set(exemptExpected 2)
 endif()

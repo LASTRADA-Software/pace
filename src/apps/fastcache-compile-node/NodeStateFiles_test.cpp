@@ -10,18 +10,18 @@
 #include "NodeSurfaces.hpp"
 #include "RaftStoreArchiver.hpp"
 
-#include <FastCache/Cluster/FleetEndpoints.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/FormationRecord.hpp>
-#include <FastCache/Cluster/Roster.hpp>
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Consensus/FileRaftStorage.hpp>
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/ISecureRandom.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/FleetHistory.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
+#include <Pace/Cluster/FleetEndpoints.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/FormationRecord.hpp>
+#include <Pace/Cluster/Roster.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Consensus/FileRaftStorage.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/ISecureRandom.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/FileTrust.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -61,11 +61,11 @@
 #include <tests/SecureRandomFakes.hpp>
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::ScratchDirectory;
-using FastCache::Testing::ScriptedNodeKeyGuard;
-using FastCache::Testing::ScriptedSecureRandom;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::ScratchDirectory;
+using Pace::Testing::ScriptedNodeKeyGuard;
+using Pace::Testing::ScriptedSecureRandom;
 
 namespace
 {

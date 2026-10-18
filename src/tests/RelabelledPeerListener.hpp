@@ -13,7 +13,7 @@
 #include <core/net/IListener.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// An accepted connection that says it comes from a fixed host, and is otherwise the real socket.
@@ -143,4 +143,4 @@ class RelabelledPeerListener final: public core::net::IListener
     std::string _host;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

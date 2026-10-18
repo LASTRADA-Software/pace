@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CompileCapacity.hpp"
 
-#include <FastCache/Cli/Duration.hpp>
-#include <FastCache/Core/BoundedDrain.hpp>
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
 
 #include <chrono>
 #include <mutex>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 bool CompileCapacity::TakeBytes(std::size_t want) noexcept
@@ -237,4 +237,4 @@ DrainAction NextDrainAction(std::size_t outstanding,
     return waited >= timeout ? DrainAction::Abandon : DrainAction::Report;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

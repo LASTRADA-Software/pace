@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "MarkerDiscovery.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,10 +12,10 @@
 
 #include <tests/Unwrap.hpp>
 
-using FastCache::Cc::IMarkerDiscovery;
-using FastCache::Cc::MarkerFromProbeOutput;
-using FastCache::Cc::MarkerSource;
-using FastCache::Cc::ResolveIncludeNoteMarker;
+using Pace::Cc::IMarkerDiscovery;
+using Pace::Cc::MarkerFromProbeOutput;
+using Pace::Cc::MarkerSource;
+using Pace::Cc::ResolveIncludeNoteMarker;
 
 namespace
 {
@@ -61,7 +61,7 @@ TEST_CASE("A note's prefix is read back out of the probe's own output")
     std::string const output = std::string { "Note: including file: " } + std::string { ProbeHeader } + "\n";
     auto const learned = MarkerFromProbeOutput(output, ProbeHeader);
     REQUIRE(learned.has_value());
-    CHECK(FastCache::Testing::Unwrap(learned) == FastCache::PathCanon::IncludeNoteMarker);
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
 }
 
 TEST_CASE("A localized note's prefix is read back, which is the whole point")
@@ -74,7 +74,7 @@ TEST_CASE("A localized note's prefix is read back, which is the whole point")
     std::string const output = std::string { "Hinweis: Einlesen der Datei: " } + std::string { ProbeHeader } + "\r\n";
     auto const learned = MarkerFromProbeOutput(output, ProbeHeader);
     REQUIRE(learned.has_value());
-    CHECK(FastCache::Testing::Unwrap(learned) == "Hinweis: Einlesen der Datei:");
+    CHECK(Pace::Testing::Unwrap(learned) == "Hinweis: Einlesen der Datei:");
 }
 
 TEST_CASE("The depth padding is trimmed off what is learned")
@@ -92,7 +92,7 @@ TEST_CASE("The depth padding is trimmed off what is learned")
     std::string const output = std::string { "Note: including file:    " } + std::string { ProbeHeader } + "\n";
     auto const learned = MarkerFromProbeOutput(output, ProbeHeader);
     REQUIRE(learned.has_value());
-    CHECK(FastCache::Testing::Unwrap(learned) == FastCache::PathCanon::IncludeNoteMarker);
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
 }
 
 TEST_CASE("A line with blanks in front of the marker teaches nothing")
@@ -129,7 +129,7 @@ TEST_CASE("Two candidates that AGREE still teach, which is the ordinary deep cas
                                + "Note: including file:  " + std::string { ProbeHeader } + "\n";
     auto const learned = MarkerFromProbeOutput(output, ProbeHeader);
     REQUIRE(learned.has_value());
-    CHECK(FastCache::Testing::Unwrap(learned) == FastCache::PathCanon::IncludeNoteMarker);
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
 }
 
 TEST_CASE("A path the driver spelled differently is still recognised")
@@ -142,7 +142,7 @@ TEST_CASE("A path the driver spelled differently is still recognised")
     std::string const output = "Note: including file: " + echoed + "\n";
     auto const learned = MarkerFromProbeOutput(output, ProbeHeader);
     REQUIRE(learned.has_value());
-    CHECK(FastCache::Testing::Unwrap(learned) == FastCache::PathCanon::IncludeNoteMarker);
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
 }
 
 TEST_CASE("A stream naming a DIFFERENT path teaches nothing")
@@ -181,15 +181,15 @@ TEST_CASE("The discovery request is an ASK, not a prefix")
     // that turned the sentinel into an empty string itself would be a second place for
     // the meaning to drift, and the drift is silent in the direction that matters.
     ScriptedDiscovery discovery { std::string { "Hinweis: Einlesen der Datei:" } };
-    auto const resolved = ResolveIncludeNoteMarker(FastCache::Cc::MarkerDiscoveryRequest, &discovery);
+    auto const resolved = ResolveIncludeNoteMarker(Pace::Cc::MarkerDiscoveryRequest, &discovery);
     CHECK(resolved.marker == "Hinweis: Einlesen der Datei:");
     CHECK(resolved.source == MarkerSource::Discovered);
     CHECK(discovery.Calls() == 1);
 
     // And with no probe handed in it is the DEFAULT, never the sentinel: an operator who
     // asked for discovery on a build that cannot do it gets English, not `auto`.
-    auto const withoutProbe = ResolveIncludeNoteMarker(FastCache::Cc::MarkerDiscoveryRequest, nullptr);
-    CHECK(withoutProbe.marker == FastCache::PathCanon::IncludeNoteMarker);
+    auto const withoutProbe = ResolveIncludeNoteMarker(Pace::Cc::MarkerDiscoveryRequest, nullptr);
+    CHECK(withoutProbe.marker == Pace::PathCanon::IncludeNoteMarker);
     CHECK(withoutProbe.source == MarkerSource::Default);
 }
 
@@ -208,7 +208,7 @@ TEST_CASE("A probe that would not say falls back to English and SAYS it was aske
     // rewrites nothing, so such a build is where it was rather than worse.
     ScriptedDiscovery declines { std::nullopt };
     auto const fromDeclined = ResolveIncludeNoteMarker("", &declines);
-    CHECK(fromDeclined.marker == FastCache::PathCanon::IncludeNoteMarker);
+    CHECK(fromDeclined.marker == Pace::PathCanon::IncludeNoteMarker);
     CHECK(declines.Calls() == 1);
 
     // The assertion that distinguishes, and the reason the marker check above cannot be
@@ -238,7 +238,7 @@ TEST_CASE("Never asked and asked-and-declined are told apart, and read different
 
     REQUIRE(asked.marker == neverAsked.marker); // The premise: the VALUE cannot separate them.
     CHECK(asked.source != neverAsked.source);
-    CHECK(FastCache::Cc::MarkerSourceLabel(asked.source) != FastCache::Cc::MarkerSourceLabel(neverAsked.source));
+    CHECK(Pace::Cc::MarkerSourceLabel(asked.source) != Pace::Cc::MarkerSourceLabel(neverAsked.source));
 
     // And the never-asked probe really was never asked -- a fixture that consulted it
     // anyway would satisfy every line above while spawning a compiler nobody asked for.
@@ -250,6 +250,6 @@ TEST_CASE("No probe at all is the English default, without a crash")
     // What an invocation that must not spawn gets: a link step, a compile that deals in
     // no `/showIncludes`, or a GNU driver.
     auto const resolved = ResolveIncludeNoteMarker("", nullptr);
-    CHECK(resolved.marker == FastCache::PathCanon::IncludeNoteMarker);
+    CHECK(resolved.marker == Pace::PathCanon::IncludeNoteMarker);
     CHECK(resolved.source == MarkerSource::Default);
 }

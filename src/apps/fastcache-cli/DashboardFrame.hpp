@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file DashboardFrame.hpp
@@ -95,4 +95,4 @@ struct DashboardFrame
     std::vector<FrameSpan> spans {};           ///< The runs of its text a presenter dresses, possibly none.
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

@@ -3,14 +3,14 @@
 
 #include "CliEndpoint.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LeaderRedirect.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LeaderRedirect.hpp>
 
 #include <cstdint>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file FleetReach.hpp
@@ -81,4 +81,4 @@ struct LeaderHop
                      : "; present the dashboard credential with --dashboard-token-file";
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

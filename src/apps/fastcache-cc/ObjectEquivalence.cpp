@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -275,4 +275,4 @@ ObjectComparisonResult CompareObjectImages(std::span<std::byte const> served, st
     return { .outcome = ObjectComparison::Different, .detail = DescribeDifference(layout, served, fresh, difference) };
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

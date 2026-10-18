@@ -3,15 +3,15 @@
 #include "NodeSurfaces.hpp"
 #include "OperatorCredentials.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Protocol/TicketChoice.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/TicketChoice.hpp>
 
 #include <utility>
 
 #include <core/async/SyncRun.hpp>
 #include <core/net/IConnector.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 DialedExchange::DialedExchange(IEndpointDialer& dialer, Cc::CredentialNotice& notice) noexcept:
@@ -60,4 +60,4 @@ OperatorCredentials::OperatorCredentials(NodeConfig const& cfg,
 {
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

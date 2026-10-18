@@ -3,9 +3,9 @@
 #include "CacheTier.hpp"
 #include "NodeIdentity.hpp"
 
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/StateFiles.hpp>
-#include <FastCache/Core/StopAwareWait.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/StateFiles.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
 
 #include <core/Ranges.hpp>
 #include <core/async/SyncRun.hpp>
@@ -13,9 +13,9 @@
 #if defined(FC_TLS_ENABLED)
     #include <core/net/Tls.hpp>
 #endif
-#include <FastCache/Distributed/FleetChart.hpp>
-#include <FastCache/Distributed/FleetText.hpp>
-#include <FastCache/Distributed/FleetView.hpp>
+#include <Pace/Distributed/FleetChart.hpp>
+#include <Pace/Distributed/FleetText.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 
 #include <algorithm>
 #include <array>
@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sources,
@@ -83,7 +83,7 @@ AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sou
     };
 }
 
-std::expected<FastCache::SecureString, NodeRefusal> ReadSecretFile(std::filesystem::path const& path)
+std::expected<Pace::SecureString, NodeRefusal> ReadSecretFile(std::filesystem::path const& path)
 {
     std::ifstream file { path, std::ios::binary };
     if (!file)
@@ -106,8 +106,8 @@ std::expected<FastCache::SecureString, NodeRefusal> ReadSecretFile(std::filesyst
     // rejects it under `-Werror=null-dereference` (see `Cc::ReadBytes` and
     // `DefaultConfigPath_test`'s `ReadFile`). A sized read has no iterator to inline.
     constexpr std::size_t ReadChunkBytes = 4096;
-    FastCache::SecureCharBuffer secret;
-    FastCache::SecureCharBuffer chunk(ReadChunkBytes);
+    Pace::SecureCharBuffer secret;
+    Pace::SecureCharBuffer chunk(ReadChunkBytes);
     while (file.read(chunk.data(), static_cast<std::streamsize>(chunk.size())) || file.gcount() > 0)
     {
         secret.insert(secret.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(file.gcount()));
@@ -140,7 +140,7 @@ std::expected<FastCache::SecureString, NodeRefusal> ReadSecretFile(std::filesyst
                                                      "is worse than none, because the surface looks guarded",
                                                      path.string())) };
 
-    return FastCache::SecureString { std::string_view { secret.data(), secret.size() } };
+    return Pace::SecureString { std::string_view { secret.data(), secret.size() } };
 }
 
 std::expected<AdminCredential, NodeRefusal> ReadDashboardToken(std::filesystem::path const& path)
@@ -150,7 +150,7 @@ std::expected<AdminCredential, NodeRefusal> ReadDashboardToken(std::filesystem::
     // trailing-newline rule and the empty-file refusal cannot hold for one credential
     // and not another.
     return ReadSecretFile(path).transform(
-        [](FastCache::SecureString secret) { return AdminCredential { std::move(secret) }; });
+        [](Pace::SecureString secret) { return AdminCredential { std::move(secret) }; });
 }
 
 namespace
@@ -1254,4 +1254,4 @@ std::expected<std::unique_ptr<AdminEndpoint>, std::string> AdminEndpoint::Start(
                                                                 NodeServedSurfacesFor(cfg) } };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

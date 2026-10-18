@@ -27,7 +27,7 @@
 // `std::expected` built into a variable first, a `co_return`, an error carried out through an
 // out-parameter, or a file the glob does not reach -- is simply not seen, and this passes.
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -84,7 +84,7 @@ struct EarlierRow
     std::string_view opens; ///< The line that opens the function; the body runs to the next `}` in column 0.
 };
 
-constexpr auto EarlierRows = FastCache::EnumTable<Earlier, EarlierRow> { {
+constexpr auto EarlierRows = Pace::EnumTable<Earlier, EarlierRow> { {
     { .earlier = Earlier::None, .file = "", .opens = "" },
     { .earlier = Earlier::StartupTable,
       .file = "NodeConfig.cpp",
@@ -94,7 +94,7 @@ constexpr auto EarlierRows = FastCache::EnumTable<Earlier, EarlierRow> { {
       .file = "NodeConfig.cpp",
       .opens = "std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept" },
 } };
-static_assert(FastCache::RowsInEnumeratorOrder(EarlierRows, [](EarlierRow const& row) { return row.earlier; }),
+static_assert(Pace::RowsInEnumeratorOrder(EarlierRows, [](EarlierRow const& row) { return row.earlier; }),
               "every Earlier needs a row, at its own index");
 
 /// One classified refusal site, or several sharing one spelling.
@@ -599,7 +599,7 @@ struct SourceFile
 [[nodiscard]] std::string NodeSource(std::string_view name)
 {
     auto const path =
-        std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node" / name;
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node" / name;
     INFO(path.string());
     REQUIRE(std::filesystem::exists(path));
     // Through the stream buffer, for `PosixDaemonHost_test`'s measured reason.
@@ -656,7 +656,7 @@ template <typename ReadSource>
 [[nodiscard]] std::vector<SourceFile> ScannedFiles()
 {
     auto const directory =
-        std::filesystem::path { FastCache::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcache-compile-node";
     std::vector<std::filesystem::path> paths;
     for (auto const& entry: std::filesystem::directory_iterator { directory })
     {

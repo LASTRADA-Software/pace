@@ -2,7 +2,7 @@
 #include "DashboardGlyphs.hpp"
 #include "ScriptedCellWidth.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,9 +15,9 @@
 #include <string_view>
 #include <vector>
 
-using namespace FastCache::Cli;
-using FastCache::Enumerators;
-using FastCache::Cli::Testing::FakeCellWidth;
+using namespace Pace::Cli;
+using Pace::Enumerators;
+using Pace::Cli::Testing::FakeCellWidth;
 
 namespace
 {

@@ -102,7 +102,7 @@ endfunction()
 set(baseHome
 "// SPDX-License-Identifier: Apache-2.0
 #pragma once
-namespace FastCache
+namespace Pace
 {
 namespace Detail
 {
@@ -115,25 +115,25 @@ namespace Detail
     };
 } // namespace Detail
 inline std::string EscapeMarkup(std::string_view text) { return std::string { text }; }
-} // namespace FastCache
+} // namespace Pace
 ")
 
 set(baseConsumer
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Markup.hpp>
-namespace FastCache::Distributed
+#include <Pace/Core/Markup.hpp>
+namespace Pace::Distributed
 {
 // An ampersand becomes ~AMP~, so a label a peer chose cannot break the document.
 std::string Row(std::string_view label)
 {
     return EscapeMarkup(label);
 }
-} // namespace FastCache::Distributed
+} // namespace Pace::Distributed
 ")
 
 set(baseTest
 "// SPDX-License-Identifier: Apache-2.0
-#include <FastCache/Core/Markup.hpp>
+#include <Pace/Core/Markup.hpp>
 TEST_CASE(\"markup escapes what it must\")
 {
     CHECK(EscapeMarkup(\"a&b\") == \"a~AMP~b\");
@@ -144,13 +144,13 @@ TEST_CASE(\"markup escapes what it must\")
 set(baseProse
 "// SPDX-License-Identifier: Apache-2.0
 #include \"AdminEndpoint.hpp\"
-namespace FastCache::Node
+namespace Pace::Node
 {
 void Help(std::string& out)
 {
     out += \"<code>Authorization: Bearer ~LT~token~GT~</code>\"~sc~
 }
-} // namespace FastCache::Node
+} // namespace Pace::Node
 ")
 
 # ---------------------------------------------------------------------------
@@ -210,9 +210,9 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     if(writeSources)
-        file(WRITE "${tree}/src/FastCache/Core/Markup.hpp" "${homeText}")
-        file(WRITE "${tree}/src/FastCache/Distributed/FleetView.cpp" "${consumerText}")
-        file(WRITE "${tree}/src/FastCache/Distributed/FleetText_test.cpp" "${testText}")
+        file(WRITE "${tree}/src/Pace/Core/Markup.hpp" "${homeText}")
+        file(WRITE "${tree}/src/Pace/Distributed/FleetView.cpp" "${consumerText}")
+        file(WRITE "${tree}/src/Pace/Distributed/FleetText_test.cpp" "${testText}")
     else()
         file(MAKE_DIRECTORY "${tree}/src")
         file(WRITE "${tree}/README.md" "not a source\n")
@@ -266,32 +266,32 @@ set(FastCachedMarkupCases
     "baseline via git|none-git|-|-|no duplicate escaper across && git ls-files|CMake Error"
 
     # THE RED ARM: a second escaper, named by file and line.
-    "hand-rolled escaper|newfile|src/FastCache/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    std::string o~sc~~n~    for (char c : t) { if (c == '&') o += \"~AMP~\"~sc~ }~n~    return o~sc~~n~}~n~|src/FastCache/Platform/ServiceControl.cpp:4|-"
-    "hand-rolled escaper via git|newfile-git|src/FastCache/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    return t == \"<\" ? \"~LT~\" : \"\"~sc~~n~}~n~|src/FastCache/Platform/ServiceControl.cpp:3 && git ls-files|-"
+    "hand-rolled escaper|newfile|src/Pace/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    std::string o~sc~~n~    for (char c : t) { if (c == '&') o += \"~AMP~\"~sc~ }~n~    return o~sc~~n~}~n~|src/Pace/Platform/ServiceControl.cpp:4|-"
+    "hand-rolled escaper via git|newfile-git|src/Pace/Platform/ServiceControl.cpp|std::string XmlEscape(std::string_view t)~n~{~n~    return t == \"<\" ? \"~LT~\" : \"\"~sc~~n~}~n~|src/Pace/Platform/ServiceControl.cpp:3 && git ls-files|-"
 
     # THE RETIRED SPELLING, refused BY NAME rather than as an ordinary duplicate.
-    "the retired entity returns|newfile|src/FastCache/Platform/ServiceControl.cpp|std::string Q() { return \"~APOS~\"~sc~ }~n~|spell the retired && src/FastCache/Platform/ServiceControl.cpp:1|-"
+    "the retired entity returns|newfile|src/Pace/Platform/ServiceControl.cpp|std::string Q() { return \"~APOS~\"~sc~ }~n~|spell the retired && src/Pace/Platform/ServiceControl.cpp:1|-"
 
     # THE ACCEPTING ARM PROPER. Each of these is a real shape from the tree, and each
     # differs from a violation only by context.
-    "a comment is not a use|newfile|src/FastCache/Distributed/FleetChart.cpp|// The label is escaped, so ~AMP~ and ~LT~ cannot break the SVG.~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
-    "a block comment is not a use|newfile|src/FastCache/Distributed/FleetChart.cpp|/*~n~ A paragraph naming ~AMP~ and ~QUOT~ with no leading stars.~n~*/~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
+    "a comment is not a use|newfile|src/Pace/Distributed/FleetChart.cpp|// The label is escaped, so ~AMP~ and ~LT~ cannot break the SVG.~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
+    "a block comment is not a use|newfile|src/Pace/Distributed/FleetChart.cpp|/*~n~ A paragraph naming ~AMP~ and ~QUOT~ with no leading stars.~n~*/~n~int Chart() { return 0~sc~ }~n~|no duplicate escaper across|CMake Error"
 
     # COMMENT ORDERING, the same false green this check carried: a line comment
     # NAMING a block opener opened one that never closed, and the rest of the file
     # went unread behind a clean count.
-    "a line comment naming a block opener does not open one|newfile|src/FastCache/Platform/Order.cpp|// Call EscapeMarkup rather than ~AMP~, and not inside a /* block either.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Order.cpp:2|-"
+    "a line comment naming a block opener does not open one|newfile|src/Pace/Platform/Order.cpp|// Call EscapeMarkup rather than ~AMP~, and not inside a /* block either.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Order.cpp:2|-"
 
     # ...and the CONTROL: the `//` inside the open block stays inside it (line 2 is
     # never named) and the file RESUMES after `*/` (line 4 is).
-    "a block comment survives a line marker inside it|newfile|src/FastCache/Platform/Order.cpp|/*~n~ Prose with a // in it, naming ~AMP~ to argue against writing it.~n~*/~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Order.cpp:4|Order.cpp:2"
-    "a test may assert the output|newfile|src/FastCache/Distributed/FleetView_test.cpp|CHECK(EscapeMarkup(\"&\") == \"~AMP~\")~sc~~n~|no duplicate escaper across|CMake Error"
+    "a block comment survives a line marker inside it|newfile|src/Pace/Platform/Order.cpp|/*~n~ Prose with a // in it, naming ~AMP~ to argue against writing it.~n~*/~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Order.cpp:4|Order.cpp:2"
+    "a test may assert the output|newfile|src/Pace/Distributed/FleetView_test.cpp|CHECK(EscapeMarkup(\"&\") == \"~AMP~\")~sc~~n~|no duplicate escaper across|CMake Error"
 
     # THE PARTIAL-FIX SHAPE: a file that explains the rule AND breaks it.
-    "prose and a use in one file|newfile|src/FastCache/Platform/Both.cpp|// Always call EscapeMarkup rather than writing ~AMP~ by hand.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Both.cpp:2|-"
+    "prose and a use in one file|newfile|src/Pace/Platform/Both.cpp|// Always call EscapeMarkup rather than writing ~AMP~ by hand.~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Both.cpp:2|-"
 
     # LINE NUMBERS, with the list structure that makes them drift planted above.
-    "line number survives brackets|newfile|src/FastCache/Platform/Drift.cpp|int a~lb~4~rb~ = {1,2,3,4}~sc~~n~auto b = a~lb~0~rb~~sc~~n~// a trailing backslash \\\\~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/FastCache/Platform/Drift.cpp:4|-"
+    "line number survives brackets|newfile|src/Pace/Platform/Drift.cpp|int a~lb~4~rb~ = {1,2,3,4}~sc~~n~auto b = a~lb~0~rb~~sc~~n~// a trailing backslash \\\\~n~std::string E() { return \"~AMP~\"~sc~ }~n~|src/Pace/Platform/Drift.cpp:4|-"
 
     # --- fails CLOSED ---
 

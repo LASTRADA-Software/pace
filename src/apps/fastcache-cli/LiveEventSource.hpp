@@ -7,8 +7,8 @@
 #include "FleetReach.hpp"
 #include "LiveSubscriber.hpp"
 
-#include <FastCache/Platform/StopSignal.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Platform/StopSignal.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <memory>
@@ -20,7 +20,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file LiveEventSource.hpp
@@ -214,4 +214,4 @@ class LiveEventSource final: public IDashboardEventSource
     std::shared_ptr<State> _state;
 };
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

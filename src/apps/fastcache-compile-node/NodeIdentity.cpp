@@ -4,10 +4,10 @@
 #include "NodeStateFiles.hpp"
 #include "NodeSurfaces.hpp"
 
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Utf8.hpp>
-#include <FastCache/Platform/FileTrust.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Utf8.hpp>
+#include <Pace/Platform/FileTrust.hpp>
 
 #include <algorithm>
 #include <array>
@@ -26,7 +26,7 @@
 #include <system_error>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -75,7 +75,7 @@ namespace
     /// is what [#1029](https://github.com/LASTRADA-Software/fastcached/issues/1029) is
     /// for -- a SCAN, since a comment stating the rule reaches only the files that
     /// already obey it. Not consolidated here: this file has no business owning a
-    /// shared file-reading seam, and reaching into `FastCache::Cc` for one would put a
+    /// shared file-reading seam, and reaching into `Pace::Cc` for one would put a
     /// cross-app include in the node's identity code to save nine lines.
     ///
     /// **Absent is asked of the filesystem, not inferred from a failed open.** An open that
@@ -357,4 +357,4 @@ void ApplyNodeIdentity(NodeConfig& cfg, NodeIdentity const& identity)
     cfg.nodeId = identity.id;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

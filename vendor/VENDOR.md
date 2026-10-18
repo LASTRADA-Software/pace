@@ -28,7 +28,7 @@ A fix to that code is a pull request against
 
 ## `vendor/monocypher`: Monocypher 4.0.3
 
-The Ed25519 and X25519 implementation behind `src/FastCache/Core/{Ed25519,X25519}` (#178), which
+The Ed25519 and X25519 implementation behind `src/Pace/Core/{Ed25519,X25519}` (#178), which
 give every node an identity of its own in place of the cluster's shared key.
 
 | | |
@@ -59,9 +59,9 @@ attribute nothing, so they are left upstream; each file's hash is its `MANIFEST`
 library, `fastcache-monocypher`, from the two `.c` files compiled as C++ with upstream's
 `MONOCYPHER_CPP_NAMESPACE` -- that file says why C++, why the namespace, and why it is built
 unconditionally. It has no dependency, so `fastcache-cc` can
-link it without FastCache.
+link it without Pace.
 
-**Who may use it.** Only `src/FastCache/Core/Ed25519.cpp` and `src/FastCache/Core/X25519.cpp`
+**Who may use it.** Only `src/Pace/Core/Ed25519.cpp` and `src/Pace/Core/X25519.cpp`
 include a Monocypher header; `ctest -R crypto-seam` refuses any other first-party file that does.
 Everything else goes through those two headers and `Core/Hkdf.hpp`, which is where a new primitive
 is added and checked against its RFC's vectors.

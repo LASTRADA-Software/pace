@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -430,4 +430,4 @@ bool RootReconciler::RecordAlias(std::string_view original, Depth depth)
     return anyFound();
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

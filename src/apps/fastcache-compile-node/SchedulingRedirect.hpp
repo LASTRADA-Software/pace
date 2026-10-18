@@ -3,10 +3,10 @@
 
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Distributed/StateLeaseRoster.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/StateLeaseRoster.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -20,7 +20,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file SchedulingRedirect.hpp
@@ -295,4 +295,4 @@ class SchedulingRedirectResponder final: public IFrameResponder
     ISchedulingLeaderSource const& _leader;            ///< Where the leader answers, read per answer.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

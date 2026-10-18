@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CompileCapacity.hpp"
 
-#include <FastCache/Core/BoundedDrain.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,10 +16,10 @@
 #include <thread>
 #include <tuple>
 
-using namespace FastCache;
-using namespace FastCache::Node;
+using namespace Pace;
+using namespace Pace::Node;
 
-namespace Wire = FastCache::CompileCacheWire;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {

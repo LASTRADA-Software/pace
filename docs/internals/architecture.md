@@ -14,7 +14,7 @@ thing testable end-to-end against an in-memory transport.
 ## Module map
 
 ```
-src/FastCache/
+src/Pace/
   Core/         Errors taxonomy, Clock (steady + wall + reactor-cached), Logger, BufferPool,
                 Bytes, Endian, Crc32c, MurmurHash3, StringHash, Owner, Profiling (Tracy)
   Async/        Task<T>, DetachedTask, ResumeOn, SleepUntil/SleepFor,

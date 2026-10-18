@@ -3,10 +3,10 @@
 
 #include "NodeConditions.hpp"
 
-#include <FastCache/Cluster/Encounter.hpp>
-#include <FastCache/Cluster/FleetPin.hpp>
-#include <FastCache/Cluster/ProvenFleet.hpp>
-#include <FastCache/Cluster/SplitEvidence.hpp>
+#include <Pace/Cluster/Encounter.hpp>
+#include <Pace/Cluster/FleetPin.hpp>
+#include <Pace/Cluster/ProvenFleet.hpp>
+#include <Pace/Cluster/SplitEvidence.hpp>
 
 #include <array>
 #include <chrono>
@@ -18,7 +18,7 @@
 
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Raises `foreign-fleet-visible` while another ESTABLISHED fleet is being proven on the segment
@@ -176,4 +176,4 @@ class ForeignFleetWatch final: public Cluster::IFleetObserver
     Hearing _published { Hearing::Listening };                 ///< What the rows last said was heard.
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

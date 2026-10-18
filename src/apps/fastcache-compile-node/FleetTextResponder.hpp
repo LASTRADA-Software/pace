@@ -3,11 +3,11 @@
 
 #include "FrameEndpoint.hpp"
 
-#include <FastCache/Distributed/MembershipOracle.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/LiveStream.hpp>
-#include <FastCache/Server/AdminCredential.hpp>
+#include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -18,7 +18,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// @file FleetTextResponder.hpp
@@ -172,4 +172,4 @@ class FleetTextResponder final: public IFrameResponder
     IMetricsSink& _metrics;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

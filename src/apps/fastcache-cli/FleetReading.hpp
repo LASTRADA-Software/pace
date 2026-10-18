@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file FleetReading.hpp
@@ -54,4 +54,4 @@ using FleetParser = std::expected<FleetDocument, std::string> (*)(std::string_vi
 /// @return The record: `source` alone before any reading.
 [[nodiscard]] Value FleetKpiFigures(DashboardModel const& model);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

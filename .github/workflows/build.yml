@@ -1297,7 +1297,7 @@ jobs:
   # The TAGS were: the first version named three and silently excluded six of
   # ten `Async/` test files while every signal in the run said clean. Then the
   # SCOPE was, and #316 is what that cost — it named three directories, while a
-  # `std::thread` census over `FastCacheTest`'s own sources finds nineteen
+  # `std::thread` census over `PaceTest`'s own sources finds nineteen
   # threaded files with eleven in no row and under no tag. Every threaded `Net/`
   # test was among them, which is the module `BlockingListener` lives in and so
   # the module #260 came out of; that race reached this job only because the node
@@ -1315,7 +1315,7 @@ jobs:
   # incorrect ones.
   #
   # The BINARY half is no longer a proxy, and #1209 is why. `fastcache-cc-tests`
-  # sat in no row: the launcher does not link the FastCache library, so no tag
+  # sat in no row: the launcher does not link the Pace library, so no tag
   # expression could ever have reached it. It is a row now, run whole. The ticket
   # enumerated the test binaries by hand and its table listed four; this tree
   # registers six with `catch_discover_tests`, five of them in a default
@@ -1439,7 +1439,7 @@ jobs:
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DFASTCACHED_ENABLE_TLS=ON
 
       # Only the targets the gate runs — but do not read that as "the scope makes
-      # this job cheap". `FastCacheTest` is one binary carrying every library
+      # this job cheap". `PaceTest` is one binary carrying every library
       # `*_test.cpp`, so the tag scope buys RUNTIME and almost nothing at build
       # time. This job's cost is its compile.
       #
@@ -1476,7 +1476,7 @@ jobs:
       - name: "Build"
         run: >-
           cmake --build --preset clang-tsan --target
-          FastCacheTest fastcache-compile-node-tests fastcache-cc-tests fastcache-cli-tests tsan-canary
+          PaceTest fastcache-compile-node-tests fastcache-cc-tests fastcache-cli-tests tsan-canary
 
       - name: "Report ccache effectiveness"
         run: ccache --show-stats --verbose
@@ -4616,7 +4616,7 @@ jobs:
           # and it is declared once because two copies is how one of them loses an
           # entry.
           $broad = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-4', 'S-1-5-32-546')
-          # The write mask, now PlantingRights from src/FastCache/Platform/FileTrust.cpp
+          # The write mask, now PlantingRights from src/Pace/Platform/FileTrust.cpp
           # bit for bit (#866). It was NOT that mirror in either direction, while a
           # comment presented it as one -- "a comment naming what it duplicates
           # vouches for the duplicate's bugs":
@@ -4646,7 +4646,7 @@ jobs:
                     -bor [int64][Security.AccessControl.FileSystemRights]::TakeOwnership `
                     -bor [int64]1073741824 `
                     -bor [int64]268435456
-          # The read mask is ReadingRights from src/FastCache/Platform/FileTrust.cpp,
+          # The read mask is ReadingRights from src/Pace/Platform/FileTrust.cpp,
           # spelled for PowerShell. ReadData rather than the Read composite: that
           # one includes ReadPermissions, which almost every entry carries, so a
           # band against it would fire on principals that cannot read a byte. The

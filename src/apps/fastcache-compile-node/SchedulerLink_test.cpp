@@ -13,9 +13,9 @@
 
 #include <tests/Unwrap.hpp>
 
-using namespace FastCache;
-using namespace FastCache::Node;
-using FastCache::Testing::Unwrap;
+using namespace Pace;
+using namespace Pace::Node;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -370,14 +370,14 @@ TEST_CASE("A retargeted walk keeps its place by endpoint, and keeps a remembered
 
 TEST_CASE("DescribeAnnounceRound: a steady heartbeat round does not claim a registration", "[node][scheduler]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
     // The defect itself (#999): six heartbeats reported "6 of 6 toolchain(s)
     // registered", every interval, forever. Asserted on the WORDING and not only the
     // level, because that is what was wrong -- a test checking the level alone passes
     // with the sentence still collapsed.
     auto const steady = DescribeAnnounceRound(6, 0, 6);
-    CHECK(steady.level == FastCache::LogLevel::Trace);
+    CHECK(steady.level == Pace::LogLevel::Trace);
     CHECK(!steady.message.contains("registered,"));
     CHECK(steady.message.contains("still registered"));
     CHECK(steady.message.contains("6"));
@@ -385,10 +385,10 @@ TEST_CASE("DescribeAnnounceRound: a steady heartbeat round does not claim a regi
 
 TEST_CASE("DescribeAnnounceRound: a real registration is an event and says so", "[node][scheduler]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
     auto const fresh = DescribeAnnounceRound(0, 6, 6);
-    CHECK(fresh.level == FastCache::LogLevel::Info);
+    CHECK(fresh.level == Pace::LogLevel::Info);
 
     // The ACCEPTED form is a fixture contract: `E2eRegisteredMarker` is
     // "1 of 1 toolchain(s) registered" and distinguishes an accepted worker from one
@@ -404,12 +404,12 @@ TEST_CASE("DescribeAnnounceRound: a real registration is an event and says so", 
 
 TEST_CASE("DescribeAnnounceRound: a heartbeat that fell through to a register is its own outcome", "[node][scheduler]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
     // The case worth catching: the scheduler forgot this worker and it re-announced.
     // Fully accepted, so a count-based check calls it healthy -- and it is an event.
     auto const mixed = DescribeAnnounceRound(4, 2, 6);
-    CHECK(mixed.level == FastCache::LogLevel::Info);
+    CHECK(mixed.level == Pace::LogLevel::Info);
     CHECK(mixed.message.contains("2 of 6 toolchain(s) re-registered"));
 
     // Three outcomes, three sentences. None may collide with another.
@@ -422,12 +422,12 @@ TEST_CASE("DescribeAnnounceRound: a heartbeat that fell through to a register is
 TEST_CASE("DescribeAnnounceRound: a shortfall is Debug, because each refusal it counts is said on its own",
           "[node][scheduler]")
 {
-    using namespace FastCache::Node;
+    using namespace Pace::Node;
 
     // A shortfall is registrars a scheduler refused or redirected. Each refusal is said by
     // `SchedulerReachability` -- at Warn on its transition, then quietly -- and each redirect as the
     // round follows it, so the per-round count of them is Debug whatever caused it.
-    CHECK(DescribeAnnounceRound(0, 0, 1).level == FastCache::LogLevel::Debug);
+    CHECK(DescribeAnnounceRound(0, 0, 1).level == Pace::LogLevel::Debug);
 
     // The SHORTFALL form is still a fixture contract as bytes: the e2e helpers' self-test stages
     // "0 of 1 toolchain(s) registered" as the line a turned-away worker writes.

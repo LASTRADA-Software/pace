@@ -4,7 +4,7 @@
 #include <atomic>
 #include <utility>
 
-namespace FastCache::Testing
+namespace Pace::Testing
 {
 
 /// What a coroutine-lifetime case counts.
@@ -79,4 +79,4 @@ class FrameSentinel
     FrameCounters* _counters;
 };
 
-} // namespace FastCache::Testing
+} // namespace Pace::Testing

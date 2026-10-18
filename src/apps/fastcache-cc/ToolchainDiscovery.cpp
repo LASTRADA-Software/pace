@@ -2,15 +2,15 @@
 #include "ToolchainDiscovery.hpp"
 #include "ToolchainProbe.hpp"
 
-#include <FastCache/CompileCache/PathCanon.hpp>
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
 #include <array>
 #include <set>
 #include <utility>
 
-namespace FastCache::Cc
+namespace Pace::Cc
 {
 
 namespace
@@ -784,4 +784,4 @@ std::unique_ptr<IToolchainDiscovery> MakeToolchainDiscovery(IToolchainHost& host
     return std::make_unique<HostToolchainDiscovery>(host, runner);
 }
 
-} // namespace FastCache::Cc
+} // namespace Pace::Cc

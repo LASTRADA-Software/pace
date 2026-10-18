@@ -3,12 +3,12 @@
 #include "SharedCacheDirectory.hpp"
 #include "SharedCacheHost.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <utility>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 namespace
@@ -80,4 +80,4 @@ void ApplySharedCacheState(Cluster::ClusterState const& state,
         upstream->StateApplied();
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

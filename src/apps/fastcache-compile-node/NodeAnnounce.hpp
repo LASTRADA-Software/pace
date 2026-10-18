@@ -10,16 +10,16 @@
 #include "SchedulerLink.hpp"
 #include "SchedulerReachability.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/HostPort.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/Version.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/NodePolicy.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/HostLoad.hpp>
-#include <FastCache/Platform/LocalAddresses.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/Version.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostLoad.hpp>
+#include <Pace/Platform/LocalAddresses.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -38,7 +38,7 @@
 #include <WorkerProtocol.hpp>
 #include <core/net/ISocket.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// An endpoint this node states, now, held so every reader sees one value change at one point.
@@ -618,4 +618,4 @@ inline constexpr std::chrono::milliseconds SuspendDialTimeout { 1'000 };
 /// @return How many registrations the scheduler retired.
 [[nodiscard]] std::size_t WithdrawOnce(HeartbeatRound const& round, SchedulerLink const& link, IEndpointDialer& dialer);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

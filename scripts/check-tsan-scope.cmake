@@ -51,7 +51,7 @@
 # - **That the scope table is COMPLETE.** It is a stated claim about where the
 #   threads are, checked by nobody. #316 is what that costs: the table named three
 #   directories, and a census of `std::thread`/`std::jthread`/`std::async` across
-#   `FastCacheTest`'s own sources finds nineteen threaded files, ELEVEN of which
+#   `PaceTest`'s own sources finds nineteen threaded files, ELEVEN of which
 #   were in no scope row and selected by no gate tag. A grep for those spellings
 #   is NOT promoted into a check here, deliberately: it is a proxy -- a file that
 #   reaches threads through a helper spawns none of its own, and a file naming
@@ -119,19 +119,19 @@ endif()
 # the gate instruments them as core-cpp's archives (`tsan-gate.sh`).
 set(FastCachedTsanScope
     # Directories: everything here is concurrency-bearing.
-    "src/FastCache/Consensus"
-    "src/FastCache/Distributed"
-    "src/FastCache/Transport"
+    "src/Pace/Consensus"
+    "src/Pace/Distributed"
+    "src/Pace/Transport"
     # Files: one threaded test in a directory that is otherwise not.
-    "src/FastCache/Cache/ExpiryReaper_test.cpp"
-    "src/FastCache/Cache/ShardedStorage_test.cpp"
-    "src/FastCache/Core/BoundedWait_test.cpp"
-    "src/FastCache/Platform/HostEvents_test.cpp"
-    "src/FastCache/Platform/NetworkChangeWatcher_test.cpp"
-    "src/FastCache/Protocol/LiveStreamReactors_test.cpp"
-    "src/FastCache/Protocol/RedisRespSocket_test.cpp"
-    "src/FastCache/Server/ReactorServerLoop_test.cpp"
-    "src/FastCache/Server/ReadinessAnnouncer_test.cpp"
+    "src/Pace/Cache/ExpiryReaper_test.cpp"
+    "src/Pace/Cache/ShardedStorage_test.cpp"
+    "src/Pace/Core/BoundedWait_test.cpp"
+    "src/Pace/Platform/HostEvents_test.cpp"
+    "src/Pace/Platform/NetworkChangeWatcher_test.cpp"
+    "src/Pace/Protocol/LiveStreamReactors_test.cpp"
+    "src/Pace/Protocol/RedisRespSocket_test.cpp"
+    "src/Pace/Server/ReactorServerLoop_test.cpp"
+    "src/Pace/Server/ReadinessAnnouncer_test.cpp"
 )
 
 # The gate whose scope this enforces. Its `TARGETS` table is the source of truth

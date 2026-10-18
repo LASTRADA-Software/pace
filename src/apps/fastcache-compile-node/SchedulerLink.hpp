@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/Logger.hpp>
+#include <Pace/Core/Logger.hpp>
 
 #include <cstddef>
 #include <format>
@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// How many `NotLeader` redirects one heartbeat round will follow.
@@ -288,4 +288,4 @@ struct RoundReport
     return { .level = LogLevel::Trace, .message = std::format("{} toolchain(s) still registered", beats) };
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

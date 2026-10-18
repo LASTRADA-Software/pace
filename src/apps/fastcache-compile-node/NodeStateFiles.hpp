@@ -6,11 +6,11 @@
 #include "NodeFormation.hpp"
 #include "NodeKey.hpp"
 
-#include <FastCache/Consensus/DurableFile.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Core/StateFiles.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Platform/ReplacingRename.hpp>
+#include <Pace/Consensus/DurableFile.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Core/StateFiles.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/ReplacingRename.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -36,7 +36,7 @@
 /// a row here -- and a test runs every writer into a scratch directory besides, and requires a row
 /// for each file it finds and a file for each row.
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Probe how the state files in @p directory are replaced, and say so when the replace FALLS BACK:
@@ -186,4 +186,4 @@ struct NodeStateFileRow
 /// @return @p paths, without the files another account owns.
 [[nodiscard]] HistoryPaths SetAsideForeignHistory(HistoryPaths paths, INodeKeyFileGuard& guard, ILogger& logger);
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

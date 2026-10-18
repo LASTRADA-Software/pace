@@ -22,7 +22,7 @@
 #include <core/tui/Terminal.hpp>
 #include <core/tui/runtime/InputSource.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 /// @file TerminalEventStream.hpp
@@ -360,4 +360,4 @@ class ITerminalDevice
 [[nodiscard]] core::async::Task<std::expected<StartedTerminal, std::string>> StartTerminalDevice(
     std::unique_ptr<ITerminalDevice> device, core::async::IExecutor* pool, core::async::IExecutor* resumeOn);
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

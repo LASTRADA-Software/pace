@@ -16,7 +16,7 @@
 #include <core/net/ThreadedAddressResolver.hpp>
 #include <core/platform/Clock.hpp>
 
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 class FrameServer;
@@ -224,4 +224,4 @@ class NodeIoLoop final: public IReactorHome
     std::jthread _thread;
 };
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

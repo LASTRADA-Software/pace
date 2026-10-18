@@ -20,7 +20,7 @@
 #include <core/async/ResumeOn.hpp>
 #include <core/net/DeadlineTimer.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 namespace
@@ -642,4 +642,4 @@ core::async::Task<void> LiveEventSource::Drained()
     (void) co_await state->finished.pop();
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

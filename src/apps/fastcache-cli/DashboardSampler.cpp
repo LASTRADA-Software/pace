@@ -5,7 +5,7 @@
 
 #include <core/async/ResumeOn.hpp>
 
-namespace FastCache::Cli
+namespace Pace::Cli
 {
 
 core::async::Task<FrameOutcome> TakeFrame(ILiveSubscription* subscription,
@@ -51,4 +51,4 @@ core::async::Task<std::expected<void, ExchangeError>> OpenStream(ILiveSubscripti
     co_return opened;
 }
 
-} // namespace FastCache::Cli
+} // namespace Pace::Cli

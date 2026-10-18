@@ -2970,7 +2970,7 @@ if [[ "$self_test" -eq 1 ]]; then
         "$(target_set_report "$scratch/right")"
     mkdir -p "$scratch/discovered/src/tests" "$scratch/discovered/src/CowTree"
     printf 'CLANG_TIDY_EXE:FILEPATH=/usr/bin/clang-tidy-22\n%b' "$targets_on" > "$scratch/discovered/CMakeCache.txt"
-    : > "$scratch/discovered/src/tests/FastCacheTest-abc1234_tests.cmake"
+    : > "$scratch/discovered/src/tests/PaceTest-abc1234_tests.cmake"
     : > "$scratch/discovered/src/CowTree/CowTreeTests-abc1234_tests.cmake"
     expect "the report counts catch_discover_tests' own output, one per Catch2 binary" \
         "target set: FASTCACHED_BUILD_TESTCLIENT=ON FASTCACHED_BUILD_BENCHMARKS=ON; Catch2 binaries discovered: 2" \
@@ -3203,14 +3203,14 @@ CONTINUED" \
     # the whole defect is that the answer depends on where a checkout lives: a
     # case using this run's own root would assert one thing in a lane worktree
     # and the opposite on CI, which is the blind spot being closed.
-    _hdrs="src/FastCache/Core/Base64.hpp
+    _hdrs="src/Pace/Core/Base64.hpp
 src/apps/fastcached/Main.hpp"
     # The LAYOUT cases ask the `posix` spelling alone: they are about where a
     # checkout lives, and the historical patterns are /-only, so every spelling
     # would make each of them a separator case as well and assert two things at once.
     _old='.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*'
-    _slash='.*/src/(CowTree|FastCache|apps|tests)/.*'
-    _new='.*[/\\]src[/\\](CowTree|FastCache|apps|tests)[/\\].*'
+    _slash='.*/src/(CowTree|Pace|apps|tests)/.*'
+    _new='.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
     _exc=''
 
     # The three layouts the old pattern covered, which must not regress...
@@ -3224,7 +3224,7 @@ src/apps/fastcached/Main.hpp"
     # ... and the one it did NOT, which is the ticket. Zero of two, and the
     # verdict names the first header that would have gone unanalysed.
     expect "the old pattern covered NO header in a lane worktree" \
-        "0/2 src/FastCache/Core/Base64.hpp" \
+        "0/2 src/Pace/Core/Base64.hpp" \
         "$(header_filter_match "$_old" "" /w/fastcached-worktrees/lane-a posix <<< "$_hdrs")"
 
     # The /-only replacement covered all four as POSIX paths -- which is why this
@@ -3239,18 +3239,18 @@ src/apps/fastcached/Main.hpp"
     # nothing, and the verdict names the spelling rather than a layout: a path taken
     # in one spelling and not another is a separator defect, not a location one.
     expect "the /-only pattern covers NO header in the all-backslash spelling" \
-        "0/2 src/FastCache/Core/Base64.hpp (windows spelling)" \
+        "0/2 src/Pace/Core/Base64.hpp (windows spelling)" \
         "$(header_filter_match "$_slash" "" /w/fastcached-worktrees/lane-a <<< "$_hdrs")"
     # A pattern written for both separators as two separate copies -- the edit the
     # remedy text warns against -- still misses MSVC's mix: a backslashed include
     # directory, then a slashed `#include` name.
-    _twocopies='(.*/src/(CowTree|FastCache|apps|tests)/.*|.*\\src\\(CowTree|FastCache|apps|tests)\\.*)'
+    _twocopies='(.*/src/(CowTree|Pace|apps|tests)/.*|.*\\src\\(CowTree|Pace|apps|tests)\\.*)'
     expect "two copies of the pattern miss the MSVC mix of separators" \
-        "0/2 src/FastCache/Core/Base64.hpp (msvc spelling)" \
+        "0/2 src/Pace/Core/Base64.hpp (msvc spelling)" \
         "$(header_filter_match "$_twocopies" "" /w/fastcached <<< "$_hdrs")"
     expect "... which is what the MSVC spelling IS" \
-        '\w\fastcached\src/FastCache/Core/Base64.hpp' \
-        "$(header_filter_spell msvc /w/fastcached/src/FastCache/Core/Base64.hpp)"
+        '\w\fastcached\src/Pace/Core/Base64.hpp' \
+        "$(header_filter_spell msvc /w/fastcached/src/Pace/Core/Base64.hpp)"
     expect "a spelling nobody defined is refused, never skipped" \
         "2" "$(header_filter_spell dos /w/x >/dev/null 2>&1; echo $?)"
 
@@ -3299,7 +3299,7 @@ src/apps/fastcached/Main.hpp"
     # still reports findings, so it looks like it is working.
     expect "a partial match names how many and which" \
         "1/2 src/apps/fastcached/Main.hpp" \
-        "$(header_filter_match '.*/src/FastCache/.*' "" /w/fastcached posix <<< "$_hdrs")"
+        "$(header_filter_match '.*/src/Pace/.*' "" /w/fastcached posix <<< "$_hdrs")"
 
     # The reporter. `all` is the only arm that carries on -- asserted as the
     # STATUS beside the text, since a reporter that says the right words and
@@ -3315,9 +3315,9 @@ src/apps/fastcached/Main.hpp"
     # headers were taken "as POSIX paths" -- that is the one spelling that did NOT take them, a
     # confident wrong signal. Driven through the real match, so the verdict is the one a gate
     # would produce, not one typed here.
-    _p3="$(header_filter_match '.*\\src\\(CowTree|FastCache|apps|tests)\\.*' "" /w/fastcached <<< "$_hdrs")"
+    _p3="$(header_filter_match '.*\\src\\(CowTree|Pace|apps|tests)\\.*' "" /w/fastcached <<< "$_hdrs")"
     expect "P3: a backslash-only filter's miss is named in the posix spelling" \
-        "0/2 src/FastCache/Core/Base64.hpp (posix spelling)" "$_p3"
+        "0/2 src/Pace/Core/Base64.hpp (posix spelling)" "$_p3"
     # `if`, never `case`, inside `$( )`: bash 3.2 reads a case pattern's `)` as the
     # substitution's end (#1224) -- at RUN time, which `check-bash32-parse.sh` cannot see.
     _p3_report="$(header_filter_report /w/.clang-tidy "$_p3" 2>&1)"
@@ -3346,7 +3346,7 @@ src/apps/fastcached/Main.hpp"
     # P1: a filter taking one root in every spelling and another as POSIX paths only -- a
     # PARTIAL miss in one spelling. Driven through the real match. Its cause is the separators,
     # and #1040 (where a checkout lives) must not be named for it.
-    _p1="$(header_filter_match '(.*/src/(CowTree|FastCache|apps|tests)/.*|.*[/\\]src[/\\]FastCache[/\\].*)' "" /w/fastcached <<< "$_hdrs")"
+    _p1="$(header_filter_match '(.*/src/(CowTree|Pace|apps|tests)/.*|.*[/\\]src[/\\]Pace[/\\].*)' "" /w/fastcached <<< "$_hdrs")"
     expect "P1: a partial miss in one spelling is named in that spelling" \
         "1/2 src/apps/fastcached/Main.hpp (windows spelling)" "$_p1"
     expect "P1: ... and its cause is the separators" \
@@ -3401,15 +3401,15 @@ src/apps/fastcached/Main.hpp"
     # spells uniqueness the one way this repository has been bitten by (`$$` is
     # shared inside a subshell on bash 3.2).
     _hf_tree="$scratch/header-filter"
-    _hf_clean='.*[/\\]src[/\\](CowTree|FastCache|apps|tests)[/\\].*'
+    _hf_clean='.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
     _hf_config() { printf "HeaderFilterRegex: '%s'\n" "$1" > "$_hf_tree/.clang-tidy"; }
     # The roots come from the TREE (#1370), so the tree plants its own file -- and a
     # second root, `thirdparty`, which no line of this script names: a split still
     # keyed on `vendor` would count its header as first-party and go 1/2.
     _hf_roots() { { echo '# planted'; printf '%s\n' "$@"; } > "$_hf_tree/scripts/lib/third-party-roots.txt"; }
-    mkdir -p "$_hf_tree/src/FastCache/Core" "$_hf_tree/vendor/endo/tui" \
+    mkdir -p "$_hf_tree/src/Pace/Core" "$_hf_tree/vendor/endo/tui" \
              "$_hf_tree/thirdparty/lib" "$_hf_tree/scripts/lib"
-    : > "$_hf_tree/src/FastCache/Core/Base64.hpp"
+    : > "$_hf_tree/src/Pace/Core/Base64.hpp"
     : > "$_hf_tree/vendor/endo/tui/Sixel.hpp"
     : > "$_hf_tree/thirdparty/lib/Upstream.hpp"
     # A declared package, so the dependency layouts are DERIVED from something: the

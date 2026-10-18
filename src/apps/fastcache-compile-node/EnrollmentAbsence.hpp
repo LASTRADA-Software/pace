@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <FastCache/Core/EnumTable.hpp>
+#include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +17,7 @@
 /// sentence is chosen where the reason is known, from this table, and every remedy names a flag or a
 /// command that exists. A header of its own so the router can read it without the configuration it
 /// is derived from (`EnrollmentAbsenceOf`).
-namespace FastCache::Node
+namespace Pace::Node
 {
 
 /// Why this node records no joiner.
@@ -81,4 +81,4 @@ static_assert(RowsInEnumeratorOrder(EnrollmentAbsenceTable, &EnrollmentAbsenceRo
     return EnrollmentAbsenceTable[static_cast<std::size_t>(absence)].detail;
 }
 
-} // namespace FastCache::Node
+} // namespace Pace::Node

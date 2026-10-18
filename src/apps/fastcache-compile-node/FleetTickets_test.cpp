@@ -13,14 +13,14 @@
 #include "NodeConfig.hpp"
 #include "NodeMembership.hpp"
 
-#include <FastCache/Core/EnumTable.hpp>
-#include <FastCache/Core/Logger.hpp>
-#include <FastCache/Distributed/LeaseToken.hpp>
-#include <FastCache/Distributed/MachineTicket.hpp>
-#include <FastCache/Distributed/TicketVerifier.hpp>
-#include <FastCache/Metrics/IMetricsSink.hpp>
-#include <FastCache/Protocol/CompileCacheWire.hpp>
-#include <FastCache/Protocol/ProvenIdentity.hpp>
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
+#include <Pace/Distributed/TicketVerifier.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -33,10 +33,10 @@
 #include <tests/FleetHarness.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 
-using namespace FastCache;
-using FastCache::Testing::FleetHarness;
-using FastCache::Testing::TestKeyPair;
-namespace Wire = FastCache::CompileCacheWire;
+using namespace Pace;
+using Pace::Testing::FleetHarness;
+using Pace::Testing::TestKeyPair;
+namespace Wire = Pace::CompileCacheWire;
 
 namespace
 {
@@ -62,7 +62,7 @@ struct Office
 {
     FleetHarness fleet;
     NullLogger logger;
-    FastCache::Node::NodeMembership membership { FastCache::Node::NodeConfig {}, logger };
+    Pace::Node::NodeMembership membership { Pace::Node::NodeConfig {}, logger };
 
     Office()
     {
