@@ -6892,6 +6892,12 @@ clang-tidy discards. That is the reason to keep the filter to classes, alternati
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
+- **[#1713](https://github.com/LASTRADA-Software/pace/issues/1713)** — the rename to Pace
+  left two refusals that name the OLD spelling and read nothing under it: `pace-cc` and
+  `pace-node` print one stderr line while any `FASTCACHE_*` variable is set
+  (`Cli/RetiredEnvironment.hpp`), and the top-level configure fails on a cache holding a
+  `FASTCACHED_*` entry (`cmake/RetiredOptions.cmake`, `ctest -R retired-cmake-options`).
+  Both are removed in 0.8.0, with their exemption rows in `brand-leftovers`.
 - **[#1591](https://github.com/LASTRADA-Software/pace/issues/1591)** — three sites
   now feed a listing through process substitution, and the other herestrings are NOT
   swept. 341 `<<<` sites exist under `scripts/` and nearly all take a line, a row or

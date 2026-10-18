@@ -67,6 +67,7 @@
 
 #include <Pace/Cache/InMemoryLruStorage.hpp>
 #include <Pace/Cli/Options.hpp>
+#include <Pace/Cli/RetiredEnvironment.hpp>
 #include <Pace/Cli/UsageDoc.hpp>
 #include <Pace/Config/ByteSize.hpp>
 #include <Pace/Config/ConfigReloader.hpp>
@@ -2342,6 +2343,12 @@ constexpr auto ThisNetworkWatcherStart = NetworkWatcherStart::InsideTheBody;
 int main(int argc, char** argv)
 {
     std::span<char const* const> const argvSpan { const_cast<char const* const*>(argv), static_cast<std::size_t>(argc) };
+
+    // The rename to Pace retired the old environment prefix (Cli/RetiredEnvironment.hpp names
+    // it): nothing reads it, so a node still configured through the old scheduler variable is
+    // told so rather than starting without it in silence (#1713 removes this in 0.8.0).
+    if (auto const notice = RetiredEnvironmentNoticeFor("pace-node", EnvironmentVariableNames()))
+        std::cerr << *notice << '\n';
 
     // Parsed TWICE, into two results, and which one a decision reads is the whole
     // of this arrangement.

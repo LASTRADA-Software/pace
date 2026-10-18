@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -205,6 +206,15 @@ struct EnvVarSpec
 /// The `PACE_*` variables, in the order `--help` documents them.
 /// @return A view of the static table; never empty.
 [[nodiscard]] std::span<EnvVarSpec const> LauncherEnvironment() noexcept;
+
+/// The one stderr line the launcher prints while a retired environment variable is set,
+/// read from THIS process's environment (`EnvironmentVariableNames`).
+///
+/// Here rather than in `main.cpp`, which is in no test target, so that the line a build sees is
+/// tested as the launcher composes it: the retired table, the host's name case and the real
+/// environment, together.
+/// @return The line, or a disengaged optional when nothing retired is set.
+[[nodiscard]] std::optional<std::string> LauncherRetiredEnvironmentNotice();
 
 /// Render the usage text.
 ///

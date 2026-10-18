@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 
@@ -62,3 +63,21 @@ TEST_CASE("ReadEnvironmentVariable: a variable set to nothing is an empty string
     REQUIRE(value.value_or(std::string { "not empty" }).empty());
 }
 #endif
+
+TEST_CASE("EnvironmentVariableNames: a variable that is set is listed by its name alone, and one removed is not",
+          "[platform][environment]")
+{
+    auto const listed = [](std::string_view name) {
+        return std::ranges::contains(Pace::EnvironmentVariableNames(), name);
+    };
+    {
+        ScopedEnv const env { "PACE_TEST_LISTED_NAME", "a=b" };
+        // The NAME, cut at the first '=': the value carries one too, and must not reach the list.
+        CHECK(listed("PACE_TEST_LISTED_NAME"));
+        CHECK_FALSE(listed("PACE_TEST_LISTED_NAME=a"));
+    }
+    CHECK_FALSE(listed("PACE_TEST_LISTED_NAME"));
+    // Windows' hidden per-drive entries (`=C:=C:\...`) name no variable.
+    CHECK(std::ranges::none_of(Pace::EnvironmentVariableNames(),
+                               [](std::string const& name) { return name.empty() || name.starts_with('='); }));
+}

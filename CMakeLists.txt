@@ -34,11 +34,16 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND NOT DEFINED ENV{MACOSX_
     set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum supported macOS version")
 endif()
 
-project(pace-kv
+project(pace
     VERSION "${PACE_VERSION}"
-    DESCRIPTION "Fast Cache Daemon — platform-independent memcached/Redis server"
+    DESCRIPTION "Pace — a distributed compile fleet with a cache, and a memcached/Redis-compatible daemon"
     LANGUAGES CXX
 )
+
+# Before anything reads an option: a tree configured before the rename holds FASTCACHED_*
+# entries nothing reads any more, and is refused rather than configured on defaults.
+include(RetiredOptions)
+pace_refuse_retired_cache_entries()
 
 include(GNUInstallDirs)
 

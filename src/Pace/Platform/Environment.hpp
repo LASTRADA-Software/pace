@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Pace
 {
@@ -38,5 +39,14 @@ namespace Pace
 ///         an unset variable means "this location does not apply", while a set
 ///         but empty one is a deliberate value.
 [[nodiscard]] std::optional<std::string> ReadEnvironmentVariable(std::string_view name);
+
+/// The NAMES of every variable in the process environment, in the environment's order.
+///
+/// Read beside `ReadEnvironmentVariable` because it is the same source: a caller that
+/// must notice a name it does not know in advance (`RetiredEnvironmentNames`) cannot ask
+/// for it by name. Windows' hidden per-drive entries (`=C:=...`) name no variable and are
+/// left out.
+/// @return The names; empty when the environment is empty or cannot be read.
+[[nodiscard]] std::vector<std::string> EnvironmentVariableNames();
 
 } // namespace Pace

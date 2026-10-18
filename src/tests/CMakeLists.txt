@@ -431,6 +431,19 @@ else()
         "report SKIPPED on this host")
 endif()
 
+# The configure refusal of a build tree configured before the rename to Pace
+# (cmake/RetiredOptions.cmake, #1713): its decision names a FASTCACHED_ entry and passes
+# PACE_ ones. Judged by output, as every script check is.
+add_test(
+    NAME "retired-cmake-options"
+    COMMAND ${CMAKE_COMMAND} -DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P "${CMAKE_SOURCE_DIR}/scripts/check-retired-options.cmake"
+)
+set_tests_properties("retired-cmake-options" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
+    LABELS "hygiene"
+    TIMEOUT 60
+)
+
 # The canary: a check that must be seen to fail. See scripts/script-check-canary.cmake
 # for why a property needs one. WILL_FAIL inverts the verdict, so this reports
 # green exactly while the mechanism above works, and red the moment it does not.

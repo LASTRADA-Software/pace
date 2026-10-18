@@ -3,7 +3,10 @@
 #include "LauncherCli.hpp"
 
 #include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/RetiredEnvironment.hpp>
 #include <Pace/Cli/UsageTestUtils.hpp>
+#include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/EnvironmentTestUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -459,4 +462,35 @@ TEST_CASE("a launcher deadline variable reads a duration and falls back on anyth
     CHECK(EnvironmentDuration("2000", fallback) == fallback);
     CHECK(EnvironmentDuration("", fallback) == fallback);
     CHECK(EnvironmentDuration("soon", fallback) == fallback);
+}
+
+TEST_CASE("LauncherRetiredEnvironmentNotice: the retired address variable is told, PACE_ADDR alone is not",
+          "[launcher][retired-environment]")
+{
+    // The real environment, through the seam main() prints from: a launcher that read the names
+    // wrongly, or asked a table nobody filled, stays silent while a build still exports the old
+    // address -- the silence this line exists to end. The retired name is built from the table's
+    // row, so this file spells no old name for scripts/brand-leftovers-exemptions.tsv to excuse.
+    auto const& row = Pace::RetiredEnvironmentPrefixes.front();
+    auto const retiredAddress = std::format("{}ADDR", row.retired);
+    {
+        Pace::Testing::ScopedEnv const retired { retiredAddress, "127.0.0.1:6674" };
+        auto const notice = LauncherRetiredEnvironmentNotice();
+        REQUIRE(notice.has_value());
+        CHECK(notice.value_or(std::string {}).starts_with("pace-cc: "));
+        CHECK(notice.value_or(std::string {}).contains(retiredAddress));
+        CHECK(notice.value_or(std::string {}).contains("PACE_ADDR"));
+    }
+
+    // Any retired name this process inherited would make the second half say something; that is
+    // the environment's doing, not the launcher's, so it is reported rather than passed.
+    auto const names = Pace::EnvironmentVariableNames();
+    std::vector<std::string_view> const views(names.begin(), names.end());
+    auto const inherited =
+        Pace::RetiredEnvironmentNames(views, Pace::RetiredEnvironmentPrefixes, Pace::HostEnvironmentNameCase);
+    if (!inherited.empty())
+        SKIP(std::format("this test process inherited a retired variable ({})", inherited.front().name));
+
+    Pace::Testing::ScopedEnv const current { "PACE_ADDR", "127.0.0.1:6674" };
+    CHECK_FALSE(LauncherRetiredEnvironmentNotice().has_value());
 }

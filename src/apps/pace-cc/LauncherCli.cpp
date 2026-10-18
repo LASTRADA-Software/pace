@@ -3,6 +3,8 @@
 #include "LauncherCli.hpp"
 
 #include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/RetiredEnvironment.hpp>
+#include <Pace/Platform/Environment.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,6 +12,7 @@
 #include <format>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -507,6 +510,11 @@ std::chrono::milliseconds EnvironmentDuration(std::string_view text, std::chrono
 std::span<EnvVarSpec const> LauncherEnvironment() noexcept
 {
     return EnvironmentTable;
+}
+
+std::optional<std::string> LauncherRetiredEnvironmentNotice()
+{
+    return RetiredEnvironmentNoticeFor("pace-cc", EnvironmentVariableNames());
 }
 
 std::string HelpText(UsageColor color)

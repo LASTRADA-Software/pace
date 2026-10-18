@@ -3749,6 +3749,13 @@ int main(int argc, char** argv)
             break;
     }
 
+    // The rename to Pace retired the old environment prefix (Cli/RetiredEnvironment.hpp names
+    // it): nothing reads it, so a build still exporting the old daemon address would compile
+    // locally in silence. Said once per invocation, on stderr, and nothing else changes (#1713
+    // removes this in 0.8.0).
+    if (auto const notice = Cc::LauncherRetiredEnvironmentNotice())
+        std::cerr << *notice << '\n';
+
     // Parsed BEFORE the configuration, which is the reverse of how this read until
     // #878, because one setting now depends on the command line: the `/showIncludes`
     // marker is resolved by asking the compiler when nobody named one, and `cmd` is
