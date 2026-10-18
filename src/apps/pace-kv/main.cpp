@@ -131,9 +131,7 @@ constexpr std::string_view ProgramVersion = Pace::VersionString;
 /// @param stage The step that refused, whose row says which code a supervisor reads.
 /// @param reason Why this process will not start.
 /// @return What the outcome's reader is answered: a start's @p stage code, or another reader's ending.
-[[nodiscard]] int RefuseUnderService(Pace::CliResult const& commandLine,
-                                     Pace::StartStage stage,
-                                     std::string_view reason)
+[[nodiscard]] int RefuseUnderService(Pace::CliResult const& commandLine, Pace::StartStage stage, std::string_view reason)
 {
     std::println(std::cerr, "pace-kv: {}", reason);
     if (auto const reader = Pace::ExitReaderOf(commandLine.outcome); reader != Pace::ExitReader::Supervisor)
@@ -141,10 +139,9 @@ constexpr std::string_view ProgramVersion = Pace::VersionString;
     auto const& config = commandLine.config;
     auto const code = Pace::ExitCodeFor(stage);
     auto const host =
-        config.daemon
-            ? Pace::MakeWindowsServiceHost(
-                  config.serviceName, Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt) })
-            : nullptr;
+        config.daemon ? Pace::MakeWindowsServiceHost(
+                            config.serviceName, Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt) })
+                      : nullptr;
     if (host == nullptr)
         return code;
     auto const eventLogger = Pace::MakeWindowsEventLogger(config.serviceName, config.logLevel);
@@ -627,13 +624,13 @@ struct StorageBackendBundle
             shards.push_back(entry->path());
     }
     if (ec)
-        return std::unexpected(Pace::UnfinishedCommand {
-            .ending = Pace::CommandEnding::Failed,
-            .reason = std::format("cannot list '{}': {}", configured.string(), ec.message()) });
+        return std::unexpected(
+            Pace::UnfinishedCommand { .ending = Pace::CommandEnding::Failed,
+                                      .reason = std::format("cannot list '{}': {}", configured.string(), ec.message()) });
     if (shards.empty())
         return std::unexpected(
             Pace::UnfinishedCommand { .ending = Pace::CommandEnding::Declined,
-                                           .reason = std::format("no shard-NN.cow files under '{}'", configured.string()) });
+                                      .reason = std::format("no shard-NN.cow files under '{}'", configured.string()) });
 
     // Sorted so the report reads in shard order rather than in whatever order
     // the filesystem hands them back.
@@ -725,9 +722,9 @@ int DaemonBody(Pace::Config const& effective,
     // rather than a platform branch — and `effective.daemon` rather than "am I on
     // Windows", so a foreground run keeps its terminal output on a machine that has
     // one (#179).
-    Pace::ConsoleLogger consoleLogger {
-        std::cerr, effective.logLevel, effective.logTimestamps ? Pace::LogTimestamps::Yes : Pace::LogTimestamps::No
-    };
+    Pace::ConsoleLogger consoleLogger { std::cerr,
+                                        effective.logLevel,
+                                        effective.logTimestamps ? Pace::LogTimestamps::Yes : Pace::LogTimestamps::No };
     auto const eventLogger =
         effective.daemon ? Pace::MakeWindowsEventLogger(effective.serviceName, effective.logLevel) : nullptr;
     Pace::ILogger& logger =
@@ -1047,25 +1044,25 @@ int DaemonBody(Pace::Config const& effective,
     // non-empty) or the synthesised legacy single-bind. Either way, a TLS
     // banner field that reports "off" while a TLS listener is up is the
     // operator-misleading bug — fold `anyTlsBind` into the TLS field below.
-    logger.Logf(
-        Pace::LogLevel::Info,
-        "pace-kv {} starting; bind={} max-memory={} config={} storage={} "
-        "durability={} compression={} memory-compression={} max-value={} reactors={} shards={}{} auth={} "
-        "tls={}",
-        ProgramVersion,
-        bindSummary,
-        Pace::FormatByteSize(effective.maxMemoryBytes),
-        effective.configPath.empty() ? std::string_view { "<none>" } : std::string_view { effective.configPath },
-        effective.storagePath.empty() ? std::string_view { "<in-memory>" } : std::string_view { effective.storagePath },
-        durabilityName,
-        effective.storagePath.empty() ? std::string_view { "<no disk tier>" } : Pace::Compression::NameOf(diskCodec),
-        Pace::Compression::NameOf(memoryCodec),
-        Pace::FormatByteSize(effective.storageMaxValueBytes),
-        reactorCount,
-        physicalShards,
-        shardingMode,
-        authSource.Current() ? std::string_view { "on" } : std::string_view { "off" },
-        (effective.tlsEnabled || anyTlsBind) ? std::string_view { "on" } : std::string_view { "off" });
+    logger.Logf(Pace::LogLevel::Info,
+                "pace-kv {} starting; bind={} max-memory={} config={} storage={} "
+                "durability={} compression={} memory-compression={} max-value={} reactors={} shards={}{} auth={} "
+                "tls={}",
+                ProgramVersion,
+                bindSummary,
+                Pace::FormatByteSize(effective.maxMemoryBytes),
+                effective.configPath.empty() ? std::string_view { "<none>" } : std::string_view { effective.configPath },
+                effective.storagePath.empty() ? std::string_view { "<in-memory>" }
+                                              : std::string_view { effective.storagePath },
+                durabilityName,
+                effective.storagePath.empty() ? std::string_view { "<no disk tier>" } : Pace::Compression::NameOf(diskCodec),
+                Pace::Compression::NameOf(memoryCodec),
+                Pace::FormatByteSize(effective.storageMaxValueBytes),
+                reactorCount,
+                physicalShards,
+                shardingMode,
+                authSource.Current() ? std::string_view { "on" } : std::string_view { "off" },
+                (effective.tlsEnabled || anyTlsBind) ? std::string_view { "on" } : std::string_view { "off" });
 
     InstallStopHandlers();
     // The "ready, accepting connections" line is emitted by the server loop
@@ -1273,8 +1270,7 @@ int DaemonBody(Pace::Config const& effective,
         }
     }
 
-    int const exitCode =
-        Pace::RunReactorServer(serverOpts, engine, logger, acceptLoops, /*admission*/ nullptr, &metrics);
+    int const exitCode = Pace::RunReactorServer(serverOpts, engine, logger, acceptLoops, /*admission*/ nullptr, &metrics);
 
     if (adminServer)
     {
@@ -1319,8 +1315,7 @@ int main(int argc, char const* const* argv)
             return Pace::CommandExitCode(Pace::CommandEnding::Completed);
         case Pace::CliOutcome::ShowHelp:
             std::print("{}",
-                       Pace::CliUsage(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored
-                                                                            : Pace::UsageColor::Plain));
+                       Pace::CliUsage(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored : Pace::UsageColor::Plain));
             return Pace::CommandExitCode(Pace::CommandEnding::Completed);
         case Pace::CliOutcome::SeedConfig:
             return SeedDefaultConfig(parsed->seedConfigTemplate);
@@ -1344,8 +1339,8 @@ int main(int argc, char const* const* argv)
     // path baked into a service's launch arguments would outrank the file itself
     // forever, and InlineCredentialRejection would start naming a path nobody
     // typed.
-    auto const lookup = Pace::EffectiveConfigPath(
-        parsed->config.configPath, Pace::SystemConfigPathProbe {}, Pace::DaemonApplicationName);
+    auto const lookup =
+        Pace::EffectiveConfigPath(parsed->config.configPath, Pace::SystemConfigPathProbe {}, Pace::DaemonApplicationName);
     auto const configPath = lookup.path.string();
 
     // A config that exists and is readable but was passed over anyway has to say
@@ -1373,7 +1368,7 @@ int main(int argc, char const* const* argv)
     // that wants the env form simply omits the config/CLI value, letting both the
     // daemon and its `--healthcheck` probe agree via a single `-e ...`.
     Pace::ConfigSources const sources { .args = std::vector<std::string>(args.begin(), args.end()),
-                                             .metricsPortEnv = MetricsPortFromEnv() };
+                                        .metricsPortEnv = MetricsPortFromEnv() };
 
     auto assembled = Pace::AssembleEffectiveConfig(configPath, sources);
     if (!assembled.has_value())
@@ -1428,8 +1423,8 @@ int main(int argc, char const* const* argv)
     // probe runs inside the same host/container as the daemon.
     if (parsed->outcome == Pace::CliOutcome::HealthCheck)
         return Pace::CommandExitCode(core::net::httpHealthProbe("127.0.0.1", effective.metricsPort, "/healthz")
-                                              ? Pace::CommandEnding::Completed
-                                              : Pace::CommandEnding::Failed);
+                                         ? Pace::CommandEnding::Completed
+                                         : Pace::CommandEnding::Failed);
 
     // Service-control requests act on the service manager and exit; they never
     // run the daemon body.
@@ -1444,8 +1439,7 @@ int main(int argc, char const* const* argv)
     // of a mode-0600 config file into a world-readable service registration.
     // The YAML is still parsed above, so a broken config is still rejected here
     // rather than at first start.
-    if (parsed->outcome == Pace::CliOutcome::InstallService
-        || parsed->outcome == Pace::CliOutcome::UninstallService)
+    if (parsed->outcome == Pace::CliOutcome::InstallService || parsed->outcome == Pace::CliOutcome::UninstallService)
     {
         // The command-line config, never the merged one -- see the comment above.
         // Turned into a ServiceSpec here because that is the seam the platform
@@ -1490,15 +1484,14 @@ int main(int argc, char const* const* argv)
         // registration, never after a refused one (`WithRemovalFirewall`). The registration is
         // the argument, so it has happened before the firewall is asked.
         auto const firewall = Pace::MakeSystemFirewall();
-        auto const result = parsed->outcome == Pace::CliOutcome::InstallService
-                                ? Pace::WithRegistrationFirewall(
-                                      Pace::InstallService(spec, parsed->serviceScope),
-                                      firewall.get(),
-                                      spec.serviceName,
-                                      Pace::DaemonFirewallRules(effective, spec.exePath, parsed->firewallAllow))
-                                : Pace::WithRemovalFirewall(Pace::UninstallService(spec, parsed->serviceScope),
-                                                                 firewall.get(),
-                                                                 spec.serviceName);
+        auto const result =
+            parsed->outcome == Pace::CliOutcome::InstallService
+                ? Pace::WithRegistrationFirewall(Pace::InstallService(spec, parsed->serviceScope),
+                                                 firewall.get(),
+                                                 spec.serviceName,
+                                                 Pace::DaemonFirewallRules(effective, spec.exePath, parsed->firewallAllow))
+                : Pace::WithRemovalFirewall(
+                      Pace::UninstallService(spec, parsed->serviceScope), firewall.get(), spec.serviceName);
         if (result.Ending() == Pace::CommandEnding::Completed)
             std::println("pace-kv: {}", result.message);
         else
@@ -1512,10 +1505,9 @@ int main(int argc, char const* const* argv)
 #if defined(_WIN32)
         // RUNNING once every acceptor is armed (`serverOpts.onServing` below), so `net start` answers
         // for a daemon that serves rather than for a process that is up.
-        host = Pace::MakeWindowsServiceHost(
-            effective.serviceName,
-            Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt),
-                                            .readiness = Pace::ServiceReadiness::BodySignals });
+        host = Pace::MakeWindowsServiceHost(effective.serviceName,
+                                            Pace::ServiceHostOptions { .stop = Pace::StopPendingPlanFor(std::nullopt),
+                                                                       .readiness = Pace::ServiceReadiness::BodySignals });
 #else
         // `/`, stated rather than defaulted. This daemon executes nothing, so no
         // path-mapping rule is ever derived from its working directory and the

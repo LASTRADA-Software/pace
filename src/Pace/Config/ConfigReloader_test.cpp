@@ -87,10 +87,10 @@ TEST_CASE("ConfigReloader::Reload picks up reloadable changes", "[config][reload
                                 "max_memory: 1024\n"
                                 "log_level: info\n");
     Pace::Config initial { .maxMemoryBytes = 1024,
-                                .bindAddress = "127.0.0.1",
-                                .configPath = path.string(),
-                                .port = 11600,
-                                .logLevel = Pace::LogLevel::Info };
+                           .bindAddress = "127.0.0.1",
+                           .configPath = path.string(),
+                           .port = 11600,
+                           .logLevel = Pace::LogLevel::Info };
     Pace::ConfigReloader reloader { initial, path, {} };
 
     bool fired = false;
@@ -119,9 +119,7 @@ TEST_CASE("ConfigReloader::Reload rejects changes to immutable fields", "[config
                                 "bind: 127.0.0.1\n"
                                 "port: 11700\n"
                                 "max_memory: 1024\n");
-    Pace::Config initial {
-        .maxMemoryBytes = 1024, .bindAddress = "127.0.0.1", .configPath = path.string(), .port = 11700
-    };
+    Pace::Config initial { .maxMemoryBytes = 1024, .bindAddress = "127.0.0.1", .configPath = path.string(), .port = 11700 };
     Pace::ConfigReloader reloader { initial, path, {} };
 
     // Try to change the port — should be rejected.
@@ -398,7 +396,7 @@ TEST_CASE("ConfigReloader: a reload re-applies the command line", "[config][relo
     auto const path = WriteYaml("reload-argv", "log_level: info\n");
 
     Pace::ConfigSources const sources { .args = { "--max-memory=1024", "--log-level=info" },
-                                             .metricsPortEnv = std::nullopt };
+                                        .metricsPortEnv = std::nullopt };
     auto const assembled = Pace::AssembleEffectiveConfig(path, sources);
     REQUIRE(assembled.has_value());
     REQUIRE(assembled->Configuration().maxMemoryBytes == 1024);
@@ -428,7 +426,7 @@ TEST_CASE("ConfigReloader: a reload keeps a flag typed at its own default", "[co
     // Off the constant, never a literal: the whole point is that the typed value
     // IS the compiled-in default.
     Pace::ConfigSources const sources { .args = { std::format("--port={}", Pace::DefaultPort) },
-                                             .metricsPortEnv = std::nullopt };
+                                        .metricsPortEnv = std::nullopt };
     auto const assembled = Pace::AssembleEffectiveConfig(path, sources);
     REQUIRE(assembled.has_value());
     REQUIRE(assembled->Configuration().port == Pace::DefaultPort);

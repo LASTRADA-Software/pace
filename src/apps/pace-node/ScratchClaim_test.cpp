@@ -378,21 +378,20 @@ TEST_CASE("Two nodes compiling at once, each on its own claimed root, keep their
         return out;
     };
 
-    std::array<std::expected<Pace::Cc::CompileOutcome, Pace::Cc::JobError>, OverlappingEchoRunner::Overlap>
-        results {};
+    std::array<std::expected<Pace::Cc::CompileOutcome, Pace::Cc::JobError>, OverlappingEchoRunner::Overlap> results {};
     std::latch start { static_cast<std::ptrdiff_t>(OverlappingEchoRunner::Overlap) };
     {
         std::vector<std::jthread> threads;
         for (auto const index: std::views::iota(std::size_t { 0 }, OverlappingEchoRunner::Overlap))
             threads.emplace_back([&, index] {
                 auto job = Pace::Cc::CompileJob { .fingerprint = "gcc-13",
-                                                       .args = { "-O2" },
-                                                       .preprocessed = texts.at(index),
-                                                       .sourceName = "a.cpp",
-                                                       .compileDir = {},
-                                                       .compileDirReplacement = {},
-                                                       .sourceRoot = {},
-                                                       .sourceRootReplacement = {} };
+                                                  .args = { "-O2" },
+                                                  .preprocessed = texts.at(index),
+                                                  .sourceName = "a.cpp",
+                                                  .compileDir = {},
+                                                  .compileDirReplacement = {},
+                                                  .sourceRoot = {},
+                                                  .sourceRootReplacement = {} };
                 start.arrive_and_wait();
                 // No Catch2 macro on this thread: the assertion macros are not
                 // thread-safe, so the answer is carried back and checked below.
@@ -451,8 +450,7 @@ TEST_CASE("The directory a daemonized node runs in leaves its own prefix-map rul
         // TWO rules: the client's directory and the worker's own. That second one is
         // what clang records, and it is the whole point -- gcc adopts the client's
         // directory out of the preprocessed text, clang leaves this machine's showing.
-        auto const rules =
-            Pace::Cc::WorkerPrefixMapRules(stated, ClientDirectory, Replacement, Pace::Cc::DriverFamily::Gnu);
+        auto const rules = Pace::Cc::WorkerPrefixMapRules(stated, ClientDirectory, Replacement, Pace::Cc::DriverFamily::Gnu);
         REQUIRE(rules.has_value());
         CHECK(rules->size() == 2);
         CHECK(std::ranges::any_of(*rules, [&](std::string const& rule) {
@@ -469,8 +467,7 @@ TEST_CASE("The directory a daemonized node runs in leaves its own prefix-map rul
         // cannot pass by the function returning two rules for everything -- which is
         // the shape that makes a test agree with the healthy and the broken state
         // alike.
-        auto const rules =
-            Pace::Cc::WorkerPrefixMapRules("/", ClientDirectory, Replacement, Pace::Cc::DriverFamily::Gnu);
+        auto const rules = Pace::Cc::WorkerPrefixMapRules("/", ClientDirectory, Replacement, Pace::Cc::DriverFamily::Gnu);
         REQUIRE(rules.has_value());
         CHECK(rules->size() == 1);
         CHECK(

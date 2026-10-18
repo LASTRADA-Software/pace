@@ -246,8 +246,7 @@ TEST_CASE("A loop's listener asks for the deep accept queue, and the daemon's de
     auto const options = Pace::LoopListenOptions("127.0.0.1", 6674);
     CHECK(options.host == "127.0.0.1");
     CHECK(options.port == 6674);
-    CHECK(options.backlog
-          == Pace::ListenBacklogArgument(Pace::ListenQueueDepth, Pace::ThisPlatformBacklogSpelling));
+    CHECK(options.backlog == Pace::ListenBacklogArgument(Pace::ListenQueueDepth, Pace::ThisPlatformBacklogSpelling));
     // Deeper than core-cpp's own default, or the helper asks for nothing a bare `ListenOptions`
     // would not already get.
     CHECK(Pace::ListenQueueDepth > core::net::ListenOptions {}.backlog);
@@ -297,10 +296,9 @@ TEST_CASE("Every way this file binds leaves the kernel holding the depth it was 
     SECTION("core::net::listen over ClientListenOptions at the daemon's default depth")
     {
         core::net::PlatformLoop loop;
-        auto listened =
-            core::net::listen(loop,
-                              Pace::ClientListenOptions(
-                                  "127.0.0.1", 0, Pace::Config {}.listenBacklog, core::net::PortSharing::Exclusive));
+        auto listened = core::net::listen(
+            loop,
+            Pace::ClientListenOptions("127.0.0.1", 0, Pace::Config {}.listenBacklog, core::net::PortSharing::Exclusive));
         REQUIRE(listened.has_value());
         auto const limits = Pace::Testing::ListenQueueLimitsOnPort((*listened)->boundPort());
         REQUIRE(limits.has_value());
@@ -318,8 +316,8 @@ TEST_CASE("Every way this file binds leaves the kernel holding the depth it was 
         auto const wanted = std::min(depth, *ceiling);
 
         core::net::PlatformLoop loop;
-        auto listened = core::net::listen(
-            loop, Pace::ClientListenOptions("127.0.0.1", 0, depth, core::net::PortSharing::Exclusive));
+        auto listened =
+            core::net::listen(loop, Pace::ClientListenOptions("127.0.0.1", 0, depth, core::net::PortSharing::Exclusive));
         REQUIRE(listened.has_value());
         auto const onLoop = Pace::Testing::ListenQueueLimitsOnPort((*listened)->boundPort());
         REQUIRE(onLoop.has_value());
@@ -735,9 +733,9 @@ TEST_CASE("A signal that interrupts an armed accept's poll is a poll tick, not a
         [&answered] { return answered.wait_for(0s) == std::future_status::ready; },
         [] { return std::string { "signalling the acceptor thread on every poll" }; },
         Pace::Testing::WaitOptions { .step = [&handler, native] { handler.Interrupt(native); },
-                                          .context = {},
-                                          .bound = Pace::Testing::WaitHangGuard,
-                                          .rest = Pace::Testing::WaitRest });
+                                     .context = {},
+                                     .bound = Pace::Testing::WaitHangGuard,
+                                     .rest = Pace::Testing::WaitRest });
     // Joined before any assertion: the poll ends on its own within its timeout, so this is bounded.
     acceptor.join();
     REQUIRE(reached);

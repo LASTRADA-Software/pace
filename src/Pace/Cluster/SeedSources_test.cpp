@@ -39,8 +39,7 @@ TEST_CASE("A seed names a machine and takes the node port by default", "[cluster
     CHECK_FALSE(NormalizeSeed("office-a:0").has_value());
 }
 
-TEST_CASE("The SRV name is the primary DNS suffix under _pace._tcp and absent without one",
-          "[cluster][formation][seeds]")
+TEST_CASE("The SRV name is the primary DNS suffix under _pace._tcp and absent without one", "[cluster][formation][seeds]")
 {
     CHECK(SrvQueryName("corp.example") == "_pace._tcp.corp.example");
     CHECK(SrvQueryName("").empty());

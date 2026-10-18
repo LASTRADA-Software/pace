@@ -797,8 +797,7 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
         INFO(rejection.value_or(std::string {}));
         CHECK_FALSE(rejection.has_value());
 
-        auto const spec =
-            MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+        auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
         CHECK(std::ranges::none_of(spec.arguments, [](std::string const& a) { return a.starts_with("--cluster-dir"); }));
         // The scope is install-time only: it shapes the rules this install creates and is never
         // replayed, so a registration that carried it would re-scope nothing at every start.
@@ -863,8 +862,8 @@ TEST_CASE("The MSI's node registration installs with no property, never with a t
         constexpr std::string_view ResolvedId = "2e407297e87c4828f54639bf9dcbdff2";
         auto registration = cfg;
         registration.nodeId = std::string { ResolvedId };
-        auto const commandLine = BuildServiceCommandLine(MakeNodeServiceSpec(
-            std::filesystem::path { "pace-node" }, registration, Testing::InstallerPathProbe()));
+        auto const commandLine = BuildServiceCommandLine(
+            MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, registration, Testing::InstallerPathProbe()));
         INFO("registered: " << commandLine);
         auto const registered = SplitArguments(commandLine);
         REQUIRE(registered.size() > 1);

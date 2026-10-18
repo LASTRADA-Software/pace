@@ -2892,9 +2892,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     // The host's narrow-text policy goes in here and nowhere else, because this is
     // the one object every path a compiler emitted passes through. It is read from
     // the platform at exactly this call site so everything it reaches stays pure.
-    Cc::RootReconciler reconciler {
-        cfg.srcRoot, cfg.buildTree, PathResolver(), Pace::HostNarrowTextPolicy(), cfg.depsRoot
-    };
+    Cc::RootReconciler reconciler { cfg.srcRoot, cfg.buildTree, PathResolver(), Pace::HostNarrowTextPolicy(), cfg.depsRoot };
     PathCanon::Layout const& layout = reconciler.Layout();
 
     // Asked before ANYTHING else the cache does, direct mode included, and that
@@ -3617,8 +3615,8 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
 {
     // The color decision is made here, not inside Stats.cpp, so that module
     // stays free of ambient probes -- the same split --help already uses.
-    std::cout << Cc::FormatReport(
-        groupFilter, Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored : Pace::UsageColor::Plain);
+    std::cout << Cc::FormatReport(groupFilter,
+                                  Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored : Pace::UsageColor::Plain);
     return 0;
 }
 
@@ -3724,8 +3722,7 @@ int main(int argc, char** argv)
             // the module stays free of ambient probes. On Windows the call also
             // enables virtual-terminal processing as a side effect, so it has to
             // happen before anything is written.
-            std::cout << Cc::HelpText(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored
-                                                                       : Pace::UsageColor::Plain);
+            std::cout << Cc::HelpText(Pace::StdoutSupportsColor() ? Pace::UsageColor::Colored : Pace::UsageColor::Plain);
             return 0;
         case Cc::Action::Version:
             std::cout << "pace-cc " << PACE_CC_VERSION << '\n';

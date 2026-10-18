@@ -427,8 +427,7 @@ std::expected<std::string, UnfinishedCommand> RunEnrollAdmin(NodeConfig const& c
                                                              Cc::ICredentialFor& credentials,
                                                              IEndpointDialer& dialer)
 {
-    auto notice =
-        Cc::CredentialNotice { [](std::string_view text) { std::cerr << "pace-node: " << text << '\n'; } };
+    auto notice = Cc::CredentialNotice { [](std::string_view text) { std::cerr << "pace-node: " << text << '\n'; } };
 
     // The first ask walks the configured list -- this machine's own node when `--scheduler` names
     // none (`AdminTargetsOf`) -- and takes whichever CONNECTS; a redirect names one

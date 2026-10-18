@@ -852,8 +852,7 @@ TEST_CASE("A service registration owns the machine-wide state directory and hand
     withEnvironment.serviceAccountEnvironment = { { "STATE_DIRECTORY", "/Library/Application Support/pace-node" } };
     auto const plist = BuildLaunchdPlist(withEnvironment, ServiceScope::System, std::filesystem::path { "/tmp" });
     CHECK(plist.contains("<key>EnvironmentVariables</key>"));
-    CHECK(
-        plist.contains("<key>STATE_DIRECTORY</key>\n        <string>/Library/Application Support/pace-node</string>"));
+    CHECK(plist.contains("<key>STATE_DIRECTORY</key>\n        <string>/Library/Application Support/pace-node</string>"));
 }
 
 #if !defined(_WIN32)
@@ -897,9 +896,8 @@ TEST_CASE("A service registration's defaulted state directory loses its group an
     // seclusion, and the POSIX seclusion is `chmod go-rwx`. The real directory is
     // /var/lib/pace-node, which a suite run unprivileged cannot touch, so the spec's own
     // entry is re-pointed at a scratch directory and keeps every other field.
-    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" },
-                                          Testing::FirstStart(NodeConfig {}),
-                                          Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(
+        std::filesystem::path { "pace-node" }, Testing::FirstStart(NodeConfig {}), Testing::InstallerPathProbe());
     auto const machineWide = MachineWideNodeClusterDirectory(Testing::InstallerPathProbe());
     REQUIRE(machineWide.has_value());
     auto const* const owned = core::findOrNull(spec.ownedPaths, Testing::Unwrap(machineWide), &OwnedPath::path);
@@ -959,7 +957,8 @@ TEST_CASE("The per-user node unit and LaunchAgent keep the identity where the no
     // started by hand takes NodeDefaults' per-user default. Were the two to choose a directory
     // each, one person's node would have two identities depending on how it was started -- so
     // the unit's directory is read out of the shipped file, never restated here.
-    auto const unit = std::filesystem::path { Testing::CheckoutSourceDir } / "packaging" / "linux" / "pace-node-user.service";
+    auto const unit =
+        std::filesystem::path { Testing::CheckoutSourceDir } / "packaging" / "linux" / "pace-node-user.service";
     auto const handedOver = UnitDirective(unit, "StateDirectory");
     REQUIRE(handedOver.has_value());
     // systemd appends the name to $XDG_STATE_HOME; the node appends NodeStateDirectoryName to it.

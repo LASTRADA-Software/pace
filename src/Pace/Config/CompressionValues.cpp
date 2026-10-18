@@ -33,9 +33,9 @@ std::expected<CompressionCodec, ConfigError> ParseCompressionCodec(std::string_v
     // is a real one, so "unknown codec" would send an operator looking for a typo
     // that is not there.
     if (!Compression::IsAvailable(*codec))
-        return std::unexpected(ValueError(
-            ConfigErrorCode::OutOfRange,
-            std::format("codec '{}' is not available in this build (rebuild with PACE_ENABLE_COMPRESSION)", sv)));
+        return std::unexpected(
+            ValueError(ConfigErrorCode::OutOfRange,
+                       std::format("codec '{}' is not available in this build (rebuild with PACE_ENABLE_COMPRESSION)", sv)));
 
     return *codec;
 }

@@ -1148,8 +1148,7 @@ class HoldableResponder final: public IFrameResponder
                                    Entered(),
                                    Answered());
             },
-            Pace::Testing::WaitOptions {
-                .step = {}, .context = {}, .bound = bound, .rest = Pace::Testing::WaitRest });
+            Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = bound, .rest = Pace::Testing::WaitRest });
         CHECK(left);
         CHECK(_waits.AllReached());
     }
@@ -3555,8 +3554,8 @@ namespace
 /// is the remedy this repository has had to write down more than once.
 [[nodiscard]] std::string EndpointCodeWithoutComments()
 {
-    auto const path = std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps"
-                      / "pace-node" / "FrameEndpoint.cpp";
+    auto const path =
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-node" / "FrameEndpoint.cpp";
     std::ifstream in { path, std::ios::binary };
     std::ostringstream contents;
     // Via the stream buffer rather than `istreambuf_iterator`, for the reason

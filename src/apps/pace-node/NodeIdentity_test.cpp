@@ -615,8 +615,7 @@ TEST_CASE("A service registration bakes in the resolved identity", "[node][ident
     auto const identity = Resolved(NodeStateDirectory(cfg), cfg.nodeId, random);
     ApplyNodeIdentity(cfg, identity);
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
 
     // Read back by PARSING the registration, never by grepping it: what matters is that
     // the value survives this project's own parser and arrives in the field the node

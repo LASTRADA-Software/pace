@@ -42,9 +42,7 @@ namespace
 /// @return The entry.
 [[nodiscard]] LogEntry Entry(std::uint64_t term, std::string_view tag)
 {
-    return LogEntry { .term = Term { .value = term },
-                      .kind = EntryKind::Command,
-                      .payload = Pace::BytesFromString(tag) };
+    return LogEntry { .term = Term { .value = term }, .kind = EntryKind::Command, .payload = Pace::BytesFromString(tag) };
 }
 
 /// Open a file store, failing the test if it cannot be opened.

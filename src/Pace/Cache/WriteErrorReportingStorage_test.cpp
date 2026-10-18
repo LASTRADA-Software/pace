@@ -41,54 +41,53 @@ class StubStorage final: public Pace::IStorage
     }
 
     std::expected<Pace::GetResult, Pace::StorageError> Get(std::string_view /*key*/,
-                                                                     core::platform::SteadyTimePoint /*now*/) override
+                                                           core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::GetResult {};
     }
     std::expected<Pace::CasToken, Pace::StorageError> Set(std::string_view /*key*/,
-                                                                    std::vector<std::byte> /*value*/,
-                                                                    std::uint32_t /*flags*/,
-                                                                    core::platform::SteadyTimePoint /*expiry*/) override
+                                                          std::vector<std::byte> /*value*/,
+                                                          std::uint32_t /*flags*/,
+                                                          core::platform::SteadyTimePoint /*expiry*/) override
     {
         return WriteResult();
     }
     std::expected<Pace::CasToken, Pace::StorageError> Add(std::string_view /*key*/,
-                                                                    std::vector<std::byte> /*value*/,
-                                                                    std::uint32_t /*flags*/,
-                                                                    core::platform::SteadyTimePoint /*expiry*/,
-                                                                    core::platform::SteadyTimePoint /*now*/) override
+                                                          std::vector<std::byte> /*value*/,
+                                                          std::uint32_t /*flags*/,
+                                                          core::platform::SteadyTimePoint /*expiry*/,
+                                                          core::platform::SteadyTimePoint /*now*/) override
     {
         return WriteResult();
     }
     std::expected<Pace::CasToken, Pace::StorageError> Replace(std::string_view /*key*/,
-                                                                        std::vector<std::byte> /*value*/,
-                                                                        std::uint32_t /*flags*/,
-                                                                        core::platform::SteadyTimePoint /*expiry*/,
-                                                                        core::platform::SteadyTimePoint /*now*/) override
+                                                              std::vector<std::byte> /*value*/,
+                                                              std::uint32_t /*flags*/,
+                                                              core::platform::SteadyTimePoint /*expiry*/,
+                                                              core::platform::SteadyTimePoint /*now*/) override
     {
         return WriteResult();
     }
     std::expected<Pace::CasToken, Pace::StorageError> Append(std::string_view /*key*/,
-                                                                       std::span<std::byte const> /*suffix*/,
-                                                                       Pace::CasToken /*expected*/,
-                                                                       core::platform::SteadyTimePoint /*now*/) override
+                                                             std::span<std::byte const> /*suffix*/,
+                                                             Pace::CasToken /*expected*/,
+                                                             core::platform::SteadyTimePoint /*now*/) override
     {
         return WriteResult();
     }
     std::expected<Pace::CasToken, Pace::StorageError> Prepend(std::string_view /*key*/,
-                                                                        std::span<std::byte const> /*prefix*/,
-                                                                        Pace::CasToken /*expected*/,
-                                                                        core::platform::SteadyTimePoint /*now*/) override
+                                                              std::span<std::byte const> /*prefix*/,
+                                                              Pace::CasToken /*expected*/,
+                                                              core::platform::SteadyTimePoint /*now*/) override
     {
         return WriteResult();
     }
-    std::expected<Pace::CasToken, Pace::StorageError> CompareAndSwap(
-        std::string_view /*key*/,
-        Pace::CasToken /*expected*/,
-        std::vector<std::byte> /*value*/,
-        std::uint32_t /*flags*/,
-        core::platform::SteadyTimePoint /*expiry*/,
-        core::platform::SteadyTimePoint /*now*/) override
+    std::expected<Pace::CasToken, Pace::StorageError> CompareAndSwap(std::string_view /*key*/,
+                                                                     Pace::CasToken /*expected*/,
+                                                                     std::vector<std::byte> /*value*/,
+                                                                     std::uint32_t /*flags*/,
+                                                                     core::platform::SteadyTimePoint /*expiry*/,
+                                                                     core::platform::SteadyTimePoint /*now*/) override
     {
         return WriteResult();
     }
@@ -103,35 +102,34 @@ class StubStorage final: public Pace::IStorage
         return IStorage::IncrResult { .value = 0, .cas = Pace::CasToken { 1 } };
     }
     std::expected<void, Pace::StorageError> Delete(std::string_view /*key*/,
-                                                        core::platform::SteadyTimePoint /*now*/) override
+                                                   core::platform::SteadyTimePoint /*now*/) override
     {
         if (writeError.has_value())
             return std::unexpected(*writeError);
         return {};
     }
     std::expected<void, Pace::StorageError> CompareAndDelete(std::string_view /*key*/,
-                                                                  Pace::CasToken /*expected*/,
-                                                                  core::platform::SteadyTimePoint /*now*/) override
+                                                             Pace::CasToken /*expected*/,
+                                                             core::platform::SteadyTimePoint /*now*/) override
     {
         if (writeError.has_value())
             return std::unexpected(*writeError);
         return {};
     }
     std::expected<Pace::CasToken, Pace::StorageError> Touch(std::string_view /*key*/,
-                                                                      core::platform::SteadyTimePoint /*newExpiry*/,
-                                                                      core::platform::SteadyTimePoint /*now*/) override
+                                                            core::platform::SteadyTimePoint /*newExpiry*/,
+                                                            core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 1 };
     }
     std::expected<Pace::GetResult, Pace::StorageError> Peek(std::string_view /*key*/,
-                                                                      core::platform::SteadyTimePoint /*now*/) override
+                                                            core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::GetResult {};
     }
-    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(
-        std::string_view /*key*/,
-        std::optional<core::platform::SteadyTimePoint> /*newExpiry*/,
-        core::platform::SteadyTimePoint /*now*/) override
+    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(std::string_view /*key*/,
+                                                                std::optional<core::platform::SteadyTimePoint> /*newExpiry*/,
+                                                                core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 1 };
     }
@@ -171,8 +169,8 @@ TEST_CASE("WriteErrorReportingStorage can own the storage it reports for", "[cac
 
     auto inner = std::make_unique<StubStorage>();
     inner->writeError = Pace::StorageError { .code = Pace::StorageErrorCode::IoError,
-                                                  .systemCode = 28,
-                                                  .context = "no space left on device" };
+                                             .systemCode = 28,
+                                             .context = "no space left on device" };
 
     // The caller's handle is EMPTIED here. Everything below runs with the inner
     // reachable only through the decorator, which is the whole point: a borrowing
@@ -200,8 +198,8 @@ TEST_CASE("WriteErrorReportingStorage logs and counts a persistence failure", "[
 
     // A full disk surfaces as IoError with the OS errno (28 == ENOSPC).
     inner.writeError = Pace::StorageError { .code = Pace::StorageErrorCode::IoError,
-                                                 .systemCode = 28,
-                                                 .context = "no space left on device" };
+                                            .systemCode = 28,
+                                            .context = "no space left on device" };
     auto const result =
         reporter.Set("obj", std::vector<std::byte> { std::byte { 'x' } }, 0, core::platform::SteadyTimePoint::max());
 
@@ -289,17 +287,14 @@ TEST_CASE("WriteErrorReportingStorage reports a removal it could not persist, an
     // Nothing to remove is control flow: the ordinary answer to a repair's second run.
     inner.writeError = Pace::MakeStorageError(Pace::StorageErrorCode::KeyNotFound);
     REQUIRE_FALSE(reporter.Delete("gone", core::platform::SteadyTimePoint {}).has_value());
-    REQUIRE_FALSE(
-        reporter.CompareAndDelete("gone", Pace::CasToken { 1 }, core::platform::SteadyTimePoint {}).has_value());
+    REQUIRE_FALSE(reporter.CompareAndDelete("gone", Pace::CasToken { 1 }, core::platform::SteadyTimePoint {}).has_value());
     CHECK(reporter.Snapshot().writeErrors == 0);
     CHECK(logger.Snapshot().empty());
 
-    inner.writeError = Pace::StorageError { .code = Pace::StorageErrorCode::IoError,
-                                                 .systemCode = 5,
-                                                 .context = "input/output error" };
+    inner.writeError =
+        Pace::StorageError { .code = Pace::StorageErrorCode::IoError, .systemCode = 5, .context = "input/output error" };
     REQUIRE_FALSE(reporter.Delete("obj", core::platform::SteadyTimePoint {}).has_value());
-    REQUIRE_FALSE(
-        reporter.CompareAndDelete("obj", Pace::CasToken { 1 }, core::platform::SteadyTimePoint {}).has_value());
+    REQUIRE_FALSE(reporter.CompareAndDelete("obj", Pace::CasToken { 1 }, core::platform::SteadyTimePoint {}).has_value());
     CHECK(reporter.Snapshot().writeErrors == 2);
     auto const records = logger.Snapshot();
     CHECK(HasLine(records, Pace::LogLevel::Warn, { "storage write failed: DELETE key=obj", "IoError", "system=5" }));

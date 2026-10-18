@@ -322,8 +322,7 @@ std::expected<std::string, UnfinishedCommand> RunClusterAdmin(NodeConfig const& 
     // at all -- before #363 the cluster verbs discarded this silently, so an operator
     // running `--cluster-status` with a token against an older scheduler was told
     // nothing.
-    auto notice =
-        Cc::CredentialNotice { [](std::string_view text) { std::cerr << "pace-node: " << text << '\n'; } };
+    auto notice = Cc::CredentialNotice { [](std::string_view text) { std::cerr << "pace-node: " << text << '\n'; } };
 
     // What the exchange that produced the final answer presented: asked per endpoint, so a
     // redirect's leader is shown a ticket naming it.

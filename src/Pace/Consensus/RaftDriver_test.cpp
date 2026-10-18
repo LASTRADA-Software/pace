@@ -659,9 +659,8 @@ TEST_CASE("An applied log is traded for a snapshot once enough has piled up", "[
 
     while (unsnapshotted() + 1 < Threshold)
     {
-        REQUIRE(
-            driver.Propose(Pace::BytesFromString(std::format("e{}", step)), core::platform::SteadyTimePoint {} + 200ms)
-                .has_value());
+        REQUIRE(driver.Propose(Pace::BytesFromString(std::format("e{}", step)), core::platform::SteadyTimePoint {} + 200ms)
+                    .has_value());
         ++step;
     }
 
@@ -708,9 +707,8 @@ TEST_CASE("A driver told nothing about compaction never discards anything", "[co
     REQUIRE(CarryPreVote(driver, core::platform::SteadyTimePoint {} + 150ms));
 
     for (auto const step: std::views::iota(0, 8))
-        REQUIRE(
-            driver.Propose(Pace::BytesFromString(std::format("e{}", step)), core::platform::SteadyTimePoint {} + 200ms)
-                .has_value());
+        REQUIRE(driver.Propose(Pace::BytesFromString(std::format("e{}", step)), core::platform::SteadyTimePoint {} + 200ms)
+                    .has_value());
 
     CHECK(std::ranges::find(journal.events, "snapshot") == journal.events.end());
     CHECK(driver.Node().Log().SnapshotIndex() == LogIndex::BeforeFirst());

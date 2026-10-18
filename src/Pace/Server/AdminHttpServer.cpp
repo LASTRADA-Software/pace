@@ -36,11 +36,10 @@ AdminBindFailureReport DescribeToleratedAdminBindFailure(std::string_view addres
 {
     return AdminBindFailureReport {
         .level = LogLevel::Warn,
-        .message =
-            std::format("pace-kv: cannot bind metrics endpoint {}:{} ({}); continuing without /metrics and /healthz",
-                        address,
-                        port,
-                        error),
+        .message = std::format("pace-kv: cannot bind metrics endpoint {}:{} ({}); continuing without /metrics and /healthz",
+                               address,
+                               port,
+                               error),
     };
 }
 

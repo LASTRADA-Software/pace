@@ -191,7 +191,7 @@ TEST_CASE("A memory-only LayeredStorage reports no disk tier", "[storage-tier][l
     // and what a double standing in for a disk tier is. Each store answers for
     // itself, so neither is mislabelled by the composite above it.
     Pace::LayeredStorage storage { std::make_unique<Pace::InMemoryLruStorage>(4096),
-                                        std::make_unique<Pace::InMemoryLruStorage>(0) };
+                                   std::make_unique<Pace::InMemoryLruStorage>(0) };
     REQUIRE(storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());
 
     auto const tiers = storage.SnapshotTiers();
@@ -235,8 +235,8 @@ TEST_CASE("A sharded layered cache reports both tiers", "[storage-tier][sharded]
     // wrapper, and the tier split has to survive it.
     Pace::Testing::ScratchDirectory const scratch { "storage-tier-sharded-layered" };
     std::vector<std::unique_ptr<Pace::IStorage>> inners;
-    inners.emplace_back(std::make_unique<Pace::LayeredStorage>(std::make_unique<Pace::InMemoryLruStorage>(2048),
-                                                                    OpenCowTree(scratch)));
+    inners.emplace_back(
+        std::make_unique<Pace::LayeredStorage>(std::make_unique<Pace::InMemoryLruStorage>(2048), OpenCowTree(scratch)));
     Pace::ShardedStorage storage { std::move(inners) };
 
     REQUIRE(storage.Set("k", MakeBytes("v"), 0, core::platform::SteadyTimePoint::max()).has_value());

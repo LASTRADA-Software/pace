@@ -342,8 +342,7 @@ TEST_CASE("Restarting every node in turn preserves what was committed", "[consen
         for (auto const index: std::views::iota(std::uint64_t { 1 }, log.LastIndex().value + 1))
         {
             auto const* const entry = log.EntryAt(LogIndex { .value = index });
-            if (entry != nullptr && entry->kind == EntryKind::Command
-                && Pace::AsStringView(entry->payload) == "durable")
+            if (entry != nullptr && entry->kind == EntryKind::Command && Pace::AsStringView(entry->payload) == "durable")
                 found = true;
         }
 

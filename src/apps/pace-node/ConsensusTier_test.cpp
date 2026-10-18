@@ -303,8 +303,8 @@ TEST_CASE("A demotion names the term, the peer, and what this node was", "[node]
     // `pre-candidate` and `candidate` both read as `undecided` to the scheduler,
     // and a deposed LEADER is the case worth spotting at a glance.
     auto const cause = Pace::Consensus::TermAdoption { .previousTerm = Pace::Consensus::Term { .value = 1 },
-                                                            .previousRole = Pace::Consensus::Role::Leader,
-                                                            .from = "n3" };
+                                                       .previousRole = Pace::Consensus::Role::Leader,
+                                                       .from = "n3" };
 
     CHECK(DescribeTermAdoption(Pace::Consensus::Term { .value = 2 }, cause)
           == "consensus: term 2 arrived from n3; this node was leader in term 1");

@@ -887,9 +887,9 @@ TEST_CASE("Each outcome says whether the serving rules judge it and whether it i
     struct Line
     {
         std::vector<char const*> argv; ///< The command line, program name removed.
-        Pace::CliOutcome outcome; ///< What it parses to.
+        Pace::CliOutcome outcome;      ///< What it parses to.
         bool judged;                   ///< Whether the serving rules refuse it.
-        Pace::ExitReader reader;  ///< Who reads what it exits with.
+        Pace::ExitReader reader;       ///< Who reads what it exits with.
     };
     // `reader`: a START is read by a supervisor (1 or 78); a one-shot command by an operator, so a
     // refusal before it runs declines (2); a `--healthcheck` by a container runtime, which knows 0

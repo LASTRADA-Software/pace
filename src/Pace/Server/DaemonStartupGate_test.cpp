@@ -100,8 +100,7 @@ TEST_CASE("pace-kv's main asks the serving rules through the gate and nowhere el
 {
     // `main` is in no test target, so what holds it to the gate is its text: one call, and none of
     // the three rules asked beside it, where an outcome the gate excuses would meet them anyway.
-    auto const path =
-        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-kv" / "main.cpp";
+    auto const path = std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-kv" / "main.cpp";
     REQUIRE(std::filesystem::exists(path));
     // Through the stream buffer, for `PosixDaemonHost_test`'s measured reason.
     std::ifstream in { path, std::ios::binary };

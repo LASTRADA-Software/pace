@@ -79,8 +79,7 @@ constexpr auto CauseVerdicts = std::to_array<CauseVerdict>({
 /// @return Its bytes; the case has failed when it cannot be read.
 [[nodiscard]] std::string NodeMain()
 {
-    auto const path = std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps"
-                      / "pace-node" / "main.cpp";
+    auto const path = std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-node" / "main.cpp";
     REQUIRE(std::filesystem::exists(path));
     // Through the stream buffer, for `PosixDaemonHost_test`'s measured reason.
     std::ifstream in { path, std::ios::binary };

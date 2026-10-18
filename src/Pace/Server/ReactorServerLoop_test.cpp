@@ -45,10 +45,10 @@ namespace
 /// Whether `RunReactorServer` can be called with @p Args after its options, engine and logger --
 /// dependent on a template parameter, so an ill-formed call is `false` rather than a hard error.
 template <typename... Args>
-constexpr bool RunnableWith = requires(Pace::ReactorServerOptions const& options,
-                                       Pace::CacheEngine& engine,
-                                       Pace::ILogger& logger,
-                                       Args&... args) { Pace::RunReactorServer(options, engine, logger, args...); };
+constexpr bool RunnableWith =
+    requires(Pace::ReactorServerOptions const& options, Pace::CacheEngine& engine, Pace::ILogger& logger, Args&... args) {
+        Pace::RunReactorServer(options, engine, logger, args...);
+    };
 
 // The `/healthz` registry is a REQUIRED argument. It used to be `ReactorServerOptions::acceptLoops`,
 // null unless somebody set it, so a caller that forgot compiled and every accept loop's end reached
@@ -368,7 +368,7 @@ struct ServerRun
 {
     std::vector<Pace::CapturingLogger::Record> log; ///< Every record, in order.
     Pace::Testing::WaitOutcome ready {};            ///< The readiness wait: whether the line arrived, and its cost.
-    int exitCode { EXIT_FAILURE };                       ///< What the loop returned.
+    int exitCode { EXIT_FAILURE };                  ///< What the loop returned.
 };
 
 /// Positions of the records whose message contains `needle`.
@@ -589,9 +589,8 @@ TEST_CASE("RunReactorServer waits for every reactor's accept loops before announ
     // naming its reactor; Windows runs one acceptor thread per bind.
     auto const armedAs = [&run](std::string_view surface) {
         auto const prefix = std::format("{}: {} (", ArmedMarker, surface);
-        return std::ranges::count_if(run.log, [&prefix](Pace::CapturingLogger::Record const& record) {
-            return record.message.starts_with(prefix);
-        });
+        return std::ranges::count_if(
+            run.log, [&prefix](Pace::CapturingLogger::Record const& record) { return record.message.starts_with(prefix); });
     };
 #if defined(_WIN32)
     CHECK(armedAs("cache 127.0.0.1:0") == 1);
@@ -882,13 +881,13 @@ struct AcceptorThreadFixture
         announcer.AcceptorsAllSpawned();
         auto thread = Pace::Detail::StartAcceptorThread(
             Pace::Detail::AcceptorThreadOptions { .surface = std::string { AcceptorSurface },
-                                                       .threadName = "fc-acceptor-0",
-                                                       .acceptor = std::make_unique<ScriptedRawAcceptor>(script),
-                                                       .logger = logger,
-                                                       .acceptLoops = acceptLoops,
-                                                       .wait = wait,
-                                                       .stopping = stopping,
-                                                       .announcer = announcer },
+                                                  .threadName = "fc-acceptor-0",
+                                                  .acceptor = std::make_unique<ScriptedRawAcceptor>(script),
+                                                  .logger = logger,
+                                                  .acceptLoops = acceptLoops,
+                                                  .wait = wait,
+                                                  .stopping = stopping,
+                                                  .announcer = announcer },
             [this](Pace::AcceptedSocket raw) { handedOff.push_back(std::move(raw.peer)); });
         // Every script ends in a `Cancelled` the thread cannot outlive, so the join is bounded by the
         // script's length rather than by a clock.
@@ -898,8 +897,8 @@ struct AcceptorThreadFixture
     /// @return How many records were logged at @p level.
     [[nodiscard]] std::size_t CountAt(Pace::LogLevel level) const
     {
-        return static_cast<std::size_t>(std::ranges::count(
-            logger.Snapshot(), level, [](Pace::CapturingLogger::Record const& r) { return r.level; }));
+        return static_cast<std::size_t>(
+            std::ranges::count(logger.Snapshot(), level, [](Pace::CapturingLogger::Record const& r) { return r.level; }));
     }
 };
 
@@ -917,8 +916,7 @@ TEST_CASE("The Windows acceptor thread accepts past a reset and exhaustion and e
     fixture.script.answers = {
         FailedAccept(core::net::NetErrorCode::ConnReset),
         FailedAccept(core::net::NetErrorCode::ResourceExhausted),
-        RawAcceptAnswer {
-            Pace::AcceptedSocket { .handle = core::platform::InvalidHandle, .peer = "198.51.100.7:40000" } },
+        RawAcceptAnswer { Pace::AcceptedSocket { .handle = core::platform::InvalidHandle, .peer = "198.51.100.7:40000" } },
         FailedAccept(core::net::NetErrorCode::Cancelled),
     };
     fixture.RunToEnd();

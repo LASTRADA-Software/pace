@@ -18,8 +18,7 @@ namespace Pace::Cli
 
 std::size_t TerminalCellWidth(std::string_view /*text*/) noexcept
 {
-    std::fputs("pacectl: a panel was laid out in a build without the terminal UI (PACE_BUILD_TUI=OFF)\n",
-               stderr);
+    std::fputs("pacectl: a panel was laid out in a build without the terminal UI (PACE_BUILD_TUI=OFF)\n", stderr);
     std::abort();
 }
 

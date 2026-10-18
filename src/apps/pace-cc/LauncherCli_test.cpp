@@ -410,8 +410,7 @@ TEST_CASE("the help text documents every environment variable the launcher reads
     // Counted from the loop rather than written down, so this cannot drift from the
     // list it describes -- a hand-maintained number beside a hand-maintained list is
     // two sources of truth wearing one hat.
-    INFO("oracle knows " << paceNames << " PACE_* names; LauncherEnvironment() has "
-                         << LauncherEnvironment().size());
+    INFO("oracle knows " << paceNames << " PACE_* names; LauncherEnvironment() has " << LauncherEnvironment().size());
     CHECK(paceNames == LauncherEnvironment().size());
 }
 

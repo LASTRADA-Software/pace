@@ -74,8 +74,8 @@ class CountingSink final: public Pace::IHostEventSink
         return std::format("changes={} others={}", changes.load(), others.load());
     }
 
-    std::atomic<int> changes { 0 };                                           ///< `NetworkChanged` deliveries.
-    std::atomic<int> others { 0 };                                            ///< Any other event: none expected.
+    std::atomic<int> changes { 0 };                                      ///< `NetworkChanged` deliveries.
+    std::atomic<int> others { 0 };                                       ///< Any other event: none expected.
     std::atomic<Pace::NetworkChangeRelay*> notifyFromInside { nullptr }; ///< Notified once, from inside.
 };
 
@@ -83,8 +83,8 @@ class CountingSink final: public Pace::IHostEventSink
 /// destruction that never returns without that thread reading the case's freed frame.
 struct RelayScene
 {
-    core::platform::ManualClock clock;                    ///< Decides when a burst is due.
-    CountingSink sink;                                    ///< Hears the relay.
+    core::platform::ManualClock clock;               ///< Decides when a burst is due.
+    CountingSink sink;                               ///< Hears the relay.
     std::unique_ptr<Pace::NetworkChangeRelay> relay; ///< The relay under test.
 };
 
@@ -201,8 +201,7 @@ TEST_CASE("The network watcher runs where the platform offers one, and is absent
         std::unique_ptr<Pace::NetworkChangeWatcher> watcher;
     };
     auto const scene = std::make_shared<Scene>();
-    auto started =
-        Pace::StartNetworkChangeWatcher(scene->sink, scene->clock, Pace::NetworkDebounce {}, scene->logger);
+    auto started = Pace::StartNetworkChangeWatcher(scene->sink, scene->clock, Pace::NetworkDebounce {}, scene->logger);
 
     INFO((started.has_value() ? std::string { "started" } : started.error()));
     REQUIRE(started.has_value());
@@ -284,10 +283,10 @@ constexpr std::uint16_t NetlinkDone = 3;
 /// A descriptor watcher and everything its threads touch, owned together.
 struct DescriptorScene
 {
-    core::platform::SteadyClock clock;                        ///< Real time: the debounce is short.
-    CountingSink sink;                                        ///< Hears the relay.
+    core::platform::SteadyClock clock;                   ///< Real time: the debounce is short.
+    CountingSink sink;                                   ///< Hears the relay.
     Pace::CapturingLogger logger;                        ///< Hears the read loop ending on its own.
-    Pipe pipe;                                                ///< What the watcher reads.
+    Pipe pipe;                                           ///< What the watcher reads.
     std::unique_ptr<Pace::NetworkChangeWatcher> watcher; ///< The watcher under test.
 
     /// @return How many lines say the watcher stopped hearing changes.
@@ -305,12 +304,8 @@ struct DescriptorScene
 [[nodiscard]] std::shared_ptr<DescriptorScene> MakeDescriptorScene()
 {
     auto scene = std::make_shared<DescriptorScene>();
-    auto started = Pace::WatchNetworkChangeDescriptor(scene->pipe.TakeReadEnd(),
-                                                           &Pace::NetlinkReportsChange,
-                                                           scene->sink,
-                                                           scene->clock,
-                                                           ShortDebounce,
-                                                           scene->logger);
+    auto started = Pace::WatchNetworkChangeDescriptor(
+        scene->pipe.TakeReadEnd(), &Pace::NetlinkReportsChange, scene->sink, scene->clock, ShortDebounce, scene->logger);
     INFO((started.has_value() ? std::string { "started" } : started.error()));
     REQUIRE(started.has_value());
     REQUIRE(*started != nullptr);

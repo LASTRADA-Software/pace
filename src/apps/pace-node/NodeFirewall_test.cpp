@@ -258,8 +258,7 @@ TEST_CASE("A node bound to the IPv6 wildcard opens its port", "[node][firewall]"
     cfg.raftListen.clear();
 
     auto const rules = NodeFirewallRules(cfg, Program);
-    CHECK(Openings(rules)
-          == std::vector<std::string> { "pace-node node tcp/6674", "pace-node admin tcp/9464" });
+    CHECK(Openings(rules) == std::vector<std::string> { "pace-node node tcp/6674", "pace-node admin tcp/9464" });
     for (auto const& rule: rules)
         CHECK(rule.bindHost == "::");
 }
@@ -374,8 +373,7 @@ TEST_CASE("An install whose formation record was held opens what the service wil
     CHECK(names == expected);
 
     // The control: the same configuration's own rules, the derivation the install used to make.
-    CHECK(Openings(NodeFirewallRules(unshaped, Program))
-          == std::vector<std::string> { "pace-node node tcp/6674" });
+    CHECK(Openings(NodeFirewallRules(unshaped, Program)) == std::vector<std::string> { "pace-node node tcp/6674" });
 }
 
 TEST_CASE("An install whose formation record cannot be read after securing is refused, and opens nothing",

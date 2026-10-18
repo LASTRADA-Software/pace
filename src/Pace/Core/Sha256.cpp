@@ -227,8 +227,7 @@ namespace
     /// @param block The 64-byte block.
     /// @param index Which of its four 16-byte words.
     /// @return The words as one vector.
-    [[nodiscard]] PACE_ARM_SHA2_TARGET uint32x4_t LoadWordsArm(std::span<std::byte const> block,
-                                                                     std::size_t index) noexcept
+    [[nodiscard]] PACE_ARM_SHA2_TARGET uint32x4_t LoadWordsArm(std::span<std::byte const> block, std::size_t index) noexcept
     {
         std::array<std::uint8_t, 16> bytes {};
         std::memcpy(bytes.data(), block.subspan(index * 16, 16).data(), bytes.size());

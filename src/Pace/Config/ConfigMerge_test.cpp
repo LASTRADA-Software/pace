@@ -49,8 +49,8 @@ namespace
         scratch.Write("cfg.yaml", *file);
         path = scratch / "cfg.yaml";
     }
-    return Pace::AssembleEffectiveConfig(
-        path, Pace::ConfigSources { .args = std::move(args), .metricsPortEnv = metricsPortEnv });
+    return Pace::AssembleEffectiveConfig(path,
+                                         Pace::ConfigSources { .args = std::move(args), .metricsPortEnv = metricsPortEnv });
 }
 
 } // namespace
@@ -144,8 +144,7 @@ TEST_CASE("AssembleEffectiveConfig: the environment applies only where nobody na
     {
         // The case a value comparison cannot answer: `metrics_port:` written out as
         // the default is a decision, and the bit its applier set is what says so.
-        auto const assembled =
-            Assemble(scratch, std::format("metrics_port: {}\n", Pace::DefaultMetricsPort), {}, EnvPort);
+        auto const assembled = Assemble(scratch, std::format("metrics_port: {}\n", Pace::DefaultMetricsPort), {}, EnvPort);
         REQUIRE(assembled.has_value());
         CHECK(assembled->Configuration().metricsPort == Pace::DefaultMetricsPort);
     }
@@ -541,9 +540,8 @@ TEST_CASE("The daemon's startup rules refuse what its body used to refuse only o
         // longer charges free pages after a restart and the refusal that guarded it is gone.
         config.storagePath = "/var/cache/pace";
         config.storageMaxDiskBytes = std::size_t { 1 } << 30U;
-        for (auto const durability: { Pace::StorageDurability::Batched,
-                                      Pace::StorageDurability::Fsync,
-                                      Pace::StorageDurability::None })
+        for (auto const durability:
+             { Pace::StorageDurability::Batched, Pace::StorageDurability::Fsync, Pace::StorageDurability::None })
         {
             config.storageDurability = durability;
             CHECK_FALSE(Pace::DaemonStartupRejection(config).has_value());

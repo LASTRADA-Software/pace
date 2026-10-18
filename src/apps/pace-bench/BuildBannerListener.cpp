@@ -84,9 +84,9 @@ class BuildBannerListener: public Catch::EventListenerBase
     {
         std::cerr << Pace::Bench::RenderFigure(
             Pace::Bench::Figure { .name = benchmarkStats.info.name,
-                                       .meanNanoseconds = benchmarkStats.mean.point.count(),
-                                       .estimatedNanoseconds = benchmarkStats.info.estimatedDuration,
-                                       .samples = benchmarkStats.samples.size() },
+                                  .meanNanoseconds = benchmarkStats.mean.point.count(),
+                                  .estimatedNanoseconds = benchmarkStats.info.estimatedDuration,
+                                  .samples = benchmarkStats.samples.size() },
             _reason);
     }
 

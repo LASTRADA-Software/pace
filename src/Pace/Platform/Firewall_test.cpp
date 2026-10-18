@@ -54,9 +54,9 @@ TEST_CASE("A firewall rule and its group are named after the service and the sur
 {
     CHECK(Pace::FirewallGroupFor("pace-node") == "Pace: pace-node");
     CHECK(Pace::FirewallRuleName("pace-node",
-                                      "discovery-beacon",
-                                      FirewallProtocol::Udp,
-                                      FirewallLocalPort { .kind = FirewallPortKind::Fixed, .number = 6681 })
+                                 "discovery-beacon",
+                                 FirewallProtocol::Udp,
+                                 FirewallLocalPort { .kind = FirewallPortKind::Fixed, .number = 6681 })
           == "pace-node discovery-beacon udp/6681");
     CHECK(Pace::FirewallProtocolRowOf(FirewallProtocol::Tcp).ianaNumber == 6);
     CHECK(Pace::FirewallProtocolRowOf(FirewallProtocol::Udp).ianaNumber == 17);
@@ -481,8 +481,7 @@ TEST_CASE("A rule opened for the name localhost says why, and one bound to an ad
     auto const addressed = RuleOn("pace-kv: Probe", 6680);
 
     RecordingFirewall firewall;
-    auto const note =
-        Pace::RegistrationFirewallNote(&firewall, "Probe", std::vector<FirewallRule> { named, addressed });
+    auto const note = Pace::RegistrationFirewallNote(&firewall, "Probe", std::vector<FirewallRule> { named, addressed });
     INFO(note);
     CHECK(note.contains("note: Probe node tcp/6674 is opened for a surface bound to 'LocalHost'"));
     CHECK_FALSE(note.contains("Probe node tcp/6680 is opened for"));
@@ -496,9 +495,7 @@ TEST_CASE("A rule opened for the name localhost says why, and one bound to an ad
 TEST_CASE("A removal that stops part-way names the rules that remain, and not the ones it took", "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("pace-kv: Probe", 6674),
-                       RuleOn("pace-kv: Probe", 6680),
-                       RuleOn("pace-kv: Probe", 6690) };
+    firewall.rules = { RuleOn("pace-kv: Probe", 6674), RuleOn("pace-kv: Probe", 6680), RuleOn("pace-kv: Probe", 6690) };
     firewall.refuseRemoveAt = 1;
 
     auto const note = Pace::RemovalFirewallNote(&firewall, "Probe");

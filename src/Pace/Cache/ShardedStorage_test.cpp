@@ -76,7 +76,7 @@ class ParkableStorage: public Pace::IStorage
     }
 
     std::expected<Pace::GetResult, Pace::StorageError> Get(std::string_view /*key*/,
-                                                                     core::platform::SteadyTimePoint /*now*/) override
+                                                           core::platform::SteadyTimePoint /*now*/) override
     {
         ++readInFlight;
         std::unique_lock lock { mu };
@@ -86,9 +86,9 @@ class ParkableStorage: public Pace::IStorage
     }
 
     std::expected<Pace::CasToken, Pace::StorageError> Set(std::string_view /*key*/,
-                                                                    std::vector<std::byte> /*value*/,
-                                                                    std::uint32_t /*flags*/,
-                                                                    core::platform::SteadyTimePoint /*expiry*/) override
+                                                          std::vector<std::byte> /*value*/,
+                                                          std::uint32_t /*flags*/,
+                                                          core::platform::SteadyTimePoint /*expiry*/) override
     {
         ++writeInFlight;
         std::unique_lock lock { mu };
@@ -99,42 +99,41 @@ class ParkableStorage: public Pace::IStorage
 
     // Minimal stubs for the rest of the interface; not used by these tests.
     std::expected<Pace::CasToken, Pace::StorageError> Add(std::string_view /*key*/,
-                                                                    std::vector<std::byte> /*value*/,
-                                                                    std::uint32_t /*flags*/,
-                                                                    core::platform::SteadyTimePoint /*expiry*/,
-                                                                    core::platform::SteadyTimePoint /*now*/) override
+                                                          std::vector<std::byte> /*value*/,
+                                                          std::uint32_t /*flags*/,
+                                                          core::platform::SteadyTimePoint /*expiry*/,
+                                                          core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
     std::expected<Pace::CasToken, Pace::StorageError> Replace(std::string_view /*key*/,
-                                                                        std::vector<std::byte> /*value*/,
-                                                                        std::uint32_t /*flags*/,
-                                                                        core::platform::SteadyTimePoint /*expiry*/,
-                                                                        core::platform::SteadyTimePoint /*now*/) override
+                                                              std::vector<std::byte> /*value*/,
+                                                              std::uint32_t /*flags*/,
+                                                              core::platform::SteadyTimePoint /*expiry*/,
+                                                              core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
     std::expected<Pace::CasToken, Pace::StorageError> Append(std::string_view /*key*/,
-                                                                       std::span<std::byte const> /*suffix*/,
-                                                                       Pace::CasToken /*expected*/,
-                                                                       core::platform::SteadyTimePoint /*now*/) override
+                                                             std::span<std::byte const> /*suffix*/,
+                                                             Pace::CasToken /*expected*/,
+                                                             core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
     std::expected<Pace::CasToken, Pace::StorageError> Prepend(std::string_view /*key*/,
-                                                                        std::span<std::byte const> /*prefix*/,
-                                                                        Pace::CasToken /*expected*/,
-                                                                        core::platform::SteadyTimePoint /*now*/) override
+                                                              std::span<std::byte const> /*prefix*/,
+                                                              Pace::CasToken /*expected*/,
+                                                              core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
-    std::expected<Pace::CasToken, Pace::StorageError> CompareAndSwap(
-        std::string_view /*key*/,
-        Pace::CasToken /*expected*/,
-        std::vector<std::byte> /*value*/,
-        std::uint32_t /*flags*/,
-        core::platform::SteadyTimePoint /*expiry*/,
-        core::platform::SteadyTimePoint /*now*/) override
+    std::expected<Pace::CasToken, Pace::StorageError> CompareAndSwap(std::string_view /*key*/,
+                                                                     Pace::CasToken /*expected*/,
+                                                                     std::vector<std::byte> /*value*/,
+                                                                     std::uint32_t /*flags*/,
+                                                                     core::platform::SteadyTimePoint /*expiry*/,
+                                                                     core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
@@ -147,25 +146,24 @@ class ParkableStorage: public Pace::IStorage
         return Pace::IStorage::IncrResult { .value = 0, .cas = Pace::CasToken { 0 } };
     }
     std::expected<void, Pace::StorageError> Delete(std::string_view /*key*/,
-                                                        core::platform::SteadyTimePoint /*now*/) override
+                                                   core::platform::SteadyTimePoint /*now*/) override
     {
         return {};
     }
     std::expected<Pace::CasToken, Pace::StorageError> Touch(std::string_view /*key*/,
-                                                                      core::platform::SteadyTimePoint /*newExpiry*/,
-                                                                      core::platform::SteadyTimePoint /*now*/) override
+                                                            core::platform::SteadyTimePoint /*newExpiry*/,
+                                                            core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
     std::expected<Pace::GetResult, Pace::StorageError> Peek(std::string_view /*key*/,
-                                                                      core::platform::SteadyTimePoint /*now*/) override
+                                                            core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::GetResult { .found = false, .entry = {} };
     }
-    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(
-        std::string_view /*key*/,
-        std::optional<core::platform::SteadyTimePoint> /*newExpiry*/,
-        core::platform::SteadyTimePoint /*now*/) override
+    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(std::string_view /*key*/,
+                                                                std::optional<core::platform::SteadyTimePoint> /*newExpiry*/,
+                                                                core::platform::SteadyTimePoint /*now*/) override
     {
         return Pace::CasToken { 0 };
     }
@@ -861,8 +859,7 @@ TEST_CASE("ShardedStorage::Update preserves prior expiry on Store", "[sharded][u
 
     auto const upd = storage->Update(
         "k",
-        [](Pace::GetResult const& current)
-            -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+        [](Pace::GetResult const& current) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
             REQUIRE(current.found);
             return Pace::IStorage::UpdateOutcome {
                 .value = MakeBytes("1"),

@@ -13,8 +13,7 @@ namespace Pace::Cli
 
 std::expected<std::unique_ptr<ISixelEncoder>, std::string> MakeSixelEncoder()
 {
-    return std::unexpected(
-        std::string { "this pacectl was built without the terminal UI (PACE_BUILD_TUI=OFF)" });
+    return std::unexpected(std::string { "this pacectl was built without the terminal UI (PACE_BUILD_TUI=OFF)" });
 }
 
 } // namespace Pace::Cli

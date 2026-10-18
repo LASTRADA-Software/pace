@@ -363,7 +363,7 @@ TEST_CASE("StreamCodec: a reservation is capped, so a peer's count cannot size i
         return StreamHeader()
             .U32(claimed)
             .U64(0)
-            .U64(0)                                   // the first entry's id
+            .U64(0)                              // the first entry's id
             .U32(Pace::Testing::ImpossibleCount) // ... and its field count
             .Pad((claimed * StreamCodec::detail::MinEntryBytes) - StreamCodec::detail::MinEntryBytes);
     };

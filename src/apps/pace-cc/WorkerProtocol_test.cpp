@@ -238,16 +238,15 @@ constexpr std::uint64_t GrantTerm = 4;
                                    std::uint64_t epoch = GrantTerm,
                                    std::string_view serial = "17")
 {
-    return Pace::Distributed::MintLeaseToken(
-        TestSigner(),
-        Pace::Distributed::LeaseClaims { .serial = std::string { serial },
-                                              .endpoint = std::string { endpoint },
-                                              .fingerprint = std::string { fingerprint },
-                                              .key = "obj-abc",
-                                              .expiresAt = LeaseClock.now() + validFor,
-                                              .clusterId = std::string { cluster },
-                                              .epoch = epoch,
-                                              .signer = {} });
+    return Pace::Distributed::MintLeaseToken(TestSigner(),
+                                             Pace::Distributed::LeaseClaims { .serial = std::string { serial },
+                                                                              .endpoint = std::string { endpoint },
+                                                                              .fingerprint = std::string { fingerprint },
+                                                                              .key = "obj-abc",
+                                                                              .expiresAt = LeaseClock.now() + validFor,
+                                                                              .clusterId = std::string { cluster },
+                                                                              .epoch = epoch,
+                                                                              .signer = {} });
 }
 
 /// Build one of the two production lease validators.

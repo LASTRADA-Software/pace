@@ -45,7 +45,7 @@ namespace
                                    std::optional<Pace::ProvenIdentity> const& proven)
 {
     return Pace::Distributed::ExplainConnection(membership.Oracle(),
-                                                     Pace::ConnectionFacts { .host = host, .proven = proven })
+                                                Pace::ConnectionFacts { .host = host, .proven = proven })
         .verdict;
 }
 
@@ -55,11 +55,11 @@ namespace
 void Forget(Pace::Cluster::ClusterState& state, std::string const& id)
 {
     Pace::Cluster::Apply(state,
-                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::Forget,
-                                                            .key = id,
-                                                            .value = {},
-                                                            .schedulerEndpoint = {},
-                                                            .publicKey = std::nullopt });
+                         Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::Forget,
+                                                  .key = id,
+                                                  .value = {},
+                                                  .schedulerEndpoint = {},
+                                                  .publicKey = std::nullopt });
 }
 
 /// Apply a committed `--cluster-admit=<id>=<endpoint>@<key>` to @p state, as consensus would.
@@ -73,11 +73,11 @@ void Admit(Pace::Cluster::ClusterState& state,
            Pace::Ed25519PublicKey const& key)
 {
     Pace::Cluster::Apply(state,
-                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddMember,
-                                                            .key = id,
-                                                            .value = endpoint,
-                                                            .schedulerEndpoint = {},
-                                                            .publicKey = key });
+                         Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddMember,
+                                                  .key = id,
+                                                  .value = endpoint,
+                                                  .schedulerEndpoint = {},
+                                                  .publicKey = key });
 }
 } // namespace
 
@@ -285,8 +285,7 @@ TEST_CASE("A re-admit under a new key admits the new key only, and a reload lift
     auto const reminted = Proving("m1-reminted").key;
     Admit(state, "m1", "10.0.0.1:6676", reminted);
     membership.PublishCluster(state);
-    CHECK(VerdictOf(membership, "10.0.0.1", Pace::ProvenIdentity { .id = "m1", .key = reminted })
-          == Membership::Member);
+    CHECK(VerdictOf(membership, "10.0.0.1", Pace::ProvenIdentity { .id = "m1", .key = reminted }) == Membership::Member);
     CHECK(VerdictOf(membership, "10.0.0.1", Proving("m1")) == Membership::Forgotten);
 }
 
@@ -383,13 +382,13 @@ TEST_CASE("A rosterless node that runs no consensus admits no other machine, by 
     // And the control that makes the key half able to fail: the same key IS admitted, by proof and
     // by ticket, once a roster names it -- which only a node running consensus is ever handed.
     auto state = Pace::Cluster::ClusterState {};
-    state.members.push_back(Pace::Cluster::ClusterMember {
-        .id = "n9",
-        .raftEndpoint = {},
-        .schedulerEndpoint = {},
-        .schedulerEndpointHistory = Pace::Cluster::SchedulerEndpointHistory::NeverAnnounced,
-        .seat = Pace::Cluster::MemberSeat::Learner,
-        .publicKey = proven->key });
+    state.members.push_back(
+        Pace::Cluster::ClusterMember { .id = "n9",
+                                       .raftEndpoint = {},
+                                       .schedulerEndpoint = {},
+                                       .schedulerEndpointHistory = Pace::Cluster::SchedulerEndpointHistory::NeverAnnounced,
+                                       .seat = Pace::Cluster::MemberSeat::Learner,
+                                       .publicKey = proven->key });
     membership.PublishCluster(state);
     CHECK(Distributed::ExplainConnection(oracle, ConnectionFacts { .host = "10.0.0.7", .proven = proven }).verdict
           == Membership::Member);
@@ -421,11 +420,11 @@ TEST_CASE("A learner's verified ticket admits it once consensus publishes the cl
 
     auto state = Pace::Cluster::ClusterState {};
     Pace::Cluster::Apply(state,
-                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddLearner,
-                                                            .key = machine.id,
-                                                            .value = "10.0.0.7:6676",
-                                                            .schedulerEndpoint = {},
-                                                            .publicKey = machine.key });
+                         Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddLearner,
+                                                  .key = machine.id,
+                                                  .value = "10.0.0.7:6676",
+                                                  .schedulerEndpoint = {},
+                                                  .publicKey = machine.key });
     REQUIRE(state.members.size() == 1);
     REQUIRE(state.members.front().seat == Pace::Cluster::MemberSeat::Learner);
     membership.PublishCluster(state);
@@ -457,13 +456,13 @@ TEST_CASE("A voter's ticket stands as an operator and a learner's does not, from
     auto state = Pace::Cluster::ClusterState {};
     Admit(state, "pc-07", "10.0.0.7:6676", Proving("pc-07").key);
     Pace::Cluster::Apply(state,
-                              Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddLearner,
-                                                            .key = "lt-12",
-                                                            .value = {},
-                                                            .schedulerEndpoint = {},
-                                                            .publicKey = Proving("lt-12").key,
-                                                            .createdAtUnixSeconds = std::nullopt,
-                                                            .leaderKey = std::nullopt });
+                         Pace::Cluster::Command { .kind = Pace::Cluster::CommandKind::AddLearner,
+                                                  .key = "lt-12",
+                                                  .value = {},
+                                                  .schedulerEndpoint = {},
+                                                  .publicKey = Proving("lt-12").key,
+                                                  .createdAtUnixSeconds = std::nullopt,
+                                                  .leaderKey = std::nullopt });
     REQUIRE(state.members.size() == 2);
     membership.PublishCluster(state);
 

@@ -212,8 +212,7 @@ TEST_CASE("A one-shot command's ending is a decision or transient, and one table
     // one shard stopped part-way and one refused has something a re-run finishes, and says so.
     CHECK(Pace::CommandEnding::Completed < Pace::CommandEnding::Declined);
     CHECK(Pace::CommandEnding::Declined < Pace::CommandEnding::Failed);
-    CHECK(std::max(Pace::CommandEnding::Declined, Pace::CommandEnding::Failed)
-          == Pace::CommandEnding::Failed);
+    CHECK(std::max(Pace::CommandEnding::Declined, Pace::CommandEnding::Failed) == Pace::CommandEnding::Failed);
 }
 
 TEST_CASE("A one-shot command stopped by a configuration error ends by its arm, as a start does", "[platform][exit][config]")
@@ -254,8 +253,7 @@ TEST_CASE("A command stopped at a step ends as a start there would: an I/O arm t
     {
         INFO(Spelled(stage));
         CHECK(Pace::EndingOf(stage)
-              == (Pace::ExitOf(stage) == ProcessExit::Failed ? Pace::CommandEnding::Failed
-                                                                  : Pace::CommandEnding::Declined));
+              == (Pace::ExitOf(stage) == ProcessExit::Failed ? Pace::CommandEnding::Failed : Pace::CommandEnding::Declined));
     }
     CHECK(Pace::EndingOf(StartStage::IdentityKeyIo) == Pace::CommandEnding::Failed);
     CHECK(Pace::EndingOf(StartStage::IdentityKey) == Pace::CommandEnding::Declined);

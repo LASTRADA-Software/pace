@@ -433,7 +433,7 @@ TEST_CASE("The key filter, the manifest and the replay guard all place the sibli
                                        "Note: including file: /usr/include/vector\r\n",
                                        sibling);
         std::vector<Pace::TextRegion> const regions { { .grammar = Pace::PathCanon::Grammar::ShowIncludes,
-                                                             .bytes = notes } };
+                                                        .bytes = notes } };
         auto const probed = ReplayedDependencyPaths(regions, layout);
         CHECK(probed == std::vector<std::string> { std::string { sibling } });
     }
@@ -457,7 +457,7 @@ TEST_CASE("The key filter, the manifest and the replay guard all place the sibli
 
         auto const notes = std::format("Note: including file: {}\r\n", vendored);
         std::vector<Pace::TextRegion> const regions { { .grammar = Pace::PathCanon::Grammar::ShowIncludes,
-                                                             .bytes = notes } };
+                                                        .bytes = notes } };
         CHECK(ReplayedDependencyPaths(regions, layout).empty());
     }
 }
@@ -713,8 +713,7 @@ TEST_CASE("BuildManifest tells dropped, absent and unobserved dependencies apart
     auto const sourcePath = root / "src" / "u.cpp";
     scratch.Write("src/u.cpp", "int main() { return 0; }\n");
 
-    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
-                                                .buildTree = (root / "bld").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "bld").string() };
 
     // A path under neither root -- another checkout's header, which is exactly what
     // an uncanonicalized region replays.
@@ -1127,8 +1126,7 @@ TEST_CASE("BuildManifest names the offending DEPENDENCY, not the source (issue #
     // Rooted at `<root>/src` rather than at `<root>`, so the near-miss path below
     // lies under neither root. Under a root of `<root>` it would canonicalize
     // perfectly and the section would be testing Unreadable by another name.
-    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
-                                                .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "out").string() };
     auto const build = [&](std::vector<std::string> includes, std::string cwd) {
         return BuildManifest({ .sourcePath = sourcePath.string(),
                                .reportedDependencies = ReportedDependencies::Observed(std::move(includes)),
@@ -1251,7 +1249,7 @@ TEST_CASE("AnchorWorkingDirectory re-spells a symlinked cwd in the layout's voca
 
     // The layout names the root through the symlink; the cwd arrives resolved.
     Pace::PathCanon::Layout const layout { .sourceRoot = (base / "link").string(),
-                                                .buildTree = (base / "link" / "out").string() };
+                                           .buildTree = (base / "link" / "out").string() };
     auto const anchored = AnchorWorkingDirectory((base / "real" / "sub").string(), layout);
     CHECK(anchored == (base / "link" / "sub").string());
 
@@ -1270,7 +1268,7 @@ TEST_CASE("AnchorWorkingDirectory prefers the longest root and passes through th
     std::filesystem::create_directories(base / "elsewhere");
 
     Pace::PathCanon::Layout const layout { .sourceRoot = (base / "proj").string(),
-                                                .buildTree = (base / "proj" / "out").string() };
+                                           .buildTree = (base / "proj" / "out").string() };
 
     CHECK(AnchorWorkingDirectory((base / "proj" / "out" / "build").string(), layout)
           == (base / "proj" / "out" / "build").string());
@@ -2055,8 +2053,7 @@ TEST_CASE("ProjectDependencyPaths keeps project headers, resolved, and drops too
 {
     Pace::Testing::ScratchDirectory const scratch { "fc-direct-project-paths" };
     auto const& root = scratch.Path();
-    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(),
-                                                .buildTree = (root / "out").string() };
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "out").string() };
     auto const project = (root / "src" / "inc" / ".." / "h.hpp").string();
     auto const toolchain = (root / "sdk" / "vector").string();
     auto const kept = ProjectDependencyPaths(std::vector<std::string> { project, toolchain }, root.string(), layout);

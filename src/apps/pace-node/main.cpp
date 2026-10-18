@@ -2478,8 +2478,7 @@ int main(int argc, char** argv)
             return RefuseUnderService(cliOnly, ConfigurationFileStage(loaded.error().code), loaded.error().ToString());
         }
         else
-            std::cerr << "pace-node: ignoring " << lookup.path.string() << ": " << loaded.error().ToString()
-                      << '\n';
+            std::cerr << "pace-node: ignoring " << lookup.path.string() << ": " << loaded.error().ToString() << '\n';
     }
 
     if (!fileApplied)

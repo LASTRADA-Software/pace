@@ -149,8 +149,7 @@ std::expected<AdminCredential, NodeRefusal> ReadDashboardToken(std::filesystem::
     // path; what differs is only what the secret becomes. Written once, so the
     // trailing-newline rule and the empty-file refusal cannot hold for one credential
     // and not another.
-    return ReadSecretFile(path).transform(
-        [](Pace::SecureString secret) { return AdminCredential { std::move(secret) }; });
+    return ReadSecretFile(path).transform([](Pace::SecureString secret) { return AdminCredential { std::move(secret) }; });
 }
 
 namespace

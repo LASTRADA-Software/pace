@@ -3314,8 +3314,7 @@ std::uintmax_t StoreFileSize(std::filesystem::path const& path)
 
 TEST_CASE("Compression: values round-trip under every codec, inline and overflow", "[cowstorage][compression]")
 {
-    auto const codec =
-        GENERATE(Pace::CompressionCodec::Identity, Pace::CompressionCodec::Lz4, Pace::CompressionCodec::Zstd);
+    auto const codec = GENERATE(Pace::CompressionCodec::Identity, Pace::CompressionCodec::Lz4, Pace::CompressionCodec::Zstd);
     if (!Pace::Compression::IsAvailable(codec))
         return;
 

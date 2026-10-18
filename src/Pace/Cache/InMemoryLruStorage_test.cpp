@@ -454,9 +454,7 @@ TEST_CASE("InMemoryLruStorage: completing a pass is reported apart from the coun
 
     // An empty tier completes trivially rather than reporting itself unfinished.
     Pace::InMemoryLruStorage const empty;
-    CHECK(Pace::InMemoryLruStorage {}
-              .PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 8 })
-              .completedPass);
+    CHECK(Pace::InMemoryLruStorage {}.PurgeExpired(clock.now(), Pace::PurgeBudget { .maxScanned = 8 }).completedPass);
 }
 
 TEST_CASE("InMemoryLruStorage: the reclaim ceiling leaves the victim for the next sweep", "[cache][purge]")
@@ -635,7 +633,7 @@ TEST_CASE("Append/Prepend that push the combined value over the cap return Value
 
 TEST_CASE("maxValueBytes == 0 disables the per-value cap entirely", "[cache][max-value]")
 {
-    Pace::InMemoryLruStorage storage { 0, 0 };        // no budget cap, no value cap
+    Pace::InMemoryLruStorage storage { 0, 0 };             // no budget cap, no value cap
     auto const big = MakeBytes(std::string(1 << 20, 'x')); // 1 MiB
     REQUIRE(storage.Set("k", big, 0, core::platform::SteadyTimePoint::max()).has_value());
 }
@@ -735,8 +733,7 @@ TEST_CASE("IStorage::Update default preserves prior expiry on Store", "[cache][u
 
     auto const upd = storage.Update(
         "k",
-        [](Pace::GetResult const& current)
-            -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+        [](Pace::GetResult const& current) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
             REQUIRE(current.found);
             return Pace::IStorage::UpdateOutcome {
                 .value = MakeBytes("1"),
@@ -767,8 +764,7 @@ TEST_CASE("IStorage::Update honours an explicit newExpiry override", "[cache][up
 
     auto const upd = storage.Update(
         "k",
-        [newExpiry](
-            Pace::GetResult const&) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+        [newExpiry](Pace::GetResult const&) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
             return Pace::IStorage::UpdateOutcome {
                 .value = MakeBytes("1"),
                 .flags = 0,
@@ -794,8 +790,7 @@ TEST_CASE("IStorage::Update on absent key without override uses TimePoint::max()
 
     auto const upd = storage.Update(
         "fresh",
-        [](Pace::GetResult const& current)
-            -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+        [](Pace::GetResult const& current) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
             REQUIRE_FALSE(current.found);
             return Pace::IStorage::UpdateOutcome {
                 .value = MakeBytes("new"),

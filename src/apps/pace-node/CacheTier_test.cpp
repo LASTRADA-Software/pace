@@ -928,7 +928,7 @@ TEST_CASE("NodeMetrics reads back as the series the node's own /metrics route se
     // two empty records agree perfectly, and so do two that lost the same block.
     constexpr auto Required =
         std::array<std::string_view, 7> { "pace_worker_jobs_completed_total", "pace_items",
-                                          "pace_delete_hits_total",          "pace_tier_items{tier=\"memory\"}",
+                                          "pace_delete_hits_total",           "pace_tier_items{tier=\"memory\"}",
                                           "pace_node_logical_cores",          "pace_node_cpu_busy_ticks_total",
                                           "pace_node_upstream_configured" };
     for (auto const name: Required)

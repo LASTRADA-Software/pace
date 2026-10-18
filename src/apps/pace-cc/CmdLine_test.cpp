@@ -768,8 +768,7 @@ TEST_CASE("A path-valued -D is dispatchable, and the macro leaves only the worke
     // `dispatched 0` on the fleet page and no counter anywhere saying so. Any project
     // passing a source root, a config directory or a version string containing a slash
     // got the same silence.
-    std::vector<std::string> const argv { "g++", "-std=c++23", "-DPACE_SOURCE_DIR=\"/mnt/d/pace\"",
-                                          "-O2", "-c",         "a.cpp",
+    std::vector<std::string> const argv { "g++", "-std=c++23", "-DPACE_SOURCE_DIR=\"/mnt/d/pace\"", "-O2", "-c", "a.cpp",
                                           "-o",  "a.o" };
     auto const cmd = ParseCommand(argv);
     REQUIRE(cmd.parsedOk);

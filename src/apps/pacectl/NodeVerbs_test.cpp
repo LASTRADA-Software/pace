@@ -1792,8 +1792,8 @@ TEST_CASE("fleet redirected to a leader it could not mint for says the mint fail
     // The leader is dialled through `INodeDialer`, so what its connection said while opening --
     // that this machine's node did not answer `MINT-TICKET` -- rides the seam back. Its
     // `NotAMember` is then the missing ticket's doing, and is worded as that.
-    auto const said = std::format("{} (at 127.0.0.1:6674: cannot reach it)",
-                                  Pace::Cc::ReasonFor(Pace::Cc::MintFailure::Unreachable));
+    auto const said =
+        std::format("{} (at 127.0.0.1:6674: cannot reach it)", Pace::Cc::ReasonFor(Pace::Cc::MintFailure::Unreachable));
     ScriptedNodeExchange follower { { Refusal(CacheWire::ErrorCode::NotLeader, "10.0.0.2:6674") }, "10.0.0.7:6674" };
     ScriptedNodeExchange leader { { Refusal(CacheWire::ErrorCode::NotAMember, "not a member") }, "10.0.0.2:6674" };
     leader.OpenedWithoutTicket(Pace::Cc::MintFailure::Unreachable, said);

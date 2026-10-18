@@ -665,8 +665,8 @@ TEST_CASE("The list prints the approval of each waiting row, ready to paste, nam
 
     auto const rendered =
         RenderEnrollmentReport(Wire::EnrollmentReport { .pending = { waiting, decided } }, "10.0.0.1:6675");
-    auto const line = std::format("pace-node --scheduler=10.0.0.1:6675 --enroll-approve=laptop@{}",
-                                  FormatEd25519PublicKey(KeyOf(0x42)));
+    auto const line =
+        std::format("pace-node --scheduler=10.0.0.1:6675 --enroll-approve=laptop@{}", FormatEd25519PublicKey(KeyOf(0x42)));
     CHECK(rendered.contains(line));
     // Only a row nobody decided about: a decided one needs no approval.
     CHECK_FALSE(rendered.contains("--enroll-approve=desk@"));

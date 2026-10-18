@@ -108,9 +108,7 @@ core::async::Task<std::vector<std::byte>> Drain(core::net::ISocket* s)
     co_return out;
 }
 
-std::vector<std::byte> Exchange(BinaryFixture& fix,
-                                std::span<std::byte const> request,
-                                Pace::SessionContext session = {})
+std::vector<std::byte> Exchange(BinaryFixture& fix, std::span<std::byte const> request, Pace::SessionContext session = {})
 {
     REQUIRE(core::async::syncRun(Write(fix.pair.client.get(), request)));
     REQUIRE(Pace::Testing::ShutdownWrite(*fix.pair.client).has_value());
@@ -123,8 +121,8 @@ std::vector<std::byte> Exchange(BinaryFixture& fix,
 /// tests: those paths write no reply and do not close, so the response-draining
 /// Exchange above would suspend forever without a reactor.
 std::vector<Pace::CapturingLogger::Record> DrivePrimedAndSnapshot(BinaryFixture& fix,
-                                                                       std::span<std::byte const> frame,
-                                                                       Pace::CapturingLogger& logger)
+                                                                  std::span<std::byte const> frame,
+                                                                  Pace::CapturingLogger& logger)
 {
     Pace::SessionContext session;
     session.logger = &logger;
@@ -174,8 +172,7 @@ std::vector<BinaryRecord> ParseRecords(std::vector<std::byte> const& resp)
         auto const keyLen = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { resp.data() + off + 2, 2 });
         auto const extrasLen = std::to_integer<std::uint8_t>(resp[off + 4]);
         rec.status = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { resp.data() + off + 6, 2 });
-        auto const bodyLen =
-            Pace::ReadBigEndian<std::uint32_t>(std::span<std::byte const> { resp.data() + off + 8, 4 });
+        auto const bodyLen = Pace::ReadBigEndian<std::uint32_t>(std::span<std::byte const> { resp.data() + off + 8, 4 });
         rec.cas = Pace::ReadBigEndian<std::uint64_t>(std::span<std::byte const> { resp.data() + off + 16, 8 });
         std::size_t const valueStart = off + 24 + extrasLen + keyLen;
         std::size_t const valueLen = bodyLen - extrasLen - keyLen;
@@ -214,8 +211,7 @@ TEST_CASE("memcached-binary: SET then GET round-trips", "[protocol][binary]")
     auto const setStatus = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 6, 2 });
     REQUIRE(setStatus == 0);
     // Decode the GET response status + value.
-    auto const getStatus =
-        Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 24 + 6, 2 });
+    auto const getStatus = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 24 + 6, 2 });
     REQUIRE(getStatus == 0);
     std::string value;
     for (auto const byte: response | std::views::drop(24 + 24 + 4))
@@ -402,8 +398,7 @@ TEST_CASE("memcached-binary: Touch (0x1c) refreshes expiry and returns Ok", "[pr
     REQUIRE(response.size() >= 24 + 24);
     auto const setStatus = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 6, 2 });
     REQUIRE(setStatus == 0);
-    auto const touchStatus =
-        Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 24 + 6, 2 });
+    auto const touchStatus = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 24 + 6, 2 });
     REQUIRE(touchStatus == 0);
 }
 
@@ -436,11 +431,9 @@ TEST_CASE("memcached-binary: GAT (0x1d) returns value + flags + bumps CAS", "[pr
     auto const response = Exchange(fix, std::span<std::byte const> { frame.data(), frame.size() });
     // SET response: 24 bytes only. GAT response: 24 header + 4 extras + 7 payload.
     REQUIRE(response.size() == 24 + 24 + 4 + 7);
-    auto const gatStatus =
-        Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 24 + 6, 2 });
+    auto const gatStatus = Pace::ReadBigEndian<std::uint16_t>(std::span<std::byte const> { response.data() + 24 + 6, 2 });
     REQUIRE(gatStatus == 0);
-    auto const gatFlags =
-        Pace::ReadBigEndian<std::uint32_t>(std::span<std::byte const> { response.data() + 24 + 24, 4 });
+    auto const gatFlags = Pace::ReadBigEndian<std::uint32_t>(std::span<std::byte const> { response.data() + 24 + 24, 4 });
     REQUIRE(gatFlags == 0xCAFEU);
     std::string value;
     for (auto const byte: response | std::views::drop(24 + 24 + 4))
@@ -517,8 +510,7 @@ TEST_CASE("memcached-binary: Increment on existing value adds delta", "[protocol
 
     auto const response = Exchange(fix, std::span<std::byte const> { frame.data(), frame.size() });
     // SET reply 24 bytes; INCR reply 24 header + 8-byte value.
-    auto const newValue =
-        Pace::ReadBigEndian<std::uint64_t>(std::span<std::byte const> { response.data() + 24 + 24, 8 });
+    auto const newValue = Pace::ReadBigEndian<std::uint64_t>(std::span<std::byte const> { response.data() + 24 + 24, 8 });
     REQUIRE(newValue == 15U);
 }
 
@@ -536,8 +528,7 @@ TEST_CASE("memcached-binary: Decrement saturates at zero", "[protocol][binary][a
     frame.insert(frame.end(), req.begin(), req.end());
 
     auto const response = Exchange(fix, std::span<std::byte const> { frame.data(), frame.size() });
-    auto const newValue =
-        Pace::ReadBigEndian<std::uint64_t>(std::span<std::byte const> { response.data() + 24 + 24, 8 });
+    auto const newValue = Pace::ReadBigEndian<std::uint64_t>(std::span<std::byte const> { response.data() + 24 + 24, 8 });
     REQUIRE(newValue == 0U); // 3 - 10 saturates to 0
 }
 

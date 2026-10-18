@@ -1858,8 +1858,7 @@ TEST_CASE("RESP keyspace: K with class off (only $ set, no g) drops DEL events",
 TEST_CASE("RESP keyspace: DEL fires under K + g", "[protocol][resp][keyspace]")
 {
     KeyspaceFixture fix;
-    fix.EnableEvents(Pace::KeyspaceEvents::Keyspace | Pace::KeyspaceEvents::Generic
-                     | Pace::KeyspaceEvents::String);
+    fix.EnableEvents(Pace::KeyspaceEvents::Keyspace | Pace::KeyspaceEvents::Generic | Pace::KeyspaceEvents::String);
     fix.PSubscribeTo("__keyspace@0__:*");
 
     (void) ExchangeKs(fix,
@@ -1884,8 +1883,7 @@ TEST_CASE("RESP keyspace: with notifier null, no messages and no crash", "[proto
 TEST_CASE("RESP keyspace: EXPIRE fires the verb-named event under K + g", "[protocol][resp][keyspace]")
 {
     KeyspaceFixture fix;
-    fix.EnableEvents(Pace::KeyspaceEvents::Keyspace | Pace::KeyspaceEvents::Generic
-                     | Pace::KeyspaceEvents::String);
+    fix.EnableEvents(Pace::KeyspaceEvents::Keyspace | Pace::KeyspaceEvents::Generic | Pace::KeyspaceEvents::String);
     fix.PSubscribeTo("__keyspace@0__:*");
 
     (void) ExchangeKs(fix,
@@ -2039,8 +2037,7 @@ TEST_CASE("RESP keyspace: DEL multi-key still publishes 'del' per key when the g
           "[protocol][resp][keyspace][batch][hoist]")
 {
     KeyspaceFixture fix;
-    fix.EnableEvents(Pace::KeyspaceEvents::Keyevent | Pace::KeyspaceEvents::Generic
-                     | Pace::KeyspaceEvents::String);
+    fix.EnableEvents(Pace::KeyspaceEvents::Keyevent | Pace::KeyspaceEvents::Generic | Pace::KeyspaceEvents::String);
     fix.SubscribeTo("__keyevent@0__:del");
 
     (void) ExchangeKs(fix,
@@ -2236,60 +2233,60 @@ class FailingPeekStorage final: public Pace::IStorage
     }
 
     std::expected<Pace::GetResult, Pace::StorageError> Get(std::string_view key,
-                                                                     core::platform::SteadyTimePoint now) override
+                                                           core::platform::SteadyTimePoint now) override
     {
         return _inner.Get(key, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Set(std::string_view key,
-                                                                    std::vector<std::byte> value,
-                                                                    std::uint32_t flags,
-                                                                    core::platform::SteadyTimePoint expiry) override
+                                                          std::vector<std::byte> value,
+                                                          std::uint32_t flags,
+                                                          core::platform::SteadyTimePoint expiry) override
     {
         return _inner.Set(key, std::move(value), flags, expiry);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Add(std::string_view key,
-                                                                    std::vector<std::byte> value,
-                                                                    std::uint32_t flags,
-                                                                    core::platform::SteadyTimePoint expiry,
-                                                                    core::platform::SteadyTimePoint now) override
+                                                          std::vector<std::byte> value,
+                                                          std::uint32_t flags,
+                                                          core::platform::SteadyTimePoint expiry,
+                                                          core::platform::SteadyTimePoint now) override
     {
         return _inner.Add(key, std::move(value), flags, expiry, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Replace(std::string_view key,
-                                                                        std::vector<std::byte> value,
-                                                                        std::uint32_t flags,
-                                                                        core::platform::SteadyTimePoint expiry,
-                                                                        core::platform::SteadyTimePoint now) override
+                                                              std::vector<std::byte> value,
+                                                              std::uint32_t flags,
+                                                              core::platform::SteadyTimePoint expiry,
+                                                              core::platform::SteadyTimePoint now) override
     {
         return _inner.Replace(key, std::move(value), flags, expiry, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Append(std::string_view key,
-                                                                       std::span<std::byte const> suffix,
-                                                                       Pace::CasToken expected,
-                                                                       core::platform::SteadyTimePoint now) override
+                                                             std::span<std::byte const> suffix,
+                                                             Pace::CasToken expected,
+                                                             core::platform::SteadyTimePoint now) override
     {
         return _inner.Append(key, suffix, expected, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Prepend(std::string_view key,
-                                                                        std::span<std::byte const> prefix,
-                                                                        Pace::CasToken expected,
-                                                                        core::platform::SteadyTimePoint now) override
+                                                              std::span<std::byte const> prefix,
+                                                              Pace::CasToken expected,
+                                                              core::platform::SteadyTimePoint now) override
     {
         return _inner.Prepend(key, prefix, expected, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> CompareAndSwap(std::string_view key,
-                                                                               Pace::CasToken expected,
-                                                                               std::vector<std::byte> value,
-                                                                               std::uint32_t flags,
-                                                                               core::platform::SteadyTimePoint expiry,
-                                                                               core::platform::SteadyTimePoint now) override
+                                                                     Pace::CasToken expected,
+                                                                     std::vector<std::byte> value,
+                                                                     std::uint32_t flags,
+                                                                     core::platform::SteadyTimePoint expiry,
+                                                                     core::platform::SteadyTimePoint now) override
     {
         return _inner.CompareAndSwap(key, expected, std::move(value), flags, expiry, now);
     }
     std::expected<IncrResult, Pace::StorageError> IncrementOrInitialize(std::string_view key,
-                                                                             std::uint64_t magnitude,
-                                                                             bool decrement,
-                                                                             core::platform::SteadyTimePoint now) override
+                                                                        std::uint64_t magnitude,
+                                                                        bool decrement,
+                                                                        core::platform::SteadyTimePoint now) override
     {
         return _inner.IncrementOrInitialize(key, magnitude, decrement, now);
     }
@@ -2298,13 +2295,13 @@ class FailingPeekStorage final: public Pace::IStorage
         return _inner.Delete(key, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Touch(std::string_view key,
-                                                                      core::platform::SteadyTimePoint newExpiry,
-                                                                      core::platform::SteadyTimePoint now) override
+                                                            core::platform::SteadyTimePoint newExpiry,
+                                                            core::platform::SteadyTimePoint now) override
     {
         return _inner.Touch(key, newExpiry, now);
     }
     std::expected<Pace::GetResult, Pace::StorageError> Peek(std::string_view key,
-                                                                      core::platform::SteadyTimePoint now) override
+                                                            core::platform::SteadyTimePoint now) override
     {
         // When `_failOnlyForKey` is set, behave like a normal storage for
         // every key EXCEPT that one — lets the partial-WATCH-rollback test
@@ -2313,10 +2310,9 @@ class FailingPeekStorage final: public Pace::IStorage
             return _inner.Peek(key, now);
         return std::unexpected(Pace::MakeStorageError(Pace::StorageErrorCode::IoError));
     }
-    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(
-        std::string_view key,
-        std::optional<core::platform::SteadyTimePoint> newExpiry,
-        core::platform::SteadyTimePoint now) override
+    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(std::string_view key,
+                                                                std::optional<core::platform::SteadyTimePoint> newExpiry,
+                                                                core::platform::SteadyTimePoint now) override
     {
         return _inner.MarkStale(key, newExpiry, now);
     }

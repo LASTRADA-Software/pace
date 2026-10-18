@@ -985,8 +985,8 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
         /// so its roster is the state it applies and nothing it was handed -- stamping leader
         /// contact on @p clock, the harness's own.
         [[nodiscard]] static std::unique_ptr<Pace::Node::NodeRoster> BuildRoster(std::string const& endpoint,
-                                                                                      std::string const& leader,
-                                                                                      core::platform::IClock const& clock)
+                                                                                 std::string const& leader,
+                                                                                 core::platform::IClock const& clock)
         {
             auto cfg = Pace::Node::NodeConfig {};
             cfg.nodeId = endpoint;
@@ -1231,8 +1231,8 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
                 &redirect,
                 nullptr,
                 nodeStatus,
-                std::unexpected { Pace::Node::EnrollmentAbsenceOf(cfg, false)
-                                      .value_or(Pace::Node::EnrollmentAbsence::NoIdentityKey) },
+                std::unexpected {
+                    Pace::Node::EnrollmentAbsenceOf(cfg, false).value_or(Pace::Node::EnrollmentAbsence::NoIdentityKey) },
                 liveStats,
                 fleetText,
                 &nodeProof,
@@ -1266,7 +1266,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
 
         std::string endpoint;
         Pace::Node::NodeConfig cfg; ///< What `main` would have built it from.
-        Ed25519KeyPair identity;         ///< Its identity key: what its node-proof and formation answers sign.
+        Ed25519KeyPair identity;    ///< Its identity key: what its node-proof and formation answers sign.
         /// Its own sink, standing for the one sink `main` hands every component on a node's surface.
         ///
         /// **Every component on this surface that holds a sink is handed THIS one** -- the redirect

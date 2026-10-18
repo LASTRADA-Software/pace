@@ -558,8 +558,8 @@ TEST_CASE("The consensus role is a state set driven by RoleTable", "[metrics][pr
                                                              .role = subject.role } });
 
         for (auto const& row: Consensus::RoleTable)
-            CHECK(body.contains(std::format(
-                "pace_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == subject.role ? 1 : 0)));
+            CHECK(body.contains(
+                std::format("pace_node_consensus_role{{role=\"{}\"}} {}\n", row.name, row.role == subject.role ? 1 : 0)));
     }
 }
 

@@ -442,8 +442,7 @@ TEST_CASE("FileTrust: a file others may write is told apart from one only its ow
     std::filesystem::permissions(path, std::filesystem::perms::group_write, std::filesystem::perm_options::remove);
     std::filesystem::permissions(path, std::filesystem::perms::others_write, std::filesystem::perm_options::add);
     CHECK(Pace::OthersMayWrite(path) == std::expected<bool, std::error_code> { true });
-    CHECK(Pace::OthersMayWriteRemedy(path)
-          == std::vector<std::string> { std::format("chmod go-w '{}'", path.string()) });
+    CHECK(Pace::OthersMayWriteRemedy(path) == std::vector<std::string> { std::format("chmod go-w '{}'", path.string()) });
 #endif
     CHECK(Pace::OthersMayWriteRemedy(path).front().contains(path.string()));
 }
@@ -545,8 +544,8 @@ TEST_CASE("FileTrust: the printed directory remedy, run as printed, restricts a 
     auto const programData = scratch / "programdata";
     std::filesystem::create_directories(programData);
     REQUIRE(Pace::Testing::ApplyAccessList(programData,
-                                                L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)"
-                                                L"(A;OICIIO;FA;;;CO)(A;OICI;0x1200a9;;;BU)(A;CI;0x116;;;BU)"));
+                                           L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)"
+                                           L"(A;OICIIO;FA;;;CO)(A;OICI;0x1200a9;;;BU)(A;CI;0x116;;;BU)"));
     auto const directory = programData / "cluster";
     std::filesystem::create_directories(directory);
     scratch.Write("programdata/cluster/node-key", "x");
@@ -994,17 +993,17 @@ void TrySetOwner(std::filesystem::path const& path, wchar_t const* sid)
     /// When that is set and the process is NOT elevated the case FAILS -- fail closed, so a runner
     /// that is not elevated turns the first CI run red rather than the guard retiring silently. The
     /// read-only pre-checks (reparse, foreign owner, hard link) need no such right and run everywhere.
-    #define REQUIRE_OWNER_SETTING()                                                                                     \
-        do                                                                                                              \
-        {                                                                                                               \
-            if (!Pace::IsPrivilegedProcess())                                                                      \
-            {                                                                                                           \
-                if (ExpectElevated())                                                                                   \
-                    FAIL("PACE_EXPECT_ELEVATED=1 but this process is not elevated, so the ACL cases that set an " \
-                         "owner could not run -- the runner must be elevated");                                         \
-                SKIP("setting a directory's owner to Administrators needs the privileges an install has; the windows "  \
-                     "job's ctest step runs this path elevated");                                                       \
-            }                                                                                                           \
+    #define REQUIRE_OWNER_SETTING()                                                                                    \
+        do                                                                                                             \
+        {                                                                                                              \
+            if (!Pace::IsPrivilegedProcess())                                                                          \
+            {                                                                                                          \
+                if (ExpectElevated())                                                                                  \
+                    FAIL("PACE_EXPECT_ELEVATED=1 but this process is not elevated, so the ACL cases that set an "      \
+                         "owner could not run -- the runner must be elevated");                                        \
+                SKIP("setting a directory's owner to Administrators needs the privileges an install has; the windows " \
+                     "job's ctest step runs this path elevated");                                                      \
+            }                                                                                                          \
         } while (false)
 } // namespace
 
@@ -1171,8 +1170,7 @@ TEST_CASE("FileTrust: a foreign-owned entry is refused with the deletion remedy"
     if (owner == "S-1-5-18" || owner == "S-1-5-32-544" || owner == "S-1-5-19")
     {
         if (ExpectElevated())
-            FAIL(std::format("PACE_EXPECT_ELEVATED=1 but the planted key is still owned by {}, an allowed owner",
-                             owner));
+            FAIL(std::format("PACE_EXPECT_ELEVATED=1 but the planted key is still owned by {}, an allowed owner", owner));
         SKIP("could not arrange a foreign owner for the planted key on this host");
     }
 

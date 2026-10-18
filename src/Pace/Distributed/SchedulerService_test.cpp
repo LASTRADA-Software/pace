@@ -311,8 +311,7 @@ TEST_CASE("A machine admitted by ticket is still refused the verbs a machine joi
     Leading fleet;
     Testing::RosterFold const fold { { "pc-07" } };
     auto const ticketed = CallerContextOf(
-        fold.admitted,
-        Pace::ConnectionFacts { .host = "10.0.0.7", .authenticatedMachine = Testing::IdentityOf("pc-07") });
+        fold.admitted, Pace::ConnectionFacts { .host = "10.0.0.7", .authenticatedMachine = Testing::IdentityOf("pc-07") });
     REQUIRE(ticketed.membership == Membership::Member);
     REQUIRE_FALSE(ticketed.provenNodeId.has_value());
 

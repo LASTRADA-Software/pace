@@ -303,9 +303,7 @@ TEST_CASE("AdminHttp: a request split across reads is consumed to the end", "[me
     Pace::AtomicMetricsSink metrics;
     using namespace std::chrono_literals;
     auto provider = [] {
-        return Pace::MetricsSnapshot { .storage = std::nullopt,
-                                            .host = std::nullopt,
-                                            .uptime = Pace::Uptime { 7s } };
+        return Pace::MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Pace::Uptime { 7s } };
     };
     core::platform::SteadyClock clock;
     core::async::syncRun(Pace::ServeAdminHttp(&shortReads, &metrics, provider, &clock));
@@ -336,9 +334,7 @@ std::string ExchangeWithRoutes(std::string_view request, std::vector<Pace::Admin
     REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
     using namespace std::chrono_literals;
     auto provider = [] {
-        return Pace::MetricsSnapshot { .storage = std::nullopt,
-                                            .host = std::nullopt,
-                                            .uptime = Pace::Uptime { 1s } };
+        return Pace::MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Pace::Uptime { 1s } };
     };
     core::platform::SteadyClock clock;
     core::async::syncRun(Pace::ServeAdminHttp(pair.server.get(), &metrics, provider, &clock, routes));
@@ -354,9 +350,7 @@ TEST_CASE("AdminHttp: a contributed route answers on its own path", "[admin][htt
         { .path = "/fleet",
           .handler =
               [](Pace::AdminRequest const&) {
-                  return Pace::AdminResponse { .status = "200 OK",
-                                                    .contentType = "text/html",
-                                                    .body = "<h1>fleet</h1>" };
+                  return Pace::AdminResponse { .status = "200 OK", .contentType = "text/html", .body = "<h1>fleet</h1>" };
               } },
     };
 
@@ -389,9 +383,9 @@ TEST_CASE("AdminHttp: a route may refuse, and its extra headers reach the client
           .handler =
               [](Pace::AdminRequest const&) {
                   return Pace::AdminResponse { .status = "401 Unauthorized",
-                                                    .contentType = "text/plain",
-                                                    .body = "credential required\n",
-                                                    .extraHeaders = { R"(WWW-Authenticate: Basic realm="fleet")" } };
+                                               .contentType = "text/plain",
+                                               .body = "credential required\n",
+                                               .extraHeaders = { R"(WWW-Authenticate: Basic realm="fleet")" } };
               } },
     };
 
@@ -408,8 +402,8 @@ TEST_CASE("AdminHttp: a handler is told the Authorization header, whatever its c
     // not for a proxy, which gets diagnosed as "the token is wrong".
     auto const echo = [](Pace::AdminRequest const& request) {
         return Pace::AdminResponse { .status = "200 OK",
-                                          .contentType = "text/plain",
-                                          .body = std::string { request.Header(Pace::AdminHeader::Authorization) } };
+                                     .contentType = "text/plain",
+                                     .body = std::string { request.Header(Pace::AdminHeader::Authorization) } };
     };
     std::vector<Pace::AdminRoute> const routes { { .path = "/echo", .handler = echo } };
 
@@ -427,8 +421,8 @@ TEST_CASE("AdminHttp: a query string reaches the handler and does not defeat rou
 {
     auto const echo = [](Pace::AdminRequest const& request) {
         return Pace::AdminResponse { .status = "200 OK",
-                                          .contentType = "text/plain",
-                                          .body = std::string { request.query } };
+                                     .contentType = "text/plain",
+                                     .body = std::string { request.query } };
     };
     std::vector<Pace::AdminRoute> const routes { { .path = "/echo", .handler = echo } };
 
@@ -444,10 +438,10 @@ TEST_CASE("AdminHttp: every readable header arrives, in either order", "[admin][
     // `Authorization` above `If-None-Match`.
     auto const echo = [](Pace::AdminRequest const& request) {
         return Pace::AdminResponse { .status = "200 OK",
-                                          .contentType = "text/plain",
-                                          .body = std::format("[{}][{}]",
-                                                              request.Header(Pace::AdminHeader::Authorization),
-                                                              request.Header(Pace::AdminHeader::IfNoneMatch)) };
+                                     .contentType = "text/plain",
+                                     .body = std::format("[{}][{}]",
+                                                         request.Header(Pace::AdminHeader::Authorization),
+                                                         request.Header(Pace::AdminHeader::IfNoneMatch)) };
     };
     std::vector<Pace::AdminRoute> const routes { { .path = "/echo", .handler = echo } };
 
@@ -465,11 +459,11 @@ TEST_CASE("AdminHttp: a 304 carries its validators and no content at all", "[adm
               [](Pace::AdminRequest const& request) {
                   if (request.Header(Pace::AdminHeader::IfNoneMatch) == "\"g-7\"")
                       return Pace::AdminResponse { .status = "304 Not Modified",
-                                                        .extraHeaders = { "ETag: \"g-7\"", "Cache-Control: max-age=42" } };
+                                                   .extraHeaders = { "ETag: \"g-7\"", "Cache-Control: max-age=42" } };
                   return Pace::AdminResponse { .status = "200 OK",
-                                                    .contentType = "image/svg+xml",
-                                                    .body = "<svg/>",
-                                                    .extraHeaders = { "ETag: \"g-7\"" } };
+                                               .contentType = "image/svg+xml",
+                                               .body = "<svg/>",
+                                               .extraHeaders = { "ETag: \"g-7\"" } };
               } },
     };
 
@@ -497,8 +491,8 @@ TEST_CASE("AdminHttp: a prefix route answers its tail and never shadows an exact
     auto const named = [](std::string_view what) {
         return [what](Pace::AdminRequest const& request) {
             return Pace::AdminResponse { .status = "200 OK",
-                                              .contentType = "text/plain",
-                                              .body = std::format("{}:{}", what, request.path) };
+                                         .contentType = "text/plain",
+                                         .body = std::format("{}:{}", what, request.path) };
         };
     };
     // The prefix route is registered *first*, which is what makes this a test of the
@@ -635,9 +629,7 @@ TEST_CASE("AdminHttp: a head that dribbles past its total budget is refused 408"
     using namespace std::chrono_literals;
     Pace::AtomicMetricsSink metrics;
     auto provider = [] {
-        return Pace::MetricsSnapshot { .storage = std::nullopt,
-                                            .host = std::nullopt,
-                                            .uptime = Pace::Uptime { 1s } };
+        return Pace::MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Pace::Uptime { 1s } };
     };
     core::async::syncRun(Pace::ServeAdminHttp(&dribble, &metrics, provider, &clock));
     CloseAsServed(&dribble);
@@ -717,13 +709,9 @@ TEST_CASE("AdminHttp: a served connection's refusal over a head it did not finis
     Pace::NullLogger logger;
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::AdminHttpServer server { listener,
-                                        metrics,
-                                        [] { return Pace::MetricsSnapshot {}; },
-                                        logger,
-                                        clock,
-                                        acceptLoops,
-                                        Pace::DefaultDrainWait() };
+    Pace::AdminHttpServer server {
+        listener, metrics, [] { return Pace::MetricsSnapshot {}; }, logger, clock, acceptLoops, Pace::DefaultDrainWait()
+    };
 
     auto client = listener.connectClient();
     std::string request = "GET /healthz HTTP/1.1\r\nHost: x\r\n";
@@ -787,8 +775,7 @@ TEST_CASE("The tolerated admin verdict is not the verdict for a bind that stops 
     // to start" -- those return EXIT_FAILURE, so `Error` is correct there and this
     // function must never be reached for them. What is left to pin here is that the
     // two verdicts do not collapse into one level.
-    auto const tolerated =
-        Pace::DescribeToleratedAdminBindFailure("192.0.2.1", 9259, "cannot assign requested address");
+    auto const tolerated = Pace::DescribeToleratedAdminBindFailure("192.0.2.1", 9259, "cannot assign requested address");
 
     CHECK(tolerated.level == Pace::LogLevel::Warn);
     // A tolerated failure must not describe itself as the process stopping. Refusal
@@ -815,13 +802,9 @@ namespace
 {
     Pace::AtomicMetricsSink metrics;
     core::platform::SteadyClock clock;
-    Pace::AdminHttpServer server { listener,
-                                        metrics,
-                                        [] { return Pace::MetricsSnapshot {}; },
-                                        logger,
-                                        clock,
-                                        acceptLoops,
-                                        Pace::DefaultDrainWait() };
+    Pace::AdminHttpServer server {
+        listener, metrics, [] { return Pace::MetricsSnapshot {}; }, logger, clock, acceptLoops, Pace::DefaultDrainWait()
+    };
     auto client = inner.connectClient();
     REQUIRE(core::async::syncRun(WriteString(client.get(), "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n")));
     REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
@@ -934,13 +917,9 @@ TEST_CASE("AdminHttp: signals landing on the accept thread do not stop /healthz"
     Pace::AtomicMetricsSink metrics;
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::AdminHttpServer server { *listener,
-                                        metrics,
-                                        [] { return Pace::MetricsSnapshot {}; },
-                                        logger,
-                                        clock,
-                                        acceptLoops,
-                                        Pace::DefaultDrainWait() };
+    Pace::AdminHttpServer server {
+        *listener, metrics, [] { return Pace::MetricsSnapshot {}; }, logger, clock, acceptLoops, Pace::DefaultDrainWait()
+    };
     std::atomic<bool> ended { false };
     std::jthread acceptThread { [&server, &ended] {
         core::async::syncRun(server.Run());
@@ -963,13 +942,13 @@ TEST_CASE("AdminHttp: signals landing on the accept thread do not stop /healthz"
         [&signalled] { return signalled >= signalCount; },
         [&signalled] { return std::format("{} of {} signal(s) sent", signalled, signalCount); },
         Pace::Testing::WaitOptions { .step =
-                                              [&handler, native, &signalled] {
-                                                  handler.Interrupt(native);
-                                                  ++signalled;
-                                              },
-                                          .context = {},
-                                          .bound = Pace::Testing::WaitHangGuard,
-                                          .rest = 5ms });
+                                         [&handler, native, &signalled] {
+                                             handler.Interrupt(native);
+                                             ++signalled;
+                                         },
+                                     .context = {},
+                                     .bound = Pace::Testing::WaitHangGuard,
+                                     .rest = 5ms });
     REQUIRE(sent);
 
     // The loop reported nothing -- the registry `/healthz` answers from is empty -- and is still

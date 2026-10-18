@@ -291,8 +291,7 @@ TEST_CASE("ServiceControl: argv keeps values unquoted", "[platform][service][lau
 TEST_CASE("ServiceControl: argv element 0 is the executable", "[platform][service][launchd]")
 {
     Pace::Config const cfg {};
-    auto const argv =
-        BuildServiceArgv(std::filesystem::path { "/opt/pace/bin/pace-kv" }, AsTyped(cfg), EmitDaemonFlag::No);
+    auto const argv = BuildServiceArgv(std::filesystem::path { "/opt/pace/bin/pace-kv" }, AsTyped(cfg), EmitDaemonFlag::No);
     REQUIRE(argv.front() == "/opt/pace/bin/pace-kv");
 }
 
@@ -410,8 +409,7 @@ TEST_CASE("ServiceControl: a system job's log directory is its own", "[platform]
     // registering the worker took the daemon's, and a package reinstall took it
     // back.
     auto const daemon = Pace::DefaultLogDirectory("software.lastrada.pace-kv", ServiceScope::System, "/Users/jo");
-    auto const worker =
-        Pace::DefaultLogDirectory("software.lastrada.pace-node", ServiceScope::System, "/Users/jo");
+    auto const worker = Pace::DefaultLogDirectory("software.lastrada.pace-node", ServiceScope::System, "/Users/jo");
 
     REQUIRE(daemon != worker);
     REQUIRE(daemon.filename() == "software.lastrada.pace-kv");
@@ -483,8 +481,7 @@ TEST_CASE("ServiceControl: scope defaults are filled in for a file-configured se
 
     SECTION("a system daemon is pointed at the packaged config")
     {
-        auto const filled =
-            WithScopeDefaults(spec, ServiceScope::System, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
+        auto const filled = WithScopeDefaults(spec, ServiceScope::System, "/Users/jo", "/opt/pace/etc/pace-kv.yaml");
 
         REQUIRE(std::ranges::contains(filled.arguments, "--config=/opt/pace/etc/pace-kv.yaml"));
         // ServiceAccountReadDenial validates this, so leaving it empty would
@@ -854,9 +851,9 @@ TEST_CASE("ServiceControl: a C0 control XML forbids is replaced, and the three i
     // as the raw byte and there is nothing to escape a control TO. Substituting is
     // the only move available.
     auto const plist = Pace::BuildLaunchdPlist(SpecCarrying("a\x01"
-                                                                 "b"),
-                                                    ServiceScope::System,
-                                                    "/tmp/logs");
+                                                            "b"),
+                                               ServiceScope::System,
+                                               "/tmp/logs");
 
     // WHAT DISTINGUISHES: the raw byte is what the defect wrote, and the character
     // reference is what a reader would reach for instead -- neither may appear.
@@ -909,7 +906,7 @@ TEST_CASE("ServiceControl: a registration carrying text no supervisor can record
     // below returned nullopt before this rule existed.
     REQUIRE(Pace::SupervisorTextRejection(SpecCarrying("gcc\xC3\x28-1")).has_value());
     REQUIRE(Pace::LaunchdTextRejection(SpecCarrying("a\x01"
-                                                         "b"))
+                                                    "b"))
                 .has_value());
 
     // Encoding is asked of the service name too, which `ServiceNameRejection` does
@@ -922,10 +919,8 @@ TEST_CASE("ServiceControl: a registration carrying text no supervisor can record
 
     // The rule is reachable through the gate both platforms' InstallService share,
     // rather than being a function nothing calls.
-    REQUIRE(Pace::ServiceRegistrationRejection(SpecCarrying("gcc\xC3\x28-1"), Pace::SupervisorKind::Launchd)
-                .has_value());
-    REQUIRE(
-        Pace::ServiceRegistrationRejection(SpecCarrying("gcc\xC3\x28-1"), Pace::SupervisorKind::Scm).has_value());
+    REQUIRE(Pace::ServiceRegistrationRejection(SpecCarrying("gcc\xC3\x28-1"), Pace::SupervisorKind::Launchd).has_value());
+    REQUIRE(Pace::ServiceRegistrationRejection(SpecCarrying("gcc\xC3\x28-1"), Pace::SupervisorKind::Scm).has_value());
 
     // THE POSITIVE CONTROL, which is the direction a refusal test skips: a guard
     // nobody has watched ACCEPT is not known to work either, and a rule that refused
@@ -934,8 +929,7 @@ TEST_CASE("ServiceControl: a registration carrying text no supervisor can record
     REQUIRE(!Pace::SupervisorTextRejection(SpecCarrying("caf\xC3\xA9")).has_value()); // U+00E9, legal text
     REQUIRE(!Pace::LaunchdTextRejection(SpecCarrying("caf\xC3\xA9")).has_value());
     for (auto const supervisor: { Pace::SupervisorKind::Scm, Pace::SupervisorKind::Launchd })
-        REQUIRE(
-            !Pace::ServiceRegistrationRejection(SpecFor("pace-kv", Pace::Config {}), supervisor).has_value());
+        REQUIRE(!Pace::ServiceRegistrationRejection(SpecFor("pace-kv", Pace::Config {}), supervisor).has_value());
 }
 
 TEST_CASE("ServiceControl: a code point only XML forbids is refused for launchd and not for the SCM", "[platform][service]")
@@ -1271,17 +1265,14 @@ TEST_CASE("ServiceControl: every registration rule gates an install", "[platform
     // on one supervisor and forgotten on the other.
     Pace::Config named {};
     named.serviceName = "../escape";
-    REQUIRE(Pace::ServiceRegistrationRejection(SpecFor("pace-kv", named), Pace::SupervisorKind::Launchd)
-                .has_value());
+    REQUIRE(Pace::ServiceRegistrationRejection(SpecFor("pace-kv", named), Pace::SupervisorKind::Launchd).has_value());
 
     Pace::Config secret {};
     secret.requirePass = "hunter2";
-    REQUIRE(
-        Pace::ServiceRegistrationRejection(SpecFor("pace-kv", secret), Pace::SupervisorKind::Scm).has_value());
+    REQUIRE(Pace::ServiceRegistrationRejection(SpecFor("pace-kv", secret), Pace::SupervisorKind::Scm).has_value());
 
-    REQUIRE(!Pace::ServiceRegistrationRejection(SpecFor("pace-kv", Pace::Config {}),
-                                                     Pace::SupervisorKind::Launchd)
-                 .has_value());
+    REQUIRE(
+        !Pace::ServiceRegistrationRejection(SpecFor("pace-kv", Pace::Config {}), Pace::SupervisorKind::Launchd).has_value());
 }
 
 TEST_CASE("ServiceControl: the timestamp switch registers whichever spelling produces the value", "[platform][service]")
@@ -1473,8 +1464,7 @@ TEST_CASE("ServiceControl: every flag that can reach a registration does, one ro
     // "the token moved" is not a weakened assertion but an unaskable one. It is
     // named here rather than skipped at the assertion, and the presence half still
     // runs on every build.
-    constexpr auto NonIdentityCodecs =
-        std::to_array({ Pace::CompressionCodec::Zstd, Pace::CompressionCodec::Lz4 });
+    constexpr auto NonIdentityCodecs = std::to_array({ Pace::CompressionCodec::Zstd, Pace::CompressionCodec::Lz4 });
     //
     // The loop holds no ITERATOR, which is portability rather than taste and is the
     // reason `MakeConfigFileSettings` gives for the same shape: `std::array`'s
@@ -1488,8 +1478,7 @@ TEST_CASE("ServiceControl: every flag that can reach a registration does, one ro
                 return codec;
         return std::nullopt;
     }();
-    auto const memoryCodecStimulus =
-        Pace::Compression::NameOf(secondCodec.value_or(Pace::CompressionCodec::Identity));
+    auto const memoryCodecStimulus = Pace::Compression::NameOf(secondCodec.value_or(Pace::CompressionCodec::Identity));
 
     // Whether a row's emitted token CAN move at all on this build: true for every
     // row but the one above, and there only where something was compiled in to move
@@ -1612,8 +1601,7 @@ TEST_CASE("ServiceControl: every flag that can reach a registration does, one ro
         for (auto const& row: table)
         {
             INFO("listed flag: " << row.flag);
-            CHECK(
-                std::ranges::any_of(Pace::CliOptions(), [&row](auto const& spec) { return spec.primary == row.flag; }));
+            CHECK(std::ranges::any_of(Pace::CliOptions(), [&row](auto const& spec) { return spec.primary == row.flag; }));
         }
     };
     rowsAreLive(NeverRegistered);
@@ -1994,8 +1982,7 @@ TEST_CASE("ServiceControl: the daemon's spec carries the start mode typed, and n
     // replaying it would hand every boot a flag the process ignores.
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& arg) { return arg.starts_with("--service-start"); }));
 
-    CHECK(SpecFor(std::filesystem::path { "pace-kv" }, Pace::CliResult {}).startMode
-          == Pace::ServiceStart::Auto);
+    CHECK(SpecFor(std::filesystem::path { "pace-kv" }, Pace::CliResult {}).startMode == Pace::ServiceStart::Auto);
 }
 
 TEST_CASE("ServiceControl: a manual system job is not kept alive unconditionally, which would start it at load",
@@ -2507,11 +2494,11 @@ TEST_CASE("ServiceControl: an uninstall whose firewall removal is refused still 
     Pace::Testing::RecordingFirewall firewall;
     firewall.rules = { ours.front(), theirs };
 
-    auto const deleted = Pace::WithRemovalFirewall(
-        Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Removed,
-                                          .message = "uninstalled service 'Probe'" },
-        &firewall,
-        "Probe");
+    auto const deleted =
+        Pace::WithRemovalFirewall(Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Removed,
+                                                               .message = "uninstalled service 'Probe'" },
+                                  &firewall,
+                                  "Probe");
     INFO(deleted.message);
     CHECK(deleted.outcome == Pace::ServiceControlOutcome::Removed);
     CHECK(deleted.ExitCode() == 0);
@@ -2524,11 +2511,11 @@ TEST_CASE("ServiceControl: an uninstall whose firewall removal is refused still 
     // A service that was never there leaves nothing to protect, so its rules go -- and the outcome
     // stays the uninstall's, whatever the firewall did.
     firewall.rules = { ours.front() };
-    auto const missing = Pace::WithRemovalFirewall(
-        Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::NotInstalled,
-                                          .message = "no service named 'Probe' is installed" },
-        &firewall,
-        "Probe");
+    auto const missing =
+        Pace::WithRemovalFirewall(Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::NotInstalled,
+                                                               .message = "no service named 'Probe' is installed" },
+                                  &firewall,
+                                  "Probe");
     INFO(missing.message);
     CHECK(missing.outcome == Pace::ServiceControlOutcome::NotInstalled);
     CHECK(missing.ExitCode() == Pace::CommandExitCode(Pace::CommandEnding::Declined));
@@ -2568,9 +2555,9 @@ TEST_CASE("ServiceControl: an uninstall whose deletion was refused leaves the fi
     // Where no firewall is managed there is nothing to say at all.
     auto const unmanaged =
         Pace::WithRemovalFirewall(Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Failed,
-                                                                         .message = "access denied opening the service" },
-                                       nullptr,
-                                       "Probe");
+                                                               .message = "access denied opening the service" },
+                                  nullptr,
+                                  "Probe");
     CHECK(unmanaged.message == "access denied opening the service");
 }
 
@@ -2590,24 +2577,24 @@ TEST_CASE("ServiceControl: only an install that registered touches the firewall,
     CHECK(refused.message == "access denied");
     CHECK(firewall.adds == 0);
 
-    auto const registered = Pace::WithRegistrationFirewall(
-        Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Created,
-                                          .message = "installed service 'Probe'" },
-        &firewall,
-        "Probe",
-        rules);
+    auto const registered =
+        Pace::WithRegistrationFirewall(Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Created,
+                                                                    .message = "installed service 'Probe'" },
+                                       &firewall,
+                                       "Probe",
+                                       rules);
     CHECK(registered.outcome == Pace::ServiceControlOutcome::Created);
     CHECK(registered.message
           == "installed service 'Probe'\nfirewall: allowed inbound Probe cache tcp/6674 (every network profile)");
     CHECK(firewall.InGroup("pace-kv: Probe") == rules);
 
     firewall.refuseRemove = "access denied reading the firewall";
-    auto const unopened = Pace::WithRegistrationFirewall(
-        Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Created,
-                                          .message = "installed service 'Probe'" },
-        &firewall,
-        "Probe",
-        rules);
+    auto const unopened =
+        Pace::WithRegistrationFirewall(Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Created,
+                                                                    .message = "installed service 'Probe'" },
+                                       &firewall,
+                                       "Probe",
+                                       rules);
     INFO(unopened.message);
     CHECK(unopened.outcome == Pace::ServiceControlOutcome::Created);
     CHECK(
@@ -2641,12 +2628,12 @@ TEST_CASE("ServiceControl: a bracketed loopback bind opens nothing, and one boun
     CHECK(rules.front().bindHost == "localhost");
 
     Pace::Testing::RecordingFirewall firewall;
-    auto const installed = Pace::WithRegistrationFirewall(
-        Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Created,
-                                          .message = "installed service 'Probe'" },
-        &firewall,
-        "Probe",
-        rules);
+    auto const installed =
+        Pace::WithRegistrationFirewall(Pace::ServiceControlResult { .outcome = Pace::ServiceControlOutcome::Created,
+                                                                    .message = "installed service 'Probe'" },
+                                       &firewall,
+                                       "Probe",
+                                       rules);
     INFO(installed.message);
     CHECK(installed.message.contains("allowed inbound Probe metrics tcp/9464"));
     CHECK(installed.message.contains("note: Probe metrics tcp/9464 is opened for a surface bound to 'localhost': a name is "
@@ -2690,21 +2677,21 @@ namespace
 /// One way an SCM call can answer, and how the registration must end on it.
 struct ScmVerdict
 {
-    std::string_view why;                 ///< The answer, in words.
+    std::string_view why;            ///< The answer, in words.
     Pace::Testing::ScmScript script; ///< What the service manager answers.
     Pace::CommandEnding ending;      ///< How the registration ends.
-    std::string_view says;                ///< What it tells the operator.
+    std::string_view says;           ///< What it tells the operator.
 };
 
 /// One way launchd or the system around it can answer, and how the registration must end on it.
 struct LaunchdVerdict
 {
-    std::string_view why;                     ///< The answer, in words.
+    std::string_view why;                ///< The answer, in words.
     Pace::ServiceScope scope;            ///< Which domain.
-    bool knowsItsExecutable;                  ///< False: the spec names no executable.
+    bool knowsItsExecutable;             ///< False: the spec names no executable.
     Pace::Testing::LaunchdScript script; ///< What launchd answers.
     Pace::CommandEnding ending;          ///< How the registration ends.
-    std::string_view says;                    ///< What it tells the operator.
+    std::string_view says;               ///< What it tells the operator.
 };
 } // namespace
 
@@ -2735,8 +2722,7 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
           .ending = CommandEnding::Completed,
           .says = "updated the registration of service 'pace-kv'" },
         { .why = "the service already exists, and re-applying is refused to this account",
-          .script =
-              ScmScript { .createError = Pace::ScmErrorServiceExists, .reapplyError = Pace::ScmErrorAccessDenied },
+          .script = ScmScript { .createError = Pace::ScmErrorServiceExists, .reapplyError = Pace::ScmErrorAccessDenied },
           .ending = CommandEnding::Declined,
           .says = "access denied registering the service" },
         { .why = "creating a service is refused to this account",
@@ -2822,15 +2808,13 @@ TEST_CASE("An SCM removal forgets the event source only once the service is gone
     // short of a reinstall puts it back: a failed delete must leave the event source alone.
     using Pace::Testing::ScmScript;
     Pace::Testing::ScriptedScmCalls removed { ScmScript {} };
-    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), removed).Ending()
-            == Pace::CommandEnding::Completed);
+    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), removed).Ending() == Pace::CommandEnding::Completed);
     CHECK(removed.Calls()
           == std::vector<std::string> {
               "OpenManager(Connect)", "Open", "Stop", "StillRunning", "Delete", "Close", "Close", "RemoveEventSource" });
 
     Pace::Testing::ScriptedScmCalls stuck { ScmScript { .deleteError = 1072 } };
-    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), stuck).Ending()
-            == Pace::CommandEnding::Failed);
+    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), stuck).Ending() == Pace::CommandEnding::Failed);
     CHECK(std::ranges::count(stuck.Calls(), std::string { "RemoveEventSource" }) == 0);
 }
 
@@ -2844,12 +2828,10 @@ TEST_CASE("An SCM registration opens the manager with the least each operation n
     CHECK(Pace::ScmManagerAccessMask(Pace::ScmManagerAccess::Connect) == 0x0001);
 
     Pace::Testing::ScriptedScmCalls installing { Pace::Testing::ScmScript {} };
-    REQUIRE(Pace::ScmInstall(RegistrableSpec("C:/pace/pace-kv.exe"), installing).Ending()
-            == Pace::CommandEnding::Completed);
+    REQUIRE(Pace::ScmInstall(RegistrableSpec("C:/pace/pace-kv.exe"), installing).Ending() == Pace::CommandEnding::Completed);
     CHECK(std::ranges::count(installing.Calls(), std::string { "OpenManager(Create)" }) == 1);
     Pace::Testing::ScriptedScmCalls removing { Pace::Testing::ScmScript {} };
-    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), removing).Ending()
-            == Pace::CommandEnding::Completed);
+    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), removing).Ending() == Pace::CommandEnding::Completed);
     CHECK(std::ranges::count(removing.Calls(), std::string { "OpenManager(Connect)" }) == 1);
 }
 
@@ -2917,7 +2899,7 @@ TEST_CASE("An SCM install a private path refuses deletes the registration it cre
     CHECK(created.OpenHandles() == 0);
 
     Pace::Testing::ScriptedScmCalls reapplied { ScmScript { .createError = Pace::ScmErrorServiceExists,
-                                                                 .secludeDenial = "the list would not apply" } };
+                                                            .secludeDenial = "the list would not apply" } };
     auto const kept = Pace::ScmInstall(spec, reapplied);
     INFO(kept.message);
     CHECK(kept.outcome == Pace::ServiceControlOutcome::Failed);
@@ -2925,8 +2907,7 @@ TEST_CASE("An SCM install a private path refuses deletes the registration it cre
     CHECK(std::ranges::count(reapplied.Calls(), std::string { "Delete" }) == 0);
     CHECK(reapplied.OpenHandles() == 0);
 
-    Pace::Testing::ScriptedScmCalls stuck { ScmScript { .deleteError = 1072,
-                                                             .secludeDenial = "the list would not apply" } };
+    Pace::Testing::ScriptedScmCalls stuck { ScmScript { .deleteError = 1072, .secludeDenial = "the list would not apply" } };
     CHECK(Pace::ScmInstall(spec, stuck).message.contains("could NOT be removed"));
     CHECK(stuck.OpenHandles() == 0);
 }
@@ -3070,8 +3051,7 @@ TEST_CASE("A launchd registration declines on a decision and fails on a call tha
     {
         INFO(verdict.why);
         Pace::Testing::ScriptedLaunchdCalls calls { verdict.script };
-        auto const result =
-            Pace::LaunchdUninstall(RegistrableSpec("/opt/pace/bin/pace-kv"), verdict.scope, calls);
+        auto const result = Pace::LaunchdUninstall(RegistrableSpec("/opt/pace/bin/pace-kv"), verdict.scope, calls);
         INFO(result.message);
         CHECK(result.Ending() == verdict.ending);
         CHECK(result.message.contains(verdict.says));
@@ -3085,8 +3065,7 @@ TEST_CASE("A launchd registration boots a previous job out of every domain befor
     // candidate, and loads into the first domain launchd knows -- here `gui/501`.
     Pace::Testing::ScriptedLaunchdCalls calls { Pace::Testing::LaunchdScript {} };
     auto const spec = RegistrableSpec("/opt/pace/bin/pace-kv");
-    REQUIRE(Pace::LaunchdInstall(spec, Pace::ServiceScope::User, calls).Ending()
-            == Pace::CommandEnding::Completed);
+    REQUIRE(Pace::LaunchdInstall(spec, Pace::ServiceScope::User, calls).Ending() == Pace::CommandEnding::Completed);
     auto const label = Pace::LaunchdLabel(spec);
     auto const& made = calls.Calls();
     auto const at = [&made](std::string const& call) {

@@ -2446,8 +2446,7 @@ TEST_CASE("a cache panel is titled by the server that answered, and a panel whos
         return TopEdge(sink.frames.front());
     };
 
-    CHECK(titled(CachePanel(), "pace-node", CacheChromeSample())
-              .starts_with(TopStart("pace-node 0.4.1")));
+    CHECK(titled(CachePanel(), "pace-node", CacheChromeSample()).starts_with(TopStart("pace-node 0.4.1")));
     CHECK(titled(CachePanel(), {}, CacheChromeSample()).starts_with(TopStart("pace-kv 0.4.1")));
     CHECK(titled(FleetPanel(), "pace-node", CacheChromeSample()).starts_with(TopStart("fleet")));
 }

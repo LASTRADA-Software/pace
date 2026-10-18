@@ -105,7 +105,7 @@ enum class Closing : std::uint8_t
 /// What the server end of a real refusal saw.
 struct ServerSide
 {
-    std::atomic<bool> done { false };                ///< The server finished, however it went.
+    std::atomic<bool> done { false };           ///< The server finished, however it went.
     std::optional<Pace::LingerOutcome> outcome; ///< How the linger ended, when it lingered.
 };
 
@@ -240,9 +240,7 @@ TEST_CASE("CloseLingering stops at whichever cap a peer meets first", "[net][lin
     SECTION("the reads")
     {
         auto const outcome = core::async::syncRun(Pace::CloseLingering(
-            pair.server.get(),
-            nullptr,
-            Pace::LingerBounds { .total = 1000ms, .maxBytes = large.size() * 2, .reads = 1 }));
+            pair.server.get(), nullptr, Pace::LingerBounds { .total = 1000ms, .maxBytes = large.size() * 2, .reads = 1 }));
         CHECK(outcome.end == Pace::LingerEnd::ReadCap);
         CHECK(outcome.reads == 1);
     }
@@ -308,8 +306,8 @@ TEST_CASE("CloseLingering on a blocking socket stops listening to a silent peer"
 
     // The client stays open and silent throughout, so only the deadline can end the linger,
     // and a read with none would block this thread for good.
-    auto const outcome = core::async::syncRun(Pace::CloseLingering(
-        server.get(), nullptr, Pace::LingerBounds { .total = 200ms, .maxBytes = 4096, .reads = 2 }));
+    auto const outcome = core::async::syncRun(
+        Pace::CloseLingering(server.get(), nullptr, Pace::LingerBounds { .total = 200ms, .maxBytes = 4096, .reads = 2 }));
     CHECK(outcome.end == Pace::LingerEnd::Expired);
     CHECK(outcome.reads == 1);
     CHECK(server->isClosed());

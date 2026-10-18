@@ -104,8 +104,7 @@ TEST_CASE("blank lines separate sections and blocks but never follow a title", "
 
 TEST_CASE("a title prints its subject uncolored on the same line", "[cli][usage]")
 {
-    static constexpr auto sections =
-        std::to_array<UsageSection>({ { .title = "usage:", .subject = " pace-kv [options]" } });
+    static constexpr auto sections = std::to_array<UsageSection>({ { .title = "usage:", .subject = " pace-kv [options]" } });
 
     CHECK(RenderUsage({ .sections = sections }, UsageColor::Plain) == "usage: pace-kv [options]\n");
 

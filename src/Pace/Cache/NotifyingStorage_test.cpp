@@ -171,8 +171,8 @@ TEST_CASE("NotifyingStorage Update fires Update on Store, Delete on Delete, noth
         "k",
         [](Pace::GetResult const&) {
             return Pace::IStorage::UpdateOutcome { .value = std::vector<std::byte>(4),
-                                                        .flags = 0,
-                                                        .action = Pace::IStorage::UpdateAction::Store };
+                                                   .flags = 0,
+                                                   .action = Pace::IStorage::UpdateAction::Store };
         },
         clock.now());
     REQUIRE(stored.has_value());
@@ -185,8 +185,8 @@ TEST_CASE("NotifyingStorage Update fires Update on Store, Delete on Delete, noth
         "k",
         [](Pace::GetResult const&) {
             return Pace::IStorage::UpdateOutcome { .value = {},
-                                                        .flags = 0,
-                                                        .action = Pace::IStorage::UpdateAction::Unchanged };
+                                                   .flags = 0,
+                                                   .action = Pace::IStorage::UpdateAction::Unchanged };
         },
         clock.now());
     REQUIRE(unchanged.has_value());
@@ -196,9 +196,7 @@ TEST_CASE("NotifyingStorage Update fires Update on Store, Delete on Delete, noth
     auto const deleted = notifying.Update(
         "k",
         [](Pace::GetResult const&) {
-            return Pace::IStorage::UpdateOutcome { .value = {},
-                                                        .flags = 0,
-                                                        .action = Pace::IStorage::UpdateAction::Delete };
+            return Pace::IStorage::UpdateOutcome { .value = {}, .flags = 0, .action = Pace::IStorage::UpdateAction::Delete };
         },
         clock.now());
     REQUIRE(deleted.has_value());

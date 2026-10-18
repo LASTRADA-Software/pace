@@ -326,8 +326,8 @@ TEST_CASE("The real host reaches the same registry the platform leaf does", "[to
     CHECK_FALSE(value.has_value());
 #endif
 
-    CHECK_FALSE(host->RegistryString(RegistryHive::LocalMachine, R"(SOFTWARE\pace-absent)", "x", RegistryView::Native)
-                    .has_value());
+    CHECK_FALSE(
+        host->RegistryString(RegistryHive::LocalMachine, R"(SOFTWARE\pace-absent)", "x", RegistryView::Native).has_value());
 }
 
 TEST_CASE("The real host reads the environment through the shared leaf", "[toolchain-host]")

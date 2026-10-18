@@ -611,8 +611,7 @@ TEST_CASE("LayeredStorage::Update is atomic across L1+L2 and preserves expiry", 
 
     auto const upd = storage->Update(
         "k",
-        [](Pace::GetResult const& current)
-            -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
+        [](Pace::GetResult const& current) -> std::expected<Pace::IStorage::UpdateOutcome, Pace::StorageError> {
             REQUIRE(current.found);
             // Callback sees the L2 (canonical) entry with its real TTL.
             REQUIRE(Decode(current.entry.ValueBytes()) == "0");

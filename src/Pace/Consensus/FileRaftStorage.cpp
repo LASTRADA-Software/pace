@@ -600,8 +600,7 @@ std::expected<void, ConsensusError> FileRaftStorage::TrimLogThrough(LogIndex thr
 
     _log = OpenBinary(_logPath, "r+b");
     if (_log == nullptr)
-        return std::unexpected { Pace::StorageFailure(
-            std::format("cannot reopen {} after trimming", _logPath.string())) };
+        return std::unexpected { Pace::StorageFailure(std::format("cannot reopen {} after trimming", _logPath.string())) };
 
     if (auto scanned = ScanLog(nullptr); !scanned.has_value())
         return std::unexpected { scanned.error() };
@@ -695,8 +694,7 @@ std::expected<void, ConsensusError> FileRaftStorage::SaveLog(LogAppend const& ap
         auto error = std::error_code {};
         std::filesystem::resize_file(_logPath, start, error);
         if (error)
-            return std::unexpected { Pace::StorageFailure(
-                std::format("cannot truncate the log: {}", error.message())) };
+            return std::unexpected { Pace::StorageFailure(std::format("cannot truncate the log: {}", error.message())) };
 
         if (!FlushToDisk(_log))
             return std::unexpected { Pace::StorageFailure("cannot flush the truncated log") };

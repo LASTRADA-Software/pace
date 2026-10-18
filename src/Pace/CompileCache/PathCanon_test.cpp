@@ -50,8 +50,7 @@ TEST_CASE("A dependency root is a third token, localized on another machine's ow
                        .buildTree = "/srv/bob/fc/out/build/r",
                        .dependencyRoot = "/fixture/user-b/.cache/pace/cpm" };
 
-    auto const token =
-        PathCanon::Canonicalize("/fixture/user-a/.cache/pace/cpm/core-cpp/22c6/src/core/Log.hpp", alice);
+    auto const token = PathCanon::Canonicalize("/fixture/user-a/.cache/pace/cpm/core-cpp/22c6/src/core/Log.hpp", alice);
     CHECK(token == "<DEPROOT>/core-cpp/22c6/src/core/Log.hpp");
     CHECK(PathCanon::Localize(token, bob) == "/fixture/user-b/.cache/pace/cpm/core-cpp/22c6/src/core/Log.hpp");
 
@@ -67,8 +66,7 @@ TEST_CASE("A dependency root is a third token, localized on another machine's ow
     CHECK(PathCanon::Canonicalize("/w/fc/src/b.cpp", nested) == "<SRCROOT>/src/b.cpp");
 
     // It relates as a root does, so the launcher's classifier counts its headers as content.
-    CHECK(PathCanon::RelateToLayout("/fixture/user-a/.cache/pace/cpm/x/1/a.h", alice)
-          == PathCanon::RootRelation::Under);
+    CHECK(PathCanon::RelateToLayout("/fixture/user-a/.cache/pace/cpm/x/1/a.h", alice) == PathCanon::RootRelation::Under);
 
     // A layout naming no dependency root is the layout every server builds from a STORE
     // frame, and it canonicalizes exactly as it did -- the token is unreachable from it, and

@@ -61,8 +61,7 @@ class ScriptedNodes
     /// @param replies The bytes the socket reads back.
     void Serve(std::string endpoint, std::vector<std::byte> replies)
     {
-        _sockets.insert_or_assign(std::move(endpoint),
-                                  std::make_unique<Pace::Testing::ScriptedSocket>(std::move(replies)));
+        _sockets.insert_or_assign(std::move(endpoint), std::make_unique<Pace::Testing::ScriptedSocket>(std::move(replies)));
     }
 
     /// @return A dial over the scripted sockets.

@@ -223,20 +223,13 @@ static void AppendStorageMetrics(std::string& out, StorageStats const& stats)
     using enum MetricType;
 
     auto const table = std::array {
+        Metric { .name = "pace_cmd_get_total", .help = "GET commands processed.", .type = Counter, .value = stats.cmdGet },
         Metric {
-            .name = "pace_cmd_get_total", .help = "GET commands processed.", .type = Counter, .value = stats.cmdGet },
-        Metric { .name = "pace_cmd_set_total",
-                 .help = "SET-family commands processed.",
-                 .type = Counter,
-                 .value = stats.cmdSet },
-        Metric { .name = "pace_cmd_touch_total",
-                 .help = "TOUCH commands processed.",
-                 .type = Counter,
-                 .value = stats.cmdTouch },
-        Metric { .name = "pace_cmd_flush_total",
-                 .help = "FLUSH commands processed.",
-                 .type = Counter,
-                 .value = stats.cmdFlush },
+            .name = "pace_cmd_set_total", .help = "SET-family commands processed.", .type = Counter, .value = stats.cmdSet },
+        Metric {
+            .name = "pace_cmd_touch_total", .help = "TOUCH commands processed.", .type = Counter, .value = stats.cmdTouch },
+        Metric {
+            .name = "pace_cmd_flush_total", .help = "FLUSH commands processed.", .type = Counter, .value = stats.cmdFlush },
         Metric { .name = "pace_get_hits_total",
                  .help = "GET requests that found a live entry.",
                  .type = Counter,

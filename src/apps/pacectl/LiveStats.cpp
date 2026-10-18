@@ -67,8 +67,7 @@ namespace
     /// works. What is known is that the thing there speaks RESP and would not say what it
     /// is -- a Redis-compatible server that is not this project, or a pace-kv older
     /// than the question.
-    constexpr std::string_view RespButUnidentified =
-        "so this is not a pace-kv, or one too old to identify itself over 0xFC";
+    constexpr std::string_view RespButUnidentified = "so this is not a pace-kv, or one too old to identify itself over 0xFC";
 
     /// The subject an endpoint of @p kind is given when none is named.
     ///

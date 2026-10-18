@@ -524,8 +524,7 @@ TEST_CASE("A scratch root no mapping rule can name is reported once, and the rep
     SECTION("an ordinary root says nothing, and its rules are built")
     {
         CHECK(ScratchRootMappingWarnings("/tmp/pace-node/0").empty());
-        CHECK(
-            WorkerSourceNameRule(jobPath("/tmp/pace-node/0"), "../src/tu.cpp", DriverFamily::Gnu).has_value());
+        CHECK(WorkerSourceNameRule(jobPath("/tmp/pace-node/0"), "../src/tu.cpp", DriverFamily::Gnu).has_value());
     }
 
     SECTION("a root that cannot be spelled is named, and its rules are not built")
@@ -533,10 +532,8 @@ TEST_CASE("A scratch root no mapping rule can name is reported once, and the rep
         // A space is the reachable one -- `/Users/john doe/...` is an ordinary macOS
         // home -- and `=` is the rule's own separator, which the two drivers cut at
         // opposite ends.
-        auto const root = GENERATE(as<std::string> {},
-                                   "/Users/john doe/tmp/pace-node/0",
-                                   "/tmp/a=b/pace-node/0",
-                                   "/tmp/tab\there/pace-node/0");
+        auto const root = GENERATE(
+            as<std::string> {}, "/Users/john doe/tmp/pace-node/0", "/tmp/a=b/pace-node/0", "/tmp/tab\there/pace-node/0");
         INFO("scratch root: " << root);
 
         auto const warnings = ScratchRootMappingWarnings(root);

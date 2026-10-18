@@ -342,8 +342,7 @@ TEST_CASE("NodeConfig: --migrate-cache is a mode, and never reaches a service re
     auto const& cfg = *parsed;
     REQUIRE(cfg.migrateCache);
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& arg) { return FlagMatches(arg, "--migrate-cache"); }));
     // ...while the flag it acts ON is carried, since that one does describe the
     // running worker. Asserted alongside so this cannot pass by emitting nothing.
@@ -360,8 +359,7 @@ TEST_CASE("NodeConfig: --cordon is a mode, and never reaches a service registrat
     auto const& cfg = *parsed;
     REQUIRE(cfg.cordon == CordonCommand::Cordon);
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& arg) {
         return FlagMatches(arg, "--cordon") || FlagMatches(arg, "--uncordon");
     }));
@@ -555,8 +553,7 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
         if (option.explicitBit != nullptr)
             cfg.*option.explicitBit = true;
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
 
     for (auto const& option: NodeOptions())
     {
@@ -583,8 +580,8 @@ TEST_CASE("NodeConfig: a registered drain timeout is read back as the same lengt
         auto cfg = Installable();
         cfg.drainTimeout = length;
         cfg.drainTimeoutExplicit = true;
-        auto const reparsed = ReparseSpec(
-            MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe()));
+        auto const reparsed =
+            ReparseSpec(MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe()));
         REQUIRE(reparsed.has_value());
         CHECK(reparsed->drainTimeout == length);
         CHECK(reparsed->drainTimeoutExplicit);
@@ -599,8 +596,7 @@ TEST_CASE("NodeConfig: the credential is never written into a registration", "[n
     auto cfg = Installable();
     cfg.requirePass = "hunter2";
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
 
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& arg) { return arg.contains("hunter2"); }));
     CHECK(spec.inlineCredential == InlineCredential::Present);
@@ -618,8 +614,7 @@ TEST_CASE("NodeConfig: every toolchain is re-emitted", "[node][service]")
     auto cfg = Installable();
     cfg.toolchains = { "/usr/bin/g++", "/usr/bin/clang++", "deadbeef=/opt/gcc-13/bin/g++" };
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
 
     for (auto const& toolchain: cfg.toolchains)
     {
@@ -643,8 +638,8 @@ TEST_CASE("NodeConfig: several --scheduler values are kept in order, and no regi
     CHECK(parsed->schedulers == expected);
     CHECK(AdminTargetsOf(*parsed) == expected);
 
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& a) { return a.starts_with("--scheduler"); }));
 
     auto named = Installable();
@@ -1079,8 +1074,8 @@ TEST_CASE("NodeConfig: the daemon flag is carried apart from the arguments", "[n
     // is reaped instantly as "exited"; the Windows SCM needs the opposite. One
     // spec has to answer both, which is why the flag is a field rather than an
     // argument.
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
     CHECK(spec.daemonFlag == "--daemon");
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& arg) { return arg == "--daemon"; }));
@@ -1105,8 +1100,8 @@ TEST_CASE("NodeConfig: a system-scope job names an unprivileged account", "[node
     // unit already uses puts the platform's existing "that account does not
     // exist" guard in the way, so a macOS system-scope install refuses until the
     // package creates it rather than silently succeeding as root.
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
     CHECK(spec.serviceAccount == "pace-node");
 
@@ -1142,8 +1137,8 @@ TEST_CASE("NodeConfig: the worker's launchd label is what the packaging removes"
     // silence, which is the failure this assertion exists to prevent -- the
     // derivation itself (LaunchdLabelPrefix + the lowercased service name) is
     // already covered by ServiceControl_test.cpp.
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
     CHECK(LaunchdLabel(spec) == std::string_view { PACE_MACOS_NODE_LABEL });
 }
@@ -1156,8 +1151,8 @@ TEST_CASE("NodeConfig: the worker's registration survives its own parser", "[nod
     // `NodeOptions()` has `--config` and no `--storage` at all -- and the
     // installer used to fill both in from the daemon's defaults, because the
     // application name was hardcoded.
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
     // Since [#396](https://github.com/LASTRADA-Software/pace/issues/396) the
     // worker NAMES an application and accepts one default rather than none. Those
@@ -1175,10 +1170,8 @@ TEST_CASE("NodeConfig: the worker's registration survives its own parser", "[nod
     // which is the half that was missing while it lived inside the macOS block.
     for (auto const scope: { ServiceScope::User, ServiceScope::System })
     {
-        auto const filled = WithScopeDefaults(spec,
-                                              scope,
-                                              std::filesystem::path { "/Users/jo" },
-                                              std::filesystem::path { "/opt/pace/etc/pace-kv.yaml" });
+        auto const filled = WithScopeDefaults(
+            spec, scope, std::filesystem::path { "/Users/jo" }, std::filesystem::path { "/opt/pace/etc/pace-kv.yaml" });
 
         // Every argument must be one this binary's own parser accepts.
         for (auto const& argument: filled.arguments)
@@ -2094,8 +2087,7 @@ TEST_CASE("NodeConfig: a system-scope job owns the directories it was given", "[
     cfg.cacheDir = std::filesystem::path { "/var/cache/pace-node" };
     cfg.clusterDir = std::filesystem::path { "/var/lib/pace-node" };
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
 
     auto const privacyOf = [&spec](std::filesystem::path const& path) -> std::optional<PathPrivacy> {
         auto const* const owned = core::findOrNull(spec.ownedPaths, path, &OwnedPath::path);
@@ -2132,8 +2124,7 @@ TEST_CASE("NodeConfig: a system-scope job owns the directories it was given", "[
     auto const machineWide = MachineWideNodeClusterDirectory(Testing::InstallerPathProbe());
     REQUIRE(machineWide.has_value());
     // And Private, as a named --cluster-dir is: it holds the same key.
-    CHECK(MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, neither, Testing::InstallerPathProbe())
-              .ownedPaths
+    CHECK(MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, neither, Testing::InstallerPathProbe()).ownedPaths
           == std::vector<OwnedPath> { OwnedPath { .path = Unwrap(machineWide),
                                                   .privacy = PathPrivacy::Private,
                                                   .credentialFiles = { std::filesystem::path { NodeKeyFileName } } } });
@@ -2509,16 +2500,14 @@ TEST_CASE("NodeConfig: a reserve of zero is re-emitted, because zero is an answe
     cfg.toolchains = { "/usr/bin/g++" };
     cfg.reservedCores = 0;
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
     CHECK(std::ranges::contains(spec.arguments, std::string { "--reserve-cores=0" }));
 
     // And a configuration that never mentioned one emits nothing, so the class
     // default keeps applying rather than being frozen at install time.
     NodeConfig quiet = cfg;
     quiet.reservedCores.reset();
-    auto const quietSpec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, quiet, Testing::InstallerPathProbe());
+    auto const quietSpec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, quiet, Testing::InstallerPathProbe());
     CHECK_FALSE(std::ranges::any_of(quietSpec.arguments,
                                     [](std::string const& arg) { return FlagMatches(arg, "--reserve-cores"); }));
 }
@@ -3100,8 +3089,7 @@ TEST_CASE("A cache budget nobody set emits no flag, and a zero one does", "[node
     // must emit nothing and be re-derived on the machine the service runs on. That
     // matters more now the default follows host RAM: baking today's bytes into a
     // unit would freeze them across a memory upgrade or a VM resize.
-    auto const untouched =
-        MakeNodeServiceSpec("/usr/bin/pace-node", Installable(), Testing::InstallerPathProbe());
+    auto const untouched = MakeNodeServiceSpec("/usr/bin/pace-node", Installable(), Testing::InstallerPathProbe());
     CHECK(std::ranges::none_of(untouched.arguments, [](auto const& arg) { return arg.starts_with("--cache-memory"); }));
 
     auto off = Installable();
@@ -3202,8 +3190,7 @@ TEST_CASE("NodeConfig: a setting the operator pinned reaches the supervisor as p
 
     // Its converse, or "always emit it" would pass: a setting nobody named stays out
     // of the registration, so the machine's default is not frozen at install time.
-    auto const silent =
-        MakeNodeServiceSpec("/usr/bin/pace-node", named(Installable()), Testing::InstallerPathProbe());
+    auto const silent = MakeNodeServiceSpec("/usr/bin/pace-node", named(Installable()), Testing::InstallerPathProbe());
     for (auto const& option: NodeOptions())
     {
         if (option.explicitBit == nullptr)
@@ -3502,8 +3489,7 @@ TEST_CASE("NodeConfig: the lease rule permits every flag provenance now emits", 
     // And the registration really does carry them -- otherwise this case would pass
     // for the wrong reason, having asserted a rule permits flags that were never
     // emitted.
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
     CHECK(std::ranges::any_of(spec.arguments, [](std::string const& a) { return a.starts_with("--listen-node="); }));
     CHECK(std::ranges::any_of(spec.arguments, [](std::string const& a) { return a.starts_with("--cache-memory="); }));
 
@@ -3958,8 +3944,7 @@ TEST_CASE("NodeConfig: a registration carries the config path and not the file's
     // literal, which would be a POSIX string on a test that also runs on Windows.
     cfg.configPath = "node.yaml";
 
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe());
 
     std::error_code ec;
     auto const expected = std::filesystem::absolute(cfg.configPath, ec).string();
@@ -3982,8 +3967,8 @@ TEST_CASE("NodeConfig: a registration for a worker given no file names none", "[
     // start, which is what lets a package replace that file without touching the
     // registration. Emitting a resolved path instead would pin the service to
     // whatever the lookup found on the day somebody ran the installer.
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
     CHECK(std::ranges::none_of(spec.arguments, [](auto const& argument) { return argument.starts_with("--config="); }));
     CHECK(spec.configPath.empty());
@@ -4641,8 +4626,8 @@ TEST_CASE("NodeSecretFiles: the worker actually asks, and that is asserted", "[n
     // A source scan because `main.cpp` is in no test target. Full-line comments are
     // stripped first: a COMMENT is not a call site, and the call site here sits under
     // twenty lines of comment that name the very function being looked for.
-    std::ifstream source { std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps"
-                           / "pace-node" / "main.cpp" };
+    std::ifstream source { std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-node"
+                           / "main.cpp" };
     REQUIRE(source.is_open());
 
     std::string code;
@@ -6272,12 +6257,12 @@ TEST_CASE("NodeConfig: a registration replays --slots=0, and omits a count nobod
     // are opposite machines since #206: omitted is a worker sized from its hardware, and
     // zero is a node that runs none. A registration that dropped the zero would turn a
     // scheduler-only box into a worker at its first reboot.
-    auto const worker = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const worker =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
     CHECK_FALSE(std::ranges::any_of(worker.arguments, [](std::string const& arg) { return FlagMatches(arg, "--slots"); }));
 
-    auto const spec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, SchedulerOnly(), Testing::InstallerPathProbe());
+    auto const spec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, SchedulerOnly(), Testing::InstallerPathProbe());
     CHECK(std::ranges::contains(spec.arguments, std::string { "--slots=0" }));
 
     auto const reparsed = ReparseSpec(spec);
@@ -6581,15 +6566,13 @@ TEST_CASE("NodeConfig: --service-start reaches the spec and never the registered
 {
     auto const parsed = ParseNodeArgv({ "--install-service", "--service-start=manual" });
     REQUIRE(parsed.has_value());
-    auto const spec =
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, *parsed, Testing::InstallerPathProbe());
+    auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, *parsed, Testing::InstallerPathProbe());
     CHECK(spec.startMode == ServiceStart::Manual);
     CHECK(std::ranges::none_of(spec.arguments, [](std::string const& arg) { return FlagMatches(arg, "--service-start"); }));
 
     auto const defaulted = ParseNodeArgv({ "--install-service" });
     REQUIRE(defaulted.has_value());
-    CHECK(MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, *defaulted, Testing::InstallerPathProbe())
-              .startMode
+    CHECK(MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, *defaulted, Testing::InstallerPathProbe()).startMode
           == ServiceStart::Auto);
 }
 
@@ -7194,14 +7177,14 @@ TEST_CASE("NodeConfig: the compile ceilings are registered when typed and left t
     auto cfg = Installable();
     cfg.compileRequestMaxBytes = 512ULL * 1024 * 1024;
     cfg.compileInflightMaxBytes = 3ULL * 1024 * 1024 * 1024;
-    auto const reparsed = ReparseSpec(
-        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe()));
+    auto const reparsed =
+        ReparseSpec(MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, cfg, Testing::InstallerPathProbe()));
     REQUIRE(reparsed.has_value());
     CHECK(reparsed->compileRequestMaxBytes == cfg.compileRequestMaxBytes);
     CHECK(reparsed->compileInflightMaxBytes == cfg.compileInflightMaxBytes);
 
-    auto const quietSpec = MakeNodeServiceSpec(
-        std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
+    auto const quietSpec =
+        MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
     CHECK(std::ranges::none_of(quietSpec.arguments, [](std::string const& arg) {
         return FlagMatches(arg, "--compile-request-max") || FlagMatches(arg, "--compile-inflight-max");
     }));

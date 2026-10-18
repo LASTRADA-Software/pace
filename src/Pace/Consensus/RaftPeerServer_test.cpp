@@ -1415,13 +1415,13 @@ TEST_CASE("A peer that reset its queued connection does not take this node out o
         [&ended] { return ended; },
         [&listener] { return std::format("{} failed accept(s) answered", listener.failuresAnswered()); },
         Pace::Testing::WaitOptions { .step =
-                                              [&clock, &reactor] {
-                                                  reactor.drain();
-                                                  clock.advance(core::net::AcceptErrorPolicy::MaxBackoff);
-                                              },
-                                          .context = {},
-                                          .bound = Pace::Testing::WaitHangGuard,
-                                          .rest = Pace::Testing::WaitRest }));
+                                         [&clock, &reactor] {
+                                             reactor.drain();
+                                             clock.advance(core::net::AcceptErrorPolicy::MaxBackoff);
+                                         },
+                                     .context = {},
+                                     .bound = Pace::Testing::WaitHangGuard,
+                                     .rest = Pace::Testing::WaitRest }));
 
     std::vector<std::byte> replied;
     auto buffer = std::array<std::byte, 4096> {};

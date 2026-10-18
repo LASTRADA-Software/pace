@@ -26,18 +26,18 @@ namespace Pace::Testing
 struct ScmScript
 {
     std::filesystem::path executable { "C:/Program Files/Pace/bin/pace-kv.exe" }; ///< Empty: unknown.
-    std::optional<std::uint32_t> openManagerError {}; ///< `OpenSCManager`'s error, if it fails.
-    std::optional<std::uint32_t> createError {};      ///< `CreateService`'s error, if it fails.
-    std::optional<std::uint32_t> reapplyError {};     ///< Re-applying an existing registration's error, if it fails.
-    std::optional<std::uint32_t> openError {};        ///< `OpenService`'s error, if it fails.
-    std::optional<std::uint32_t> recoveryError {};    ///< The restart policy's error, if refused.
-    std::optional<std::uint32_t> nonCrashError {};    ///< The ordinary-failure flag's error, if refused.
-    std::optional<std::uint32_t> sidTypeError {};     ///< The service SID type's error, if refused.
-    std::size_t runningPolls { 0 };                   ///< How many status reads still answer "running".
-    std::optional<std::uint32_t> deleteError {};      ///< `DeleteService`'s error, if it fails.
-    std::optional<std::string> eventSourceDenial {};  ///< Why the event source could not be added.
-    std::optional<std::string> grantDenial {};        ///< Why a path could not be granted.
-    std::optional<std::string> secludeDenial {};      ///< Why a path could not be secluded.
+    std::optional<std::uint32_t> openManagerError {};                             ///< `OpenSCManager`'s error, if it fails.
+    std::optional<std::uint32_t> createError {};                                  ///< `CreateService`'s error, if it fails.
+    std::optional<std::uint32_t> reapplyError {};    ///< Re-applying an existing registration's error, if it fails.
+    std::optional<std::uint32_t> openError {};       ///< `OpenService`'s error, if it fails.
+    std::optional<std::uint32_t> recoveryError {};   ///< The restart policy's error, if refused.
+    std::optional<std::uint32_t> nonCrashError {};   ///< The ordinary-failure flag's error, if refused.
+    std::optional<std::uint32_t> sidTypeError {};    ///< The service SID type's error, if refused.
+    std::size_t runningPolls { 0 };                  ///< How many status reads still answer "running".
+    std::optional<std::uint32_t> deleteError {};     ///< `DeleteService`'s error, if it fails.
+    std::optional<std::string> eventSourceDenial {}; ///< Why the event source could not be added.
+    std::optional<std::string> grantDenial {};       ///< Why a path could not be granted.
+    std::optional<std::string> secludeDenial {};     ///< Why a path could not be secluded.
 };
 
 /// The Windows service manager, scripted: every call answers what `ScmScript` says and is

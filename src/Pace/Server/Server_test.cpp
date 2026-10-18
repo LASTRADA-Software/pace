@@ -72,60 +72,60 @@ class ThrowOnGetStorage final: public Pace::IStorage
 {
   public:
     std::expected<Pace::GetResult, Pace::StorageError> Get(std::string_view /*key*/,
-                                                                     core::platform::SteadyTimePoint /*now*/) override
+                                                           core::platform::SteadyTimePoint /*now*/) override
     {
         throw std::bad_alloc {};
     }
     std::expected<Pace::CasToken, Pace::StorageError> Set(std::string_view key,
-                                                                    std::vector<std::byte> value,
-                                                                    std::uint32_t flags,
-                                                                    core::platform::SteadyTimePoint expiry) override
+                                                          std::vector<std::byte> value,
+                                                          std::uint32_t flags,
+                                                          core::platform::SteadyTimePoint expiry) override
     {
         return _inner.Set(key, std::move(value), flags, expiry);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Add(std::string_view key,
-                                                                    std::vector<std::byte> value,
-                                                                    std::uint32_t flags,
-                                                                    core::platform::SteadyTimePoint expiry,
-                                                                    core::platform::SteadyTimePoint now) override
+                                                          std::vector<std::byte> value,
+                                                          std::uint32_t flags,
+                                                          core::platform::SteadyTimePoint expiry,
+                                                          core::platform::SteadyTimePoint now) override
     {
         return _inner.Add(key, std::move(value), flags, expiry, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Replace(std::string_view key,
-                                                                        std::vector<std::byte> value,
-                                                                        std::uint32_t flags,
-                                                                        core::platform::SteadyTimePoint expiry,
-                                                                        core::platform::SteadyTimePoint now) override
+                                                              std::vector<std::byte> value,
+                                                              std::uint32_t flags,
+                                                              core::platform::SteadyTimePoint expiry,
+                                                              core::platform::SteadyTimePoint now) override
     {
         return _inner.Replace(key, std::move(value), flags, expiry, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Append(std::string_view key,
-                                                                       std::span<std::byte const> suffix,
-                                                                       Pace::CasToken expected,
-                                                                       core::platform::SteadyTimePoint now) override
+                                                             std::span<std::byte const> suffix,
+                                                             Pace::CasToken expected,
+                                                             core::platform::SteadyTimePoint now) override
     {
         return _inner.Append(key, suffix, expected, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Prepend(std::string_view key,
-                                                                        std::span<std::byte const> prefix,
-                                                                        Pace::CasToken expected,
-                                                                        core::platform::SteadyTimePoint now) override
+                                                              std::span<std::byte const> prefix,
+                                                              Pace::CasToken expected,
+                                                              core::platform::SteadyTimePoint now) override
     {
         return _inner.Prepend(key, prefix, expected, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> CompareAndSwap(std::string_view key,
-                                                                               Pace::CasToken expected,
-                                                                               std::vector<std::byte> value,
-                                                                               std::uint32_t flags,
-                                                                               core::platform::SteadyTimePoint expiry,
-                                                                               core::platform::SteadyTimePoint now) override
+                                                                     Pace::CasToken expected,
+                                                                     std::vector<std::byte> value,
+                                                                     std::uint32_t flags,
+                                                                     core::platform::SteadyTimePoint expiry,
+                                                                     core::platform::SteadyTimePoint now) override
     {
         return _inner.CompareAndSwap(key, expected, std::move(value), flags, expiry, now);
     }
     std::expected<IncrResult, Pace::StorageError> IncrementOrInitialize(std::string_view key,
-                                                                             std::uint64_t magnitude,
-                                                                             bool decrement,
-                                                                             core::platform::SteadyTimePoint now) override
+                                                                        std::uint64_t magnitude,
+                                                                        bool decrement,
+                                                                        core::platform::SteadyTimePoint now) override
     {
         return _inner.IncrementOrInitialize(key, magnitude, decrement, now);
     }
@@ -134,20 +134,19 @@ class ThrowOnGetStorage final: public Pace::IStorage
         return _inner.Delete(key, now);
     }
     std::expected<Pace::CasToken, Pace::StorageError> Touch(std::string_view key,
-                                                                      core::platform::SteadyTimePoint newExpiry,
-                                                                      core::platform::SteadyTimePoint now) override
+                                                            core::platform::SteadyTimePoint newExpiry,
+                                                            core::platform::SteadyTimePoint now) override
     {
         return _inner.Touch(key, newExpiry, now);
     }
     std::expected<Pace::GetResult, Pace::StorageError> Peek(std::string_view key,
-                                                                      core::platform::SteadyTimePoint now) override
+                                                            core::platform::SteadyTimePoint now) override
     {
         return _inner.Peek(key, now);
     }
-    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(
-        std::string_view key,
-        std::optional<core::platform::SteadyTimePoint> newExpiry,
-        core::platform::SteadyTimePoint now) override
+    std::expected<Pace::CasToken, Pace::StorageError> MarkStale(std::string_view key,
+                                                                std::optional<core::platform::SteadyTimePoint> newExpiry,
+                                                                core::platform::SteadyTimePoint now) override
     {
         return _inner.MarkStale(key, newExpiry, now);
     }
@@ -183,8 +182,7 @@ constexpr std::string_view TestSurface = "cache 127.0.0.1:11211";
 // collaborator as `core::net::AcceptLoopHealth* = nullptr`, so a construction site that left the registry out
 // compiled, and its loop's end reached no `/healthz` at all. A constructor that can be called
 // without either brings that back, and fails here rather than in a review.
-static_assert(
-    !std::is_constructible_v<Pace::Server, core::net::IListener&, Pace::CacheEngine&, Pace::ILogger&>);
+static_assert(!std::is_constructible_v<Pace::Server, core::net::IListener&, Pace::CacheEngine&, Pace::ILogger&>);
 static_assert(!std::is_constructible_v<Pace::Server,
                                        core::net::IListener&,
                                        Pace::CacheEngine&,
@@ -236,15 +234,15 @@ TEST_CASE("Server with LogSource::Yes prefixes connection logs with the client I
     core::net::testing::InMemoryListener listener;
     core::net::AcceptLoopHealth acceptLoops;
     Pace::Server server { listener,
-                               engine,
-                               logger,
-                               acceptLoops,
-                               std::string { TestSurface },
-                               nullptr,
-                               nullptr,
-                               Pace::SessionContext {},
-                               nullptr,
-                               Pace::LogSource::Yes };
+                          engine,
+                          logger,
+                          acceptLoops,
+                          std::string { TestSurface },
+                          nullptr,
+                          nullptr,
+                          Pace::SessionContext {},
+                          nullptr,
+                          Pace::LogSource::Yes };
 
     auto client = listener.connectClient(/*maxBytesInFlight*/ 0, /*peerAddress*/ "203.0.113.7");
     REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value()); // EOF with no bytes -> autodetect fails -> Debug log
@@ -270,15 +268,15 @@ TEST_CASE("Server with LogSource::Yes prefixes the storage trace line with the c
     core::net::testing::InMemoryListener listener;
     core::net::AcceptLoopHealth acceptLoops;
     Pace::Server server { listener,
-                               engine,
-                               logger,
-                               acceptLoops,
-                               std::string { TestSurface },
-                               nullptr,
-                               nullptr,
-                               Pace::SessionContext {},
-                               nullptr,
-                               Pace::LogSource::Yes };
+                          engine,
+                          logger,
+                          acceptLoops,
+                          std::string { TestSurface },
+                          nullptr,
+                          nullptr,
+                          Pace::SessionContext {},
+                          nullptr,
+                          Pace::LogSource::Yes };
 
     auto client = listener.connectClient(/*maxBytesInFlight*/ 0, /*peerAddress*/ "203.0.113.7");
     REQUIRE(core::async::syncRun(Send(client.get(), "set foo 0 0 5\r\nhello\r\nget foo\r\n")));
@@ -307,9 +305,7 @@ TEST_CASE("Server without --log-source leaves the storage trace line unprefixed"
     Pace::CacheEngine engine { storage, clock };
     core::net::testing::InMemoryListener listener;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::Server server {
-        listener, engine, logger, acceptLoops, std::string { TestSurface }
-    }; // LogSource defaults to No
+    Pace::Server server { listener, engine, logger, acceptLoops, std::string { TestSurface } }; // LogSource defaults to No
 
     auto client = listener.connectClient(/*maxBytesInFlight*/ 0, /*peerAddress*/ "203.0.113.7");
     REQUIRE(core::async::syncRun(Send(client.get(), "set foo 0 0 5\r\nhello\r\nget foo\r\n")));
@@ -339,7 +335,7 @@ TEST_CASE("Server: non-data commands are logged only under --log-everything", "[
         session.logEverything = logEverything;
         core::net::AcceptLoopHealth acceptLoops;
         Pace::Server server { listener, engine,  logger,  acceptLoops, std::string { TestSurface },
-                                   nullptr,  nullptr, session, nullptr,     Pace::LogSource::Yes };
+                              nullptr,  nullptr, session, nullptr,     Pace::LogSource::Yes };
 
         auto client = listener.connectClient(/*maxBytesInFlight*/ 0, /*peerAddress*/ "203.0.113.7");
         REQUIRE(core::async::syncRun(Send(client.get(), "version\r\nset foo 0 0 5\r\nhello\r\n")));
@@ -378,15 +374,15 @@ TEST_CASE("Server: command logging is silent at the default Info level", "[serve
     core::net::testing::InMemoryListener listener;
     core::net::AcceptLoopHealth acceptLoops;
     Pace::Server server { listener,
-                               engine,
-                               logger,
-                               acceptLoops,
-                               std::string { TestSurface },
-                               nullptr,
-                               nullptr,
-                               Pace::SessionContext {},
-                               nullptr,
-                               Pace::LogSource::Yes };
+                          engine,
+                          logger,
+                          acceptLoops,
+                          std::string { TestSurface },
+                          nullptr,
+                          nullptr,
+                          Pace::SessionContext {},
+                          nullptr,
+                          Pace::LogSource::Yes };
 
     auto client = listener.connectClient(/*maxBytesInFlight*/ 0, /*peerAddress*/ "203.0.113.7");
     REQUIRE(core::async::syncRun(Send(client.get(), "set foo 0 0 5\r\nhello\r\nget foo\r\n")));
@@ -408,9 +404,7 @@ TEST_CASE("Server with LogSource::No leaves connection logs unprefixed", "[serve
     Pace::CapturingLogger logger;
     core::net::testing::InMemoryListener listener;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::Server server {
-        listener, engine, logger, acceptLoops, std::string { TestSurface }
-    }; // LogSource defaults to No
+    Pace::Server server { listener, engine, logger, acceptLoops, std::string { TestSurface } }; // LogSource defaults to No
 
     auto client = listener.connectClient(/*maxBytesInFlight*/ 0, /*peerAddress*/ "203.0.113.7");
     REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
@@ -465,9 +459,7 @@ TEST_CASE("Server: a refusal over a request the connection did not finish readin
     Pace::SessionContext session {};
     session.maxPayloadBytes = 1024;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::Server server {
-        listener, engine, logger, acceptLoops, std::string { TestSurface }, nullptr, nullptr, session
-    };
+    Pace::Server server { listener, engine, logger, acceptLoops, std::string { TestSurface }, nullptr, nullptr, session };
 
     auto client = listener.connectClient();
     std::string const value(4096, 'x');
@@ -499,8 +491,7 @@ TEST_CASE("Server: a lingering connection holds its admission slot until it clos
     session.maxPayloadBytes = 1024;
     session.reactor = &reactor;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::Server server { listener,   engine,  logger, acceptLoops, std::string { TestSurface },
-                               &admission, nullptr, session };
+    Pace::Server server { listener, engine, logger, acceptLoops, std::string { TestSurface }, &admission, nullptr, session };
 
     auto client = listener.connectClient();
     std::string const value(4096, 'x');
@@ -643,7 +634,7 @@ TEST_CASE("Server: ConnectionsTotalTls / ConnectionsAdmissionRejectedTls bumped 
     Pace::AtomicMetricsSink metrics;
     core::net::AcceptLoopHealth acceptLoops;
     Pace::Server server { listener,   engine,   logger,         acceptLoops,     std::string { TestSurface },
-                               &admission, &metrics, /*session*/ {}, tlsContext.get() };
+                          &admission, &metrics, /*session*/ {}, tlsContext.get() };
 
     auto c1 = listener.connectClient();
     auto c2 = listener.connectClient();

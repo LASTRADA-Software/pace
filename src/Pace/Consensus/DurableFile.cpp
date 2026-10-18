@@ -229,8 +229,7 @@ std::expected<std::optional<std::vector<std::byte>>, ConsensusError> ReadFileIfP
     auto error = std::error_code {};
     auto const present = std::filesystem::exists(path, error);
     if (error)
-        return std::unexpected { Pace::StorageFailure(
-            std::format("cannot stat {}: {}", path.string(), error.message())) };
+        return std::unexpected { Pace::StorageFailure(std::format("cannot stat {}: {}", path.string(), error.message())) };
 
     // A file that is not there is not a failure, and not an empty file either: which of
     // the two it is belongs to the caller, who knows what an absent file means.
@@ -239,8 +238,7 @@ std::expected<std::optional<std::vector<std::byte>>, ConsensusError> ReadFileIfP
 
     auto const size = std::filesystem::file_size(path, error);
     if (error)
-        return std::unexpected { Pace::StorageFailure(
-            std::format("cannot size {}: {}", path.string(), error.message())) };
+        return std::unexpected { Pace::StorageFailure(std::format("cannot size {}: {}", path.string(), error.message())) };
 
     auto opened = OpenForReading(path);
     if (!opened.has_value())
