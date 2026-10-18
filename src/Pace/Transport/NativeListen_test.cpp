@@ -188,7 +188,7 @@ TEST_CASE("BindAndListen keeps its address to itself while it is listening", "[n
     // A listening address is not shareable, and saying so takes a different option on each
     // platform. POSIX SO_REUSEADDR only lets a bind step over a TIME_WAIT left by a DEAD socket;
     // Windows SO_REUSEADDR lets a second socket bind an address a LIVE one already holds -- so
-    // setting it there let any process on the box take the port fastcached was already serving
+    // setting it there let any process on the box take the port pace-kv was already serving
     // (#85). Both sides go through BindAndListen: that is the production shape, and it is the
     // option BindAndListen sets that has to refuse it.
     auto held = BindLoopback(0);
@@ -525,7 +525,7 @@ TEST_CASE("An armed listener's accept wakes on its own poll, with nobody connect
 
 TEST_CASE("A socket this process owns is not handed to the children it spawns", "[net][listener]")
 {
-    // `fastcache-compile-node` accepts connections and spawns a compiler for every job, so a
+    // `pace-node` accepts connections and spawns a compiler for every job, so a
     // socket a child inherits is a client connection that stays open for as long as an unrelated
     // compile runs. `ApplyHotSocketOptions` is what every socket `BlockingListener` accepts
     // passes through.

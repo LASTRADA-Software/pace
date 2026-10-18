@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# When a version-mismatched `fastcache-cc` hands the build to somebody else, the
+# When a version-mismatched `pace-cc` hands the build to somebody else, the
 # operator is told so — and told what took over — in one place, checked as a pure
 # computation over the combinations a configure cannot be made to produce.
 #
@@ -21,7 +21,7 @@
 #
 # ## Why a pure function
 #
-# Producing the situation for real needs a `fastcache-cc` and a `fastcached` whose
+# Producing the situation for real needs a `pace-cc` and a `pace-kv` whose
 # WIRE VERSIONS disagree, both installed, with the daemon answering — and then an
 # MSVC-family compiler for the caveat to exist at all, which this host does not
 # have. That is not a fixture; it is a second machine and a downgrade. So the
@@ -93,17 +93,17 @@ set(_quiet 0)
 # No ';' in any field: the row LIST splits on it before `fastcached_row_fields`
 # ever runs. '|' in the LAST field is fine -- that is what the house splitter buys.
 set(_rows
-    "rejected (unsupported-version)|unsupported-version|fastcache-cc|sccache|yes|yes|the whole ticket: a reason that predicts, into a winner that carries the hazard"
-    "rejected (unsupported-version)|unsupported-version|fastcache-cc|ccache|yes|yes|winner-agnostic: any winner carrying a caveat gets the same treatment"
-    "rejected (unsupported-version)|unsupported-version|fastcache-cc|ccache|no|yes|#815: a SAFE replacement is still a build not using the cache it was told it had"
-    "rejected (unsupported-version)|unsupported-version|fastcache-cc|sccache|no|yes|the same, whichever launcher carries no hazard on this compiler"
-    "rejected (unsupported-version)|unsupported-version|fastcache-cc||no|yes|#815, loudest case: nothing replaced it, so the build compiles uncached"
-    "no answer within 10s|unsupported-version|fastcache-cc|sccache|yes|no|no daemon answered -- predicts nothing about versions"
-    "probe compile failed (1)|unsupported-version|fastcache-cc|sccache|yes|no|a broken probe is not a version mismatch"
-    "not caching (uncacheable)|unsupported-version|fastcache-cc|sccache|yes|no|a deliberately uncacheable probe says nothing about the daemon"
-    "rejected (unsupported-version)||fastcache-cc|sccache|yes|no|a row that declares no prediction stays silent whatever its reason"
-    "|unsupported-version|fastcache-cc|sccache|yes|no|nothing was rejected at all"
-    "no answer within 10s|unsupported-version|fastcache-cc||yes|no|and no winner does not make a non-predicting reason worth saying"
+    "rejected (unsupported-version)|unsupported-version|pace-cc|sccache|yes|yes|the whole ticket: a reason that predicts, into a winner that carries the hazard"
+    "rejected (unsupported-version)|unsupported-version|pace-cc|ccache|yes|yes|winner-agnostic: any winner carrying a caveat gets the same treatment"
+    "rejected (unsupported-version)|unsupported-version|pace-cc|ccache|no|yes|#815: a SAFE replacement is still a build not using the cache it was told it had"
+    "rejected (unsupported-version)|unsupported-version|pace-cc|sccache|no|yes|the same, whichever launcher carries no hazard on this compiler"
+    "rejected (unsupported-version)|unsupported-version|pace-cc||no|yes|#815, loudest case: nothing replaced it, so the build compiles uncached"
+    "no answer within 10s|unsupported-version|pace-cc|sccache|yes|no|no daemon answered -- predicts nothing about versions"
+    "probe compile failed (1)|unsupported-version|pace-cc|sccache|yes|no|a broken probe is not a version mismatch"
+    "not caching (uncacheable)|unsupported-version|pace-cc|sccache|yes|no|a deliberately uncacheable probe says nothing about the daemon"
+    "rejected (unsupported-version)||pace-cc|sccache|yes|no|a row that declares no prediction stays silent whatever its reason"
+    "|unsupported-version|pace-cc|sccache|yes|no|nothing was rejected at all"
+    "no answer within 10s|unsupported-version|pace-cc||yes|no|and no winner does not make a non-predicting reason worth saying"
 )
 
 foreach(_row IN LISTS _rows)
@@ -198,7 +198,7 @@ endforeach()
 file(READ "${_module}" _moduleText)
 if(NOT _moduleText MATCHES "set\\(_fc_cache_fastcache_cc_predicts \"([^\"]*)\"\\)")
     message(FATAL_ERROR
-        "check-version-fallback-warning: could not find fastcache-cc's `predicts` column in "
+        "check-version-fallback-warning: could not find pace-cc's `predicts` column in "
         "${_module}. Either it was renamed or the column is gone, and this check now proves "
         "nothing about what the module actually declares.")
 endif()
@@ -226,7 +226,7 @@ endif()
 # "no answer", which is the alarm nobody reads -- and no row above can see it,
 # because they supply their own pattern.
 _fc_cache_rejection_warning(
-    "no answer within 10s" "${_declared}" "fastcache-cc" "sccache" "${_caveat}" "${_detail}" _wide)
+    "no answer within 10s" "${_declared}" "pace-cc" "sccache" "${_caveat}" "${_detail}" _wide)
 if(NOT _wide STREQUAL "")
     message(FATAL_ERROR
         "check-version-fallback-warning: the declared pattern '${_declared}' also matches a "

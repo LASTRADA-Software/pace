@@ -37,7 +37,7 @@
 # **A `static_cast<...>(x)` near an `EnumeratorCount<` is NOT refused, and that was measured
 # rather than assumed.** The obvious third pattern matches six sites in this tree and every
 # one of them is legitimate -- `static_cast<std::size_t>(raw) >= EnumeratorCount<E>` in
-# `Consensus/RaftTypes.hpp` and `apps/fastcache-cc/Stats.cpp`, which are BOUNDS CHECKS on a
+# `Consensus/RaftTypes.hpp` and `apps/pace-cc/Stats.cpp`, which are BOUNDS CHECKS on a
 # value arriving off a wire, not walks. A check on that pattern would refuse correct code,
 # which is why shape 2 requires `for`/`while` on the line: `>=` is a range test and `<` in an
 # `if` may be one too.

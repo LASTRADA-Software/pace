@@ -83,13 +83,13 @@ struct RefusalRegion
 /// A file, an anchor or a routed call that is not found is a FAILURE, never a skip: a scan matching
 /// nothing is the failure a consistency check must not have.
 constexpr std::array Regions {
-    RefusalRegion { .file = "src/apps/fastcache-compile-node/main.cpp",
+    RefusalRegion { .file = "src/apps/pace-node/main.cpp",
                     .from = "ParseNodeCommandLine(argvSpan",
                     .to = "host->Run(",
                     .bare = "return EXIT_FAILURE;",
                     .coded = "return ExitCodeFor(",
                     .routed = "RefuseStart(" },
-    RefusalRegion { .file = "src/apps/fastcached/main.cpp",
+    RefusalRegion { .file = "src/apps/pace-kv/main.cpp",
                     .from = "ParseCliInto(args, cli)",
                     .to = "host->Run(",
                     .bare = "return EXIT_FAILURE;",
@@ -259,8 +259,8 @@ TEST_CASE("Every daemonizing main asks its service host to wait for serving and 
         std::string_view marks; ///< How this binary tells the host it serves.
     };
     constexpr std::array Wirings {
-        Wiring { .file = "src/apps/fastcache-compile-node/main.cpp", .marks = "DaemonControls::Instance().MarkServing()" },
-        Wiring { .file = "src/apps/fastcached/main.cpp", .marks = "serverOpts.onServing" },
+        Wiring { .file = "src/apps/pace-node/main.cpp", .marks = "DaemonControls::Instance().MarkServing()" },
+        Wiring { .file = "src/apps/pace-kv/main.cpp", .marks = "serverOpts.onServing" },
     };
     for (auto const& wiring: Wirings)
     {

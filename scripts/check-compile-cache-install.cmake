@@ -42,8 +42,8 @@ cmake_minimum_required(VERSION 3.28)
 # for platforms this oracle has not learned about yet, and on such a host there
 # is simply nothing here to compare against.
 set(FastCachedInstallOracle
-    "Linux|x86_64|Linux-x86_64|usr/bin/fastcache-cc"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/fastcache-cc"
+    "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc"
+    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc"
 )
 
 # The version the mirror publishes. Deliberately not a version that exists, so a
@@ -95,7 +95,7 @@ foreach(row IN LISTS FastCachedInstallOracle)
     endif()
 endforeach()
 if(NOT platform)
-    message("SKIP: no published fastcache-cc is expected for "
+    message("SKIP: no published pace-cc is expected for "
             "${CMAKE_HOST_SYSTEM_NAME}-${hostProcessor}, so there is nothing to install")
     return()
 endif()
@@ -112,7 +112,7 @@ set(payloadRoot "${FASTCACHED_SCRATCH_DIR}/payload")
 get_filename_component(memberDir "${payloadRoot}/${stem}/${member}" DIRECTORY)
 file(MAKE_DIRECTORY "${memberDir}")
 file(WRITE "${payloadRoot}/${stem}/${member}"
-     "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fastcache-cc ${mirrorVersion}'; exit 0; fi\nexit 3\n")
+     "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'pace-cc ${mirrorVersion}'; exit 0; fi\nexit 3\n")
 file(CHMOD "${payloadRoot}/${stem}/${member}"
      PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
@@ -174,7 +174,7 @@ if(NOT configureResult EQUAL 0)
     list(APPEND violations "configure failed (${configureResult})")
 endif()
 
-string(FIND "${output}" "Auto-installed fastcache-cc" announced)
+string(FIND "${output}" "Auto-installed pace-cc" announced)
 if(announced EQUAL -1)
     list(APPEND violations "the install was never announced")
 endif()
@@ -183,7 +183,7 @@ endif()
 # version and the platform are both in the path so that one shared staging
 # directory can serve several of each, and a layout that quietly lost either
 # would still glob just fine.
-set(expected "${stageDir}/${mirrorVersion}/${platform}/fastcache-cc")
+set(expected "${stageDir}/${mirrorVersion}/${platform}/pace-cc")
 if(NOT EXISTS "${expected}")
     file(GLOB_RECURSE staged "${stageDir}/*")
     list(APPEND violations "expected the launcher at ${expected}, found [${staged}]")
@@ -197,7 +197,7 @@ else()
     if(NOT stagedResult EQUAL 0)
         # Chiefly: it must have been made executable on the way in.
         list(APPEND violations "the staged launcher does not run (${stagedResult})")
-    elseif(NOT stagedOutput STREQUAL "fastcache-cc ${mirrorVersion}")
+    elseif(NOT stagedOutput STREQUAL "pace-cc ${mirrorVersion}")
         list(APPEND violations "the staged launcher answered '${stagedOutput}'")
     endif()
 endif()

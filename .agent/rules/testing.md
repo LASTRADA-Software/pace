@@ -249,11 +249,11 @@ the one remedy that cannot work.
 
 `run-launcher-e2e.ps1` bound the constant `21714` and nothing reaped the daemon when
 a run did not reach its cleanup — a ctest interrupted, a test killed by a timeout, a
-build cancelled mid-suite. `fastcached.exe` then listened for as long as the machine
+build cancelled mid-suite. `pace-kv.exe` then listened for as long as the machine
 was up and **every later run** failed at
 
 ```
-fastcached exited immediately (exit 1)
+pace-kv exited immediately (exit 1)
 ```
 
 which names neither the port nor the process and reads exactly like a daemon that
@@ -967,7 +967,7 @@ and what got it there is worth keeping:
     test reach for `UniqueScratchPath`, and a seventh author will reach for whatever
     looks random. `ctest -R unique-temp-paths`.
 - **The fifth one happened because the shared fix was somewhere it could not be
-  included from.** `UniqueScratchPath` lived in `src/apps/fastcache-cc/`, which
+  included from.** `UniqueScratchPath` lived in `src/apps/pace-cc/`, which
   `PaceTest` does not have on its include path, so the one suite that could
   not reach it re-derived it. A helper is shared only if it sits where everything
   that needs it can include from; `src` is on all three test targets' paths, which
@@ -1605,14 +1605,14 @@ argues against.
 **Which CMakeLists registers a script-driven test is load-bearing, not filing.**
 `src/apps` walks its app table *in order*, so a test registered beside one binary
 cannot name a binary that comes later in that table: at the point
-`src/apps/fastcache-cc` is configured, `fastcache-compile-node` is not a target
+`src/apps/pace-cc` is configured, `pace-node` is not a target
 yet, and a `$<TARGET_FILE:>` guard on it does not fail — it silently skips the
 test, forever, with one `message(STATUS)` in a configure log nobody reads.
 `src/tests` is added *after* `src/apps`, so every target exists by the time it
 runs. That is why `dist-compile-e2e` lives there, and the general rule is that a
 script-driven test naming more than one executable belongs in `src/tests`
 regardless of which binary it feels closest to. (`compile-cache-e2e` predates the
-rule and names only `fastcached`, which the table happens to reach first.)
+rule and names only `pace-kv`, which the table happens to reach first.)
 
 `dist-compile-e2e` additionally allocates its ports per run rather than fixing
 them. It needs four, and four more fixed ports is four more ways to collide with
@@ -2146,8 +2146,8 @@ skipped. It is a hard error at GENERATE time**, so the whole configure fails:
 
 ```
 CMake Error at src/tests/CMakeLists.txt:943 (add_test):
-  Error evaluating generator expression: $<TARGET_FILE:fastcached>
-  No target "fastcached"
+  Error evaluating generator expression: $<TARGET_FILE:pace-kv>
+  No target "pace-kv"
 ```
 
 That is #390. A block registering a test that starts a binary is guarded on
@@ -2163,7 +2163,7 @@ checkout without sccache installed never reaches the broken reference and the fl
 appears to work. The error then names CMake rather than the option, on some
 machines and not others — so the natural conclusion is "my checkout is broken".
 
-And the rule was already written down. `src/apps/fastcache-cc/CMakeLists.txt`
+And the rule was already written down. `src/apps/pace-cc/CMakeLists.txt`
 spells it out in four lines directly above the block that obeys it, while two
 blocks one directory away did not. A rule one file explains and another ignores is
 a rule that needs a check, not a better comment: `ctest -R target-file-guards`
@@ -2945,7 +2945,7 @@ green Linux run is not evidence about it.
 
 <!-- agent-tripwire: A fixture handed a launcher records ONLY into its run's own state directory -->
 
-The launcher records every invocation in `<state>/fastcache-cc/invocations.log`, and
+The launcher records every invocation in `<state>/pace-cc/invocations.log`, and
 `-z` / `--zero-stats` DELETES that file. `<state>` is the DEVELOPER's — `%LOCALAPPDATA%` on
 Windows, `$XDG_STATE_HOME` or `$HOME/.local/state` elsewhere — unless the fixture says
 otherwise. The Windows launcher e2e (`run-launcher-e2e.ps1`) did not: every run deleted
@@ -2954,8 +2954,8 @@ them. Three more fixtures appended without deleting. Nothing looked wrong from i
 of them — the result was right, and only somebody else's file had changed. The POSIX twin
 had exported `XDG_STATE_HOME` all along, which is why nobody noticed the Windows one.
 
-So a fixture handed a launcher — `$<TARGET_FILE:fastcache-cc>` (or any
-`$<TARGET_FILE…:fastcache-cc>`) on its registration, directly or through a variable
+So a fixture handed a launcher — `$<TARGET_FILE:pace-cc>` (or any
+`$<TARGET_FILE…:pace-cc>`) on its registration, directly or through a variable
 carrying it, or a launcher parameter it declares — goes through ONE seam, **entered before
 the launcher first runs**: `Enter-E2ELauncherState` in `scripts/lib/E2EEnvironment.psm1`,
 or `e2e_launcher_state_enter` in `scripts/lib/e2e-common.sh`. Never a variable exported by
@@ -3062,7 +3062,7 @@ or a carrier variable outside an `add_test`/`set` it can read, a block it cannot
 registration naming no script, a script declaring no launcher parameter, a bash fixture
 calling no `e2e_begin`. Carriers are followed to a fixpoint, across files, and a census
 that found no fixture is a failure. It fails OPEN where a registration reaches the launcher
-without naming `$<TARGET_FILE…:fastcache-cc>` or a carrier — a path spelled from the build
+without naming `$<TARGET_FILE…:pace-cc>` or a carrier — a path spelled from the build
 tree's layout, a `find_program` of its own — and nothing catches that. It also holds the
 two readers to one answer per platform. `launcher-state-isolation-selftest` (`--self-test`)
 is the check's proof that it can fail: a planted tree that must earn every verdict, and

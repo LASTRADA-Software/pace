@@ -77,7 +77,7 @@ namespace Detail
 ///
 /// It then happened a FIFTH time, in `RaftStorage_test.cpp`, and that occurrence
 /// is why this header lives here rather than beside the launcher's tests. The
-/// shared version sat under `src/apps/fastcache-cc/`, which the library test
+/// shared version sat under `src/apps/pace-cc/`, which the library test
 /// binary does not have on its include path -- so the one test suite that could
 /// not reach it re-derived it, counter and all, and ten of its cases failed
 /// under `ctest -j 8`. A helper is only shared if it is somewhere everything

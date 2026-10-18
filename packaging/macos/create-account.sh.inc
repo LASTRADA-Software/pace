@@ -42,7 +42,7 @@ fastcached_create_account() {
             | /usr/bin/awk '{ used[$NF] = 1 }
                             END { for (id = 200; id <= 400; id++) if (!(id in used)) { print id; exit } }')
         if [ -z "${_fc_next_id:-}" ]; then
-            echo "fastcached: no free id in 200..400 for the '${_fc_account}' account" >&2
+            echo "pace-kv: no free id in 200..400 for the '${_fc_account}' account" >&2
             return 0
         fi
 
@@ -69,7 +69,7 @@ fastcached_create_account() {
     fi
 
     # dscl returns before the record is resolvable through getpwnam(3), which is
-    # what launchd -- and fastcached's own pre-flight check -- actually use. Wait
+    # what launchd -- and pace-kv's own pre-flight check -- actually use. Wait
     # instead of racing: an unresolvable UserName leaves launchd registering the job
     # and then never spawning it, with no error anywhere.
     #
@@ -95,7 +95,7 @@ fastcached_create_account() {
     # with a service whose state directory and config it does not own, which is
     # the state --install-service refuses; the ids are the better bet.
     /usr/bin/id -u "$_fc_account" >/dev/null 2>&1 \
-        || echo "fastcached: '${_fc_account}' is not resolvable via getpwnam after account creation" >&2
+        || echo "pace-kv: '${_fc_account}' is not resolvable via getpwnam after account creation" >&2
 
     # Numeric ids, read straight from the records just written. Name lookups go
     # through the DirectoryService cache, which lags dscl -- and a chown that names
@@ -113,6 +113,6 @@ fastcached_create_account() {
     FASTCACHED_ACCOUNT_GID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}')
 
     # Recorded because two runs were lost to guessing at this from the outside.
-    echo "fastcached: account ${_fc_account} uid=${FASTCACHED_ACCOUNT_UID:-<none>} gid=${FASTCACHED_ACCOUNT_GID:-<none>}" \
+    echo "pace-kv: account ${_fc_account} uid=${FASTCACHED_ACCOUNT_UID:-<none>} gid=${FASTCACHED_ACCOUNT_GID:-<none>}" \
         "group-record=$(/usr/bin/dscl . -read "/Groups/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}' || true)" >&2
 }

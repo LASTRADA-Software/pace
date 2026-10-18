@@ -239,7 +239,7 @@ struct OptionSpec
     /// error, and believing the change took.
     ///
     /// The reason most rows are `No` is stated once, in the node's own table, and it
-    /// is the argument `fastcache-compile-node/main.cpp` used to give for handling no
+    /// is the argument `pace-node/main.cpp` used to give for handling no
     /// SIGHUP at all: a worker's toolchain table is what its registration advertised,
     /// so re-reading it would leave the scheduler dispatching against a set this
     /// worker no longer serves.

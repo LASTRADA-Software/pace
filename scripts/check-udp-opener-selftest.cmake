@@ -33,7 +33,7 @@ endif()
 set(ran 0)
 set(failures "")
 
-set(discoveryTier "src/apps/fastcache-compile-node/DiscoveryTier.cpp")
+set(discoveryTier "src/apps/pace-node/DiscoveryTier.cpp")
 set(routeProbe "src/Pace/Platform/RouteProbe.cpp")
 set(otherFile "src/Pace/Cluster/Other.cpp")
 

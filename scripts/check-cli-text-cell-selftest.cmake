@@ -203,9 +203,9 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     endif()
 
     if(writeSources)
-        file(WRITE "${tree}/src/apps/fastcache-cli/CliValue.cpp" "${factoryText}")
-        file(WRITE "${tree}/src/apps/fastcache-cli/CliFormat.cpp" "${rendererText}")
-        file(WRITE "${tree}/src/apps/fastcache-cli/CliValue_test.cpp" "${testText}")
+        file(WRITE "${tree}/src/apps/pacectl/CliValue.cpp" "${factoryText}")
+        file(WRITE "${tree}/src/apps/pacectl/CliFormat.cpp" "${rendererText}")
+        file(WRITE "${tree}/src/apps/pacectl/CliValue_test.cpp" "${testText}")
     else()
         # A tree with a src/ directory and no sources in it, which is what a moved
         # source root looks like from here.
@@ -268,52 +268,52 @@ set(FastCachedTextCellCases
     "baseline via git|none-git|-|-|no bypass across && git ls-files|CMake Error"
 
     # THE RED ARM: a designated initialiser past the factory, named by file and line.
-    "designated initialiser bypass|newfile|src/apps/fastcache-cli/CliVerbs.cpp|#include \"CliValue.hpp\"~n~Cell KeyCell(std::string key)~n~{~n~    return Cell { .kind = CellKind::Text, .lexical = std::move(key) }~sc~~n~}~n~|src/apps/fastcache-cli/CliVerbs.cpp:4: builds a|-"
+    "designated initialiser bypass|newfile|src/apps/pacectl/CliVerbs.cpp|#include \"CliValue.hpp\"~n~Cell KeyCell(std::string key)~n~{~n~    return Cell { .kind = CellKind::Text, .lexical = std::move(key) }~sc~~n~}~n~|src/apps/pacectl/CliVerbs.cpp:4: builds a|-"
 
     # ...and in git mode too, since that is the enumeration CI uses.
-    "designated initialiser bypass via git|newfile-git|src/apps/fastcache-cli/CliVerbs.cpp|#include \"CliValue.hpp\"~n~Cell KeyCell(std::string key)~n~{~n~    return Cell { .kind = CellKind::Text, .lexical = std::move(key) }~sc~~n~}~n~|src/apps/fastcache-cli/CliVerbs.cpp:4: builds a && git ls-files|-"
+    "designated initialiser bypass via git|newfile-git|src/apps/pacectl/CliVerbs.cpp|#include \"CliValue.hpp\"~n~Cell KeyCell(std::string key)~n~{~n~    return Cell { .kind = CellKind::Text, .lexical = std::move(key) }~sc~~n~}~n~|src/apps/pacectl/CliVerbs.cpp:4: builds a && git ls-files|-"
 
     # The POSITIONAL aggregate, which a designated-initialiser-only pattern misses.
     # Two shapes reach the same hole and a check that saw one would report clean over
     # the other.
-    "positional aggregate bypass|newfile|src/apps/fastcache-cli/CliVerbs.cpp|#include \"CliValue.hpp\"~n~Cell KeyCell(std::string key)~n~{~n~    return Cell { CellKind::Text, std::move(key) }~sc~~n~}~n~|src/apps/fastcache-cli/CliVerbs.cpp:4: builds a|-"
+    "positional aggregate bypass|newfile|src/apps/pacectl/CliVerbs.cpp|#include \"CliValue.hpp\"~n~Cell KeyCell(std::string key)~n~{~n~    return Cell { CellKind::Text, std::move(key) }~sc~~n~}~n~|src/apps/pacectl/CliVerbs.cpp:4: builds a|-"
 
     # A plain assignment to an existing cell, which is the third spelling.
-    "assignment bypass|newfile|src/apps/fastcache-cli/CliVerbs.cpp|#include \"CliValue.hpp\"~n~void Force(Cell& cell)~n~{~n~    cell.kind = CellKind::Text~sc~~n~}~n~|src/apps/fastcache-cli/CliVerbs.cpp:4: builds a|-"
+    "assignment bypass|newfile|src/apps/pacectl/CliVerbs.cpp|#include \"CliValue.hpp\"~n~void Force(Cell& cell)~n~{~n~    cell.kind = CellKind::Text~sc~~n~}~n~|src/apps/pacectl/CliVerbs.cpp:4: builds a|-"
 
     # THE ACCEPTING ARM PROPER, and the one the ticket names. These differ from a
     # violation by a single character or by the keyword in front, and a check that
     # refused them would refuse every renderer in the binary.
-    "a switch arm is not a write|newfile|src/apps/fastcache-cli/Other.cpp|void Render(Cell const& c, std::string& o)~n~{~n~    switch (c.kind)~n~    {~n~        case CellKind::Text: o += c.lexical~sc~ return~sc~~n~        default: return~sc~~n~    }~n~}~n~|no bypass across|CMake Error"
-    "an equality comparison is not a write|newfile|src/apps/fastcache-cli/Other.cpp|bool IsText(Cell const& c)~n~{~n~    return c.kind == CellKind::Text~sc~~n~}~n~|no bypass across|CMake Error"
-    "an inequality comparison is not a write|newfile|src/apps/fastcache-cli/Other.cpp|bool NotText(Cell const& c)~n~{~n~    return c.kind != CellKind::Text~sc~~n~}~n~|no bypass across|CMake Error"
+    "a switch arm is not a write|newfile|src/apps/pacectl/Other.cpp|void Render(Cell const& c, std::string& o)~n~{~n~    switch (c.kind)~n~    {~n~        case CellKind::Text: o += c.lexical~sc~ return~sc~~n~        default: return~sc~~n~    }~n~}~n~|no bypass across|CMake Error"
+    "an equality comparison is not a write|newfile|src/apps/pacectl/Other.cpp|bool IsText(Cell const& c)~n~{~n~    return c.kind == CellKind::Text~sc~~n~}~n~|no bypass across|CMake Error"
+    "an inequality comparison is not a write|newfile|src/apps/pacectl/Other.cpp|bool NotText(Cell const& c)~n~{~n~    return c.kind != CellKind::Text~sc~~n~}~n~|no bypass across|CMake Error"
 
     # PROSE, including the shape this check's own documentation uses: the doc comment
     # on `TextCell` spells the aggregate out in order to explain it. A check that
     # refused that would refuse the documentation of its own rule.
-    "a line comment is not a write|newfile|src/apps/fastcache-cli/Other.cpp|// Never Cell { .kind = CellKind::Text, ... } -- call TextCell instead.~n~int Note() { return 0~sc~ }~n~|no bypass across|CMake Error"
-    "a block comment is not a write|newfile|src/apps/fastcache-cli/Other.cpp|/*~n~ A paragraph showing Cell { CellKind::Text, bytes } to argue against it.~n~*/~n~int Note() { return 0~sc~ }~n~|no bypass across|CMake Error"
+    "a line comment is not a write|newfile|src/apps/pacectl/Other.cpp|// Never Cell { .kind = CellKind::Text, ... } -- call TextCell instead.~n~int Note() { return 0~sc~ }~n~|no bypass across|CMake Error"
+    "a block comment is not a write|newfile|src/apps/pacectl/Other.cpp|/*~n~ A paragraph showing Cell { CellKind::Text, bytes } to argue against it.~n~*/~n~int Note() { return 0~sc~ }~n~|no bypass across|CMake Error"
 
     # COMMENT ORDERING, and the first of these is the false green it was: the `/*`
     # test ran BEFORE `//` was stripped, so a line comment NAMING a block opener
     # opened one that no `*/` ever closed -- every remaining line of that file
     # skipped, while the run still printed a clean count over lines it never read.
     # The violation one line below it was invisible.
-    "a line comment naming a block opener does not open one|newfile|src/apps/fastcache-cli/Order.cpp|// Never Cell { .kind = ... } by hand, and not inside a /* block either.~n~Cell K(std::string k) { return Cell { .kind = CellKind::Text, .lexical = k }~sc~ }~n~|src/apps/fastcache-cli/Order.cpp:2: builds a|-"
+    "a line comment naming a block opener does not open one|newfile|src/apps/pacectl/Order.cpp|// Never Cell { .kind = ... } by hand, and not inside a /* block either.~n~Cell K(std::string k) { return Cell { .kind = CellKind::Text, .lexical = k }~sc~ }~n~|src/apps/pacectl/Order.cpp:2: builds a|-"
 
     # ...and the CONTROL, which is what stops the repair from being *ignore block
     # comments*: a `//` inside an open block stays inside it, so line 2 is never
     # named, and the file RESUMES after `*/`, so line 4 is. Both halves are needed
     # -- a reader that dropped block tracking passes the case above.
-    "a block comment survives a line marker inside it|newfile|src/apps/fastcache-cli/Order.cpp|/*~n~ Prose with a // in it, showing Cell { CellKind::Text, b } to argue against.~n~*/~n~Cell K(std::string k) { return Cell { .kind = CellKind::Text, .lexical = k }~sc~ }~n~|src/apps/fastcache-cli/Order.cpp:4: builds a|Order.cpp:2"
+    "a block comment survives a line marker inside it|newfile|src/apps/pacectl/Order.cpp|/*~n~ Prose with a // in it, showing Cell { CellKind::Text, b } to argue against.~n~*/~n~Cell K(std::string k) { return Cell { .kind = CellKind::Text, .lexical = k }~sc~ }~n~|src/apps/pacectl/Order.cpp:4: builds a|Order.cpp:2"
 
     # THE PARTIAL-FIX SHAPE: a file that documents the rule AND breaks it. Refused --
     # a prose mention must not excuse the file it sits in.
-    "prose and a bypass in one file|newfile|src/apps/fastcache-cli/Both.cpp|// Call TextCell rather than Cell { .kind = CellKind::Text, ... }.~n~Cell KeyCell(std::string k)~n~{~n~    return Cell { .kind = CellKind::Text, .lexical = std::move(k) }~sc~~n~}~n~|src/apps/fastcache-cli/Both.cpp:4: builds a|-"
+    "prose and a bypass in one file|newfile|src/apps/pacectl/Both.cpp|// Call TextCell rather than Cell { .kind = CellKind::Text, ... }.~n~Cell KeyCell(std::string k)~n~{~n~    return Cell { .kind = CellKind::Text, .lexical = std::move(k) }~sc~~n~}~n~|src/apps/pacectl/Both.cpp:4: builds a|-"
 
     # LINE NUMBERS, with the list structure that makes them drift planted above the
     # violation. A filename-only assertion passes under that bug.
-    "line number survives brackets and semicolons|newfile|src/apps/fastcache-cli/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~Cell K(std::string k) { return Cell { .kind = CellKind::Text, .lexical = k }~sc~ }~n~|src/apps/fastcache-cli/Drift.cpp:4: builds a|-"
+    "line number survives brackets and semicolons|newfile|src/apps/pacectl/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~Cell K(std::string k) { return Cell { .kind = CellKind::Text, .lexical = k }~sc~ }~n~|src/apps/pacectl/Drift.cpp:4: builds a|-"
 
     # --- fails CLOSED ---
 

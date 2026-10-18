@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # sccache smoke test (Windows / PowerShell). Mirrors scripts/sccache-smoke.sh:
-# start fastcached, point sccache at it over the chosen wire protocol, compile
+# start pace-kv, point sccache at it over the chosen wire protocol, compile
 # a one-file program twice, and assert the second compile is served from cache.
 #
 # Usage:
-#   pwsh -File sccache-smoke.ps1 --fastcached <path> [--protocol memcached|redis]
+#   pwsh -File sccache-smoke.ps1 --pace-kv <path> [--protocol memcached|redis]
 #        [--port <n>] [--compiler <cxx>] [--expect-flavor <name>]
 #
 # Exit codes: 0 = every assertion held; 1 = ran and something was wrong; 77 = a
-# runtime prerequisite (sccache / fastcached / compiler / a backend that is not
+# runtime prerequisite (sccache / pace-kv / compiler / a backend that is not
 # compiled into this sccache) was missing.
 #
 # 77 is a SKIP under CTest (`SKIP_RETURN_CODE`) and would be a FAILURE from a
@@ -20,7 +20,7 @@
 # ## What this asserts, and why one assertion was never enough
 #
 # `Cache hits >= 1` alone is satisfied by sccache's own LOCAL DISK cache, so the
-# fixture passed with no fastcached in the picture at all, for as long as it
+# fixture passed with no pace-kv in the picture at all, for as long as it
 # existed (#1318). Three questions, because each is satisfied by the failing state
 # of the next:
 #
@@ -56,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'lib/E2EPorts.psm1') -Force
 
-$fastcached = ''
+$pace_kv = ''
 $protocol = 'memcached'
 # 0 draws one per run. A port passed explicitly is honoured and PROBED first,
 # since the caller chose the collision risk.
@@ -70,7 +70,7 @@ $expectFlavor = ''
 
 for ($i = 0; $i -lt $args.Count; $i++) {
     switch ($args[$i]) {
-        '--fastcached' { $fastcached = $args[++$i] }
+        '--pace-kv' { $pace_kv = $args[++$i] }
         '--protocol' { $protocol = $args[++$i] }
         '--port' { $port = $args[++$i] }
         '--compiler' { $compiler = $args[++$i] }
@@ -83,7 +83,7 @@ $SKIP = 77
 function Test-Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
 if (-not (Test-Have 'sccache')) { Write-Host 'sccache not found; skipping'; exit $SKIP }
-if (-not $fastcached -or -not (Test-Path $fastcached)) { Write-Host "fastcached not found: '$fastcached'; skipping"; exit $SKIP }
+if (-not $pace_kv -or -not (Test-Path $pace_kv)) { Write-Host "pace-kv not found: '$pace_kv'; skipping"; exit $SKIP }
 if (-not (Test-Have $compiler)) { Write-Host "compiler not found: '$compiler'; skipping"; exit $SKIP }
 
 # One row per protocol and every column this fixture needs about it, so adding a
@@ -136,7 +136,7 @@ if ($help -notmatch "(?m)^\s+$($backend.Feature):\s+true\s*$") {
 # Settled BEFORE the backend URL is exported, which is the one ordering constraint
 # here: sccache's server reads that variable at ITS start, so the address has to be
 # final by now.
-$port = Get-E2EFixturePort ([int]$port) $fastcached "fastcached"
+$port = Get-E2EFixturePort ([int]$port) $pace_kv "pace-kv"
 
 Set-Item -Path "env:$($backend.Env)" -Value "$($backend.Scheme)://127.0.0.1:$port"
 $env:SCCACHE_NO_DAEMON = '0'
@@ -195,7 +195,7 @@ function Stop-Smoke($reason, $detail) {
     Write-Host "sccache smoke ($protocol) FAILED: $reason"
     foreach ($line in $detail) { Write-Host "  $line" }
     & sccache --stop-server *> $null
-    Write-LogTail 'fastcached log' (Get-DaemonLog)
+    Write-LogTail 'pace-kv log' (Get-DaemonLog)
     Write-LogTail 'sccache log' $(if (Test-Path $sccacheLog) { Get-Content -Raw -ErrorAction SilentlyContinue $sccacheLog })
     Invoke-Cleanup
     exit 1
@@ -217,7 +217,7 @@ else {
 # nothing could tell a text-speaking client from a binary-speaking one. No
 # production change was needed: the daemon has always known and has always been
 # able to say so. Nothing asked.
-$server = Start-Process -FilePath $fastcached `
+$server = Start-Process -FilePath $pace_kv `
     -ArgumentList "--port=$port", '--log-level=trace', '--log-everything' `
     -PassThru -NoNewWindow -RedirectStandardOutput $daemonOut -RedirectStandardError $daemonErr
 # Waits on the LISTENER, bounded, and reports a daemon that DIED as a death rather
@@ -235,9 +235,9 @@ $server = Start-Process -FilePath $fastcached `
 # `Stop-Smoke` rather than letting it escape: it prints the reason, cleans up and
 # exits 1, which is what every other failure here does.
 try {
-    Wait-E2EPortAnswers $port $server "fastcached" @($daemonOut, $daemonErr)
+    Wait-E2EPortAnswers $port $server "pace-kv" @($daemonOut, $daemonErr)
 } catch {
-    Stop-Smoke 'fastcached never answered on its port' @("$_")
+    Stop-Smoke 'pace-kv never answered on its port' @("$_")
 }
 
 & sccache --stop-server *> $null
@@ -249,7 +249,7 @@ $env:SCCACHE_LOG = 'debug'
 Remove-Item Env:SCCACHE_LOG -ErrorAction SilentlyContinue
 & sccache --zero-stats | Out-Null
 
-# First compile: cache miss; it is what populates fastcached.
+# First compile: cache miss; it is what populates pace-kv.
 & sccache @compileArgs
 if ($LASTEXITCODE -ne 0) { Stop-Smoke "first compile failed ($LASTEXITCODE)" @() }
 Remove-Item -Force $obj -ErrorAction SilentlyContinue
@@ -268,7 +268,7 @@ if ($locationLine -notmatch "^\s*Cache location\s+$([regex]::Escape($backend.Loc
         "expected 'Cache location' to name '$($backend.Location)'.",
         "got: $(if ($locationLine) { $locationLine } else { '(no Cache location line at all)' })",
         'sccache falls back to its own local disk cache SILENTLY, and a hit from',
-        'that cache satisfies the hit assertion with no fastcached involved (#1318).')
+        'that cache satisfies the hit assertion with no pace-kv involved (#1318).')
 }
 
 # WAIT FOR THE STORE TO LAND. sccache's write to a REMOTE backend is asynchronous:
@@ -285,13 +285,13 @@ $stored = $false
 while ((Get-Date) -lt $deadline) {
     if ((Get-DaemonLog) -match 'storage: SET key=[0-9a-f]/') { $stored = $true; break }
     if ($server.HasExited) {
-        Stop-Smoke 'fastcached exited while waiting for it to store the first object' @(
+        Stop-Smoke 'pace-kv exited while waiting for it to store the first object' @(
             "exit code: $($server.ExitCode)")
     }
     Start-Sleep -Milliseconds 200
 }
 if (-not $stored) {
-    Stop-Smoke 'timed out waiting for fastcached to store the first compile object' @(
+    Stop-Smoke 'timed out waiting for pace-kv to store the first compile object' @(
         'waited 20s for a line matching: storage: SET key=[0-9a-f]/',
         'the daemon is alive, so this is a slow machine or a store that never arrived.')
 }

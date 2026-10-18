@@ -17,7 +17,7 @@ namespace Pace::Distributed
 /// `CompileCacheWire.hpp` must stay dependency-free, so it MIRRORS `Membership` and
 /// `MembershipParticipant` rather than carrying them; the two halves are joined by the tables
 /// below. They live in the library rather than in the node app because a mirror needs a reader at
-/// each end -- the node ENCODES an answer and `fastcache-cli` RENDERS one -- and two copies of a
+/// each end -- the node ENCODES an answer and `pacectl` RENDERS one -- and two copies of a
 /// mapping are two things that can disagree about which bit means which route, in a verb whose
 /// whole subject is attributing a decision correctly.
 

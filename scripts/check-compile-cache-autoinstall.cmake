@@ -7,7 +7,7 @@
 # That is the property issue #48 turns on. A build with no compiler cache is a
 # slow build; a build whose configure aborts because a cache could not be
 # downloaded is no build at all, and the module is vendored into repositories
-# that have never heard of fastcached. Every way the fetch can go wrong
+# that have never heard of pace-kv. Every way the fetch can go wrong
 # therefore has to end in one status line and a fall-through to sccache, ccache,
 # or plain compilation.
 #
@@ -61,12 +61,12 @@ cmake_minimum_required(VERSION 3.28)
 # platform nothing is published for. no-such-release names the asset it tried,
 # which is how it shows the pin reached the download and not only the lookup.
 set(FastCachedAutoInstallRows
-    "api-unreachable|Not auto-installing fastcache-cc: cannot reach the GitHub API||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_API=http://127.0.0.1:1"
-    "off-by-default||Not auto-installing fastcache-cc|"
-    "opted-out-empty-addr|Not auto-installing fastcache-cc: FASTCACHE_ADDR is empty||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_ADDR="
+    "api-unreachable|Not auto-installing pace-cc: cannot reach the GitHub API||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_API=http://127.0.0.1:1"
+    "off-by-default||Not auto-installing pace-cc|"
+    "opted-out-empty-addr|Not auto-installing pace-cc: FASTCACHE_ADDR is empty||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_ADDR="
     "not-a-version|is not a numeric X.Y.Z version||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_VERSION=not-a-version"
-    "no-such-release|Not auto-installing fastcache-cc: downloading fastcached-9.9.9-Linux-x86_64.tar.gz failed||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_VERSION=9.9.9"
-    "unpublished-platform|Not auto-installing fastcache-cc: no prebuilt binary is published for Linux-no-such-arch||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_HOST_SYSTEM=Linux -DFASTCACHE_AUTO_INSTALL_HOST_PROCESSOR=no-such-arch"
+    "no-such-release|Not auto-installing pace-cc: downloading fastcached-9.9.9-Linux-x86_64.tar.gz failed||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_VERSION=9.9.9"
+    "unpublished-platform|Not auto-installing pace-cc: no prebuilt binary is published for Linux-no-such-arch||-DFASTCACHE_AUTO_INSTALL=ON -DFASTCACHE_AUTO_INSTALL_HOST_SYSTEM=Linux -DFASTCACHE_AUTO_INSTALL_HOST_PROCESSOR=no-such-arch"
 )
 
 # The platform every row asks about unless it states its own. It must be a row of
@@ -110,7 +110,7 @@ file(MAKE_DIRECTORY "${sandbox}/usr/bin")
 file(CREATE_LINK "${hostUname}" "${sandbox}/usr/bin/uname" COPY_ON_ERROR SYMBOLIC)
 
 # Shared by every row: a real project, a compiler named outright, and a program
-# search that can find neither fastcache-cc nor sccache nor ccache.
+# search that can find neither pace-cc nor sccache nor ccache.
 set(commonArguments
     "-DFASTCACHED_MODULE_DIR=${moduleDir}"
     "-DCMAKE_CXX_COMPILER=${FASTCACHED_CXX_COMPILER}"

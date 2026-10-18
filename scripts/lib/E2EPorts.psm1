@@ -293,7 +293,7 @@ function Get-E2EPortRefusal([int]$port, $holder) {
 # was proved free a moment ago.
 #
 # The message NAMES the port and the process, which is the cheapest half of #220:
-# `fastcached exited immediately (exit 1)` named neither, read exactly like a
+# `pace-kv exited immediately (exit 1)` named neither, read exactly like a
 # daemon that cannot start, and cost a twenty-minute diagnosis by hand.
 #
 # @param port the port the caller chose.
@@ -324,7 +324,7 @@ function Assert-E2EPortAvailable([int]$port, [string]$expectedPath) {
 # @param expectedPath the daemon this run would start.
 # @param label what to call the port in the line this prints.
 # @return the port to use.
-function Get-E2EFixturePort([int]$port, [string]$expectedPath, [string]$label = "fastcached") {
+function Get-E2EFixturePort([int]$port, [string]$expectedPath, [string]$label = "pace-kv") {
     if ($port -eq 0) {
         $drawn = New-E2EPort
         Write-Host "${label} port for this run: ${drawn}"
@@ -459,10 +459,10 @@ $script:E2EPortConsumers = @(
     @{
         Name  = 'tls-smoke.ps1'
         Path  = 'scripts/tls-smoke.ps1'
-        Stage = @('fastcached.exe', 'server.crt', 'server.key')
+        Stage = @('pace-kv.exe', 'server.crt', 'server.key')
         Argv  = {
             param($stage, $port)
-            @('-Fastcached', (Join-Path $stage 'fastcached.exe'),
+            @('-Fastcached', (Join-Path $stage 'pace-kv.exe'),
               '-Cert',       (Join-Path $stage 'server.crt'),
               '-Key',        (Join-Path $stage 'server.key'),
               '-Port',       $port)
@@ -471,10 +471,10 @@ $script:E2EPortConsumers = @(
     @{
         Name  = 'run-crossdepth.ps1'
         Path  = 'src/apps/compile-cache-testclient/run-crossdepth.ps1'
-        Stage = @('fastcached.exe', 'compile-cache-testclient.exe')
+        Stage = @('pace-kv.exe', 'compile-cache-testclient.exe')
         Argv  = {
             param($stage, $port)
-            @('-Fastcached', (Join-Path $stage 'fastcached.exe'),
+            @('-Fastcached', (Join-Path $stage 'pace-kv.exe'),
               '-Client',     (Join-Path $stage 'compile-cache-testclient.exe'),
               '-Port',       $port,
               '-Synthetic')
@@ -482,23 +482,23 @@ $script:E2EPortConsumers = @(
     }
     @{
         Name  = 'run-launcher-e2e.ps1'
-        Path  = 'src/apps/fastcache-cc/run-launcher-e2e.ps1'
-        Stage = @('fastcached.exe', 'fastcache-cc.exe')
+        Path  = 'src/apps/pace-cc/run-launcher-e2e.ps1'
+        Stage = @('pace-kv.exe', 'pace-cc.exe')
         Argv  = {
             param($stage, $port)
-            @('-Fastcached', (Join-Path $stage 'fastcached.exe'),
-              '-Launcher',   (Join-Path $stage 'fastcache-cc.exe'),
+            @('-Fastcached', (Join-Path $stage 'pace-kv.exe'),
+              '-Launcher',   (Join-Path $stage 'pace-cc.exe'),
               '-Port',       $port)
         }
     }
     @{
         Name  = 'sccache-smoke.ps1'
         Path  = 'scripts/sccache-smoke.ps1'
-        Stage = @('fastcached.exe')
+        Stage = @('pace-kv.exe')
         # The ONE row that may legitimately answer 77, and it says WHICH 77.
         #
         # A bare `$true` accepts any of this fixture's four skip exits -- sccache
-        # absent, fastcached absent, compiler absent, backend not compiled in --
+        # absent, pace-kv absent, compiler absent, backend not compiled in --
         # and two of those are staged away by the `Stage` list and the `--compiler`
         # argument above. So if that bookkeeping ever drifts, a `$true` row
         # degrades to a PERMANENT SILENT SKIP, which is the one outcome the column
@@ -513,7 +513,7 @@ $script:E2EPortConsumers = @(
             # pre-flight refuses first. Passing a real compiler name would make
             # this row skip on every host without `cl` -- a case that did not run,
             # reported as a host property rather than as the coverage gap it is.
-            @('--fastcached', (Join-Path $stage 'fastcached.exe'),
+            @('--pace-kv', (Join-Path $stage 'pace-kv.exe'),
               '--protocol',   'memcached',
               '--compiler',   (Get-Process -Id $PID).Path,
               '--port',       $port)
@@ -565,24 +565,24 @@ function Invoke-E2EPortSelfTest {
     # ACCEPTING arm first and deliberately: a `Resolve-E2EPortHolder` that answered
     # `refuse` unconditionally would satisfy every refusing case below while
     # refusing every honest run.
-    Expect "nothing listening is free" "free" (Resolve-E2EPortHolder $null "C:\build\fastcached.exe")
+    Expect "nothing listening is free" "free" (Resolve-E2EPortHolder $null "C:\build\pace-kv.exe")
     Expect "our own daemon is reaped, not adopted" "reap" `
-        (Resolve-E2EPortHolder @{ ProcessId = 1; Name = "fastcached"; Path = "C:\build\fastcached.exe" } `
-                               "C:\build\fastcached.exe")
+        (Resolve-E2EPortHolder @{ ProcessId = 1; Name = "pace-kv"; Path = "C:\build\pace-kv.exe" } `
+                               "C:\build\pace-kv.exe")
     Expect "and case-insensitively, because Windows paths are" "reap" `
-        (Resolve-E2EPortHolder @{ ProcessId = 1; Name = "fastcached"; Path = "C:\Build\FastCached.EXE" } `
-                               "c:\build\fastcached.exe")
+        (Resolve-E2EPortHolder @{ ProcessId = 1; Name = "pace-kv"; Path = "C:\Build\pace-kv.exe" } `
+                               "c:\build\pace-kv.exe")
     Expect "another build of the same daemon is REFUSED, not adopted" "refuse" `
-        (Resolve-E2EPortHolder @{ ProcessId = 2; Name = "fastcached"; Path = "D:\other\fastcached.exe" } `
-                               "C:\build\fastcached.exe")
+        (Resolve-E2EPortHolder @{ ProcessId = 2; Name = "pace-kv"; Path = "D:\other\pace-kv.exe" } `
+                               "C:\build\pace-kv.exe")
     Expect "somebody else entirely is refused" "refuse" `
         (Resolve-E2EPortHolder @{ ProcessId = 3; Name = "sqlservr"; Path = "C:\sql\sqlservr.exe" } `
-                               "C:\build\fastcached.exe")
+                               "C:\build\pace-kv.exe")
     # A holder whose path could not be read is REFUSED. It is the direction that
     # matters: an unreadable path reaching `reap` would kill a process this fixture
     # knows nothing about.
     Expect "a holder we cannot name is refused, never reaped" "refuse" `
-        (Resolve-E2EPortHolder @{ ProcessId = 0; Name = "(unknown)"; Path = "" } "C:\build\fastcached.exe")
+        (Resolve-E2EPortHolder @{ ProcessId = 0; Name = "(unknown)"; Path = "" } "C:\build\pace-kv.exe")
 
     # THE RENDERED REFUSAL, on its own, and it needs its own cases for a reason
     # that is not obvious: the site cases below build their expected sentence from
@@ -720,7 +720,7 @@ function Invoke-E2EPortSelfTest {
         # The whole point, end to end: a taken port refuses by name rather than
         # letting the daemon start and fail with a sentence naming neither.
         $refused = $false
-        try { Assert-E2EPortAvailable $held "C:\nothing\fastcached.exe" } catch { $refused = $true }
+        try { Assert-E2EPortAvailable $held "C:\nothing\pace-kv.exe" } catch { $refused = $true }
         Expect "an occupied port is refused before the daemon starts" $true $refused
 
         # THE SITES. A fixture that never meets a holder passes identically with

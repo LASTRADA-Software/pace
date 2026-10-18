@@ -25,7 +25,7 @@ using Pace::CliOutcome;
 namespace
 {
 
-/// The configuration `fastcached` assembles from @p args and no file.
+/// The configuration `pace-kv` assembles from @p args and no file.
 /// @param args The command line, program name excluded.
 /// @return The assembly; the case has failed when it does not assemble.
 [[nodiscard]] Pace::EffectiveConfig AssembledFrom(std::vector<std::string> args)
@@ -96,12 +96,12 @@ TEST_CASE("Only a start and an install are refused by the serving rules, each ru
     }
 }
 
-TEST_CASE("fastcached's main asks the serving rules through the gate and nowhere else", "[config][startup][gate]")
+TEST_CASE("pace-kv's main asks the serving rules through the gate and nowhere else", "[config][startup][gate]")
 {
     // `main` is in no test target, so what holds it to the gate is its text: one call, and none of
     // the three rules asked beside it, where an outcome the gate excuses would meet them anyway.
     auto const path =
-        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcached" / "main.cpp";
+        std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-kv" / "main.cpp";
     REQUIRE(std::filesystem::exists(path));
     // Through the stream buffer, for `PosixDaemonHost_test`'s measured reason.
     std::ifstream in { path, std::ios::binary };

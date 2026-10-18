@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/ReactorHome.hpp>
+#include <apps/pace-node/ReactorHome.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/TestLoop.hpp>
 #include <core/platform/Clock.hpp>

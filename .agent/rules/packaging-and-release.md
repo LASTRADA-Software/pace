@@ -51,7 +51,7 @@ installer pane, the version derivation, or the release job's asset list.
   at build time, on every platform at once:
 
   ```
-  file INSTALL cannot find ".../target/fastcache-cli": No such file or directory
+  file INSTALL cannot find ".../target/pacectl": No such file or directory
   ```
 
   Measured (PR #1198): all three `Package (...)` jobs failed identically, and the
@@ -148,7 +148,7 @@ installer pane, the version derivation, or the release job's asset list.
 The version is the git tag, so cutting a release is pushing one:
 
 ```sh
-git tag -a v0.1.0 -m "fastcached 0.1.0"
+git tag -a v0.1.0 -m "Pace 0.1.0"
 git push origin v0.1.0
 ```
 

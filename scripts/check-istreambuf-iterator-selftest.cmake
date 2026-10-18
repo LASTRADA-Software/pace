@@ -216,7 +216,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     if(writeSources)
         file(WRITE "${tree}/src/Pace/Core/Clean.cpp" "${cleanText}")
         file(WRITE "${tree}/src/Pace/Core/Documented.cpp" "${documentedText}")
-        file(WRITE "${tree}/src/apps/fastcache-cc/FileBytes.hpp" "${helperText}")
+        file(WRITE "${tree}/src/apps/pace-cc/FileBytes.hpp" "${helperText}")
     else()
         # A tree with a src/ directory and no sources in it, which is what a moved
         # source root looks like from here.

@@ -34,12 +34,12 @@ upgrades — only <code>fastcached.yaml.default</code> beside it is replaced.</p
 
 <pre>    launchctl kickstart -k gui/$UID/software.lastrada.fastcached</pre>
 
-<h3>Removing fastcached</h3>
+<h3>Removing Pace</h3>
 
 <p>macOS packages have no built-in uninstaller, so one ships with this
 package:</p>
 
-<pre>    sudo /opt/fastcached/bin/fastcached-uninstall</pre>
+<pre>    sudo /opt/fastcached/bin/pace-uninstall</pre>
 
 <p>It stops and unregisters the launchd jobs, removes
 <code>/opt/fastcached</code>, the <code>PATH</code> entry and the symlinks, and

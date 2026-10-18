@@ -1,6 +1,6 @@
-# fastcached
+# pace-kv
 
-fastcached is a cache daemon that speaks four wire protocols off a
+pace-kv is a cache daemon that speaks four wire protocols off a
 single storage engine: memcached ASCII text, memcached binary,
 memcached meta (1.6+), and Redis RESP2. The protocols are detected
 automatically from the first bytes a client sends, so any one
@@ -9,7 +9,7 @@ configuration.
 
 The project is a re-implementation. The protocols and their semantics
 are defined by the [memcached](https://memcached.org/) and
-[Redis](https://redis.io/) projects, and fastcached aims to be
+[Redis](https://redis.io/) projects, and pace-kv aims to be
 compatible with well-behaved clients written against those references.
 
 ## What's in the box

@@ -26,14 +26,14 @@ namespace Pace
 /// grammar exists for, and getting it right is four lines that every caller would
 /// otherwise write for itself.
 ///
-/// `fastcache-cc`'s `TcpClient.cpp` had the only correct copy, file-local. A
+/// `pace-cc`'s `TcpClient.cpp` had the only correct copy, file-local. A
 /// second caller — the worker's `--admin-listen` — is what turned "a private
 /// helper" into "a rule with two authors", which is the shape this codebase
 /// treats as a defect rather than a coincidence.
 ///
 /// ## Why `Core/` and header-only
 ///
-/// The same constraint `WireFields` and `Cli/Options` are under: `fastcache-cc`
+/// The same constraint `WireFields` and `Cli/Options` are under: `pace-cc`
 /// compiles against these without linking `Pace`, so anything needing a
 /// translation unit would break the launcher's *link* rather than merely its
 /// build. Nothing here touches a socket — it is text in, text out — so there is

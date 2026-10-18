@@ -22,9 +22,9 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/FrameEndpoint.hpp>
-#include <apps/fastcache-compile-node/MembershipGate.hpp>
-#include <apps/fastcache-compile-node/Responders.hpp>
+#include <apps/pace-node/FrameEndpoint.hpp>
+#include <apps/pace-node/MembershipGate.hpp>
+#include <apps/pace-node/Responders.hpp>
 #include <core/async/Task.hpp>
 
 namespace Pace::Node::SurfaceFakes

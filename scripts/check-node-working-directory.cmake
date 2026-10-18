@@ -143,9 +143,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # No row may contain a ';' -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
 set(FastCachedUnitWorkingDirectories
-    "linux/fastcache-compile-node.service|yes|The compile worker. Its entire purpose is to spawn a compiler, and the prefix-map rules it builds are derived from this directory."
-    "linux/fastcached.service|no|The cache daemon. It executes nothing at all, so no prefix-map rule is ever derived from its directory and a working directory of / costs it nothing but a busy mount point."
-    "linux/fastcached-user.service|no|The per-user cache daemon. Executes nothing, exactly as the system daemon does not."
+    "linux/pace-node.service|yes|The compile worker. Its entire purpose is to spawn a compiler, and the prefix-map rules it builds are derived from this directory."
+    "linux/pace-kv.service|no|The cache daemon. It executes nothing at all, so no prefix-map rule is ever derived from its directory and a working directory of / costs it nothing but a busy mount point."
+    "linux/pace-kv-user.service|no|The per-user cache daemon. Executes nothing, exactly as the system daemon does not."
 )
 
 # One row per shipped unit whose program keeps a NODE IDENTITY and runs unprivileged:
@@ -154,13 +154,13 @@ set(FastCachedUnitWorkingDirectories
 #
 # A unit named here that does not exist is a failure, for the table above's reason.
 set(FastCachedUnitNodeStateDirectories
-    "linux/fastcache-compile-node.service|The compile node, running as the unprivileged fastcache-node account: without StateDirectory= naming its directory it would keep the machine's identity in that account's home, / under sysusers and read-only under ProtectSystem=strict."
+    "linux/pace-node.service|The compile node, running as the unprivileged fastcache-node account: without StateDirectory= naming its directory it would keep the machine's identity in that account's home, / under sysusers and read-only under ProtectSystem=strict."
 )
 
 # Where the node's own name for its state directory is spelled, and the pattern that
 # reads it. Read rather than restated: a second spelling here is how the unit and the
 # binary would come to disagree with every check green.
-set(FastCachedNodeDefaultsHeader "src/apps/fastcache-compile-node/NodeDefaults.hpp")
+set(FastCachedNodeDefaultsHeader "src/apps/pace-node/NodeDefaults.hpp")
 set(FastCachedNodeStateNamePattern "NodeStateDirectoryName = \"([A-Za-z0-9._-]+)\"")
 
 # One row per shipped unit whose program takes a `cache_dir` and runs under
@@ -170,13 +170,13 @@ set(FastCachedNodeStateNamePattern "NodeStateDirectoryName = \"([A-Za-z0-9._-]+)
 #
 # A unit named here that does not exist is a failure, for the first table's reason.
 set(FastCachedUnitNodeCacheDirectories
-    "linux/fastcache-compile-node.service|The compile node under ProtectSystem=strict: cache_dir has no default, and the state directory it can write is refused as one, so without CacheDirectory= a disk tier has nowhere persistent to live."
+    "linux/pace-node.service|The compile node under ProtectSystem=strict: cache_dir has no default, and the state directory it can write is refused as one, so without CacheDirectory= a disk tier has nowhere persistent to live."
 )
 
 # Where an operator is told what to write for `cache_dir`: the reference configuration
 # they edit, and the pages. The reference is also the positive control -- it must cite
 # one, or a scan finding nothing would read as every citation agreeing.
-set(FastCachedCacheDirReference "packaging/config/fastcache-compile-node.yaml")
+set(FastCachedCacheDirReference "packaging/config/pace-node.yaml")
 set(FastCachedCacheDirCitationSources "docs/*.md" "${FastCachedCacheDirReference}")
 
 # A citation: `--cache-dir=<path>`, `--cache-dir <path>` or `cache_dir: <path>`, judged

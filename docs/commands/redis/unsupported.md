@@ -1,6 +1,6 @@
 # Unsupported Redis commands
 
-Common Redis commands fastcached does not implement, with a hint
+Common Redis commands pace-kv does not implement, with a hint
 where one exists. Anything not listed here and not on the
 [supported list](../../protocols/redis-resp.md#supported-commands)
 returns `-ERR unknown command`.
@@ -34,7 +34,7 @@ blob, store it via [SET](string/set.md) and unpack on the client.
 
 `KEYS`, `SCAN`, `RANDOMKEY`, `DBSIZE` and `TYPE` are not implemented,
 and neither is memcached's `stats cachedump`. There is no way to
-enumerate the keyspace from a client on any protocol fastcached speaks.
+enumerate the keyspace from a client on any protocol pace-kv speaks.
 
 ## Pub / sub
 
@@ -60,21 +60,21 @@ For a single conditional write with no transaction, memcached's
 
 Cluster commands (`CLUSTER *`), replication commands (`REPLICAOF`,
 `SLAVEOF`, `SYNC`, `PSYNC`), and persistence commands (`BGSAVE`,
-`BGREWRITEAOF`) are not implemented. fastcached is a single-node
+`BGREWRITEAOF`) are not implemented. pace-kv is a single-node
 cache with its own persistence story (see the persistent-storage
 docs in the project source).
 
 ## Multiple databases
 
 `SELECT` is accepted as a no-op for any index (it always replies
-`+OK`) so client connection setup succeeds, but fastcached has a single
+`+OK`) so client connection setup succeeds, but pace-kv has a single
 flat keyspace and the index is ignored. See [SELECT](connection/select.md).
 
 ## Server commands
 
 `MONITOR`, `LASTSAVE`, `OBJECT *`, `MEMORY *`, `LATENCY *`,
-`SLOWLOG *` are not implemented. Use fastcached's `stats` (memcached
-text protocol), the `/metrics` endpoint, or `fastcache-cli stats` for
+`SLOWLOG *` are not implemented. Use pace-kv's `stats` (memcached
+text protocol), the `/metrics` endpoint, or `pacectl stats` for
 similar information.
 
 `DEBUG` **is** implemented, for one sub-command: `DEBUG PROTOCOL <type>`

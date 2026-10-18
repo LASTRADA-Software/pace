@@ -6,7 +6,7 @@
 #
 # This needs root and it modifies the host, so it is deliberately not part of
 # `ctest`. CI runs it; a developer can too, on a machine they do not mind
-# installing fastcached on.
+# installing pace-kv on.
 #
 # The properties it asserts, each of which has failed silently at some point in
 # a way the unit tests could not see:
@@ -210,7 +210,7 @@ dump_daemon_stderr() {
 # drives its verdicts against a synthesised readings record for the same reason.
 #
 # Placed BEFORE the macOS guard and before the `trap cleanup EXIT` that runs
-# `fastcached-uninstall`: this must run on any platform and must never touch an
+# `pace-uninstall`: this must run on any platform and must never touch an
 # installation.
 if [[ -n "$selftest" ]]; then
     selftest_root="$(mktemp -d)"
@@ -273,7 +273,7 @@ if [[ -n "$selftest" ]]; then
     # 5. Content, and the content must REACH the output -- which is the whole point.
     #    The phrase is #1060's, because telling that refusal apart from any other
     #    `ExitUsage` is what this dump exists to make possible.
-    printf '%s\n' "fastcache-compile-node: found no compiler on this machine" > "${selftest_root}/logs/real.err.log"
+    printf '%s\n' "pace-node: found no compiler on this machine" > "${selftest_root}/logs/real.err.log"
     selftest_plist "${selftest_root}/real.plist" "${selftest_root}/logs/real.err.log"
     selftest_expect "log-with-content" "found no compiler on this machine" "${selftest_root}/real.plist"
 
@@ -316,7 +316,7 @@ readonly NODE_LABEL="software.lastrada.fastcachecompilenode"
 
 workdir="$(mktemp -d)"
 cleanup() {
-    sudo "${PREFIX}/bin/fastcached-uninstall" >/dev/null 2>&1 || true
+    sudo "${PREFIX}/bin/pace-uninstall" >/dev/null 2>&1 || true
     rm -rf "$workdir"
 }
 trap cleanup EXIT
@@ -344,7 +344,7 @@ dump_install_logs() {
         echo "--- /var/log/fastcached-install.log ---" >&2
         tail -40 /var/log/fastcached-install.log >&2
     fi
-    sudo grep -i fastcached /var/log/install.log 2>/dev/null | tail -20 >&2 || true
+    sudo grep -i pace-kv /var/log/install.log 2>/dev/null | tail -20 >&2 || true
 
     # And what the JOBS said, which is the half `launchctl` cannot report: it gives
     # an exit CODE, and `ExitUsage` is one code for every refusal the worker has.
@@ -368,12 +368,12 @@ pkgutil --expand-full "$pkg" "${workdir}/expanded" >/dev/null \
 
 payload="$(cd "${workdir}/expanded" && find . -path '*/Payload/*' -type f | sed 's|.*/Payload/||' | sort -u)"
 
-for expected in opt/fastcached/bin/fastcached \
-                opt/fastcached/bin/fastcache-cc \
-                opt/fastcached/bin/fastcache-compile-node \
-                opt/fastcached/bin/fastcached-uninstall \
+for expected in opt/fastcached/bin/pace-kv \
+                opt/fastcached/bin/pace-cc \
+                opt/fastcached/bin/pace-node \
+                opt/fastcached/bin/pace-uninstall \
                 opt/fastcached/etc/fastcached.yaml.default \
-                opt/fastcached/etc/fastcache-compile-node.yaml.default \
+                opt/fastcached/etc/pace-node.yaml.default \
                 etc/paths.d/fastcached; do
     grep -qx "$expected" <<<"$payload" || fail "missing from payload: $expected"
 done
@@ -382,8 +382,8 @@ done
 # its payload on every install, so shipping it would discard operator edits.
 ! grep -qx "opt/fastcached/etc/fastcached.yaml" <<<"$payload" \
     || fail "the live fastcached.yaml is in the payload; an upgrade would overwrite it"
-! grep -qx "opt/fastcached/etc/fastcache-compile-node.yaml" <<<"$payload" \
-    || fail "the live fastcache-compile-node.yaml is in the payload; an upgrade would overwrite it"
+! grep -qx "opt/fastcached/etc/pace-node.yaml" <<<"$payload" \
+    || fail "the live pace-node.yaml is in the payload; an upgrade would overwrite it"
 
 # Third-party build artefacts must not leak into a package rooted at /.
 ! grep -qE '^(include|lib)/' <<<"$payload" \
@@ -426,7 +426,7 @@ done
 
 # --- 2. the shipped binaries must be redistributable -----------------------
 echo "== checking dynamic-library dependencies"
-for tool in fastcached fastcache-cc; do
+for tool in pace-kv pace-cc; do
     binaries="$(find "${workdir}/expanded" -path "*/Payload/opt/fastcached/bin/${tool}" -type f)"
     binary="${binaries%%$'\n'*}"
     [[ -n "$binary" ]] || fail "could not locate ${tool} in the expanded payload"
@@ -469,16 +469,16 @@ echo "== installing (scope: ${scope})"
 install_log="$(sudo installer -pkg "$pkg" -applyChoiceChangesXML "$choices" -target / 2>&1)" \
     || fail "installer failed: $install_log"
 
-[[ -x "${PREFIX}/bin/fastcached" ]]             || fail "no ${PREFIX}/bin/fastcached"
-[[ -x "${PREFIX}/bin/fastcache-cc" ]]           || fail "no ${PREFIX}/bin/fastcache-cc"
-[[ -x "${PREFIX}/bin/fastcache-compile-node" ]] || fail "no ${PREFIX}/bin/fastcache-compile-node"
-[[ -x "${PREFIX}/bin/fastcached-uninstall" ]]   || fail "no uninstaller"
+[[ -x "${PREFIX}/bin/pace-kv" ]]             || fail "no ${PREFIX}/bin/pace-kv"
+[[ -x "${PREFIX}/bin/pace-cc" ]]           || fail "no ${PREFIX}/bin/pace-cc"
+[[ -x "${PREFIX}/bin/pace-node" ]] || fail "no ${PREFIX}/bin/pace-node"
+[[ -x "${PREFIX}/bin/pace-uninstall" ]]   || fail "no uninstaller"
 [[ -f "${PREFIX}/etc/fastcached.yaml" ]]        || fail "postinstall did not seed fastcached.yaml"
 # The worker's, which reached no non-Linux package at all until #397. Its own line
 # rather than folded into a loop with the daemon's: they are seeded by one table now,
 # and a loop would pass if that table ever shrank back to the single entry it tests.
-[[ -f "${PREFIX}/etc/fastcache-compile-node.yaml" ]] \
-    || fail "postinstall did not seed fastcache-compile-node.yaml"
+[[ -f "${PREFIX}/etc/pace-node.yaml" ]] \
+    || fail "postinstall did not seed pace-node.yaml"
 # The daemon's appendix belongs to the daemon's file ALONE. A seeding loop that
 # appended it to every file would give the worker a `storage_path:` it has no setting
 # for, and the worker would then refuse to start naming a key it has never heard of --
@@ -498,13 +498,13 @@ sudo grep -q '^storage_path:' "${PREFIX}/etc/fastcached.yaml" \
 # grep that cannot open the file also fails to match, so "carries no storage_path"
 # and "could not be read at all" are one green. The reference is entirely comments,
 # so a `#` must be found; only then does the absence below mean anything.
-sudo grep -q '^#' "${PREFIX}/etc/fastcache-compile-node.yaml" \
+sudo grep -q '^#' "${PREFIX}/etc/pace-node.yaml" \
     || fail "the worker's seeded config could not be read, so the next assertion would prove nothing"
-! sudo grep -q '^storage_path:' "${PREFIX}/etc/fastcache-compile-node.yaml" \
+! sudo grep -q '^storage_path:' "${PREFIX}/etc/pace-node.yaml" \
     || fail "the worker's seeded config carries storage_path, a setting it does not have"
 
 # The worker's account comes from the RUNTIME component, so it must exist
-# whichever launchd choice was made for fastcached -- including the per-user
+# whichever launchd choice was made for pace-kv -- including the per-user
 # agent, which is the installer's default and has nothing to do with the worker.
 # Asserted before the scope split below for exactly that reason (issue #87).
 dscl . -read "/Users/${NODE_ACCOUNT}" >/dev/null 2>&1 \
@@ -652,7 +652,7 @@ fi
 # assertion that the account is actually usable for what it exists for.
 #
 # Run in both scopes, because the account comes from the Runtime component: an
-# operator who took the installer's default (the per-user agent for fastcached)
+# operator who took the installer's default (the per-user agent for pace-kv)
 # must still be able to install a system-wide worker.
 #
 # Before #87 this refused with "the 'fastcache-node' service account does not
@@ -709,7 +709,7 @@ node_plist="/Library/LaunchDaemons/${NODE_LABEL}.plist"
 # else uses.
 node_port=$(( port + 3 ))
 raft_port=$(( port + 4 ))
-if ! node_log="$(sudo "${PREFIX}/bin/fastcache-compile-node" --install-service --service-scope=system \
+if ! node_log="$(sudo "${PREFIX}/bin/pace-node" --install-service --service-scope=system \
         --listen-node=127.0.0.1:${node_port} \
         --advertise=127.0.0.1:${node_port} \
         --cluster-dir="${PREFIX}/var/fastcache-node" \
@@ -769,13 +769,13 @@ grep -q "<string>${NODE_ACCOUNT}</string>" "$node_plist" \
 # is asserted DIRECTLY below instead of by proxy. `--storage` stays a refusal: the
 # worker has no such flag at all.
 ! grep -q -- "--storage" "$node_plist" \
-    || fail "the worker plist carries --storage, which fastcache-compile-node does not accept"
+    || fail "the worker plist carries --storage, which pace-node does not accept"
 
 # The positive half. `packagedConfig` is looked up under the SPEC's application
 # name, and hardcoding the daemon's is a bug this project has already had: the
 # worker was handed a file it cannot parse and, once the package tightens that file
 # to 0640 root:_fastcached, cannot even read.
-grep -q -- "--config=${PREFIX}/etc/fastcache-compile-node.yaml" "$node_plist" \
+grep -q -- "--config=${PREFIX}/etc/pace-node.yaml" "$node_plist" \
     || fail "the worker plist does not carry --config for its OWN packaged file"
 ! grep -q -- "--config=${PREFIX}/etc/fastcached.yaml" "$node_plist" \
     || fail "the worker plist carries the DAEMON's config; a worker cannot parse it and its account cannot read it"
@@ -817,7 +817,7 @@ fi
 
 # --- 6. uninstall must leave nothing ---------------------------------------
 echo "== uninstalling"
-uninstall_log="$(sudo "${PREFIX}/bin/fastcached-uninstall" 2>&1)" \
+uninstall_log="$(sudo "${PREFIX}/bin/pace-uninstall" 2>&1)" \
     || fail "uninstaller failed: $uninstall_log"
 
 [[ ! -e "$PREFIX" ]]  || fail "$PREFIX still present"

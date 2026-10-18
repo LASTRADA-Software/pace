@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every page that recommends pointing sccache at fastcached must carry, right
+# Every page that recommends pointing sccache at pace-kv must carry, right
 # there, what that costs under MSVC and clang-cl.
 #
-# "Point sccache at fastcached" is by definition ONE cache shared by every
+# "Point sccache at pace-kv" is by definition ONE cache shared by every
 # checkout and every machine pointed at it, which is the maximal form of the
 # hazard in .agent/rules/build-and-toolchain.md. PR #171 put a `message(WARNING)`
 # in cmake/portable/CompileCache.cmake, which reaches the audience that
@@ -58,7 +58,7 @@ cmake_minimum_required(VERSION 3.28)
 
 # ---------------------------------------------------------------------------
 # What counts as recommending the configuration. These two environment variables
-# are the only way to point sccache at a fastcached daemon, so naming one IS the
+# are the only way to point sccache at a pace-kv daemon, so naming one IS the
 # recommendation -- there is no way to describe the setup without them, and no
 # other reason to write them down.
 #
@@ -67,8 +67,8 @@ cmake_minimum_required(VERSION 3.28)
 # No row may contain a ';' -- these are CMake lists, and a semicolon inside a row
 # would split it into two.
 set(FastCachedSccacheBackendMarkers
-    "SCCACHE_MEMCACHED|Points sccache at a fastcached daemon over the memcached wire format."
-    "SCCACHE_REDIS|The same, over RESP2. sccache reaches fastcached through one of these two or not at all."
+    "SCCACHE_MEMCACHED|Points sccache at a pace-kv daemon over the memcached wire format."
+    "SCCACHE_REDIS|The same, over RESP2. sccache reaches pace-kv through one of these two or not at all."
 )
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ set(FastCachedSccacheSnippetInclude "^[ \t]*--8<--[ ]*\"([^\"]+)\"")
 set(FastCachedSccacheCaveatElements
     "the exposed compilers|MSVC / clang-cl|A caveat that does not say WHEN it applies is one every reader learns to skip. GCC and Clang are genuinely unaffected -- their preprocessed output carries the paths, so two checkouts never share an entry to begin with -- and a warning that fired for them too would cost exactly the case that matters."
     "the mechanism|/showIncludes / /EP|Without it the reader cannot tell a performance note from a correctness one, nor recognise the symptom when it arrives hours later somewhere else as an object built against a header it never read."
-    "the remedy|fastcache-cc|A hazard with no way out reads as a reason to stop reading. The launcher in this repository does not have this failure mode -- it rewrites a hit's paths into the consuming checkout and refuses a hit whose replayed dependency is absent -- which is the whole reason it exists."
+    "the remedy|pace-cc|A hazard with no way out reads as a reason to stop reading. The launcher in this repository does not have this failure mode -- it rewrites a hit's paths into the consuming checkout and refuses a hit whose replayed dependency is absent -- which is the whole reason it exists."
 )
 
 # How far AFTER a recommendation its caveat may sit, in lines.
@@ -108,7 +108,7 @@ set(FastCachedSccacheCaveatElements
 # thing it qualifies -- which is also what CliParser_test.cpp asserts about the
 # rendered `--help` -- and a window that also looked backwards was measurably
 # satisfied by unrelated prose: with the whole caveat deleted from README.md, a
-# symmetric window still found "MSVC" and "fastcache-cc" 10 and 34 lines ABOVE
+# symmetric window still found "MSVC" and "pace-cc" 10 and 34 lines ABOVE
 # the marker, in a different section, and reported only the mechanism missing.
 # Looking forward only, the same deletion reports all three.
 set(FastCachedSccacheCaveatWindow 40)
@@ -1106,7 +1106,7 @@ if(NOT report STREQUAL "")
 
     message(FATAL_ERROR
         "${report}"
-        "\nPointing sccache at fastcached is ONE cache shared by every checkout and every "
+        "\nPointing sccache at pace-kv is ONE cache shared by every checkout and every "
         "machine pointed at it, which under MSVC and clang-cl is the maximal form of the "
         "hazard in .agent/rules/build-and-toolchain.md: sccache hashes `/EP` output, which "
         "carries no paths, and replays a hit's `/showIncludes` with the absolute paths of "

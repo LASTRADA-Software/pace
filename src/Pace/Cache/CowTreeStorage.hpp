@@ -859,8 +859,8 @@ class CowTreeStorage final: public IStorage
 ///
 /// Both binaries that expose the conversion print the same sentence, so it is
 /// written once. Two copies of an operator-facing string diverge the first time
-/// either is improved, and an operator running `fastcache-compile-node
-/// --migrate-cache` after `fastcached --migrate-storage` should not have to work
+/// either is improved, and an operator running `pace-node
+/// --migrate-cache` after `pace-kv --migrate-storage` should not have to work
 /// out whether two differently-worded lines mean the same thing.
 ///
 /// Takes the whole outcome rather than a report, because the failure line is

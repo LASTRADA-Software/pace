@@ -101,7 +101,7 @@ set(homeShape "a line declaring `inline constexpr std::array MarkupEscapes`")
 # has is never "is this file listed" but "why is this allowed", and an opt-out with no
 # answer to that is indistinguishable from somebody silencing the check.
 set(ExemptionTable
-    "src/apps/fastcache-compile-node/AdminEndpoint.cpp|hand-escaped literal prose inside string literals -- it writes an escaped Authorization header as DOCUMENTATION for an operator to read, so the angle brackets are content rather than an escaped value. It calls no escape helper at all, which is why #1359 settled that a consolidation cannot reach it and that it is not a fourth duplicate. (This reason spells no entity itself: they contain CMake's list separator.)"
+    "src/apps/pace-node/AdminEndpoint.cpp|hand-escaped literal prose inside string literals -- it writes an escaped Authorization header as DOCUMENTATION for an operator to read, so the angle brackets are content rather than an escaped value. It calls no escape helper at all, which is why #1359 settled that a consolidation cannot reach it and that it is not a fourth duplicate. (This reason spells no entity itself: they contain CMake's list separator.)"
 )
 
 # Walk a file line by line WITHOUT ever building a CMake list of lines.
@@ -431,7 +431,7 @@ if(violations)
     message("")
     message("  out += EscapeMarkup(text);   // Pace/Core/Markup.hpp")
     message("")
-    message("It is header-only and std-only, so even `fastcache-cc` -- which links no")
+    message("It is header-only and std-only, so even `pace-cc` -- which links no")
     message("library at all -- reaches it for no `_fc_cc_core` row and no link.")
     message("")
     message("WHAT THIS DOES NOT SAY: a comment may discuss the entities, a `*_test.cpp`")

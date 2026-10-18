@@ -833,7 +833,7 @@ TEST_CASE("The daemon refuses a fleet read by name and sends it to the fleet's s
     auto const error = ErrorOf(reply);
     REQUIRE(error.present);
     CHECK(error.code == Wire::ErrorCode::DispatchNotPermitted);
-    CHECK(error.message.contains("the fleet's scheduler, a fastcache-compile-node"));
+    CHECK(error.message.contains("the fleet's scheduler, a pace-node"));
 }
 
 TEST_CASE("The daemon refuses an admission explanation by name and sends it to a compile node", "[compile-cache][handler]")
@@ -855,7 +855,7 @@ TEST_CASE("The daemon refuses an admission explanation by name and sends it to a
     CHECK(error.code != Wire::ErrorCode::NoCluster);
     // The WORDS, for the fleet case's reason: a relocated verb with no row is refused with the
     // same code and names no destination, so the code alone cannot tell the two apart.
-    CHECK(error.message.contains("fastcache-compile-node"));
+    CHECK(error.message.contains("pace-node"));
 }
 
 TEST_CASE("The daemon refuses a fleet summary by name and sends it to a compile node", "[compile-cache][handler][formation]")
@@ -871,7 +871,7 @@ TEST_CASE("The daemon refuses a fleet summary by name and sends it to a compile 
     REQUIRE(error.present);
     CHECK(error.code == Wire::ErrorCode::NoCluster);
     CHECK(error.code != Wire::UnimplementedVerb);
-    CHECK(error.message.contains("fastcache-compile-node"));
+    CHECK(error.message.contains("pace-node"));
 }
 
 TEST_CASE("The daemon refuses a ticket mint by name and sends it to a compile node", "[compile-cache][handler]")
@@ -885,7 +885,7 @@ TEST_CASE("The daemon refuses a ticket mint by name and sends it to a compile no
     auto const error = ErrorOf(reply);
     REQUIRE(error.present);
     CHECK(error.code == Wire::ErrorCode::DispatchNotPermitted);
-    CHECK(error.message.contains("fastcache-compile-node"));
+    CHECK(error.message.contains("pace-node"));
 }
 
 TEST_CASE("The daemon refuses the fleet cache verbs by name and names the machine that serves them",
@@ -894,7 +894,7 @@ TEST_CASE("The daemon refuses the fleet cache verbs by name and names the machin
     // The new-verb checklist's daemon half: a missing switch arm DROPS the frame (and on MSVC does not
     // fail the build), and a missing RelocatedVerbs row answers the generic refusal naming nobody.
     // `NotSharedCache`, never `UnknownOpcode`: a client told the verb is unknown concludes this build is
-    // too old, when it asked a fastcached for what only the named compile node serves.
+    // too old, when it asked a pace-kv for what only the named compile node serves.
     auto const store = Wire::StoreRequest { .key = "k", .prefetchGroup = {}, .srcRoot = {}, .buildTree = {}, .value = {} };
     for (auto const& frame:
          { Wire::EncodeFetchAs(Wire::FleetSharedCacheVerbs, "k"), Wire::EncodeStoreAs(Wire::FleetSharedCacheVerbs, store) })
@@ -908,7 +908,7 @@ TEST_CASE("The daemon refuses the fleet cache verbs by name and names the machin
         CHECK(error.code == Wire::ErrorCode::NotSharedCache);
         // The ROW's words, for the fleet case's reason: `NotSharedCache`'s own default message says
         // "shared-cache" too, so only the destination proves the RelocatedVerbs row answered.
-        CHECK(error.message.contains("fastcache-compile-node"));
+        CHECK(error.message.contains("pace-node"));
     }
 }
 
@@ -1406,8 +1406,8 @@ TEST_CASE("A gated verb keeps the operator's cap, not the AUTH ceiling", "[compi
 
 TEST_CASE("The cache refuses every scheduling verb, and says where they went", "[compile-cache][handler][distributed]")
 {
-    // `fastcached` is a cache and nothing else. The fleet's scheduler moved to
-    // `fastcache-compile-node`, because handing out capacity is a
+    // `pace-kv` is a cache and nothing else. The fleet's scheduler moved to
+    // `pace-node`, because handing out capacity is a
     // decision only one node may make at a time and nothing here can establish which
     // node that is.
     //
@@ -1433,7 +1433,7 @@ TEST_CASE("The cache refuses every scheduling verb, and says where they went", "
     {
         CHECK(ErrorOf(frame).code == Wire::ErrorCode::DispatchNotPermitted);
         // A refusal that cannot say what would have worked cannot be acted on.
-        CHECK(ErrorOf(frame).message.contains("fastcache-compile-node"));
+        CHECK(ErrorOf(frame).message.contains("pace-node"));
     }
 }
 

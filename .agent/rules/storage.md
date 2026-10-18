@@ -87,8 +87,8 @@ because the store now truncates its free tail after a durable flush and both sur
 metas may still name the cut ids. No list page a surviving meta names is ever cut, which
 is what keeps the link check a damage check. So the reach that can refuse is the meta
 slots, the free-list chain and the two reserved keys. Damage inside that reach refuses the process to start, and damage
-anywhere else is found per key while the process serves. Both `fastcached` and
-`fastcache-compile-node` treat a store that will not open as **fatal**, on purpose
+anywhere else is found per key while the process serves. Both `pace-kv` and
+`pace-node` treat a store that will not open as **fatal**, on purpose
 — the operator named a path, and coming up without it delivers less than was
 configured — which makes the first an outage and the second a degradation.
 Anything that makes `Open` touch more of the store converts the second into the
@@ -241,7 +241,7 @@ test wanting it; and a rulebook sentence that describes where code currently liv
 is a fact with an expiry date, so it has to be searched for when the code moves.
 
 **The signals are not the same on both binaries.** `WriteErrorReportingStorage` is
-constructed only by `fastcached`, so `fastcached_write_errors_total` and the
+constructed only by `pace-kv`, so `fastcached_write_errors_total` and the
 `storage write failed` warning cannot move on a compile node — its tier is wrapped
 in `ShardedStorage` and nothing else. A counter that is exported and can never rise
 is the shape the metrics rules already name, so anything written about reacting to

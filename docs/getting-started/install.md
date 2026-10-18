@@ -4,7 +4,7 @@
 
 The release artifacts include a `.deb`, an `.rpm`, a macOS `.pkg` (also
 offered inside a `.dmg`), and a Windows `.msi`. All of them install both
-executables — `fastcached` (the daemon) and `fastcache-cc` (the compiler
+executables — `pace-kv` (the daemon) and `pace-cc` (the compiler
 launcher) — and register the daemon as a service that starts on boot.
 
 ### Debian / Ubuntu, Fedora / RHEL
@@ -14,26 +14,26 @@ sudo apt install ./fastcached_<version>_<arch>.deb
 sudo dnf install ./fastcached-<version>.<arch>.rpm
 ```
 
-Installing creates a dedicated `fastcached` system user, enables the unit,
+Installing creates a dedicated `pace-kv` system user, enables the unit,
 and starts it. The daemon listens on `127.0.0.1:6674` out of the box (see
 [Ports](#ports)):
 
 ```sh
-systemctl status fastcached
-journalctl -u fastcached -f
+systemctl status pace-kv
+journalctl -u pace-kv -f
 ```
 
 Configuration lives in `/etc/fastcached/fastcached.yaml`, which is where
-fastcached looks when it is started without `--config`. It ships fully
+pace-kv looks when it is started without `--config`. It ships fully
 commented with every setting at its default, and is marked as a package
 config file, so local edits survive upgrades.
 
 ```sh
 sudoedit /etc/fastcached/fastcached.yaml
-sudo systemctl restart fastcached
+sudo systemctl restart pace-kv
 ```
 
-`systemctl reload fastcached` applies the reloadable subset — log level,
+`systemctl reload pace-kv` applies the reloadable subset — log level,
 memory budget, and the authentication settings — without dropping
 connections. Changing `bind`, `port`, `listen`, `listen_tls`, any `storage*` key, or
 `threads` requires a restart; a reload that touches them is rejected and
@@ -43,7 +43,7 @@ To change the command line rather than the config file, use a drop-in
 instead of editing the shipped unit (which is replaced on upgrade):
 
 ```sh
-sudo systemctl edit fastcached
+sudo systemctl edit pace-kv
 ```
 
 ### Running it as your own user
@@ -51,20 +51,20 @@ sudo systemctl edit fastcached
 For a personal compile cache, no root is involved:
 
 ```sh
-systemctl --user enable --now fastcached
+systemctl --user enable --now pace-kv
 ```
 
 The user unit runs on built-in defaults, so that is the whole setup. To
-customise it, just drop a config where fastcached already looks — no unit
+customise it, just drop a config where pace-kv already looks — no unit
 override needed:
 
 ```sh
 mkdir -p ~/.config/fastcached
 cp /etc/fastcached/fastcached.yaml ~/.config/fastcached/fastcached.yaml
-systemctl --user restart fastcached
+systemctl --user restart pace-kv
 ```
 
-That file is the *only* one any fastcached you start yourself will read:
+That file is the *only* one any pace-kv you start yourself will read:
 `/etc/fastcached/fastcached.yaml` describes the system service, whose cache only
 the service account can write, so an unprivileged instance passes over it
 entirely rather than inheriting settings it cannot act on. Your own copy is
@@ -79,18 +79,18 @@ $USER` if you want it running while you are not logged in.
 Setting up several PCs as one fleet? [Running a Windows office fleet](../operations/windows-office-fleet.md)
 is the runbook: which machine to install first, how the others join, and how to approve them.
 
-Run the MSI and choose what this machine runs: **fastcached** (the cache daemon),
-**fastcache-cc** (the compiler launcher), **fastcache-compile-node** (the compile
+Run the MSI and choose what this machine runs: **pace-kv** (the cache daemon),
+**pace-cc** (the compiler launcher), **pace-node** (the compile
 worker), and the command-line client, which is always installed. The installer
 registers the services that follow from the choice:
 
 | Installed | `FastCacheCompileNode` | `FastCached` |
 |---|---|---|
-| the node (with or without fastcached) | starts with Windows, started now | disabled, stopped |
-| fastcached without the node | — | starts with Windows, started now (pass `FASTCACHED_START_SERVICE=0` to leave it stopped) |
+| the node (with or without pace-kv) | starts with Windows, started now | disabled, stopped |
+| pace-kv without the node | — | starts with Windows, started now (pass `FASTCACHED_START_SERVICE=0` to leave it stopped) |
 
 The node needs no property to be registered: it finds its scheduler from the fleet it forms or
-joins (the [fastcache-compile-node page](../tools/fastcache-compile-node.md#macos-and-windows)
+joins (the [pace-node page](../tools/pace-node.md#macos-and-windows)
 has the details). There is no property for the address clients reach the node at: the node
 advertises the address this machine routes from and re-derives it when the network changes, so a
 renamed machine or a new VPN address needs no reinstall and no restart; an address that must be
@@ -99,10 +99,10 @@ firewall rules both registrations create to that remote range; left out, they ad
 `FASTCACHE_FLEET_SEED=office-a.vpn.example`, one machine of the fleet for the node to ask when no
 discovery beacon reaches it, as across a VPN; it is registered as the node's `--fleet-seed`, and a
 node that needs more than one names them under `fleet_seed:` in its configuration file. So is
-`FASTCACHE_FLEET_ID`, the one fleet the node may join, pasted as `fastcache-cli node` prints it on a
+`FASTCACHE_FLEET_ID`, the one fleet the node may join, pasted as `pacectl node` prints it on a
 machine of that fleet (`<cluster-id>@<key>[,<key>...]`); it is registered VERBATIM as the node's
 `--fleet-id`. A value the node cannot read **fails the whole transaction** (msiexec exits 1603, and
-the log names the action `FastCacheNodeCheckArguments`; `fastcache-compile-node --check-arguments
+the log names the action `FastCacheNodeCheckArguments`; `pace-node --check-arguments
 --fleet-id=<value>` names what is wrong with the value): the node's own parser checks
 the node's arguments before anything is remembered or registered, so a refused pin is never
 remembered, and a repair or upgrade leaves the existing registration and its remembered pin as they
@@ -146,7 +146,7 @@ its verbose log, Windows Installer reports the refused restart as
 `RESTART MANAGER: Failed while restarting applications. Error: 352`, followed by the line
 `Previously shut down applications have been restarted.`, which does not mean `FastCached` is
 running: it stays stopped. Neither needs anything done. The same old removal also closes any program holding one of
-0.3.0's files without asking, for example a `fastcache-cc` inside a running build, as every silent
+0.3.0's files without asking, for example a `pace-cc` inside a running build, as every silent
 Windows Installer removal does: finish or stop builds before upgrading. Without the node, the
 restart succeeds, so an upgrade from 0.3.0 that passes `FASTCACHED_START_SERVICE=0` still leaves
 `FastCached` running if it was running before: stop it first (`net stop FastCached`) to have it left
@@ -186,12 +186,12 @@ sc.exe start FastCached
 Uninstalling removes the services and leaves your configuration in place.
 
 Registering a service also opens the Windows Firewall for whatever it listens on beyond
-loopback — nothing, for fastcached's default `127.0.0.1:6674` — and uninstalling, or
+loopback — nothing, for pace-kv's default `127.0.0.1:6674` — and uninstalling, or
 deselecting a feature, removes its rules. An upgrade that drops a feature deletes its
-registration and its rule group (`fastcached: <service>`) as well; only its event source
+registration and its rule group (`pace-kv: <service>`) as well; only its event source
 stays, inert, since it names a program that is no longer installed. What each binary opens is on its own page:
-[fastcached](../operations/deployment.md#windows-service) and
-[fastcache-compile-node](../tools/fastcache-compile-node.md#macos-and-windows).
+[pace-kv](../operations/deployment.md#windows-service) and
+[pace-node](../tools/pace-node.md#macos-and-windows).
 
 ### macOS
 
@@ -199,7 +199,7 @@ Open the `.dmg` and run the `.pkg` inside it (the `.pkg` is also published
 on its own — the disk image is only a convenience). Both executables land
 in `/opt/fastcached/bin`.
 
-The installer asks how you want fastcached to start:
+The installer asks how you want pace-kv to start:
 
 | Choice | Runs as | Starts | Plist |
 |---|---|---|---|
@@ -207,7 +207,7 @@ The installer asks how you want fastcached to start:
 | **Start at boot, system-wide** | `_fastcached` | boot | `/Library/LaunchDaemons/software.lastrada.fastcached.plist` |
 
 They are alternatives, not additions. Both would listen on the same
-address, and fastcached has no unix-socket endpoint to fall back on, so if
+address, and pace-kv has no unix-socket endpoint to fall back on, so if
 you select the system-wide service it wins and the per-user agent is
 skipped. Selecting neither installs the tools without starting anything.
 
@@ -226,8 +226,8 @@ You can also register the service by hand at any time, which is how you
 set one up for a second user account:
 
 ```sh
-fastcached --install-service --service-scope=user
-sudo fastcached --install-service --service-scope=system
+pace-kv --install-service --service-scope=user
+sudo pace-kv --install-service --service-scope=system
 ```
 
 Note which one takes `sudo`. The user scope installs an agent for *the
@@ -276,7 +276,7 @@ else in the file applies normally. To choose the cache location, name the file
 at registration time instead:
 
 ```sh
-fastcached --install-service --service-scope=user --config=~/my-fastcached.yaml
+pace-kv --install-service --service-scope=user --config=~/my-fastcached.yaml
 ```
 
 Whichever file you name governs `storage_path` too: the registration passes
@@ -286,7 +286,7 @@ file and restarting the job actually changes where the cache lives.
 To remove everything:
 
 ```sh
-sudo /opt/fastcached/bin/fastcached-uninstall
+sudo /opt/fastcached/bin/pace-uninstall
 ```
 
 A `.pkg` has no built-in uninstaller — `pkgutil --forget` only drops the
@@ -300,7 +300,7 @@ Apple Silicon only. On an Intel Mac, build from source.
 
 ## Building from source
 
-fastcached builds with CMake 3.28 or newer and a C++23 compiler.
+pace-kv builds with CMake 3.28 or newer and a C++23 compiler.
 
 !!! warning "A build you installed by hand does not learn that it is out of date"
 
@@ -353,7 +353,7 @@ Requires `VCPKG_ROOT` to be set in the environment.
 ## Building the packages yourself
 
 An ordinary `cmake --install --prefix /usr/local` gives the conventional
-layout — `/usr/local/bin/fastcached`, and no service assets, since systemd
+layout — `/usr/local/bin/pace-kv`, and no service assets, since systemd
 does not read units from under a `/usr/local` prefix.
 
 Building a `.deb` or `.rpm` needs the package layout instead: the payload is
@@ -362,7 +362,7 @@ rooted at `/` so the units land in `/usr/lib/systemd` and the config in
 
 ```sh
 cmake --preset gcc-release -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON
-cmake --build --preset gcc-release --target fastcached fastcache-cc
+cmake --build --preset gcc-release --target pace-kv pace-cc
 cd out/build/gcc-release && cpack -G "DEB;RPM"
 ```
 
@@ -402,7 +402,7 @@ See `CMakePresets.json` for the complete list.
 ## Running a build
 
 The build produces two executables under the preset's `target/`
-directory: `fastcached` and `fastcache-cc`. The daemon runs in the
+directory: `pace-kv` and `pace-cc`. The daemon runs in the
 foreground and listens on `127.0.0.1:6674` by default:
 
 ```sh
@@ -413,12 +413,12 @@ A `--help` flag prints the full configuration surface.
 
 ## Ports
 
-fastcached's own port is **6674** — the leading digits of the gravitational
+pace-kv's own port is **6674** — the leading digits of the gravitational
 constant, G = 6.674×10⁻¹¹. It is unassigned in the IANA service-name registry,
 above the privileged floor (so it needs no `CAP_NET_BIND_SERVICE`), and below
 Linux's ephemeral range, so nothing else has a claim on it.
 
-**The port selects no protocol.** fastcached detects the wire format per
+**The port selects no protocol.** pace-kv detects the wire format per
 connection, so memcached text, memcached binary, redis RESP and the compile-
 cache protocol are all served on 6674 — and on any other port you bind. Earlier
 releases defaulted to memcached's 11211, which implied a protocol the daemon
@@ -447,7 +447,7 @@ One further port, **off unless you ask for it**:
 
 | Port | What | Default |
 |------|------|---------|
-| **6675** | The fleet scheduler | a convention, not a default: every `fastcache-compile-node` serves the scheduler on its own `--listen-node` rather than on a port of its own, so a scheduling node given `--listen-node=6675` answers there. Not served by `fastcached` |
+| **6675** | The fleet scheduler | a convention, not a default: every `pace-node` serves the scheduler on its own `--listen-node` rather than on a port of its own, so a scheduling node given `--listen-node=6675` answers there. Not served by `pace-kv` |
 
 A worker needs no port of its own. Dispatched compiles arrive on the **same
 `--listen-node` surface** that carries the node's cache verbs, so a worker opens one
@@ -455,10 +455,10 @@ A worker needs no port of its own. Dispatched compiles arrive on the **same
 
 A compile node also serves a **cache tier of its own**, on the same `--listen-node`
 port, which defaults to `6674` on loopback — the same address as the daemon's,
-deliberately, because that is where `fastcache-cc` already looks. A node that cannot
+deliberately, because that is where `pace-cc` already looks. A node that cannot
 bind that port **refuses to start** and names the address, whether you typed it or
 not: it opens exactly one `0xFC` port, and without it would register an address
-nothing answers. So do not run a node and `fastcached` on one machine — the node
+nothing answers. So do not run a node and `pace-kv` on one machine — the node
 answers every verb the daemon does — or give one of them a port of its own.
 A node running consensus additionally binds `--listen-raft` — every connection on that
 port proves the member's own identity key before a message is read — and,

@@ -254,7 +254,7 @@ DebArms() { # DebArms <deb> <repo-root> <paths>
             echo "Section: misc"
             echo "Priority: optional"
             echo "Architecture: all"
-            echo "Maintainer: fastcached packaging check <noreply@example.invalid>"
+            echo "Maintainer: pace-kv packaging check <noreply@example.invalid>"
             echo "Description: synthesised predecessor for the #383 upgrade check"
         } > "$old/DEBIAN/control"
         : > "$old/DEBIAN/conffiles"

@@ -25,7 +25,7 @@ namespace Pace
 /// in that file's anonymous namespace, with its reasoning in a comment there. That is
 /// exactly where a rule reaches nobody: a new file's author has no reason to open the
 /// RESP handler, and the natural thing to write is the `from_chars` call that does not
-/// build on one platform. It cost `fastcache-cli` a red `macOS-clang-release` on its
+/// build on one platform. It cost `pacectl` a red `macOS-clang-release` on its
 /// first push. Moved here rather than copied -- a second implementation citing the
 /// first in a comment vouches for its bugs without inheriting its fixes.
 

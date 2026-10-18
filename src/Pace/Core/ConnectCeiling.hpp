@@ -9,7 +9,7 @@ namespace Pace
 
 /// @file ConnectCeiling.hpp
 /// The one rule for capping a connect timeout, header-only and std-only so the launcher, which links
-/// nothing of `Pace`, `fastcache-cli` and the node all spell it the same way.
+/// nothing of `Pace`, `pacectl` and the node all spell it the same way.
 
 /// @p connect, at most @p ceiling.
 ///
@@ -17,7 +17,7 @@ namespace Pace
 /// non-positive connect is `core::net::DialOptions`' spelling of *leave the platform default in
 /// place*, which may be minutes, so it takes the ceiling too -- or `FASTCACHE_CONNECT_TIMEOUT=0s`
 /// would give the dial the cap exists for the longest wait of all. Every cap asks this, whatever it
-/// caps -- an exchange budget (`Cc::WithConnectAtMost`) or a dial's own timeouts (`fastcache-cli`'s
+/// caps -- an exchange budget (`Cc::WithConnectAtMost`) or a dial's own timeouts (`pacectl`'s
 /// mint) -- so the non-positive rule is written once.
 /// @param connect The connect timeout as configured.
 /// @param ceiling The longest the connect may take; positive.

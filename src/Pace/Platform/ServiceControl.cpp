@@ -409,8 +409,8 @@ ServiceSpec MakeDaemonServiceSpec(std::filesystem::path const& exePath, CliResul
     Config const& cfg = cli.config;
 
     // The dedicated account a system-wide job runs as, created by the package's
-    // postinstall. Mirrors the `fastcached` user in
-    // packaging/linux/fastcached.sysusers. It lives here, with the daemon's own
+    // postinstall. Mirrors the `pace-kv` user in
+    // packaging/linux/pace-kv.sysusers. It lives here, with the daemon's own
     // spec, rather than beside the launchd code that used to hardcode it: which
     // account a service runs as is a property of the service, and a second
     // binary registering itself may well want a different one.
@@ -433,8 +433,8 @@ ServiceSpec MakeDaemonServiceSpec(std::filesystem::path const& exePath, CliResul
                          .exePath = exePath,
                          .arguments = std::move(argv),
                          .daemonFlag = "--daemon",
-                         .displayName = "fastcached",
-                         .description = "fastcached — fast cache daemon",
+                         .displayName = "pace-kv",
+                         .description = "pace-kv — fast cache daemon",
                          .serviceAccount = std::string { DaemonServiceAccount },
                          .ownedPaths = std::move(owned),
                          // Nothing to hand the account: every path the daemon keeps is
@@ -1401,9 +1401,9 @@ bool ScopeDefaultApplies(ServiceSpec const& spec, ServiceScope scope, ScopeDefau
     // and where a per-user cache goes -- so a service that names none has nothing
     // to derive either default from, whatever its parser would accept. That is a
     // property of the VALUE and not of the parser, and for the one service that
-    // existed the two questions happened to coincide: `fastcached` has files AND
+    // existed the two questions happened to coincide: `pace-kv` has files AND
     // takes both flags. They were never the same fact, and the day
-    // `fastcache-compile-node` arrived -- a config file, no `--storage` -- the bit
+    // `pace-node` arrived -- a config file, no `--storage` -- the bit
     // could answer only one of them (#396). Do not fold this back into the set:
     // a spec accepting `StoragePath` and naming no application would render
     // `<home>/Library/Caches//cache`, which is a path nobody asked for rather than
@@ -1766,7 +1766,7 @@ ServiceControlResult ScmInstall(ServiceSpec const& spec, IScmCalls& calls, IDrai
 
     auto const exe = calls.ExecutablePath();
     if (exe.empty())
-        return { .outcome = ServiceControlOutcome::Failed, .message = "could not determine the fastcached executable path" };
+        return { .outcome = ServiceControlOutcome::Failed, .message = "could not determine the pace-kv executable path" };
 
     auto const logonName = WindowsLogonName(spec);
     auto const& start = ServiceStartRowOf(spec.startMode);
@@ -1781,7 +1781,7 @@ ServiceControlResult ScmInstall(ServiceSpec const& spec, IScmCalls& calls, IDrai
     }
 
     // The logon name: naming nobody is LocalSystem -- the whole machine -- which
-    // fastcache-compile-node must not have: it compiles input that arrived over the
+    // pace-node must not have: it compiles input that arrived over the
     // network. No password: a virtual account has none, and LocalSystem takes none.
     auto const request = ScmServiceRequest { .name = spec.serviceName,
                                              .commandLine = BuildServiceCommandLine(spec),
@@ -2095,7 +2095,7 @@ ServiceControlResult LaunchdInstall(ServiceSpec const& spec, ServiceScope scope,
 
     // The mirror guard, and not a nicety: a user agent is installed *for the
     // invoking account*, and HomeDirectory reads the real uid, which
-    // sudo sets to 0. Without this, `sudo fastcached --install-service` — the
+    // sudo sets to 0. Without this, `sudo pace-kv --install-service` — the
     // natural reading of a command whose help mentions sudo — writes the plist
     // to /var/root/Library/LaunchAgents and bootstraps it into root's domain.
     // Nothing starts at the operator's own login, and an unprivileged
@@ -2534,7 +2534,7 @@ namespace
                                                      nullptr,
                                                      // lpServiceStartName. Naming nobody is
                                                      // LocalSystem -- the whole machine --
-                                                     // which fastcache-compile-node must
+                                                     // which pace-node must
                                                      // not have: it compiles input that
                                                      // arrived over the network.
                                                      request.logonName ? request.logonName->c_str() : nullptr,

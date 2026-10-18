@@ -85,7 +85,7 @@ _secret|the shared secret a credential holder keeps -- AuthPolicy, AdminCredenti
 requirePass|the client-authentication secret of the daemon, which ConfigReloader multiplies by every retained snapshot (Config/Config, #1125)
 cookieKey|the key every discovery challenge cookie is MACed under, drawn per epoch: whoever holds it can mint a challenge this node will believe it issued (Cluster/ChallengeCookies)
 machineTicket|a minted machine ticket: a bearer credential, signed by the identity key of this machine, until it expires (Distributed/MachineTicket)
-secret|the text credential a client presents: Cc::Credential::secret in the launcher and the node, and Credential::secret in fastcache-cli (#1125, #1578)
+secret|the text credential a client presents: Cc::Credential::secret in the launcher and the node, and Credential::secret in pacectl (#1125, #1578)
 '
 # The rows are the per-node identity's (#178): the table's claim is "these names hold key
 # material", and a node's signing key and a session's derived keys are exactly that. Each name is
@@ -109,12 +109,12 @@ secret|the text credential a client presents: Cc::Credential::secret in the laun
 # `requirePassExplicit` -- which is a provenance BIT and holds no secret.
 #
 # `secret` is a row since both of its holders are `SecureString`: `Cc::Credential::secret`
-# (`apps/fastcache-cc/CacheProtocol.hpp`) since the launcher began presenting machine tickets,
-# and `fastcache-cli`'s own `Credential::secret` since its node verbs began presenting them too.
+# (`apps/pace-cc/CacheProtocol.hpp`) since the launcher began presenting machine tickets,
+# and `pacectl`'s own `Credential::secret` since its node verbs began presenting them too.
 # What the row cannot reach is the one plain copy a wire needs spelled out, made where it is sent
 # and named for something else: the RESP `AUTH` vector `SocketExchange.cpp` encodes. That residue
 # is #1578. (The admin surface is sent no credential at all, so no bearer copy exists.) **That vector is NAMED `argv` and is not a process
-# argument list** -- `fastcache-cli` spawns no process at all, and it is written here because
+# argument list** -- `pacectl` spawns no process at all, and it is written here because
 # the name produced exactly that misreading once.
 #
 # TWO names were considered for #1125 and are deliberately NOT rows, each for a different
@@ -130,7 +130,7 @@ secret|the text credential a client presents: Cc::Credential::secret in the laun
 #                the `key` argument again.
 #
 # Where those secrets LAND is therefore still plain storage in places, and that is a stated
-# boundary rather than a gap this table forgot -- `fastcache-cli`'s `main.cpp` says where.
+# boundary rather than a gap this table forgot -- `pacectl`'s `main.cpp` says where.
 #
 # A MINTED TICKET leaves `SecureString` exactly once, and on purpose: MINT-TICKET's `Ok`
 # reply IS the ticket, so `EncodeReply` copies it into the plain reply vector the endpoint

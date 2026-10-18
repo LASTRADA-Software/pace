@@ -57,17 +57,17 @@ endif()
 # may hold, and what asks for it there. The reason is a column because a row with no
 # stated purpose is a row nobody can judge when it starts failing.
 set(vslangAllowedSites
-    "src/apps/fastcache-cc/main.cpp|1|RunCaptureSplitInEnglish, for the preprocess probe that reads /showIncludes (#692)"
-    "src/apps/fastcache-cc/ToolchainProbe.cpp|1|CompilerBanner, for the version banner that is the compiler identity (#200)"
+    "src/apps/pace-cc/main.cpp|1|RunCaptureSplitInEnglish, for the preprocess probe that reads /showIncludes (#692)"
+    "src/apps/pace-cc/ToolchainProbe.cpp|1|CompilerBanner, for the version banner that is the compiler identity (#200)"
 )
 
 # Where an assignment may NOT appear. Scanned as a whole so a new production file
 # reaching for it is caught rather than silently permitted by an allow-list that
 # does not mention it.
 set(vslangScanRoots
-    "src/apps/fastcache-cc"
-    "src/apps/fastcache-compile-node"
-    "src/apps/fastcached"
+    "src/apps/pace-cc"
+    "src/apps/pace-node"
+    "src/apps/pace-kv"
     "src/Pace"
 )
 
@@ -89,7 +89,7 @@ set(vslangAssignmentPattern "\\.name[ \t]*=[ \t]*\"VSLANG\"")
 # guard written against one route does not cover a second route to the same place
 # merely because the same variable is at the end of it.
 set(vslangEnglishEntryPoints
-    "src/apps/fastcache-cc/main.cpp|RunCaptureSplitInEnglish|2|its definition, plus the single preprocess-probe call (#692)"
+    "src/apps/pace-cc/main.cpp|RunCaptureSplitInEnglish|2|its definition, plus the single preprocess-probe call (#692)"
 )
 
 set(missingRoots "")

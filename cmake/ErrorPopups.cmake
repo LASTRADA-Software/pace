@@ -20,7 +20,7 @@
 # A TEST executable suppresses always. A PRODUCT binary -- the target named for its own
 # `src/apps/<name>` directory, or one carrying `FASTCACHED_ERROR_POPUPS_POLICY on-request`
 # -- suppresses only when `FASTCACHED_ERROR_DIALOG_VARIABLE` is present in its environment.
-# A developer running a Debug `fastcached` by hand keeps the dialog and the chance to attach
+# A developer running a Debug `pace-kv` by hand keeps the dialog and the chance to attach
 # a debugger at the assert; a product binary an e2e fixture spawns does not, because every
 # registered test carries the variable (`_fastcached_mark_tests_for_error_dialogs` below, and
 # `FASTCACHED_ERROR_DIALOG_ENVIRONMENT` on each `catch_discover_tests`) and a child inherits

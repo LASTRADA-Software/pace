@@ -10,7 +10,7 @@
 /// A header rather than a `target_compile_definitions` because a definition reaches
 /// EVERY translation unit of the target, and the compiler cache keys on the command
 /// line as well as on the preprocessed text. An absolute path on the command line
-/// gave every unit of `PaceTest` and `fastcache-compile-node-tests` -- 382 of a
+/// gave every unit of `PaceTest` and `pace-node-tests` -- 382 of a
 /// clang-release build's 1017, most of which never named it -- a key no other checkout
 /// computes, so a second folder recompiled all of them. Included only where a path is
 /// read, the checkout reaches the keys of the units that actually depend on it.

@@ -55,7 +55,7 @@
 #
 # It is also already this project's idiom for asking a `cmake/portable/` module
 # what it computes: `check-debug-prefix-map.cmake` and
-# `check-fastcache-addr-opt-out.cmake` both `include()` `CompileCache.cmake` and
+# `check-pace-addr-opt-out.cmake` both `include()` `CompileCache.cmake` and
 # drive it. The only thing new here is the stub, which those two do not need
 # because the functions they call spawn nothing.
 
@@ -341,8 +341,8 @@ endforeach()
 # The MSVC family is the warning selectors `cl` and `clang-cl` accept, with `-` or `/`: `w` (every
 # warning off), `wdN` (one off), `woN` (once), `w1N`..`w4N` (moved to a level `/W4` may not show),
 # and `W0` (the level that shows nothing). `weN` is NOT one: it makes a warning an error, which
-# hardens it. The same enumeration is fastcache-cc's argument allowlist
-# (src/apps/fastcache-cc/CompileJob.cpp, the `w`/`wd`/`we`/`wo`/`w1`..`w4` rows); it is C++ inside an
+# hardens it. The same enumeration is pace-cc's argument allowlist
+# (src/apps/pace-cc/CompileJob.cpp, the `w`/`wd`/`we`/`wo`/`w1`..`w4` rows); it is C++ inside an
 # app, so it is cited rather than shared. The GNU family is `-w` (every warning off) and `-Wno-X`,
 # except the fatality-only `-Wno-error=X`, which the WERROR block owns. One list for every persona:
 # clang-cl takes `-Wno-X` too, and a spelling no driver takes cannot be recorded anyway.

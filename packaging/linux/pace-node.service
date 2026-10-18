@@ -1,0 +1,224 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The compile worker.
+#
+# Socket-activated: pace-node.socket owns the port and this unit
+# adopts it, so there is no --listen-node here -- the worker reads the address and
+# port off the socket it is handed, and advertises what it reads. Enable the
+# SOCKET, not this:
+#
+#     systemctl enable --now pace-node.socket
+#
+# Type=simple and NOT a daemonizing flag, for the reason the pace-kv unit
+# records: a double-fork silences journald and races Type=forking's pidfile.
+#
+# Override anything here with a drop-in rather than editing this file (it is
+# replaced on upgrade):
+#
+#     systemctl edit pace-node
+
+[Unit]
+Description=fastcache compile worker
+Documentation=https://github.com/LASTRADA-Software/fastcached
+Requires=pace-node.socket
+After=pace-node.socket network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# What is SITE-SPECIFIC -- an advertised address other machines must dial in place
+# of the one this machine routes from, a fleet seed across a VPN, the membership
+# policy -- comes from a file an operator writes rather than from this unit. None
+# of it is required: a node with no configuration forms a fleet of its own and
+# registers its worker where its formation record says, never at a scheduler
+# address anybody typed (a node that serves is refused `--scheduler`, which aims
+# the one-shot verbs alone).
+#
+# That file is now the node's own YAML configuration rather than a shell fragment
+# of command-line arguments (#291). One file, one grammar, one precedence rule:
+# what an operator writes there is configuration the binary parses, not text a
+# unit expands into an argument vector. The mechanism it replaces could disagree
+# with the command line with nobody having written down which won.
+#
+# `--config` is passed explicitly, and it is NOT a second source of truth: the
+# path below is the same one the node would discover on its own, because
+# DefaultConfigPath's system candidate is `<sysconfdir>/{app}.yaml` and this
+# application is `pace-node`. Stating it is what makes the failure
+# legible -- a config the operator NAMED is strict, so a missing or unparseable
+# file stops the service here instead of silently starting a worker configured
+# out of nothing: an unparseable one at once (78), a missing one once the start
+# limit below is spent (1, because at boot it may sit on a mount not back yet).
+# The two spellings cannot drift apart; one is the other written down.
+#
+# The TOOLCHAINS are not in it. "No default compiler" and "no discovery" turned
+# out to be different claims: a default is how a job ends up running against
+# something nobody chose, while which compilers a machine holds is a fact this
+# worker can establish for itself. It surveys the machine at startup and serves
+# what it finds; `toolchain:` narrows that, and `toolchain_discovery: false`
+# turns it off.
+ExecStart=/usr/bin/pace-node --config=/etc/fastcached/pace-node.yaml
+
+# SIGHUP re-reads the config file. The binary has handled it since #291 and this
+# unit never offered it, so `systemctl reload pace-node` answered
+# "Job type reload is not applicable" and every reloadable setting was reachable
+# only by restarting -- which on this unit means dropping the compiles in flight.
+# The reload channel existing in the binary and not in the service is the whole
+# defect: nothing was broken, nothing logged, and the feature was simply
+# unreachable from the shipped install.
+#
+# Only a subset applies. `toolchain` and `no_toolchain_discovery` re-survey and
+# re-register; `log_level` and `allow_compile_arg` take effect immediately.
+# Everything else is validated as immutable, and a candidate that changes one is
+# refused whole -- the worker logs which key and keeps running on the previous
+# configuration, so a reload never half-applies.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# SIGTERM stops accepting and lets the accept loop finish; the stop flag is
+# polled at 100 ms and jobs are served inline, so a clean stop is bounded by
+# the compile in flight rather than by any drain of its own. TimeoutStopSec is
+# generous for that reason: killing a worker mid-compile costs the client a
+# local recompile, but it is not wrong -- waiting is simply cheaper.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+Restart=on-failure
+RestartSec=1
+# A start refused on its configuration, or on a defect in its own build, exits 78
+# (EX_CONFIG, `ProcessExit::Refused` in src/Pace/Platform/ProcessExit.hpp), and the
+# next start would refuse it again, so
+# it is not restarted: the unit stays failed, with the reason in the journal. Every other
+# failure -- a port still held by a process that was exiting, a store another process
+# holds, a named file that is absent or could not be read -- is restarted, within
+# systemd's default start limit of five starts in ten seconds. Measured on systemd 259: a refusal ran once and stayed failed, whether it
+# arrived at once or after three seconds; a failure after three seconds was restarted
+# nine times in forty seconds and went on; eight restarts by hand three seconds apart
+# were all honoured, and five starts inside ten seconds are honoured too -- it is a
+# SIXTH, the fifth restart typed right after a start, that the default limit refuses.
+RestartPreventExitStatus=78
+
+User=fastcache-node
+Group=fastcache-node
+
+# A directory of this worker's OWN, and deliberately not `/`.
+#
+# systemd starts a service in `/` when it is given no WorkingDirectory, and on
+# THIS unit that is not cosmetic. A dispatched compile is told the client's
+# compilation directory and what to replace it with, and the worker spells that
+# as `-fdebug-prefix-map=<directory>=<replacement>` for both its own directory
+# and the client's -- because gcc records the client's and clang records this
+# machine's, so mapping both gives one answer either way.
+#
+# A prefix-map rule appends the unmatched tail. So `<from>` = `/` matches EVERY
+# absolute path in the object and keeps the rest of it: `/usr/include/stdio.h`
+# becomes `.usr/include/stdio.h`. Measured on gcc 14.2.0 against a node running
+# in `/`, `DW_AT_comp_dir` came back `.tmp/.../client` and every system header
+# read `.usr/include/...`. The cache KEY is correct, so that object is stored and
+# shared -- a wrong object under a right key, which is the failure this project
+# is most careful about. Issue #674.
+#
+# `WorkerPrefixMapRules` in CompileJob.cpp drops the worker's own rule when this
+# directory contains the client's, so a node installed from a package that
+# predates this line does not produce that object. That guard is not a substitute
+# for this line: it costs the clang half, leaving such a node's objects with this
+# machine's absolute path in `DW_AT_comp_dir`. A WorkingDirectory is the only
+# thing that buys that back.
+#
+# RuntimeDirectory= rather than a path the package installs: systemd creates it
+# at start, owned by the account below, and removes it at stop -- so there is no
+# directory to install, chown, migrate or clean up, and it is writable even under
+# the ProtectSystem=strict further down. It is also somewhere no build tree ever
+# lives, which matters because a worker directory that CONTAINED a client's build
+# directory would drop the rule exactly as `/` does. That rules out the other
+# obvious candidate, /tmp: continuous-integration builds run there.
+#
+# 0700 rather than the 0755 default. Nothing but this worker has any business in
+# it, and UMask=0077 below says the same thing about what it writes.
+RuntimeDirectory=fastcache-node
+RuntimeDirectoryMode=0700
+WorkingDirectory=/run/fastcache-node
+
+# The node's STATE directory, /var/lib/fastcache-node, which `cluster_dir:` names.
+#
+# It is where the node keeps WHO IT IS -- its identity key and its id (#178) -- and
+# every worker needs one: a worker proves that key on every connection to its
+# scheduler, and every node keeps its formation record there too. The runtime
+# directory above cannot be it, because systemd removes that at
+# every stop and a worker that mints a new identity on every restart is a machine the
+# cluster has to admit again each time. Under ProtectSystem=strict nothing else is
+# writable, so without this line the setting the configuration asks for could not
+# work. 0700 for the key's sake.
+StateDirectory=fastcache-node
+StateDirectoryMode=0700
+
+# The node's DISK CACHE directory, /var/cache/fastcache-node, for `cache_dir:`.
+#
+# `cache_dir` has no default -- a disk tier is a resource an operator names -- so
+# this line turns nothing on. What it gives the setting is somewhere to point.
+# Under ProtectSystem=strict the only persistent directories this unit can write
+# are the ones it declares, and the state directory above is not a candidate: the
+# node keeps its identity there and refuses to start beside an entry it has no row
+# for, so `cache_dir: /var/lib/fastcache-node/cache` ends the start with "this
+# build keeps no entry by that name". Without this line the path the reference
+# configuration and the docs name, /var/cache/fastcache-node, is read-only to the
+# service, and a disk tier was reachable only through a drop-in.
+#
+# CacheDirectory= because a compile cache is regenerable by definition, which is
+# what /var/cache is for -- and so a backup of /var/lib does not carry 20 GiB of
+# objects the fleet can rebuild. 0700 for the reason UMask=0077 is set below.
+CacheDirectory=fastcache-node
+CacheDirectoryMode=0700
+
+# --- Hardening -------------------------------------------------------------
+# This block is deliberately NOT a copy of pace-kv's, and the difference is
+# the whole point of the service: pace-kv executes nothing, while this
+# worker's entire job is to run a compiler. Every relaxation below is named
+# with the reason, so a future tightening does not silently break compiles.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
+CapabilityBoundingSet=
+
+# Read-only /usr is what a compiler needs and all it needs: the toolchain is
+# read, never written. Scratch goes to PrivateTmp above, which is this unit's
+# own /tmp and is discarded when the service stops -- so a job that leaked a
+# file cannot accumulate across restarts.
+ProtectSystem=strict
+
+# AF_UNIX and AF_NETLINK are not for listening. glibc's getaddrinfo needs both
+# to resolve a non-numeric address -- this machine's own name at startup, a
+# `fleet_seed:` such as `build-cache.internal` -- since NSS reaches systemd-resolved
+# over AF_UNIX and enumerates interfaces over AF_NETLINK.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+# @system-service covers fork and exec, which this unit cannot do without.
+# Listed explicitly rather than inherited from a template, because a filter
+# that forbade exec would make every job fail in a way that looks like a
+# compiler bug rather than a policy decision.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# MemoryDenyWriteExecute is deliberately ABSENT, where pace-kv sets it.
+# Compilers legitimately map writable-then-executable memory -- LTO plugins and
+# any JIT the driver loads -- so enabling it here would reject perfectly valid
+# toolchains with an error pointing at the compiler instead of at this file.
+# The restriction is worth having in a daemon that never execs and is simply
+# not applicable to one whose purpose is to exec.
+
+# No [Install]. The socket is what gets enabled; a service enabled on its own
+# would start at boot and sit idle, which is the opposite of what activation is
+# for.

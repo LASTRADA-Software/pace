@@ -3,12 +3,12 @@
 # The launcher's documented environment table must name every variable the launcher
 # reads, and no variable it does not.
 #
-# `EnvName` in `src/apps/fastcache-cc/LauncherCli.hpp` holds the names, and
+# `EnvName` in `src/apps/pace-cc/LauncherCli.hpp` holds the names, and
 # `EnvironmentTable` in `LauncherCli.cpp` is what drives parsing and `--help` from
-# them. `docs/tools/fastcache-cc.md` is what somebody reading the documentation site
+# them. `docs/tools/pace-cc.md` is what somebody reading the documentation site
 # gets instead. Nothing linked the two, and the page said so in prose:
 #
-#   > `fastcache-cc --help` documents the same set, generated from the table in
+#   > `pace-cc --help` documents the same set, generated from the table in
 #   > `LauncherCli.cpp` ... if the two ever disagree, `--help` is right.
 #
 # A sentence that names a hazard and does nothing about it. A variable added to the
@@ -47,8 +47,8 @@ if(NOT DEFINED FASTCACHED_SOURCE_DIR)
     message(FATAL_ERROR "FASTCACHED_SOURCE_DIR must be set")
 endif()
 
-set(_header "${FASTCACHED_SOURCE_DIR}/src/apps/fastcache-cc/LauncherCli.hpp")
-set(_page "${FASTCACHED_SOURCE_DIR}/docs/tools/fastcache-cc.md")
+set(_header "${FASTCACHED_SOURCE_DIR}/src/apps/pace-cc/LauncherCli.hpp")
+set(_page "${FASTCACHED_SOURCE_DIR}/docs/tools/pace-cc.md")
 
 foreach(_file "${_header}" "${_page}")
     if(NOT EXISTS "${_file}")
@@ -111,13 +111,13 @@ set(_violations "")
 foreach(_name IN LISTS _declared)
     if(NOT "${_name}" IN_LIST _documented)
         list(APPEND _violations
-             "${_name} is read by the launcher and has no row in docs/tools/fastcache-cc.md")
+             "${_name} is read by the launcher and has no row in docs/tools/pace-cc.md")
     endif()
 endforeach()
 foreach(_name IN LISTS _documented)
     if(NOT "${_name}" IN_LIST _declared)
         list(APPEND _violations
-             "${_name} has a row in docs/tools/fastcache-cc.md and is not read by the launcher")
+             "${_name} has a row in docs/tools/pace-cc.md and is not read by the launcher")
     endif()
 endforeach()
 
@@ -129,8 +129,8 @@ if(_violations)
     message(FATAL_ERROR
             "check-launcher-env-reference: the launcher and its documented environment table disagree."
             "${_text}\n"
-            "  Add or remove the row in docs/tools/fastcache-cc.md, or the declaration in "
-            "src/apps/fastcache-cc/LauncherCli.hpp. The table in LauncherCli.cpp drives --help, "
+            "  Add or remove the row in docs/tools/pace-cc.md, or the declaration in "
+            "src/apps/pace-cc/LauncherCli.hpp. The table in LauncherCli.cpp drives --help, "
             "so --help is right and the page is what drifts.")
 endif()
 

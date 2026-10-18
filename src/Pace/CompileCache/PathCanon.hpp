@@ -613,7 +613,7 @@ using PathTransform = std::function<std::string(std::string_view)>;
 /// reason both exist as names is that the general form carries its direction in the
 /// ORDER OF TWO PARAMETERS OF THE SAME TYPE. Swapping them compiles, and it passes
 /// every test on every platform this project builds on: the only call sites are in
-/// `fastcache-cc/main.cpp`, which is in no test target, and on an English toolchain
+/// `pace-cc/main.cpp`, which is in no test target, and on an English toolchain
 /// both directions are byte-exact no-ops. It would then poison every stored value on
 /// exactly the machines this exists to fix, silently. That is #700's own argument --
 /// `RenderShowIncludes` takes its marker required and undefaulted so a producer

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Only the files in `FastCachedUdpOpenerUnits` below open a UDP socket: discovery's, in
-# `src/apps/fastcache-compile-node/DiscoveryTier.cpp`, the one socket that RECEIVES; and the route
+# `src/apps/pace-node/DiscoveryTier.cpp`, the one socket that RECEIVES; and the route
 # probe's, in `src/Pace/Platform/RouteProbe.cpp`, which only `connect()`s to read the kernel's
 # source-address choice, sends and receives nothing, and is closed at once.
 #
@@ -67,7 +67,7 @@ endif()
 # The files allowed to open a UDP socket, and why. Adding a row is a decision about the firewall
 # rule rather than about this check.
 set(FastCachedUdpOpenerUnits
-    "src/apps/fastcache-compile-node/DiscoveryTier.cpp|discovery's shared beacon socket and its private reply socket, the sockets the program-scoped udp/any firewall rule exists for"
+    "src/apps/pace-node/DiscoveryTier.cpp|discovery's shared beacon socket and its private reply socket, the sockets the program-scoped udp/any firewall rule exists for"
     "src/Pace/Platform/RouteProbe.cpp|the route probe: connect() only, to read the kernel's source-address choice, and it never sends or receives, so no firewall rule is involved"
 )
 

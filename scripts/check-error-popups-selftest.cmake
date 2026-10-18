@@ -112,14 +112,14 @@ set(catchEdge "build target\\cli-tests.exe: CXX_EXECUTABLE_LINKER__cli-tests_Deb
 
 # ---- the passing direction --------------------------------------------------------------
 
-fc_registration(ccE2e "cc-e2e" "\"bash\" \"e2e.sh\" \"--launcher\" \"${t}/fastcache-cc\"" TRUE)
+fc_registration(ccE2e "cc-e2e" "\"bash\" \"e2e.sh\" \"--launcher\" \"${t}/pace-cc\"" TRUE)
 fc_registration(canary "canary" "\"cmake\" \"-DCANARY=${t}/canary.exe\" \"-P\" \"gate.cmake\"" TRUE)
 fc_stage(clean
-    "${anchorRow}cli-tests|${t}/cli-tests.exe|always|\nfastcache-cc|${t}/fastcache-cc|on-request|\ncanary|${t}/canary.exe|always|\nunlaunched|${t}/unlaunched.exe|always|\n"
+    "${anchorRow}cli-tests|${t}/cli-tests.exe|always|\npace-cc|${t}/pace-cc|on-request|\ncanary|${t}/canary.exe|always|\nunlaunched|${t}/unlaunched.exe|always|\n"
     "${anchorTest}${ccE2e}${canary}"
     "${catchInclude}"
     "${catchTestsMarked}"
-    "${anchorEdge}${catchEdge}build target/fastcache-cc: CXX_EXECUTABLE_LINKER__fastcache-cc_Debug y.o ErrorPopupsAtStartup.cpp.o\nbuild target\\canary.exe: CXX_EXECUTABLE_LINKER__canary_Debug ErrorPopupsAtStartup.cpp.obj\nbuild target\\unlaunched.exe: CXX_EXECUTABLE_LINKER__unlaunched_Debug z.obj\n"
+    "${anchorEdge}${catchEdge}build target/pace-cc: CXX_EXECUTABLE_LINKER__pace-cc_Debug y.o ErrorPopupsAtStartup.cpp.o\nbuild target\\canary.exe: CXX_EXECUTABLE_LINKER__canary_Debug ErrorPopupsAtStartup.cpp.obj\nbuild target\\unlaunched.exe: CXX_EXECUTABLE_LINKER__unlaunched_Debug z.obj\n"
     tree)
 fc_case("a command, a catch_discover_tests include and a script argument all count as launched and covered" "${tree}" pass "4 of 5 executable(s) are launched by a test; 4 carry the suppression")
 fc_case("every registered test, catch-discovered ones included, is read and sets the variable" "${tree}" pass "4 registered test(s) read, 0 without ${variable}")
@@ -134,11 +134,11 @@ fc_case("a launched executable stating a reason passes and prints the reason" "$
 
 # POSIX spells no `.exe`, so the launcher's path is a PREFIX of its test binary's. The
 # uncovered launcher is not launched; its test binary is.
-fc_registration(prefixTest "t" "/b/target/fastcache-cc-tests" TRUE)
+fc_registration(prefixTest "t" "/b/target/pace-cc-tests" TRUE)
 fc_stage(prefix
-    "${anchorRow}fastcache-cc|/b/target/fastcache-cc|on-request|\nfastcache-cc-tests|/b/target/fastcache-cc-tests|always|\n"
+    "${anchorRow}pace-cc|/b/target/pace-cc|on-request|\npace-cc-tests|/b/target/pace-cc-tests|always|\n"
     "${anchorTest}${prefixTest}" "" "<none>"
-    "${anchorEdge}build target/fastcache-cc: CXX_EXECUTABLE_LINKER__fastcache-cc_Debug a.o\nbuild target/fastcache-cc-tests: CXX_EXECUTABLE_LINKER__fastcache-cc-tests_Debug ErrorPopupsAtStartup.cpp.o\n"
+    "${anchorEdge}build target/pace-cc: CXX_EXECUTABLE_LINKER__pace-cc_Debug a.o\nbuild target/pace-cc-tests: CXX_EXECUTABLE_LINKER__pace-cc-tests_Debug ErrorPopupsAtStartup.cpp.o\n"
     tree)
 fc_case("a path that is only a PREFIX of a launched one is not launched" "${tree}" pass "2 of 3 executable(s) are launched")
 
@@ -152,13 +152,13 @@ fc_stage(command
     tree)
 fc_case("an uncovered test COMMAND is refused by name" "${tree}" refuse "bare is launched by a test and its 'Debug' link line carries no")
 
-fc_registration(e2e "e2e" "\"bash\" \"e2e.sh\" \"--fastcached\" \"${t}/fastcached.exe\"" TRUE)
+fc_registration(e2e "e2e" "\"bash\" \"e2e.sh\" \"--pace-kv\" \"${t}/pace-kv.exe\"" TRUE)
 fc_stage(argument
-    "${anchorRow}fastcached|${t}/fastcached.exe|on-request|\n"
+    "${anchorRow}pace-kv|${t}/pace-kv.exe|on-request|\n"
     "${anchorTest}${e2e}" "" "<none>"
-    "${anchorEdge}build target\\fastcached.exe: CXX_EXECUTABLE_LINKER__fastcached_Debug main.obj\n"
+    "${anchorEdge}build target\\pace-kv.exe: CXX_EXECUTABLE_LINKER__pace-kv_Debug main.obj\n"
     tree)
-fc_case("an uncovered binary handed to a script as an ARGUMENT is refused" "${tree}" refuse "fastcached is launched by a test")
+fc_case("an uncovered binary handed to a script as an ARGUMENT is refused" "${tree}" refuse "pace-kv is launched by a test")
 
 fc_stage(catch
     "${anchorRow}cli-tests|${t}/cli-tests.exe|always|\n"

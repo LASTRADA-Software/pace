@@ -181,14 +181,14 @@ Every rule below has already been a bug.
   `opRaw` at some seventy call sites across the daemon, the launcher and the test
   client, and the thing that had to stop being duplicated was the *layout*.
 - **`Protocol/CompileCacheWire.hpp` must stay header-only and dependency-free.**
-  Same constraint as `Cli/UsageDoc`, same reason: `fastcache-cc` does not link
+  Same constraint as `Cli/UsageDoc`, same reason: `pace-cc` does not link
   the `Pace` library, so an include of anything from `Net/`, `Cache/`,
   `Async/` or `Config/` there breaks the launcher's **link**, not merely its
   build. Being header-only is also what keeps it free — it costs no row in
   `_fc_cc_core`. The dependency runs *out* of `ProtocolAutodetect.hpp` (which
   pulls in `Task`, `CacheEngine` and `ISocket`, and so can never be included by a
   client) into the wire header, never the other way. The launcher's own framing
-  lives in `apps/fastcache-cc/CacheProtocol.cpp` rather than `main.cpp` for a
+  lives in `apps/pace-cc/CacheProtocol.cpp` rather than `main.cpp` for a
   related reason: `main.cpp` is in no test target, so while the framing sat there
   it had *no* unit coverage at all.
   - **And being dependency-free is what makes it carry cache tiers POSITIONALLY, which
@@ -227,7 +227,7 @@ Every rule below has already been a bug.
     from `WorkerServer.hpp` and handed over at construction, so lowering the surface's
     cap lowers the decoder's.
   - **Both ends of a payload need the guard, so there is ONE decoder**
-    (`apps/fastcache-cc/CodecEnvelope`). The worker opening a request and the launcher
+    (`apps/pace-cc/CodecEnvelope`). The worker opening a request and the launcher
     opening a worker's reply were copies of one function; a guard added to either is
     half a fix, and two guards must then agree forever. The launcher is not the safe
     half: it dialled a worker the *scheduler* named, which is not a worker it trusts
@@ -353,7 +353,7 @@ Every rule below has already been a bug.
       tightened**.
   - **It lives in `Core/WireFields.hpp` beside `FieldPrefixSize`**, which is usually the
     answer to its `minBytesEach`, and which that header already argues must stay
-    header-only and dependency-free because `fastcache-cc` compiles it in *without
+    header-only and dependency-free because `pace-cc` compiles it in *without
     linking `Pace`*. A guard under `CompileCache/` was invisible to `Protocol/`,
     `Cluster/DiscoveryWire` and `Consensus/RaftWire` — the decoders that share this
     grammar and will grow the next declared count.
@@ -618,7 +618,7 @@ Every rule below has already been a bug.
   `FASTCACHE_TOKEN`-configured launcher a permanent 0% hit rate, reported as
   `rejected`, which is indistinguishable from a cache that is merely cold. The
   launcher's own comment had already recorded this for the *daemon* — a
-  pre-AUTH `fastcached` answers `unknown-opcode` and serves the pipelined command
+  pre-AUTH `pace-kv` answers `unknown-opcode` and serves the pipelined command
   perfectly well, which is the mixed-fleet case the framing's extensibility exists
   for — and the node then reintroduced it on three surfaces by picking a code that
   reads as more accurate. It is not more accurate; it is a different sentence to a
@@ -753,7 +753,7 @@ Every rule below has already been a bug.
   [#1596](https://github.com/LASTRADA-Software/fastcached/issues/1596), with TLS as `core::net_tls`
   and the three leaf headers the table let travel (`Clock`, `Ranges`, `Profiling`) as core-cpp's
   `core::platform` clock and `core::` base headers. The check went with them, because the
-  boundary is now a CMake target edge: fastcached's code cannot reach into core-cpp's internals
+  boundary is now a CMake target edge: pace-kv's code cannot reach into core-cpp's internals
   except through its installed headers, and core-cpp's own module table refuses an include across
   its modules that it does not list.
 - **What is left here is what core-cpp does not offer yet, in `Transport/`, and a defect in the
@@ -768,7 +768,7 @@ Every rule below has already been a bug.
 
 - **Three implementations of one TCP client, and the rot was in the one nobody
   built.** `Net/BlockingConnector` dialled non-blocking through `getaddrinfo` and
-  was coroutine-aware; `fastcache-cc` carried a synchronous `Cc::ITcpClient` with
+  was coroutine-aware; `pace-cc` carried a synchronous `Cc::ITcpClient` with
   its own `SetIoTimeouts` copied from `Net/BlockingSocket` and a comment saying it
   could not be shared; and `compile-cache-testclient` carried a hand-written class
   that was `inet_pton(AF_INET)`-only (so a hostname could never work), unbounded,
@@ -823,9 +823,9 @@ Every rule below has already been a bug.
   `::signal(SIGPIPE, SIG_IGN)` the first time anything touched the network, which
   keeps a broken-pipe write from killing a server and is wrong for any process that
   also spawns a child: an ignored disposition is **inherited across exec**.
-  `fastcache-compile-node` links this library, listens on a socket and then runs a
+  `pace-node` links this library, listens on a socket and then runs a
   compiler per job, so it was handing every one of those compilers a disposition
-  they never asked for — which is precisely what `fastcache-cc` is documented
+  they never asked for — which is precisely what `pace-cc` is documented
   as having to avoid, for the same reason, reached by a different route. Nothing
   in the parent misbehaves, which is why it went unnoticed. Suppression is
   per socket now (`Detail::ArmNoSigPipe`: `SO_NOSIGPIPE` on macOS and the BSDs,
@@ -931,7 +931,7 @@ Every rule below has already been a bug.
   socket, and a live listener still holds its address alone; on Windows it lets a
   second socket bind an address a **live** socket already holds, which is the
   documented reason `SO_EXCLUSIVEADDRUSE` exists. So on Windows any process on the
-  box -- unprivileged -- could bind the port `fastcached`, a compile node, or
+  box -- unprivileged -- could bind the port `pace-kv`, a compile node, or
   either one's admin endpoint was already serving, with which of the two answered a
   given connection undefined: for a compile cache reached without a credential that
   is object injection into everybody's build, and for `/metrics` it is a scrape
@@ -1224,7 +1224,7 @@ Every rule below has already been a bug.
       serving one**, and a liveness probe that asks nothing is the confident wrong signal.
       The ADMIN loop is the one `/healthz` cannot report, since the thread that would answer
       `503` is the one that ended -- a probe times out instead, measured -- so on the node its
-      end is carried by that condition row (NODE-STATUS (`fastcache-cli node`) and the fleet page, both over
+      end is carried by that condition row (NODE-STATUS (`pacectl node`) and the fleet page, both over
       other surfaces), and the daemon has only the `Error` line.
     - A fixture that ends a loop by answering some error is now a fixture that SPINS: it
       must answer `Cancelled`, the way a closed listener does. core-cpp's
@@ -1406,7 +1406,7 @@ Every rule below has already been a bug.
 
   And the rule never covered the worst case anyway: `connectTimeout` bounds the
   dial, while **name resolution runs first and is bounded by nothing**, because
-  `getaddrinfo` takes no timeout. For `fastcache-cc` that is every translation
+  `getaddrinfo` takes no timeout. For `pace-cc` that is every translation
   unit in a build waiting on a wedged resolver with no knob anywhere.
   Consequences that are each load-bearing:
   - **`Connect` takes `std::string` by value, not `string_view`.** A coroutine
@@ -1949,7 +1949,7 @@ Every rule below has already been a bug.
       the only spelling of *abandon* that is not `Close()`.
   - **It is watched refusing, and the hazard has no other coverage at all.** Measured
     while landing the guard: a probe at all six arm sites reported ZERO double-arms
-    across `PaceTest` (2073 cases) and `fastcache-compile-node-tests`, and no
+    across `PaceTest` (2073 cases) and `pace-node-tests`, and no
     script fixture drives a blocking RESP verb or a subscription over a real socket
     -- so nothing in the suite can see this, which is the ticket's own point.
     `read-slot-guard-canary` (now core-cpp's `socket-contract-canary`) double-arms a REAL
@@ -1975,7 +1975,7 @@ Every rule below has already been a bug.
     somebody else's frame -- the pulse-versus-reply interleaving
     [`distributed-compilation.md`](distributed-compilation.md) describes. A write that
     completes inline takes no claim and needs none.
-  - **Watched BOTH ways, which the read-side canary is not** -- in fastcached until the move;
+  - **Watched BOTH ways, which the read-side canary is not** -- in pace-kv until the move;
     core-cpp's `socket-contract-canary` watches both slots now.
     `ctest -R write-slot-guard-canary` drove an ordinary sequential pair of writes and
     only then the double-arm, and `scripts/write-slot-guard-gate.cmake` requires the
@@ -2189,7 +2189,7 @@ Every rule below has already been a bug.
   the tick, and a reactor destroyed in that window frees nothing --
   `IReactor::Run` returns with its timer heap exactly as it was, deliberately. One
   leaked coroutine frame **per dial and per cache exchange**, harmless in a daemon
-  that outlives them and fatal for `fastcache-cc`, where an ASan build then exits
+  that outlives them and fatal for `pace-cc`, where an ASan build then exits
   non-zero and turns every cached compile into a failed one.
   `IReactor::CancelPending` closes it: `Disarm()` takes the timer's own handle back
   off the reactor and destroys it there and then. Five things are load-bearing:

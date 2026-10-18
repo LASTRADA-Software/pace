@@ -22,7 +22,7 @@ namespace Pace
 /// means appending a new id and a matching descriptor row in Compression.cpp.
 ///
 /// **And one place outside this file**: `Cc::AvailableCodecs` in
-/// `apps/fastcache-cc/CodecEnvelope.cpp` keeps its own list of the non-Identity
+/// `apps/pace-cc/CodecEnvelope.cpp` keeps its own list of the non-Identity
 /// codecs, because this class exposes no way to enumerate the table — a codec
 /// missing from it is never advertised and never negotiated by the compile fleet,
 /// with the build green and every test passing. `AvailableCodecsCoverEveryCodec`

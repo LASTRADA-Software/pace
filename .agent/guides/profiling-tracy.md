@@ -12,7 +12,7 @@ and link zero Tracy symbols.
 ```sh
 cmake --preset clang-tracy        # RelWithDebInfo, TRACY_ENABLE=ON, TRACY_ON_DEMAND=ON
 cmake --build --preset clang-tracy
-# -> out/build/clang-tracy/target/fastcached
+# -> out/build/clang-tracy/target/pace-kv
 ```
 
 `TRACY_ON_DEMAND=ON` means the daemon buffers nothing until a profiler
@@ -62,7 +62,7 @@ cmake --build /tmp/tracy-cap -j        # -> /tmp/tracy-cap/tracy-capture
 
 Workflow — the client listens on TCP **8086**:
 
-1. Start the daemon: `./out/build/clang-tracy/target/fastcached --bind 127.0.0.1`.
+1. Start the daemon: `./out/build/clang-tracy/target/pace-kv --bind 127.0.0.1`.
 2. Connect the profiler (GUI **Connect**, or `tracy-capture -o out.tracy -a 127.0.0.1`).
    On-demand mode records only from the moment of connection, so connect **before**
    driving load.

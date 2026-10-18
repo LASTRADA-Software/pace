@@ -104,7 +104,7 @@ struct UsageSection
 {
     std::string_view title {};             ///< Heading, colorized; empty for an untitled section.
     std::string_view subject {};           ///< Printed after `title` on the same line and never
-                                           ///< colorized, e.g. " fastcached [options]".
+                                           ///< colorized, e.g. " pace-kv [options]".
     std::span<UsageBlock const> blocks {}; ///< The body; may be empty for a bare title line.
 };
 

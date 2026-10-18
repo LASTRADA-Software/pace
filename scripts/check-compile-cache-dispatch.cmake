@@ -3,10 +3,10 @@
 # Whether configure's `[cache] dispatch` line is TRUE of the build it generates, and whether the
 # two settings the configure environment SEEDS stay where a `-D` put them.
 #
-# fastcache-cc dispatches a miss to a compile fleet when `FASTCACHE_SCHEDULER` names one, and it
+# pace-cc dispatches a miss to a compile fleet when `FASTCACHE_SCHEDULER` names one, and it
 # read that only from the environment of whatever ran the build. So a developer who set it in one
 # shell and built from another got a build that compiled everything locally, with configure having
-# said only that fastcache-cc was the launcher: measured on a workstation, 341 misses and
+# said only that pace-cc was the launcher: measured on a workstation, 341 misses and
 # `NOT_CONFIGURED` on every one of them, found from a fleet dashboard reading 0 compiling.
 # `cmake/portable/CompileCache.cmake` now decides dispatch at configure, holds it in the cache,
 # bakes it into the launcher and says which way it decided (`_fc_hold_setting`,
@@ -20,14 +20,14 @@
 #   1. The DECISION, as a pure computation over every combination of a cache entry and the
 #      configure environment -- including the ones a shell cannot easily stage. A failure here is
 #      reported and half 2 still runs, so one broken function does not hide what the wiring does.
-#   2. The WIRING: the fixture project configured with a stand-in fastcache-cc, in sequences that
+#   2. The WIRING: the fixture project configured with a stand-in pace-cc, in sequences that
 #      reconfigure one build tree the ways a real one is reconfigured -- by hand with and without a
 #      `-D`, from shells that do and do not hold the variables, and by ninja's own regeneration --
 #      with the values every `LAUNCHER =` line of the generated build.ninja carries compared with
 #      the table AND with what the configure printed, directly.
 #
 # The stand-in is BUILT here, from a few lines of C++, rather than being a script: the module's
-# probe runs it as a program and requires `fastcache-cc: MISS key=` on stderr, and a shell script
+# probe runs it as a program and requires `pace-cc: MISS key=` on stderr, and a shell script
 # is not a program on Windows -- where this defect was measured. A toolchain that cannot build it
 # is reported with `SKIP: `, never as a verdict about the module.
 #
@@ -197,15 +197,15 @@ if(FASTCACHED_GENERATOR)
 endif()
 
 # The stand-in: a program that reports a cache miss and exits 0, which is everything the module's
-# probe asks of fastcache-cc. It is never run by a build -- nothing here builds the fixture.
+# probe asks of pace-cc. It is never run by a build -- nothing here builds the fixture.
 set(standInSource "${FASTCACHED_SCRATCH_DIR}/stand-in")
 set(standInBuild "${FASTCACHED_SCRATCH_DIR}/stand-in-build")
 file(REMOVE_RECURSE "${standInSource}" "${standInBuild}")
 file(WRITE "${standInSource}/CMakeLists.txt"
-     "cmake_minimum_required(VERSION 3.28)\nproject(fastcache-cc-stand-in LANGUAGES CXX)\n"
-     "add_executable(fastcache-cc-stand-in main.cpp)\n")
+     "cmake_minimum_required(VERSION 3.28)\nproject(pace-cc-stand-in LANGUAGES CXX)\n"
+     "add_executable(pace-cc-stand-in main.cpp)\n")
 file(WRITE "${standInSource}/main.cpp"
-     "#include <cstdio>\nint main() { std::fputs(\"fastcache-cc: MISS key=dispatch-stand-in\\n\", stderr); return 0; }\n")
+     "#include <cstdio>\nint main() { std::fputs(\"pace-cc: MISS key=dispatch-stand-in\\n\", stderr); return 0; }\n")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${standInSource}" -B "${standInBuild}" ${commonArguments}
     RESULT_VARIABLE standInConfigured OUTPUT_VARIABLE standInOutput ERROR_VARIABLE standInError TIMEOUT 300)
@@ -218,12 +218,12 @@ else()
 endif()
 # One traversal, filtered: a GLOB_RECURSE with two patterns walks the tree twice (#502).
 file(GLOB_RECURSE standInCandidates LIST_DIRECTORIES false "${standInBuild}/*")
-list(FILTER standInCandidates INCLUDE REGEX "/fastcache-cc-stand-in(\\.exe)?$")
+list(FILTER standInCandidates INCLUDE REGEX "/pace-cc-stand-in(\\.exe)?$")
 if(NOT standInBuilt EQUAL 0 OR NOT standInCandidates)
     # Not a verdict: a Windows shell that is not a Developer shell has a cl.exe that cannot compile.
     string(REPLACE "CMake Error" "CMake-Error" standInReport "${standInOutput}${standInError}")
     string(REPLACE "CMake Warning" "CMake-Warning" standInReport "${standInReport}")
-    string(CONCAT wiringUnmeasured "the stand-in fastcache-cc does not build with this toolchain (${standInBuilt}), "
+    string(CONCAT wiringUnmeasured "the stand-in pace-cc does not build with this toolchain (${standInBuilt}), "
                   "so no configure below would be measuring the module:\n${standInReport}")
     EndWithoutWiring()
 endif()
@@ -317,11 +317,11 @@ set(wiringRows
     "measured-stays-off-under-an-empty-define-from-a-shell-with-it|again|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=|<empty>|127.0.0.1:1|which outranks the 10.0.0.9:6674 in the environment"
     "measured-stays-off-without-a-define-from-a-shell-with-it|again|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1|<empty>|127.0.0.1:1|which outranks the 10.0.0.9:6674 in the environment"
     "a-define-outranks-the-environment-on-a-first-configure|fresh|FASTCACHE_SCHEDULER=10.0.0.9:6674|FASTCACHE_ADDR=127.0.0.1:1 FASTCACHE_SCHEDULER=10.0.0.7:6674|10.0.0.7:6674|127.0.0.1:1|dispatch: 10.0.0.7:6674 (configured, held in this build tree's cache, where a -DFASTCACHE_SCHEDULER"
-    "address-seeded-from-the-environment|fresh|FASTCACHE_ADDR=127.0.0.1:2|-|<empty>|127.0.0.1:2|Enabling fastcache-cc"
+    "address-seeded-from-the-environment|fresh|FASTCACHE_ADDR=127.0.0.1:2|-|<empty>|127.0.0.1:2|Enabling pace-cc"
     "address-held-over-a-new-environment|again|FASTCACHE_ADDR=127.0.0.1:3|-|<empty>|127.0.0.1:2|[cache] FASTCACHE_ADDR is '127.0.0.1:3' in the environment and NOT applied: this build tree holds '127.0.0.1:2'"
     "address-define-equal-to-the-held-value-outranks-the-environment|again|FASTCACHE_ADDR=127.0.0.1:3|FASTCACHE_ADDR=127.0.0.1:2|<empty>|127.0.0.1:2|-DFASTCACHE_ADDR=127.0.0.1:3 applies it"
     "address-held-over-ninja-regeneration-with-another|regenerate|FASTCACHE_ADDR=127.0.0.1:4|-|<empty>|127.0.0.1:2|[cache] FASTCACHE_ADDR is '127.0.0.1:4' in the environment and NOT applied"
-    "address-define-retargets|again|FASTCACHE_ADDR=127.0.0.1:4|FASTCACHE_ADDR=127.0.0.1:4|<empty>|127.0.0.1:4|Enabling fastcache-cc"
+    "address-define-retargets|again|FASTCACHE_ADDR=127.0.0.1:4|FASTCACHE_ADDR=127.0.0.1:4|<empty>|127.0.0.1:4|Enabling pace-cc"
 )
 
 set(violations "")
@@ -386,7 +386,7 @@ foreach(row IN LISTS wiringRows)
         list(APPEND violations "${name}: ${step} failed (${configured}); the module must never fail a configure\n${echoed}")
         continue()
     endif()
-    string(FIND "${output}" "Enabling fastcache-cc" enabledAt)
+    string(FIND "${output}" "Enabling pace-cc" enabledAt)
     if(enabledAt EQUAL -1)
         list(APPEND violations "${name}: no configure that took the stand-in as the launcher ran (a regeneration "
                                "ninja did not perform, or the row was not taken), so nothing below measures it\n${echoed}")

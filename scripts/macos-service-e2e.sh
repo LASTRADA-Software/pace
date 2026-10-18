@@ -21,21 +21,21 @@
 #   5. Uninstall leaves nothing  — no job, no plist.
 #
 # Uses a non-default service name and port throughout, so it can never disturb
-# a real fastcached installed on the same machine.
+# a real pace-kv installed on the same machine.
 #
 # Usage:
-#   macos-service-e2e.sh --fastcached <path> [--port <n>]
+#   macos-service-e2e.sh --pace-kv <path> [--port <n>]
 #
 # Exit codes: 0 = all assertions held; 1 = a failure; 77 = a runtime
 # prerequisite was missing (skip).
 set -euo pipefail
 
-fastcached=""
+pace_kv=""
 port="21993"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached) fastcached="$2"; shift 2 ;;
+        --pace-kv) pace_kv="$2"; shift 2 ;;
         --port)       port="$2";       shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -44,7 +44,7 @@ done
 readonly SKIP=77
 
 [[ "$(uname -s)" == "Darwin" ]] || { echo "not macOS; skipping"; exit "$SKIP"; }
-[[ -n "$fastcached" && -x "$fastcached" ]] || { echo "fastcached not found: '$fastcached'; skipping"; exit "$SKIP"; }
+[[ -n "$pace_kv" && -x "$pace_kv" ]] || { echo "pace-kv not found: '$pace_kv'; skipping"; exit "$SKIP"; }
 
 readonly SERVICE_NAME="FastCachedE2E"
 readonly LABEL="software.lastrada.fastcachede2e"
@@ -65,7 +65,7 @@ readonly DOMAIN
 
 workdir="$(mktemp -d)"
 cleanup() {
-    "$fastcached" --uninstall-service --service-scope=user --service-name="$SERVICE_NAME" >/dev/null 2>&1 || true
+    "$pace_kv" --uninstall-service --service-scope=user --service-name="$SERVICE_NAME" >/dev/null 2>&1 || true
     rm -rf "$workdir"
 }
 trap cleanup EXIT
@@ -90,7 +90,7 @@ e2e_begin "macOS service E2E" "$workdir"
 
 # --- 1. install -------------------------------------------------------------
 echo "== installing the launchd agent"
-"$fastcached" --install-service --service-scope=user \
+"$pace_kv" --install-service --service-scope=user \
     --service-name="$SERVICE_NAME" --port="$port" \
     --storage="${workdir}/cache" > "${workdir}/install.log" 2>&1 \
     || fail "--install-service exited non-zero: $(cat "${workdir}/install.log")"
@@ -142,7 +142,7 @@ reply="$(printf 'set k 0 0 5\r\nhello\r\nget k\r\nquit\r\n' | nc -w 5 127.0.0.1 
 # so the second bootstrap only succeeds if the teardown was waited for.
 echo "== reinstalling over the running job"
 newport=$((port + 1))
-"$fastcached" --install-service --service-scope=user \
+"$pace_kv" --install-service --service-scope=user \
     --service-name="$SERVICE_NAME" --port="$newport" \
     --storage="${workdir}/cache" > "${workdir}/reinstall.log" 2>&1 \
     || fail "reinstall exited non-zero: $(cat "${workdir}/reinstall.log")"
@@ -154,7 +154,7 @@ wait_for_port 127.0.0.1 "$newport" "-" "the reinstalled agent" "-"
 
 # --- 6. uninstall leaves nothing behind ------------------------------------
 echo "== uninstalling"
-"$fastcached" --uninstall-service --service-scope=user --service-name="$SERVICE_NAME" \
+"$pace_kv" --uninstall-service --service-scope=user --service-name="$SERVICE_NAME" \
     > "${workdir}/uninstall.log" 2>&1 \
     || fail "--uninstall-service exited non-zero: $(cat "${workdir}/uninstall.log")"
 

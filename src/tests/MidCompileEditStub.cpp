@@ -4,14 +4,14 @@
 // reproduction, end to end.
 //
 // [#1650](https://github.com/LASTRADA-Software/fastcached/issues/1650): an editor's save that
-// lands WHILE `fastcache-cc` compiles is a moment the launcher cannot see from outside. It took
+// lands WHILE `pace-cc` compiles is a moment the launcher cannot see from outside. It took
 // its key from the content before the save and, before the fix, recorded its manifest from the
 // content after it, so the saved content became a direct HIT on the object of the content it
 // replaced -- exit 0, in every checkout whose files matched. No fixture can type a save into
 // that window by timing, so this stub IS the compiler the launcher runs: it forwards every
 // invocation to the real compiler and, at one chosen point, performs the save itself.
 //
-// The e2e fixtures (`scripts/compile-cache-e2e.sh`, `src/apps/fastcache-cc/run-launcher-e2e.ps1`)
+// The e2e fixtures (`scripts/compile-cache-e2e.sh`, `src/apps/pace-cc/run-launcher-e2e.ps1`)
 // copy it into a directory of its own under the REAL compiler's file name, because the launcher
 // picks its driver grammar by that name. It needs no Pace library and no Catch2, and it is
 // never installed.

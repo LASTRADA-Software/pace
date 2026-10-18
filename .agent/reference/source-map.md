@@ -59,7 +59,7 @@ src/Pace/
                 prose, rendered with an ANSI palette) and Options (OptionSpec
                 row type, the matching rules, the one parse loop). Dependency-
                 free by design — std plus the header-only ConfigError — so
-                fastcache-cc can compile it in without linking the library
+                pace-cc can compile it in without linking the library
   Cache/        IStorage atomic primitives (incl. Prefetch — warm a tier with
                 no read side effect), CacheEntry, CacheEngine,
                 InMemoryLruStorage, CowTreeStorage (CoW B+tree, src/CowTree),
@@ -177,7 +177,7 @@ src/Pace/
                 on-FETCH, leading-key group prefetch), CompileCacheWire
                 (header-only, dependency-free: the 0xFC magic/version/opcode/
                 status/error tables and their encoders, shared verbatim by the
-                daemon, fastcache-cc and the test client) and SurfaceRefusal
+                daemon, pace-cc and the test client) and SurfaceRefusal
                 (the ONE way any 0xFC surface answers a refusal: Refuse with a
                 row carrying the counter, RefuseWithoutCounter with the reason
                 nothing rises, RefuseUntriaged with the issue that will decide
@@ -242,7 +242,7 @@ each one, so adding an executable is adding a row:
 ```
 src/apps/
   fastcached/               the daemon (FASTCACHED_BUILD_DAEMON, default ON)
-  fastcache-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER,
+  pace-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER,
                             default ON) — a drop-in sccache-style launcher that
                             keys on preprocess+relativized-args, FETCHes and
                             hit-replays with include paths localized,
@@ -261,7 +261,7 @@ src/apps/
                             its help renders and colorizes exactly like the
                             daemon's without linking the library. `Cli/Options`
                             is header-only, so including it costs no build row.
-  fastcache-compile-node/   the compile worker AND the peer service (
+  pace-node/   the compile worker AND the peer service (
                             FASTCACHED_BUILD_NODE, default ON) — registers with a
                             scheduler's `--serve-scheduler` endpoint (another node's;
                             `--listen-dispatch` on the daemon is gone) and answers
@@ -287,9 +287,9 @@ src/apps/
                             framed surfaces are `FrameEndpoint`s over one shared
                             `NodeIoLoop`, and its HTTP surface is
                             `AdminHttpServer`.
-  fastcache-cli/            the operator's client (FASTCACHED_BUILD_CLI, default
+  pacectl/            the operator's client (FASTCACHED_BUILD_CLI, default
                             ON, INSTALLED). Reads, writes and measures a running
-                            cache from a terminal; `docs/tools/fastcache-cli.md`
+                            cache from a terminal; `docs/tools/pacectl.md`
                             is its reference. It was absent from this tree and
                             from `AGENT.md`'s app table until #1439 noticed,
                             having shipped and been documented on the Tools page
@@ -299,7 +299,7 @@ src/apps/
                             validation (FASTCACHED_BUILD_TESTCLIENT, default
                             OFF — test infrastructure, never installed, but
                             built by the `linux` and `clang-tidy` CI jobs for the
-                            reason `fastcache-bench` is: a target nothing
+                            reason `pace-bench` is: a target nothing
                             compiles is a target that rots, and this one had
                             rotted all the way to not building on POSIX). Drives
                             either driver family off a two-row table, and gets
@@ -308,7 +308,7 @@ src/apps/
                             and launcher use — a tool that exists to prove
                             the canonicalization contract proves nothing if it
                             reimplements either side of it
-  fastcache-bench/          in-process storage micro-benchmarks
+  pace-bench/          in-process storage micro-benchmarks
                             (FASTCACHED_BUILD_BENCHMARKS, default OFF — test
                             infrastructure, never installed). Catch2 benchmarks
                             decomposing a lookup layer by layer, plus a

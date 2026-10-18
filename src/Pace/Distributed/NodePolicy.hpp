@@ -511,7 +511,7 @@ inline constexpr EnumTable<SlotLimit, SlotLimitTraits> SlotLimitTable { {
       .refusal = SlotRefusal::NoCapacity },
     { .limit = SlotLimit::Cordoned,
       .name = "cordoned",
-      .remedy = "an operator cordoned this machine. Lift it with `fastcache-cli uncordon` there, or restart the node.",
+      .remedy = "an operator cordoned this machine. Lift it with `pacectl uncordon` there, or restart the node.",
       .refusal = SlotRefusal::Withdrawn },
 } };
 

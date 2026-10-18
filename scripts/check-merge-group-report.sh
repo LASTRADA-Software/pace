@@ -250,7 +250,7 @@ REQ
             "sccache smoke (memcached text)" \
             "sccache smoke (memcached binary)" \
             "sccache smoke (redis RESP2)" \
-            "fastcache-cc smoke (compile-cache 0xFC)" \
+            "pace-cc smoke (compile-cache 0xFC)" \
             "Draft GitHub release"
         do
             if [[ "$name" == "$failing" ]]; then

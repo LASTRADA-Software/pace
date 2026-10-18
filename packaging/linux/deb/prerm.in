@@ -5,8 +5,8 @@
 set -e
 
 SERVICE="@FASTCACHED_SERVICE_NAME@"
-NODE_SERVICE="fastcache-compile-node.service"
-NODE_SOCKET="fastcache-compile-node.socket"
+NODE_SERVICE="pace-node.service"
+NODE_SOCKET="pace-node.socket"
 
 case "$1" in
     remove|deconfigure)

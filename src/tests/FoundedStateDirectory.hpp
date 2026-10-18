@@ -13,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-#include <apps/fastcache-compile-node/NodeKey.hpp>
+#include <apps/pace-node/NodeKey.hpp>
 #include <tests/SecureRandomFakes.hpp>
 
 /// @file FoundedStateDirectory.hpp

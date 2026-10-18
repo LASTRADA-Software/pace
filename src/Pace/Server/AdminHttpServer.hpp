@@ -151,7 +151,7 @@ struct AdminRoute
 ///
 /// Returned as a pair rather than logged in place because the level is the thing
 /// under test. A severity spelled at a call site inside `main.cpp` is reachable
-/// from no test in this tree, which is how `fastcached` came to report a
+/// from no test in this tree, which is how `pace-kv` came to report a
 /// deliberately-tolerated condition at `Error` for as long as it did.
 struct AdminBindFailureReport
 {
@@ -163,9 +163,9 @@ struct AdminBindFailureReport
 ///
 /// ## The severity follows the verdict, and the verdicts differ
 ///
-/// `fastcached` **tolerates** this: the admin surface is a scrape and probe
+/// `pace-kv` **tolerates** this: the admin surface is a scrape and probe
 /// convenience rather than the service, so the daemon serves the cache on without
-/// one, permanently and by design. `fastcache-compile-node` answers the same
+/// one, permanently and by design. `pace-node` answers the same
 /// failure by refusing to start, and is right to -- an operator who asked a *worker*
 /// for an endpoint is almost always wiring a probe to it, so a worker that started
 /// without one looks healthy to the very thing that would have reported it was not.

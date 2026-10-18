@@ -124,7 +124,7 @@ class LeaseTable
     /// Derived rather than written, because the launcher's dispatch deadline is the
     /// same number seen from the other end and the two were a pair of literals
     /// coupled only by prose (#249). `CompileCacheWire.hpp` is where it lives: it is
-    /// the one header both ends include, since `fastcache-cc` does not link this
+    /// the one header both ends include, since `pace-cc` does not link this
     /// library. The reasoning for the value is there too, stated once.
     static constexpr std::chrono::milliseconds DefaultLeaseTimeout = CompileCacheWire::DefaultCompileLeaseTimeout;
 

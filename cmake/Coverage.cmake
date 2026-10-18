@@ -93,7 +93,7 @@ endif()
 # A compiler cache and coverage instrumentation are quietly incompatible, and
 # this project ships the launcher that makes it worst. Coverage mapping data is
 # embedded in the object file and names its sources by ABSOLUTE path, while
-# fastcache-cc's whole purpose is that an object built under one checkout root
+# pace-cc's whole purpose is that an object built under one checkout root
 # serves a compile under another. A cache hit therefore replays a perfectly
 # correct object carrying the PRODUCER's paths, and llvm-cov then reports files
 # that do not exist on this machine -- or, where the roots happen to collide,

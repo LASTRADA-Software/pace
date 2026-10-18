@@ -373,13 +373,13 @@ TEST_CASE("Both daemons give up at each step through the table, never with a bar
         // node's pre-verb state-directory refusal, which is I/O whichever way it went
         // (`NodeIdentityIo`). The node's serving body gives up through its own table,
         // `NodeRefusalCauses` (`NodeRefusal_test`).
-        { .main = std::filesystem::path { "src" } / "apps" / "fastcached" / "main.cpp",
+        { .main = std::filesystem::path { "src" } / "apps" / "pace-kv" / "main.cpp",
           .sites = { 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1 } },
-        { .main = std::filesystem::path { "src" } / "apps" / "fastcache-compile-node" / "main.cpp",
+        { .main = std::filesystem::path { "src" } / "apps" / "pace-node" / "main.cpp",
           .sites = { 1, 0, 0, 0, 2, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0 } },
     });
     // And the node chooses its key's and identity's step by the fault that refused.
-    auto const node = SourceText(std::filesystem::path { "src" } / "apps" / "fastcache-compile-node" / "main.cpp");
+    auto const node = SourceText(std::filesystem::path { "src" } / "apps" / "pace-node" / "main.cpp");
     CHECK(Occurrences(node, "ExitCodeFor(StageOf(identityKey.error().fault))") == 1);
     CHECK(Occurrences(node, "ExitCodeFor(StageOf(identity.error().fault))") == 1);
     // A one-shot verb is never supervised, so a refusal decided before it runs answers what the
@@ -392,7 +392,7 @@ TEST_CASE("Both daemons give up at each step through the table, never with a bar
           == 1);
     // And the daemon's, from `CliOutcomeTable`'s reader column, asked in its one refusal function of
     // the command line's own parse. `exit-codes-e2e` drives it through the binaries.
-    auto const daemonMain = SourceText(std::filesystem::path { "src" } / "apps" / "fastcached" / "main.cpp");
+    auto const daemonMain = SourceText(std::filesystem::path { "src" } / "apps" / "pace-kv" / "main.cpp");
     CHECK(Occurrences(daemonMain,
                       "if (auto const reader = Pace::ExitReaderOf(commandLine.outcome); reader != "
                       "Pace::ExitReader::Supervisor)\n        return Pace::RefusalExitCode(reader, stage);")
@@ -439,8 +439,8 @@ static_assert(std::ranges::none_of(SpelledCodeExemptions,
 /// @return Both.
 [[nodiscard]] std::array<std::filesystem::path, 2> SpellingMains()
 {
-    return { std::filesystem::path { "src" } / "apps" / "fastcached" / "main.cpp",
-             std::filesystem::path { "src" } / "apps" / "fastcache-compile-node" / "main.cpp" };
+    return { std::filesystem::path { "src" } / "apps" / "pace-kv" / "main.cpp",
+             std::filesystem::path { "src" } / "apps" / "pace-node" / "main.cpp" };
 }
 
 /// Every line of @p text that spells an exit code, whole-line comments excepted, blanks trimmed.

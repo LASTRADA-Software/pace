@@ -1155,7 +1155,7 @@ namespace
     /// lives. It was MOVED out of this file rather than copied: the reason it cannot
     /// be a `std::from_chars` call -- libc++ has no floating-point overload before
     /// macOS 26.0 -- is a fact about the whole tree, and stated only here it reached
-    /// nobody writing a new file. `fastcache-cli` walked straight into it and went
+    /// nobody writing a new file. `pacectl` walked straight into it and went
     /// red on `macOS-clang-release`.
     /// @param sv  Text to parse.
     /// @param out Receives the parsed value on success.
@@ -1206,7 +1206,7 @@ namespace
 
     /// Null reply. RESP3 has a dedicated null type (`_\r\n`); RESP2 spells it as
     /// a null bulk string (`$-1\r\n`). Callers that need a null *array* in RESP2
-    /// (`*-1`) should special-case it; for fastcached's commands the bulk form
+    /// (`*-1`) should special-case it; for pace-kv's commands the bulk form
     /// is always the correct RESP2 spelling.
     /// @param resp The connection's negotiated protocol version.
     core::async::Task<bool> ReplyNull(core::net::ISocket* socket, RespVersion resp)
@@ -1732,7 +1732,7 @@ namespace
     /// an existing key. The four wire commands differ only by data (unit and
     /// absolute-vs-relative interpretation), so they share one handler.
     ///
-    /// Redis EXPIREAT/PEXPIREAT take a UNIX timestamp; fastcached's
+    /// Redis EXPIREAT/PEXPIREAT take a UNIX timestamp; pace-kv's
     /// monotonic clock has no notion of wall time, so the implementation
     /// approximates it by anchoring against std::chrono::system_clock once
     /// per call (mirrors the absolute-exptime path in CacheEngine).
@@ -1956,7 +1956,7 @@ namespace
     core::async::Task<bool> WriteHelloMap(core::net::ISocket* socket, RespVersion resp)
     {
         std::array<HelloField, 6> const fields { {
-            { .key = "server", .stringValue = "fastcached", .intValue = 0, .isInteger = false },
+            { .key = "server", .stringValue = "pace-kv", .intValue = 0, .isInteger = false },
             { .key = "version", .stringValue = ServerVersionBanner, .intValue = 0, .isInteger = false },
             { .key = "proto", .stringValue = {}, .intValue = resp == RespVersion::Resp3 ? 3 : 2, .isInteger = true },
             { .key = "id", .stringValue = {}, .intValue = 1, .isInteger = true },
@@ -2218,7 +2218,7 @@ namespace
 
     core::async::Task<bool> HandleSelect(core::net::ISocket* socket, std::span<std::string const> args)
     {
-        // fastcached exposes a single logical keyspace. The redis client
+        // pace-kv exposes a single logical keyspace. The redis client
         // crate issues `SELECT <index>` whenever the connection URL names a
         // database; accept any index rather than erroring (which aborts the
         // client's connection setup and surfaces as a startup timeout).
@@ -2498,7 +2498,7 @@ namespace
             // where Touched found the index empty (handle not yet
             // registered), no handle dirtied, EXEC committed over the
             // racing write. Real Redis avoids this by being
-            // single-threaded; fastcached cannot.
+            // single-threaded; pace-kv cannot.
             //
             // A StorageError on PeekCas means the snapshot is unreliable —
             // treating an I/O failure as "key absent" would silently
@@ -4256,7 +4256,7 @@ namespace
     /// and it exercises the verbatim writer on a second command besides INFO.
     core::async::Task<bool> HandleLolwut(core::net::ISocket* socket, RespVersion resp)
     {
-        auto const art = std::format("fastcached {}\n", RedisRespHandler::ServerVersion());
+        auto const art = std::format("pace-kv {}\n", RedisRespHandler::ServerVersion());
         co_return co_await ReplyVerbatim(socket, "txt", art, resp);
     }
 

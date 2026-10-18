@@ -12,8 +12,8 @@
 #include <string_view>
 #include <vector>
 
-#include <apps/fastcache-cc/Dispatch.hpp>
-#include <apps/fastcache-cc/TicketCredentials.hpp>
+#include <apps/pace-cc/Dispatch.hpp>
+#include <apps/pace-cc/TicketCredentials.hpp>
 #include <tests/Unwrap.hpp>
 
 namespace Pace::Testing

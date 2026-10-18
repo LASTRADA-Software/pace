@@ -1984,7 +1984,7 @@ trap "rm -rf '$scratch'" EXIT
 # The unit of work is a COMPILE COMMAND, not a file, and that is what keeps this
 # equivalent to the build-driven tidy it replaced. A source compiled into two
 # targets is two translation units with two preprocessor states -- `Stats.cpp`
-# builds into `fastcache-cc`, `fastcache-cc-tests` and `fastcache-compile-node`,
+# builds into `pace-cc`, `pace-cc-tests` and `pace-node`,
 # and those targets do not agree about `FC_COMPRESSION_ENABLED` -- so one
 # invocation per file would silently stop checking the other configurations.
 #

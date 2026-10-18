@@ -34,7 +34,7 @@
 area/launcher:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/apps/fastcache-cc/**'
+          - 'src/apps/pace-cc/**'
           - 'cmake/portable/CompileCache.cmake'
 
 area/compile-cache:
@@ -49,7 +49,7 @@ area/distributed:
   - changed-files:
       - any-glob-to-any-file:
           - 'src/Pace/Distributed/**'
-          - 'src/apps/fastcache-compile-node/**'
+          - 'src/apps/pace-node/**'
           - 'scripts/dist-compile-e2e.*'
 
 area/cluster:
@@ -63,7 +63,7 @@ area/protocol:
       - any-glob-to-any-file:
           - 'src/Pace/Protocol/**'
           - 'src/Pace/Auth/**'
-          - 'src/apps/fastcache-cli/**'
+          - 'src/apps/pacectl/**'
 
 area/net:
   - changed-files:
@@ -83,14 +83,14 @@ area/platform:
           - 'src/Pace/Platform/**'
           - 'src/Pace/Config/**'
           - 'src/Pace/Cli/**'
-          - 'src/apps/fastcached/**'
+          - 'src/apps/pace-kv/**'
 
 area/observability:
   - changed-files:
       - any-glob-to-any-file:
           - 'src/Pace/Metrics/**'
-          - 'src/apps/fastcache-cli/**'
-          - 'scripts/fastcache-cli-e2e.sh'
+          - 'src/apps/pacectl/**'
+          - 'scripts/pacectl-e2e.sh'
 
 area/packaging:
   - changed-files:

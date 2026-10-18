@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end test of distributed compilation (POSIX). Starts a fastcached cache and
-# fastcache-compile-node processes, and drives real compiles through fastcache-cc.
+# End-to-end test of distributed compilation (POSIX). Starts a pace-kv cache and
+# pace-node processes, and drives real compiles through pace-cc.
 #
 # EVERY NODE HERE IS SOLITARY. A zero-config node is a fleet of its own: it serves the
 # scheduler, its own worker registers with it, and its scheduler leases that worker --
@@ -92,15 +92,15 @@
 # process, over a real endpoint whose peer reports a non-loopback host (#235).
 #
 # Usage:
-#   dist-compile-e2e.sh --fastcached <path> --node <path> --launcher <path>
+#   dist-compile-e2e.sh --pace-kv <path> --node <path> --launcher <path>
 #                       [--compiler <cxx>] [--case suite|self-test]
-#                       [--cli <fastcache-cli>] [--edit-stub <mid-compile-edit-stub>]
+#                       [--cli <pacectl>] [--edit-stub <mid-compile-edit-stub>]
 #
 # Exit codes: 0 = all assertions held; 1 = a failure; 77 = a runtime prerequisite
 # was missing (skip).
 set -euo pipefail
 
-fastcached=""
+pace_kv=""
 node=""
 launcher=""
 compiler="${CXX:-c++}"
@@ -119,7 +119,7 @@ mode="suite"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached) fastcached="$2"; shift 2 ;;
+        --pace-kv) pace_kv="$2"; shift 2 ;;
         --node)       node="$2";       shift 2 ;;
         --launcher)   launcher="$2";   shift 2 ;;
         --compiler)   compiler="$2";   shift 2 ;;
@@ -221,7 +221,7 @@ is_withdrawn_refusal() {
 
 # The scheduler's `limited-by` for one worker, out of `fleet workers` as TSV. The
 # columns are found by their header, not by position.
-# @param 1 what `fastcache-cli --format=tsv fleet workers` printed
+# @param 1 what `pacectl --format=tsv fleet workers` printed
 # @param 2 the worker's advertised endpoint
 # @param 3 the toolchain the lease asked for
 # Prints the `limited-by` text, or nothing when no such worker is in the record.
@@ -313,13 +313,13 @@ run_self_test() {
     _check "$(_is "$(dwarf_attr_of "$llvm_dump" "AT_ranges")" "")" "a missing attribute reads empty"
 
     # ---- is_withdrawn_refusal ---------------------------------------------
-    local withdrawn="fastcache-cc: not dispatched (rejected (withdrawn): every matching worker has withdrawn its capacity); compiling locally"
-    local no_worker="fastcache-cc: not dispatched (rejected (no-worker): no worker serves this toolchain); compiling locally"
+    local withdrawn="pace-cc: not dispatched (rejected (withdrawn): every matching worker has withdrawn its capacity); compiling locally"
+    local no_worker="pace-cc: not dispatched (rejected (no-worker): no worker serves this toolchain); compiling locally"
     _check "$(is_withdrawn_refusal "$withdrawn" && echo y || echo n)" "a withdrawn refusal is recognised"
     _check "$(is_withdrawn_refusal "$no_worker" && echo n || echo y)" "a different refusal is not a withdrawal"
     _check "$(is_withdrawn_refusal "" && echo n || echo y)" "nor is a compile that said nothing"
 
-    # The scheduler's record as `fastcache-cli --format=tsv fleet workers` prints it,
+    # The scheduler's record as `pacectl --format=tsv fleet workers` prints it,
     # captured from a real run with a second row added, so the reader is asked WHICH
     # worker it is looking at rather than whether a `limited-by` exists.
     local fleet_tsv
@@ -349,12 +349,12 @@ fi
 
 readonly SKIP=77
 
-[[ -n "$fastcached" && -x "$fastcached" ]] || { echo "fastcached not found: '$fastcached'; skipping"; exit "$SKIP"; }
-[[ -n "$node"       && -x "$node"       ]] || { echo "fastcache-compile-node not found: '$node'; skipping"; exit "$SKIP"; }
+[[ -n "$pace_kv" && -x "$pace_kv" ]] || { echo "pace-kv not found: '$pace_kv'; skipping"; exit "$SKIP"; }
+[[ -n "$node"       && -x "$node"       ]] || { echo "pace-node not found: '$node'; skipping"; exit "$SKIP"; }
 
 # Every node below except the cache-tier cases (9 and 11) and case 8's worker, whose
 # stop asserts the teardown of a private tier, turns its own cache OFF.
-# `--listen-node` defaults to 0.0.0.0:6674 -- 6674 being where `fastcache-cc` looks --
+# `--listen-node` defaults to 0.0.0.0:6674 -- 6674 being where `pace-cc` looks --
 # which is right for the one node per machine a real deployment runs and wrong
 # here, where several share a host and would race for it. Said explicitly rather
 # than left to the default's warn-and-continue, so a node that failed to bind for
@@ -477,7 +477,7 @@ e2e_wait_seconds 30
 
 # After `e2e_begin`, whose snapshot of the caller's statistics must precede every use of
 # the launcher variable -- `launcher-state-isolation` refuses one above it.
-[[ -n "$launcher"   && -x "$launcher"   ]] || { echo "fastcache-cc not found: '$launcher'; skipping"; exit "$SKIP"; }
+[[ -n "$launcher"   && -x "$launcher"   ]] || { echo "pace-cc not found: '$launcher'; skipping"; exit "$SKIP"; }
 
 # Every launcher this fixture runs records into a state directory of the run's own,
 # through the shim `e2e_launcher_state_enter` (scripts/lib/e2e-common.sh) puts in
@@ -514,7 +514,7 @@ worker_drain_seconds=5
 stated_drain="--drain-timeout=${worker_drain_seconds}s"
 stop_bound_seconds=$(( worker_drain_seconds + 5 ))
 
-# And the daemon's own, which is NOT derived from the above. `fastcached` takes no
+# And the daemon's own, which is NOT derived from the above. `pace-kv` takes no
 # `--drain-timeout` and runs no compiles, so it has nothing to drain: it stops as
 # soon as its loop is woken. Tying its bound to a worker's drain would be arithmetic
 # that reads as a shared rule and is a category error -- and it is the shape that
@@ -588,7 +588,7 @@ assert_checks_leases() {
 # same flag twice and which one wins is then the option table's overwrite order --
 # a fixture asserting a property it never states. `--cache-memory=0` in particular
 # is what turns a tier OFF, so a node that silently kept one would race for
-# `fastcache-cc`'s default port with every other node in the run.
+# `pace-cc`'s default port with every other node in the run.
 #
 # BOUND IS NOT READY, which is why this waits through `wait_for_node_ready`
 # rather than `wait_for_port` (#451, #634). The full account -- what the window
@@ -651,7 +651,7 @@ start_node() {
     wait_for_node_ready "$host" "$port" "$pid" "$tag" "$log"
 }
 
-# Start one `fastcached` daemon, and wait for it to be ACCEPTING.
+# Start one `pace-kv` daemon, and wait for it to be ACCEPTING.
 #
 # `start_node`'s counterpart, and it exists for the same reason one ticket later
 # (#644). The node recipe reached twelve copies before #451 folded it; the DAEMON
@@ -698,7 +698,7 @@ start_daemon() {
     local tag="$1" host="$2" port="$3"
     shift 3
     local log="${workdir}/${tag}.log" pid=""
-    "$fastcached" --listen="${host}:${port}" ${@+"$@"} > "$log" 2>&1 &
+    "$pace_kv" --listen="${host}:${port}" ${@+"$@"} > "$log" 2>&1 &
     pid=$!
     started_pid="$pid"
     started_log="$log"
@@ -836,7 +836,7 @@ fail_if_withdrawn() {
         records="$(run_bounded "$cli_read_seconds" bash -c 'exec "$0" "$@" 2>/dev/null' \
             "$cli" "--addr=$2" --format=tsv fleet workers)" || asked=$?
         if [[ "$(e2e_bound_outcome)" == "$E2eBoundOutcomeExceeded" ]]; then
-            echo "the scheduler's record was not read: fastcache-cli fleet workers against $2 did not answer within ${cli_read_seconds}s" >&2
+            echo "the scheduler's record was not read: pacectl fleet workers against $2 did not answer within ${cli_read_seconds}s" >&2
         elif [[ "$asked" -eq 0 ]]; then
             limit="$(worker_limit_from_tsv "$records" "$3" "$4")"
         fi
@@ -846,7 +846,7 @@ fail_if_withdrawn() {
 }
 
 # --- start the cache ---------------------------------------------------------
-# One listener now, and only the cache. `fastcached` used to carry the scheduler
+# One listener now, and only the cache. `pace-kv` used to carry the scheduler
 # as well, on a second `--listen-dispatch` endpoint; that flag is gone. The two
 # have opposite deployment shapes -- a cache is shared infrastructure somebody
 # operates, while handing out capacity is a decision only ONE node may make at a
@@ -1014,7 +1014,7 @@ echo "   byte-identical to the local object"
 rm -f "${proj}/build/one.o"
 run_launcher "${workdir}/case2.log" -std=c++17 -O1 -c "${proj}/one.cpp" -o "${proj}/build/one.o" \
     || { cat "${workdir}/case2.log" >&2; fail "the second compile failed"; }
-grep -q "fastcache-cc: HIT" "${workdir}/case2.log" \
+grep -q "pace-cc: HIT" "${workdir}/case2.log" \
     || { cat "${workdir}/case2.log" >&2; fail "a dispatched result was not served from the cache afterwards"; }
 grep -q "DISPATCHED to " "${workdir}/case2.log" \
     && { cat "${workdir}/case2.log" >&2; fail "a cached compile was dispatched again"; }
@@ -1151,11 +1151,11 @@ rm -f "${proj}/build/one-moved.o"
 moved_compile "${workdir}/case2b-2.log" FASTCACHE_E2E_CASE=moved \
     || { cat "${workdir}/case2b-2.log" >&2; fail "case 2b: the rebuild of the original content failed"; }
 cat "${workdir}/case2b-2.log"
-grep -q "fastcache-cc: MISS" "${workdir}/case2b-2.log" \
+grep -q "pace-cc: MISS" "${workdir}/case2b-2.log" \
     || fail "case 2b: the original content was served from the cache -- the worker's object of the saved content under the original key (the #1650 defect)"
 # The SAME key the raced compile was taken on, or this MISS says nothing about that key.
-raced_key="$(sed -n 's/^fastcache-cc: MISS key=\([^ ]*\).*/\1/p' "${workdir}/case2b-1.log")"
-rebuilt_key="$(sed -n 's/^fastcache-cc: MISS key=\([^ ]*\).*/\1/p' "${workdir}/case2b-2.log")"
+raced_key="$(sed -n 's/^pace-cc: MISS key=\([^ ]*\).*/\1/p' "${workdir}/case2b-1.log")"
+rebuilt_key="$(sed -n 's/^pace-cc: MISS key=\([^ ]*\).*/\1/p' "${workdir}/case2b-2.log")"
 [[ -n "$raced_key" && "$raced_key" == "$rebuilt_key" ]] \
     || fail "case 2b: the rebuild missed on key '${rebuilt_key}', not on the raced compile's key '${raced_key}'"
 grep -q "STORED key=" "${workdir}/case2b-2.log" \
@@ -1220,7 +1220,7 @@ write_source "${proj}/four.cpp" "casefour"
 # local compile, which is the property. A scheduler that outlives its worker --
 # leasing a dead endpoint until the heartbeat lapses, then answering no-worker --
 # is the two-machine shape, asserted in process: the client's fallback on a worker
-# that does not answer is `fastcache-cc`'s Dispatch cases, and the expiry is
+# that does not answer is `pace-cc`'s Dispatch cases, and the expiry is
 # `ExpireStale`'s.
 grep -q "not dispatched (scheduler exchange failed)" "${workdir}/case4.log" \
     || { cat "${workdir}/case4.log" >&2; fail "expected the client to report the unreachable scheduler"; }
@@ -1387,12 +1387,12 @@ bound_why=""
 LC_ALL=C grep -qaF "$bound_a" "${bound_a}/build/u.o" || bound_why+="; a's object does not name a (the case exercises nothing)"
 grep -q "DISPATCHED to " "${workdir}/case7b-a.log" || bound_why+="; a was not dispatched"
 grep -q "root-bound object" "${workdir}/case7b-a.log" || bound_why+="; a's dispatched object was not stored bound"
-grep -Eq "fastcache-cc: MISS key=[^ ]+ \(root-bound:" "${workdir}/case7b-b.log" \
+grep -Eq "pace-cc: MISS key=[^ ]+ \(root-bound:" "${workdir}/case7b-b.log" \
     || bound_why+="; b did not miss through a's marker"
 grep -q "DISPATCHED to " "${workdir}/case7b-b.log" || bound_why+="; b was not dispatched"
 [[ -f "${bound_b}/build/u.o" ]] || bound_why+="; b wrote no object"
 if LC_ALL=C grep -qaF "$bound_a" "${bound_b}/build/u.o" 2>/dev/null; then bound_why+="; b's object names checkout a"; fi
-grep -Eq "fastcache-cc: HIT key=[^ ]+ \(root-bound:" "${workdir}/case7b-a2.log" \
+grep -Eq "pace-cc: HIT key=[^ ]+ \(root-bound:" "${workdir}/case7b-a2.log" \
     || bound_why+="; a was not served its own bound copy"
 if grep -q "DISPATCHED to " "${workdir}/case7b-a2.log"; then bound_why+="; a's second compile was dispatched again"; fi
 if [[ -n "$bound_why" ]]; then
@@ -1511,7 +1511,7 @@ rm -f "${proj}/build/nine.o"
     unset FASTCACHE_SCHEDULER
     run_launcher "${workdir}/case9-hit.log" -std=c++17 -O1 -c "${proj}/nine.cpp" -o "${proj}/build/nine.o"
 ) || { cat "${workdir}/case9-hit.log" >&2; fail "the second compile through the node failed"; }
-grep -q "fastcache-cc: HIT" "${workdir}/case9-hit.log"     || { cat "${workdir}/case9-hit.log" >&2; fail "the node did not serve a hit"; }
+grep -q "pace-cc: HIT" "${workdir}/case9-hit.log"     || { cat "${workdir}/case9-hit.log" >&2; fail "the node did not serve a hit"; }
 
 # Now take the shared cache away and ask again. This is the assertion: a hit is
 # answered from the node's own tier, so it must survive an upstream that is gone.
@@ -1523,7 +1523,7 @@ rm -f "${proj}/build/nine.o"
     unset FASTCACHE_SCHEDULER
     run_launcher "${workdir}/case9-offline.log" -std=c++17 -O1 -c "${proj}/nine.cpp" -o "${proj}/build/nine.o"
 ) || { cat "${workdir}/case9-offline.log" >&2; fail "a build survived neither the hit nor the fallback"; }
-grep -q "fastcache-cc: HIT" "${workdir}/case9-offline.log"     || { cat "${workdir}/case9-offline.log" >&2; fail "the node went to the network for an object it held"; }
+grep -q "pace-cc: HIT" "${workdir}/case9-offline.log"     || { cat "${workdir}/case9-offline.log" >&2; fail "the node went to the network for an object it held"; }
 
 cmp -s "${proj}/build/nine-ref.o" "${proj}/build/nine.o"     || fail "the object served from the node's tier is wrong"
 echo "   a hit was served with the shared cache stopped, and the object is right"
@@ -1589,7 +1589,7 @@ stop_and_require_exit "$sizing_pid" "the self-sizing worker" "$stop_bound_second
 # THE regression case for the reason the node's cache tier moved onto a reactor.
 # `RemoteUpstream` dials from inside a cache answer, and answering used to be
 # serialized -- so one upstream that never responded held every local
-# `fastcache-cc` behind it for the full per-operation ceiling, one after another.
+# `pace-cc` behind it for the full per-operation ceiling, one after another.
 # A node with an unreachable shared cache had an unusable port of its own.
 #
 # 192.0.2.1 is RFC 5737 documentation space: it BLACK-HOLES rather than refusing,
@@ -1719,7 +1719,7 @@ grep -q "cache unavailable (fetch exchange failed)" "${workdir}/case12.log" \
 
 # And it is not reported as a miss. A MISS trace would clear the reason above and
 # make a broken cache read as a cold one.
-grep -q "fastcache-cc: MISS" "${workdir}/case12.log" \
+grep -q "pace-cc: MISS" "${workdir}/case12.log" \
     && { cat "${workdir}/case12.log" >&2; fail "a cache that never answered was traced as a miss"; }
 
 # Nothing is pushed at a daemon that did not answer the fetch. Before the fix a

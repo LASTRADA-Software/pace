@@ -22,8 +22,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 # fails:
 #
 #   CMake Error at src/tests/CMakeLists.txt:943 (add_test):
-#     Error evaluating generator expression: $<TARGET_FILE:fastcached>
-#     No target "fastcached"
+#     Error evaluating generator expression: $<TARGET_FILE:pace-kv>
+#     No target "pace-kv"
 #
 # That is #390. Two blocks were guarded on their own feature -- `tls-smoke` on
 # `FASTCACHED_ENABLE_TLS`, the sccache smokes on `SCCACHE` -- and on nothing
@@ -39,7 +39,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 #
 # The second rule exists because the first one can be satisfied by a guard that
 # is not a condition at all. `src/apps` adds its table IN ORDER, so inside
-# `src/apps/fastcache-cc/` the target `compile-cache-testclient` -- two rows
+# `src/apps/pace-cc/` the target `compile-cache-testclient` -- two rows
 # further down -- does not exist yet, and `if(TARGET compile-cache-testclient)`
 # is the constant FALSE. A fixture written that way reports its case SKIPPED on
 # every machine, in every job, forever, in a sentence indistinguishable from a

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A `fastcache-compile-node` keeps working — as worker, scheduler and Raft voter — when its
+**Goal:** A `pace-node` keeps working — as worker, scheduler and Raft voter — when its
 host's IP changes (DHCP, Wi-Fi ↔ LAN, network moves), with no config edit and no restart, and a
 stock socket-activated package install starts without `--advertise`.
 
@@ -101,7 +101,7 @@ inline constexpr std::array<std::string_view, 2> DefaultRouteProbeTargets { "192
 - Modify: `src/Pace/Platform/NetworkChangeWatcher.cpp:69-75` (POSIX branch),
   `src/Pace/Platform/NetworkChangeWatcher.hpp` (doc), `NetworkChangeWatcher_test.cpp:183` (expectation),
   `src/Pace/CMakeLists.txt`
-- Modify: `src/apps/fastcache-compile-node/main.cpp:2738-2747` (start POSIX watcher after the fork)
+- Modify: `src/apps/pace-node/main.cpp:2738-2747` (start POSIX watcher after the fork)
 
 **Interfaces — Produces:**
 ```cpp
@@ -152,13 +152,13 @@ their length field, stop at a truncated/zero-length header (return what was seen
 ### Task 3: Advertise policy — `auto`, pinned names and literals; `--raft-self` reloadable; `routeHost`
 
 **Files:**
-- Modify: `src/apps/fastcache-compile-node/NodeConfig.hpp/.cpp` (rows at 975-1010 and 1190-1203,
+- Modify: `src/apps/pace-node/NodeConfig.hpp/.cpp` (rows at 975-1010 and 1190-1203,
   `ParseAdvertise` 391-406, `AddressReloadableFlags` 1144, `AdvertisedEndpoint` 2809-2849,
   `RaftSelfEndpoint` 2759-2785, `AdvertisedNameWithheld` 2851-2857)
-- Modify: `src/apps/fastcache-compile-node/NodeDefaults.hpp` (apply helper beside `ApplyHostNames`)
-- Modify: `docs/tools/fastcache-compile-node.md:2931-2941` (reloadable table: add `raft_self`),
-  `packaging/config/fastcache-compile-node.yaml:13-31` (count SEVEN → EIGHT; describe `auto`)
-- Test: `src/apps/fastcache-compile-node/NodeConfig_test.cpp`
+- Modify: `src/apps/pace-node/NodeDefaults.hpp` (apply helper beside `ApplyHostNames`)
+- Modify: `docs/tools/pace-node.md:2931-2941` (reloadable table: add `raft_self`),
+  `packaging/config/pace-node.yaml:13-31` (count SEVEN → EIGHT; describe `auto`)
+- Test: `src/apps/pace-node/NodeConfig_test.cpp`
 
 **Interfaces — Produces:**
 ```cpp
@@ -213,8 +213,8 @@ Semantics:
 ### Task 4: `EndpointResolver` — the sole publisher of the node's endpoints
 
 **Files:**
-- Create: `src/apps/fastcache-compile-node/EndpointResolver.hpp/.cpp`, `EndpointResolver_test.cpp`
-  (register both in `src/apps/fastcache-compile-node/CMakeLists.txt`: source list and `fastcache-compile-node-tests` list near :181)
+- Create: `src/apps/pace-node/EndpointResolver.hpp/.cpp`, `EndpointResolver_test.cpp`
+  (register both in `src/apps/pace-node/CMakeLists.txt`: source list and `pace-node-tests` list near :181)
 - Modify: `WorkerTier.cpp:446-464, 533-565` + `WorkerTier.hpp` (re-register on published change)
 - Modify: `NodeAnnounce.hpp/.cpp` (`AdvertisedEndpointChange` retired or reduced — see below)
 - Modify: `NodeReload.hpp:52`, `NodeReload.cpp:26-29` (reload applies the live route host)
@@ -222,7 +222,7 @@ Semantics:
   `hostEvents` FIRST; pass raft endpoint source on; ~:2538-2547 apply initial route host to `cfg`
   and `cliOnly` before `StartupPolicyRejection`)
 - Modify: `src/Pace/Metrics/IMetricsSink.hpp`, `MetricsCatalog.hpp`, `StatsReading.hpp:542`
-  (`CounterSoleWriterTable`), `docs/tools/fastcache-compile-node.md` metrics table
+  (`CounterSoleWriterTable`), `docs/tools/pace-node.md` metrics table
 - Test: `WorkerTier_test.cpp` (fixture `WorkerTierTestFixture.hpp`)
 
 **Interfaces — Consumes:** `IRouteProbe`, `DefaultRouteProbeTargets` (Task 1); `ApplyRouteHost`,
@@ -303,10 +303,10 @@ Behaviour:
 ### Task 5: Socket activation derives the advertised address
 
 **Files:**
-- Modify: `src/apps/fastcache-compile-node/main.cpp:252-291, 1775-1782`
-- Create or modify: a testable home for the decision, e.g. `src/apps/fastcache-compile-node/NodeActivation.hpp/.cpp`
+- Modify: `src/apps/pace-node/main.cpp:252-291, 1775-1782`
+- Create or modify: a testable home for the decision, e.g. `src/apps/pace-node/NodeActivation.hpp/.cpp`
   (+ `_test.cpp`, registered in the app CMakeLists) — `main.cpp` is in no test target.
-- Modify: `packaging/linux/fastcache-compile-node.socket`, `.service` comments;
+- Modify: `packaging/linux/pace-node.socket`, `.service` comments;
   `.agent/rules/distributed-compilation.md:266-276` (rule rewritten: the inherited socket's bound
   address is read with `getsockname`; wildcard → Auto; specific → pinned).
 
@@ -339,7 +339,7 @@ namespace Pace::Node {
 **Files:**
 - Modify: `src/Pace/Cluster/AnnouncedEndpoints.hpp/.cpp` (+ `_test.cpp`)
 - Modify: `src/Pace/Consensus/RaftPeerTransport.hpp/.cpp` (public `ResetSessions()`)
-- Modify: `src/apps/fastcache-compile-node/ConsensusTier.hpp/.cpp` (raft source; reconcile)
+- Modify: `src/apps/pace-node/ConsensusTier.hpp/.cpp` (raft source; reconcile)
 - Modify: `main.cpp:1239` + `DiscoveryTier.cpp:102-123` (live fleet summary)
 - Test: `src/Pace/Cluster/MembershipCluster_test.cpp`, `RaftPeerTransport_test.cpp`, `ConsensusTier_test.cpp`
 
@@ -417,7 +417,7 @@ Two-way (learner) sessions are untouched (they already attach as links).
 - `.agent/rules/consensus-and-cluster.md` :1839-1849 (announced move also moves a coupled Raft endpoint).
 - `AGENT.md` rulebook tripwires for any new rule (keep within `scripts/agent-md-budget.txt`;
   `ctest -R "rulebook-tripwires|agent-md-budget"`).
-- `docs/tools/fastcache-compile-node.md` (flags, "sleep, wake and network change" ~:2881-2905),
+- `docs/tools/pace-node.md` (flags, "sleep, wake and network change" ~:2881-2905),
   `docs/operations/cluster-communication.md` (~470-510 re-addressing), `docs/operations/windows-office-fleet.md`
   (~450-470: names are opt-in now; #1605 is mitigated by auto), `docs/getting-started/distributed-compilation.md` if it shows `--advertise`.
 - Release note: find the project's changelog/metainfo convention (`git log -p -1 -- '*metainfo*' 'CHANGELOG*' docs/about`); add an entry incl. the upgrade hint "remove a literal `--advertise` work-around under socket activation, or the node stays pinned".

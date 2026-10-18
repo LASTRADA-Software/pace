@@ -15,7 +15,7 @@ namespace Pace
 /// One definition rather than one per caller, because two decisions have to agree
 /// on it and are made in different places:
 ///
-/// - `fastcached` resolves its physical shard count from it. A `storage_path` that
+/// - `pace-kv` resolves its physical shard count from it. A `storage_path` that
 ///   names one file stays single-file for backward compatibility (`cache.cow`);
 ///   anything else fans out into `shard-NN.cow` files inside a directory.
 /// - The `--install-service` handover creates an absent `ServiceSpec::ownedPaths`

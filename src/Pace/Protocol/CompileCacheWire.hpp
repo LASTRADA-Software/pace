@@ -26,11 +26,11 @@
 #include <vector>
 
 /// The `0xFC` compile-cache wire format — the single source of truth shared by
-/// the daemon's handler, the `fastcache-cc` launcher, and the protocol test
+/// the daemon's handler, the `pace-cc` launcher, and the protocol test
 /// client.
 ///
 /// **This header must stay dependency-free** (the standard library plus the
-/// header-only `Core/Endian.hpp`, and nothing else). `fastcache-cc` deliberately
+/// header-only `Core/Endian.hpp`, and nothing else). `pace-cc` deliberately
 /// does not link the `Pace` library — it compiles a handful of leaf sources
 /// in directly so it pulls no vcpkg dependency — so an include of anything from
 /// `Net/`, `Cache/`, `Async/` or `Config/` here breaks the launcher's **link**,
@@ -154,7 +154,7 @@ using WireVersion = std::uint8_t;
 /// new status is a new reply grammar for every reader and the floor moves with it -- the
 /// version-3 argument exactly.
 ///
-/// **Every node and every `fastcache-cc` upgrade together.** A launcher is a reader of this
+/// **Every node and every `pace-cc` upgrade together.** A launcher is a reader of this
 /// wire, and a version-8 launcher is refused by a version-9 node rather than served; on this
 /// project's one installation that is one rebuild of both binaries
 /// ([#332](https://github.com/LASTRADA-Software/fastcached/issues/332)).
@@ -305,7 +305,7 @@ inline constexpr WireVersion CurrentVersion = 15;
 /// `UnsupportedVersion` names the range -- `CompileCacheHandler`'s own
 /// *"unsupported wire version {}; this server speaks {}..{}"*, whose numbers are these
 /// two constants and are deliberately not restated here -- which
-/// `docs/tools/fastcache-cc.md` documents as meaning a mixed install, while a decode
+/// `docs/tools/pace-cc.md` documents as meaning a mixed install, while a decode
 /// failure names no version and reads as a corrupt reply or a protocol bug. Refusing
 /// by name is the more actionable of two loud failures.
 ///
@@ -506,11 +506,11 @@ enum class Op : std::uint8_t
     Withdraw = 0x0D,
 
     // Operator verbs. What a person with a terminal needs to ASK a node, as opposed to
-    // what the fleet needs to tell it. They exist because `fastcache-compile-node`
+    // what the fleet needs to tell it. They exist because `pace-node`
     // speaks this wire and nothing else, so a client pointed at one got a silent close
     // and no way to find out why: measured against the running node, RESP `PING`, RESP
     // `INFO` and memcached `version` each closed having sent nothing, while a `0xFC`
-    // header got a proper refusal. `fastcache-cli` is the consumer.
+    // header got a proper refusal. `pacectl` is the consumer.
 
     /// Operator asks what this node IS: its version, what it serves, and where.
     ///
@@ -654,7 +654,7 @@ enum class Op : std::uint8_t
     ///
     /// The case is a stored value somebody has determined is wrong -- `FASTCACHE_VERIFY`
     /// naming a `WRONG OBJECT` and its key is the ordinary way to learn one -- on a
-    /// `fastcache-compile-node`, which speaks no RESP and therefore has no `DEL`.
+    /// `pace-node`, which speaks no RESP and therefore has no `DEL`.
     ///
     /// **`Miss` is an answer, not a failure.** Dropping a key that is not there is what the
     /// second run of a repair does, and an idempotent operation that errors on its second
@@ -1597,7 +1597,7 @@ enum class IdentityRequirement : std::uint8_t
 /// credential is required, and which counter a refusal belongs to.
 ///
 /// So the grouping becomes a column. It says which family a verb BELONGS to, never
-/// which process serves it: `fastcached` and a node both answer `Cache` verbs, and
+/// which process serves it: `pace-kv` and a node both answer `Cache` verbs, and
 /// what differs is which of them has a component for the family, not the taxonomy.
 ///
 /// **Private: in-process only.** A verb's family is read off `OpTable` at each end and is
@@ -1780,7 +1780,7 @@ struct OpDescriptor
 /// What an endpoint answers for a verb it does not implement.
 ///
 /// **A wire contract between binaries that do not link each other**, and the reason
-/// it is one name rather than a value each surface picks: `fastcache-cc` compiles
+/// it is one name rather than a value each surface picks: `pace-cc` compiles
 /// this header in and links none of `Pace`, so an enumerator named on both
 /// sides is the only thing holding the two ends together.
 ///
@@ -1845,7 +1845,7 @@ static_assert(static_cast<std::uint8_t>(UnimplementedVerb) == 0x02,
 /// surfaces answering that question three hand-written ways is how #283 fixed one of
 /// them and left the other two broken for a fortnight (#340).
 ///
-/// Here rather than in a library header because `fastcache-cc` compiles this file in
+/// Here rather than in a library header because `pace-cc` compiles this file in
 /// and links none of `Pace`. It needs only `Op`, `ErrorCode` and
 /// `std::string_view`, so the header-only, dependency-free rule holds.
 struct RefusedVerb
@@ -2092,7 +2092,7 @@ static_assert(MaxRefusalReply <= MaxSealedReplyPayload && MaxSealedReplyPayload 
 /// ([#249](https://github.com/LASTRADA-Software/fastcached/issues/249)).
 ///
 /// It lives HERE for the reason `MaxAuthPayload` and `MaxControlPayload` do: this
-/// header is the only thing both ends can include. `fastcache-cc` does not link
+/// header is the only thing both ends can include. `pace-cc` does not link
 /// `Pace`, so `LeaseTable`'s own header is not reachable from the launcher --
 /// which is what left these as two literals coupled by a doc comment. The comment
 /// was right that they could not be `static_assert`ed against each other; it was
@@ -3378,7 +3378,7 @@ struct PrePayloadRequest
 ///
 /// The two are not otherwise ordered by preference: telling an unauthenticated peer
 /// that its declared length exceeded a published constant discloses nothing, because
-/// the constant is in this header and this header ships inside `fastcache-cc`.
+/// the constant is in this header and this header ships inside `pace-cc`.
 ///
 /// **Total, so an unknown verb is refused rather than buffered.** An earlier draft
 /// took a resolved opcode as a precondition, which left the node's loop -- the one
@@ -3575,7 +3575,7 @@ namespace Detail
 
 /// The fetch and store verbs one cache upstream speaks, as data.
 ///
-/// A pair rather than a flag, so the client that speaks to a `fastcached` and the one that speaks to
+/// A pair rather than a flag, so the client that speaks to a `pace-kv` and the one that speaks to
 /// the fleet's shared cache are the same code over a different ROW -- the node picks the row from a
 /// table keyed on its upstream kind, and nothing branches on which kind it is.
 ///
@@ -3607,7 +3607,7 @@ struct CacheVerbs
     [[nodiscard]] friend constexpr bool operator==(CacheVerbs, CacheVerbs) noexcept = default;
 };
 
-/// What a `fastcached` -- and a node's private tier -- answers.
+/// What a `pace-kv` -- and a node's private tier -- answers.
 inline constexpr CacheVerbs DaemonCacheVerbs { Op::Fetch, Op::Store };
 
 /// What the fleet's shared cache answers.
@@ -4020,7 +4020,7 @@ using CodecList = std::vector<std::uint8_t>;
 ///
 /// Sized from what a list IS: the codecs a build can produce, most-preferred first --
 /// `Cc::AvailableCodecs()`, at most the compressed codecs it tries plus `Identity`, three today.
-/// The `static_assert` holding this at twice that sits in `fastcache-cc/CodecEnvelope.cpp`, where
+/// The `static_assert` holding this at twice that sits in `pace-cc/CodecEnvelope.cpp`, where
 /// the list is built; a codec added there that would overrun it fails the build rather than every
 /// registration.
 inline constexpr std::size_t MaxCodecListIds = 16;
@@ -4071,7 +4071,7 @@ inline constexpr std::size_t MaxCodecListIds = 16;
 /// Cache facts that travel one field per tier, positionally.
 ///
 /// **Position is the tier**, because this header is compiled into
-/// `fastcache-cc`, which does not link `Pace` and therefore cannot see
+/// `pace-cc`, which does not link `Pace` and therefore cannot see
 /// `Pace::StorageTier` — the same reason `nodeClassRaw` is a byte here and
 /// an enumerator one layer up. Index 0 is the first tier that enum names, index
 /// 1 the second, and so on; the mapping is done in
@@ -4395,7 +4395,7 @@ static_assert((MaxInterfaceAddresses * (MaxInterfaceAddressBytes + WireFields::F
 ///
 /// Raw values rather than the scheduler's own `Distributed::NodeClass`, for the
 /// reason `CodecList` holds raw codec ids: this header is compiled into
-/// `fastcache-cc`, which does not link `Pace`, so it may not know the
+/// `pace-cc`, which does not link `Pace`, so it may not know the
 /// scheduler's vocabulary. The mapping happens one layer up, where an unknown
 /// class can be answered rather than assumed.
 struct CapacityFields
@@ -4714,7 +4714,7 @@ static_assert(std::ranges::all_of(std::to_array<std::string_view>({ "cl 19.44.35
 /// Sized from what a fingerprint IS. `ComputeToolchainFingerprint` -- one translation unit, which
 /// the launcher and the worker both compile -- renders a `KeyDigest`: `KeyDigest::HexLength`, 32
 /// lowercase hex characters. 64 is twice that, room for a digest twice as wide before this bound
-/// has to move. The `static_assert` holding it there sits in `fastcache-cc/Dispatch.cpp`, where the
+/// has to move. The `static_assert` holding it there sits in `pace-cc/Dispatch.cpp`, where the
 /// lease is built and both this bound and `KeyDigest` are visible; this header may not include an
 /// app's. A worker's pinned `<fingerprint>=<compiler>` is a copy of a client's digest, or it
 /// matches no lease at any length -- so a pin longer than this was already a worker nothing picks,
@@ -4724,7 +4724,7 @@ inline constexpr std::size_t MaxToolchainFingerprintBytes = 64;
 /// The longest `LeaseRequest::key` a scheduler records, in bytes.
 ///
 /// KEPT by the lease table for as long as the lease lives, and listed among `/fleet.json`'s
-/// outstanding leases. The launcher's key is a `KeyDigest` too (`objkey-v*`, `fastcache-cc/CacheKey.cpp`),
+/// outstanding leases. The launcher's key is a `KeyDigest` too (`objkey-v*`, `pace-cc/CacheKey.cpp`),
 /// so it is sized as the fingerprint is and held there by the same `static_assert`.
 inline constexpr std::size_t MaxLeaseKeyBytes = 64;
 
@@ -4752,7 +4752,7 @@ inline constexpr std::size_t MaxEndpointBytes = 254 + std::string_view { ":65535
 /// `X.Y.Z`, as `X.Y.Z-<distance>-g<commit>` between tags and with `-dirty` on an unclean tree --
 /// under fifty bytes at any abbreviation git picks for a repository this size -- or a vendor's
 /// `-DFASTCACHED_VERSION_STRING`. The `static_assert` holding this at twice the running build's
-/// sits in `fastcache-compile-node/WorkerTier.cpp`, where the version is put on the wire; this
+/// sits in `pace-node/WorkerTier.cpp`, where the version is put on the wire; this
 /// header may not include the generated `Version.hpp`.
 inline constexpr std::size_t MaxNodeVersionBytes = 128;
 
@@ -4764,7 +4764,7 @@ inline constexpr std::size_t MaxNodeVersionBytes = 128;
 /// Sized from what a display name IS: the host's own name, which `QueryHostFacts` reads into a
 /// buffer of `MaxHostNameBytes` and a terminator, so it can be no longer -- and 255 is DNS's own
 /// ceiling on a name, above what either platform's call returns for a host. The `static_assert`
-/// holding the two together sits in `fastcache-compile-node/WorkerTier.cpp`, where the name is put
+/// holding the two together sits in `pace-node/WorkerTier.cpp`, where the name is put
 /// on the wire.
 inline constexpr std::size_t MaxDisplayNameBytes = 255;
 
@@ -5049,7 +5049,7 @@ struct RegisterReplyFields
 /// A WIRE CONTRACT, and the same kind `StorageTier`'s enumerator order already is:
 /// the slots travel POSITIONALLY, so this number and `FleetMetric`'s enumerator
 /// count are one fact spelled in two places that cannot include each other -- this
-/// header stays dependency-free because `fastcache-cc` compiles it without linking
+/// header stays dependency-free because `pace-cc` compiles it without linking
 /// `Pace`. The assertion tying them together lives on the side that can see
 /// both.
 ///
@@ -9332,7 +9332,7 @@ struct ProveNodeRequest
 enum class LiveSubject : std::uint8_t
 {
     /// A cache's figures: every counter, the storage block and its tiers. Served by a node with
-    /// a cache tier and by `fastcached`.
+    /// a cache tier and by `pace-kv`.
     Cache = 0x00,
     /// A compile node's figures: the cache's plus its host, consensus and `NodeStatusFields`.
     Node = 0x01,

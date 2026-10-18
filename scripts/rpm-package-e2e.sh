@@ -23,16 +23,16 @@
 #
 #   install   `dnf install` of the file resolves its dependencies on Fedora and
 #             runs %post: the service accounts exist, and a FRESH install has
-#             enabled and started fastcached.
-#   daemon    fastcached runs as its own account, logs readiness to the journal
+#             enabled and started pace-kv.
+#   daemon    pace-kv runs as its own account, logs readiness to the journal
 #             (so it is not daemonizing), round-trips a set/get, keeps its config
-#             at 0640 root:fastcached and readable by that account, applies a
+#             at 0640 root:pace-kv and readable by that account, applies a
 #             SIGHUP reload, and stops with Result=success.
-#   takeover  enabling the node's socket while fastcached runs stops fastcached
+#   takeover  enabling the node's socket while pace-kv runs stops pace-kv
 #             and binds 6674 -- the node supersedes the plain daemon (#1676);
 #   boot      with BOTH enabled, a boot comes up with the node's socket holding
-#             6674 and fastcached inactive;
-#   worker    the socket activates fastcache-compile-node with a memory AND a disk
+#             6674 and pace-kv inactive;
+#   worker    the socket activates pace-node with a memory AND a disk
 #             tier at /var/cache/fastcache-node, the service adopts the socket,
 #             runs as fastcache-node, opens its store there, and stops cleanly.
 #   upgrade   a reinstall keeps an operator's edit to a %config(noreplace) file.
@@ -97,7 +97,7 @@ dump_container_state() {
     echo "--- systemctl --failed ---" >&2
     in_container systemctl --failed --no-pager >&2 2>&1 || true
     local unit
-    for unit in fastcached fastcache-compile-node.socket fastcache-compile-node; do
+    for unit in pace-kv pace-node.socket pace-node; do
         echo "--- journalctl -u ${unit} (last 40) ---" >&2
         in_container journalctl -u "$unit" --no-pager -n 40 >&2 2>&1 || true
     done
@@ -131,24 +131,24 @@ echo "== dnf install ${rpm_name}"
 docker cp "$rpm_path" "${container}:/root/${rpm_name}"
 in_container dnf -y install "/root/${rpm_name}" > "${workdir}/dnf-install.log" 2>&1 \
     || { cat "${workdir}/dnf-install.log" >&2; fail "dnf could not install ${rpm_name}"; }
-in_container rpm -q fastcached
+in_container rpm -q pace
 
-in_container id fastcached >/dev/null || fail "%post did not create the fastcached account"
+in_container id pace-kv >/dev/null || fail "%post did not create the pace-kv account"
 in_container id "$NODE_ACCOUNT" >/dev/null || fail "%post did not create the ${NODE_ACCOUNT} account"
 
 # --- 2. the daemon a fresh install starts -------------------------------------
-echo "== fastcached"
-[[ "$(in_container systemctl is-enabled fastcached 2>&1 || true)" == enabled ]] \
-    || fail "a fresh install did not enable fastcached.service"
+echo "== pace-kv"
+[[ "$(in_container systemctl is-enabled pace-kv 2>&1 || true)" == enabled ]] \
+    || fail "a fresh install did not enable pace-kv.service"
 
 daemon_ready() {
-    journal_to fastcached "${workdir}/daemon.log"
+    journal_to pace-kv "${workdir}/daemon.log"
     grep -q 'ready, accepting connections' "${workdir}/daemon.log"
 }
-wait_until daemon_ready "fastcached to log readiness to the journal" - "${workdir}/daemon.log" 60
+wait_until daemon_ready "pace-kv to log readiness to the journal" - "${workdir}/daemon.log" 60
 
-[[ "$(in_container systemctl show -p User --value fastcached)" == fastcached ]] \
-    || fail "fastcached does not run as the fastcached account"
+[[ "$(in_container systemctl show -p User --value pace-kv)" == pace-kv ]] \
+    || fail "pace-kv does not run as the pace-kv account"
 
 # Bounded from THIS side, around the whole exchange: run_bounded rather than
 # timeout(1), which the fixtures may not name (macOS has none, and the scan reads text).
@@ -161,72 +161,72 @@ grep -q STORED "${workdir}/round-trip.txt" && grep -q hello "${workdir}/round-tr
 # %post restricts the machine-wide config to the service account (#861); this is the
 # INSTALLED result, which a scan of the scriptlet source cannot see.
 config_mode="$(in_container stat -c '%a %U:%G' /etc/fastcached/fastcached.yaml)"
-[[ "$config_mode" == "640 root:fastcached" ]] \
-    || fail "/etc/fastcached/fastcached.yaml is '${config_mode}', expected '640 root:fastcached'"
-in_container runuser -u fastcached -- test -r /etc/fastcached/fastcached.yaml \
-    || fail "the fastcached account cannot read its own config"
+[[ "$config_mode" == "640 root:pace-kv" ]] \
+    || fail "/etc/fastcached/fastcached.yaml is '${config_mode}', expected '640 root:pace-kv'"
+in_container runuser -u pace-kv -- test -r /etc/fastcached/fastcached.yaml \
+    || fail "the pace-kv account cannot read its own config"
 
 # A reload that applies, asserted by its own log line rather than by the unit still
 # being up afterwards -- a SIGHUP nothing handled leaves it up as well.
 in_container grep -q '^#log_level: info' /etc/fastcached/fastcached.yaml \
     || fail "the shipped fastcached.yaml no longer contains '#log_level: info'; update this script"
 in_container sed -i 's/^#log_level: info/log_level: debug/' /etc/fastcached/fastcached.yaml
-in_container systemctl reload fastcached
+in_container systemctl reload pace-kv
 daemon_reloaded() {
-    journal_to fastcached "${workdir}/daemon.log"
+    journal_to pace-kv "${workdir}/daemon.log"
     if grep -q 'config reload failed' "${workdir}/daemon.log"; then
-        fail "fastcached refused the reload: $(grep 'config reload failed' "${workdir}/daemon.log")"
+        fail "pace-kv refused the reload: $(grep 'config reload failed' "${workdir}/daemon.log")"
     fi
     grep -q 'config reloaded' "${workdir}/daemon.log"
 }
-wait_until daemon_reloaded "fastcached to apply a SIGHUP reload" - "${workdir}/daemon.log" 30
+wait_until daemon_reloaded "pace-kv to apply a SIGHUP reload" - "${workdir}/daemon.log" 30
 
-in_container systemctl stop fastcached
-[[ "$(in_container systemctl show -p Result --value fastcached)" == success ]] \
-    || fail "fastcached did not stop cleanly"
+in_container systemctl stop pace-kv
+[[ "$(in_container systemctl show -p Result --value pace-kv)" == success ]] \
+    || fail "pace-kv did not stop cleanly"
 
 # --- 3. the compile worker, with a disk tier ----------------------------------
-echo "== fastcache-compile-node with cache_dir ${NODE_CACHE_DIR}"
+echo "== pace-node with cache_dir ${NODE_CACHE_DIR}"
 # The worker's whole configuration. A named toolchain rather than discovery: a node
 # with nothing to serve treats that as a configuration error and exits non-zero at
 # its stop, which would fail the clean-stop assertion for a reason that is not the
 # package's.
 in_container bash -c "printf 'toolchain:\n  - /usr/bin/g++\ncache_memory: 64m\ncache_disk: 256m\ncache_dir: ${NODE_CACHE_DIR}\n' \
-    > /etc/fastcached/fastcache-compile-node.yaml"
+    > /etc/fastcached/pace-node.yaml"
 
 # Who holds a port, as one line per listener: the process names ss reports for it.
 # @param 1 port
 listeners_of() { in_container ss -ltnpH "( sport = :$1 )" 2>&1 || true; }
 
-# The takeover: fastcached running, as a fresh install leaves it, and the node's
+# The takeover: pace-kv running, as a fresh install leaves it, and the node's
 # socket enabled beside it. The socket must stop it and bind the port, not fail to.
-in_container systemctl start fastcached
-in_container systemctl is-active --quiet fastcached || fail "fastcached did not start again before the takeover"
-in_container systemctl enable --now fastcache-compile-node.socket
-in_container systemctl is-active --quiet fastcache-compile-node.socket \
-    || fail "the worker's socket unit did not start beside a running fastcached: $(listeners_of "$NODE_PORT")"
-if in_container systemctl is-active --quiet fastcached; then
-    fail "enabling the node's socket left fastcached running, so the two contend for ${NODE_PORT}"
+in_container systemctl start pace-kv
+in_container systemctl is-active --quiet pace-kv || fail "pace-kv did not start again before the takeover"
+in_container systemctl enable --now pace-node.socket
+in_container systemctl is-active --quiet pace-node.socket \
+    || fail "the worker's socket unit did not start beside a running pace-kv: $(listeners_of "$NODE_PORT")"
+if in_container systemctl is-active --quiet pace-kv; then
+    fail "enabling the node's socket left pace-kv running, so the two contend for ${NODE_PORT}"
 fi
 held="$(listeners_of "$NODE_PORT")"
-[[ "$held" == *'"systemd",pid=1,'* && "$held" != *fastcached* ]] \
+[[ "$held" == *'"systemd",pid=1,'* && "$held" != *pace-kv* ]] \
     || fail "after the takeover ${NODE_PORT} is not held by the socket unit alone: ${held}"
 
-# The boot: both units enabled, as they are now -- %post enabled fastcached, the step
+# The boot: both units enabled, as they are now -- %post enabled pace-kv, the step
 # above the socket. Which one a boot starts is systemd's answer to the Conflicts= the
 # socket declares, and it is asserted rather than assumed.
-echo "== reboot with fastcached and the node's socket both enabled"
-[[ "$(in_container systemctl is-enabled fastcached 2>&1 || true)" == enabled ]] \
-    || fail "fastcached is no longer enabled, so the boot below would test nothing"
+echo "== reboot with pace-kv and the node's socket both enabled"
+[[ "$(in_container systemctl is-enabled pace-kv 2>&1 || true)" == enabled ]] \
+    || fail "pace-kv is no longer enabled, so the boot below would test nothing"
 docker restart "$container" >/dev/null
 wait_until system_booted "systemd in the container to boot again" - - 60
-in_container systemctl is-active --quiet fastcache-compile-node.socket \
+in_container systemctl is-active --quiet pace-node.socket \
     || fail "after a boot with both enabled the node's socket is not active: $(listeners_of "$NODE_PORT")"
-if in_container systemctl is-active --quiet fastcached; then
-    fail "after a boot with both enabled fastcached is running beside the node's socket"
+if in_container systemctl is-active --quiet pace-kv; then
+    fail "after a boot with both enabled pace-kv is running beside the node's socket"
 fi
 
-if in_container systemctl is-active --quiet fastcache-compile-node; then
+if in_container systemctl is-active --quiet pace-node; then
     fail "the worker started without a connection, so the socket was bypassed"
 fi
 
@@ -237,7 +237,7 @@ run_bounded 10 docker exec "$container" bash -c "exec 3<>/dev/tcp/127.0.0.1/${NO
 # at the bound -- the defect this leg exists for restarts the unit with exit 1, and
 # waiting out 240 s for it says nothing a refusal line has not already said.
 node_ready() {
-    journal_to fastcache-compile-node "${workdir}/node.log"
+    journal_to pace-node "${workdir}/node.log"
     if grep -q 'refusing to start' "${workdir}/node.log"; then
         fail "the worker refused to start: $(grep 'refusing to start' "${workdir}/node.log" | tail -1)"
     fi
@@ -256,15 +256,15 @@ grep -q 'serving a socket-activated listener' "${workdir}/node.log" \
 # And the state: the port's only listener is the socket systemd bound, which the
 # worker shares -- one it bound for itself would be a second line, or none at all.
 held="$(listeners_of "$NODE_PORT")"
-[[ "$(grep -c LISTEN <<<"$held")" == 1 && "$held" == *'"systemd",pid=1,'* && "$held" == *fastcache-compi* ]] \
+[[ "$(grep -c LISTEN <<<"$held")" == 1 && "$held" == *'"systemd",pid=1,'* && "$held" == *'"pace-node",pid='* ]] \
     || fail "${NODE_PORT} is not the adopted socket alone: ${held}"
-[[ "$(in_container systemctl show -p User --value fastcache-compile-node)" == "$NODE_ACCOUNT" ]] \
+[[ "$(in_container systemctl show -p User --value pace-node)" == "$NODE_ACCOUNT" ]] \
     || fail "the worker does not run as ${NODE_ACCOUNT}"
 
-in_container systemctl stop fastcache-compile-node
-[[ "$(in_container systemctl show -p Result --value fastcache-compile-node)" == success ]] \
+in_container systemctl stop pace-node
+[[ "$(in_container systemctl show -p Result --value pace-node)" == success ]] \
     || fail "the worker did not stop cleanly"
-in_container systemctl stop fastcache-compile-node.socket
+in_container systemctl stop pace-node.socket
 
 # --- 4. an upgrade keeps the operator's edits ---------------------------------
 echo "== dnf reinstall keeps a local edit"
@@ -276,14 +276,14 @@ in_container grep -q 'local edit that must survive' /etc/fastcached/fastcached.y
 
 # --- 5. removal deregisters ---------------------------------------------------
 echo "== dnf remove"
-in_container systemctl stop fastcached >/dev/null 2>&1 || true
-in_container dnf -y remove fastcached > "${workdir}/dnf-remove.log" 2>&1 \
-    || { cat "${workdir}/dnf-remove.log" >&2; fail "dnf could not remove fastcached"; }
-for leftover in /usr/lib/systemd/system/fastcached.service \
-                /usr/lib/systemd/system/fastcache-compile-node.service \
-                /usr/lib/systemd/system/fastcache-compile-node.socket \
-                /etc/systemd/system/multi-user.target.wants/fastcached.service \
-                /etc/systemd/system/sockets.target.wants/fastcache-compile-node.socket; do
+in_container systemctl stop pace-kv >/dev/null 2>&1 || true
+in_container dnf -y remove pace > "${workdir}/dnf-remove.log" 2>&1 \
+    || { cat "${workdir}/dnf-remove.log" >&2; fail "dnf could not remove pace"; }
+for leftover in /usr/lib/systemd/system/pace-kv.service \
+                /usr/lib/systemd/system/pace-node.service \
+                /usr/lib/systemd/system/pace-node.socket \
+                /etc/systemd/system/multi-user.target.wants/pace-kv.service \
+                /etc/systemd/system/sockets.target.wants/pace-node.socket; do
     if in_container test -e "$leftover"; then
         fail "removal left ${leftover} behind"
     fi

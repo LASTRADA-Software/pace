@@ -29,8 +29,8 @@ using Pace::Testing::Unwrap;
 ///
 /// ## Why this exists
 ///
-/// `fastcached` exported two compile-cache refusal counters that appeared in **no
-/// documentation at all**, while `fastcache-compile-node` documented its twin of one
+/// `pace-kv` exported two compile-cache refusal counters that appeared in **no
+/// documentation at all**, while `pace-node` documented its twin of one
 /// of them ([#648](https://github.com/LASTRADA-Software/fastcached/issues/648)). An
 /// operator watching a rolling upgrade follows the node series because it is the one
 /// the documentation names, sees it settle, and reads a mixed fleet as a converged
@@ -60,7 +60,7 @@ using Pace::Testing::Unwrap;
 /// **The `fastcache_*` series** (no `d`). Every process that serves this endpoint
 /// exports every counter, so a daemon's scrape also carries the worker, node and
 /// scheduler series — flat at zero, because nothing in that binary moves them. They
-/// are `fastcache-compile-node`'s and are documented on its page; documenting sixty
+/// are `pace-node`'s and are documented on its page; documenting sixty
 /// permanently-zero rows on the daemon's page would bury the rows that mean
 /// something. The deployment page says so in prose, and that prose is outside what
 /// this check can verify.
@@ -81,7 +81,7 @@ constexpr std::string_view MetricsHeading = "## Metrics";
 constexpr std::string_view DaemonPrefix = "fastcached_";
 
 /// The page that carries the compile node's per-series tables.
-constexpr std::string_view NodePage = "docs/tools/fastcache-compile-node.md";
+constexpr std::string_view NodePage = "docs/tools/pace-node.md";
 
 /// The node's namespace.
 ///

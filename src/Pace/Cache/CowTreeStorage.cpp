@@ -278,7 +278,7 @@ namespace
         auto const* const remedy = [&] {
             if (readable)
                 return "the store is intact and does not need to be deleted -- convert it with "
-                       "`fastcached --migrate-storage` (or `fastcache-compile-node --migrate-cache`), "
+                       "`pace-kv --migrate-storage` (or `pace-node --migrate-cache`), "
                        "passing the same storage options this process was given";
             if (onDisk > CowTreeStorage::CurrentFormatVersion)
                 return "upgrade to a build that writes this version; the store is intact and does not need to be "
@@ -320,8 +320,8 @@ namespace
     {
         return MakeError(StorageErrorCode::UnsupportedFormatVersion,
                          std::format("an interrupted conversion left this store part-way from on-disk storage "
-                                     "format version {} to {}: re-run `fastcached --migrate-storage` (or "
-                                     "`fastcache-compile-node --migrate-cache`) to finish it, which resumes where "
+                                     "format version {} to {}: re-run `pace-kv --migrate-storage` (or "
+                                     "`pace-node --migrate-cache`) to finish it, which resumes where "
                                      "it stopped. The store is intact and does not need to be deleted.",
                                      fromVersion,
                                      CowTreeStorage::CurrentFormatVersion));

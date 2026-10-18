@@ -293,7 +293,7 @@ core::async::Task<void> ExpiryReaper::Run(core::net::EventLoop* reactor,
         // ONE park straight to the deadline, and a stop cancels it: the token is this frame's own
         // (`AdoptStopToken` above), so the park's stop callback retires it and the await throws
         // `OperationCancelled`. The cycle used to sleep in `stopWakeBound` steps and re-read the
-        // token at each one, because fastcached's reactor could not take a scheduled resumption
+        // token at each one, because pace-kv's reactor could not take a scheduled resumption
         // back; core-cpp's can, so an idle cycle now costs no wake-up at all (#1596).
         //
         // Awaited directly rather than through `interruptibleSleepUntil`, and the reason is WHICH

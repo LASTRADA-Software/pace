@@ -36,7 +36,7 @@
 #     Fails OPEN.
 #   * The table's rows are checked for VOCABULARY only -- a known start mode and a
 #     known state -- never against the fragment. A row that is wrong the same way
-#     the fragment is wrong (both saying fastcached stays auto beside the node,
+#     the fragment is wrong (both saying pace-kv stays auto beside the node,
 #     say) passes here and passes the packaging job, because there the one agrees
 #     with the other. Only a reader of both catches that. Fails OPEN.
 #   * `Assert-NodeStatePrivate` reads access lists a real install produced; only
@@ -90,18 +90,18 @@ $ErrorActionPreference = 'Stop'
 # state the service must reach, as Win32_Service spells them; $null means the
 # service must not be registered at all.
 #
-#   Release030WithNode  -- 0.3.0 installed with both node properties: fastcached
+#   Release030WithNode  -- 0.3.0 installed with both node properties: pace-kv
 #                          auto and started, the node registered auto and never
-#                          started (that installer starts only fastcached). The
+#                          started (that installer starts only pace-kv). The
 #                          starting point of the upgrade, not a row of the
 #                          current table.
 #   NodeSelected        -- the node feature is installed: node auto and running,
-#                          fastcached DISABLED and stopped (both would answer on 6674,
+#                          pace-kv DISABLED and stopped (both would answer on 6674,
 #                          and an old package's removal inside an upgrade has Windows
 #                          Installer restart it by name after the transaction ends).
-#   NodeAlone           -- the node without fastcached: node auto and running, and
-#                          no fastcached registration left behind.
-#   DaemonAlone         -- fastcached without the node: auto and running, and no
+#   NodeAlone           -- the node without pace-kv: node auto and running, and
+#                          no pace-kv registration left behind.
+#   DaemonAlone         -- pace-kv without the node: auto and running, and no
 #                          node registration left behind.
 #   DaemonAloneUnstarted -- the same, installed with FASTCACHED_START_SERVICE=0:
 #                          registered auto and left stopped.
@@ -125,7 +125,7 @@ $script:States = @('Running', 'Stopped')
 # names a service by its display name in its text and by its service name in its
 # binary data; either is recognised, so a registration another build wrote under
 # another display name is still matched by its service name.
-$script:ServiceDisplayNames = [ordered]@{ FastCached = 'fastcached'; FastCacheCompileNode = 'fastcache-compile-node' }
+$script:ServiceDisplayNames = [ordered]@{ FastCached = 'pace-kv'; FastCacheCompileNode = 'pace-node' }
 
 # The service control manager's events for a service that ended without being told
 # to: 7031 while the SCM still takes a recovery action for it, 7034 when it takes
@@ -594,7 +594,7 @@ function Get-NodeFirewallVerdict([string[]] $Seen, [string[]] $Expected) {
 # and rules derived before that opened the node port alone. Reads a live firewall, so the
 # self-test reaches only the verdict above; fails CLOSED.
 function Assert-NodeFirewall {
-    $group = 'fastcached: FastCacheCompileNode'
+    $group = 'Pace: FastCacheCompileNode'
     $rules = @(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue)
     $rules | Format-Table DisplayName, Direction, Action, Profile | Out-String | Write-Host
     if ($verdict = Get-NodeFirewallVerdict @($rules | ForEach-Object { $_.DisplayName }) $script:NodeFirewallRuleNames) {
@@ -644,7 +644,7 @@ $script:FirewallGroupNotFoundId = 'CmdletizationQuery_NotFound_RuleGroup,Get-Net
 
 # The firewall group @p Group on the REAL Windows Firewall, one Format-FirewallRuleLine per rule,
 # sorted, so two snapshots compare as text. What Assert-FirewallGroupUnchanged reads.
-# @param Group The group, `fastcached: <service>`.
+# @param Group The group, `pace-kv: <service>`.
 # @param Read Takes a group and returns its rules, as Get-NetFirewallRule -ErrorAction Stop does; a
 #        seam so the self-test can drive the error decision without a firewall.
 # @return The lines; none for an empty or absent group. Throws on a read that failed for any other
@@ -730,7 +730,7 @@ function Get-NodeFirewallScopeVerdict([object[]] $Seen, [string] $Scope) {
 # a rule reading Any here is the fail-open this exists to catch. Reads a live firewall, so the
 # self-test reaches only the verdict above; fails CLOSED.
 function Assert-NodeFirewallScope([string] $Scope) {
-    $group = 'fastcached: FastCacheCompileNode'
+    $group = 'Pace: FastCacheCompileNode'
     $seen = @(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue | ForEach-Object {
             @{ Name = $_.DisplayName; Remote = @(($_ | Get-NetFirewallAddressFilter).RemoteAddress) }
         })
@@ -1085,7 +1085,7 @@ function Show-PortHolders([int] $Port) {
             $owner = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
             Write-Host "$($listener.LocalAddress):$Port held by PID $($listener.OwningProcess): $($owner.Path)"
         }
-        foreach ($process in @(Get-Process -Name fastcached, fastcache-compile-node -ErrorAction SilentlyContinue)) {
+        foreach ($process in @(Get-Process -Name pace-kv, pace-node -ErrorAction SilentlyContinue)) {
             Write-Host "running: PID $($process.Id) $($process.Path), started $($process.StartTime)"
         }
     } catch {
@@ -1712,7 +1712,7 @@ function Invoke-TransactionJudgement {
         $kinds = @($findings | ForEach-Object Kind | Sort-Object -Unique)
         $hints = @(
             if ('Termination' -in $kinds) { 'a TERMINATION is the service failing: read its time against the verbose log and the service''s own Application events (Show-ServiceDiagnosis), a refused start and a bad restore look like this' }
-            if ('Start' -in $kinds) { 'a START of a service the expectation leaves not running has had one cause so far, Windows Installer''s Restart Manager (PR 1634): the package disables it (MSIRESTARTMANAGERCONTROL), an OLD package''s removal inside an upgrade does not, and Windows Installer restarts what that removal shut down after the transaction ends, which is why fastcached beside the node is disabled; read the verbose log''s RESTART MANAGER lines and the actions running at that time' }
+            if ('Start' -in $kinds) { 'a START of a service the expectation leaves not running has had one cause so far, Windows Installer''s Restart Manager (PR 1634): the package disables it (MSIRESTARTMANAGERCONTROL), an OLD package''s removal inside an upgrade does not, and Windows Installer restarts what that removal shut down after the transaction ends, which is why pace-kv beside the node is disabled; read the verbose log''s RESTART MANAGER lines and the actions running at that time' }
         )
         throw "'$what' disturbed a service the table owns ($($expectation.Name)):`n  $(@($findings | ForEach-Object Text) -join "`n  ")`n$($hints -join "`n")"
     }
@@ -1863,14 +1863,14 @@ function Get-InstallationSnapshot {
     }
     $snapshot['installer values'] = Get-RegistryTreeLines 'SOFTWARE\fastcached\Installer'
     $snapshot['rollback state'] = Get-RegistryTreeLines 'SOFTWARE\fastcached\InstallerRollback'
-    foreach ($group in 'fastcached: FastCached', 'fastcached: FastCacheCompileNode') {
+    foreach ($group in 'Pace: FastCached', 'Pace: FastCacheCompileNode') {
         $snapshot["firewall $group"] = @(Get-FirewallGroupSnapshot $group)
     }
     # Bound first: the reader returns its array as ONE pipeline object, so piping the call itself
     # would sort a single nested Object[] and compare it by reference.
     $codes = Get-InstalledProductCodes $UpgradeCode
     $snapshot['products'] = @($codes | Sort-Object)
-    $snapshot['binary'] = @("fastcached.exe present: $(Test-Path -LiteralPath (Join-Path $Root 'bin\fastcached.exe'))")
+    $snapshot['binary'] = @("pace-kv.exe present: $(Test-Path -LiteralPath (Join-Path $Root 'bin\pace-kv.exe'))")
     return $snapshot
 }
 
@@ -2225,7 +2225,7 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The registration verdict Assert-NodeRegistrationArgument reads: a whole token passes behind a
     # quoted program path with spaces, and neither its absence nor a longer value passes.
-    $imagePath = '"C:\Program Files\fastcached\bin\fastcache-compile-node.exe" --service --fleet-seed=seed.example.invalid:6674'
+    $imagePath = '"C:\Program Files\fastcached\bin\pace-node.exe" --service --fleet-seed=seed.example.invalid:6674'
     if ($null -ne (Get-NodeRegistrationArgumentVerdict $imagePath '--fleet-seed=seed.example.invalid:6674')) {
         throw 'registration verdict: a whole token must pass'
     }
@@ -2239,8 +2239,8 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The diagnosis's command-line split: a quoted program path with spaces is one token, and so
     # is a value quoted after its `=`; the quotes are dropped either way.
-    $split = @(Split-RegisteredCommandLine '"C:\Program Files\fastcached\bin\fastcache-compile-node.exe" --daemon --cache-dir="C:\dir with space" --x=1')
-    if (($split -join '|') -ne 'C:\Program Files\fastcached\bin\fastcache-compile-node.exe|--daemon|--cache-dir=C:\dir with space|--x=1') {
+    $split = @(Split-RegisteredCommandLine '"C:\Program Files\fastcached\bin\pace-node.exe" --daemon --cache-dir="C:\dir with space" --x=1')
+    if (($split -join '|') -ne 'C:\Program Files\fastcached\bin\pace-node.exe|--daemon|--cache-dir=C:\dir with space|--x=1') {
         throw "split: got '$($split -join '|')'"
     }
     Pass 'split: a quoted program path and a quoted value are one token each'
@@ -2275,7 +2275,7 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The absence verdict: 0.3.0's registration is refused, the new one passes, and a flag that
     # merely shares the prefix is not the flag.
-    $old030 = '"C:\Program Files\fastcached\bin\fastcache-compile-node.exe" --daemon --service-name=FastCacheCompileNode --scheduler=127.0.0.1:6675 --advertise=127.0.0.1:6674'
+    $old030 = '"C:\Program Files\fastcached\bin\pace-node.exe" --daemon --service-name=FastCacheCompileNode --scheduler=127.0.0.1:6675 --advertise=127.0.0.1:6674'
     ExpectThrow 'absent: a registration still carrying --scheduler is refused' {
         if ($v = Get-NodeRegistrationLacksVerdict $old030 '--scheduler') { throw $v }
     } 'still carries --scheduler'
@@ -2300,11 +2300,11 @@ function Invoke-MsiServiceTableSelfTest {
 
     # The emptiness verdict Assert-FirewallGroupEmpty reads: no rule passes, one left behind is refused
     # by name.
-    if ($null -ne (Get-FirewallGroupEmptyVerdict @() 'fastcached: X')) { throw 'group verdict: an empty group must pass' }
+    if ($null -ne (Get-FirewallGroupEmptyVerdict @() 'pace-kv: X')) { throw 'group verdict: an empty group must pass' }
     Pass 'group: an empty group passes'
     ExpectThrow 'group: a rule left behind is refused, naming it' {
-        if ($verdict = Get-FirewallGroupEmptyVerdict @('X node tcp/6674') 'fastcached: X') { throw $verdict }
-    } "'fastcached: X' still holds \[X node tcp/6674\]"
+        if ($verdict = Get-FirewallGroupEmptyVerdict @('X node tcp/6674') 'pace-kv: X') { throw $verdict }
+    } "'pace-kv: X' still holds \[X node tcp/6674\]"
 
     # The before-and-after verdict Assert-FirewallGroupUnchanged reads (R4-3): the same rules pass in
     # any order, a scope the rollback did not put back is refused naming both lines, and an empty
@@ -2312,49 +2312,49 @@ function Invoke-MsiServiceTableSelfTest {
     $rule = 'FastCached cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=Any'
     $scoped = 'FastCached cache tcp/6674 | enabled=True Inbound Allow | TCP/6674 | remote=10.0.0.0/255.0.0.0'
     $other = 'FastCached admin tcp/6675 | enabled=True Inbound Allow | TCP/6675 | remote=Any'
-    if ($null -ne (Get-FirewallGroupUnchangedVerdict @($rule, $other) @($other, $rule) 'fastcached: X')) {
+    if ($null -ne (Get-FirewallGroupUnchangedVerdict @($rule, $other) @($other, $rule) 'pace-kv: X')) {
         throw 'unchanged verdict: the same rules in another order must pass'
     }
     Pass 'unchanged: the same rules in another order pass'
     ExpectThrow 'unchanged: a scope the rollback left in place is refused, naming what was lost and what is held' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($scoped) 'fastcached: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($scoped) 'pace-kv: X') { throw $verdict }
     } 'lost \[FastCached cache tcp/6674 .*remote=Any\] and holds \[FastCached cache tcp/6674 .*remote=10\.0\.0\.0'
     ExpectThrow 'unchanged: an empty group before the transaction proves nothing, and is refused' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @() @() 'fastcached: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @() @() 'pace-kv: X') { throw $verdict }
     } 'held no rule BEFORE the transaction'
     # And the snapshot LINE carries the profile and the program (round 11 review, M6): a rollback that
     # put the port and the scope back but admitted another program, or another profile, is refused.
     $ruleObject = [pscustomobject] @{ DisplayName = 'FastCached cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
     $portFilter = [pscustomobject] @{ Protocol = 'TCP'; LocalPort = '6674' }
     $addressFilter = [pscustomobject] @{ RemoteAddress = 'Any' }
-    $programBefore = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\fastcached\bin\fastcached.exe' })
-    $programAfter = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Elsewhere\fastcached.exe' })
+    $programBefore = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\fastcached\bin\pace-kv.exe' })
+    $programAfter = Format-FirewallRuleLine $ruleObject $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Elsewhere\pace-kv.exe' })
     $privateOnly = [pscustomobject] @{ DisplayName = 'FastCached cache tcp/6674'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Private' }
-    $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\fastcached\bin\fastcached.exe' })
+    $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\fastcached\bin\pace-kv.exe' })
     ExpectThrow 'unchanged: a rollback that admits another PROGRAM is refused, naming it' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'fastcached: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'pace-kv: X') { throw $verdict }
     } 'holds \[.*program=C:\\Elsewhere\\fastcached\.exe\]'
     ExpectThrow 'unchanged: a rollback that changes the PROFILE is refused, naming it' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($profileAfter) 'fastcached: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($profileAfter) 'pace-kv: X') { throw $verdict }
     } 'holds \[.*profile=Private'
     # A rule the rollback DUPLICATED renders as the same line twice, and a set comparison reads that as
     # unchanged (#1629, M1): the comparison is a multiset.
     ExpectThrow 'unchanged: a rule the rollback duplicated is refused, naming the extra one' {
-        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($rule, $rule) 'fastcached: X') { throw $verdict }
+        if ($verdict = Get-FirewallGroupUnchangedVerdict @($rule) @($rule, $rule) 'pace-kv: X') { throw $verdict }
     } 'lost \[\] and holds \[FastCached cache tcp/6674 .*remote=Any\] it did not$'
 
     # The firewall snapshot's error decision (#1629, M2): a group that holds no rule reads as empty, and
     # any OTHER failed read is thrown, never read as an empty group that then compares as unchanged.
     $failWith = { param([string] $id, [string] $message)
         { param($group) throw [Management.Automation.ErrorRecord]::new([Exception]::new($message), $id, 'NotSpecified', $group) }.GetNewClosure() }
-    $empty = @(Get-FirewallGroupSnapshot 'fastcached: X' -Read (& $failWith $script:FirewallGroupNotFoundId 'No MSFT_NetFirewallRule objects found'))
+    $empty = @(Get-FirewallGroupSnapshot 'pace-kv: X' -Read (& $failWith $script:FirewallGroupNotFoundId 'No MSFT_NetFirewallRule objects found'))
     if ($empty.Count -ne 0) { throw "firewall snapshot: a group holding no rule answered '$($empty -join ' | ')'" }
     Pass 'firewall snapshot: a group holding no rule reads as empty'
     ExpectThrow 'firewall snapshot: any other failed read is thrown, never read as empty' {
-        Get-FirewallGroupSnapshot 'fastcached: X' -Read (& $failWith 'HRESULT 0x80070005,Get-NetFirewallRule' 'Access is denied')
+        Get-FirewallGroupSnapshot 'pace-kv: X' -Read (& $failWith 'HRESULT 0x80070005,Get-NetFirewallRule' 'Access is denied')
     } '^Access is denied$'
     # And the id is the one the REAL firewall raises: a group no host has, read live.
-    $noGroup = @(Get-FirewallGroupSnapshot ('fastcached: SelfTest' + [guid]::NewGuid().ToString('N')))
+    $noGroup = @(Get-FirewallGroupSnapshot ('pace-kv: SelfTest' + [guid]::NewGuid().ToString('N')))
     if ($noGroup.Count -ne 0) { throw "firewall snapshot: a group no host has answered '$($noGroup -join ' | ')'" }
     Pass 'firewall snapshot: live, a group no host has reads as empty rather than failing'
 
@@ -2397,7 +2397,7 @@ function Invoke-MsiServiceTableSelfTest {
     # What failed, read whatever shape Windows Installer gave it: an action that could not START names
     # no CustomAction and no code (round 5), one that ran and failed does, and a clean log says nothing.
     $startFailure = @('Action start 5:34:04: InstallFiles.', 'noise', 'noise', 'noise',
-        'MSI (s) (88:AC) [05:34:04:780]: Product: fastcached -- Error 1721. There is a problem with this Windows Installer package. Action: FastCacheAwaitServiceExit, location: C:\Program Files\fastcached\, command: ...',
+        'MSI (s) (88:AC) [05:34:04:780]: Product: pace-kv -- Error 1721. There is a problem with this Windows Installer package. Action: FastCacheAwaitServiceExit, location: C:\Program Files\fastcached\, command: ...',
         'after')
     $found = @(Get-MsiFailureLines $startFailure)
     if ($found.Count -ne 4 -or $found[-1] -notmatch 'Error 1721.*FastCacheAwaitServiceExit' -or $found -contains 'after') {
@@ -2457,7 +2457,7 @@ function Invoke-MsiServiceTableSelfTest {
         'MSI (s) (D8:AC) [13:32:19:900]: Executing op: ServiceControl(,Name=FastCached,Action=1,Wait=0,)',
         'MSI (s) (D8:AC) [13:32:20:100]: RESTART MANAGER: Restarted the applications.',
         'MSI (s) (D8:AC) [13:32:21:000]: Note: 1: 2205 2:  3: Error',
-        'MSI (s) (D8:AC) [13:32:40:000]: Product: fastcached -- Installation completed successfully.',
+        'MSI (s) (D8:AC) [13:32:40:000]: Product: pace-kv -- Installation completed successfully.',
         'MSI (s) (D8:AC) [00:00:02:000]: Doing action: AfterMidnight')
     $got = Get-MsiLinesAround -Lines $around -Times @([TimeSpan]::new(0, 13, 32, 20, 306), [TimeSpan]::new(0, 13, 32, 24, 585)) -BeforeSeconds 30
     if ($got.Omitted -ne 0 -or ($got.Lines -join '|') -notmatch '^MSI .*Running product .*\|Action start 13:32:01: InstallValidate\.\|.*ServiceControl\(,Name=FastCached.*\|.*RESTART MANAGER: Restarted the applications\.$') {
@@ -2520,10 +2520,10 @@ function Invoke-MsiServiceTableSelfTest {
     }
 
     # The installation comparison, over synthetic snapshots (#1629): every outcome, and WHICH field.
-    $base = [ordered]@{ 'service FastCached' = @('ImagePath ExpandString "C:\r\fastcached.exe" --daemon', 'Start DWord 2'); 'state FastCached' = @('Running') }
+    $base = [ordered]@{ 'service FastCached' = @('ImagePath ExpandString "C:\r\pace-kv.exe" --daemon', 'Start DWord 2'); 'state FastCached' = @('Running') }
     $cmp = @(
         @{ Case = 'equal snapshots'; After = $base; Match = $null }
-        @{ Case = 'one changed value'; After = [ordered]@{ 'service FastCached' = @('ImagePath ExpandString "C:\r\fastcached.exe" --daemon', 'Start DWord 3'); 'state FastCached' = @('Running') }; Match = '^service FastCached: lost \[Start DWord 2\]; gained \[Start DWord 3\]$' }
+        @{ Case = 'one changed value'; After = [ordered]@{ 'service FastCached' = @('ImagePath ExpandString "C:\r\pace-kv.exe" --daemon', 'Start DWord 3'); 'state FastCached' = @('Running') }; Match = '^service FastCached: lost \[Start DWord 2\]; gained \[Start DWord 3\]$' }
         @{ Case = 'a changed state'; After = [ordered]@{ 'service FastCached' = $base['service FastCached']; 'state FastCached' = @('Stopped') }; Match = '^state FastCached: lost \[Running\]; gained \[Stopped\]$' }
         @{ Case = 'a field only one side has'; After = [ordered]@{ 'service FastCached' = $base['service FastCached'] }; Match = '^state FastCached: lost \[Running\]; gained \[\]$' }
         @{ Case = 'a key that vanished'; After = [ordered]@{ 'service FastCached' = @('<absent>'); 'state FastCached' = @('Running') }; Match = '^service FastCached: lost' }
@@ -2703,10 +2703,10 @@ function Invoke-MsiServiceTableSelfTest {
     $realBinary = '46006100730074004300610063006800650043006F006D00700069006C0065004E006F00640065000000'
     $parses = @(
         @{ Case = 'the service name is read from the binary data, the time in UTC'
-           Xml = (& $eventXml 7031 '2026-10-06T12:12:48.1234567Z' @{ param1 = 'fastcache-compile-node'; param2 = '1' } $realBinary); Message = "The node`r`n terminated."
+           Xml = (& $eventXml 7031 '2026-10-06T12:12:48.1234567Z' @{ param1 = 'pace-node'; param2 = '1' } $realBinary); Message = "The node`r`n terminated."
            Id = 7031; Service = 'FastCacheCompileNode'; State = ''; Text = 'The node terminated.'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc).AddTicks(1234567) }
         @{ Case = "with no binary data, this package's display name reads as its service name"
-           Xml = (& $eventXml 7034 '2026-10-06T12:12:48Z' @{ param1 = 'fastcached'; param2 = '1' } ''); Message = 'm'
+           Xml = (& $eventXml 7034 '2026-10-06T12:12:48Z' @{ param1 = 'pace-kv'; param2 = '1' } ''); Message = 'm'
            Id = 7034; Service = 'FastCached'; State = ''; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 12, 48, [DateTimeKind]::Utc) }
         @{ Case = 'another service keeps its own name'
            Xml = (& $eventXml 7034 '2026-10-06T12:12:48Z' @{ param1 = 'OpenSSH SSH Server'; param2 = '1' } (& $hexOf 'sshd')); Message = 'm'
@@ -2718,7 +2718,7 @@ function Invoke-MsiServiceTableSelfTest {
            Xml = (& $eventXml 7036 '2026-10-06T12:13:23Z' @{ param1 = 'FastCached'; param2 = 'running' } ''); Message = 'The FastCached service entered the running state.'
            Id = 7036; Service = 'FastCached'; State = 'Running'; Text = 'The FastCached service entered the running state.'; Time = [DateTime]::new(2026, 10, 6, 12, 13, 23, [DateTimeKind]::Utc) }
         @{ Case = 'a 7036 whose binary data reads <name>/<code> and whose param2 says nothing'
-           Xml = (& $eventXml 7036 '2026-10-06T12:13:24Z' @{ param1 = 'fastcache-compile-node'; param2 = '' } (& $hexOf 'FastCacheCompileNode/1')); Message = 'm'
+           Xml = (& $eventXml 7036 '2026-10-06T12:13:24Z' @{ param1 = 'pace-node'; param2 = '' } (& $hexOf 'FastCacheCompileNode/1')); Message = 'm'
            Id = 7036; Service = 'FastCacheCompileNode'; State = 'Stopped'; Text = 'm'; Time = [DateTime]::new(2026, 10, 6, 12, 13, 24, [DateTimeKind]::Utc) }
     )
     foreach ($row in $parses) {
@@ -2786,7 +2786,7 @@ function Invoke-MsiServiceTableSelfTest {
         "MSI (s) (D8:AC) [$(& $stamp 2)]: RESTART MANAGER: Shut down the nested session's applications.",
         "MSI (s) (D8:AC) [$(& $stamp 32)]: Doing action: FastCacheNodeStartService",
         "MSI (s) (D8:AC) [$(& $stamp 33)]: RESTART MANAGER: Restarted FastCached.",
-        "MSI (s) (D8:AC) [$(& $stamp 38)]: Product: fastcached -- Installation completed successfully.")
+        "MSI (s) (D8:AC) [$(& $stamp 38)]: Product: pace-kv -- Installation completed successfully.")
     try {
         $judged = & $record 'NodeSelected' '' 5 0 @()
         $judged.Log = $judgedLog
@@ -2797,7 +2797,7 @@ function Invoke-MsiServiceTableSelfTest {
         if ($shown -notcontains 'refused') { throw "log on refusal: the judgement did not refuse ($($shown.Count) line(s))" }
         $text = $shown -join "`n"
         foreach ($want in @('--- the tail ---\n(MSI [^\n]*\n)*MSI [^\n]*Doing action: FastCacheNodeStartService\n', 'RESTART MANAGER: Shut down the nested session''s applications',
-                '--- the actions from 10 s before to 5 s after each finding .*---\n.*Doing action: FastCacheNodeStartService\n.*RESTART MANAGER: Restarted FastCached\.\n.*Product: fastcached -- Installation completed successfully\.')) {
+                '--- the actions from 10 s before to 5 s after each finding .*---\n.*Doing action: FastCacheNodeStartService\n.*RESTART MANAGER: Restarted FastCached\.\n.*Product: pace-kv -- Installation completed successfully\.')) {
             if ($text -notmatch $want) { throw "log on refusal: nothing shown matches '$want' in:`n$text" }
         }
         if (@(Show-MsiLog $judgedLog 6>$null).Count -ne 0) { throw 'log on refusal: Show-MsiLog wrote to the output stream' }
@@ -2889,7 +2889,7 @@ function Invoke-MsiServiceTableSelfTest {
 
         # The evidence a refusal shows, from the same read the verdict was taken from: each event with
         # its meaning, and each service's state, process and exit codes.
-        $refusedWith = @($nodeStoppedAt2) + @([pscustomobject]@{ Id = 7000; Time = $t0.AddSeconds(3); Service = 'FastCacheCompileNode'; State = ''; Message = 'The fastcache-compile-node service failed to start.' })
+        $refusedWith = @($nodeStoppedAt2) + @([pscustomobject]@{ Id = 7000; Time = $t0.AddSeconds(3); Service = 'FastCacheCompileNode'; State = ''; Message = 'The pace-node service failed to start.' })
         $shown = @(& { try { $null = Invoke-TransactionJudgement -Transaction (& $record 'NodeSelected' '' 5 0 @() 0) -ReadEvents { $refusedWith } -Observe (& $nodeIs 'Stopped' 0 1067) } catch { 'refused' } } 6>&1 | ForEach-Object { "$_" })
         $text = $shown -join "`n"
         foreach ($want in @('^refused$', '^FastCacheCompileNode: Auto, Stopped, process 0; exit code 1067, service-specific 0$', '^FastCached: Disabled, Stopped, process 0; exit code 1077, service-specific 0$',
@@ -2934,7 +2934,7 @@ function Invoke-MsiServiceTableSelfTest {
     }
 
     # The second judgement for a transaction no row assertion follows (I-A): a failed upgrade's rollback
-    # restarts fastcached with an unwaited `sc.exe start`, and a restore that cannot serve crashes after
+    # restarts pace-kv with an unwaited `sc.exe start`, and a restore that cannot serve crashes after
     # msiexec exits. Judged at the exit it passes; settled, its late 7031 is refused.
     $saved = $script:LastMsiTransaction
     try {

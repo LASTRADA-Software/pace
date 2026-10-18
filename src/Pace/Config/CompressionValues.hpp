@@ -19,7 +19,7 @@ namespace Pace
 /// questions: which codec, how hard, and below which size not to bother. They
 /// live here because the alternative is a copy per table: `CliParser.cpp` and
 /// `YamlReader.cpp` already carried one each, differing only in how they dressed
-/// the error, and `fastcache-compile-node` would have made a third
+/// the error, and `pace-node` would have made a third
 /// ([#623](https://github.com/LASTRADA-Software/fastcached/issues/623) is what a
 /// setting reachable from one table and not another costs).
 ///

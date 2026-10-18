@@ -50,7 +50,7 @@
 # want-fail assertion is indistinguishable from the rule firing (#723).
 #
 # **It checks EVERY binary in `SubjectTable` below, not just the node.** This was written
-# for `fastcache-compile-node` (#1026) and the daemon joined at
+# for `pace-node` (#1026) and the daemon joined at
 # [#1070](https://github.com/LASTRADA-Software/fastcached/issues/1070), which is why the
 # file and its two ctest entries lost their node-shaped names: a check whose name has
 # stopped describing its subject is a defect here rather than cosmetics.
@@ -124,8 +124,8 @@ readonly TableArrayMarker="std::to_array<OptionSpec"
 # artefact declaring a subject with no row is REFUSED BY NAME, so the coverage gap cannot
 # be closed silently by adding a marker somewhere.
 SubjectTable='
-fastcache-compile-node|src/apps/fastcache-compile-node/NodeConfig.cpp
-fastcached|src/Pace/Config/CliParser.cpp
+pace-node|src/apps/pace-node/NodeConfig.cpp
+pace-kv|src/Pace/Config/CliParser.cpp
 '
 
 # The option table a subject is checked against, into `TableFor` -- a global rather than
@@ -327,7 +327,7 @@ readonly CountRead='
 # That is the same unchecked-claim shape the ticket is about, one field over.
 #
 # The names follow a colon on the count line and continue over comment lines until a bare
-# `#`. A file may legitimately state NO names -- `fastcache-compile-node.yaml` states only
+# `#`. A file may legitimately state NO names -- `pace-node.yaml` states only
 # a count -- so "no colon" is an answer, not a failure. What is NOT tolerated is a colon
 # that parses to nothing: that is the parser having stopped matching, and it is refused by
 # the caller rather than read as a file claiming nothing.
@@ -663,7 +663,7 @@ check_subject() {
 
     # **Every subject states a count, and requiring one of the DAEMON was a decision rather
     # than an inherited default** (#1070). The node states one in
-    # `packaging/config/fastcache-compile-node.yaml`. The daemon ships the same kind of
+    # `packaging/config/pace-node.yaml`. The daemon ships the same kind of
     # file, `packaging/config/fastcached.yaml`, and it carried a hand-typed list AND a
     # hand-typed total -- "The five above are the complete list" -- with nothing deriving
     # either. Exempting the daemon would have left the one artefact an operator actually
@@ -901,14 +901,14 @@ if [[ "${1:-}" == "--self-test" ]]; then
         local at="$1" nodeTable="$2" nodeDocs="$3" nodeCount="$4"
         local dTable="${5-$2}" dDocs="${6-$3}" dCount="${7-$4}"
 
-        mkdir -p "${at}/src/apps/fastcache-compile-node" "${at}/docs/tools" "${at}/packaging/config" \
+        mkdir -p "${at}/src/apps/pace-node" "${at}/docs/tools" "${at}/packaging/config" \
             "${at}/src/Pace/Config" "${at}/docs/snippets" "${at}/scripts/lib"
 
-        _artefacts "$at" fastcache-compile-node \
-            src/apps/fastcache-compile-node/NodeConfig.cpp docs/tools/node.md packaging/config/node.yaml \
+        _artefacts "$at" pace-node \
+            src/apps/pace-node/NodeConfig.cpp docs/tools/node.md packaging/config/node.yaml \
             "$nodeTable" "$nodeDocs" "$nodeCount" expanded
 
-        _artefacts "$at" fastcached \
+        _artefacts "$at" pace-kv \
             src/Pace/Config/CliParser.cpp docs/snippets/reload-matrix.md packaging/config/fastcached.yaml \
             "$dTable" "$dDocs" "$dCount" compact
 
@@ -963,26 +963,26 @@ if [[ "${1:-}" == "--self-test" ]]; then
     #    a different set, so a scan keyed on the header alone reported a correct tree as
     #    broken -- which is why a subject is DECLARED and the scope derived from it.
     #
-    #    The planted subject used to be `fastcached`, and #1070 is precisely the change
-    #    that made `fastcached` a row. Kept rather than deleted with the gap it described:
+    #    The planted subject used to be `pace-kv`, and #1070 is precisely the change
+    #    that made `pace-kv` a row. Kept rather than deleted with the gap it described:
     #    what it asserts is that an UNHANDLED subject is refused BY NAME, and that has to
     #    keep working for the binary after this one.
     _tree "${work}/otherbinary" "log_level" "log_level" "one"
     {
-        echo '<!-- reloadable-for: fastcache-cli -->'
+        echo '<!-- reloadable-for: pacectl -->'
         echo ''
         echo '| Reloadable | Requires a restart |'
         echo '|---|---|'
         echo '| `log_level` | `bind` |'
     } > "${work}/otherbinary/docs/tools/cli.md"
     _track "${work}/otherbinary"
-    _case "an-artefact-for-another-binary-is-refused-by-name" 1 "declares subject 'fastcache-cli'" "${work}/otherbinary"
+    _case "an-artefact-for-another-binary-is-refused-by-name" 1 "declares subject 'pacectl'" "${work}/otherbinary"
 
     # 9. A subject declared and nothing stated: the marker is decoration, and decoration
     #    that reads as coverage is what this check exists to stop.
     _tree "${work}/emptyclaim" "log_level" "log_level" "one"
     {
-        echo '<!-- reloadable-for: fastcache-compile-node -->'
+        echo '<!-- reloadable-for: pace-node -->'
         echo ''
         echo 'This page says nothing about which settings reload.'
     } > "${work}/emptyclaim/docs/tools/silent.md"
@@ -998,7 +998,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     #     this arrangement reaches: with two rows, stripping one binary's markers leaves
     #     the other's, so the scope scan still finds files. Case 14 reaches the scope arm.
     _tree "${work}/nosubject" "log_level" "log_level" "one"
-    sed -i.bak 's/reloadable-for: fastcache-compile-node/describes: something-else-entirely/' \
+    sed -i.bak 's/reloadable-for: pace-node/describes: something-else-entirely/' \
         "${work}/nosubject/docs/tools/node.md" "${work}/nosubject/packaging/config/node.yaml"
     rm -f "${work}/nosubject/docs/tools/node.md.bak" "${work}/nosubject/packaging/config/node.yaml.bak"
     _track "${work}/nosubject"
@@ -1018,7 +1018,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     _tree "${work}/vendored" "log_level" "log_level" "one"
     mkdir -p "${work}/vendored/vendor/upstream/docs"
     {
-        echo '<!-- reloadable-for: fastcache-cli -->'
+        echo '<!-- reloadable-for: pacectl -->'
         echo '| Reloadable | Requires a restart |'
     } > "${work}/vendored/vendor/upstream/docs/daemon.md"
     _track "${work}/vendored"
@@ -1070,7 +1070,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     # where a row taken out of the build actually sits. Neuter the comment rule and
     # `legacy` is reported as a reloadable key the docs do not list.
     _tree "${work}/commentedrow" "log_level" "log_level" "one"
-    _plant_after_opener "${work}/commentedrow/src/apps/fastcache-compile-node/NodeConfig.cpp"
+    _plant_after_opener "${work}/commentedrow/src/apps/pace-node/NodeConfig.cpp"
     _case "a-commented-out-row-is-not-a-row" 0 "every artefact agrees" "${work}/commentedrow"
 
     # Fields BELOW the table attached to its last row, replacing that row's key. A second
@@ -1083,7 +1083,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
         echo 'static constexpr auto fileRefusals = std::to_array<RefusedSetting>({'
         echo '        { .yamlKey = "phantom", .reloadable = Reloadable::Yes },'
         echo '});'
-    } >> "${work}/afterthetable/src/apps/fastcache-compile-node/NodeConfig.cpp"
+    } >> "${work}/afterthetable/src/apps/pace-node/NodeConfig.cpp"
     _case "fields-below-the-table-are-not-its-last-row" 0 "every artefact agrees" "${work}/afterthetable"
 
     # And ABOVE it, which is a separate rule from the one below and was briefly uncovered:
@@ -1091,7 +1091,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     # work. The two guard opposite sides and each needs its own case -- above, a construct
     # with these field names opens a row where no table has started.
     _tree "${work}/abovethetable" "log_level" "log_level" "one"
-    _aboveFile="${work}/abovethetable/src/apps/fastcache-compile-node/NodeConfig.cpp"
+    _aboveFile="${work}/abovethetable/src/apps/pace-node/NodeConfig.cpp"
     {
         echo 'static constexpr auto documentedElsewhere = std::to_array<DocRow>({'
         echo '        { .primary = "--ghost", .yamlKey = "ghost", .reloadable = Reloadable::Yes },'

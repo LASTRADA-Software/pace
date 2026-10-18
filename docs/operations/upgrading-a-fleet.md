@@ -1,6 +1,6 @@
 # Upgrading a fleet
 
-**A `fastcache-compile-node` fleet upgrades as a unit. A rolling upgrade — replacing
+**A `pace-node` fleet upgrades as a unit. A rolling upgrade — replacing
 one node at a time while the others keep serving — is not supported in this release,
 and this page is here so that is something you plan around rather than discover during
 a rollout.**
@@ -24,10 +24,10 @@ the field it expected and continues. Refusing the older version outright is
 `UnsupportedVersion`, which names the supported range and arrives before any source is
 sent. A loud, immediate, named refusal is the better failure.
 
-Version 9 is such a step: it adds the live-stats stream `fastcache-cli live-stats`
+Version 9 is such a step: it adds the live-stats stream `pacectl live-stats`
 subscribes to ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)), and
-every node, every `fastcached` serving `0xFC`, every `fastcache-cc` and every
-`fastcache-cli` has to move to it together.
+every node, every `pace-kv` serving `0xFC`, every `pace-cc` and every
+`pacectl` has to move to it together.
 
 What makes it a *fleet* problem rather than a daemon problem is that a fleet has more
 than one process. A cache daemon is upgraded, restarted, and done; twenty nodes cannot
@@ -35,8 +35,8 @@ be.
 
 ## This release: 0xFC version 15, discovery version 3, consensus version 5
 
-Every one of the three wires changed its grammar, so every node, every `fastcached` serving
-`0xFC`, every `fastcache-cc` and every `fastcache-cli` moves together (the supported procedure
+Every one of the three wires changed its grammar, so every node, every `pace-kv` serving
+`0xFC`, every `pace-cc` and every `pacectl` moves together (the supported procedure
 below).
 
 - **`0xFC` 15:**
@@ -57,7 +57,7 @@ below).
 - **Consensus 5:** see [the consensus peer wire](#the-consensus-peer-wire-version-5).
 - **Every cached object misses once.** The launcher's key moved (`objkey-v7`, `manifest-v7`,
   value generation 7). This costs one cold build per fleet and needs no step.
-- **`fastcache-cli live-stats` from an older build** refuses the newer layout. Upgrade the
+- **`pacectl live-stats` from an older build** refuses the newer layout. Upgrade the
   clients too.
 
 ### What refuses to start after the upgrade, and the step
@@ -77,7 +77,7 @@ below).
 `--advertise` and `--raft-self` now default to `auto`: the address the machine routes from,
 re-derived when the network changes, so a node keeps working across a DHCP renewal, a move
 from Wi-Fi to wired or another network, with no edit and no restart (see
-[the node's flags](../tools/fastcache-compile-node.md#-advertise-is-the-flag-to-get-right)).
+[the node's flags](../tools/pace-node.md#-advertise-is-the-flag-to-get-right)).
 A socket-activated node no longer needs `--advertise` either: it reads the address off the
 socket it is handed. This moves no wire version and no stored format.
 
@@ -98,13 +98,13 @@ once* above applies only to a build older than 0.4.0. No step.
 
 ## The supported procedure
 
-1. **Stop the builds.** Anything running `fastcache-cc` against the fleet should be
+1. **Stop the builds.** Anything running `pace-cc` against the fleet should be
    quiescent. Builds do not break — see *What a mismatch looks like* — but they compile
    locally, so a build started here is slow rather than wrong.
 2. **Stop every node**, including any machine running only the scheduler or only a
    cache tier.
 3. **Upgrade every node and every client to the same release.** The launcher
-   (`fastcache-cc`) speaks this wire too, so a client left behind stops using the
+   (`pace-cc`) speaks this wire too, so a client left behind stops using the
    cache — saying so on the developer's terminal, where you are not looking.
 4. **Start the nodes**, schedulers first if you run them separately.
 5. **Confirm** with the counter below before releasing the builds.
@@ -113,7 +113,7 @@ The order matters only in that nothing old should be running once anything new i
 
 ## What a mismatch looks like, and why you must go looking
 
-**A version mismatch never fails a build.** `fastcache-cc` treats an unusable cache as a
+**A version mismatch never fails a build.** `pace-cc` treats an unusable cache as a
 miss and compiles locally, which is the contract that keeps a cache problem from
 becoming a build problem. The cost is quiet: every affected client loses the cache and
 every dispatched compile stops being dispatched, and what a client says about it is said
@@ -129,7 +129,7 @@ nothing about the others.
 | `fastcache_node_cache_requests_refused_unsupported_version_total` | a node's cache tier |
 | `fastcache_worker_frames_refused_unsupported_version_total` | a node's compile worker |
 | `fastcached_dispatch_frames_refused_unsupported_version_total` | the fleet scheduler's port |
-| `fastcached_cache_frames_refused_unsupported_version_total` | the `fastcached` daemon's compile-cache port |
+| `fastcached_cache_frames_refused_unsupported_version_total` | the `pace-kv` daemon's compile-cache port |
 
 Any of them non-zero and rising means something is still speaking the other version.
 These are the *only* places a mismatch is visible, so an operator who has not been told
@@ -137,9 +137,9 @@ to watch them will not see one — which is why they are named here rather than 
 be found during a rollout.
 
 The three node counters are on every node whatever it was started with:
-`fastcache-cli node-metrics` reads them over the node's `0xFC` port, and a node with
+`pacectl node-metrics` reads them over the node's `0xFC` port, and a node with
 `--admin-listen` also serves them on `/metrics`. The daemon's is exported only when
-`fastcached` runs with `--metrics`. If you cannot read them, you cannot tell whether the
+`pace-kv` runs with `--metrics`. If you cannot read them, you cannot tell whether the
 upgrade was complete, which is a reason to do step 5 rather than a reason to skip it.
 
 **The servers count every refusal; a client only mentions it, on its own machine.** A
@@ -150,7 +150,7 @@ the servers.
 
 And a fleet on **one wire at two builds** is refused by nothing at all, so none of the
 counters above moves. The leader raises the `mixed-node-versions` condition for that,
-naming each build and the machines running it (`fastcache-cli fleet`, its conditions section).
+naming each build and the machines running it (`pacectl fleet`, its conditions section).
 
 ## The consensus peer wire, version 5
 
@@ -176,7 +176,7 @@ still named one another with `--raft-peer`; that flag is gone since
 [the formation record decides a cluster's shape](#the-flags-that-carried-a-clusters-shape),
 and before you upgraded, you gave each member's `--raft-peer` list every other member's key:
 
-1. On each member, run `fastcache-compile-node --print-identity` with the flags it runs
+1. On each member, run `pace-node --print-identity` with the flags it runs
    with, as the account it runs as. It prints the member's `raft-peer` token, key included.
    A member that already has a state directory keeps its id; a key is minted beside it.
 2. Put every token into every member's `--raft-peer` list.
@@ -204,7 +204,7 @@ A node that names one refuses to start, by name, and so does a service registrat
 replays one: remove them from every command line, configuration file and registration
 before upgrading. A member upgraded from a build that had them starts as a cluster of one,
 and rejoins its fleet by admission, as any machine does — see
-[adding a machine to a running cluster](../tools/fastcache-compile-node.md#adding-a-machine-to-a-running-cluster).
+[adding a machine to a running cluster](../tools/pace-node.md#adding-a-machine-to-a-running-cluster).
 
 The flags that admitted by **address** are gone too, because an address admits nobody any
 more: `--fleet-member`, `--scheduler-token-file`, `--cluster-admit-client` and
@@ -295,7 +295,7 @@ tombstones). Either way the directory is intact; what an operator does is:
 
 A RUNNING member offered a snapshot by a leader on another state format does not stop: it
 refuses the snapshot and stays behind, raising the `unreadable-leader-snapshot` condition
-(`fastcache-cli node-conditions`, and the fleet page). It follows no change the cluster makes
+(`pacectl node-conditions`, and the fleet page). It follows no change the cluster makes
 until it can read what the leader sends, and catches up by itself once it runs the leader's
 build — nothing needs moving aside. That is the one condition a mixed fleet shows on its own,
 and the reason to finish an upgrade rather than leave it half done.

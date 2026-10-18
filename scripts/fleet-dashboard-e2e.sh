@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end test of the fleet dashboard (POSIX). Starts a real
-# fastcache-compile-node with a scheduler surface and an admin surface, and asks
+# pace-node with a scheduler surface and an admin surface, and asks
 # the dashboard the questions no unit test can:
 #
 #   1. The routes are actually reachable  — a unit test drives `MakeFleetRoutes`
@@ -49,7 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 readonly SKIP=77
-[[ -n "$node" && -x "$node" ]] || { echo "fastcache-compile-node not found: '$node'; skipping"; exit "$SKIP"; }
+[[ -n "$node" && -x "$node" ]] || { echo "pace-node not found: '$node'; skipping"; exit "$SKIP"; }
 
 # When a certificate is named this run is the HTTPS one, and it needs a client
 # that speaks TLS. `/dev/tcp` cannot, so this half -- and only this half -- depends

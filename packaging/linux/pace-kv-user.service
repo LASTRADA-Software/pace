@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Per-user pace-kv unit, installed as `pace-kv.service` under the systemd
+# user directory:
+#
+#     systemctl --user enable --now pace-kv
+#
+# Runs as the invoking user with no privileged setup at all — no service
+# account, no /var/lib, no root. State lives under $XDG_STATE_HOME and the
+# config under $XDG_CONFIG_HOME, so a personal compile cache needs nothing
+# beyond the package itself.
+#
+# The config file is NOT shipped for user installs (a package cannot write into
+# a home directory), so this unit starts on built-in defaults and works out of
+# the box. To customise it, just put a file where pace-kv already looks — no
+# unit override needed:
+#
+#     mkdir -p ~/.config/fastcached
+#     cp /etc/fastcached/fastcached.yaml ~/.config/fastcached/fastcached.yaml
+#     systemctl --user restart pace-kv
+#
+# ExecStart deliberately passes no --config, and must not start doing so.
+# Naming a file the package does not ship made the very first
+# `systemctl --user enable --now pace-kv` fail with FileNotFound, and
+# Restart=on-failure then respawned it once a second until the start limit
+# tripped — an out-of-the-box restart loop instead of a working daemon.
+# Leaving the flag off gets the file above when it exists, because the daemon's
+# own lookup probes $XDG_CONFIG_HOME/fastcached/fastcached.yaml (then ~/.config)
+# and simply skips what is absent. It will NOT pick up /etc/fastcached: that one
+# describes the system daemon, and only a process running as root reads it — so
+# an admin configuring the system service cannot accidentally point every user
+# instance on the host at a cache directory it has no access to.
+
+[Unit]
+Description=pace-kv — fast cache daemon (user instance)
+Documentation=https://github.com/LASTRADA-Software/fastcached
+After=network-online.target
+
+[Service]
+Type=simple
+
+# %S is $XDG_STATE_HOME (~/.local/state); %E would be $XDG_CONFIG_HOME.
+#
+# A config at %E/fastcached/fastcached.yaml is picked up with no override at
+# all. Use `systemctl --user edit pace-kv` only for settings that have to be
+# on the command line, or to name a config file somewhere else entirely:
+#
+#     [Service]
+#     ExecStart=
+#     ExecStart=/usr/bin/pace-kv --config=%h/elsewhere/fastcached.yaml
+ExecStart=/usr/bin/pace-kv
+ExecReload=/bin/kill -HUP $MAINPID
+
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=1
+# A start refused on its configuration, or on a defect in its own build, exits 78
+# (EX_CONFIG, `ProcessExit::Refused` in src/Pace/Platform/ProcessExit.hpp), and the
+# next start would refuse it again, so
+# it is not restarted: the unit stays failed, with the reason in the journal. Every other
+# failure -- a port still held by a process that was exiting, a store another process
+# holds, a named file that is absent or could not be read -- is restarted, within
+# systemd's default start limit of five starts in ten seconds. Measured on systemd 259: a refusal ran once and stayed failed, whether it
+# arrived at once or after three seconds; a failure after three seconds was restarted
+# nine times in forty seconds and went on; eight restarts by hand three seconds apart
+# were all honoured, and five starts inside ten seconds are honoured too -- it is a
+# SIXTH, the fifth restart typed right after a start, that the default limit refuses.
+RestartPreventExitStatus=78
+
+# Creates %S/fastcached (~/.local/state/fastcached) for storage_path.
+StateDirectory=pace-kv
+StateDirectoryMode=0750
+
+# --- Hardening -------------------------------------------------------------
+# Deliberately a subset of the system unit's: directives needing privileged
+# namespace setup (ProtectSystem=strict, ProtectHome, PrivateDevices,
+# ProtectProc, ProtectKernel*) are unreliable or unavailable in a user manager
+# and are left out rather than silently failing the unit.
+NoNewPrivileges=yes
+PrivateTmp=yes
+# AF_UNIX/AF_NETLINK are needed by glibc's resolver, not for listening — see
+# the system unit for the full rationale.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=default.target

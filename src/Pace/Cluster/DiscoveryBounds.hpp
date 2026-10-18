@@ -140,7 +140,7 @@ struct WorkBudgetRow
 
 /// Every kind of signature work, in enumerator order, each budget sized from what the work COSTS.
 ///
-/// Measured rather than assumed, with `fastcache-bench "[discovery]" --benchmark-samples 200`, two
+/// Measured rather than assumed, with `pace-bench "[discovery]" --benchmark-samples 200`, two
 /// runs. The conditions are pinned here so a later reading can be compared rather than quoted:
 ///
 /// - Build: MSVC 19.51 Release, /O2 /Ob2 -- the optimiser read from `build.ninja`'s flags, since

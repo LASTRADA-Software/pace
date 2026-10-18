@@ -1,6 +1,6 @@
 # Architecture
 
-fastcached is a layered C++23 server. Each layer reaches its
+Pace is a layered C++23 server. Each layer reaches its
 collaborators through a narrow interface, which keeps the whole
 thing testable end-to-end against an in-memory transport.
 
@@ -56,7 +56,7 @@ src/Pace/
                 RaftMembership, and RaftClusterHarness (a whole cluster in one
                 process, against scripted partitions, loss and restarts)
   Cli/          UsageDoc (usage text as data) and Options (the one parse loop),
-                dependency-free so fastcache-cc compiles it in rather than
+                dependency-free so pace-cc compiles it in rather than
                 linking the library
   Protocol/     IProtocolHandler, ProtocolAutodetect,
                 Framing/ByteReader (line and length-prefixed), MemcachedText,
@@ -65,9 +65,9 @@ src/Pace/
                 MULTI/EXEC), PubSubRegistry, StreamWaiterRegistry,
                 KeyspaceNotifier, CompileCacheHandler (the daemon's 0xFC cache
                 executor; it REFUSES the scheduling verbs, which moved to
-                fastcache-compile-node, and names where they went),
+                pace-node, and names where they went),
                 CompileCacheWire (header-only, dependency-free: shared verbatim
-                by the daemon, fastcache-cc and fastcache-compile-node)
+                by the daemon, pace-cc and pace-node)
   Server/       Connection (per-client coroutine), Server (accept loop),
                 ReactorServerLoop (the server driver), AdminHttpServer
   Platform/     IDaemonHost (ForegroundHost / PosixDaemonHost / ServiceHost over
@@ -102,7 +102,7 @@ flowchart LR
 
 ## Concurrency model
 
-fastcached is built on **single-threaded reactors**. One `IReactor`
+pace-kv is built on **single-threaded reactors**. One `IReactor`
 (epoll / kqueue / IOCP) owns an event loop on exactly one thread; every
 connection it accepts is **pinned to that reactor for its whole life**, so
 all of a connection's I/O and state mutation happen on one thread. There is

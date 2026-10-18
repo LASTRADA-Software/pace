@@ -25,13 +25,13 @@ namespace Pace
 /// admin CLI only printed, so a wrong answer here is a hop the real leader never hears.
 ///
 /// **It lives here because it has three callers and had two authors.** `ClusterAdminCli`
-/// wrote this rule once and `fastcache-cc` wrote it again; that was
+/// wrote this rule once and `pace-cc` wrote it again; that was
 /// [#237](https://github.com/LASTRADA-Software/fastcached/issues/237), closed by making
-/// the first ask the second. `fastcache-cli` gaining the cluster verbs would have been
+/// the first ask the second. `pacectl` gaining the cluster verbs would have been
 /// the THIRD author, and the third one is the one nobody compares against the other two.
 /// A rule that works only while every copy agrees is a rule with a scheduled expiry.
 ///
-/// Header-only and resting on two header-only headers, because `fastcache-cc` does not
+/// Header-only and resting on two header-only headers, because `pace-cc` does not
 /// link the `Pace` library and must still be able to ask.
 
 /// The endpoint a refusal redirects to, or nothing.

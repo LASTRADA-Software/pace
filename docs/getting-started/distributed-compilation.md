@@ -1,7 +1,7 @@
 # Distributed compilation
 
 A cache makes the *second* build of a commit fast. It can do nothing about the
-first one: on a miss, `fastcache-cc` runs the real compiler locally and stores
+first one: on a miss, `pace-cc` runs the real compiler locally and stores
 the result.
 
 Distributed compilation absorbs those misses. Machines that would otherwise sit
@@ -28,39 +28,39 @@ below easier to place.
 ## Architecture
 
 Three roles across two programs, with the shared cache behind them.
-**Scheduler and worker are the same binary** — `fastcache-compile-node` —
+**Scheduler and worker are the same binary** — `pace-node` —
 because being the one that hands out capacity is a *role* a node takes, not a
 different program.
 
 | Role | Program | What it does |
 |------|---------|--------------|
-| **Client** | `fastcache-cc` | Fronts each compile. Checks the cache, and on a miss asks for a worker. |
-| **Scheduler** | `fastcache-compile-node` | Tracks the fleet's workers and hands one out. Exactly one node at a time: whichever leads the cluster. |
-| **Worker** | `fastcache-compile-node` | Compiles what it is sent. Also holds a cache tier of its own, unless you turn it off. |
-| **Shared cache** | `fastcached` | Optional, and *not* the scheduler. Where objects end up so other machines get them. |
+| **Client** | `pace-cc` | Fronts each compile. Checks the cache, and on a miss asks for a worker. |
+| **Scheduler** | `pace-node` | Tracks the fleet's workers and hands one out. Exactly one node at a time: whichever leads the cluster. |
+| **Worker** | `pace-node` | Compiles what it is sent. Also holds a cache tier of its own, unless you turn it off. |
+| **Shared cache** | `pace-kv` | Optional, and *not* the scheduler. Where objects end up so other machines get them. |
 
 ```
    ┌──────────────┐          ┌───────────────────────────────┐
-   │ fastcache-cc │          │ fastcache-compile-node        │
+   │ pace-cc │          │ pace-node        │
    │  (client)    │          │  (this one leads: scheduler)  │
    └──────┬───────┘          └───────────────┬───────────────┘
           │                                  │
           │  1. FETCH ──────────────────────►│ :6674  its cache tier,
           │     ◄──────────── hit: done      │        reading through to
-          │                                  │        fastcached upstream
+          │                                  │        pace-kv upstream
           │  2. miss: "give me a worker" ───►│ :6675  scheduler
           │     ◄──────── endpoint + lease   │
           │                                  ▲
           │                                  │ register + heartbeat
           │                   ┌──────────────┴─────────┐
-          │  3. compile this ►│ fastcache-compile-node │ :6674
+          │  3. compile this ►│ pace-node │ :6674
           │     ◄──── object  │      (a worker)        │
           │                   └────────────────────────┘
           │
           └─ 4. STORE the object ─► :6674  ← the CLIENT stores, not the worker
 ```
 
-`fastcached` is behind all of it as the fleet-wide store a node's `--upstream`
+`pace-kv` is behind all of it as the fleet-wide store a node's `--upstream`
 points at. It serves the cache verbs and nothing else: a scheduling verb arriving
 at one of its listeners is refused with a typed `dispatch-not-permitted` naming
 where the scheduler went.
@@ -98,7 +98,7 @@ Workers are given **no cache credentials at all**.
 
 ### 1. The client preprocesses, and that is the part that cannot be distributed
 
-`fastcache-cc` must preprocess to compute the cache key *before* it can know
+`pace-cc` must preprocess to compute the cache key *before* it can know
 whether there is a miss. That work is unavoidable and always local — roughly
 45 ms against compiles of 300 ms–2 s, which is where the ceiling of about
 10–40× comes from. Distribution is not linear scaling and should not be sized as
@@ -206,7 +206,7 @@ translation unit compiles locally, and `--show-stats` counts it as
 The scheduler is a **compile node**, not the cache. Pick one machine and start it:
 
 ```sh
-fastcache-compile-node \
+pace-node \
     --listen-node=0.0.0.0:6675 \
     --raft-self=scheduler.internal \
     --advertise=scheduler.internal:6675
@@ -238,13 +238,13 @@ proves its own identity key instead -- a member to the other members, a worker t
 scheduler -- and removing one machine is revoking that one key. What that buys is under
 [Security](#security).
 
-It used to be `fastcached --listen-dispatch=...`, and that flag is **gone** rather
+It used to be `pace-kv --listen-dispatch=...`, and that flag is **gone** rather
 than deprecated. The two jobs have opposite deployment shapes: a cache is shared
 infrastructure somebody operates, while handing out capacity is a decision only
 **one** node may make at a time — and nothing in the cache daemon can establish
 which node that is. So scheduling moved to where cluster leadership lives.
 
-A scheduling verb arriving at a `fastcached` listener is refused with a typed
+A scheduling verb arriving at a `pace-kv` listener is refused with a typed
 error naming where the scheduler went, so a client configured for the old layout
 tells you what to fix instead of failing mysteriously.
 
@@ -263,7 +263,7 @@ running none of those is refused too. Until
 and history still read 0 slots.
 
 ```sh
-fastcache-compile-node --slots=0 \
+pace-node --slots=0 \
     --listen-node=0.0.0.0:6674 ...
 ```
 
@@ -274,7 +274,7 @@ its own history is not handed to a leader either ([#1440](https://github.com/LAS
 Once several nodes schedule, exactly one of them may at a time, which is what the
 same consensus decides once it has more than one member: one machine founds the
 cluster, every other one joins it as a learner and is admitted by its identity key. See
-[a cluster, and who leads it](../tools/fastcache-compile-node.md#a-cluster-and-who-leads-it).
+[a cluster, and who leads it](../tools/pace-node.md#a-cluster-and-who-leads-it).
 
 #### Who may use the fleet
 
@@ -287,7 +287,7 @@ VPN or DHCP usable at all. It is **not** only the worker list: every scheduler v
 gated, `LEASE` included, so a machine whose key the cluster does not hold is refused a
 lease and compiles locally. Admit the machines that *ask* as well as the machines that
 *answer*: see [a machine that only
-asks](../tools/fastcache-compile-node.md#a-machine-that-only-asks-tickets).
+asks](../tools/pace-node.md#a-machine-that-only-asks-tickets).
 
 `--fleet-open` admits every caller, for one machine or a network that is already your
 boundary. A node with neither a roster nor `--fleet-open` refuses every caller but its own
@@ -303,7 +303,7 @@ It does not gate the node's own **cache tier**, which serves this machine and
 nothing else however either list reads
 ([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)): that tier is
 a developer's whole build output, and contributing capacity does not entitle
-another machine to read it. Nor does it gate the shared `fastcached`, where a
+another machine to read it. Nor does it gate the shared `pace-kv`, where a
 non-member reads and writes objects exactly as before — that one is infrastructure
 somebody operates, and it is what a cache several machines share looks like.
 
@@ -319,7 +319,7 @@ admission against.
 On each machine that should take work:
 
 ```sh
-fastcache-compile-node \
+pace-node \
     --fleet-seed=scheduler.internal:6675 \
     --listen-node=0.0.0.0:6674 \
     --advertise=worker-01.internal:6674 \
@@ -335,11 +335,11 @@ scheduler compares the key and approves it:
 
 ```sh
 # on the scheduler: what is waiting, each row with the key to compare and the line to approve it
-fastcache-compile-node --enroll-list
-fastcache-compile-node --enroll-approve=<id>@<key>
+pace-node --enroll-list
+pace-node --enroll-approve=<id>@<key>
 
 # or, while a known batch of machines is being added, admit whoever asks for a while
-fastcache-compile-node --enroll-auto-approve=30min
+pace-node --enroll-auto-approve=30min
 ```
 
 The approved machine becomes a learner of the fleet: it applies the fleet's replicated
@@ -355,7 +355,7 @@ key to type, and a voter the fleet revokes stops verifying the moment the learne
 the revocation. A worker another machine can reach **will not start** with no way to check
 a lease; one reachable only from its own machine needs none.
 
-An address still admits a *client* -- a developer's `fastcache-cc` asking for a lease
+An address still admits a *client* -- a developer's `pace-cc` asking for a lease
 needs no identity -- but never a machine joining the fleet.
 
 **`--listen-node` and `--advertise` may both be left alone on a worker that serves a
@@ -387,7 +387,7 @@ drop it: the worker's roster — the fleet's state, which it applies — admits 
 the cluster admitted, by the key each proves or the ticket each presents, and everyone
 else stays refused, whatever address they dial from. A client machine is admitted by its
 key too, as a learner: see [a machine that only
-asks](../tools/fastcache-compile-node.md#a-machine-that-only-asks-tickets).
+asks](../tools/pace-node.md#a-machine-that-only-asks-tickets).
 
 The worker then surveys the machine at startup and serves every compiler it
 finds, naming each one and the layout it came from:
@@ -409,15 +409,15 @@ asking for one. Point it at the shared cache with `--upstream` and a local rebui
 stops reaching the wire at all. `--cache-memory=0` with no `--cache-dir` turns the
 tier off, which is what a machine that only compiles for others wants. The whole
 of it is on
-[the node's own page](../tools/fastcache-compile-node.md#a-cache-of-its-own).
+[the node's own page](../tools/pace-node.md#a-cache-of-its-own).
 
 On Linux the package ships a socket-activated unit; put the settings in
-`/etc/fastcached/fastcache-compile-node.yaml` — every key is one flag, spelled
+`/etc/fastcached/pace-node.yaml` — every key is one flag, spelled
 with underscores, and a worker needs `cluster_dir: /var/lib/fastcache-node`, the
 state directory the unit creates for its identity key — and enable the **socket**:
 
 ```sh
-sudo systemctl enable --now fastcache-compile-node.socket
+sudo systemctl enable --now pace-node.socket
 ```
 
 !!! warning "`--advertise` is the flag to get wrong"
@@ -432,17 +432,17 @@ sudo systemctl enable --now fastcache-compile-node.socket
 ```sh
 export FASTCACHE_ADDR=build-cache.internal:6674
 export FASTCACHE_SCHEDULER=scheduler.internal:6675
-cmake -DCMAKE_CXX_COMPILER_LAUNCHER=fastcache-cc ...
+cmake -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc ...
 ```
 
-`FASTCACHE_ADDR` is the **cache** — a `fastcached`, or the local node's own
+`FASTCACHE_ADDR` is the **cache** — a `pace-kv`, or the local node's own
 `--listen-node`. It defaults to `127.0.0.1:6674` when unset, which is where a
 node on this machine already answers, so a developer running a node needs only
 the scheduler line. `FASTCACHE_ADDR=` (set but empty) is the opt-out -- on a POSIX shell. PowerShell cannot
 express a set-but-empty variable: `$env:FASTCACHE_ADDR = ""` looks set from inside
 PowerShell and reaches the child process as *unset*, so the launcher takes its default
 and goes on caching. Use `-DFASTCACHE_ADDR=` or `-DUSE_COMPILER_CACHE=OFF` there; see
-[the launcher's note](../tools/fastcache-cc.md#the-empty-opt-out-does-not-work-from-powershell).
+[the launcher's note](../tools/pace-cc.md#the-empty-opt-out-does-not-work-from-powershell).
 
 Getting it **wrong** costs the cache and nothing else: a daemon that cannot be
 reached, or that answers and refuses, is reported (`cache unavailable (…)`,
@@ -552,10 +552,10 @@ With `FASTCACHE_VERBOSE=1` the launcher says what happened to each translation
 unit:
 
 ```
-fastcache-cc: HIT key=…                                          served from cache
-fastcache-cc: DISPATCHED to worker-01.internal:6674 key=…        compiled remotely
-fastcache-cc: not dispatched (rejected (no-worker)); compiling locally
-fastcache-cc: cache unavailable (fetch exchange failed); compiling this translation unit anyway
+pace-cc: HIT key=…                                          served from cache
+pace-cc: DISPATCHED to worker-01.internal:6674 key=…        compiled remotely
+pace-cc: not dispatched (rejected (no-worker)); compiling locally
+pace-cc: cache unavailable (fetch exchange failed); compiling this translation unit anyway
 ```
 
 The last of those is a **cache** problem, not a fleet one, and the line says so
@@ -581,8 +581,8 @@ start it with `--admin-listen` and these count the outcomes.
 | `fastcached_dispatch_leases_reclaimed_total` | A machine went away mid-job, or restarted, and the keys it was building were freed. Work nobody will report done — a build that lost part of its distribution, which is a different thing to fix from a fleet that is merely full. |
 | `fastcached_dispatch_leases_unauthorized_total` | A client handed back a lease token this cluster never signed. Never sum it with the `unknown-lease` refusals beside it: those name a lease this scheduler *did* issue and has since forgotten, while a rise here is a forged release — or, far more likely, a launcher predating signed leases, in which case it tracks a rollout and stops when the rollout finishes. |
 | `fastcached_dispatch_leases_released_late_total` | A client reported a job whose lease had **already expired**: a real compile outran the lease timeout. Read it as a fraction of `released_total` — a steady fraction means the lease bound is shorter than this site's slowest translation unit. **Not** a count of leases that expired: a client that never reports back at all reaches this nowhere, and is `reclaimed` or nothing. |
-| `fastcached_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused before anything it named was kept. `fastcache-cc` checks its label before sending it, so any rise names a client that does not. |
-| `fastcached_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused before any of it was kept. Each is a few dozen bytes from a real client, and `fastcache-cc` sends none longer, so any rise names a client that does. |
+| `fastcached_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused before anything it named was kept. `pace-cc` checks its label before sending it, so any rise names a client that does not. |
+| `fastcached_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused before any of it was kept. Each is a few dozen bytes from a real client, and `pace-cc` sends none longer, so any rise names a client that does. |
 | `fastcached_dispatch_worker_registrations_field_too_long_total` | A worker registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused before any of it was kept. Each is kept in the worker's entry, and this project's nodes send none that long -- a compiler whose name would overrun its ceiling registers without the name -- so any rise names a peer that does. |
 | `fastcached_dispatch_node_announcements_field_too_long_total` | A machine announced itself with an endpoint or version longer than a scheduler records, and was refused before any of it was kept. A condition field has a ceiling too, but an overlong one is refused earlier, when the frame is decoded, as a malformed frame no counter moves for -- so this series never sees it from the network. This project's nodes send none that long, so any rise names a peer that does. |
 
@@ -623,7 +623,7 @@ what that machine is doing:
 | `fastcache_worker_jobs_refused_scratch_unavailable_total` | The scratch disk is full or unwritable. |
 | `fastcache_worker_jobs_refused_spawn_failed_total` | The toolchain is configured but cannot be executed. |
 | `fastcache_worker_jobs_refused_compiler_unclassified_total` | The toolchain runs, and this build cannot tell which driver it is, so no command line can be built for it. The remedy is the `--toolchain` on that node, not a path. The node also says this once at survey time, so check its startup log before this counter. |
-| `fastcache_worker_jobs_refused_not_a_member_total` | A caller this worker does not admit tried to compile on it. **Check your own fleet first**: if this worker holds no roster and is not `--fleet-open`, it admits its own machine and nothing else, and this counter is your clients being turned away one hop after a lease was granted; a client whose machine the cluster has not admitted lands here too, and `fastcache-cli explain-admission <machine>` says so. Once the policy is right, a rise here is somebody with no claim on the machine — check who can reach `--listen-node`. |
+| `fastcache_worker_jobs_refused_not_a_member_total` | A caller this worker does not admit tried to compile on it. **Check your own fleet first**: if this worker holds no roster and is not `--fleet-open`, it admits its own machine and nothing else, and this counter is your clients being turned away one hop after a lease was granted; a client whose machine the cluster has not admitted lands here too, and `pacectl explain-admission <machine>` says so. Once the policy is right, a rise here is somebody with no claim on the machine — check who can reach `--listen-node`. |
 | `fastcache_worker_jobs_refused_envelope_declared_too_large_total` | A request declared its payload expands past this worker's ceiling. Nothing honest does that by accident: a probe of the port, or a client with a larger ceiling than the worker. |
 | `fastcache_worker_jobs_refused_envelope_unsupported_codec_total` | A client compressed with a codec this worker was not built with. A packaging difference between two honest machines; each one cost a local compile. |
 | `fastcache_worker_jobs_refused_envelope_malformed_total` | A payload envelope that did not parse: a version skew, or something on the port that is not this protocol. |
@@ -775,7 +775,7 @@ and `fastcached_bytes_limit` for the cache as a whole, plus a
 effectively empty sends every rebuild to the wire; one whose evictions climb while
 its hit rate falls has a budget too small for the tree it builds. Both are
 invisible from the scheduler's own counters, which only see the work that reached
-it. See [the node's own page](../tools/fastcache-compile-node.md#reading-it) for
+it. See [the node's own page](../tools/pace-node.md#reading-it) for
 why these must not be summed across tiers, and why a node running no tier reports
 the series as **absent** rather than as zero.
 
@@ -793,7 +793,7 @@ hostname, endpoint, software version, capacity and cache, plus charts of the las
 24 hours or 7 days:
 
 ```sh
-fastcache-compile-node ... \
+pace-node ... \
     --listen-node=6675 \
     --admin-listen=6677 \
     --dashboard --dashboard-token-file=/etc/fastcached/dashboard.token
@@ -806,7 +806,7 @@ own file rather than `--requirepass`. `/metrics` and `/healthz` stay outside it,
 so a scraper or a probe is unaffected — and `/metrics` remains the source of truth
 for anything you alert on. The full account, including what each column means and
 why a value nobody reported renders as `–` rather than `0`, is under
-[looking at the whole fleet](../tools/fastcache-compile-node.md#looking-at-the-whole-fleet).
+[looking at the whole fleet](../tools/pace-node.md#looking-at-the-whole-fleet).
 
 ### "No worker matches this toolchain"
 
@@ -814,8 +814,8 @@ The commonest setup failure. A worker is matched only if its toolchain
 fingerprint is byte-identical to the client's, so ask both ends:
 
 ```sh
-fastcache-cc --print-toolchain-fingerprint /usr/bin/g++    # on a client
-journalctl -u fastcache-compile-node | grep serving        # on a worker
+pace-cc --print-toolchain-fingerprint /usr/bin/g++    # on a client
+journalctl -u pace-node | grep serving        # on a worker
 ```
 
 If they differ, the machines really do have different toolchains — different
@@ -893,7 +893,7 @@ have — but it looks like a cold cache the first time a fleet upgrades past it.
   calculation, so a worker cannot end up fuller and slower than the scheduler
   believes at the same moment. `--slots=0` is not a count: it runs no worker at
   all (see [The scheduler](#the-scheduler) above). See
-  [the worker's own page](../tools/fastcache-compile-node.md#capacity).
+  [the worker's own page](../tools/pace-node.md#capacity).
 - **`--node-class` defaults to `workstation`,** which is the safe answer rather
   than the common one: a node nobody classified is somebody's desktop until
   proven otherwise. Set `--node-class dedicated` on build servers, or the fleet
@@ -933,7 +933,7 @@ identity key on every connection to its scheduler, and every frame after that pr
 sealed under a key only the two ends hold -- so something on the path can neither speak
 for a worker nor slip a verb into a connection the worker's proof admitted. A machine the
 cluster forgets with `--cluster-forget` is refused on its key, from any address. See
-[A node proves which machine it is](../tools/fastcache-compile-node.md#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
+[A node proves which machine it is](../tools/pace-node.md#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
 
 A node is closed by default. Its compile port and its scheduler admit **this machine,
 and machines whose key the cluster admitted** — by a proof, or by a machine ticket — or
@@ -948,7 +948,7 @@ says and whatever it is bound to
 ([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)). A peer that
 may spend this machine's CPU is not thereby entitled to read everything it has ever
 compiled, and the tier is exactly that. A cache several machines share is a
-`fastcached` behind `--upstream`.
+`pace-kv` behind `--upstream`.
 
 Membership alone was never enough, because *admitted to the fleet* is not *granted
 this compile*: an admitted machine could spend any worker's CPU without ever asking
@@ -996,7 +996,7 @@ accordingly.
 So: keep a scheduling node's port off any network you would not run a compiler for,
 and put mTLS in front of every port for anything beyond a trusted build network.
 The two remaining credentials in this system are real and unaffected —
-`--dashboard-token-file` guards the fleet page and the live-stats fleet stream, and `fastcached`'s own
+`--dashboard-token-file` guards the fleet page and the live-stats fleet stream, and `pace-kv`'s own
 `--requirepass` guards the shared cache.
 
 Also worth knowing: no **source address** admits anybody but a node's own machine
@@ -1014,7 +1014,7 @@ minute and is spent once.
   across checkouts too. `-fmacro-prefix-map` travels to the worker verbatim, which applies
   it to the client's paths; a line carrying `-ffile-prefix-map` **compiles locally**, since
   it also rewrites debug records a worker maps by its own rules. See
-  [the launcher's own account](../tools/fastcache-cc.md#debug-paths-in-a-replayed-object).
+  [the launcher's own account](../tools/pace-cc.md#debug-paths-in-a-replayed-object).
 - **Diagnostics from a failed remote compile are not shown.** A worker reporting
   a non-zero exit is retried locally and the local result is what you see —
   which also regenerates the diagnostics with correct line numbers.
@@ -1050,14 +1050,14 @@ minute and is spent once.
   `FASTCACHE_VERBOSE=1` to see which of these applied.
 
 - **A node's `--requirepass` is for its `--upstream` alone.** It is the secret of the
-  shared `fastcached`, presented there and nowhere else. The fleet's own traffic is
+  shared `pace-kv`, presented there and nowhere else. The fleet's own traffic is
   authenticated by machine keys instead (see [Security](#security)): a node proves its
   identity key on every connection to its scheduler, and any other machine presents a
   ticket its own node minted. So there is no fleet password to set.
 
 ## Reference
 
-- [fastcache-compile-node](../tools/fastcache-compile-node.md) — every flag, the
+- [pace-node](../tools/pace-node.md) — every flag, the
   node's cache tier, the cluster, and the fleet dashboard.
 - [Cluster communication](../operations/cluster-communication.md) — one compile
   as the fleet sees it, every connection in one table, and firewall rules.

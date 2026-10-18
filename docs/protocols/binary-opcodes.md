@@ -1,6 +1,6 @@
 # Binary opcodes
 
-The full opcode table fastcached recognises.
+The full opcode table pace-kv recognises.
 
 | Hex   | Name        | Status     |
 |-------|-------------|------------|

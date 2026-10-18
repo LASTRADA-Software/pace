@@ -52,7 +52,7 @@ constexpr auto LiveReadVariable = std::string_view { "FASTCACHED_FIREWALL_LIVE_R
 
 TEST_CASE("A firewall rule and its group are named after the service and the surface", "[platform][firewall]")
 {
-    CHECK(Pace::FirewallGroupFor("FastCacheCompileNode") == "fastcached: FastCacheCompileNode");
+    CHECK(Pace::FirewallGroupFor("FastCacheCompileNode") == "Pace: FastCacheCompileNode");
     CHECK(Pace::FirewallRuleName("FastCacheCompileNode",
                                       "discovery-beacon",
                                       FirewallProtocol::Udp,
@@ -170,32 +170,32 @@ TEST_CASE("A firewall scope is an IPv4 or IPv6 address or prefix and a refusal n
 TEST_CASE("Applying a service's rules replaces its group and leaves every other group alone", "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 1111), RuleOn("fastcached: Other", 2222) };
+    firewall.rules = { RuleOn("pace-kv: Probe", 1111), RuleOn("pace-kv: Other", 2222) };
 
-    auto const wanted = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674), RuleOn("fastcached: Probe", 6680) };
-    auto const outcome = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted);
+    auto const wanted = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674), RuleOn("pace-kv: Probe", 6680) };
+    auto const outcome = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted);
     REQUIRE(outcome.has_value());
     CHECK(outcome->removed == 1);
     CHECK(outcome->added == 2);
-    CHECK(firewall.InGroup("fastcached: Probe") == wanted);
-    CHECK(firewall.InGroup("fastcached: Other").size() == 1);
+    CHECK(firewall.InGroup("pace-kv: Probe") == wanted);
+    CHECK(firewall.InGroup("pace-kv: Other").size() == 1);
 
     // A repair or an upgrade runs the install again. Replaced, never appended.
-    REQUIRE(Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted).has_value());
-    CHECK(firewall.InGroup("fastcached: Probe") == wanted);
+    REQUIRE(Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted).has_value());
+    CHECK(firewall.InGroup("pace-kv: Probe") == wanted);
 }
 
 TEST_CASE("A rule filed under another group is refused before anything is touched", "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 1111) };
-    auto const stray = std::vector<FirewallRule> { RuleOn("fastcached: Other", 6674) };
+    firewall.rules = { RuleOn("pace-kv: Probe", 1111) };
+    auto const stray = std::vector<FirewallRule> { RuleOn("pace-kv: Other", 6674) };
 
-    auto const outcome = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", stray);
+    auto const outcome = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", stray);
     REQUIRE_FALSE(outcome.has_value());
-    CHECK(outcome.error().contains("fastcached: Other"));
+    CHECK(outcome.error().contains("pace-kv: Other"));
     CHECK(firewall.adds == 0);
-    CHECK(firewall.InGroup("fastcached: Probe").size() == 1);
+    CHECK(firewall.InGroup("pace-kv: Probe").size() == 1);
 }
 
 TEST_CASE("A rule the firewall would refuse is refused before anything is touched", "[platform][firewall]")
@@ -247,44 +247,44 @@ TEST_CASE("A rule the firewall would refuse is refused before anything is touche
     });
 
     auto const batch = [] {
-        auto rules = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674), RuleOn("fastcached: Probe", 6680) };
+        auto rules = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674), RuleOn("pace-kv: Probe", 6680) };
         rules[1].remoteAddresses = { "10.0.0.0/8", "fd00::/8" };
         return rules;
     };
 
     // The control: the unspoiled batch applies, so every refusal below is the spoiled field's.
     RecordingFirewall control;
-    REQUIRE(Pace::ApplyServiceFirewall(control, "fastcached: Probe", batch()).has_value());
+    REQUIRE(Pace::ApplyServiceFirewall(control, "pace-kv: Probe", batch()).has_value());
     CHECK(control.adds == 2);
 
     for (auto const& row: Cases)
     {
         INFO("fault: " << row.fault);
         RecordingFirewall firewall;
-        firewall.rules = { RuleOn("fastcached: Probe", 1111) };
+        firewall.rules = { RuleOn("pace-kv: Probe", 1111) };
         auto wanted = batch();
         row.spoil(wanted);
 
         // CHECK rather than REQUIRE, so a check that lets one fault through names every row it misses.
-        auto const outcome = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted);
+        auto const outcome = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted);
         CHECK_FALSE(outcome.has_value());
         if (outcome.has_value())
             continue;
         CHECK(outcome.error().contains(row.mentions));
         CHECK(outcome.error().contains("the firewall was not changed"));
         CHECK(firewall.adds == 0);
-        CHECK(firewall.InGroup("fastcached: Probe") == std::vector<FirewallRule> { RuleOn("fastcached: Probe", 1111) });
+        CHECK(firewall.InGroup("pace-kv: Probe") == std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 1111) });
     }
 }
 
 TEST_CASE("A refused add says how many rules landed before it and how many were removed", "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 1111) };
+    firewall.rules = { RuleOn("pace-kv: Probe", 1111) };
     firewall.refuseAddAt = 1;
-    auto const wanted = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674), RuleOn("fastcached: Probe", 6680) };
+    auto const wanted = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674), RuleOn("pace-kv: Probe", 6680) };
 
-    auto const outcome = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted);
+    auto const outcome = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted);
     REQUIRE_FALSE(outcome.has_value());
     CHECK(outcome.error().contains("1 of 2"));
     CHECK(outcome.error().contains("scripted refusal"));
@@ -294,8 +294,8 @@ TEST_CASE("A refused add says how many rules landed before it and how many were 
 TEST_CASE("Removing a service's rules removes its group only", "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 1), RuleOn("fastcached: Probe", 2), RuleOn("fastcached: Other", 3) };
-    auto const removed = Pace::RemoveServiceFirewall(firewall, "fastcached: Probe");
+    firewall.rules = { RuleOn("pace-kv: Probe", 1), RuleOn("pace-kv: Probe", 2), RuleOn("pace-kv: Other", 3) };
+    auto const removed = Pace::RemoveServiceFirewall(firewall, "pace-kv: Probe");
     REQUIRE(removed.has_value());
     CHECK(Unwrap(removed) == 2);
     CHECK(firewall.rules.size() == 1);
@@ -305,19 +305,19 @@ TEST_CASE("A firewall that cannot empty the group refuses the apply and the remo
           "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 1111) };
+    firewall.rules = { RuleOn("pace-kv: Probe", 1111) };
     firewall.refuseRemove = "scripted removal refusal";
-    auto const wanted = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674) };
+    auto const wanted = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674) };
 
-    auto const applied = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted);
+    auto const applied = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted);
     REQUIRE_FALSE(applied.has_value());
     CHECK(applied.error().contains("scripted removal refusal"));
     CHECK(firewall.adds == 0);
 
-    auto const removed = Pace::RemoveServiceFirewall(firewall, "fastcached: Probe");
+    auto const removed = Pace::RemoveServiceFirewall(firewall, "pace-kv: Probe");
     REQUIRE_FALSE(removed.has_value());
     CHECK(removed.error().contains("scripted removal refusal"));
-    CHECK(firewall.InGroup("fastcached: Probe") == std::vector<FirewallRule> { RuleOn("fastcached: Probe", 1111) });
+    CHECK(firewall.InGroup("pace-kv: Probe") == std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 1111) });
 }
 
 TEST_CASE("A name a rule outside the group carries refuses the apply before anything changes", "[platform][firewall]")
@@ -325,18 +325,18 @@ TEST_CASE("A name a rule outside the group carries refuses the apply before anyt
     // The firewall removes by NAME. A planned rule named like an operator's own rule would make the
     // NEXT removal take either, and a group rule named like one makes THIS removal do so: both
     // refuse, in the removal's own walk, before anything is removed or added.
-    auto const wanted = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674), RuleOn("fastcached: Probe", 6680) };
+    auto const wanted = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674), RuleOn("pace-kv: Probe", 6680) };
     auto theirs = RuleOn("Operator rules", 6680);
 
     SECTION("a planned name")
     {
         RecordingFirewall firewall;
-        firewall.rules = { RuleOn("fastcached: Probe", 1111), theirs };
+        firewall.rules = { RuleOn("pace-kv: Probe", 1111), theirs };
         auto const before = firewall.rules;
 
-        auto const outcome = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted);
+        auto const outcome = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted);
         REQUIRE_FALSE(outcome.has_value());
-        CHECK(outcome.error().contains("our rule 'Probe node tcp/6680' (group 'fastcached: Probe')"));
+        CHECK(outcome.error().contains("our rule 'Probe node tcp/6680' (group 'pace-kv: Probe')"));
         CHECK(outcome.error().contains("the rule 'Probe node tcp/6680' outside it"));
         CHECK(firewall.adds == 0);
         CHECK(firewall.rules == before);
@@ -346,14 +346,14 @@ TEST_CASE("A name a rule outside the group carries refuses the apply before anyt
     {
         RecordingFirewall firewall;
         theirs.name = "PROBE NODE TCP/6680";
-        firewall.rules = { RuleOn("fastcached: Probe", 1111), theirs };
+        firewall.rules = { RuleOn("pace-kv: Probe", 1111), theirs };
         auto const before = firewall.rules;
 
-        auto const outcome = Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted);
+        auto const outcome = Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted);
         REQUIRE_FALSE(outcome.has_value());
         // Both spellings, each in its place: ours as this project spells it, theirs as the other
         // rule does -- the sentence every implementation builds through FirewallNameCollision.
-        CHECK(outcome.error().contains("our rule 'Probe node tcp/6680' (group 'fastcached: Probe')"));
+        CHECK(outcome.error().contains("our rule 'Probe node tcp/6680' (group 'pace-kv: Probe')"));
         CHECK(outcome.error().contains("the rule 'PROBE NODE TCP/6680' outside it"));
         CHECK(firewall.adds == 0);
         CHECK(firewall.rules == before);
@@ -362,12 +362,12 @@ TEST_CASE("A name a rule outside the group carries refuses the apply before anyt
     SECTION("a name the group already holds")
     {
         RecordingFirewall firewall;
-        firewall.rules = { RuleOn("fastcached: Probe", 6680), theirs };
+        firewall.rules = { RuleOn("pace-kv: Probe", 6680), theirs };
         auto const before = firewall.rules;
 
-        auto const removed = Pace::RemoveServiceFirewall(firewall, "fastcached: Probe");
+        auto const removed = Pace::RemoveServiceFirewall(firewall, "pace-kv: Probe");
         REQUIRE_FALSE(removed.has_value());
-        CHECK(removed.error().contains("our rule 'Probe node tcp/6680' (group 'fastcached: Probe')"));
+        CHECK(removed.error().contains("our rule 'Probe node tcp/6680' (group 'pace-kv: Probe')"));
         CHECK(firewall.rules == before);
     }
 
@@ -375,11 +375,11 @@ TEST_CASE("A name a rule outside the group carries refuses the apply before anyt
     {
         RecordingFirewall firewall;
         theirs.name = "Operator's own rule";
-        firewall.rules = { RuleOn("fastcached: Probe", 6680), theirs };
+        firewall.rules = { RuleOn("pace-kv: Probe", 6680), theirs };
 
-        REQUIRE(Pace::ApplyServiceFirewall(firewall, "fastcached: Probe", wanted).has_value());
+        REQUIRE(Pace::ApplyServiceFirewall(firewall, "pace-kv: Probe", wanted).has_value());
         CHECK(firewall.adds == 2);
-        REQUIRE(Pace::RemoveServiceFirewall(firewall, "fastcached: Probe").has_value());
+        REQUIRE(Pace::RemoveServiceFirewall(firewall, "pace-kv: Probe").has_value());
         CHECK(firewall.rules == std::vector<FirewallRule> { theirs });
     }
 }
@@ -405,13 +405,13 @@ TEST_CASE("The system firewall's rules can be listed when a run opts in", "[plat
     if (firewall == nullptr)
         SKIP("this platform has no firewall this project manages");
 
-    auto const removed = firewall->RemoveGroup("fastcached: read-only probe, never a service's group", {});
+    auto const removed = firewall->RemoveGroup("pace-kv: read-only probe, never a service's group", {});
     INFO("refusal: " << (removed.has_value() ? std::string {} : removed.error()));
     REQUIRE(removed.has_value());
     CHECK(Unwrap(removed) == 0);
 
     // The listing walks the same rules the same way, and changes nothing by construction.
-    auto const listed = firewall->NamesInGroup("fastcached: read-only probe, never a service's group");
+    auto const listed = firewall->NamesInGroup("pace-kv: read-only probe, never a service's group");
     INFO("refusal: " << (listed.has_value() ? std::string {} : listed.error()));
     REQUIRE(listed.has_value());
     CHECK(Unwrap(listed).empty());
@@ -421,7 +421,7 @@ TEST_CASE("An install says which rules it opened, and a loopback-only one clears
           "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    auto const opened = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674) };
+    auto const opened = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674) };
 
     auto const first = Pace::RegistrationFirewallNote(&firewall, "Probe", opened);
     CHECK(first.contains("allowed inbound Probe node tcp/6674"));
@@ -430,7 +430,7 @@ TEST_CASE("An install says which rules it opened, and a loopback-only one clears
     // so no rule is needed and the ones the first registration opened are gone.
     auto const second = Pace::RegistrationFirewallNote(&firewall, "Probe", {});
     CHECK(second.contains("no rule needed"));
-    CHECK(firewall.InGroup("fastcached: Probe").empty());
+    CHECK(firewall.InGroup("pace-kv: Probe").empty());
 
     firewall.rules = opened;
     CHECK(Pace::RemovalFirewallNote(&firewall, "Probe").contains("removed 1 rule(s)"));
@@ -439,7 +439,7 @@ TEST_CASE("An install says which rules it opened, and a loopback-only one clears
 
 TEST_CASE("Where no firewall is managed, an install says so only when something faces the network", "[platform][firewall]")
 {
-    auto const opened = std::vector<FirewallRule> { RuleOn("fastcached: Probe", 6674) };
+    auto const opened = std::vector<FirewallRule> { RuleOn("pace-kv: Probe", 6674) };
     CHECK(Pace::RegistrationFirewallNote(nullptr, "Probe", opened).contains("not managed"));
     CHECK(Pace::RegistrationFirewallNote(nullptr, "Probe", {}).empty());
     CHECK(Pace::RemovalFirewallNote(nullptr, "Probe").empty());
@@ -450,17 +450,17 @@ TEST_CASE("A removal the firewall refuses names every rule it left in place and 
     // The operator's own rule carries one of our names, so the firewall refuses to remove by name.
     auto theirs = RuleOn("Operator rules", 6680);
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 6674), RuleOn("fastcached: Probe", 6680), theirs };
+    firewall.rules = { RuleOn("pace-kv: Probe", 6674), RuleOn("pace-kv: Probe", 6680), theirs };
 
     auto const note = Pace::RemovalFirewallNote(&firewall, "Probe");
     INFO(note);
-    CHECK(note.contains("the firewall rules of 'fastcached: Probe' were not removed"));
+    CHECK(note.contains("the firewall rules of 'pace-kv: Probe' were not removed"));
     // WHICH refusal: the shared name, in the one sentence both implementations give.
     CHECK(note.contains("have the same name ignoring case"));
     CHECK(note.contains("still in place: Probe node tcp/6674, Probe node tcp/6680"));
-    CHECK(note.contains("Remove-NetFirewallRule -Group 'fastcached: Probe'"));
+    CHECK(note.contains("Remove-NetFirewallRule -Group 'pace-kv: Probe'"));
     CHECK(note.contains("run --uninstall-service again"));
-    CHECK(firewall.InGroup("fastcached: Probe").size() == 2);
+    CHECK(firewall.InGroup("pace-kv: Probe").size() == 2);
     CHECK(std::ranges::contains(firewall.rules, theirs));
 
     // Where the firewall will not even list them, the note says so rather than naming none.
@@ -469,16 +469,16 @@ TEST_CASE("A removal the firewall refuses names every rule it left in place and 
     INFO(unlisted);
     CHECK(unlisted.contains("could not be listed (listing refused)"));
     CHECK(unlisted.contains("every one may still be in place"));
-    CHECK(unlisted.contains("Remove-NetFirewallRule -Group 'fastcached: Probe'"));
+    CHECK(unlisted.contains("Remove-NetFirewallRule -Group 'pace-kv: Probe'"));
     CHECK_FALSE(unlisted.contains("still in place:"));
 }
 
 TEST_CASE("A rule opened for the name localhost says why, and one bound to an address says nothing more",
           "[platform][firewall]")
 {
-    auto named = RuleOn("fastcached: Probe", 6674);
+    auto named = RuleOn("pace-kv: Probe", 6674);
     named.bindHost = "LocalHost";
-    auto const addressed = RuleOn("fastcached: Probe", 6680);
+    auto const addressed = RuleOn("pace-kv: Probe", 6680);
 
     RecordingFirewall firewall;
     auto const note =
@@ -496,9 +496,9 @@ TEST_CASE("A rule opened for the name localhost says why, and one bound to an ad
 TEST_CASE("A removal that stops part-way names the rules that remain, and not the ones it took", "[platform][firewall]")
 {
     RecordingFirewall firewall;
-    firewall.rules = { RuleOn("fastcached: Probe", 6674),
-                       RuleOn("fastcached: Probe", 6680),
-                       RuleOn("fastcached: Probe", 6690) };
+    firewall.rules = { RuleOn("pace-kv: Probe", 6674),
+                       RuleOn("pace-kv: Probe", 6680),
+                       RuleOn("pace-kv: Probe", 6690) };
     firewall.refuseRemoveAt = 1;
 
     auto const note = Pace::RemovalFirewallNote(&firewall, "Probe");
@@ -506,6 +506,6 @@ TEST_CASE("A removal that stops part-way names the rules that remain, and not th
     CHECK(note.contains("scripted refusal after 1 of 3 removed"));
     CHECK(note.contains("still in place: Probe node tcp/6680, Probe node tcp/6690"));
     CHECK_FALSE(note.contains("tcp/6674"));
-    CHECK(note.contains("Remove-NetFirewallRule -Group 'fastcached: Probe'"));
-    CHECK(firewall.InGroup("fastcached: Probe").size() == 2);
+    CHECK(note.contains("Remove-NetFirewallRule -Group 'pace-kv: Probe'"));
+    CHECK(firewall.InGroup("pace-kv: Probe").size() == 2);
 }

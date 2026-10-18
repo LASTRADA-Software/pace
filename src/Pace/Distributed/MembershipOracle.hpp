@@ -180,7 +180,7 @@ class OpenMembership final: public IMembershipOracle
 ///
 /// A rule rather than a convenience. Anti-leeching exists to stop OTHER machines spending capacity
 /// they do not contribute; a process on this host already has this host's CPU, and the
-/// `fastcache-cc` a developer runs against their own node is the entire reason the node is there.
+/// `pace-cc` a developer runs against their own node is the entire reason the node is there.
 /// It is also what makes "off by default" safe: a node that holds no roster admits its own machine
 /// and nothing else, so it is useful immediately and closed to the network until somebody says
 /// otherwise.

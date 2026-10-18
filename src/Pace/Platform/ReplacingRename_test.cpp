@@ -158,7 +158,7 @@ constexpr auto RenameSites = std::to_array<RenameSiteRow>({
       .calls = 2,
       .why = "the rename itself: rename(2) on POSIX, and the classic fallback where a filesystem has no "
              "POSIX-semantics rename" },
-    { .file = "src/apps/fastcache-compile-node/RaftStoreArchiver.cpp",
+    { .file = "src/apps/pace-node/RaftStoreArchiver.cpp",
       .calls = 2,
       .why = "moves a consensus store's DIRECTORY aside and into the archive, never one file over another" },
 });

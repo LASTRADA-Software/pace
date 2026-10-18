@@ -123,7 +123,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     }
     planted="src/Pace/Core/Base64.hpp
 src/tests/ScratchPath.hpp
-src/apps/fastcache-cc/Cache.hpp
+src/apps/pace-cc/Cache.hpp
 src/CowTree/Tree.hpp"
     vendored="vendor/monocypher/src/monocypher.h"
     lane=/w/fastcached-worktrees/lane-a
@@ -215,7 +215,7 @@ src/CowTree/Tree.hpp"
     # spelling is named -- this one is about where the checkout lives.
     Expect "a layout-anchored filter misses a lane worktree, naming no spelling" 1 \
         "uncovered 0/4 src/Pace/Core/Base64.hpp" \
-        '.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*' "$lane" "$planted"
+        '.*/(pace[^/]*|worktrees/[^/]+)/src/.*' "$lane" "$planted"
     # PLANTED: the widening a separator fix tempts -- any `src` directory at all.
     Expect "a filter taking any src directory reaches a dependency" 1 \
         "dependency 2/4 out/build/gate-clang-debug/_deps/catch2-src/src/catch2/x.hpp (posix spelling)" \

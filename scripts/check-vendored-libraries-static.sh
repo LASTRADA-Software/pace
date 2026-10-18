@@ -17,7 +17,7 @@
 # no dependency metadata at ALL, and the TGZ is what `FASTCACHE_AUTO_INSTALL` unpacks
 # onto a developer's machine. There the daemon dies in the dynamic loader with
 # `error while loading shared libraries: libyaml-cpp.so.0.8` and exit 127, which the
-# configure reported as `fastcached exited immediately (127)` -- a number that reads as
+# configure reported as `pace-kv exited immediately (127)` -- a number that reads as
 # *not found* for a binary CMake has just staged and knows the path of.
 #
 # The `Package (macOS .pkg)` job already passes `-DCPM_USE_LOCAL_PACKAGES=OFF` and says

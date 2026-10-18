@@ -34,7 +34,7 @@ namespace Pace::WireFrame
 /// ## Why `Core/`, and why header-only
 ///
 /// Inherited from `WireFields`, for the same reason stated there: it must be
-/// includable from `Protocol/CompileCacheWire.hpp`, which `fastcache-cc` compiles
+/// includable from `Protocol/CompileCacheWire.hpp`, which `pace-cc` compiles
 /// in **without linking `Pace`** — so anything here that needed a
 /// translation unit would break the launcher's *link*, not merely its build.
 

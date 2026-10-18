@@ -1,6 +1,6 @@
 <!-- The one wording of the MSVC/clang-cl sccache hazard. Every page that states
      it includes it from here with `--8<-- "sccache-backend-caveat.md"`; README.md
-     and `fastcached --help` restate it, because neither can include anything.
+     and `pace-kv --help` restate it, because neither can include anything.
 
      `ctest -R sccache-backend-caveat` fails on any file that names
      SCCACHE_MEMCACHED or SCCACHE_REDIS without a caveat within 40 lines that
@@ -34,10 +34,10 @@
     share an entry to begin with — the same two compiles under g++ 14 were 0 hits
     and 2 misses.
 
-    A `fastcached`-backed sccache is *definitionally* one cache shared by every
+    A `pace-kv`-backed sccache is *definitionally* one cache shared by every
     checkout and every machine pointed at it, so the developer machines behind it
     are exposed even where CI is not. On MSVC and clang-cl, use
-    [`fastcache-cc`](https://lastrada-software.github.io/fastcached/tools/fastcache-cc/)
+    [`pace-cc`](https://lastrada-software.github.io/fastcached/tools/pace-cc/)
     instead: it rewrites a hit's paths into the consuming checkout before replaying
     them, and refuses a hit whose replayed dependency is not there — which is why
     it does not have this failure mode, and why its entries are portable across

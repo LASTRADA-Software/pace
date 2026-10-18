@@ -98,15 +98,15 @@ constexpr std::array WriterFiles {
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler,
                         .path = "src/Pace/Distributed/SchedulerService.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/Pace/Distributed/LeaseToken.hpp" },
-    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/fastcache-cc/CodecEnvelope.cpp" },
-    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/fastcache-cc/WorkerProtocol.cpp" },
+    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-cc/CodecEnvelope.cpp" },
+    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-cc/WorkerProtocol.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker,
-                        .path = "src/apps/fastcache-compile-node/CompileCapacity.hpp" },
+                        .path = "src/apps/pace-node/CompileCapacity.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker,
-                        .path = "src/apps/fastcache-compile-node/CompileResponder.cpp" },
+                        .path = "src/apps/pace-node/CompileResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker,
-                        .path = "src/apps/fastcache-compile-node/CompileResponder.hpp" },
-    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/fastcache-compile-node/WorkerTier.cpp" },
+                        .path = "src/apps/pace-node/CompileResponder.hpp" },
+    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-node/WorkerTier.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::ConsensusPeerWire,
                         .path = "src/Pace/Consensus/RaftPeerRefusals.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::ConsensusPeerWire, .path = "src/Pace/Consensus/RaftPeerServer.cpp" },
@@ -114,46 +114,46 @@ constexpr std::array WriterFiles {
                         .path = "src/Pace/Consensus/RaftPeerTransport.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::LiveStats, .path = "src/Pace/Protocol/LiveStream.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::LiveStats,
-                        .path = "src/apps/fastcache-compile-node/LiveStatsResponder.cpp" },
+                        .path = "src/apps/pace-node/LiveStatsResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeCacheTier,
-                        .path = "src/apps/fastcache-compile-node/PrivateTierProfile.hpp" },
+                        .path = "src/apps/pace-node/PrivateTierProfile.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeCacheTier,
-                        .path = "src/apps/fastcache-compile-node/SharedCacheSession.cpp" },
+                        .path = "src/apps/pace-node/SharedCacheSession.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeCacheTier,
-                        .path = "src/apps/fastcache-compile-node/SharedCacheUpstream.cpp" },
+                        .path = "src/apps/pace-node/SharedCacheUpstream.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeDiscovery, .path = "src/Pace/Cluster/DiscoveryService.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeEnrollment,
-                        .path = "src/apps/fastcache-compile-node/EnrollmentResponder.cpp" },
+                        .path = "src/apps/pace-node/EnrollmentResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeEnrollment,
-                        .path = "src/apps/fastcache-compile-node/EnrollmentWindow.cpp" },
+                        .path = "src/apps/pace-node/EnrollmentWindow.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
                         .path = "src/Pace/Distributed/TicketVerifier.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
                         .path = "src/Pace/Distributed/TicketVerifier.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/EndpointResolver.cpp" },
+                        .path = "src/apps/pace-node/EndpointResolver.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/FleetTextResponder.cpp" },
+                        .path = "src/apps/pace-node/FleetTextResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/FrameEndpoint.cpp" },
+                        .path = "src/apps/pace-node/FrameEndpoint.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/MembershipGate.hpp" },
+                        .path = "src/apps/pace-node/MembershipGate.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/NodeProofResponder.cpp" },
+                        .path = "src/apps/pace-node/NodeProofResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/NodeStatusResponder.cpp" },
+                        .path = "src/apps/pace-node/NodeStatusResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/Responders.hpp" },
+                        .path = "src/apps/pace-node/Responders.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFormation,
-                        .path = "src/apps/fastcache-compile-node/FormationController.cpp" },
+                        .path = "src/apps/pace-node/FormationController.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint,
-                        .path = "src/apps/fastcache-compile-node/SessionResponder.cpp" },
+                        .path = "src/apps/pace-node/SessionResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeSharedCache,
-                        .path = "src/apps/fastcache-compile-node/SharedCacheResponder.hpp" },
+                        .path = "src/apps/pace-node/SharedCacheResponder.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeSharedCache,
-                        .path = "src/apps/fastcache-compile-node/SharedTierProfile.hpp" },
+                        .path = "src/apps/pace-node/SharedTierProfile.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFormation,
-                        .path = "src/apps/fastcache-compile-node/NodeStateFiles.cpp" },
+                        .path = "src/apps/pace-node/NodeStateFiles.cpp" },
 };
 
 /// A production file that names a counter and writes none.
@@ -172,13 +172,13 @@ constexpr std::array ReadsOnlyFiles {
     ReadsOnlyFile { .path = "src/Pace/Distributed/FleetView.cpp",
                     .why = "reads DispatchWorkerRegistrations for the fleet page and looks a lease outcome up in "
                            "LeaseOutcomeTable; the rows themselves are declared in FleetView.hpp" },
-    ReadsOnlyFile { .path = "src/apps/fastcache-cli/DashboardPanels.cpp",
+    ReadsOnlyFile { .path = "src/apps/pacectl/DashboardPanels.cpp",
                     .why = "names counters in CounterField<> and RefusalsPerMinute<> to render a reading captured "
-                           "elsewhere; fastcache-cli writes no counter at all" },
-    ReadsOnlyFile { .path = "src/apps/fastcache-compile-node/AdminEndpoint.cpp",
+                           "elsewhere; pacectl writes no counter at all" },
+    ReadsOnlyFile { .path = "src/apps/pace-node/AdminEndpoint.cpp",
                     .why = "Read()s NodeCacheHits and NodeCacheMisses into the fleet sample; PrivateTierProfile.hpp "
                            "names them for LocalCache to move" },
-    ReadsOnlyFile { .path = "src/apps/fastcache-compile-node/CacheTier.cpp",
+    ReadsOnlyFile { .path = "src/apps/pace-node/CacheTier.cpp",
                     .why = "Read()s NodeCacheHits and NodeCacheMisses into its own report; PrivateTierProfile.hpp "
                            "names them for LocalCache to move" },
 };
@@ -199,11 +199,11 @@ constexpr std::array DeclaringFiles {
 /// Headers reached only from tests, which a `*_test.cpp` filter does not catch.
 ///
 /// **One row, and it was found by an include closure rather than by reading.**
-/// `fastcache-cli/LiveSourceRig.hpp` is a fixture included from two `_test.cpp` files and names
+/// `pacectl/LiveSourceRig.hpp` is a fixture included from two `_test.cpp` files and names
 /// a counter, so the simple filter admits it and it would have to be classified as a writer --
-/// crediting `fastcache-cli`, which writes nothing, with writing one.
+/// crediting `pacectl`, which writes nothing, with writing one.
 constexpr std::array TestOnlyHeaders {
-    std::string_view { "src/apps/fastcache-cli/LiveSourceRig.hpp" },
+    std::string_view { "src/apps/pacectl/LiveSourceRig.hpp" },
 };
 
 /// A counter this task's own change catalogues before the production file that will write it

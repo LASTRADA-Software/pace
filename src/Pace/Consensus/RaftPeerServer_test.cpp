@@ -1323,7 +1323,7 @@ TEST_CASE("Shutdown closes the peer listener on the reactor, not on the calling 
           "[consensus][raft][peerserver][teardown]")
 {
     // #885. `Shutdown()` used to close the listener and every accepted connection
-    // from whatever thread was tearing the node down. On fastcached's own reactor,
+    // from whatever thread was tearing the node down. On pace-kv's own reactor,
     // `Close` on epoll and kqueue completed a parked read by resuming its coroutine
     // INLINE, so that ran each per-connection task on the stopping thread -- while the
     // reactor thread was still driving the others -- and destroyed the socket owned by

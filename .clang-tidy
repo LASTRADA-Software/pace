@@ -98,10 +98,10 @@ UseColor: true
 # DEPENDENCIES are unpacked either. Both halves have now been got wrong:
 #
 #   `.*/fastcached/src/.*`                        missed `fastcached-wt-139/`
-#   `.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*` missed `fastcached-worktrees/<lane>/`
+#   `.*/(pace[^/]*|worktrees/[^/]+)/src/.*` missed `fastcached-worktrees/<lane>/`
 #   `.*/src/.*` + exclude `.*/_deps/.*`           missed CI's `.cache/CPM/`
 #
-# The second is #1040: `fastcached[^/]*` matches the SEGMENT `fastcached-worktrees`
+# The second is #1040: `pace[^/]*` matches the SEGMENT `fastcached-worktrees`
 # and then demands `/src/` immediately, while `worktrees/[^/]+` needs a segment that
 # is literally `worktrees`. Every lane worktree analysed ZERO first-party headers and
 # reported clean, invisibly, because CI clones to `.../fastcached/src/...` -- the one

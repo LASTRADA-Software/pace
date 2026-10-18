@@ -57,7 +57,7 @@ fault.
   row answering two of the three questions is not a row, and `ErrorCode` has no zero
   enumerator for `{}` to name in the first place.
 - **A process with no cache reports no cache, and absent is not zero.**
-  `fastcache-compile-node` serves the daemon's own `AdminHttpServer` over the same
+  `pace-node` serves the daemon's own `AdminHttpServer` over the same
   renderer -- a second implementation for a process without storage is exactly how
   two endpoints come to disagree -- so `MetricsSnapshot::storage` and `::host` are
   `optional`. A default-constructed `StorageStats` would publish `fastcached_items 0`
@@ -196,7 +196,7 @@ fault.
   sink has no slot for is omitted and reported as its own series
   (`fastcached_metrics_catalogue_skew`), never rendered as a plausible zero (#1353).
   **A SECOND carve-out, on the same side of the same line (#1484): *could a writer for this
-  counter run in this PROCESS at all*.** `fastcache-compile-node` constructs neither `Server`
+  counter run in this PROCESS at all*.** `pace-node` constructs neither `Server`
   nor `ReactorServerLoop`, the only writers of `fastcached_connections_*`, so that figure cannot
   move there at any traffic level ever -- and it read `0`, which says the one thing an operator
   most wants to know and gets wrong: *nothing has connected to this node*. Found by dogfooding,
@@ -229,7 +229,7 @@ fault.
 
   **What must NOT be narrowed casually is a BINARY's surface set, not this table.** The table says
   where a counter is written, which is a fact about the source; what hides a figure is the set a
-  PROCESS claims. `fastcached` still passes `EverySurface` and renders every row. The node derives
+  PROCESS claims. `pace-kv` still passes `EverySurface` and renders every row. The node derives
   its set from the flags that decide whether each component is CONSTRUCTED
   (`NodeServedSurfacesFor`), never a second reading of them -- and `ServedSurfaces{}` defaults to
   every surface, because a default-constructed value means *not narrowed* and an empty default
@@ -265,7 +265,7 @@ fault.
     which is what reusing `IMetricsSink::Carries` would have done -- makes every compile node
     scrape as a broken build, and costs the skew series its meaning.
   - The reason travels on the WIRE, because the renderer is not always in the process that
-    captured the reading: `fastcache-cli`'s poll rung decodes a reading and re-renders Prometheus
+    captured the reading: `pacectl`'s poll rung decodes a reading and re-renders Prometheus
     from it, so a locally-derived reason would answer for the wrong process. That is what moved
     `StatsReadingWire::Grammar` to `-4`.
 
@@ -717,7 +717,7 @@ looks exactly like a port nobody is talking to.
   values and no `Last`, and a sentinel would permanently claim a byte in the one enum
   whose retired-code rule exists because bytes are scarce and irreversible.
 - **`RefusedVerb` cannot grow a counter column.** It lives in `CompileCacheWire.hpp`,
-  which is header-only and dependency-free because `fastcache-cc` compiles it in
+  which is header-only and dependency-free because `pace-cc` compiles it in
   without linking `Pace`; `IMetricsSink::Counter` is not reachable from there. The
   pairing lives in the surface that owns the sink.
 - **The refusals that ALREADY counted go through the same door**, converting their own
@@ -745,7 +745,7 @@ looks exactly like a port nobody is talking to.
   which wraps it — so adding a row is the only way to weaken the check, which makes
   weakening it an argued edit rather than an omission.
 - **The primitive has a shared home for that reason**, not for tidiness.
-  `SurfaceRefusal` and `Refuse` lived in `fastcache-cc`'s private `WorkerProtocol.hpp`,
+  `SurfaceRefusal` and `Refuse` lived in `pace-cc`'s private `WorkerProtocol.hpp`,
   which the node's generic frame listener included for two symbols; with them in
   `Protocol/SurfaceRefusal.hpp` coverage is a property of the TYPE rather than of
   somebody's memory. Header-only, because `Refuse` reaches only `CompileCacheWire.hpp`
@@ -966,7 +966,7 @@ outright rather than drawing with a gap.
   and forgotten for the other. A ceiling is sized from what the field IS and
   `static_assert`ed where the producer is visible: the key and the fingerprint are
   `KeyDigest` hex (`MaxLeaseKeyBytes`, `MaxToolchainFingerprintBytes`, held in
-  `fastcache-cc/Dispatch.cpp`), the label a compiler's name and version
+  `pace-cc/Dispatch.cpp`), the label a compiler's name and version
   (`MaxToolchainLabelBytes`, beside its constant). Two refusal rows, not text and
   too long (`MalformedFrame` on the wire, a counter each), never
   `MalformedRegistration`, whose counter is the WORKER's. And the launcher sends
@@ -1022,9 +1022,9 @@ the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/fastcached/iss
 A node detects things an operator has to act on, and until
 [#1364](https://github.com/LASTRADA-Software/fastcached/issues/1364) each one reached only the
 log -- which scrolls, and which nobody reads across forty machines. A condition is now a row of
-`NodeConditionTable` (`apps/fastcache-compile-node/NodeConditions.hpp`), kept in the one
+`NodeConditionTable` (`apps/pace-node/NodeConditions.hpp`), kept in the one
 `NodeConditions` registry `main` declares and every component borrows, and carried to three
-surfaces: `node-status` (so `fastcache-cli node` and `node-conditions`), NODE-ANNOUNCE (so the
+surfaces: `node-status` (so `pacectl node` and `node-conditions`), NODE-ANNOUNCE (so the
 leader's page, `/fleet.json`, `/fleet.txt` and `fleet conditions`) and the live-stats node panel.
 The log lines stay.
 
@@ -1074,7 +1074,7 @@ The log lines stay.
   announce loops logged an unreachable scheduler, an unproved identity and a refused registration
   or presence at Warn on every round -- about 360 lines an hour from one machine running a worker
   and the presence loop -- which is a log nobody reads for the one line that changed.
-  `SchedulerReachability` (`apps/fastcache-compile-node/`) keys on the round's OUTCOME, one row
+  `SchedulerReachability` (`apps/pace-node/`) keys on the round's OUTCOME, one row
   of `SchedulerOutcomeTable` per kind, and says it through `ReachabilityTable`. Its `cadence`
   column is the one interval. Each property below is tested with a `ManualClock` by counting
   lines per level (`[reachability]`):

@@ -505,7 +505,7 @@ struct FleetRowUnitColumns
 /// means by *NAMES it for a headline figure*.
 ///
 /// Public for the same reason `FleetColumnFormat` is: a terminal renderer of these tables must not
-/// carry its own list of which column is which. Before this, `fastcache-cli fleet kpi` printed
+/// carry its own list of which column is which. Before this, `pacectl fleet kpi` printed
 /// `cache-hit-rate 294 permille` where the page shows `29.4%` (#1488).
 /// @param section The section.
 /// @return The two column names, or nullopt where every column's scale is the column's own.
@@ -725,7 +725,7 @@ struct FleetKpiText
 /// `13314398617` and not `12.4 GiB`. This output is for `awk` and `cut`, and a
 /// humanised figure would have to be parsed back before it could be compared.
 ///
-/// Absent is `-`, which is the spelling `fastcache-cli`'s own human format already
+/// Absent is `-`, which is the spelling `pacectl`'s own human format already
 /// uses, and never an empty field: a blank cell is indistinguishable from a value
 /// that is genuinely the empty string, and *absent is not zero* loses its meaning the
 /// moment the two render alike.

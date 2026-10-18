@@ -43,7 +43,7 @@ namespace Pace::Testing
 /// **Shared because a second consumer arrived, and because drift here is SILENT.**
 /// Two files need an abortive close as of this change --
 /// `Net/WaitReadable_test.cpp`, which measures what the primitive reports, and
-/// `apps/fastcache-compile-node/FrameEndpoint_test.cpp`, which needs the surface to
+/// `apps/pace-node/FrameEndpoint_test.cpp`, which needs the surface to
 /// notice a reset peer. The hazard is not maintenance, and it is a property of the
 /// code rather than a story about its history: **a consumer's case stays GREEN when
 /// this stops working.** A `SO_LINGER` that stops taking degrades the close to an

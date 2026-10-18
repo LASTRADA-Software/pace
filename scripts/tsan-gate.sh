@@ -128,7 +128,7 @@
 # in no directory `check-tsan-scope.cmake` scanned -- among them every threaded `Net/`
 # test, which is the module `BlockingListener` lives in and therefore the module
 # the one real race this gate has ever seen (#260) came out of. That race reached
-# the gate only because `fastcache-compile-node-tests` is run whole; a regression
+# the gate only because `pace-node-tests` is run whole; a regression
 # of it reached through a `Net/` unit test in `PaceTest` was selected by
 # nothing. The scope now names those files, and the tags below are what SELECTS
 # them.
@@ -247,10 +247,10 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 # -- two are `CliParser: --tls captures cert and key paths` and a `Server:` TLS
 # metrics case -- so `[tls]` reaches a little outside the directory it is named
 # for. This paragraph said "three `TlsContext` cases" until it was asked.
-# THE THIRD ROW, and why it is run whole (#1209). `fastcache-cc-tests` was in no
+# THE THIRD ROW, and why it is run whole (#1209). `pace-cc-tests` was in no
 # row: the launcher does not link the Pace library, so it is a separate
 # binary that the two rows above cannot reach however the tags are written. Its
-# concurrency is one file, `src/apps/fastcache-cc/CompileJob_test.cpp` -- jthreads
+# concurrency is one file, `src/apps/pace-cc/CompileJob_test.cpp` -- jthreads
 # over `OverlappingEchoRunner::Overlap` behind a `std::latch`, and a toolchain
 # replacement landing mid-compile against a dangling iterator -- so a tag
 # expression would buy nothing here: the whole binary is 3 s sanitized, measured
@@ -297,9 +297,9 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 # `[host-events]` (15 cases) came back clean with 0 warnings. A bound, not an absence.
 TARGETS=(
     "PaceTest|[consensus],[distributed],[reactor],[net],[tls],[sharded],[expiry],[clock],[wait],[pubsub],[server],[host-events]|first-party"
-    "fastcache-compile-node-tests||first-party"
-    "fastcache-cc-tests||first-party"
-    "fastcache-cli-tests||first-party"
+    "pace-node-tests||first-party"
+    "pace-cc-tests||first-party"
+    "pacectl-tests||first-party"
 )
 
 # What this gate DID, one entry per row of TARGETS above.
@@ -489,7 +489,7 @@ export TSAN_OPTIONS="halt_on_error=0 exitcode=66 print_suppressions=1 detect_dea
 # place the change is a REGRESSION rather than an improvement. GNU `timeout`'s
 # manual documents `--foreground` as the way to stop children being timed out, so
 # without it they are; `run_bounded` signals the direct child only, and says so
-# (`ONE PROCESS DEEP` in its header). `fastcache-compile-node-tests` spawns
+# (`ONE PROCESS DEEP` in its header). `pace-node-tests` spawns
 # compilers and claims scratch roots, so on expiry a grandchild can outlive the
 # target this gate killed.
 #
@@ -591,7 +591,7 @@ BinaryPath() { printf '%s' "${BUILD_DIR}/target/$1"; }
 #
 # Found rather than tabulated, because the three targets do not share a parent:
 # `tsan-canary` and `PaceTest` sit under `src/tests/CMakeFiles/`, while
-# `fastcache-compile-node-tests` is under `src/apps/fastcache-compile-node/`. A
+# `pace-node-tests` is under `src/apps/pace-node/`. A
 # table would be a second place to edit when a target moves, and the kind that
 # goes stale silently.
 #
@@ -741,7 +741,7 @@ ${offenders}    The BINARY may still carry a defined __tsan_init -- the link pul
 # `AssertInstrumented` reads the objects in the row's own `<target>.dir`, and a binary
 # is more than those. The vendored TUI went unsanitized in every sanitizer
 # configuration (#134) -- its targets were declared before the directory-scoped
-# sanitizer options -- while this gate printed "fastcache-cli-tests: instrumented
+# sanitizer options -- while this gate printed "pacectl-tests: instrumented
 # (31 object files)": true of the 31, and silent about the static library holding
 # the half of that binary the row exists for.
 #
@@ -763,7 +763,7 @@ ${offenders}    The BINARY may still carry a defined __tsan_init -- the link pul
 # archive nobody recorded as a dependency is treated as ours and checked, which
 # fails CLOSED.
 #
-# A row linking no first-party archive is ordinary -- `fastcache-cc-tests` was one,
+# A row linking no first-party archive is ordinary -- `pace-cc-tests` was one,
 # compiling its few shared sources in, until #178 linked it the Ed25519 archive -- so it
 # is REPORTED by name rather than refused. What is refused is the derivation coming back empty for
 # EVERY row (`AssertSomeRowLinksALibrary`), and a link edge ninja cannot describe.
@@ -996,7 +996,7 @@ FailTarget() {
 #
 # A single grep for `assertions in` therefore reads a perfectly healthy run with
 # one skip as a run that REPORTED NOTHING, and the gate refuses to call it clean.
-# A false RED, and a deterministic one rather than a flake: `fastcache-cc-tests`
+# A false RED, and a deterministic one rather than a flake: `pace-cc-tests`
 # skips one case on every host with no MSVC-family driver, which is every Linux
 # runner, so the third row of TARGETS could not go green on the platform this job
 # runs on. The two rows before it happen to skip nothing, which is why the defect
@@ -1514,10 +1514,10 @@ STUB
 
     # THE CASE #134 IS ABOUT: the row's own objects are fine, and a library it links is
     # not. The object check above passes this tree.
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     printf '%s\n' "CPM_PACKAGE_Catch2_BINARY_DIR:INTERNAL=$(cd "$BUILD_DIR" && pwd -P)/_deps/catch2-build" > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "vendor/libtui.a" a:instrumented b:plain
-    StageQuery "target/fastcache-cli-tests" "own.o" "vendor/libtui.a"
+    StageQuery "target/pacectl-tests" "own.o" "vendor/libtui.a"
     LinkCase "linked-library-uninstrumented" first-party 1 \
         "links the first-party library vendor/libtui.a" "1 of 2 of its object files were built WITHOUT" \
         "vendor/libtui.dir/b.o" "!vendor/libtui.dir/a.o"
@@ -1526,12 +1526,12 @@ STUB
     # step over: a recorded dependency's archive that is NOT instrumented, and a system
     # library by absolute path. Watched passing, so the refusal above is not a check
     # that refuses everything.
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     printf '%s\n' "CPM_PACKAGE_Catch2_BINARY_DIR:INTERNAL=$(cd "$BUILD_DIR" && pwd -P)/_deps/catch2-build" > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "vendor/libtui.a" a:instrumented b:instrumented
     StageArchive "libFirst.a" c:instrumented
     StageArchive "_deps/catch2-build/libCatch2.a" d:plain
-    StageQuery "target/fastcache-cli-tests" "own.o" "libFirst.a vendor/libtui.a _deps/catch2-build/libCatch2.a /usr/lib/libssl.so /usr/lib/libsys.a"
+    StageQuery "target/pacectl-tests" "own.o" "libFirst.a vendor/libtui.a _deps/catch2-build/libCatch2.a /usr/lib/libssl.so /usr/lib/libsys.a"
     LinkCase "linked-libraries-instrumented" first-party 0 \
         "linked first-party libraries instrumented: libFirst.a (1) vendor/libtui.a (2)" \
         "!WITHOUT" "!libCatch2" "!libssl" "!libsys"
@@ -1539,10 +1539,10 @@ STUB
     # The classification is the BUILD'S RECORD, not the path: the same archive under
     # `_deps/` with no CPM record is ours as far as anything can tell, so it is checked
     # -- and refused. A `_deps/` pattern would have waved it through.
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "_deps/catch2-build/libCatch2.a" d:plain
-    StageQuery "target/fastcache-cli-tests" "own.o" "_deps/catch2-build/libCatch2.a"
+    StageQuery "target/pacectl-tests" "own.o" "_deps/catch2-build/libCatch2.a"
     LinkCase "unrecorded-dependency-is-checked" first-party 1 \
         "links the first-party library _deps/catch2-build/libCatch2.a"
 
@@ -1550,48 +1550,48 @@ STUB
     # none is accepted and says why; a row declaring first-party that reads empty is
     # refused -- the misread graph a count across rows could not see -- and so is a
     # stale none that reads a library, even an instrumented one.
-    Stage fastcache-cc-tests own:instrumented
+    Stage pace-cc-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cc-tests" "own.o" "/usr/lib/libssl.so"
+    StageQuery "target/pace-cc-tests" "own.o" "/usr/lib/libssl.so"
     LinkCase "row-declaring-none-links-none" "none: compiles its sources in" 0 \
-        "fastcache-cc-tests: links no first-party static library, as its row declares (compiles its sources in)" "!WITHOUT"
+        "pace-cc-tests: links no first-party static library, as its row declares (compiles its sources in)" "!WITHOUT"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cli-tests" "own.o" "/usr/lib/libssl.so"
+    StageQuery "target/pacectl-tests" "own.o" "/usr/lib/libssl.so"
     LinkCase "row-declaring-first-party-reads-none" first-party 1 \
         "declares it links first-party libraries, and ninja's record of its link names none"
 
-    Stage fastcache-cc-tests own:instrumented
+    Stage pace-cc-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
     StageArchive "libFirst.a" c:instrumented
-    StageQuery "target/fastcache-cc-tests" "own.o" "libFirst.a"
+    StageQuery "target/pace-cc-tests" "own.o" "libFirst.a"
     LinkCase "row-declaring-none-links-a-library" "none: compiles its sources in" 1 \
         "declares it links no first-party library (compiles its sources in), and it links: libFirst.a (1)"
 
-    Stage fastcache-cc-tests own:instrumented
+    Stage pace-cc-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cc-tests" "own.o" ""
+    StageQuery "target/pace-cc-tests" "own.o" ""
     LinkCase "row-declaring-something-else" "none:" 1 "declares \"none:\" about what it links"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    LinkCase "link-edge-ninja-cannot-describe" first-party 1 "ninja -t query target/fastcache-cli-tests failed"
+    LinkCase "link-edge-ninja-cannot-describe" first-party 1 "ninja -t query target/pacectl-tests failed"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cli-tests" "" ""
-    LinkCase "link-edge-with-no-inputs" first-party 1 "ninja records no inputs for target/fastcache-cli-tests"
+    StageQuery "target/pacectl-tests" "" ""
+    LinkCase "link-edge-with-no-inputs" first-party 1 "ninja records no inputs for target/pacectl-tests"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     : > "${BUILD_DIR}/CMakeCache.txt"
     StageQuery "libEmpty.a" "" ""
-    StageQuery "target/fastcache-cli-tests" "own.o" "libEmpty.a"
+    StageQuery "target/pacectl-tests" "own.o" "libEmpty.a"
     LinkCase "library-with-no-objects" first-party 1 "ninja records no object inputs for it"
 
-    Stage fastcache-cli-tests own:instrumented
+    Stage pacectl-tests own:instrumented
     rm -f "${BUILD_DIR}/CMakeCache.txt"
-    StageQuery "target/fastcache-cli-tests" "own.o" ""
+    StageQuery "target/pacectl-tests" "own.o" ""
     LinkCase "no-cache-to-classify-with" first-party 1 "no ${BUILD_DIR}/CMakeCache.txt"
 
     # The row's fields: a tag expression holding a `|` of its own still leaves the
@@ -1698,8 +1698,8 @@ STUB
     # cases ran, 0 failed. A signal that cannot be false in the failing case is
     # not evidence.
     VerdictCase "verdict-stopped-before-the-second-target" \
-        "PaceTest=FAILED fastcache-compile-node-tests=not-run" \
-        "PaceTest" "FAILED" "fastcache-compile-node-tests" "NOT RUN" \
+        "PaceTest=FAILED pace-node-tests=not-run" \
+        "PaceTest" "FAILED" "pace-node-tests" "NOT RUN" \
         "reported nothing about it" \
         "!clean" "!UNKNOWN"
 
@@ -1707,15 +1707,15 @@ STUB
     # where BOTH were examined must be distinguishable from the one above. It was
     # not, because neither printed anything per target.
     VerdictCase "verdict-both-clean-says-so-per-target" \
-        "PaceTest=clean fastcache-compile-node-tests=clean" \
-        "PaceTest" "fastcache-compile-node-tests" "clean" \
+        "PaceTest=clean pace-node-tests=clean" \
+        "PaceTest" "pace-node-tests" "clean" \
         "!NOT RUN" "!STARTED" "!FAILED"
 
     # An early failure, before any target: every row reports that it was not
     # reached. Silence used to be the only signal here, and silence is also what a
     # scrolled-past line and a truncated log look like.
     VerdictCase "verdict-nothing-reached-at-all" \
-        "PaceTest=not-run fastcache-compile-node-tests=not-run" \
+        "PaceTest=not-run pace-node-tests=not-run" \
         "NOT RUN" "!clean" "!FAILED"
 
     # STARTED is not NOT RUN, and it is not FAILED either. A target killed
@@ -1748,10 +1748,10 @@ STUB
     # three rows, and the third must come back `not-run` rather than aborting the
     # render under `set -u`.
     Expect "verdict-pairs-are-derived-from-the-table" 0 0 \
-        "$(TARGETS=("PaceTest|[async]|first-party" "fastcache-compile-node-tests||first-party" "a-third-target|[new]|none: staged")
+        "$(TARGETS=("PaceTest|[async]|first-party" "pace-node-tests||first-party" "a-third-target|[new]|none: staged")
            TargetVerdicts=("clean" "clean")
            TargetPairs)" \
-        "PaceTest=clean" "fastcache-compile-node-tests=clean" "a-third-target=not-run"
+        "PaceTest=clean" "pace-node-tests=clean" "a-third-target=not-run"
 
     # Every refusal that BELONGS to a target goes through `FailTarget`, checked at
     # the SOURCE rather than left to a reader. A bare `fatal` inside `RunTarget`

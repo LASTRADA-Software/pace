@@ -194,7 +194,7 @@ struct ParkingReactorBackend
 ///
 /// **It takes the fixture's loop's place** for as long as it lives, so `TickUntil`, `Fixture::Tick`
 /// and `Fixture::Pending` drive this loop. core-cpp's `EventLoop` keeps its timers and its ready
-/// queue itself, so a loop that forwarded its work to another -- what this was over fastcached's
+/// queue itself, so a loop that forwarded its work to another -- what this was over pace-kv's
 /// `IReactor` -- would leave the reaper's `cancelPending` nothing to take back.
 class ParkingReactor final: private ParkingReactorBackend, public core::net::EventLoop
 {
@@ -211,7 +211,7 @@ class ParkingReactor final: private ParkingReactorBackend, public core::net::Eve
     ///
     /// **One coroutine per turn** (`dispatchBatch = 1`), so a case can stop between a submission
     /// and its resumption: core-cpp's turn resumes what is queued DURING it as well, up to its
-    /// batch, where fastcached's `TestReactor` swapped the batch out first.
+    /// batch, where pace-kv's `TestReactor` swapped the batch out first.
     explicit ParkingReactor(Fixture& fixture):
         core::net::EventLoop { backend,
                                fixture.clock,
@@ -725,7 +725,7 @@ TEST_CASE("The expiry cycle stops promptly and leaves nothing parked", "[expiry]
 TEST_CASE("An idle expiry cycle parks once for its interval rather than waking a step at a time", "[expiry][reaper]")
 {
     // The cycle used to sleep in `stopWakeBound` steps and re-read its token at each one, because
-    // fastcached's reactor could not take a scheduled resumption back. core-cpp's can: a stop
+    // pace-kv's reactor could not take a scheduled resumption back. core-cpp's can: a stop
     // cancels the park itself (#1596). So between two sweeps nothing on this frame runs at all --
     // counted here as what every turn resumed, with the clock stepped just short of the interval.
     Fixture f;

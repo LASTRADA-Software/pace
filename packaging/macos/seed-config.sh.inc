@@ -10,10 +10,10 @@
 # Every consumer seeds, rather than relying on the Runtime component to have
 # done it, because macOS does not run the component postinstalls in the order
 # the components are declared. It ran LaunchDaemon's first, whose registration
-# passes --config; fastcached then exited with "no such file" and no service was
+# passes --config; pace-kv then exited with "no such file" and no service was
 # registered at all.
 #
-# **A TABLE, never one hardcoded name.** `fastcache-compile-node.yaml` arrived
+# **A TABLE, never one hardcoded name.** `pace-node.yaml` arrived
 # with #291 and reached no non-Linux package for want of a second entry here, so
 # a worker on macOS or Windows had no annotated reference at all and every
 # setting documented in that file -- including `allow_compile_arg`, which decides
@@ -31,7 +31,7 @@
 # One row per seeded file: `<basename>`. The APPENDIX is per file and is applied
 # below by name rather than carried in the row, because only one file has one and
 # a column that is empty for every row but one is a column nobody maintains.
-FASTCACHED_SEED_FILES="fastcached.yaml fastcache-compile-node.yaml"
+FASTCACHED_SEED_FILES="fastcached.yaml pace-node.yaml"
 
 for _seed in $FASTCACHED_SEED_FILES; do
     _live="${PREFIX}/etc/${_seed}"

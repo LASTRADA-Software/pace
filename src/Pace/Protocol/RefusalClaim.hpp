@@ -20,7 +20,7 @@ namespace Pace::Cc
 /// `SurfaceRefusal.hpp` argues that refusal coverage is a property of the TYPE, and the
 /// rule this encodes is the metrics rulebook's -- *a refusal's wire code and its counter
 /// are one row* -- which is not node-specific: any surface that refuses owes it. It was
-/// hoisted into `apps/fastcache-compile-node/FrameEndpoint.hpp` during #523 because
+/// hoisted into `apps/pace-node/FrameEndpoint.hpp` during #523 because
 /// `Protocol/` was outside that lane's grant, which left the next surface to re-derive it
 /// or do without. It briefly WAS three: one named predicate for the cache plus the same
 /// truth table open-coded twice as `answer.has_value() != !rationale.empty()`, two of them

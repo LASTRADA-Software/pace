@@ -83,7 +83,7 @@ set(FastCachedCounterPrefilter "ounter")
 # count, adds a second place a `Counter` becomes a number, which is the decision #1366
 # exists to make deliberate. No row may contain a ';'.
 set(FastCachedCounterConverters
-    "Pace/Metrics/IMetricsSink.hpp|2|CounterIndex, the one conversion, and CounterCount, the extent every Counter-keyed table is sized by. The header is included by fastcache-cc, which does not link Pace, so the extent is a cast here rather than EnumeratorCount."
+    "Pace/Metrics/IMetricsSink.hpp|2|CounterIndex, the one conversion, and CounterCount, the extent every Counter-keyed table is sized by. The header is included by pace-cc, which does not link Pace, so the extent is a cast here rather than EnumeratorCount."
 )
 
 # Which files count as source. Tests included: a test that indexes a table by a cast

@@ -280,7 +280,7 @@ TEST_CASE("A reactor wait runs out on the reactor's clock and says what it found
     CHECK(Unwrap(outcome).elapsed == 3s);
     // Fifteen looks in thirty ticks, not thirty: core-cpp's loop fires a due deadline at the END of
     // a turn and resumes it at the START of the next (its guarantee G2, one place resumes), so each
-    // 100 ms rest costs this drive two ticks where fastcached's `TestReactor` fired and resumed in one.
+    // 100 ms rest costs this drive two ticks where pace-kv's `TestReactor` fired and resumed in one.
     CHECK_THAT(Unwrap(outcome).account,
                ContainsSubstring("AwaitUntil gave up waiting for the flag to be set after 3000 ms on the reactor's clock "
                                  "and 15 turn(s).")

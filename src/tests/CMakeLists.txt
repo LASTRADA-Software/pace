@@ -281,7 +281,7 @@ if(WIN32)
     # exported `MSYS_NO_PATHCONV=1` / `MSYS2_ARG_CONV_EXCL='*'` -- which the rulebook tells a
     # developer driving MSVC to do -- handed it to every script `ctest` started, and a script
     # spelling a POSIX path to a native program depends on the conversion it switches off.
-    # Measured: `fastcache-cli-e2e` started `fastcached.exe` on `/tmp/.../empty.yaml` and
+    # Measured: `pacectl-e2e` started `pace-kv.exe` on `/tmp/.../empty.yaml` and
     # reported the daemon DIED, deterministically, and only with the switch exported.
     #
     # Every test in this directory rather than a list of the ones seen failing: a list is exact
@@ -906,7 +906,7 @@ add_test(
     NAME "fastcache-addr-opt-out"
     COMMAND ${CMAKE_COMMAND}
         "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        -P "${CMAKE_SOURCE_DIR}/scripts/check-fastcache-addr-opt-out.cmake"
+        -P "${CMAKE_SOURCE_DIR}/scripts/check-pace-addr-opt-out.cmake"
 )
 set_tests_properties("fastcache-addr-opt-out" PROPERTIES
     FAIL_REGULAR_EXPRESSION "${FASTCACHED_SCRIPT_CHECK_FAILED}"
@@ -915,7 +915,7 @@ set_tests_properties("fastcache-addr-opt-out" PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# A version-mismatched fastcache-cc falling through to sccache must say so where
+# A version-mismatched pace-cc falling through to sccache must say so where
 # the fallback happens, not eighty lines from the warning about what sccache
 # costs under MSVC (#658). Narrow: only that reason, only that winner, and only
 # where the caveat exists at all.
@@ -1726,7 +1726,7 @@ endif()
 # nothing at all.
 #
 # A unit test cannot reach the other two. The daemon's `StorageOpenFailure` is in
-# an ANONYMOUS NAMESPACE in `main.cpp`, behind `add_executable(fastcached
+# an ANONYMOUS NAMESPACE in `main.cpp`, behind `add_executable(pace-kv
 # main.cpp)` with no test target; the node's sentence is composed in a third
 # file in a different binary. A check that READS BOTH SIDES needs no linkage,
 # which is the STORE lane's recommendation and the reason this is a check rather
@@ -2368,7 +2368,7 @@ else()
         "the helper library is POSIX and serves POSIX fixtures; on msys2 bash a /dev/tcp connect to an unbound loopback port can SUCCEED, so its socket cases would pass against a listener that is not there")
 endif()
 
-# Every fixture handed a launcher -- `$<TARGET_FILE:fastcache-cc>` on its registration, or
+# Every fixture handed a launcher -- `$<TARGET_FILE:pace-cc>` on its registration, or
 # a launcher parameter it declares -- calls the launcher-state seam, so the launcher
 # records into the run's own state directory rather than the developer's. The Windows
 # launcher e2e deleted the developer's statistics (`-z`) on every run, and three fixtures
@@ -2768,7 +2768,7 @@ add_test(
         "-DFASTCACHED_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DFASTCACHED_TABLE=src/Pace/Config/CliParser.cpp"
         "-DFASTCACHED_REFERENCE=packaging/config/fastcached.yaml"
-        "-DFASTCACHED_LABEL=fastcached"
+        "-DFASTCACHED_LABEL=pace-kv"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-config-reference.cmake"
 )
 set_tests_properties("daemon-config-reference" PROPERTIES
@@ -2779,7 +2779,7 @@ set_tests_properties("daemon-config-reference" PROPERTIES
 
 # ---------------------------------------------------------------------------
 # Every reference configuration under packaging/config/ must reach the Linux,
-# macOS and Windows payloads. `fastcache-compile-node.yaml` reached only Linux for
+# macOS and Windows payloads. `pace-node.yaml` reached only Linux for
 # four releases (#397) and nothing said so: a file missing from two of three
 # payloads reads exactly like a file nobody needs.
 #
@@ -3323,7 +3323,7 @@ set_tests_properties("scratch-git-selftest" PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# Every fixture that starts `fastcache-compile-node` names `--cluster-dir` and turns off the
+# Every fixture that starts `pace-node` names `--cluster-dir` and turns off the
 # default fleet features it does not test (`--listen-raft=`, or `--discovery=` on a consensus
 # node). A node with no flags is a fleet member on shared default ports, keeping its identity in
 # the real per-user state directory; the rule stated in the files that obey it reaches no file
@@ -3525,7 +3525,7 @@ if(NOT WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
-# Every fastcache-cli verb is documented, and every documented verb exists.
+# Every pacectl verb is documented, and every documented verb exists.
 #
 # The same rule as resp-command-docs, over the table most likely to drift: the CLI's
 # verb list grows a block at a time, which is exactly the edit where a hand-kept doc
@@ -4088,7 +4088,7 @@ endif()
 
 # ---------------------------------------------------------------------------
 # The sccache-backend caveat. Fails when a file recommends pointing sccache at
-# fastcached -- which is what naming either of the two `SCCACHE_*` backend
+# pace-kv -- which is what naming either of the two `SCCACHE_*` backend
 # variables is -- without saying, within 40 lines, what that costs under MSVC and
 # clang-cl.
 # scripts/check-sccache-backend-caveat.cmake carries the tables and prints them
@@ -4227,7 +4227,7 @@ set_tests_properties("sccache-backend-caveat-selftest" PROPERTIES
 # UserName it cannot resolve, bootstraps the job, and simply never spawns it -- so
 # the install-time refusal in ServiceControl.cpp is the only thing standing between
 # an operator and a service that reports installed and never runs. Issue #87 was the
-# other half of that refusal missing: `fastcache-compile-node` named `fastcache-node`
+# other half of that refusal missing: `pace-node` named `fastcache-node`
 # and the package created only `_fastcached`.
 #
 # Registered here rather than left to the macOS packaging job precisely because it
@@ -4360,7 +4360,7 @@ set_tests_properties("node-working-directory-selftest" PROPERTIES
 # the binary; do not make it go away by changing a code page, and read the
 # script's header before reaching for `ENCODING`, one value of which reports a
 # PASS for the very defect this checks for.
-foreach(_utf8ArgvTarget IN ITEMS fastcached fastcache-cc fastcache-compile-node fastcache-cli compile-cache-testclient)
+foreach(_utf8ArgvTarget IN ITEMS pace-kv pace-cc pace-node pacectl compile-cache-testclient)
     if(TARGET ${_utf8ArgvTarget})
         add_test(
             NAME "utf8-argv-${_utf8ArgvTarget}"
@@ -4383,7 +4383,7 @@ endforeach()
 # each one to end in a status message and a clean fall-through.
 #
 # What it defends is the property that makes cmake/portable/CompileCache.cmake safe to
-# vendor: it is copied into repositories that never asked for fastcached, so a
+# vendor: it is copied into repositories that never asked for Pace, so a
 # cache it cannot download has to cost them a slower build and nothing else. A
 # configure that aborts because GitHub was unreachable would be a far worse
 # failure than the missing cache it is reporting.
@@ -4474,9 +4474,9 @@ set_tests_properties("compile-cache-caveat" PROPERTIES
 # ---------------------------------------------------------------------------
 # compile-cache-dispatch: configure's `[cache] dispatch:` line is true of the build.
 #
-# fastcache-cc dispatched a miss only when the environment of whatever ran the BUILD named
+# pace-cc dispatched a miss only when the environment of whatever ran the BUILD named
 # FASTCACHE_SCHEDULER, so a developer who set it in one shell and built from another compiled
-# everything locally while configure said only that fastcache-cc was the launcher -- measured:
+# everything locally while configure said only that pace-cc was the launcher -- measured:
 # 341 misses, `NOT_CONFIGURED` on each. The module now decides at configure, bakes it into the
 # launcher and says so; this asserts the decision over every source combination, and then
 # configures the fixture with a stand-in launcher it builds and compares the printed line with
@@ -4620,7 +4620,7 @@ set_tests_properties("compile-cache-daemon-diagnostic" PROPERTIES
 #
 # Registered HERE and not beside the launcher, and that is load-bearing rather
 # than tidiness: src/apps processes its table in order, so at the point
-# src/apps/fastcache-cc is configured the fastcache-compile-node target does not
+# src/apps/pace-cc is configured the pace-node target does not
 # exist yet and a $<TARGET_FILE:> guard on it silently skips the test. src/tests
 # is added after src/apps (see the top-level CMakeLists), so every target this
 # needs is defined by the time this runs -- which is also why
@@ -4668,7 +4668,7 @@ set_tests_properties("compile-cache-daemon-diagnostic" PROPERTIES
 # NOT labelled "smoke": it opens no socket, starts no daemon and needs no
 # compiler. `--print-surfaces` renders the resolved configuration and exits, so
 # every case is a process that lives for milliseconds.
-if(NOT TARGET fastcache-compile-node)
+if(NOT TARGET pace-node)
     message(STATUS "node-config-file-e2e: compile node not built -- skipping")
 elseif(WIN32)
     # POSIX-only, the way the fixtures below record for themselves: a PowerShell
@@ -4679,7 +4679,7 @@ else()
     add_test(
         NAME "node-config-file-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-config-file-e2e.sh"
-            "$<TARGET_FILE:fastcache-compile-node>"
+            "$<TARGET_FILE:pace-node>"
     )
     set_tests_properties("node-config-file-e2e" PROPERTIES
         LABELS "hygiene"
@@ -4698,8 +4698,8 @@ endif()
 #
 # NOT labelled "smoke": every case is a refusal that exits before anything is opened,
 # bound or registered.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-compile-node)
-    message(STATUS "exit-codes-e2e: fastcached or the compile node not built -- skipping")
+if(NOT TARGET pace-kv OR NOT TARGET pace-node)
+    message(STATUS "exit-codes-e2e: pace-kv or the compile node not built -- skipping")
 elseif(WIN32)
     # REGISTERED and skipped, never omitted (#1355), for `e2e-helpers-selftest`'s reason: the
     # bounded runner every case goes through is the shared POSIX library.
@@ -4709,7 +4709,7 @@ else()
     add_test(
         NAME "exit-codes-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/exit-codes-e2e.sh"
-            "$<TARGET_FILE:fastcached>" "$<TARGET_FILE:fastcache-compile-node>"
+            "$<TARGET_FILE:pace-kv>" "$<TARGET_FILE:pace-node>"
     )
     set_tests_properties("exit-codes-e2e" PROPERTIES
         LABELS "hygiene"
@@ -4729,7 +4729,7 @@ endif()
 # loop over a real bound port, that `/metrics` on that same port is byte-for-byte
 # unaffected by the credential (the assertion protecting every existing scraper),
 # and that a node registering with its own scheduler reaches the rendered page.
-if(NOT TARGET fastcache-compile-node)
+if(NOT TARGET pace-node)
     message(STATUS "fleet-dashboard-e2e: compile node not built — skipping")
 elseif(WIN32)
     # POSIX-only for now: the fixture is
@@ -4746,7 +4746,7 @@ else()
     add_test(
         NAME "node-socket-activation-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-socket-activation-e2e.sh"
-            --node "$<TARGET_FILE:fastcache-compile-node>"
+            --node "$<TARGET_FILE:pace-node>"
     )
     # Serial for `fleet-dashboard-e2e`'s reason: it starts a real node and reads a
     # well-known default port, so it must not race the other server-starting fixtures.
@@ -4761,7 +4761,7 @@ else()
     add_test(
         NAME "node-socket-activation-derived-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-socket-activation-e2e.sh"
-            --node "$<TARGET_FILE:fastcache-compile-node>" --derive-advertise
+            --node "$<TARGET_FILE:pace-node>" --derive-advertise
     )
     set_tests_properties("node-socket-activation-derived-e2e" PROPERTIES
         LABELS "smoke"
@@ -4773,7 +4773,7 @@ else()
     add_test(
         NAME "fleet-dashboard-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
-            --node "$<TARGET_FILE:fastcache-compile-node>"
+            --node "$<TARGET_FILE:pace-node>"
     )
     # Starts a real node with three listeners, so it must not race the other
     # server-starting smoke tests for ports.
@@ -4794,7 +4794,7 @@ else()
         add_test(
             NAME "fleet-dashboard-tls-e2e"
             COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
-                --node "$<TARGET_FILE:fastcache-compile-node>"
+                --node "$<TARGET_FILE:pace-node>"
                 --tls-cert "${CMAKE_SOURCE_DIR}/testdata/tls/server.crt"
                 --tls-key "${CMAKE_SOURCE_DIR}/testdata/tls/server.key"
         )
@@ -4814,7 +4814,7 @@ else()
         add_test(
             NAME "fleet-dashboard-self-signed-e2e"
             COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
-                --node "$<TARGET_FILE:fastcache-compile-node>"
+                --node "$<TARGET_FILE:pace-node>"
                 --tls-self-signed
         )
         set_tests_properties("fleet-dashboard-self-signed-e2e" PROPERTIES
@@ -4841,7 +4841,7 @@ endif()
 # Windows-only for now, the way `fleet-dashboard-e2e` records for itself. The claim
 # path for both platforms is covered by the unit tests, which run everywhere; what is
 # missing here is the POSIX half of the ORCHESTRATION, not of the guard.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-compile-node OR NOT TARGET fastcache-cc)
+if(NOT TARGET pace-kv OR NOT TARGET pace-node OR NOT TARGET pace-cc)
     message(STATUS "node-scratch-isolation-e2e: daemon, compile node or launcher not built — skipping")
 elseif(NOT WIN32)
     message(STATUS "node-scratch-isolation-e2e: Windows-only fixture — skipping")
@@ -4849,9 +4849,9 @@ else()
     add_test(
         NAME "node-scratch-isolation-e2e"
         COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/node-scratch-isolation-e2e.ps1"
-            -Fastcached "$<TARGET_FILE:fastcached>"
-            -Node "$<TARGET_FILE:fastcache-compile-node>"
-            -Launcher "$<TARGET_FILE:fastcache-cc>"
+            -Fastcached "$<TARGET_FILE:pace-kv>"
+            -Node "$<TARGET_FILE:pace-node>"
+            -Launcher "$<TARGET_FILE:pace-cc>"
     )
     # Starts three nodes and a daemon twice over and drives real compiles, so it must
     # not race the other server-starting smoke tests for ports or for CPU.
@@ -4945,7 +4945,7 @@ endif()
 # the compile or before a dispatch preprocess. Built for the e2e fixtures below and never
 # installed. It is copied there under the real compiler's own file name, because the launcher
 # picks its driver grammar by that name.
-if(TARGET fastcache-cc)
+if(TARGET pace-cc)
     add_executable(mid-compile-edit-stub MidCompileEditStub.cpp)
 endif()
 # Passed whenever it was built, and a fixture that is not handed it FAILS rather than skips:
@@ -4966,7 +4966,7 @@ endif()
 #
 # Registered HERE and not beside the launcher, for the reason `dist-compile-e2e`
 # below records and this test learned the hard way: src/apps processes its table
-# in order, so at the point src/apps/fastcache-cc is configured the
+# in order, so at the point src/apps/pace-cc is configured the
 # compile-cache-testclient target does not exist yet, and `if(TARGET
 # compile-cache-testclient)` there is not a condition -- it is the constant
 # FALSE. The fixture would have reported its wrong-object case SKIPPED on every
@@ -4986,14 +4986,14 @@ endif()
 # (`HitVerification`) is platform-neutral and unit-tested on every platform; what
 # the fixture adds is the end-to-end path, and one platform proving that is what
 # the rule about duplicating a case asks for.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-cc)
+if(NOT TARGET pace-kv OR NOT TARGET pace-cc)
     message(STATUS "compile-cache-e2e: daemon or launcher not built — skipping")
 elseif(WIN32)
     add_test(
         NAME "compile-cache-e2e"
-        COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cc/run-launcher-e2e.ps1"
-            -Fastcached "$<TARGET_FILE:fastcached>"
-            -Launcher "$<TARGET_FILE:fastcache-cc>"
+        COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/run-launcher-e2e.ps1"
+            -Fastcached "$<TARGET_FILE:pace-kv>"
+            -Launcher "$<TARGET_FILE:pace-cc>"
             ${_fc_e2e_edit_stub_windows}
     )
 else()
@@ -5008,14 +5008,14 @@ else()
     add_test(
         NAME "compile-cache-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/compile-cache-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --launcher "$<TARGET_FILE:fastcache-cc>"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
             ${_fc_e2e_testclient}
             ${_fc_e2e_edit_stub_posix}
     )
 endif()
-if(TARGET fastcached AND TARGET fastcache-cc)
+if(TARGET pace-kv AND TARGET pace-cc)
     # Binds a port and spawns a daemon, so it must not run concurrently with the
     # other server-starting smoke tests. The port is DRAWN per run since #220 --
     # `RUN_SERIAL` stays because the daemon is still a shared machine resource and
@@ -5031,7 +5031,7 @@ endif()
 #
 # `run-launcher-e2e.ps1` used to bind a constant `21714`, so a run that did not
 # reach its cleanup left a daemon listening for as long as the machine was up and
-# every later run failed at `fastcached exited immediately (exit 1)` -- naming
+# every later run failed at `pace-kv exited immediately (exit 1)` -- naming
 # neither the port nor the process, and reading exactly like a daemon that cannot
 # start. It was diagnosed once by hand from `Get-NetTCPConnection`, after it
 # survived a rebase and looked like a regression the rebase had introduced.
@@ -5044,7 +5044,7 @@ endif()
 # over staged holder records AND against real listeners on this machine, and needs
 # none of the three.
 #
-# Not guarded on `TARGET fastcached`, deliberately: needing no binary is the whole
+# Not guarded on `TARGET pace-kv`, deliberately: needing no binary is the whole
 # point, and gating it on one would put it back to running only where the fixture
 # already ran.
 find_program(FASTCACHED_PWSH NAMES pwsh)
@@ -5052,7 +5052,7 @@ if(FASTCACHED_PWSH)
     add_test(
         NAME "launcher-e2e-ports-selftest"
         COMMAND "${FASTCACHED_PWSH}" -NoProfile -File
-                "${CMAKE_SOURCE_DIR}/src/apps/fastcache-cc/run-launcher-e2e.ps1" -SelfTestPorts
+                "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/run-launcher-e2e.ps1" -SelfTestPorts
     )
     set_tests_properties("launcher-e2e-ports-selftest" PROPERTIES
         LABELS "hygiene"
@@ -5066,7 +5066,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-if(NOT TARGET fastcached OR NOT TARGET fastcache-compile-node OR NOT TARGET fastcache-cc)
+if(NOT TARGET pace-kv OR NOT TARGET pace-node OR NOT TARGET pace-cc)
     message(STATUS "dist-compile-e2e: daemon, compile node or launcher not built — skipping")
 else()
     if(WIN32)
@@ -5100,15 +5100,15 @@ else()
         # required: without it that reading is absent, and absent confirms nothing,
         # so a withdrawal stays a failure rather than the test disappearing.
         set(_fc_dist_e2e_cli)
-        if(TARGET fastcache-cli)
-            set(_fc_dist_e2e_cli -Cli "$<TARGET_FILE:fastcache-cli>")
+        if(TARGET pacectl)
+            set(_fc_dist_e2e_cli -Cli "$<TARGET_FILE:pacectl>")
         endif()
         add_test(
             NAME "dist-compile-e2e"
             COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.ps1"
-                -Fastcached "$<TARGET_FILE:fastcached>"
-                -Node "$<TARGET_FILE:fastcache-compile-node>"
-                -Launcher "$<TARGET_FILE:fastcache-cc>"
+                -Fastcached "$<TARGET_FILE:pace-kv>"
+                -Node "$<TARGET_FILE:pace-node>"
+                -Launcher "$<TARGET_FILE:pace-cc>"
                 ${_fc_dist_e2e_cli}
                 ${_fc_e2e_edit_stub_windows}
         )
@@ -5116,15 +5116,15 @@ else()
         # The client reads the scheduler's record of a worker whose lease came back
         # `withdrawn`, for the reason the Windows registration above gives.
         set(_fc_dist_e2e_cli)
-        if(TARGET fastcache-cli)
-            set(_fc_dist_e2e_cli --cli "$<TARGET_FILE:fastcache-cli>")
+        if(TARGET pacectl)
+            set(_fc_dist_e2e_cli --cli "$<TARGET_FILE:pacectl>")
         endif()
         add_test(
             NAME "dist-compile-e2e"
             COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/dist-compile-e2e.sh"
-                --fastcached "$<TARGET_FILE:fastcached>"
-                --node "$<TARGET_FILE:fastcache-compile-node>"
-                --launcher "$<TARGET_FILE:fastcache-cc>"
+                --pace-kv "$<TARGET_FILE:pace-kv>"
+                --node "$<TARGET_FILE:pace-node>"
+                --launcher "$<TARGET_FILE:pace-cc>"
                 --compiler "${CMAKE_CXX_COMPILER}"
                 ${_fc_dist_e2e_cli}
                 ${_fc_e2e_edit_stub_posix}
@@ -5229,25 +5229,25 @@ endif()
 # compile-cache-daemon-staging above. That test proves the staging plumbing
 # with fake --version-only stand-ins; a fake has no socket to accept on, so it
 # cannot prove _fc_auto_start_fastcached actually starts something that
-# answers a real connection. This drives the real, freshly built fastcached
-# and fastcache-cc instead: a configure with no daemon reachable spawns one, a
+# answers a real connection. This drives the real, freshly built pace-kv
+# and pace-cc instead: a configure with no daemon reachable spawns one, a
 # real translation unit compiled through the configured launcher reports a
 # real MISS then a real HIT against it, and a second configure against the
 # same address finds that daemon rather than starting another.
 #
 # Registered here rather than beside the launcher for the same reason
-# dist-compile-e2e is: this needs the fastcached target, so it belongs after
+# dist-compile-e2e is: this needs the pace-kv target, so it belongs after
 # src/apps has defined it. POSIX only for now, matching
 # check-compile-cache-install.cmake's and check-compile-cache-autoinstall.cmake's
 # own scoping — the process bookkeeping here is pidfile-based and POSIX's
 # --daemon has no Windows equivalent; Windows coverage of FASTCACHE_AUTO_START
 # is left as follow-up work.
-if(NOT WIN32 AND TARGET fastcached AND TARGET fastcache-cc)
+if(NOT WIN32 AND TARGET pace-kv AND TARGET pace-cc)
     add_test(
         NAME "compile-cache-daemon-start"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-daemon-start.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --launcher "$<TARGET_FILE:fastcache-cc>"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
             --source-dir "${CMAKE_SOURCE_DIR}"
     )
@@ -5264,7 +5264,7 @@ endif()
 # ---------------------------------------------------------------------------
 # sccache smoke tests. Registered only when an sccache binary is present
 # (SCCACHE is the find_program result from cmake/portable/CompileCache.cmake). Each test
-# the freshly-built fastcached, points sccache at it over one wire protocol,
+# the freshly-built pace-kv, points sccache at it over one wire protocol,
 # and asserts a cache hit — the same compile-twice check the CI smoke jobs run,
 # via the same scripts/sccache-smoke driver.
 #
@@ -5275,7 +5275,7 @@ endif()
 
 # ---------------------------------------------------------------------------
 # TLS smoke test. Registered only in TLS-enabled builds. Starts the freshly
-# built fastcached with the checked-in self-signed cert, connects a real TLS
+# built pace-kv with the checked-in self-signed cert, connects a real TLS
 # client, and asserts a RESP PING is answered +PONG over the encrypted channel
 # — end-to-end coverage of the TlsSocket handshake/pump. A missing runtime
 # prerequisite exits 77 (reported as skipped).
@@ -5284,15 +5284,15 @@ endif()
 # `$<TARGET_FILE:>` naming a target that does not exist is a hard generate
 # error, so `-DFASTCACHED_BUILD_DAEMON=OFF` failed the configure outright
 # instead of skipping this. Every other daemon-starting block here already
-# tests `TARGET fastcached`; these two were the omissions.
-if(NOT TARGET fastcached)
+# tests `TARGET pace-kv`; these two were the omissions.
+if(NOT TARGET pace-kv)
     message(STATUS "tls-smoke: daemon not built — skipping")
 elseif(FASTCACHED_ENABLE_TLS)
     if(WIN32)
         add_test(
             NAME "tls-smoke"
             COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/scripts/tls-smoke.ps1"
-                -Fastcached "$<TARGET_FILE:fastcached>"
+                -Fastcached "$<TARGET_FILE:pace-kv>"
                 -Cert "${CMAKE_SOURCE_DIR}/testdata/tls/server.crt"
                 -Key "${CMAKE_SOURCE_DIR}/testdata/tls/server.key"
         )
@@ -5300,13 +5300,13 @@ elseif(FASTCACHED_ENABLE_TLS)
         add_test(
             NAME "tls-smoke"
             COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/tls-smoke.sh"
-                --fastcached "$<TARGET_FILE:fastcached>"
+                --pace-kv "$<TARGET_FILE:pace-kv>"
                 --cert "${CMAKE_SOURCE_DIR}/testdata/tls/server.crt"
                 --key "${CMAKE_SOURCE_DIR}/testdata/tls/server.key"
         )
     endif()
     # RUN_SERIAL for the reason every other daemon-starting test here carries it:
-    # this one binds a port and spawns fastcached, so under `ctest --parallel` it
+    # this one binds a port and spawns pace-kv, so under `ctest --parallel` it
     # would race the sccache smokes and compile-cache-daemon-start for it.
     set_tests_properties("tls-smoke" PROPERTIES
         LABELS "smoke"
@@ -5315,7 +5315,7 @@ elseif(FASTCACHED_ENABLE_TLS)
     )
 endif()
 
-if(NOT TARGET fastcached)
+if(NOT TARGET pace-kv)
     message(STATUS "sccache smoke tests: daemon not built — skipping")
 elseif(SCCACHE)
     # EMPTY by default, and that emptiness is half of #183's port fix rather than a
@@ -5329,7 +5329,7 @@ elseif(SCCACHE)
     # Both drivers draw now, so an empty value here means "draw one" on either
     # platform rather than only on POSIX (#183).
     set(FASTCACHED_SMOKE_PORT "" CACHE STRING
-        "TCP port the sccache smoke tests bind fastcached to; empty draws one per run")
+        "TCP port the sccache smoke tests bind pace-kv to; empty draws one per run")
     set(_smoke_port_arg "")
     if(FASTCACHED_SMOKE_PORT)
         set(_smoke_port_arg --port ${FASTCACHED_SMOKE_PORT})
@@ -5345,7 +5345,7 @@ elseif(SCCACHE)
         add_test(
             NAME "sccache-smoke-${_proto}"
             COMMAND ${_smoke_driver}
-                --fastcached "$<TARGET_FILE:fastcached>"
+                --pace-kv "$<TARGET_FILE:pace-kv>"
                 --protocol ${_proto}
                 ${_smoke_port_arg}
                 --compiler "${CMAKE_CXX_COMPILER}"
@@ -5364,7 +5364,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# migrate-storage-e2e: `fastcached --migrate-storage` over both storage shapes.
+# migrate-storage-e2e: `pace-kv --migrate-storage` over both storage shapes.
 #
 # What it covers that the unit tests cannot: `MigrateConfiguredStorage` and
 # `StorageShardPaths` live in `main.cpp`, which is in no test target -- and the
@@ -5372,7 +5372,7 @@ endif()
 # that the flag enumerates the SAME files the daemon opens. A conversion walking
 # a different set would exit zero and leave the daemon still refusing to start on
 # the store it missed.
-if(NOT TARGET fastcached)
+if(NOT TARGET pace-kv)
     message(STATUS "migrate-storage-e2e: daemon not built — skipping")
 elseif(WIN32)
     # POSIX-only fixture, the way `fleet-dashboard-e2e` records for itself: it is
@@ -5384,7 +5384,7 @@ else()
     add_test(
         NAME "migrate-storage-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/migrate-storage-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
     )
     # Starts a real daemon to create the stores, so it must not race the other
     # server-starting smoke tests.
@@ -5397,13 +5397,13 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# fastcache-cli-e2e: the client against a real daemon.
+# pacectl-e2e: the client against a real daemon.
 #
 # Registered HERE and not beside the app because it names two targets, and
 # `src/apps` walks its table in order: a `$<TARGET_FILE:>` guard on a target
 # configured later does not fail, it silently skips the test forever.
 #
-# What this reaches that `fastcache-cli-tests` cannot is the exit codes against a
+# What this reaches that `pacectl-tests` cannot is the exit codes against a
 # live server. The unit tests drive every handler over a scripted exchange and can
 # prove the mapping from an outcome to a code; only a real daemon proves that a
 # miss, a refused credential and a closed port arrive as three different outcomes
@@ -5414,8 +5414,8 @@ endif()
 # rather than an assumption: it was run to completion on Windows through Git Bash
 # before this registration was written. It uses `mktemp`, `/dev/tcp` through
 # `wait_for_port`, and the shared helpers -- all of which Git Bash supplies.
-if(NOT TARGET fastcached OR NOT TARGET fastcache-cli)
-    message(STATUS "fastcache-cli-e2e: daemon or client not built — skipping")
+if(NOT TARGET pace-kv OR NOT TARGET pacectl)
+    message(STATUS "pacectl-e2e: daemon or client not built — skipping")
 else()
     # The node is OPTIONAL -- `FASTCACHED_BUILD_NODE` can be off -- and the eight cases
     # that need none are worth running anyway, so it is an ARGUMENT rather than a
@@ -5428,21 +5428,21 @@ else()
     # so a reference wearing one is indistinguishable from an unguarded one -- which
     # is #390's failure shape, where a guard that was never a guard read as compliance.
     set(_fc_cli_e2e_node "")
-    if(TARGET fastcache-compile-node)
-        set(_fc_cli_e2e_node "$<TARGET_FILE:fastcache-compile-node>")
+    if(TARGET pace-node)
+        set(_fc_cli_e2e_node "$<TARGET_FILE:pace-node>")
     endif()
     add_test(
-        NAME "fastcache-cli-e2e"
-        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/fastcache-cli-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --cli "$<TARGET_FILE:fastcache-cli>"
+        NAME "pacectl-e2e"
+        COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/pacectl-e2e.sh"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --cli "$<TARGET_FILE:pacectl>"
             # Empty when the node is not built, which the script reads as *skip cases
             # 11-13 and SAY SO*.
             --node "${_fc_cli_e2e_node}"
     )
     # Starts real daemons on drawn ports, so it must not race the other
     # server-starting smoke tests.
-    set_tests_properties("fastcache-cli-e2e" PROPERTIES
+    set_tests_properties("pacectl-e2e" PROPERTIES
         LABELS "smoke"
         SKIP_RETURN_CODE 77
         RUN_SERIAL TRUE
@@ -6986,7 +6986,7 @@ endif()
 #
 # `tsan-scope-hygiene` above asks whether a scoped test CASE carries a tag the
 # gate selects. That is a question about cases inside binaries the gate already
-# runs, so it could not see `fastcache-cc-tests`, which was in no row at all: the
+# runs, so it could not see `pace-cc-tests`, which was in no row at all: the
 # launcher does not link the Pace library, so no tag expression could ever
 # have reached it.
 #
@@ -7332,11 +7332,11 @@ set_tests_properties("cli-text-cell-selftest" PROPERTIES
     TIMEOUT 180
 )
 
-# fastcache-cli asks neither the environment nor the terminal anything itself (#134 §9.11).
+# pacectl asks neither the environment nor the terminal anything itself (#134 §9.11).
 #
 # `live-stats` is HANDED what a terminal can draw (`TerminalCapabilities`) and reads the
 # environment only through `Platform/Environment` from `main`. A `getenv`, `isatty`,
-# `ioctl` or `GetConsoleMode` under `src/apps/fastcache-cli/` draws the right frame on the
+# `ioctl` or `GetConsoleMode` under `src/apps/pacectl/` draws the right frame on the
 # machine it was tested on and passes every behavioural test, so the clause is a scan.
 # Exemptions are rows with reasons in `scripts/cli-ambient-read-exemptions.txt`, and a row
 # that no longer describes the tree is refused. It fails closed: the same scanner must
@@ -7435,10 +7435,10 @@ set_tests_properties("vendor-figures-selftest" PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# cli-node-flags: `fastcache-cli --help` sends operators to flags that exist.
+# cli-node-flags: `pacectl --help` sends operators to flags that exist.
 #
 # The client's NOTES name the operator actions that live only in
-# `fastcache-compile-node` -- enrollment and `--print-surfaces` (#1307). That is prose
+# `pace-node` -- enrollment and `--print-surfaces` (#1307). That is prose
 # in one binary about another binary's option table, and nothing else connects them: a
 # flag renamed in `NodeConfig.cpp` would leave the help pointing at nothing while every
 # unit test in both binaries stays green. So the check asks both BINARIES, and requires
@@ -7452,16 +7452,16 @@ set_tests_properties("vendor-figures-selftest" PROPERTIES
 # the registration is guarded on both.
 #
 # Not POSIX-only: it runs two `--help`s and reads their text with CRs stripped. Measured
-# before this was written, and no further: through Git Bash, a Windows `fastcache-cli.exe`
+# before this was written, and no further: through Git Bash, a Windows `pacectl.exe`
 # (whose help carries CRs) was captured and judged, and the CRLF case is in the self-test.
-if(NOT TARGET fastcache-cli OR NOT TARGET fastcache-compile-node)
+if(NOT TARGET pacectl OR NOT TARGET pace-node)
     message(STATUS "cli-node-flags: client or compile node not built -- skipping")
 else()
     add_test(
         NAME "cli-node-flags"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-node-flags.sh"
-            --cli "$<TARGET_FILE:fastcache-cli>"
-            --node "$<TARGET_FILE:fastcache-compile-node>"
+            --cli "$<TARGET_FILE:pacectl>"
+            --node "$<TARGET_FILE:pace-node>"
     )
     set_tests_properties("cli-node-flags" PROPERTIES
         LABELS "hygiene"
@@ -7719,12 +7719,12 @@ set_tests_properties("vendor-verbatim-selftest" PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# The exit codes the fastcache-cli page lists are OutcomeTable's, code, name and meaning.
+# The exit codes the pacectl page lists are OutcomeTable's, code, name and meaning.
 #
 # `--help` renders the table and cannot drift; the operator page restated six codes and
 # their count by hand, and #134 added a seventh. Reads `OutcomeTable`'s literal in
-# `src/apps/fastcache-cli/CliAnswer.hpp` and the `## Exit codes` section of
-# `docs/tools/fastcache-cli.md`, so renaming either is a refusal here, by design.
+# `src/apps/pacectl/CliAnswer.hpp` and the `## Exit codes` section of
+# `docs/tools/pacectl.md`, so renaming either is a refusal here, by design.
 add_test(
     NAME "cli-exit-code-docs"
     COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-cli-exit-code-docs.sh"
@@ -7760,7 +7760,7 @@ set_tests_properties("cli-exit-code-docs-selftest" PROPERTIES
 # unconditionally. And core-cpp (#1596), whose libraries that block instruments from its
 # `CORE_CPP_TARGETS` property: read here through the ones this build is sure to compile. core-cpp's
 # targets are EXCLUDE_FROM_ALL, so a library nothing links has no objects to read, and `core::tui`
-# -- behind the terminal wait on the pool -- is the one `fastcache-cli` links.
+# -- behind the terminal wait on the pool -- is the one `pacectl` links.
 if((ENABLE_SANITIZER_ADDRESS OR ENABLE_SANITIZER_THREAD) AND NOT MSVC AND CMAKE_NM)
     set(_fcVendoredObjectTargets ${FASTCACHED_MONOCYPHER_TARGETS})
     if(TARGET core::tui)
@@ -7923,7 +7923,7 @@ set_tests_properties("target-pragmas-selftest" PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# `fastcache-bench` states the build its figures came from (#1439).
+# `pace-bench` states the build its figures came from (#1439).
 #
 # A timing is a quantity UNDER CONDITIONS, and the condition that decides whether it is
 # a cost at all is the build. That binary used to print nothing about it, and a Debug
@@ -7941,15 +7941,15 @@ set_tests_properties("target-pragmas-selftest" PROPERTIES
 #     `bench/inproc_bench.py` parses, every figure is marked, and that document carries
 #     no mixed content.
 #
-# Both guarded on `TARGET fastcache-bench` as well as on the option, because the two are
+# Both guarded on `TARGET pace-bench` as well as on the option, because the two are
 # independent and a `$<TARGET_FILE:>` naming a target this configure did not declare is
 # a hard error at GENERATE time rather than a skipped test (#390).
-if(TARGET fastcache-bench)
+if(TARGET pace-bench)
     # A plain `add_test` and deliberately NOT `catch_discover_tests`:
     # `scripts/check-tsan-binaries.cmake` derives "every Catch2 test binary this tree
     # registers" from that call and requires each to be a row of the ThreadSanitizer
     # gate or to carry an exemption whose claim is re-scanned -- and
-    # `src/apps/fastcache-bench/` names `std::thread`, so no exemption there could be
+    # `src/apps/pace-bench/` names `std::thread`, so no exemption there could be
     # honest. Registering this way would put a benchmark binary, scaling tier and all,
     # under TSan in order to run a handful of text-rendering cases.
     #
@@ -7959,7 +7959,7 @@ if(TARGET fastcache-bench)
     # non-zero, which reads as a failing subject rather than as an empty filter.
     add_test(
         NAME "bench-build-banner"
-        COMMAND $<TARGET_FILE:fastcache-bench> "[buildbanner]"
+        COMMAND $<TARGET_FILE:pace-bench> "[buildbanner]"
     )
     set_tests_properties("bench-build-banner" PROPERTIES
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape and
@@ -7987,13 +7987,13 @@ if(TARGET fastcache-bench)
     # means the target is declared and was not built, so nothing ran.
     if(NOT Python3_Interpreter_FOUND)
         fastcached_register_skipped_test("bench-build-banner-streams"
-            "no Python 3 interpreter found, so what fastcache-bench writes to each stream is NOT guarded in this build tree")
+            "no Python 3 interpreter found, so what pace-bench writes to each stream is NOT guarded in this build tree")
     else()
         add_test(
             NAME "bench-build-banner-streams"
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_SOURCE_DIR}/scripts/check-bench-build-banner.py"
-                --binary "$<TARGET_FILE:fastcache-bench>"
+                --binary "$<TARGET_FILE:pace-bench>"
         )
         # TIMEOUT is the outer supervisor rather than the measurement. Measured on this
         # tree's slowest configuration -- a clang-debug build with ASan and UBSan on, over
@@ -8104,7 +8104,7 @@ endif()
 # cache" step, which still runs it and is untouched by this block.
 #
 # WHY AN OPT-IN RATHER THAN AN UNCONDITIONAL RUN. The fixture configures and
-# builds three CMake trees of `fastcache-cc-tests`. This tree's `ctest` presets
+# builds three CMake trees of `pace-cc-tests`. This tree's `ctest` presets
 # carry no label filter, so a plain `ctest` runs `smoke` too -- registering it to
 # run by default would put three full builds into every developer's test run and
 # into every CI leg that calls `ctest`, none of which asked for them. The default
@@ -8127,9 +8127,9 @@ if(WIN32)
 elseif(NOT FASTCACHED_RUN_LAUNCHER_REPLAY_E2E)
     fastcached_register_skipped_test("launcher-replay-e2e"
         "not opted in -- it configures and builds three CMake trees, so it is off by default. Set -DFASTCACHED_RUN_LAUNCHER_REPLAY_E2E=ON to run it here; CI runs it from build.yml's 'A real target, replayed from cache' step regardless")
-elseif(NOT TARGET fastcached OR NOT TARGET fastcache-cc OR NOT TARGET fastcache-cc-tests)
+elseif(NOT TARGET pace-kv OR NOT TARGET pace-cc OR NOT TARGET pace-cc-tests)
     fastcached_register_skipped_test("launcher-replay-e2e"
-        "opted in, but one of fastcached / fastcache-cc / fastcache-cc-tests is not built in this tree, and the fixture needs all three")
+        "opted in, but one of pace-kv / pace-cc / pace-cc-tests is not built in this tree, and the fixture needs all three")
 else()
     # No `--port`: the fixture draws one. A registration cannot name a port -- a
     # fixture CHOOSING one cannot see a port already held as an outbound
@@ -8142,10 +8142,10 @@ else()
     add_test(
         NAME "launcher-replay-e2e"
         COMMAND ${FASTCACHED_BASH} "${CMAKE_SOURCE_DIR}/scripts/launcher-replay-e2e.sh"
-            --fastcached "$<TARGET_FILE:fastcached>"
-            --launcher "$<TARGET_FILE:fastcache-cc>"
+            --pace-kv "$<TARGET_FILE:pace-kv>"
+            --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
-            --target fastcache-cc-tests
+            --target pace-cc-tests
             --canary
     )
     # `SKIP_RETURN_CODE 77` reads the fixture's own `skip`, which is the same 77

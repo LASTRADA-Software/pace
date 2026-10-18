@@ -30,8 +30,8 @@ using Pace::SecretProvenanceFacts;
 
 TEST_CASE("SecretProvenance: the rule over the facts is one function both executables reach", "[config][secret]")
 {
-    // The DECISION half of the acquisition/decision split. `fastcached` reads the
-    // three facts off `Config` and `CliResult`, `fastcache-compile-node` reads them
+    // The DECISION half of the acquisition/decision split. `pace-kv` reads the
+    // three facts off `Config` and `CliResult`, `pace-node` reads them
     // off `NodeConfig` and a command-line-only parse -- and neither writes the rule.
     // Asserted as a truth table, because what makes a shared rule worth having is
     // that every combination has ONE answer rather than two that agree today.

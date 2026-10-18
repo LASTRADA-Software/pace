@@ -1,6 +1,6 @@
-# Running fastcached as a compile cache
+# Running pace-kv as a compile cache
 
-Serving [`fastcache-cc`](../tools/fastcache-cc.md) needs no special mode: the
+Serving [`pace-cc`](../tools/pace-cc.md) needs no special mode: the
 [compile-cache protocol](../protocols/compile-cache.md) is detected from the
 first byte, so any listener serves it.
 
@@ -13,7 +13,7 @@ poor hit rate rather than an error.
 
 The rejection is at least diagnosable: the daemon answers with a typed
 `payload-too-large` error naming the declared size and the cap, so it appears in
-`fastcache-cc --show-stats` under fall-back reasons and in the daemon log, rather
+`pace-cc --show-stats` under fall-back reasons and in the daemon log, rather
 than as a dropped connection.
 
 Object files in a large C++ codebase routinely exceed 16 MiB; one measured
@@ -21,7 +21,7 @@ codebase peaked at ~122 MB for a single object. If your largest object goes past
 256 MiB, raise it:
 
 ```sh
-fastcached --storage-max-value=512M
+pace-kv --storage-max-value=512M
 ```
 
 `--storage-max-value` also raises the wire frame-payload cap, so a single flag
@@ -40,7 +40,7 @@ Without `--storage` the cache is memory-only and evaporates on restart, which
 for a compile cache usually means throwing away hours of compiles.
 
 ```sh
-fastcached --storage=/var/lib/fastcached/cache.cow \
+pace-kv --storage=/var/lib/fastcached/cache.cow \
            --max-memory=8g
 ```
 
@@ -58,7 +58,7 @@ same cap hold more.
 For a shared cache serving many builders concurrently:
 
 ```sh
-fastcached --bind=0.0.0.0 \
+pace-kv --bind=0.0.0.0 \
            --storage=/var/lib/fastcached/cache \
            --storage-shards=16 \
            --threads=16 \
@@ -118,10 +118,10 @@ signals are the hit ratio and the eviction rate: sustained evictions with a
 falling hit ratio mean the working set no longer fits and `--max-memory` (or
 `--storage-max-disk`) needs raising.
 
-The client side reports independently — `fastcache-cc --show-stats` gives the hit
+The client side reports independently — `pace-cc --show-stats` gives the hit
 rate as each builder sees it, which is what actually determines build times.
 
-`fastcache-cli live-stats` pointed at the `0xFC` port draws the same reading live: the
+`pacectl live-stats` pointed at the `0xFC` port draws the same reading live: the
 daemon streams its **cache** subject, the counters and snapshot `/metrics` renders, pushed
 on a fixed tick rather than scraped
 ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)). The node and fleet
@@ -129,11 +129,11 @@ subjects belong to a compile node, and the daemon refuses them by name. A stream
 the connection's credential while it runs, not only when it opens: a connection that never
 authenticated loses its stream on the tick `--requirepass` takes effect, and one that did
 keeps it when the secret rotates. The live counters are the node's rows, described under
-[Live stats](../tools/fastcache-compile-node.md#live-stats).
+[Live stats](../tools/pace-node.md#live-stats).
 
 If you run a **compile fleet** rather than a lone cache, the leader can show you
 the whole of it on one page: see
-[Looking at the whole fleet](../tools/fastcache-compile-node.md#looking-at-the-whole-fleet).
+[Looking at the whole fleet](../tools/pace-node.md#looking-at-the-whole-fleet).
 That is a view of who is a member, how big each machine is and what its cache
 holds — the thing `/metrics` cannot give you without a Prometheus in front of it,
 because a scrape is one process reporting itself. `/metrics` stays the source of
@@ -145,5 +145,5 @@ something is wrong.
 If hit rates are low, check the client before tuning the server. Cache keys
 incorporate the compiler identity and the relativized command line, so mismatched
 compiler versions or differing flags between CI and developer machines produce
-different keys by design. `fastcache-cc --show-stats` distinguishes a genuine miss
+different keys by design. `pace-cc --show-stats` distinguishes a genuine miss
 from a cache that was never reached.

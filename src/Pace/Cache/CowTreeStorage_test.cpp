@@ -1384,7 +1384,7 @@ TEST_CASE("Damage to both meta pages refuses the store at Open, and refuses it a
     WriteWholeFile(tmp.path, bytes);
 
     auto const opened = OpenDamaged(tmp.path);
-    // The process does not start. Both `fastcached` and `fastcache-compile-node`
+    // The process does not start. Both `pace-kv` and `pace-node`
     // treat a store that will not open as fatal, which is why the operator page
     // calls damage here an outage rather than a degradation.
     //

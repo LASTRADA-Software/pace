@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end check of `fastcached --migrate-storage`.
+# End-to-end check of `pace-kv --migrate-storage`.
 #
 # What it covers that the unit tests cannot: the CLI wiring, and — the part that
 # actually decides whether the feature works for an operator — that the flag
@@ -20,13 +20,13 @@ FASTCACHED=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fastcached) FASTCACHED="$2"; shift 2 ;;
+        --pace-kv) FASTCACHED="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
 if [[ -z "$FASTCACHED" || ! -x "$FASTCACHED" ]]; then
-    echo "migrate-storage-e2e: no fastcached binary — skipping" >&2
+    echo "migrate-storage-e2e: no pace-kv binary — skipping" >&2
     exit "$SKIP"
 fi
 

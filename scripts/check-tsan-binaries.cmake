@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # ## Why this is a check and not a review item (#1209)
 #
-# `fastcache-cc-tests` sat outside the sanitized scope for as long as it existed.
+# `pace-cc-tests` sat outside the sanitized scope for as long as it existed.
 # No tag could have reached it: the launcher does not link the Pace library,
 # so it is a separate binary, and the gate's other rows name binaries that cannot
 # contain its cases. `scripts/check-tsan-scope.cmake` could not see it either --
@@ -18,9 +18,9 @@ cmake_minimum_required(VERSION 3.28)
 #
 # The ticket enumerated the test binaries by hand and its table listed four. This
 # tree registers SIX with `catch_discover_tests`, five of them in a default
-# configuration; `fastcache-cli-tests` and `CowTreeTests` were in neither the
+# configuration; `pacectl-tests` and `CowTreeTests` were in neither the
 # table nor any row. Neither was threaded then, so the ticket's conclusion survived
-# its census (`fastcache-cli-tests` stopped being so with #134 and is a gate row
+# its census (`pacectl-tests` stopped being so with #134 and is a gate row
 # now) -- but a hand list is exact about what it knows and silent about what it
 # does not, and that silence reads identically to complete coverage (#492). The
 # census was written by whoever understood the gap best, and it still missed two.
@@ -52,7 +52,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # Every exemption this table has carried rested on one claim: *no source under
 # this directory names a thread primitive*. That claim was written down with a
-# date and then never read again, and it went false -- `fastcache-cli-tests`
+# date and then never read again, and it went false -- `pacectl-tests`
 # stayed exempt as "single-threaded" after #134 gave it a thread pool and two
 # suites asserting on thread identities, and this check went on passing, because
 # a reason was a string it only required to be non-empty.
@@ -462,7 +462,7 @@ if(NOT uncoveredBinaries STREQUAL "")
         "`FastCachedTsanBinaryExemptions` in ${CMAKE_CURRENT_LIST_FILE} saying what "
         "you measured and when.\n"
         "What must NOT happen is neither: that is the state this check exists to "
-        "end, and it is how `fastcache-cc-tests` went unsanitized for its whole "
+        "end, and it is how `pace-cc-tests` went unsanitized for its whole "
         "life (#1209).")
 endif()
 

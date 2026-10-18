@@ -755,7 +755,7 @@ TEST_CASE("AdminHttp: a large but complete head under the cap still routes", "[m
 TEST_CASE("A tolerated admin bind failure is reported at Warn and says the daemon carries on",
           "[server][admin][bind-verdict]")
 {
-    // #603. `fastcached` serves the cache on without an admin endpoint -- that is a
+    // #603. `pace-kv` serves the cache on without an admin endpoint -- that is a
     // policy, not an accident -- and it reported the condition at `Error`, which is
     // what a site pages on. Two costs pointing opposite ways: a page for a working
     // daemon, and an operator trained to ignore the level.

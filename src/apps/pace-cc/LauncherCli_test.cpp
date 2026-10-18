@@ -1,0 +1,462 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "Dispatch.hpp"
+#include "LauncherCli.hpp"
+
+#include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/UsageTestUtils.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <array>
+#include <chrono>
+#include <format>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace Pace::Cc;
+using Pace::Arity;
+using Pace::FormatDuration;
+using Pace::UsageColor;
+using Pace::Testing::StripAnsi;
+
+namespace
+{
+
+Command Parse(std::vector<std::string> const& argv)
+{
+    return ParseTopLevel(std::span<std::string const> { argv });
+}
+
+} // namespace
+
+// --- the drift guard --------------------------------------------------------
+//
+// The original defect was that dispatch and the usage text were independent, so
+// -h, /? and a top-level --reset were accepted but undocumented. These two cases
+// fail if that ever separates again.
+
+TEST_CASE("every accepted flag and alias appears in the help text")
+{
+    auto const help = HelpText();
+    for (auto const& table: { TopLevelFlags(), StatsOptions(), HtmlStatsOptions() })
+    {
+        for (auto const& spec: table)
+        {
+            INFO("flag " << spec.primary);
+            CHECK(help.contains(spec.primary));
+            for (auto const alias: spec.aliases)
+            {
+                INFO("alias " << alias << " of " << spec.primary);
+                CHECK(help.contains(alias));
+            }
+        }
+    }
+}
+
+TEST_CASE("every documented top-level flag and alias dispatches to its own action")
+{
+    // Arity comes from the table rather than from a list of exceptions here. A
+    // value-taking flag parsed bare is a usage error BY DESIGN, so passing it
+    // alone would assert the opposite of what its own row says -- and a list of
+    // "flags that need an operand" maintained beside the table is the second
+    // source of truth this table exists to avoid.
+    auto const withOperandIfNeeded = [](std::string token, FlagSpec const& spec) {
+        std::vector<std::string> args { std::move(token) };
+        if (spec.arity == Arity::Value)
+            args.emplace_back("operand");
+        return args;
+    };
+
+    for (auto const& spec: TopLevelFlags())
+    {
+        INFO("flag " << spec.primary);
+        CHECK(Parse(withOperandIfNeeded(std::string { spec.primary }, spec)).action == spec.action);
+        for (auto const alias: spec.aliases)
+        {
+            INFO("alias " << alias << " of " << spec.primary);
+            CHECK(Parse(withOperandIfNeeded(std::string { alias }, spec)).action == spec.action);
+        }
+    }
+}
+
+TEST_CASE("a value-taking top-level flag is rejected without its operand")
+{
+    // The other half of the rule above, and the reason the arity is honoured
+    // rather than worked around: a flag whose whole purpose is to name something
+    // must not silently act on a default.
+    for (auto const& spec: TopLevelFlags())
+    {
+        if (spec.arity != Arity::Value)
+            continue;
+        INFO("flag " << spec.primary);
+        CHECK(Parse({ std::string { spec.primary } }).action == Action::UsageError);
+    }
+}
+
+// --- the flag surface -------------------------------------------------------
+
+TEST_CASE("the short stats aliases match their long forms")
+{
+    CHECK(Parse({ "-s" }).action == Action::ShowStats);
+    CHECK(Parse({ "--show-stats" }).action == Action::ShowStats);
+    CHECK(Parse({ "-z" }).action == Action::ZeroStats);
+    CHECK(Parse({ "--zero-stats" }).action == Action::ZeroStats);
+}
+
+TEST_CASE("the html-stats flag dispatches with no options set")
+{
+    auto const cmd = Parse({ "--html-stats" });
+    CHECK(cmd.action == Action::HtmlStats);
+    CHECK(cmd.groupFilter.empty());
+    CHECK(cmd.outputPath.empty());
+}
+
+TEST_CASE("html-stats accepts --out and --prefetch-group like --show-stats does")
+{
+    auto const cmd = Parse({ "--html-stats", "--out", "report.html", "--prefetch-group", "ci-main" });
+    CHECK(cmd.action == Action::HtmlStats);
+    CHECK(cmd.outputPath == "report.html");
+    CHECK(cmd.groupFilter == "ci-main");
+
+    auto const joined = Parse({ "--html-stats", "--out=report.html" });
+    CHECK(joined.outputPath == "report.html");
+}
+
+TEST_CASE("help is reachable by all three spellings")
+{
+    CHECK(Parse({ "--help" }).action == Action::Help);
+    CHECK(Parse({ "-h" }).action == Action::Help);
+    CHECK(Parse({ "/?" }).action == Action::Help);
+}
+
+TEST_CASE("the retired sccache-era names are diagnosed, not spawned as a compiler")
+{
+    // These used to work; removing them silently would leave a caller spawning
+    // "--stats" as if it were a compiler and failing with exit 1.
+    for (auto const* retired: { "--stats", "--clear-stats", "--reset" })
+    {
+        INFO("retired flag " << retired);
+        auto const cmd = Parse({ std::string { retired } });
+        CHECK(cmd.action == Action::UsageError);
+        CHECK(cmd.diagnostic.contains(retired));
+    }
+}
+
+TEST_CASE("the reset spelling is gone entirely, including as a stats sub-option")
+{
+    auto const cmd = Parse({ "--show-stats", "--reset" });
+    CHECK(cmd.action == Action::UsageError);
+}
+
+TEST_CASE("an unknown option is named rather than treated as a compiler")
+{
+    auto const cmd = Parse({ "--frobnicate" });
+    CHECK(cmd.action == Action::UsageError);
+    CHECK(cmd.diagnostic.contains("--frobnicate"));
+}
+
+// --- the compile path -------------------------------------------------------
+
+TEST_CASE("no arguments at all is its own outcome")
+{
+    CHECK(Parse({}).action == Action::NoArguments);
+}
+
+TEST_CASE("a compiler line is fronted, whatever it contains")
+{
+    CHECK(Parse({ "g++", "-c", "a.cpp", "-o", "a.o" }).action == Action::Compile);
+    CHECK(Parse({ "cl.exe", "/c", "a.cpp" }).action == Action::Compile);
+    // The compiler's own flags must reach the compiler, not the launcher.
+    CHECK(Parse({ "g++", "--help" }).action == Action::Compile);
+    CHECK(Parse({ "g++", "--show-stats" }).action == Action::Compile);
+}
+
+TEST_CASE("a leading slash is an absolute path, not an option")
+{
+    // Deciding option-vs-path from the host rather than from the token has
+    // already been a bug; /usr/bin/g++ must stay a compiler on every platform.
+    CHECK(Parse({ "/usr/bin/g++", "-c", "a.cpp" }).action == Action::Compile);
+    CHECK(Parse({ "/opt/llvm/bin/clang++" }).action == Action::Compile);
+}
+
+// --- stats sub-options ------------------------------------------------------
+
+TEST_CASE("the prefetch group filter accepts both the separated and the joined form")
+{
+    auto const separated = Parse({ "--show-stats", "--prefetch-group", "ci-main" });
+    CHECK(separated.action == Action::ShowStats);
+    CHECK(separated.groupFilter == "ci-main");
+
+    auto const joined = Parse({ "--show-stats", "--prefetch-group=ci-main" });
+    CHECK(joined.action == Action::ShowStats);
+    CHECK(joined.groupFilter == "ci-main");
+
+    CHECK(Parse({ "-s", "--prefetch-group", "ci-main" }).groupFilter == "ci-main");
+}
+
+TEST_CASE("a stats report with no options reports every prefetch group")
+{
+    auto const cmd = Parse({ "--show-stats" });
+    CHECK(cmd.action == Action::ShowStats);
+    CHECK(cmd.groupFilter.empty());
+}
+
+TEST_CASE("the prefetch group filter consumes its value")
+{
+    // Regression: the value used to be read without being consumed, so the next
+    // iteration saw it again. With the old zero-stats spelling in that position
+    // this both filtered on the flag name and wiped the log.
+    auto const cmd = Parse({ "--show-stats", "--prefetch-group", "--zero-stats" });
+    CHECK(cmd.action == Action::ShowStats);
+    CHECK(cmd.groupFilter == "--zero-stats");
+}
+
+TEST_CASE("a prefetch group filter without a value is an error rather than a silent no-op")
+{
+    auto const cmd = Parse({ "--show-stats", "--prefetch-group" });
+    CHECK(cmd.action == Action::UsageError);
+    CHECK(cmd.diagnostic.contains("--prefetch-group"));
+}
+
+TEST_CASE("a prefetch group filter with an empty value is an error")
+{
+    // An empty filter means "every prefetch group", so accepting it would answer a
+    // different question than the one asked.
+    CHECK(Parse({ "--show-stats", "--prefetch-group=" }).action == Action::UsageError);
+    CHECK(Parse({ "--show-stats", "--prefetch-group", "" }).action == Action::UsageError);
+}
+
+TEST_CASE("an unknown stats sub-option is diagnosed")
+{
+    auto const cmd = Parse({ "--show-stats", "--nope" });
+    CHECK(cmd.action == Action::UsageError);
+    CHECK(cmd.diagnostic.contains("--nope"));
+}
+
+TEST_CASE("a value on a valueless flag is diagnosed")
+{
+    CHECK(Parse({ "--show-stats=1" }).action == Action::UsageError);
+}
+
+TEST_CASE("a valueless stats option is accepted, and rejects a joined value")
+{
+    // Every stats option that exists today takes a value, so inject a table with
+    // a valueless row to exercise the generic path a future option would use.
+    static constexpr std::array<std::string_view, 0> noAliases {};
+    static constexpr std::array options {
+        FlagSpec { .action = Action::PrefetchGroup,
+                   .primary = "--verbose",
+                   .aliases = noAliases,
+                   .arity = Arity::None,
+                   .operands = "",
+                   .summary = "Test-only valueless option." },
+    };
+
+    std::vector<std::string> const bare { "--verbose" };
+    auto const accepted = ParseStatsOptions(bare, options);
+    CHECK(accepted.action == Action::ShowStats);
+    CHECK(accepted.groupFilter.empty());
+
+    std::vector<std::string> const withValue { "--verbose=1" };
+    auto const rejected = ParseStatsOptions(withValue, options);
+    CHECK(rejected.action == Action::UsageError);
+    CHECK(rejected.diagnostic.contains("takes no value"));
+}
+
+// --- table lookup ------------------------------------------------------------
+
+TEST_CASE("FindFlag matches primaries and aliases only")
+{
+    CHECK(FindFlag(TopLevelFlags(), "--show-stats") != nullptr);
+    CHECK(FindFlag(TopLevelFlags(), "-s") != nullptr);
+    CHECK(FindFlag(TopLevelFlags(), "--prefetch-group") == nullptr);
+    CHECK(FindFlag(StatsOptions(), "--prefetch-group") != nullptr);
+    CHECK(FindFlag(StatsOptions(), "--show-stats") == nullptr);
+    CHECK(FindFlag(TopLevelFlags(), "") == nullptr);
+}
+
+TEST_CASE("the help text renders the sections it promises")
+{
+    auto const help = HelpText();
+    CHECK(help.contains("USAGE"));
+    CHECK(help.contains("STATS OPTIONS"));
+    CHECK(help.contains("ENVIRONMENT"));
+    CHECK(help.contains("pace-cc <compiler> <args...>"));
+    // The joined form is documented from the arity, not per row.
+    CHECK(help.contains("--prefetch-group=<id>"));
+}
+
+TEST_CASE("every environment row is named and described")
+{
+    REQUIRE_FALSE(LauncherEnvironment().empty());
+    for (auto const& spec: LauncherEnvironment())
+    {
+        INFO("variable " << spec.name);
+        CHECK(spec.name.starts_with("FASTCACHE_"));
+        CHECK_FALSE(spec.summary.empty());
+    }
+}
+
+TEST_CASE("plain help carries no ANSI escapes")
+{
+    // Help on stderr and help through a pipe must stay plain: the e2e scripts
+    // grep this output, and a build log is no place for escapes.
+    CHECK_FALSE(HelpText(UsageColor::Plain).contains('\x1b'));
+}
+
+TEST_CASE("colorized help adds escapes but not one character of text")
+{
+    auto const plain = HelpText(UsageColor::Plain);
+    auto const colored = HelpText(UsageColor::Colored);
+    CHECK(colored.contains('\x1b'));
+    CHECK(StripAnsi(colored) == plain);
+}
+
+TEST_CASE("the two ENVIRONMENT row groups share one column")
+{
+    // They sit in one section precisely so the prose between them cannot let
+    // the halves drift apart; XDG_STATE_HOME, HOME is as wide as the widest
+    // FASTCACHE_ name, so a regression here is visible immediately.
+    // Anchored on each row's own indent: FASTCACHE_ADDR is also named in the
+    // prose below the rows, and a bare search would find whichever came first.
+    auto const help = HelpText();
+    auto const first = Pace::Testing::DescriptionColumnOf(help, "FASTCACHE_ADDR");
+    auto const second = Pace::Testing::DescriptionColumnOf(help, "XDG_STATE_HOME, HOME");
+    REQUIRE(first != std::string_view::npos);
+    REQUIRE(second != std::string_view::npos);
+    CHECK(first == second);
+}
+
+TEST_CASE("the help text documents every environment variable the launcher reads")
+{
+    // The hardcoded list is a deliberate independent oracle: help is rendered
+    // from LauncherEnvironment(), so checking it against that table would be
+    // tautological, while this fails if a row is ever dropped.
+    //
+    // What it could NOT catch is a row ARRIVING -- a list is exact about the names it
+    // knows and silent about the ones it does not, and silence reads identically to
+    // complete coverage. `FASTCACHE_VERIFY` sat outside it for exactly that reason and
+    // was found by accident. So the COUNT is asserted below against
+    // `LauncherEnvironment().size()`, which is not tautological the way reading the
+    // names from it would be: it says "this oracle knows about as many variables as
+    // the launcher has", and a new row with no entry here fails without the oracle
+    // ever learning what that row is called.
+    auto const help = HelpText();
+    auto fastcacheNames = std::size_t { 0 };
+    for (auto const* name: { "FASTCACHE_ADDR",
+                             "FASTCACHE_SOURCE_DIR",
+                             "FASTCACHE_BINARY_DIR",
+                             "FASTCACHE_PREFETCH_GROUP",
+                             "FASTCACHE_VERBOSE",
+                             "FASTCACHE_NO_STATS",
+                             "FASTCACHE_NO_DIRECT",
+                             "FASTCACHE_CONNECT_TIMEOUT",
+                             "FASTCACHE_TIMEOUT",
+                             // Not a spelling variant of the row above it: a cache
+                             // exchange and a remote compile are bounded by
+                             // different things, and one knob moving both is the
+                             // defect #223 records. A `contains` for the shorter
+                             // name does not match the longer one, so dropping
+                             // either row is caught here.
+                             "FASTCACHE_DISPATCH_TIMEOUT",
+                             // Nor is THIS one a variant of the row above it, and the
+                             // same `contains` argument applies in the other direction:
+                             // the total bounds how long a compile may take and this
+                             // bounds how long the worker may say nothing, which is the
+                             // split #245 exists for. A build that documented one and
+                             // read the other would read exactly like a working one.
+                             "FASTCACHE_DISPATCH_IDLE",
+                             "FASTCACHE_MAX_STORE_BYTES",
+                             "FASTCACHE_SCHEDULER",
+                             "FASTCACHE_TOKEN",
+                             "FASTCACHE_USER",
+                             // Was missing from this oracle while its row existed in
+                             // the table, so the row could have been dropped with
+                             // nothing failing -- the exact hole the oracle is for.
+                             // Found while adding the row below it; a hand-kept list
+                             // is exact about what it knows and silent about what it
+                             // does not.
+                             "FASTCACHE_VERIFY",
+                             // A build that reads this and documents nothing leaves an
+                             // operator no way to discover the one setting that can fix
+                             // a silent under-rebuild (#700). It is also the only row
+                             // here whose value an operator must copy from somewhere
+                             // else, so the summary carrying the recipe is load-bearing
+                             // rather than decorative -- asserted separately below.
+                             "FASTCACHE_MSVC_DEPS_PREFIX",
+                             // The third root: without it on the help page an operator
+                             // reading why two machines never share has nothing to find.
+                             "FASTCACHE_DEPS_DIR",
+                             // The three below are not the launcher's own -- they are
+                             // the usual per-user state locations, documented as
+                             // `UsageEntry` rows rather than `EnvVarSpec` ones -- so
+                             // they are deliberately outside the count asserted after
+                             // the loop.
+                             "LOCALAPPDATA",
+                             "XDG_STATE_HOME",
+                             "HOME" })
+    {
+        INFO("variable " << name);
+        CHECK(help.contains(name));
+        if (std::string_view { name }.starts_with("FASTCACHE_"))
+            ++fastcacheNames;
+    }
+
+    // Counted from the loop rather than written down, so this cannot drift from the
+    // list it describes -- a hand-maintained number beside a hand-maintained list is
+    // two sources of truth wearing one hat.
+    INFO("oracle knows " << fastcacheNames << " FASTCACHE_* names; LauncherEnvironment() has "
+                         << LauncherEnvironment().size());
+    CHECK(fastcacheNames == LauncherEnvironment().size());
+}
+
+TEST_CASE("the help text tells an operator where to find their msvc_deps_prefix")
+{
+    // FASTCACHE_MSVC_DEPS_PREFIX is the only launcher variable whose value cannot be
+    // invented: it has to equal a string the build already holds, and getting it
+    // wrong is silent in exactly the way #700 is. So documenting the NAME is not
+    // enough -- the summary has to carry the recipe, and that is a property worth an
+    // assertion rather than a reviewer's memory.
+    //
+    // Matched on `msvc_deps_prefix` and `build.ninja` rather than on a whole
+    // sentence, so rewording the help does not fail this while dropping the recipe
+    // still does.
+    auto const help = HelpText();
+    INFO(help);
+    CHECK(help.contains("msvc_deps_prefix"));
+    CHECK(help.contains("build.ninja"));
+}
+
+TEST_CASE("the help text states the dispatch deadlines the launcher actually uses")
+{
+    // Formatted from the constants through usage tokens rather than written into the
+    // summaries, because a number in prose is the second statement that drifts. An
+    // operator who reads "10min" and gets ten seconds has been told something false
+    // about a knob whose whole purpose is that one deadline could not serve two
+    // conversations (#223).
+    auto const help = HelpText();
+    INFO(help);
+    CHECK(help.contains(std::format("default {}", FormatDuration(DefaultDispatchTotal))));
+    CHECK(help.contains(std::format("default {}", FormatDuration(DefaultDispatchIdle))));
+    // A token nobody spliced prints its own braces, and reads as a default of "{dispatch-idle}".
+    CHECK_FALSE(help.contains("{dispatch-timeout}"));
+    CHECK_FALSE(help.contains("{dispatch-idle}"));
+}
+
+TEST_CASE("a launcher deadline variable reads a duration and falls back on anything else")
+{
+    // WHAT DISTINGUISHES is the bare number: it was the ONLY spelling while these names
+    // ended in `_MS`, so a reader still taking it would read `2000` as two seconds here
+    // and as something else wherever a unit is implied. The fallback is distinct from
+    // every value parsed below, so a reader answering one spelling's parse for another
+    // cannot pass.
+    auto const fallback = std::chrono::milliseconds { 7'777 };
+    CHECK(EnvironmentDuration("500ms", fallback) == std::chrono::milliseconds { 500 });
+    CHECK(EnvironmentDuration("10min", fallback) == std::chrono::minutes { 10 });
+    CHECK(EnvironmentDuration("0s", fallback) == std::chrono::milliseconds::zero());
+    CHECK(EnvironmentDuration("2000", fallback) == fallback);
+    CHECK(EnvironmentDuration("", fallback) == fallback);
+    CHECK(EnvironmentDuration("soon", fallback) == fallback);
+}

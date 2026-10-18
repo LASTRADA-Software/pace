@@ -25,7 +25,7 @@ namespace Pace
 ///
 /// It lives in `Core/`, beside `WireFields`, under the constraint that header's own
 /// note states and this one inherits: it must be includable from a header
-/// `fastcache-cc` compiles **without linking `Pace`**, so it stays header-only and
+/// `pace-cc` compiles **without linking `Pace`**, so it stays header-only and
 /// reaches nothing but `Core/Endian.hpp`, `Core/WireFields.hpp` and the standard
 /// library. Keep it that way — a member that would pull in a new dependency belongs
 /// somewhere else.

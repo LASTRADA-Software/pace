@@ -651,7 +651,7 @@ TEST_CASE("RESP: INCR initialises a missing key to 0 then increments", "[protoco
 TEST_CASE("RESP: DECR saturates against negative values (signed semantics)", "[protocol][resp][incr]")
 {
     // Unlike memcached's saturating-at-0 DECR, redis DECR is signed and
-    // crosses zero. fastcached follows redis here.
+    // crosses zero. pace-kv follows redis here.
     RespFixture fix;
     auto const out = Exchange(fix,
                               "*2\r\n$4\r\nDECR\r\n$1\r\nc\r\n"

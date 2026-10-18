@@ -157,19 +157,19 @@ endif()
 
 # 6. std::to_underlying is the same conversion.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("underlying" "${converterBody}" "apps/fastcache-cli/DashboardLoop.hpp"
+fastcached_make_tree("underlying" "${converterBody}" "apps/pacectl/DashboardLoop.hpp"
     "auto const index = std::to_underlying(counter)\;" tree)
 fastcached_run_check("${tree}" objected output)
 if(NOT objected)
     list(APPEND failures "underlying: std::to_underlying(counter) was accepted -- a second spelling of the same conversion")
 else()
-    fastcached_expect_phrase("underlying" "${output}" "apps/fastcache-cli/DashboardLoop.hpp:1:"
+    fastcached_expect_phrase("underlying" "${output}" "apps/pacectl/DashboardLoop.hpp:1:"
         "the refusal did not name the site as file:line")
 endif()
 
 # 7. A test source is in scope: the next production site is written by copying it.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("testsource" "${converterBody}" "apps/fastcache-cli/StatsSource_test.cpp"
+fastcached_make_tree("testsource" "${converterBody}" "apps/pacectl/StatsSource_test.cpp"
     "reading.counters[static_cast<std::size_t>(IMetricsSink::Counter::ConnectionsTotal)] = 3\;" tree)
 fastcached_run_check("${tree}" objected output)
 if(NOT objected)
@@ -216,7 +216,7 @@ endif()
 # 11. A name AFTER the cast's closing parenthesis is not its operand. The overstating shape
 #     this check shipped with: an outcome indexes a table whose ROW names a counter.
 math(EXPR cases "${cases} + 1")
-fastcached_make_tree("adjacent" "${converterBody}" "apps/fastcache-compile-node/SharedCacheSession.cpp"
+fastcached_make_tree("adjacent" "${converterBody}" "apps/pace-node/SharedCacheSession.cpp"
     "    if (auto const& counter = NamedDialCounters[static_cast<std::size_t>(named.session.outcome)].counter\; counter.has_value())" tree)
 fastcached_run_check("${tree}" objected output)
 if(objected)

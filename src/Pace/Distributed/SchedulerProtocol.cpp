@@ -211,7 +211,7 @@ namespace
     /// Turn a per-tier domain table into the wire's positional list.
     ///
     /// The wire carries tiers by POSITION, because `CompileCacheWire.hpp` is
-    /// compiled into `fastcache-cc` and cannot see `StorageTier`. This function
+    /// compiled into `pace-cc` and cannot see `StorageTier`. This function
     /// and its inverse are the only two places that know the two orders are the
     /// same one, which is why they sit together — a transposition here is
     /// invisible to every compiler and to both ends of the wire.

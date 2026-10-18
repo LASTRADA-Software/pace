@@ -54,7 +54,7 @@ namespace Pace::Cc
 ///
 /// ## Why this header is here
 ///
-/// `SurfaceRefusal` and `Refuse` lived in `fastcache-cc`'s private
+/// `SurfaceRefusal` and `Refuse` lived in `pace-cc`'s private
 /// `WorkerProtocol.hpp`, and the node's generic frame listener -- which is not a
 /// compile surface at all -- included that header for two symbols. Worse, the check
 /// that guards the rule could then only be pointed at a hand-kept list of the files

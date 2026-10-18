@@ -16,7 +16,7 @@ namespace Pace
 ///
 /// ## Why this is a type rather than one `Logf` call
 ///
-/// `fastcached` logged `ready, accepting connections` **before** starting a single
+/// `pace-kv` logged `ready, accepting connections` **before** starting a single
 /// accept loop ([#646](https://github.com/LASTRADA-Software/fastcached/issues/646)).
 /// Nothing observably broke -- the listen backlog covers the window -- and that is
 /// exactly what made it worth fixing: the line reads like a readiness marker, so a

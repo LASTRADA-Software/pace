@@ -99,7 +99,7 @@ set(canaryFile
 ")
 set(liveFile "void Beat(std::atomic<bool>* stopping) { while (!stopping->load(std::memory_order_acquire)) Sleep(); }\n")
 
-# `src/apps/fastcache-cc/ToolchainProbe.cpp`'s row: a recursive_directory_iterator advanced by
+# `src/apps/pace-cc/ToolchainProbe.cpp`'s row: a recursive_directory_iterator advanced by
 # the error-code overload. ONLY the exempted loop, so this file contributes no unbacklogged site.
 set(probeFile
 "void Walk(std::filesystem::recursive_directory_iterator it, std::error_code& ec)
@@ -109,7 +109,7 @@ set(probeFile
         ;
 }
 ")
-# `src/apps/fastcache-cc/ProcessRunner.cpp` carries TWO rows, so its file carries both sites:
+# `src/apps/pace-cc/ProcessRunner.cpp` carries TWO rows, so its file carries both sites:
 # the Windows double-NUL environment block and the POSIX NULL-terminated `char**` array.
 set(runnerFile
 "void Windows(char const* inherited)
@@ -124,7 +124,7 @@ void Posix(char** inherited)
 }
 ")
 
-# `src/apps/fastcache-cli/CliCommand.cpp`'s row: the argv walk whose five `continue` paths all
+# `src/apps/pacectl/CliCommand.cpp`'s row: the argv walk whose five `continue` paths all
 # depend on the head, so a `while` would need five duplicated increments. ONLY the exempted loop,
 # so this file contributes no unbacklogged site.
 set(cliCommandFile
@@ -139,7 +139,7 @@ set(cliCommandFile
 }
 ")
 
-# `src/apps/fastcache-cli/SocketExchange.cpp`'s row: FIVE deliberate infinite loops reading
+# `src/apps/pacectl/SocketExchange.cpp`'s row: FIVE deliberate infinite loops reading
 # framed replies. Five, because the tally counts SITES and that one file-wide row covers all
 # of them -- a synthetic file with one would leave the baseline four short and read as a
 # miscount in the check rather than in this fixture.
@@ -180,7 +180,7 @@ void Drain(Socket& socket)
 }
 ")
 
-# `src/apps/fastcache-compile-node/NodeAnnounce.cpp`'s row: an init that resets the per-round
+# `src/apps/pace-node/NodeAnnounce.cpp`'s row: an init that resets the per-round
 # redirect budget and no condition at all, so what ends it is a break inside.
 set(nodeAnnounceFile
 "std::size_t DialAndAnnounce(SchedulerLink& link, IEndpointDialer& dialer)
@@ -193,7 +193,7 @@ set(nodeAnnounceFile
 }
 ")
 
-# `src/apps/fastcache-cc/ParallelFor.cpp`'s row: a work-stealing queue over a shared atomic.
+# `src/apps/pace-cc/ParallelFor.cpp`'s row: a work-stealing queue over a shared atomic.
 set(parallelForFile
 "void Worker(std::atomic<std::size_t>& next, std::size_t count, Slice slice)
 {
@@ -205,7 +205,7 @@ set(parallelForFile
 }
 ")
 
-# `src/apps/fastcache-compile-node/NodeToolchains.cpp`'s row: the same work-stealing shape over
+# `src/apps/pace-node/NodeToolchains.cpp`'s row: the same work-stealing shape over
 # the survey's entries.
 set(nodeToolchainsFile
 "void Survey(std::atomic<std::size_t>& next, Entries const& entries)
@@ -229,7 +229,7 @@ set(usageDocFile
 }
 ")
 
-# `src/apps/fastcache-cli/DashboardPanel.cpp`'s row: the mutation is on the other side -- the
+# `src/apps/pacectl/DashboardPanel.cpp`'s row: the mutation is on the other side -- the
 # body shortens the view being searched, so the unqualified find always looks from the start of
 # what is left.
 set(dashboardPanelFile
@@ -320,20 +320,20 @@ function(fastcached_stage_and_run name target from to backlog outOutput outAppli
         "src/tests/Helper.hpp"
         "src/tests/TsanCanary.cpp"
         "src/Pace/Protocol/LiveStreamReactors_test.cpp"
-        "src/apps/fastcache-cc/ToolchainProbe.cpp"
-        "src/apps/fastcache-cc/ProcessRunner.cpp"
-        "src/apps/fastcache-cli/CliCommand.cpp"
+        "src/apps/pace-cc/ToolchainProbe.cpp"
+        "src/apps/pace-cc/ProcessRunner.cpp"
+        "src/apps/pacectl/CliCommand.cpp"
         # APPENDED, never inserted: `file<N>` mutation targets are positional, so a new entry
         # in the middle would silently re-point an existing case at a different file.
-        "src/apps/fastcache-cli/SocketExchange.cpp"
-        "src/apps/fastcache-compile-node/NodeAnnounce.cpp"
-        "src/apps/fastcache-cc/ParallelFor.cpp"
-        "src/apps/fastcache-compile-node/NodeToolchains.cpp"
+        "src/apps/pacectl/SocketExchange.cpp"
+        "src/apps/pace-node/NodeAnnounce.cpp"
+        "src/apps/pace-cc/ParallelFor.cpp"
+        "src/apps/pace-node/NodeToolchains.cpp"
         "src/Pace/Cli/UsageDoc.cpp"
-        "src/apps/fastcache-cli/DashboardPanel.cpp"
+        "src/apps/pacectl/DashboardPanel.cpp"
         "src/Pace/Platform/LocalAddresses.cpp"
-        "src/apps/fastcache-compile-node/ScratchClaim.cpp"
-        "src/apps/fastcached/main.cpp")
+        "src/apps/pace-node/ScratchClaim.cpp"
+        "src/apps/pace-kv/main.cpp")
     set(texts cleanFile helperHeader canaryFile liveFile probeFile runnerFile cliCommandFile
               socketExchangeFile nodeAnnounceFile parallelForFile nodeToolchainsFile
               usageDocFile dashboardPanelFile
@@ -507,7 +507,7 @@ set(FastCachedTestLoopCases
     "an exemption whose site is gone is STALE|file3|while (!stopping->load(std::memory_order_acquire)) Sleep()~sc~|BeatUntilStopped()~sc~|matching no site && stopping->load( && STALE|-|-"
     # The same refusal for a PRODUCTION row under the `loop` rule -- the kind #1452 added eight
     # of. A converted site whose row stays behind would exempt the next loop of that text.
-    "a production exemption whose site is gone is STALE|file4|for (~sc~ it != end~sc~ it.increment(ec))|while (it != end)|matching no site && loop: src/apps/fastcache-cc/ToolchainProbe.cpp: it != end && STALE|-|-"
+    "a production exemption whose site is gone is STALE|file4|for (~sc~ it != end~sc~ it.increment(ec))|while (it != end)|matching no site && loop: src/apps/pace-cc/ToolchainProbe.cpp: it != end && STALE|-|-"
 
     # --- fails CLOSED ---
     "a scope row that matches nothing|noheader|-|-|matched no file && src/tests/*.hpp|-|-"

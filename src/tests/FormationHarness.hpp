@@ -39,29 +39,29 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/EndpointDialer.hpp>
-#include <apps/fastcache-compile-node/EnrollChannel.hpp>
-#include <apps/fastcache-compile-node/EnrollmentResponder.hpp>
-#include <apps/fastcache-compile-node/EnrollmentWindow.hpp>
-#include <apps/fastcache-compile-node/FleetProbe.hpp>
-#include <apps/fastcache-compile-node/FleetSummaryResponder.hpp>
-#include <apps/fastcache-compile-node/FleetTextResponder.hpp>
-#include <apps/fastcache-compile-node/ForeignFleetWatch.hpp>
-#include <apps/fastcache-compile-node/FormationController.hpp>
-#include <apps/fastcache-compile-node/FormationLoop.hpp>
-#include <apps/fastcache-compile-node/FormationRuntime.hpp>
-#include <apps/fastcache-compile-node/LiveStatsResponder.hpp>
-#include <apps/fastcache-compile-node/MachineStandingTestUtils.hpp>
-#include <apps/fastcache-compile-node/NodeAnnounce.hpp>
-#include <apps/fastcache-compile-node/NodeConditions.hpp>
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
-#include <apps/fastcache-compile-node/NodeFormation.hpp>
-#include <apps/fastcache-compile-node/NodeFrameSurface.hpp>
-#include <apps/fastcache-compile-node/NodeStatusResponder.hpp>
-#include <apps/fastcache-compile-node/PeerIdentity.hpp>
-#include <apps/fastcache-compile-node/Responders.hpp>
-#include <apps/fastcache-compile-node/SessionResponder.hpp>
-#include <apps/fastcache-compile-node/SharedCacheResponder.hpp>
+#include <apps/pace-node/EndpointDialer.hpp>
+#include <apps/pace-node/EnrollChannel.hpp>
+#include <apps/pace-node/EnrollmentResponder.hpp>
+#include <apps/pace-node/EnrollmentWindow.hpp>
+#include <apps/pace-node/FleetProbe.hpp>
+#include <apps/pace-node/FleetSummaryResponder.hpp>
+#include <apps/pace-node/FleetTextResponder.hpp>
+#include <apps/pace-node/ForeignFleetWatch.hpp>
+#include <apps/pace-node/FormationController.hpp>
+#include <apps/pace-node/FormationLoop.hpp>
+#include <apps/pace-node/FormationRuntime.hpp>
+#include <apps/pace-node/LiveStatsResponder.hpp>
+#include <apps/pace-node/MachineStandingTestUtils.hpp>
+#include <apps/pace-node/NodeAnnounce.hpp>
+#include <apps/pace-node/NodeConditions.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
+#include <apps/pace-node/NodeFormation.hpp>
+#include <apps/pace-node/NodeFrameSurface.hpp>
+#include <apps/pace-node/NodeStatusResponder.hpp>
+#include <apps/pace-node/PeerIdentity.hpp>
+#include <apps/pace-node/Responders.hpp>
+#include <apps/pace-node/SessionResponder.hpp>
+#include <apps/pace-node/SharedCacheResponder.hpp>
 #include <core/async/SyncRun.hpp>
 #include <core/net/IDatagramSocket.hpp>
 #include <core/net/ISocket.hpp>
@@ -223,7 +223,7 @@ class FormationHarness
     static constexpr std::chrono::seconds MeetWithin = BeaconEvery + 2 * TickEvery;
 
     /// The address an operator's verbs come from. Admitted by nothing on its own: the operator
-    /// presents its machine's ticket (`OperatorMachine`), as `fastcache-compile-node` does.
+    /// presents its machine's ticket (`OperatorMachine`), as `pace-node` does.
     static constexpr std::string_view OperatorAddress = "10.9.9.9";
 
     /// The machine the operator's node is, whose test key every machine's roster holds live.

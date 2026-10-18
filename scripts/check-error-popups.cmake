@@ -26,7 +26,7 @@
 # And a second property, read from the same registrations and the `_tests.cmake` files
 # `catch_discover_tests` generates: EVERY registered test sets VARIABLE. A product binary
 # suppresses only when that variable is in its environment, so a test that does not set it
-# is a test whose spawned `fastcached` still waits on the dialog -- and the object being
+# is a test whose spawned `pace-kv` still waits on the dialog -- and the object being
 # linked says nothing about that.
 #
 # ## Outcomes
@@ -39,7 +39,7 @@
 # presets all use Ninja, and a reader claiming to parse a format it does not is worse.
 #
 # A path is matched with a BOUNDARY after it, never as a bare substring: on POSIX
-# `target/fastcache-cc` is a prefix of `target/fastcache-cc-tests`.
+# `target/pace-cc` is a prefix of `target/pace-cc-tests`.
 #
 # Usage: cmake -DBUILD_DIR=<dir> -DCONFIG=<config> -DANCHOR=<target> -DVARIABLE=<name>
 #          -P check-error-popups.cmake

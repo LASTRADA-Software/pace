@@ -19,7 +19,7 @@
 # asserts therefore comes in as FASTCACHED_MSVC_LIKE, resolved by the caller that
 # already knows the compiler rather than re-derived here.
 #
-# The module cannot fix that — it is sccache's replay, and fastcache-cc exists
+# The module cannot fix that — it is sccache's replay, and pace-cc exists
 # because it does not have it — so what it owes a developer is a word about it.
 # This checks that the word is there.
 #
@@ -69,16 +69,16 @@ set(FastCachedCaveatMarker "sccache replays a cache hit")
 #   <element>|<accepted spellings, ' / ' separated>
 #
 # The marker above pins how the warning starts, which is not the same as pinning
-# that it remains useful: the text could lose `fastcache-cc` entirely, or stop
+# that it remains useful: the text could lose `pace-cc` entirely, or stop
 # naming which compilers are exposed, and every assertion here would still pass.
 # The same three elements are required of every prose surface that recommends
-# pointing sccache at fastcached (`ctest -R sccache-backend-caveat`, issue #170),
+# pointing sccache at pace-kv (`ctest -R sccache-backend-caveat`, issue #170),
 # and this is the caveat that reaches a developer at the moment of the mistake
 # rather than hours later, so it is held to them too. Wording is free.
 set(FastCachedCaveatElements
     "the exposed compilers|MSVC / clang-cl"
     "the mechanism|/showIncludes / /EP"
-    "the remedy|fastcache-cc"
+    "the remedy|pace-cc"
 )
 
 # One row per selection outcome, pipe-delimited:
@@ -105,7 +105,7 @@ set(FastCachedCaveatElements
 # <stand-in launcher> is one of sccache, ccache, sccache-and-ccache or none, and
 # names which of the module's launcher variables are pointed at a real program; the
 # others are forced empty so the outcome does not depend on what the host happens
-# to have installed. fastcache-cc is always forced empty — its own row is
+# to have installed. pace-cc is always forced empty — its own row is
 # conditional on a daemon answering, which is a different property with its own
 # test.
 #

@@ -37,7 +37,7 @@ namespace Pace::WireFields
 /// `Protocol/Framing/` is where the *stream* readers live, and they are compiled
 /// into the library. This is a pure byte-level transform with no socket, no clock
 /// and no state, and it has to be includable from `Protocol/CompileCacheWire.hpp`
-/// — which `fastcache-cc` compiles in **without linking `Pace`**, so an
+/// — which `pace-cc` compiles in **without linking `Pace`**, so an
 /// include of anything that needs a translation unit there breaks the launcher's
 /// link rather than merely its build. Sitting in `Core/` beside `Endian.hpp` and
 /// `Bytes.hpp`, header-only and dependency-free, is what keeps that constraint

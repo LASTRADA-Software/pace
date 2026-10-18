@@ -18,7 +18,7 @@
 namespace Pace
 {
 
-/// fastcached's own TCP port: 6674, the leading digits of the gravitational
+/// pace-kv's own TCP port: 6674, the leading digits of the gravitational
 /// constant G = 6.674e-11.
 ///
 /// Deliberately *not* memcached's 11211 nor redis's 6379. The daemon detects
@@ -299,7 +299,7 @@ struct Config
     /// the cache is in-memory only.
     std::string storagePath {};
 
-    /// TCP port. Defaults to fastcached's own `DefaultPort`; see the constant
+    /// TCP port. Defaults to pace-kv's own `DefaultPort`; see the constant
     /// for why the number is ours rather than memcached's or redis's.
     std::uint16_t port { DefaultPort };
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An edit saved while `fastcache-cc` is compiling a translation unit must never record a manifest or store an object that does not match the key it is filed under, and must cost cross-checkout and cross-machine sharing nothing.
+**Goal:** An edit saved while `pace-cc` is compiling a translation unit must never record a manifest or store an object that does not match the key it is filed under, and must cost cross-checkout and cross-machine sharing nothing.
 
 **Architecture:** A new seam, `IInputFiles`, reads a file's identity (change time, size, volume, file id), hashes its content, and reads a coarse clock. `InputWitness` uses it to snapshot every input at three moments: T0 before the key's preprocess, T1′ after it, and T2 after the compile. From those snapshots it computes one `InputStability` verdict. An `EnumTable` maps the verdict to the STORE and manifest actions. `BuildManifest` stops reading files itself and takes each hash from an `IManifestContent`, which in production is the witness, so a manifest always describes the keyed content.
 
@@ -22,7 +22,7 @@
 - The `ComputeManifestKey` tag moves from `manifest-v7` to `manifest-v8`. `objkey-v*` does NOT move.
 - The new statistics token is `INPUTS-MOVED`. Existing tokens are uppercase words; `VERIFY-MISMATCH` is the precedent.
 - Format with the pinned clang-format, resolved by `bash scripts/check-clang-format-version.sh --resolve`. Never run a `clang-format -i` that is not that build.
-- Windows builds: `cmake --preset cl-debug` and `cmake --build --preset cl-debug --target fastcache-cc-tests` from a VS developer shell. Unit tests: `out/build/cl-debug/src/apps/fastcache-cc/fastcache-cc-tests.exe "[tag]"`. If the build directory differs, find the binary with `Get-ChildItem out/build/cl-debug -Recurse -Filter fastcache-cc-tests.exe`.
+- Windows builds: `cmake --preset cl-debug` and `cmake --build --preset cl-debug --target pace-cc-tests` from a VS developer shell. Unit tests: `out/build/cl-debug/src/apps/pace-cc/pace-cc-tests.exe "[tag]"`. If the build directory differs, find the binary with `Get-ChildItem out/build/cl-debug -Recurse -Filter pace-cc-tests.exe`.
 - A Catch2 run selecting a subset asserts how many cases ran (testing rule): read the `test cases:` line of the output, and never select by a name containing a comma.
 
 ## Review Focus
@@ -38,10 +38,10 @@
 ### Task 1: The `IInputFiles` seam and its disk implementation
 
 **Files:**
-- Create: `src/apps/fastcache-cc/InputFiles.hpp`
-- Create: `src/apps/fastcache-cc/InputFiles.cpp`
-- Create: `src/apps/fastcache-cc/InputFiles_test.cpp`
-- Modify: `src/apps/fastcache-cc/CMakeLists.txt`: add `InputFiles.cpp` to `_fc_cc_sources` (after `HitVerification.cpp`) and `InputFiles_test.cpp` to `fastcache-cc-tests` (after `HitVerification_test.cpp`).
+- Create: `src/apps/pace-cc/InputFiles.hpp`
+- Create: `src/apps/pace-cc/InputFiles.cpp`
+- Create: `src/apps/pace-cc/InputFiles_test.cpp`
+- Modify: `src/apps/pace-cc/CMakeLists.txt`: add `InputFiles.cpp` to `_fc_cc_sources` (after `HitVerification.cpp`) and `InputFiles_test.cpp` to `pace-cc-tests` (after `HitVerification_test.cpp`).
 
 **Interfaces:**
 - Consumes: `Pace::Cc::HashFileContents(std::string_view)` (`DirectManifest.hpp`) and `Pace::PathFromNarrowText(std::string_view)` (`Pace/Platform/NarrowText.hpp`, already in `_fc_cc_core`).
@@ -53,7 +53,7 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-`src/apps/fastcache-cc/InputFiles_test.cpp`:
+`src/apps/pace-cc/InputFiles_test.cpp`:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
@@ -207,12 +207,12 @@ On Windows `scratch.Path().string()` must return UTF-8. The process code page is
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cmake --build --preset cl-debug --target fastcache-cc-tests`.
+Run: `cmake --build --preset cl-debug --target pace-cc-tests`.
 Expected: a compile error, because `InputFiles.hpp` does not exist.
 
 - [ ] **Step 3: Write the header**
 
-`src/apps/fastcache-cc/InputFiles.hpp`:
+`src/apps/pace-cc/InputFiles.hpp`:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
@@ -294,7 +294,7 @@ class IInputFiles
 
 - [ ] **Step 4: Write the implementation**
 
-`src/apps/fastcache-cc/InputFiles.cpp`:
+`src/apps/pace-cc/InputFiles.cpp`:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
@@ -440,19 +440,19 @@ std::unique_ptr<IInputFiles> MakeDiskInputFiles()
 
 - [ ] **Step 5: Register the files in CMake**
 
-In `src/apps/fastcache-cc/CMakeLists.txt`:
+In `src/apps/pace-cc/CMakeLists.txt`:
 - add `InputFiles.cpp` on its own line after `HitVerification.cpp` in `set(_fc_cc_sources ...)`;
-- add `InputFiles_test.cpp` on its own line after `HitVerification_test.cpp` in `add_executable(fastcache-cc-tests ...)`.
+- add `InputFiles_test.cpp` on its own line after `HitVerification_test.cpp` in `add_executable(pace-cc-tests ...)`.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `cmake --build --preset cl-debug --target fastcache-cc-tests`, then `out/build/cl-debug/src/apps/fastcache-cc/fastcache-cc-tests.exe "[input-files]"`.
+Run: `cmake --build --preset cl-debug --target pace-cc-tests`, then `out/build/cl-debug/src/apps/pace-cc/pace-cc-tests.exe "[input-files]"`.
 Expected: PASS. On Windows, `test cases: 6 | 6 passed` (the two POSIX cases are compiled out). On Linux, 7.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/apps/fastcache-cc/InputFiles.hpp src/apps/fastcache-cc/InputFiles.cpp src/apps/fastcache-cc/InputFiles_test.cpp src/apps/fastcache-cc/CMakeLists.txt
+git add src/apps/pace-cc/InputFiles.hpp src/apps/pace-cc/InputFiles.cpp src/apps/pace-cc/InputFiles_test.cpp src/apps/pace-cc/CMakeLists.txt
 git commit -s -m "cc: an input file's identity, content and clock behind one seam (#1650)"
 ```
 
@@ -461,21 +461,21 @@ git commit -s -m "cc: an input file's identity, content and clock behind one sea
 ### Task 2: `BuildManifest` takes its hashes from a content source, and the manifest tag moves
 
 **Files:**
-- Modify: `src/apps/fastcache-cc/DirectManifest.hpp`:
+- Modify: `src/apps/pace-cc/DirectManifest.hpp`:
   - `ManifestFault` (line ~104) and `FaultTable` (line ~160);
   - add `IManifestContent` before `ManifestInputs`;
   - add a field to `ManifestInputs`;
   - declare `ProjectDependencyPaths` after `ResolveAgainst`.
-- Modify: `src/apps/fastcache-cc/DirectManifest.cpp`:
+- Modify: `src/apps/pace-cc/DirectManifest.cpp`:
   - `BuildManifest` (`:760-858`), the `record` lambda (`:790-796`);
   - `ComputeManifestKey`'s `KeyDigest digest { "manifest-v7" }` (`:995`);
   - define `ProjectDependencyPaths`.
-- Create: `src/apps/fastcache-cc/ManifestContentTestSupport.hpp`.
-- Modify: `src/apps/fastcache-cc/DirectManifest_test.cpp`:
+- Create: `src/apps/pace-cc/ManifestContentTestSupport.hpp`.
+- Modify: `src/apps/pace-cc/DirectManifest_test.cpp`:
   - all 16 `BuildManifest(` call sites gain `.content`;
   - the pinned-digest case (`:1672`);
   - new cases.
-- Modify: `src/apps/fastcache-cc/main.cpp:2120-2127`. A temporary `.content`, so the tree builds; Task 5 replaces it.
+- Modify: `src/apps/pace-cc/main.cpp:2120-2127`. A temporary `.content`, so the tree builds; Task 5 replaces it.
 
 **Interfaces:**
 - Consumes: nothing from Task 1.
@@ -488,7 +488,7 @@ git commit -s -m "cc: an input file's identity, content and clock behind one sea
 
 - [ ] **Step 1: Write the failing tests**
 
-`src/apps/fastcache-cc/ManifestContentTestSupport.hpp`:
+`src/apps/pace-cc/ManifestContentTestSupport.hpp`:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
@@ -556,7 +556,7 @@ class ScriptedContent final: public IManifestContent
 } // namespace Pace::Cc::Test
 ```
 
-Append to `src/apps/fastcache-cc/DirectManifest_test.cpp` (and add `#include "ManifestContentTestSupport.hpp"` beside the other local includes):
+Append to `src/apps/pace-cc/DirectManifest_test.cpp` (and add `#include "ManifestContentTestSupport.hpp"` beside the other local includes):
 
 ```cpp
 TEST_CASE("BuildManifest takes every hash from its content source, never from the disk", "[direct-manifest][1650]")
@@ -645,11 +645,11 @@ For every existing `BuildManifest(` call in `DirectManifest_test.cpp` and every 
 - add `.content = hashedWhenAsked` as the LAST designated initializer;
 - declare `Test::HashedWhenAsked const hashedWhenAsked;` at the top of each such case, or once in the file's anonymous namespace as `Test::HashedWhenAsked const hashedWhenAsked;`.
 
-These cases are about classification, so record-time hashing is right for them. Run `grep -c "BuildManifest(" src/apps/fastcache-cc/DirectManifest_test.cpp` before and after. The count of calls grows only by the new cases, and every one carries `.content`.
+These cases are about classification, so record-time hashing is right for them. Run `grep -c "BuildManifest(" src/apps/pace-cc/DirectManifest_test.cpp` before and after. The count of calls grows only by the new cases, and every one carries `.content`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cmake --build --preset cl-debug --target fastcache-cc-tests`.
+Run: `cmake --build --preset cl-debug --target pace-cc-tests`.
 Expected: a compile error, because `IManifestContent`, `ProjectDependencyPaths`, `ChangedDuringInvocation` and the `content` field do not exist.
 
 - [ ] **Step 3: Implement**
@@ -757,13 +757,13 @@ In `main.cpp:2120`, so the tree builds until Task 5, add `.content = recordTimeC
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `out/build/cl-debug/src/apps/fastcache-cc/fastcache-cc-tests.exe "[direct-manifest]"`, then the whole binary with no filter.
+Run: `out/build/cl-debug/src/apps/pace-cc/pace-cc-tests.exe "[direct-manifest]"`, then the whole binary with no filter.
 Expected: everything PASSES. The pinned-digest case fails once with the new v8 digest; paste that value as described in Step 1, then it passes.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/apps/fastcache-cc/DirectManifest.hpp src/apps/fastcache-cc/DirectManifest.cpp src/apps/fastcache-cc/DirectManifest_test.cpp src/apps/fastcache-cc/ManifestContentTestSupport.hpp src/apps/fastcache-cc/main.cpp
+git add src/apps/pace-cc/DirectManifest.hpp src/apps/pace-cc/DirectManifest.cpp src/apps/pace-cc/DirectManifest_test.cpp src/apps/pace-cc/ManifestContentTestSupport.hpp src/apps/pace-cc/main.cpp
 git commit -s -m "cc: a manifest's hashes come from a content source, and manifest-v8 retires every v7 manifest (#1650)"
 ```
 
@@ -772,10 +772,10 @@ git commit -s -m "cc: a manifest's hashes come from a content source, and manife
 ### Task 3: `InputWitness`, the verdict and its table
 
 **Files:**
-- Create: `src/apps/fastcache-cc/InputWitness.hpp`
-- Create: `src/apps/fastcache-cc/InputWitness.cpp`
-- Create: `src/apps/fastcache-cc/InputWitness_test.cpp`
-- Modify: `src/apps/fastcache-cc/CMakeLists.txt`: add `InputWitness.cpp` to `_fc_cc_sources` after `InputFiles.cpp`, and `InputWitness_test.cpp` to the tests after `InputFiles_test.cpp`.
+- Create: `src/apps/pace-cc/InputWitness.hpp`
+- Create: `src/apps/pace-cc/InputWitness.cpp`
+- Create: `src/apps/pace-cc/InputWitness_test.cpp`
+- Modify: `src/apps/pace-cc/CMakeLists.txt`: add `InputWitness.cpp` to `_fc_cc_sources` after `InputFiles.cpp`, and `InputWitness_test.cpp` to the tests after `InputFiles_test.cpp`.
 
 **Interfaces:**
 - Consumes: Task 1's `IInputFiles`, `FileIdentity` and `FileInstant`. Task 2's `IManifestContent`, `ManifestFault::ChangedDuringInvocation`, `ManifestInputs::content`, `ProjectDependencyPaths`, `BuildManifest` and `EncodeManifest`. Also `ComputeManifestKey` and `CanonicalSourceToken`.
@@ -837,7 +837,7 @@ The table rows, in enumerator order:
 
 - [ ] **Step 1: Write the failing tests**
 
-`src/apps/fastcache-cc/InputWitness_test.cpp`:
+`src/apps/pace-cc/InputWitness_test.cpp`:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
@@ -1141,7 +1141,7 @@ If clang-tidy rejects the C array `std::string encoded[2]`, use `std::array<std:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cmake --build --preset cl-debug --target fastcache-cc-tests`.
+Run: `cmake --build --preset cl-debug --target pace-cc-tests`.
 Expected: a compile error, because `InputWitness.hpp` does not exist.
 
 - [ ] **Step 3: Write `InputWitness.hpp`**
@@ -1188,13 +1188,13 @@ Implement exactly the rules listed above this task's Step 1. `Snapshot` loops `f
 
 - [ ] **Step 5: Register in CMake, build, run the tests**
 
-Run: `cmake --build --preset cl-debug --target fastcache-cc-tests`, then `out/build/cl-debug/src/apps/fastcache-cc/fastcache-cc-tests.exe "[input-witness]"`.
+Run: `cmake --build --preset cl-debug --target pace-cc-tests`, then `out/build/cl-debug/src/apps/pace-cc/pace-cc-tests.exe "[input-witness]"`.
 Expected: `test cases: 15 | 15 passed`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/apps/fastcache-cc/InputWitness.hpp src/apps/fastcache-cc/InputWitness.cpp src/apps/fastcache-cc/InputWitness_test.cpp src/apps/fastcache-cc/CMakeLists.txt
+git add src/apps/pace-cc/InputWitness.hpp src/apps/pace-cc/InputWitness.cpp src/apps/pace-cc/InputWitness_test.cpp src/apps/pace-cc/CMakeLists.txt
 git commit -s -m "cc: an input witness decides what an edit during a compile leaves sound (#1650)"
 ```
 
@@ -1203,14 +1203,14 @@ git commit -s -m "cc: an input witness decides what an edit during a compile lea
 ### Task 4: The `INPUTS-MOVED` outcome in the statistics
 
 **Files:**
-- Modify: `src/apps/fastcache-cc/Stats.hpp:26-41`, which is `enum class Outcome`.
-- Modify: `src/apps/fastcache-cc/Stats.cpp`:
+- Modify: `src/apps/pace-cc/Stats.hpp:26-41`, which is `enum class Outcome`.
+- Modify: `src/apps/pace-cc/Stats.cpp`:
   - `ParseOutcome` (`:589-600`) and `ToStringView` (`:1073-1089`);
   - the tally struct (`:455-515`): a field, `Total()` and the lookup total;
   - the text report (`:1020-1040`) and the tally switch (`:1300-1315`);
   - the source-listing condition (`:1337`), the miss-latency condition (`:1538`) and the HTML cards (`:1830-1840`).
-- Modify: `src/apps/fastcache-cc/Stats_test.cpp`.
-- Modify: `docs/tools/fastcache-cc.md`: the `## Statistics` section near line 672, and the sample `--show-stats` output.
+- Modify: `src/apps/pace-cc/Stats_test.cpp`.
+- Modify: `docs/tools/pace-cc.md`: the `## Statistics` section near line 672, and the sample `--show-stats` output.
 
 **Interfaces:**
 - Consumes: nothing.
@@ -1218,7 +1218,7 @@ git commit -s -m "cc: an input witness decides what an edit during a compile lea
 
 - [ ] **Step 1: Write the failing tests**
 
-Read `Stats_test.cpp` for how an existing case round-trips `VerifyMismatch` through a log line and the report, with `grep -n "VERIFY-MISMATCH\|VerifyMismatch" src/apps/fastcache-cc/Stats_test.cpp`. Add the same two cases for `InputsMoved`:
+Read `Stats_test.cpp` for how an existing case round-trips `VerifyMismatch` through a log line and the report, with `grep -n "VERIFY-MISMATCH\|VerifyMismatch" src/apps/pace-cc/Stats_test.cpp`. Add the same two cases for `InputsMoved`:
 - `ToStringView(Outcome::InputsMoved) == "INPUTS-MOVED"`, and a log line with that token reads back as `Outcome::InputsMoved`, not `Unavailable`;
 - a report over one `HIT` and one `INPUTS-MOVED` record says `inputs moved : 1`, counts 2 compiles, and lists the moved record's source among the named files.
 
@@ -1226,7 +1226,7 @@ Tag both `[stats][1650]`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `out/build/cl-debug/src/apps/fastcache-cc/fastcache-cc-tests.exe "[stats]"` after building.
+Run: `out/build/cl-debug/src/apps/pace-cc/pace-cc-tests.exe "[stats]"` after building.
 Expected: a compile error, because `Outcome::InputsMoved` does not exist.
 
 - [ ] **Step 3: Implement**
@@ -1252,7 +1252,7 @@ Every `switch` over `Outcome` without a `default` now fails to compile. Fix each
 - miss latency (`:1538`): add `|| record.outcome == Outcome::InputsMoved`, since it was a real compile.
 - HTML cards (`:1833`): `AppendTallyCard(out, "inputs moved", overall.inputsMoved, "uncache");`
 
-In `docs/tools/fastcache-cc.md` `## Statistics`, add one sentence after the paragraph naming the columns:
+In `docs/tools/pace-cc.md` `## Statistics`, add one sentence after the paragraph naming the columns:
 
 > `INPUTS-MOVED` is a compile during which one of its inputs changed — an editor's save, a `git checkout` in another terminal — so the launcher kept nothing from it; the `detail` column names the file and whether it moved while the key was taken or during the compile, and the next build caches as usual.
 
@@ -1260,13 +1260,13 @@ In the sample output, add no line; the sample shows a run with none.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `out/build/cl-debug/src/apps/fastcache-cc/fastcache-cc-tests.exe "[stats]"`, then the whole binary.
+Run: `out/build/cl-debug/src/apps/pace-cc/pace-cc-tests.exe "[stats]"`, then the whole binary.
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/apps/fastcache-cc/Stats.hpp src/apps/fastcache-cc/Stats.cpp src/apps/fastcache-cc/Stats_test.cpp docs/tools/fastcache-cc.md
+git add src/apps/pace-cc/Stats.hpp src/apps/pace-cc/Stats.cpp src/apps/pace-cc/Stats_test.cpp docs/tools/pace-cc.md
 git commit -s -m "cc: a compile an edit raced is recorded INPUTS-MOVED, never a miss (#1650)"
 ```
 
@@ -1275,7 +1275,7 @@ git commit -s -m "cc: a compile an edit raced is recorded INPUTS-MOVED, never a 
 ### Task 5: Wire the witness into `RunCached`
 
 **Files:**
-- Modify: `src/apps/fastcache-cc/main.cpp`:
+- Modify: `src/apps/pace-cc/main.cpp`:
   - `RecordManifest` (`:2024-2195`);
   - `RunCached`: before `:2845` (`preprocessStarted`), the probe block (`:2858-2972`), the backfill (`:3113-3130`), and after the `!CacheIsServing` return (`:3225-3234`) up to the final `RecordManifest` (`:3393-3394`);
   - remove Task 2's temporary `HashedWhenAsked` and its include.
@@ -1396,13 +1396,13 @@ Pass `keyedContent` to the final `RecordManifest` call at the end of `RunCached`
 
 - [ ] **Step 7: Build and run the whole unit suite and the existing e2e**
 
-Run: `cmake --build --preset cl-debug`, then `ctest --preset cl-debug -R "compile-cache-e2e" --output-on-failure` (Windows) and the `fastcache-cc-tests` binary.
+Run: `cmake --build --preset cl-debug`, then `ctest --preset cl-debug -R "compile-cache-e2e" --output-on-failure` (Windows) and the `pace-cc-tests` binary.
 Expected: every case PASSES. The existing e2e legs never edit mid-compile, so they show no `INPUTS-MOVED`. A spurious one here is a defect in this task, not a flake.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/apps/fastcache-cc/main.cpp
+git add src/apps/pace-cc/main.cpp
 git commit -s -m "cc: the witness guards the STORE, the manifest and the backfill (#1650)"
 ```
 
@@ -1418,12 +1418,12 @@ git commit -s -m "cc: the witness guards the STORE, the manifest and the backfil
 - Modify: `scripts/compile-cache-e2e.sh`:
   - accept `--edit-stub <path>`, in the usage text and the parse loop;
   - a new case `11` after case 10, listed in the header comment.
-- Modify: `src/apps/fastcache-cc/run-launcher-e2e.ps1`:
+- Modify: `src/apps/pace-cc/run-launcher-e2e.ps1`:
   - a `-EditStub` parameter;
   - a new per-compiler section after `=== a stale manifest is refused ($cc) ===`.
 
 **Interfaces:**
-- Consumes: Task 5's behaviour. The trace lines `fastcache-cc: an input changed during the compile: <path>; compiled, not stored; manifest recorded from the keyed content`, `fastcache-cc: MISS key=`, `fastcache-cc: HIT key=`, `STORED key=` and `MANIFEST stored key=`, and the statistics token `INPUTS-MOVED`.
+- Consumes: Task 5's behaviour. The trace lines `pace-cc: an input changed during the compile: <path>; compiled, not stored; manifest recorded from the keyed content`, `pace-cc: MISS key=`, `pace-cc: HIT key=`, `STORED key=` and `MANIFEST stored key=`, and the statistics token `INPUTS-MOVED`.
 - Produces: the `mid-compile-edit-stub` executable, driven by environment variables:
 
 <!-- table-total: none -->
@@ -1455,7 +1455,7 @@ In `src/tests/CMakeLists.txt`, before the `compile-cache-e2e` block:
 # the compile or before a dispatch preprocess. Built for the e2e fixtures below and never
 # installed. It is copied there under the real compiler's own file name, because the launcher
 # picks its driver grammar by that name.
-if(TARGET fastcache-cc)
+if(TARGET pace-cc)
     add_executable(mid-compile-edit-stub MidCompileEditStub.cpp)
 endif()
 ```
@@ -1526,7 +1526,7 @@ for leg in tu header; do
     moved_compile "$root" "${moved}/${leg}-2.log" FASTCACHE_E2E_CASE=moved \
         || { cat "${moved}/${leg}-2.log" >&2; fail "mid-compile ${leg}: the rebuild failed"; }
     cat "${moved}/${leg}-2.log"
-    grep -q "fastcache-cc: MISS" "${moved}/${leg}-2.log" \
+    grep -q "pace-cc: MISS" "${moved}/${leg}-2.log" \
         || fail "mid-compile ${leg}: the saved content was served from the cache (the #1650 defect)"
     object_says "${root}/build/m.o" "$want" || fail "mid-compile ${leg}: the object does not say ${want}"
 done
@@ -1586,7 +1586,7 @@ Expected: PASS, with every new `==` line printed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/tests/MidCompileEditStub.cpp src/tests/CMakeLists.txt scripts/compile-cache-e2e.sh src/apps/fastcache-cc/run-launcher-e2e.ps1
+git add src/tests/MidCompileEditStub.cpp src/tests/CMakeLists.txt scripts/compile-cache-e2e.sh src/apps/pace-cc/run-launcher-e2e.ps1
 git commit -s -m "tests: a save during a compile, end to end, with the controls that prove sharing survives (#1650)"
 ```
 
@@ -1736,10 +1736,10 @@ unchanged keys, so nothing recompiles. No step.
 - [ ] **Step 5: Prove the tests can fail (testing rule: neuter the fix)**
 
 Two neutering runs, each on a throwaway commit that is reverted, never pushed:
-1. In `InputWitness::AfterCompile`, return `_atKey` immediately. Run `fastcache-cc-tests "[input-witness]"` and `compile-cache-e2e`.
+1. In `InputWitness::AfterCompile`, return `_atKey` immediately. Run `pace-cc-tests "[input-witness]"` and `compile-cache-e2e`.
    - Expected red: the unit cases "A TU saved during the compile…", "Same bytes, new identity…", "A header deleted…", "A change in the same tick…" and "A late dependency…", plus the e2e lines `the save during the compile was not seen`.
    - Expected green: every control and every `MovedBeforeKey` case.
-2. In `BuildManifest`'s `record` lambda, use `HashFileContents(resolved)` instead of `inputs.content`. Run `fastcache-cc-tests "[1650]"`.
+2. In `BuildManifest`'s `record` lambda, use `HashFileContents(resolved)` instead of `inputs.content`. Run `pace-cc-tests "[1650]"`.
    - Expected red: "BuildManifest takes every hash from its content source…" and the content-refusal case.
 
 Record both runs (which cases went red, and which stayed green) in a scratch note for the pull request body. Then `git revert` or `git reset --hard` the throwaway commits back to the Task 7 tip, and confirm with `git log --oneline -3`.

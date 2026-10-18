@@ -35,7 +35,7 @@ namespace Pace
 /// WindowsServiceHost. launchd needs its absence: like systemd it supervises a
 /// process it started in the foreground, and a job that forks is reaped
 /// immediately as "exited" — the same reason the shipped systemd unit does not
-/// pass it (see packaging/linux/fastcached.service).
+/// pass it (see packaging/linux/pace-kv.service).
 enum class EmitDaemonFlag : std::uint8_t
 {
     No,  ///< Foreground supervision (launchd, systemd).
@@ -80,7 +80,7 @@ enum class WindowsLogonAccount : std::uint8_t
 /// serve more than one executable. Every function below used to take
 /// `Config const&` -- the *daemon's* configuration type -- so a second binary
 /// could not reach any of it without either depending on the daemon's config or
-/// growing a parallel copy of this entire file, and `fastcache-compile-node` had
+/// growing a parallel copy of this entire file, and `pace-node` had
 /// no service integration on macOS or Windows for exactly that reason.
 ///
 /// What is deliberately **not** here is how `arguments` was derived. An
@@ -96,8 +96,8 @@ enum class WindowsLogonAccount : std::uint8_t
 /// could not say so.** `ServiceSpec::applicationName` used to decide both at once:
 /// a service that named an application was handed a `--config` *and* a
 /// `--storage`, and one that named none got neither. That was exactly right while
-/// `fastcached` was the only file-configured service, and it left
-/// `fastcache-compile-node` -- which reads a configuration file and has no
+/// `pace-kv` was the only file-configured service, and it left
+/// `pace-node` -- which reads a configuration file and has no
 /// `--storage` flag at all -- with no way to say so
 /// ([#396](https://github.com/LASTRADA-Software/fastcached/issues/396)). Its spec
 /// had to name no application, which is the SAFE direction (a registration
@@ -295,7 +295,7 @@ struct ServiceSpec
     /// Environment the job is started with when it runs as `serviceAccount`, as name/value pairs.
     ///
     /// Tied to the account rather than to the job, because what it exists for is a property of
-    /// running unprivileged: `fastcache-compile-node` keeps its identity in a per-user directory
+    /// running unprivileged: `pace-node` keeps its identity in a per-user directory
     /// when it is not privileged, and its launchd daemon runs as an unprivileged account whose
     /// home is not where the machine's identity belongs -- so the registration hands it the
     /// machine-wide directory the way systemd's `StateDirectory=` hands one over
@@ -314,7 +314,7 @@ struct ServiceSpec
     /// the installer filled one in. `applicationName` below answers the other, a
     /// question about the **value**. Empty -- the default -- means every default is
     /// refused, which is what a service configured entirely from argv wants and
-    /// what `fastcache-compile-node` had to get by naming no application at all.
+    /// what `pace-node` had to get by naming no application at all.
     ///
     /// Declared here, immediately after the other byte-wide member, rather than
     /// beside `applicationName` where it reads better: every `bool` and byte-wide
@@ -357,7 +357,7 @@ struct ServiceSpec
     ///
     /// So the name still gates both defaults -- `ScopeDefaultApplies` asks it
     /// first -- and it no longer says anything about which flags a parser takes.
-    /// `fastcache-compile-node` names one and accepts only `ConfigPath`.
+    /// `pace-node` names one and accepts only `ConfigPath`.
     std::string applicationName;
 
     /// Which identity the Windows SCM should log this service on as.
@@ -384,19 +384,19 @@ struct ServiceSpec
 /// Describe the running daemon as a service to register.
 ///
 /// The daemon's half of the seam: it owns `CliResult`, so it is what turns one
-/// into a `ServiceSpec`. `fastcache-compile-node` has its own equivalent over its
+/// into a `ServiceSpec`. `pace-node` has its own equivalent over its
 /// own configuration type.
 ///
 /// Takes the **parse**, not the configuration, for the reason `BuildServiceArgv`
 /// does: which flags a registration carries is decided by what the operator
 /// typed, and only a `CliResult` knows that.
 ///
-/// @param exePath Absolute path to the fastcached executable.
+/// @param exePath Absolute path to the pace-kv executable.
 /// @param cli The command-line parse to embed in the launch arguments.
 /// @return The spec a supervisor is registered from.
 [[nodiscard]] ServiceSpec MakeDaemonServiceSpec(std::filesystem::path const& exePath, CliResult const& cli);
 
-/// Build the argument vector a service supervisor launches fastcached with.
+/// Build the argument vector a service supervisor launches pace-kv with.
 ///
 /// Element 0 is @p exePath; the rest are `--flag=value` tokens, one for every
 /// flag @p cli records the operator as having **named**, plus
@@ -431,7 +431,7 @@ struct ServiceSpec
 ///
 /// Pure and platform-independent so it can be unit-tested on every platform.
 ///
-/// @param exePath Absolute path to the fastcached executable.
+/// @param exePath Absolute path to the pace-kv executable.
 /// @param cli The command-line parse to embed in the launch arguments.
 /// @param daemonFlag Whether to emit `--daemon`.
 /// @return Argument vector, `exePath` first.
@@ -447,7 +447,7 @@ struct ServiceSpec
 /// single argument. Only the value is quoted, not the whole `--flag=value`
 /// token, which is what the SCM expects.
 ///
-/// @param exePath Absolute path to the fastcached executable.
+/// @param exePath Absolute path to the pace-kv executable.
 /// @param cfg Effective configuration to embed in the service command line.
 /// @return Fully-quoted command line string.
 [[nodiscard]] std::string BuildServiceCommandLine(ServiceSpec const& spec);
@@ -1290,7 +1290,7 @@ enum class RefusedRegistration : std::uint8_t
                                                 std::string_view serviceName,
                                                 RefusedRegistration registration);
 
-/// The firewall rules fastcached's registration needs: every non-loopback cache listener and,
+/// The firewall rules pace-kv's registration needs: every non-loopback cache listener and,
 /// with `--metrics`, a non-loopback admin endpoint.
 /// @param cfg The configuration the service will run with (the merged one).
 /// @param program The executable the rules admit.
@@ -1662,7 +1662,7 @@ class ILaunchdCalls
 /// @return What the registration was left as, and what to tell the operator.
 [[nodiscard]] ServiceControlResult LaunchdUninstall(ServiceSpec const& spec, ServiceScope scope, ILaunchdCalls& calls);
 
-/// Register fastcached with the platform's service supervisor.
+/// Register pace-kv with the platform's service supervisor.
 ///
 /// Windows: creates an SCM service with the start type `spec.startMode` names but
 /// leaves it **stopped** — the caller starts it explicitly (`sc start <name>`) for
@@ -1691,7 +1691,7 @@ class ILaunchdCalls
 ///         diagnostic (e.g. needs elevation, already exists).
 [[nodiscard]] ServiceControlResult InstallService(ServiceSpec const& spec, ServiceScope scope = ServiceScope::System);
 
-/// Remove a previously-registered fastcached service.
+/// Remove a previously-registered pace-kv service.
 ///
 /// Best-effort stops (Windows) or boots out (macOS) the service first, then
 /// deletes its registration. On Windows the stop is waited for, at most

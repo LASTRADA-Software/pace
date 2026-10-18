@@ -316,8 +316,8 @@ struct SecretFileFacts
 /// group name.
 ///
 /// **State the consequence rather than leave it to be discovered:** a
-/// `sudo fastcached --seed-config=...` run by hand on Linux therefore leaves
-/// `0600 root:root`, which the packaged unit's `User=fastcached` cannot read --
+/// `sudo pace-kv --seed-config=...` run by hand on Linux therefore leaves
+/// `0600 root:root`, which the packaged unit's `User=pace-kv` cannot read --
 /// and an unreadable machine-wide candidate is skipped in SILENCE by
 /// `ResolveDefaultConfigPath`, so the daemon would start on built-in defaults
 /// with nothing said. Nothing in the shipped Linux packaging reaches this (the

@@ -105,12 +105,12 @@ TEST_CASE("blank lines separate sections and blocks but never follow a title", "
 TEST_CASE("a title prints its subject uncolored on the same line", "[cli][usage]")
 {
     static constexpr auto sections =
-        std::to_array<UsageSection>({ { .title = "usage:", .subject = " fastcached [options]" } });
+        std::to_array<UsageSection>({ { .title = "usage:", .subject = " pace-kv [options]" } });
 
-    CHECK(RenderUsage({ .sections = sections }, UsageColor::Plain) == "usage: fastcached [options]\n");
+    CHECK(RenderUsage({ .sections = sections }, UsageColor::Plain) == "usage: pace-kv [options]\n");
 
     auto const colored = RenderUsage({ .sections = sections }, UsageColor::Colored);
-    CHECK(colored.starts_with("\x1b[1;36musage:\x1b[0m fastcached [options]"));
+    CHECK(colored.starts_with("\x1b[1;36musage:\x1b[0m pace-kv [options]"));
 }
 
 TEST_CASE("substitution runs before the column is measured", "[cli][usage]")

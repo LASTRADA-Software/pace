@@ -22,13 +22,13 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/EndpointDialer.hpp>
-#include <apps/fastcache-compile-node/EnrollChannel.hpp>
-#include <apps/fastcache-compile-node/EnrollClient.hpp>
-#include <apps/fastcache-compile-node/FleetProbe.hpp>
-#include <apps/fastcache-compile-node/FormationController.hpp>
-#include <apps/fastcache-compile-node/FormationLoop.hpp>
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
+#include <apps/pace-node/EndpointDialer.hpp>
+#include <apps/pace-node/EnrollChannel.hpp>
+#include <apps/pace-node/EnrollClient.hpp>
+#include <apps/pace-node/FleetProbe.hpp>
+#include <apps/pace-node/FormationController.hpp>
+#include <apps/pace-node/FormationLoop.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
 #include <tests/FormationFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 

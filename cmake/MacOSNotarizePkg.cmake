@@ -410,7 +410,7 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
         file(REMOVE "${_dmg}")
         message(STATUS "Creating ${_dmg} (attempt ${_attempt}/${_dmgAttempts})")
         execute_process(
-            COMMAND hdiutil create -volname "fastcached ${CPACK_PACKAGE_VERSION}"
+            COMMAND hdiutil create -volname "pace-kv ${CPACK_PACKAGE_VERSION}"
                     -srcfolder "${_stage}" -fs APFS -format UDZO -ov "${_dmg}"
             TIMEOUT ${_dmgTimeout}
             RESULT_VARIABLE _dmgResult

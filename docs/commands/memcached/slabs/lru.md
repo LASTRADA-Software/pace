@@ -2,7 +2,7 @@
 
 **Protocols:** memcached text · **Status:** Synthetic stub
 
-fastcached does not implement memcached's segmented LRU. Recognises
+pace-kv does not implement memcached's segmented LRU. Recognises
 `lru tune`, `lru mode`, and `lru temp_ttl` and replies `OK` so
 capability probes succeed.
 

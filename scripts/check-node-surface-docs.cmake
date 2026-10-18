@@ -24,7 +24,7 @@
 # both sentences rather than table rows:
 #
 #     cluster-communication.md   "carries the full six-surface table"   (it has four)
-#     fastcache-compile-node.md  "Five TCP rules and one wrong one"     (there are three)
+#     pace-node.md  "Five TCP rules and one wrong one"     (there are three)
 #
 # The second sits directly under a correct four-row table, and an operator counts
 # firewall rules from it. Neither is reachable by comparing rows to rows.
@@ -79,8 +79,8 @@ endif()
 # Where the truth is. Extracted, never restated: a second copy of the surface
 # list is not a cross-check, it is a second thing to be wrong, and it would go
 # stale in the direction that reports green.
-set(FastCachedSurfaceSource "src/apps/fastcache-compile-node/NodeSurfaces.cpp")
-set(FastCachedSurfaceHeader "src/apps/fastcache-compile-node/NodeSurfaces.hpp")
+set(FastCachedSurfaceSource "src/apps/pace-node/NodeSurfaces.cpp")
+set(FastCachedSurfaceHeader "src/apps/pace-node/NodeSurfaces.hpp")
 
 # Every markdown page under `docs/` is scanned. GLOBBED, not listed, and that
 # direction is the whole lesson of the two tickets that reached it before this
@@ -160,7 +160,7 @@ set(FastCachedSurfaceNumberWords
 #
 #   <path substring>|<the phrase, verbatim and on one line>|<which sense it is in, and why>
 set(FastCachedSurfaceCountExemptions
-    "fastcache-compile-node.md|There is one surface now|Counts the surfaces carrying the COMPILE VERBS, which is one -- the node port -- rather than the arity of the port set. It is the sentence explaining why the startup question has one answer again after #290 merged the ports that used to give it two, so a future merge is exactly what should make somebody re-read it."
+    "pace-node.md|There is one surface now|Counts the surfaces carrying the COMPILE VERBS, which is one -- the node port -- rather than the arity of the port set. It is the sentence explaining why the startup question has one answer again after #290 merged the ports that used to give it two, so a future merge is exactly what should make somebody re-read it."
 )
 
 # ---------------------------------------------------------------------------

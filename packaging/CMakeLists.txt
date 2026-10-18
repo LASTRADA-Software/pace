@@ -23,7 +23,7 @@ include(GNUInstallDirs)
 
 # The systemd unit name. Single source of truth: it names the installed unit
 # file and is substituted into every DEB/RPM scriptlet.
-set(FASTCACHED_SERVICE_NAME "fastcached.service" CACHE STRING "systemd unit name")
+set(FASTCACHED_SERVICE_NAME "pace-kv.service" CACHE STRING "systemd unit name")
 
 # Install destinations, RELATIVE to CMAKE_INSTALL_PREFIX so that CPack (which
 # stages by pointing the prefix at a private package root) and DESTDIR builds
@@ -65,22 +65,22 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     # source | destination | kind | installed-name | component
     #
     # The user unit is renamed on install: the source name disambiguates it in
-    # the tree, but `systemctl --user start fastcached` requires it to land as
-    # fastcached.service inside the user unit directory.
+    # the tree, but `systemctl --user start pace-kv` requires it to land as
+    # pace-kv.service inside the user unit directory.
     set(FASTCACHED_PLATFORM_ASSETS
-        "linux/fastcached.service|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|fastcached.service|Runtime"
-        "linux/fastcached-user.service|${FASTCACHED_SYSTEMD_USER_DIR}|data|fastcached.service|Runtime"
-        "linux/fastcached.sysusers|${FASTCACHED_SYSUSERS_DIR}|data|fastcached.conf|Runtime"
-        "linux/fastcached.tmpfiles|${FASTCACHED_TMPFILES_DIR}|data|fastcached.conf|Runtime"
+        "linux/pace-kv.service|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|pace-kv.service|Runtime"
+        "linux/pace-kv-user.service|${FASTCACHED_SYSTEMD_USER_DIR}|data|pace-kv.service|Runtime"
+        "linux/pace-kv.sysusers|${FASTCACHED_SYSUSERS_DIR}|data|fastcached.conf|Runtime"
+        "linux/pace-kv.tmpfiles|${FASTCACHED_TMPFILES_DIR}|data|fastcached.conf|Runtime"
         "config/fastcached.yaml|${FASTCACHED_SYSCONF_DIR}|config|fastcached.yaml|Runtime"
         # The compile worker. Its socket unit is what an operator enables, so the
         # service carries no [Install] and is pulled in by the socket -- see the
-        # units themselves. The account is its own rather than fastcached's,
-        # because a worker runs a compiler while fastcached owns the cache
+        # units themselves. The account is its own rather than pace-kv's,
+        # because a worker runs a compiler while pace-kv owns the cache
         # storage, and the trust model gives a worker no cache credentials at all.
-        "linux/fastcache-compile-node.service|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|fastcache-compile-node.service|Runtime"
-        "linux/fastcache-compile-node.socket|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|fastcache-compile-node.socket|Runtime"
-        "linux/fastcache-compile-node.sysusers|${FASTCACHED_SYSUSERS_DIR}|data|fastcache-node.conf|Runtime"
+        "linux/pace-node.service|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime"
+        "linux/pace-node.socket|${FASTCACHED_SYSTEMD_SYSTEM_DIR}|data|pace-node.socket|Runtime"
+        "linux/pace-node.sysusers|${FASTCACHED_SYSUSERS_DIR}|data|fastcache-node.conf|Runtime"
         # The worker's own configuration file, marked `config` for the reason
         # fastcached.yaml is: it is the file an operator edits to make the worker
         # work at all, and an upgrade that reset it would un-register the worker
@@ -89,11 +89,11 @@ if(FASTCACHED_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
         # Every platform, since #397. The .pkg and the MSI have no conffile
         # mechanism, so their equivalent is a `.default` copy plus a seed-once
         # step -- macos/seed-config.sh.inc walks a TABLE of files rather than one
-        # hardcoded name, and the MSI runs `fastcache-compile-node --seed-config`
+        # hardcoded name, and the MSI runs `pace-node --seed-config`
         # so the destination comes from the worker's own application name rather
         # than the daemon's. It was Linux-only for four releases and nothing said
         # so; `ctest -R config-reference-reach` is what says so now.
-        "config/fastcache-compile-node.yaml|${FASTCACHED_SYSCONF_DIR}|config|fastcache-compile-node.yaml|Runtime"
+        "config/pace-node.yaml|${FASTCACHED_SYSCONF_DIR}|config|pace-node.yaml|Runtime"
         #
         # What used to be here was `compile-node.env`, a shell fragment of
         # command-line arguments the unit expanded into ExecStart. It is gone
@@ -154,9 +154,9 @@ elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
         # `requirepass:` -- which on a worker is the one place its token may live,
         # since a supervisor records launch arguments where every local account
         # can read them.
-        "config/fastcache-compile-node.yaml|${FASTCACHED_MACOS_PREFIX}/etc|data|fastcache-compile-node.yaml.default|Runtime"
-        "macos/paths.d.fastcached|etc/paths.d|data|fastcached|Runtime"
-        "${CMAKE_CURRENT_BINARY_DIR}/macos/fastcached-uninstall|${FASTCACHED_MACOS_PREFIX}/bin|program|fastcached-uninstall|Runtime"
+        "config/pace-node.yaml|${FASTCACHED_MACOS_PREFIX}/etc|data|pace-node.yaml.default|Runtime"
+        "macos/paths.d.pace|etc/paths.d|data|pace|Runtime"
+        "${CMAKE_CURRENT_BINARY_DIR}/macos/pace-uninstall|${FASTCACHED_MACOS_PREFIX}/bin|program|pace-uninstall|Runtime"
     )
 endif()
 
@@ -259,7 +259,7 @@ elseif(FASTCACHED_PACKAGE_ROOT_PREFIX AND APPLE)
         "postinstall-runtime"
         "postinstall-launchagent"
         "postinstall-launchdaemon"
-        "fastcached-uninstall"
+        "pace-uninstall"
     )
 
     # Shared shell fragment, substituted into whichever scripts declare
@@ -336,7 +336,7 @@ if(WIN32)
     # lays down a daemon template only where the daemon is selected, and a build
     # without that app installs no template for it.
     get_property(_daemonComponent GLOBAL PROPERTY FASTCACHED_COMPONENT_OF_fastcached)
-    get_property(_nodeComponent GLOBAL PROPERTY FASTCACHED_COMPONENT_OF_fastcache-compile-node)
+    get_property(_nodeComponent GLOBAL PROPERTY FASTCACHED_COMPONENT_OF_pace-node)
     if(_daemonComponent)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/fastcached.yaml"
             DESTINATION "etc"
@@ -347,13 +347,13 @@ if(WIN32)
     # The worker's reference, same terms, same source file (#397). Seeded by the
     # same custom action, which takes the pair rather than one hardcoded name.
     if(_nodeComponent)
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/fastcache-compile-node.yaml"
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/pace-node.yaml"
             DESTINATION "etc"
-            RENAME "fastcache-compile-node.yaml.default"
+            RENAME "pace-node.yaml.default"
             COMPONENT "${_nodeComponent}"
         )
     endif()
 
     set(FASTCACHED_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/windows/service-actions.xml"
-        CACHE INTERNAL "WiX patch fragment registering the fastcached service")
+        CACHE INTERNAL "WiX patch fragment registering the pace-kv service")
 endif()

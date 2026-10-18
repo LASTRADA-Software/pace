@@ -36,10 +36,10 @@ enum class ConfigScope : std::uint8_t
 constexpr std::string_view ApplicationNameToken = "{app}";
 
 /// The daemon's name in the config lookup.
-constexpr std::string_view DaemonApplicationName = "fastcached";
+constexpr std::string_view DaemonApplicationName = "pace-kv";
 
 /// The compile worker's name in the config lookup.
-constexpr std::string_view NodeApplicationName = "fastcache-compile-node";
+constexpr std::string_view NodeApplicationName = "pace-node";
 
 /// Substitute @p appName for every ApplicationNameToken in @p pattern.
 /// @param pattern A candidate's `display` or `suffix`.
@@ -58,7 +58,7 @@ struct ConfigCandidate
     /// `"~/.config/{app}/{app}.yaml"`. Spelled symbolically because the real
     /// path is only known once the environment is read, and carrying
     /// ApplicationNameToken because more than one binary looks itself up here --
-    /// the rows used to hardcode `fastcached`, which is why the worker had no
+    /// the rows used to hardcode `pace-kv`, which is why the worker had no
     /// discovered-config path to generalize onto.
     std::string_view display;
 
@@ -181,7 +181,7 @@ struct ConfigLookup
 ///   logon — `IsPrivilegedProcess` says which): every row
 ///   applies, and *every* row must be one only an administrator could have
 ///   written — the per-user rows included. `$HOME` and `$XDG_CONFIG_HOME` are
-///   inputs an unprivileged account often controls, and `sudo -E fastcached`
+///   inputs an unprivileged account often controls, and `sudo -E pace-kv`
 ///   would otherwise take root's configuration from them.
 ///
 /// @param probe Environment, filesystem and privilege source.

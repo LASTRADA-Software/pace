@@ -111,7 +111,7 @@ namespace
                      .project = [](StorageStats const& s) noexcept { return s.evictions; } },
         // The daemon's half of #175. `--storage` carries the same key index as a
         // node's disk tier and is not scheduled against, so nothing corrects for it
-        // there at all -- this is the only surface on which a `fastcached` operator
+        // there at all -- this is the only surface on which a `pace-kv` operator
         // can see it, or alert before the machine starts swapping.
         //
         // A gauge, and NOT comparable with `bytes_limit` beside it: that budget is
@@ -589,7 +589,7 @@ std::string RenderPrometheus(StatsReading const& reading)
             // WHICH absence this is decides whether it is a FAULT, and that is the whole of
             // #1484. A row this build's sink has no slot for is a skew. A row this PROCESS has
             // no writer for is an ordinary fact about which surfaces it serves -- counting it
-            // would report every healthy `fastcache-compile-node` as a build whose catalogue and
+            // would report every healthy `pace-node` as a build whose catalogue and
             // sink disagree, which is a confident wrong signal replacing a vague one and costs
             // the skew series its meaning.
             //

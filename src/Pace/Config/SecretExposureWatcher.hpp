@@ -108,8 +108,8 @@ using SecretExposureReport = std::function<void(std::string_view)>;
 
 /// Which files a configuration's secrets live in.
 ///
-/// The one thing the two executables do not share. `fastcached` answers it with
-/// `DaemonSecretFiles`, `fastcache-compile-node` with `Node::NodeSecretFiles`, and
+/// The one thing the two executables do not share. `pace-kv` answers it with
+/// `DaemonSecretFiles`, `pace-node` with `Node::NodeSecretFiles`, and
 /// both apply whatever provenance gate they have before returning -- see
 /// `SecretFileWarnings` for why a path-reached secret has none.
 ///
@@ -206,7 +206,7 @@ void WatchSecretExposure(ConfigReloaderOf<ConfigT>& reloader,
 /// **No watcher, and that is the whole difference.** A remembered answer exists to
 /// keep a second observation quiet; a process started entirely from argv has no
 /// second moment, so there is nothing to remember and nothing that could repeat. It
-/// still has secret files -- `fastcache-compile-node` reaches four of them by path
+/// still has secret files -- `pace-node` reaches four of them by path
 /// and needs no configuration file to name any of them -- so the observation itself
 /// is not optional.
 ///

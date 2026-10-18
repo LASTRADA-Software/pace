@@ -26,7 +26,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # The sentences are composed in `src/apps/`, and the daemon's `StorageOpenFailure`
 # sits in an ANONYMOUS NAMESPACE in `main.cpp` behind
-# `add_executable(fastcached main.cpp)` with no test target anywhere -- so it is
+# `add_executable(pace-kv main.cpp)` with no test target anywhere -- so it is
 # unreachable by unit test without restructuring the app. A check that READS BOTH
 # SIDES needs no linkage at all, dodges the anonymous namespace, and covers the
 # node's half too, which lives in a different binary again.
@@ -87,11 +87,11 @@ set(FastCachedCorruptStorePage "docs/operations/corrupt-store.md")
 set(FastCachedDiagnosticFragments
     "StorageError(code=|src/Pace/Core/Errors/StorageError.hpp|StorageError(code={} system={} context={})|The rendering the page quotes character for character. The whole format string is pinned deliberately: this IS the verbatim quote, so a change-detector is what it needs."
     "context=FilePageStore::Open|src/Pace/Cache/CowTreeStorage.cpp|\"FilePageStore::Open\"|The context token an operator matches against. Nothing else in this tree produces it, so a rename would leave the page naming a context that no longer exists."
-    "failed to open storage '|src/apps/fastcached/main.cpp|failed to open {} '{}'|The daemon's one composer. The quoted `'{}'` is the field that matters -- it carries the path the operator needs to act on."
-    "failed to open shard '|src/apps/fastcached/main.cpp|failed to open {} '{}'|The --storage-shards variant, which names the ONE damaged file. Same composer, different `what` argument."
-    "--cache-dir |src/apps/fastcache-compile-node/CacheTier.cpp|--cache-dir {}|The node prefixes its tier's refusal with the flag the operator actually typed."
-    "cannot open |src/apps/fastcache-compile-node/CacheTier.cpp|cannot open {}|The node's own open failure -- a different binary and a different sentence from the daemon's."
-    "refusing to start|src/apps/fastcache-compile-node/main.cpp|refusing to start|The suffix the node's main adds. Composed in a THIRD place, so a check reading only the tier would miss it."
+    "failed to open storage '|src/apps/pace-kv/main.cpp|failed to open {} '{}'|The daemon's one composer. The quoted `'{}'` is the field that matters -- it carries the path the operator needs to act on."
+    "failed to open shard '|src/apps/pace-kv/main.cpp|failed to open {} '{}'|The --storage-shards variant, which names the ONE damaged file. Same composer, different `what` argument."
+    "--cache-dir |src/apps/pace-node/CacheTier.cpp|--cache-dir {}|The node prefixes its tier's refusal with the flag the operator actually typed."
+    "cannot open |src/apps/pace-node/CacheTier.cpp|cannot open {}|The node's own open failure -- a different binary and a different sentence from the daemon's."
+    "refusing to start|src/apps/pace-node/main.cpp|refusing to start|The suffix the node's main adds. Composed in a THIRD place, so a check reading only the tier would miss it."
 )
 
 # The `what` arguments the daemon's single composer is called with. Separate from
@@ -240,15 +240,15 @@ foreach(row IN LISTS FastCachedDaemonWhatLiterals)
         continue()
     endif()
 
-    fastcached_read_whole("src/apps/fastcached/main.cpp" daemonContent daemonFound)
+    fastcached_read_whole("src/apps/pace-kv/main.cpp" daemonContent daemonFound)
     if(NOT daemonFound)
-        list(APPEND problems "  src/apps/fastcached/main.cpp does not exist")
+        list(APPEND problems "  src/apps/pace-kv/main.cpp does not exist")
         continue()
     endif()
     string(FIND "${daemonContent}" "${literal}" literalAt)
     if(literalAt EQUAL -1)
         list(APPEND problems
-             "  the page quotes `${fragment}`\n      but src/apps/fastcached/main.cpp no longer passes ${literal} as the `what`\n      ${reason}")
+             "  the page quotes `${fragment}`\n      but src/apps/pace-kv/main.cpp no longer passes ${literal} as the `what`\n      ${reason}")
     endif()
     math(EXPR checkedFragments "${checkedFragments} + 1")
 endforeach()

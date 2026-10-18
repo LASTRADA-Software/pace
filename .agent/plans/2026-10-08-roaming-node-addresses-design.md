@@ -1,7 +1,7 @@
 # Roaming node addresses — design
 
 Status: approved in brainstorming, 2026-10-08.
-Scope: `fastcache-compile-node` in every role (worker, scheduler, Raft voter) on Linux, macOS and Windows.
+Scope: `pace-node` in every role (worker, scheduler, Raft voter) on Linux, macOS and Windows.
 
 ## Problem
 
@@ -152,12 +152,12 @@ authenticated-beacon desire.
 
 - Info log per change: old → new endpoint (and Raft endpoint).
 - Two counters: `fastcache_node_endpoint_changes_total`, `fastcache_node_raft_endpoint_changes_total`.
-- (`fastcache-cli node-status` is NOT extended: a reply field is a wire flag day.)
+- (`pacectl node-status` is NOT extended: a reply field is a wire flag day.)
 
 ### Packaging and docs
 
 - Packaged `.socket`/`.service`/YAML comments describe `auto`; no `--advertise` needed.
-- Docs: `docs/tools/fastcache-compile-node.md`, `docs/operations/cluster-communication.md`,
+- Docs: `docs/tools/pace-node.md`, `docs/operations/cluster-communication.md`,
   `docs/operations/windows-office-fleet.md`, `.agent/rules/distributed-compilation.md`,
   `.agent/rules/consensus-and-cluster.md` (+ AGENT.md tripwires).
 - Release-note upgrade hint: remove a literal `--advertise` work-around or roaming stays off.

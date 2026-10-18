@@ -63,7 +63,7 @@ inline constexpr std::string_view DelimitedReplacement = "\xEF\xBF\xBD";
 /// `starts_with("<!doctype html>")`, which both spellings satisfy -- and the node's
 /// small pages gaining one costs them nothing.
 ///
-/// `apps/fastcache-cc/Stats.cpp` opens its report with a third spelling and keeps it
+/// `apps/pace-cc/Stats.cpp` opens its report with a third spelling and keeps it
 /// for now, and **not because that binary cannot reach this header**: the launcher's
 /// own rule is header-only and std-only -- stated at the top of `Stats.cpp` against
 /// its own `Core/Ranges.hpp` include -- and this header plus both `Core/` headers it
@@ -86,10 +86,10 @@ inline constexpr std::string_view HtmlDocumentPrologue =
 /// is not what carries that, since this is one pass over each byte; the row
 /// being PRESENT is.
 ///
-/// Shared with `fastcache-cli`, and the TABLE is the shared part rather than the
+/// Shared with `pacectl`, and the TABLE is the shared part rather than the
 /// walk -- `EscapeDelimited` below escapes more than the client's TSV does, on
 /// purpose. That divergence is argued at `EscapeTsvField` in
-/// `apps/fastcache-cli/CliFormat.cpp`, which is where somebody is tempted to call
+/// `apps/pacectl/CliFormat.cpp`, which is where somebody is tempted to call
 /// the node's function instead, and restating it here would be this change's own
 /// defect one level up.
 ///
@@ -109,7 +109,7 @@ inline constexpr std::array DelimitedEscapes {
 /// which is a statement about spelling and **not** a claim that no other file
 /// implements the same convention. It is not: `CliFormat.cpp` hand-rolls the JSON
 /// convention as a `switch` and has drifted from `JsonEscapes` in both directions
-/// (#1356), and `fastcache-cc/Stats.cpp` hand-rolls the markup one. Said the other
+/// (#1356), and `pace-cc/Stats.cpp` hand-rolls the markup one. Said the other
 /// way round, this comment previously read as *nobody else does this*, which is
 /// the sentence a future reader uses to decide not to look.
 ///

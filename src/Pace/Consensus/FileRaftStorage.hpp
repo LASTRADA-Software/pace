@@ -34,7 +34,7 @@ namespace Pace::Consensus
 /// set that names only itself, an empty node elects itself and becomes a second cluster,
 /// which a joiner's empty bootstrap set is the rule against.
 ///
-/// Text, not a path to open: every flag it names is a row of `fastcache-compile-node`'s
+/// Text, not a path to open: every flag it names is a row of `pace-node`'s
 /// option table.
 inline constexpr std::string_view UnreadableStateRemedy =
     "stop the node and move raft-state, raft-log and raft-snapshot out of its state directory together, leaving "

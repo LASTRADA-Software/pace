@@ -172,7 +172,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
 
     Stage; Workflow "$Correct"
     Case "a shipping configure with the guard before its build passes" want-pass
@@ -193,7 +193,7 @@ jobs:
       - name: "Configure"
         run: cmake --preset gcc-release @SHIP@
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached
+        run: cmake --build out/build/gcc-release --target pace-kv
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json'
     Case "a guard step AFTER the build is REFUSED" want-fail
@@ -212,7 +212,7 @@ jobs:
         if: ${{ github.event_name == '"'"'push'"'"' }}
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
     Case "a guard step carrying an if: is REFUSED" want-fail
 
     # Gating without failing, which is a different mechanism and its own refusal.
@@ -229,7 +229,7 @@ jobs:
         continue-on-error: true
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
     Case "a guard step carrying continue-on-error is REFUSED" want-fail
 
     # The guard in ANOTHER job says nothing: the database it reads is that job's
@@ -244,7 +244,7 @@ jobs:
       - name: "Configure"
         run: cmake --preset gcc-release @SHIP@
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached
+        run: cmake --build out/build/gcc-release --target pace-kv
   elsewhere:
     runs-on: ubuntu-24.04
     steps:
@@ -266,7 +266,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/somewhere-else/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "a guard naming another configure's database is REFUSED" want-fail
 
     # A multi-line configure, which the three real ones include: the macOS package
@@ -288,7 +288,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/thing/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "a configure whose flag sits on a continuation line is FOUND and passes" want-pass
 
     # And the same shape with the guard removed, so the case above is not passing
@@ -308,7 +308,7 @@ jobs:
             @SHIP@ \
             -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "the same continuation-line configure with no guard is REFUSED, so the case above found it" want-fail
 
     # A configure that is NOT a shipping one must not be required to have a guard.
@@ -331,7 +331,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/gcc-release/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/gcc-release --target fastcached'
+        run: cmake --build out/build/gcc-release --target pace-kv'
     Case "a configure without the shipping flag needs no guard and passes" want-pass
 
     # A configure this cannot resolve to a directory is REFUSED rather than
@@ -349,7 +349,7 @@ jobs:
       - name: "No global instruction-set flag in what ships"
         run: bash scripts/run-check.sh @GUARD@ out/build/thing/compile_commands.json
       - name: "Build"
-        run: cmake --build out/build/thing --target fastcached'
+        run: cmake --build out/build/thing --target pace-kv'
     Case "a shipping configure whose build directory cannot be resolved is REFUSED" want-fail
 
     # Zero shipping configures. Every verdict above is about something missing, so

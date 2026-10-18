@@ -218,7 +218,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
         file(WRITE "${tree}/README.md" "not a source\n")
     endif()
     if(writeProse)
-        file(WRITE "${tree}/src/apps/fastcache-compile-node/AdminEndpoint.cpp" "${proseText}")
+        file(WRITE "${tree}/src/apps/pace-node/AdminEndpoint.cpp" "${proseText}")
     endif()
 
     if(NOT extraPath STREQUAL "")

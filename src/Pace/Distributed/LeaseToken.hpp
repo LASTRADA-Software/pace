@@ -55,8 +55,8 @@
 ///
 /// ## Why it is header-only
 ///
-/// `apps/fastcache-cc/WorkerProtocol.cpp` is where a lease will be verified, and that
-/// file is compiled into `fastcache-cc`, which deliberately does **not link**
+/// `apps/pace-cc/WorkerProtocol.cpp` is where a lease will be verified, and that
+/// file is compiled into `pace-cc`, which deliberately does **not link**
 /// `Pace`. Being header-only over `Core/Ed25519`, `Core/Base64` and the
 /// header-only `Core/WireFields` is what lets the launcher's build reach this
 /// with dependency-free rows in `_fc_cc_core` -- and the vendored Monocypher, which

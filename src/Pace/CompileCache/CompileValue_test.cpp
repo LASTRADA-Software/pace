@@ -205,7 +205,7 @@ TEST_CASE("DecodeCompileValue refuses a region count the frame cannot supply")
     // declared four billion of them and asked for roughly 172 GB. Measured rather than
     // estimated: `sizeof(TextRegion)` is 40, and 0xFFFFFFFF * 40 is 171.8e9.
     //
-    // Reachable from the daemon's STORE path, so `fastcached` itself was exposed and
+    // Reachable from the daemon's STORE path, so `pace-kv` itself was exposed and
     // not only the compile fleet, and from a worker's reply to the launcher. Run under
     // a 2 GiB address-space cap, the pre-fix decoder aborts on `std::bad_alloc`.
     auto const frame = FrameDeclaring(Pace::Testing::ImpossibleCount, 0);

@@ -1,7 +1,7 @@
 # Compile cache (`0xFC`)
 
 A small binary protocol for storing and retrieving compiler output, used by
-[`fastcache-cc`](../tools/fastcache-cc.md). Unlike the memcached and Redis
+[`pace-cc`](../tools/pace-cc.md). Unlike the memcached and Redis
 protocols, which move opaque bytes, this one is **structured**: the server
 understands that a value contains an object blob plus tagged text regions, and
 rewrites the paths inside those regions.
@@ -11,7 +11,7 @@ rewrites the paths inside those regions.
 The first byte a client sends selects the protocol. `0xFC` selects the compile
 cache, alongside the memcached and Redis flavors — see
 [Autodetection](autodetect.md). There is no dedicated port and no flag to
-enable it: every `fastcached` listener serves it.
+enable it: every `pace-kv` listener serves it.
 
 ## Framing
 
@@ -121,7 +121,7 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x2c` | enrollment-host-full | The request came from an address that already has as many enrollment requests waiting as one host may hold, counted by the address each request first came from, so it was not recorded. Its own code rather than enrollment-full, because one address asking a lot and many machines waiting are different problems; a joiner treats both as a wait. |
 | `0x2d` | ticket-refused | An AUTH presenting a machine ticket this node did not accept: a signature that does not verify, a machine the roster does not hold, a revoked key, an audience that is not this node, or an expiry passed. One code for all of them. The message names the reason when the caller could have checked it itself -- malformed bytes, a wrong audience, an expiry -- or when it is the node's own state; a forgery, a machine the roster does not hold and a revoked key all read `not admitted by this node`, because AUTH answers any address and those three would tell a stranger which ids the roster holds. The node still counts each of them apart. Not `unauthenticated`, which says a credential is still owed; this one says a credential was presented and judged. |
 | `0x2e` | identified-caller-required | An operator's **control** verb -- `CLUSTER-ADMIT` in every form, `CLUSTER-FORGET`, `CLUSTER-SET`, `ENROLL-CONTROL` -- from a caller admitted by `--fleet-open` alone. `--fleet-open` admits a caller to what the fleet serves and never to what decides the fleet; a caller on this machine, one that proved a node key, or one presenting a verified machine ticket is past this refusal, and is then asked for an operator's standing (`operator-standing-required`). Not `not-a-member`: the caller is admitted, and the remedy is to identify itself. |
-| `0x2f` | not-shared-cache | A `SHARED-FETCH` or `SHARED-STORE` at a node that is not the fleet's shared cache right now: the `shared-cache` setting names another machine or none, or names this one and its tier could not be opened. Not `unknown-opcode`, since every node implements the verbs and a client told otherwise would conclude the build is too old; not `not-a-member`, which would tell a proven member it is not one. A `fastcached` answers it too, so a client has one refusal to read as a miss whichever wrong machine it reached. |
+| `0x2f` | not-shared-cache | A `SHARED-FETCH` or `SHARED-STORE` at a node that is not the fleet's shared cache right now: the `shared-cache` setting names another machine or none, or names this one and its tier could not be opened. Not `unknown-opcode`, since every node implements the verbs and a client told otherwise would conclude the build is too old; not `not-a-member`, which would tell a proven member it is not one. A `pace-kv` answers it too, so a client has one refusal to read as a miss whichever wrong machine it reached. |
 | `0x30` | worker-rejected-argument | The worker will not pass one of the job's arguments to its compiler — it is not on the worker's per-driver-family allowlist, or a path-mapping value cannot be spelled into a rule — and the message names it; every refused argument of the job, not only the first, cut at the node condition detail's ceiling with the rest counted (`and N more`). The frame was well formed: until this code existed the refusal was answered `malformed-frame`, and a launcher reported a flag this fleet does not dispatch as a version skew. Either add the argument on the workers with `--allow-compile-arg`, if it runs no program and names no path, or leave those compiles to run locally. |
 | `0x31` | grant-unverifiable | The worker can check nobody's lease right now: the state its own consensus applied names no voter yet, or no leader that state counts has spoken to it for longer than the silence bound. A statement about the worker, never about the lease — a fresh grant would get the same answer. |
 | `0x32` | roster-not-yet-applied | A node proof the answering node cannot judge **yet**: its consensus has not applied the log it recovered when it started -- a lone voter before its election commits, a follower before its leader first speaks -- so the key roster it judges by may lack a key its cluster holds. Answered instead of `node-key-unknown`, which would tell an operator to admit a machine the cluster already holds. A statement about the answering node: the proving node asks again on a short backoff, and nobody needs to act. A launcher never meets it -- it proves no identity. |
@@ -171,12 +171,12 @@ An empty `username` asks to be verified against the secret alone — the redis
 `requirepass` form, and the usual one. The field is always present so the frame
 arity does not depend on which credential style a client uses.
 
-`fastcached` holds no roster and so can verify no machine: against
+`pace-kv` holds no roster and so can verify no machine: against
 `--requirepass` a ticket is refused as a wrong credential would be, and with no
 credential configured it is answered `Ok` and verifies nothing, like any other.
 
 A compile node checks no password — the one it may hold, `--requirepass`, it only
-presents to the `fastcached` behind its `--upstream` — so it verifies a **ticket** and
+presents to the `pace-kv` behind its `--upstream` — so it verifies a **ticket** and
 nothing else: a password `AUTH` is answered `Ok` and establishes nothing, and the declared `kind`
 decides what is verified — a genuine ticket's bytes under the password kind establish
 nothing either. A ticket it accepts says which machine the connection speaks for; one it
@@ -261,7 +261,7 @@ fleet holds whom it names: a reader acts on the member list only beside a key it
 
 A node that runs no consensus belongs to no fleet and answers `no-cluster`, and so does one
 whose consensus address reaches only itself, since a peer told to dial it would dial itself. A
-`fastcached` answers `no-cluster` too: it is a cache and belongs to no fleet. A nonce that is
+`pace-kv` answers `no-cluster` too: it is a cache and belongs to no fleet. A nonce that is
 not one 32-byte field is `malformed-frame`. None of these refusals is counted, because anybody
 can provoke them.
 
@@ -280,7 +280,7 @@ machine's own address and `--fleet-open` admit nobody here, and a revoked key is
 any address.
 
 Served only on the machine the cluster's `shared-cache` setting names, and only while its
-tier is open; every other node answers `not-shared-cache` (`0x2f`), and so does a `fastcached`,
+tier is open; every other node answers `not-shared-cache` (`0x2f`), and so does a `pace-kv`,
 which is never the fleet's shared cache -- one refusal, read as a miss, whichever wrong machine
 a client reached.
 
@@ -298,7 +298,7 @@ admission.
 ## Distributed execution
 
 Five more verbs turn the same wire into a scheduler and a worker protocol. None
-of them is served by `fastcached`: the scheduler is a `fastcache-compile-node` whose
+of them is served by `pace-kv`: the scheduler is a `pace-node` whose
 mode serves it, and the worker is the same binary serving compiles, both answering on
 its one `--listen-node`.
 
@@ -328,7 +328,7 @@ runs no component for is refused `unknown-opcode`: that is the honest code, beca
 this endpoint really does not implement it, and a client learns so rather than
 seeing a dropped connection it cannot tell from a dead host. It is emphatically not
 `dispatch-not-permitted`, which says the verb is served **somewhere else** — that is
-what `fastcached` answers a scheduling verb, two paragraphs up. The distinction is
+what `pace-kv` answers a scheduling verb, two paragraphs up. The distinction is
 the client's: `unknown-opcode` is the one refusal a launcher steps over before
 carrying on, and `dispatch-not-permitted` is one it treats as fatal, so the wrong
 code here is a worker that never joins and a cache that never hits, behind a green
@@ -337,7 +337,7 @@ misconfiguration, so this is what a **healthy** build answers.
 `AUTH` is the exception across a node's three verb families — the scheduler's, the
 compile verbs and the cache tier's, all of them now on that one port — none of which
 implements it, so each answers `unknown-opcode`, the one refusal a client steps over
-before carrying on unauthenticated. `fastcached` does
+before carrying on unauthenticated. `pace-kv` does
 implement `AUTH`: it is the only server on this wire that checks a credential, and
 `--requirepass` there refuses the gated verbs `unauthenticated` rather than stepping
 over anything.
@@ -399,7 +399,7 @@ the same digest from what it asked for and **refuses** a reply that does not mat
 before the object envelope is opened. There is no best-effort match and no fallback
 to using the object anyway: a mismatch means the translation unit is compiled
 locally, and the launcher says so unconditionally on stderr rather than only under
-`FASTCACHE_VERBOSE`. `fastcache-cc --show-stats` ranks it as a fall-back reason.
+`FASTCACHE_VERBOSE`. `pace-cc --show-stats` ranks it as a fall-back reason.
 
 It is integrity against **accident**, not against a hostile worker: the digest is
 unkeyed, so a worker that can return a wrong object can return a wrong digest just
@@ -581,7 +581,7 @@ arrived in the clear, before the seal existed, so nothing can say whose they are
 A worker holds its identity key in `--cluster-dir`, which it mints on first start; the
 cluster admits the key through an enrollment window, as a learner, and forgets it — refusing it from every address — with `--cluster-forget`. What
 an operator sees of all of this is on the
-[node's page](../tools/fastcache-compile-node.md#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
+[node's page](../tools/pace-node.md#a-node-proves-which-machine-it-is-and-every-frame-after-it-is-sealed).
 
 ## Authentication
 
@@ -609,7 +609,7 @@ exists to avoid.
 It does not have to be spelled that way. Replies are strictly ordered and
 one-per-request, so a client **pipelines**: AUTH and the real command go out in a
 single write, and the two replies are read in order afterwards. The credential
-costs a few dozen bytes in a segment that was being sent anyway. `fastcache-cc`
+costs a few dozen bytes in a segment that was being sent anyway. `pace-cc`
 does exactly this, and asserts it — a unit test checks the write *count*, because
 the bytes are identical either way and only the call count distinguishes a
 pipelined credential from one that waited.
@@ -647,7 +647,7 @@ A client must therefore treat `unknown-opcode` **on AUTH** as "this daemon has n
 authentication", not as a failed exchange. Returning it as the outcome instead
 gives a token-configured launcher a permanent 0% hit rate against every
 not-yet-upgraded daemon, reported as `rejected (unknown-opcode)` — a regression
-with a plausible-looking error message and no obvious cause. `fastcache-cc` falls
+with a plausible-looking error message and no obvious cause. `pace-cc` falls
 through to the command's own reply and sets `credentialIgnored`, which surfaces
 once per build as a verbose note: the operator asked for authentication and did
 not get it, and a cache that silently does less than it was told to is worse than
@@ -697,7 +697,7 @@ message an operator with a mismatched install will ever see.
 
 ### Why there is no handshake
 
-There is no HELLO and no negotiation round trip on the cache path. `fastcache-cc` opens a **fresh
+There is no HELLO and no negotiation round trip on the cache path. `pace-cc` opens a **fresh
 connection per operation** — manifest fetch, object fetch, object store,
 manifest store — so a handshake would cost two to four extra round trips *per
 translation unit*, on the hot path where this project has already measured

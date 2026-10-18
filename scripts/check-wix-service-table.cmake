@@ -27,7 +27,7 @@
 # refuses fails the transaction with nothing changed (B3-1, and B4-3: the leftover
 # deletions once ran before it, and nothing restores a deleted service, so they are
 # LAST now); the registration and the waiting start are Return="check" (ci-fix2);
-# fastcached stopped for the node is waited for until its PROCESS exits, and an
+# pace-kv stopped for the node is waited for until its PROCESS exits, and an
 # upgrade waits for the old product's service processes before its files (B4-2);
 # and every step a later failure would orphan has its ROLLBACK twin scheduled just
 # before it -- a registration this transaction created is removed, one it
@@ -45,11 +45,11 @@
 # is generic. msi-custom-action-commands step 13 judges the same row, and refuses a custom action
 # setting the property.
 #
-# The FastCachedDisableForNode rows pin fastcached DISABLED beside the node, Return="check": an OLD
+# The FastCachedDisableForNode rows pin pace-kv DISABLED beside the node, Return="check": an OLD
 # package's removal inside an upgrade keeps its own Restart Manager session, and PR 1634's CI MEASURED
 # Windows Installer restarting FastCached by name after the whole transaction had ended, onto the
 # port the node holds. Disabled, that start fails at the service control manager with no process.
-# And only a registration that EXISTS: the 1060 guard rows, since fastcached's own registration is
+# And only a registration that EXISTS: the 1060 guard rows, since pace-kv's own registration is
 # Return="ignore" and a checked disable of an absent service failed the node's whole install
 # (rm-nested review, I-1). msi-custom-action-commands step 14 runs the command both ways.
 #
@@ -130,11 +130,11 @@ set(_table [=[
 <Custom Action="FastCachedDeleteLeftover"|/>|FASTCACHED_REGISTERED_HERE = "1"
 <Custom Action="FastCachedDeleteLeftover"|/>|!~><
 <Custom Action="FastCachedDeleteLeftover"|/>|After="FastCacheNodeDeleteLeftoverFirewall"
-<CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'fastcached: FastCacheCompileNode'
+<CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCacheCompileNode'
 <CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Execute="deferred"
 <CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Impersonate="no"
 <CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"|/>|Return="ignore"
-<CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'fastcached: FastCached'
+<CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Remove-NetFirewallRule -Group 'Pace: FastCached'
 <CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Execute="deferred"
 <CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Impersonate="no"
 <CustomAction Id="FastCachedDeleteLeftoverFirewall"|/>|Return="ignore"
@@ -280,12 +280,12 @@ set(_table [=[
 <Custom Action="FastCacheRollbackDeleteFleetId"|/>|After="FastCacheRollbackRestoreFleetId"
 <Custom Action="FastCacheRollbackDeleteFleetId"|/>|Condition="(FASTCACHE_NODE_SELECTED = "1") AND NOT FASTCACHE_FLEET_ID_BEFORE"
 <Custom Action="FastCacheRememberFleetId"|/>|After="FastCacheRollbackDeleteFleetId"
-<CustomAction Id="FastCachedUndoRegistration"|/>|fastcached.exe" --uninstall-service"
+<CustomAction Id="FastCachedUndoRegistration"|/>|pace-kv.exe" --uninstall-service"
 <CustomAction Id="FastCachedUndoRegistration"|/>|Execute="rollback"
 <Custom Action="FastCachedUndoRegistration"|/>|After="FastCachedRestoreRegistrationExactly"
 <Custom Action="FastCachedUndoRegistration"|/>|Condition="FASTCACHED_SELECTED = "1" AND NOT FASTCACHED_IMAGEPATH"
 <Custom Action="FastCachedInstallService"|/>|After="FastCacheNodeSeedConfig"
-<CustomAction Id="FastCacheNodeUndoRegistration"|/>|fastcache-compile-node.exe" --uninstall-service"
+<CustomAction Id="FastCacheNodeUndoRegistration"|/>|pace-node.exe" --uninstall-service"
 <CustomAction Id="FastCacheNodeUndoRegistration"|/>|Execute="rollback"
 <Custom Action="FastCacheNodeUndoRegistration"|/>|After="FastCacheNodeRestoreRegistrationExactly"
 <Custom Action="FastCacheNodeUndoRegistration"|/>|Condition="FASTCACHE_NODE_SELECTED = "1" AND NOT FASTCACHE_NODE_IMAGEPATH"
@@ -328,8 +328,8 @@ set(_table [=[
 
 <Custom Action="FastCacheNodeUninstallService"|/>|NOT UPGRADINGPRODUCTCODE
 
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|bin\fastcached.exe\"
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|bin\fastcache-compile-node.exe\"
+<CustomAction Id="FastCacheAwaitServiceExit"|/>|bin\pace-kv.exe\"
+<CustomAction Id="FastCacheAwaitServiceExit"|/>|bin\pace-node.exe\"
 <CustomAction Id="FastCacheAwaitServiceExit"|/>|exit 1460
 <CustomAction Id="FastCacheAwaitServiceExit"|/>|Execute="deferred"
 <CustomAction Id="FastCacheAwaitServiceExit"|/>|Impersonate="no"
@@ -340,12 +340,12 @@ set(_table [=[
 <Custom Action="FastCacheAwaitServiceExit"|/>|Condition="WIX_UPGRADE_DETECTED AND NOT UPGRADINGPRODUCTCODE"
 <CustomAction Id="FastCacheAwaitServiceExit"|/>|# FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]"
 <CustomAction Id="FastCacheAwaitServiceExit"|/>|(Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").CommandLine
-<CustomAction Id="FastCacheAwaitServiceExit"|/>|$p+=\"$d\fastcached.exe\",\"$d\fastcache-compile-node.exe\"
+<CustomAction Id="FastCacheAwaitServiceExit"|/>|$p+=\"$d\pace-kv.exe\",\"$d\pace-node.exe\"
 <CustomAction Id="FastCachedAwaitExitForNode"|/>|# FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]"
 <CustomAction Id="FastCachedAwaitExitForNode"|/>|(Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").CommandLine
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|$p+=\"$d\fastcached.exe\"
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|bin\fastcached.exe\"
-<CustomAction Id="FastCachedAwaitExitForNode"|/>|!fastcache-compile-node
+<CustomAction Id="FastCachedAwaitExitForNode"|/>|$p+=\"$d\pace-kv.exe\"
+<CustomAction Id="FastCachedAwaitExitForNode"|/>|bin\pace-kv.exe\"
+<CustomAction Id="FastCachedAwaitExitForNode"|/>|!pace-node
 <CustomAction Id="FastCachedAwaitExitForNode"|/>|exit 1460
 <CustomAction Id="FastCachedAwaitExitForNode"|/>|Return="check"
 <Custom Action="FastCachedAwaitExitForNode"|/>|After="FastCachedStopForNode"
@@ -421,7 +421,7 @@ Before="InstallFinalize"|/>|FASTCACHE_FAIL_FOR_TEST = "1"
 <CustomAction Id="FastCachedRestoreRegistrationExactly"|/>|Execute="rollback"
 <Custom Action="FastCachedRestoreRegistrationExactly"|/>|After="FastCachedStashFromCopy"
 <Custom Action="FastCachedRestoreRegistrationExactly"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHED_IMAGEPATH"
-<CustomAction Id="FastCachedRestoreRegistration"|/>|fastcached.exe" --install-service --service-start=[FastCachedStartModeBefore] [FastCacheFirewallAllowBeforeArgument]"
+<CustomAction Id="FastCachedRestoreRegistration"|/>|pace-kv.exe" --install-service --service-start=[FastCachedStartModeBefore] [FastCacheFirewallAllowBeforeArgument]"
 <CustomAction Id="FastCachedRestoreRegistration"|/>|Execute="rollback"
 <Custom Action="FastCachedRestoreRegistration"|/>|After="FastCachedUndoRegistration"
 <Custom Action="FastCachedRestoreRegistration"|/>|Condition="FASTCACHED_SELECTED = "1" AND FASTCACHED_IMAGEPATH"

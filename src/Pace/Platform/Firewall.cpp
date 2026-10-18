@@ -296,7 +296,7 @@ FirewallPortKindRow const& FirewallPortKindRowOf(FirewallPortKind kind) noexcept
 
 std::string FirewallGroupFor(std::string_view serviceName)
 {
-    return std::format("fastcached: {}", serviceName);
+    return std::format("Pace: {}", serviceName);
 }
 
 std::string FirewallRuleName(std::string_view serviceName,

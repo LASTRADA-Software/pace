@@ -68,7 +68,7 @@ foreach(_binary IN LISTS _binaries)
 
     # --options=runtime enables the hardened runtime and --timestamp requests a
     # secure timestamp; notarization rejects a submission missing either. No
-    # entitlements file: fastcached needs neither JIT nor relaxed library
+    # entitlements file: pace-kv needs neither JIT nor relaxed library
     # validation, and entitlements it does not need would only widen its
     # attack surface.
     message(STATUS "Signing ${_binary}")

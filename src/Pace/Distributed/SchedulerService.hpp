@@ -111,7 +111,7 @@ enum class MembershipParticipant : std::uint8_t
     /// ignores it, so no decision can name it, and `EnumTable`'s zero row stays a reserved row.
     Reserved = 0,
     /// The caller is on this machine (`LoopbackMembership`): a process here already has this
-    /// machine's CPU, and the `fastcache-cc` a developer runs against their own node is the reason
+    /// machine's CPU, and the `pace-cc` a developer runs against their own node is the reason
     /// the node exists.
     Loopback,
     /// A policy that admits everybody (`OpenMembership`, `--fleet-open`): one machine, or a fleet
@@ -651,7 +651,7 @@ struct SchedulerReply
 ///
 /// ## Why this is not in the cache daemon any more
 ///
-/// It used to be, reached through a `Dispatch` role on one of `fastcached`'s
+/// It used to be, reached through a `Dispatch` role on one of `pace-kv`'s
 /// listeners. That made the cache daemon a *scheduler* as well as a store, and the
 /// two have opposite deployment shapes: a cache is a shared piece of infrastructure
 /// somebody operates, while a scheduler must live where the cluster's leadership

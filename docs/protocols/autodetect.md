@@ -1,6 +1,6 @@
 # Autodetection
 
-When a client connects, fastcached peeks the first byte and routes the
+When a client connects, pace-kv peeks the first byte and routes the
 connection to one of four protocol handlers — memcached binary, the
 compile cache, Redis RESP, or memcached text. (The meta commands are
 dispatched from inside the text handler, so they need no first-byte rule
@@ -25,7 +25,7 @@ memcached text handler, so they don't need their own first-byte rule.
 - **`0x80`** is the request magic of the memcached binary protocol
   header. It's a non-printable byte, so no text-protocol command can
   start with it.
-- **`0xFC`** is the magic of fastcached's own compile-cache protocol.
+- **`0xFC`** is the magic of pace-kv's own compile-cache protocol.
   Also non-printable, and distinct from `0x80`, so the two binary
   protocols cannot be confused for each other or for a text command.
 - **`*`** opens a RESP array; **`+`/`-`/`:`/`$`** are the simple-string,

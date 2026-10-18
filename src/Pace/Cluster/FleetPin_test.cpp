@@ -73,7 +73,7 @@ TEST_CASE("A pin round-trips through its text, and its text is refused by name w
         auto const refused = ParsePinnedFleet(idOnly);
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().contains("no voter key"));
-        CHECK(refused.error().contains("fastcache-cli node"));
+        CHECK(refused.error().contains("pacectl node"));
     }
 
     // More keys than any office runs.

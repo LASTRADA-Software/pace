@@ -10,7 +10,7 @@
 namespace Pace
 {
 
-/// What `fastcached` refuses a command line with before the daemon host is entered, or nothing.
+/// What `pace-kv` refuses a command line with before the daemon host is entered, or nothing.
 ///
 /// **The rules a SERVING daemon is held to, asked only of the outcomes that serve**
 /// (`JudgedByServingRules`): a start, and an install, which registers the command line a start

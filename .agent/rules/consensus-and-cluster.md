@@ -361,7 +361,7 @@ Every rule below has already been a bug.
     *cluster id* is deliberately exempt: it is compared, and another fleet's is kept as a
     key of the bounded foreign table -- filtering it would take every peer away from a
     fleet named in some other encoding, silently. **It IS rendered**, in
-    `foreign-fleet-visible`'s detail, which reaches NODE-STATUS (`fastcache-cli node`), the fleet page and the
+    `foreign-fleet-visible`'s detail, which reaches NODE-STATUS (`pacectl node`), the fleet page and the
     live-stats rows; it is text there because `NodeConditions` escapes every detail's
     bytes that are not UTF-8 as `\xNN` and clamps its length, which is what a watch case
     with a non-UTF-8 cluster id pins.
@@ -1021,7 +1021,7 @@ and it is recorded here because the question will be asked again.
   a password in a `CacheFetch` is the same bytes at whichever endpoint captured it. The first
   alone still hands every node's objects to whoever a committed entry names. The second alone
   presents a replayable secret to a machine that is a member today and forgotten tomorrow. So
-  a node's `--requirepass` goes to ONE place, the `fastcached` its own `--upstream` names. No
+  a node's `--requirepass` goes to ONE place, the `pace-kv` its own `--upstream` names. No
   scheduler-facing round presents it, so no replicated, redirected or announced scheduler
   endpoint can collect it.
 
@@ -1040,7 +1040,7 @@ and it is recorded here because the question will be asked again.
     leg replays.
   - Nothing a node holds as a secret is presented there. `SharedCacheUpstream` holds no
     `ICredentialSource`, which is structural rather than a setting.
-  - The leg speaks its own verb pair, `SharedFetch`/`SharedStore`, which `fastcached` refuses
+  - The leg speaks its own verb pair, `SharedFetch`/`SharedStore`, which `pace-kv` refuses
     by name (`NotSharedCache`, never an unknown opcode).
   - `upstream` stays in `RefusedSettingTable`, and its refusal names `shared-cache` as the
     replicated alternative.
@@ -2067,7 +2067,7 @@ tick -- the scheduler answers `NotLeader` and the fleet page goes dark until it 
   two things a follower may otherwise do. `Consensus::Configuration` is two disjoint sets with
   at least one voter, and `Membership::StandingOf(configuration, id)` is the ONE author of
   *where does this node sit* -- `RaftNode::CurrentStanding`, NODE-STATUS's
-  `consensus-standing` (`fastcache-cli node`), the member series' `seat` label and the node's own log line all ask it.
+  `consensus-standing` (`pacectl node`), the member series' `seat` label and the node's own log line all ask it.
   What a standing permits is `StandingTable`'s `timer` and `votes` columns, never a switch: a
   learner's row is `TimerKind::None`, so it has no election deadline at all rather than one it
   ignores. A LEADER keeps its heartbeat whatever its standing -- one demoted by a change it has

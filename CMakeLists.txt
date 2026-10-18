@@ -34,7 +34,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND NOT DEFINED ENV{MACOSX_
     set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum supported macOS version")
 endif()
 
-project(fastcached
+project(pace-kv
     VERSION "${FASTCACHED_VERSION}"
     DESCRIPTION "Fast Cache Daemon — platform-independent memcached/Redis server"
     LANGUAGES CXX
@@ -59,7 +59,7 @@ include(GNUInstallDirs)
 # `cmake --install --prefix /usr/local` keeps putting the daemon at
 # /usr/local/bin/fastcached. Defaulting it ON rebased every developer install
 # onto <prefix>/usr/bin, which is on nobody's PATH — a successful install that
-# left `fastcached` reporting "command not found".
+# left `pace-kv` reporting "command not found".
 #
 # Turn it ON only to build packages:
 #   cmake -DFASTCACHED_PACKAGE_ROOT_PREFIX=ON ... && cpack -G "DEB;RPM"
@@ -81,7 +81,7 @@ set(FASTCACHED_MACOS_PREFIX "opt/fastcached"
 # the subdirectory does not propagate back up, which left
 # CPACK_PRODUCTBUILD_IDENTIFIER empty: receipts then registered under CPack's
 # fallback identifier and the uninstaller's `pkgutil --pkgs | grep` matched
-# nothing, so macOS believed fastcached was still installed forever.
+# nothing, so macOS believed pace-kv was still installed forever.
 #
 # The bundle id must match LaunchdLabelPrefix + the lowercased default service
 # name in src/Pace/Platform/ServiceControl.cpp: the daemon derives its own
@@ -94,9 +94,9 @@ set(FASTCACHED_MACOS_BUNDLE_ID       "software.lastrada.fastcached")
 set(FASTCACHED_MACOS_SERVICE_ACCOUNT "_fastcached")
 
 # The compile worker's account, and deliberately NOT the daemon's above: a worker
-# runs a compiler on input that arrived over the network while fastcached owns the
+# runs a compiler on input that arrived over the network while pace-kv owns the
 # cache storage, so one shared account would let a compromised compile rewrite
-# every cached object -- the reason packaging/linux/fastcache-compile-node.sysusers
+# every cached object -- the reason packaging/linux/pace-node.sysusers
 # declares its own too.
 #
 # Spelled exactly as that sysusers file and as MakeNodeServiceSpec's
@@ -128,7 +128,7 @@ set(FASTCACHED_MACOS_NODE_LABEL      "software.lastrada.fastcachecompilenode")
 # own comment records what that cost: "The uninstaller has the mirror of this
 # guard; this is the half that went missing." A tool added to one and not the
 # other is either a link nothing removes or a link nothing creates.
-set(FASTCACHED_MACOS_LINKED_TOOLS "fastcached fastcache-cc fastcache-compile-node fastcache-cli")
+set(FASTCACHED_MACOS_LINKED_TOOLS "pace-kv pace-cc pace-node pacectl")
 
 # The machine-wide configuration directory. Declared here, not in packaging/,
 # for the same scoping reason as the macOS variables above: packaging/ installs
@@ -205,15 +205,15 @@ option(FASTCACHED_ENABLE_COMPRESSION "Enable on-disk value compression (zstd + l
 option(TRACY_ENABLE "Enable Tracy profiler instrumentation (fetches & links the Tracy client)" OFF)
 option(TRACY_ON_DEMAND "Tracy: only collect data while a profiler is connected" ON)
 
-# core-cpp's terminal UI, `core::tui`, behind `fastcache-cli live-stats` (#134, #1596). ON,
+# core-cpp's terminal UI, `core::tui`, behind `pacectl live-stats` (#134, #1596). ON,
 # because a view nobody builds is a view nobody runs and its tests would not report -- the
 # option exists so a build that wants neither the terminal view nor a libunicode fetch can
 # say so, not as a way to keep it out of CI. It is forwarded as `CORE_CPP_WITH_TUI`.
-option(FASTCACHED_BUILD_TUI "Build core-cpp's terminal UI (fastcache-cli live-stats)" ON)
+option(FASTCACHED_BUILD_TUI "Build core-cpp's terminal UI (pacectl live-stats)" ON)
 
 # ----------------------------------------------------------------------------
 # Where dependency sources live, decided BEFORE the compiler cache is loaded: the cache module
-# hands this location to fastcache-cc as its dependency root (FASTCACHE_DEPS_DIR), which is what
+# hands this location to pace-cc as its dependency root (FASTCACHE_DEPS_DIR), which is what
 # lets two machines whose caches sit in different homes share objects.
 #
 # Share fetched dependency SOURCES across build trees, per machine (#545).
@@ -270,7 +270,7 @@ endif()
 
 # ----------------------------------------------------------------------------
 # Compiler caching. Loaded before any compiler invocation so that CPM-fetched
-# dependencies also get cached. CompileCache.cmake prefers our own fastcache-cc
+# dependencies also get cached. CompileCache.cmake prefers our own pace-cc
 # launcher (when installed and a daemon answers, at 127.0.0.1:6674 unless
 # FASTCACHE_ADDR says otherwise), falls back to sccache and then ccache, and
 # silently no-ops when none is usable or USE_COMPILER_CACHE=OFF. It also declares
@@ -505,7 +505,7 @@ endif()
 # core-cpp, the shared C++23 foundation of the Contour Terminal projects (#1596): the coroutines,
 # the event loop, the sockets and TLS every tier here serves on (`core::async`, `core::net`,
 # `core::net_tls`), the clock seam, the profiling macros, and the terminal UI behind
-# `fastcache-cli live-stats` (`core::tui`). `FASTCACHED_ENABLE_TLS` and `TRACY_ENABLE` are
+# `pacectl live-stats` (`core::tui`). `FASTCACHED_ENABLE_TLS` and `TRACY_ENABLE` are
 # forwarded, so core-cpp builds TLS exactly when this project asks for it and records zones into the
 # same Tracy client. After libunicode, which `core::tui` links, so
 # core-cpp takes the target this project already declared rather than fetching a second copy; and
@@ -516,11 +516,11 @@ endif()
 # The pin is a TAG. To iterate against a local checkout, configure with
 # `-DCPM_core-cpp_SOURCE=<path>`; never commit a branch.
 #
-# **The /MT twins, on MSVC only.** `fastcache-cc` links the static CRT in Release (its
+# **The /MT twins, on MSVC only.** `pace-cc` links the static CRT in Release (its
 # FASTCACHED_STATIC_LAUNCHER) and the daemon the DLL one, so one build of core-cpp's compiled modules
 # cannot serve both: MSVC refuses to link /MT and /MD objects together. core-cpp builds a
 # `core::*_mt` twin of each compiled module when asked, and the launcher links those
-# (`src/apps/fastcache-cc/CMakeLists.txt`).
+# (`src/apps/pace-cc/CMakeLists.txt`).
 set(_fcCoreCppStaticRuntimeVariants OFF)
 if(MSVC)
     set(_fcCoreCppStaticRuntimeVariants ON)
@@ -575,7 +575,7 @@ include(InstructionSetProbe)
 # sanitizer configuration unless something hands it the flags. That was measured once, on the
 # vendored endo TUI this project carried before core-cpp (#134): an object of it in the ASan build
 # carried no `-fsanitize` and 0 `__asan` symbols, beside a `Pace` object carrying both, and a
-# ThreadSanitizer run of `fastcache-cli-tests` reported that binary's own objects instrumented
+# ThreadSanitizer run of `pacectl-tests` reported that binary's own objects instrumented
 # while the terminal wait on the pool was not.
 #
 # Moving those dependencies below these includes is the tidy-looking fix and the wrong one: it
@@ -705,7 +705,7 @@ target_link_libraries(Pace PUBLIC core::async core::net)
 target_link_libraries(Pace PRIVATE fastcache-monocypher)
 
 # Tracy is linked PUBLIC so the Tracy include dirs propagate transitively to the
-# fastcached executable (thread naming in main.cpp). core-cpp's `core::base` links
+# pace-kv executable (thread naming in main.cpp). core-cpp's `core::base` links
 # the same client when CORE_CPP_WITH_TRACY is on. When TRACY_ENABLE is OFF nothing
 # is linked and every `<core/Profiling.hpp>` macro compiles to nothing -- a
 # strictly zero-cost build.
@@ -723,7 +723,7 @@ configure_file(
 )
 
 # The checkout's paths, for the test cases that read a file out of it -- generated
-# here, before src/apps, because fastcache-compile-node-tests needs it as much as
+# here, before src/apps, because pace-node-tests needs it as much as
 # PaceTest does. A header and never a compile definition: the header says why.
 #
 # PROJECT_SOURCE_DIR rather than CMAKE_SOURCE_DIR: the two differ the moment this tree
@@ -762,7 +762,7 @@ add_subdirectory(src/Pace)
 # ----------------------------------------------------------------------------
 # Executables. Every binary lives under src/apps/<name>/ and declares its own
 # target and install rule there; src/apps/CMakeLists.txt holds the app table
-# that gates each one. The shipped binaries are fastcached and fastcache-cc;
+# that gates each one. The shipped binaries are pace-kv and pace-cc;
 # compile-cache-testclient is test infrastructure and is off by default.
 
 # The component every package's SHARED payload installs under: the docs, the licence, the VC++

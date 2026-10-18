@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Nothing under `src/apps/fastcache-cli/` asks the environment or the terminal a
+# Nothing under `src/apps/pacectl/` asks the environment or the terminal a
 # question directly (#134 §9.11).
 #
 # `live-stats` draws from a model and a rung, both handed to it: what the terminal can
@@ -68,7 +68,7 @@ endif()
 # Spelled once each: what is matched, what the refusals name, and what the exemption
 # rows are validated against.
 set(FastCachedAmbientTokens "getenv" "isatty" "ioctl" "GetConsoleMode")
-set(subjectRoot "src/apps/fastcache-cli")
+set(subjectRoot "src/apps/pacectl")
 set(controlRoot "src/Pace/Platform")
 set(exemptionTable "scripts/cli-ambient-read-exemptions.txt")
 
@@ -375,7 +375,7 @@ if(violations)
         message("  ${violation}")
     endforeach()
     message("")
-    message("fastcache-cli asks neither the environment nor the terminal anything itself: it is")
+    message("pacectl asks neither the environment nor the terminal anything itself: it is")
     message("HANDED the answers (#134 §9.11). A read here draws the right frame on the machine")
     message("it was tested on and passes every behavioural test, which is why this is a scan.")
     message("")

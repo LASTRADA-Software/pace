@@ -1612,7 +1612,7 @@ class IMetricsSink
 /// How many counters this build can represent: the extent of every table keyed by `IMetricsSink::Counter`.
 ///
 /// Spelled once, here rather than as `EnumeratorCount<Counter>`: this header is included by
-/// `fastcache-cc`'s `WorkerProtocol.hpp` and `CodecEnvelope.hpp`, which do not link Pace, so
+/// `pace-cc`'s `WorkerProtocol.hpp` and `CodecEnvelope.hpp`, which do not link Pace, so
 /// pulling in `Core/EnumTable.hpp` -- and with it `<ranges>`, `<algorithm>` and `<functional>` --
 /// would be the wrong trade for one constant.
 inline constexpr std::size_t CounterCount = static_cast<std::size_t>(IMetricsSink::Counter::Last);

@@ -692,7 +692,7 @@ NonBindingContexts=(
     "Code coverage|Undecided|#829"
     "compile-cache E2E (Linux)|Undecided|#829"
     "compile-cache E2E (Windows)|Undecided|#829"
-    "fastcache-cc smoke (compile-cache 0xFC)|Undecided|#829"
+    "pace-cc smoke (compile-cache 0xFC)|Undecided|#829"
     "Docker image|Undecided|#829"
 )
 

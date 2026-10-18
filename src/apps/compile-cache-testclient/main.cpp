@@ -3,7 +3,7 @@
 // Standalone compile-cache test client — the reference localizer.
 //
 // Drives a real compiler with /showIncludes, frames the result as a
-// CompileValue, and STOREs/FETCHes it against a running fastcached over the
+// CompileValue, and STOREs/FETCHes it against a running pace-kv over the
 // custom 0xFC protocol. On FETCH it localizes the canonical paths back to the
 // consumer's layout (linking the same PathCanon the server canonicalizes with,
 // so the parity contract is exercised, not reimplemented).
@@ -209,7 +209,7 @@ constexpr auto DaemonTimeout = std::chrono::seconds { 30 };
     // below already carry.
     auto socket = core::async::syncRun(core::net::connectTcp(std::string { a.host }, a.port, DaemonTimeout, DaemonTimeout));
     if (!socket.has_value())
-        Die("connect failed (" + socket.error().context + ") -- is fastcached running?");
+        Die("connect failed (" + socket.error().context + ") -- is pace-kv running?");
     return std::move(*socket);
 }
 

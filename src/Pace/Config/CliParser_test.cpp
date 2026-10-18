@@ -554,7 +554,7 @@ TEST_CASE("CliParser: --help text does not mention the removed execution-model f
     REQUIRE(!usage.contains("--threading-model"));
 }
 
-TEST_CASE("Config: the default port is fastcached's own, not a borrowed one", "[config][port]")
+TEST_CASE("Config: the default port is pace-kv's own, not a borrowed one", "[config][port]")
 {
     // The point of the constant: the daemon answers on a number nobody else
     // claims. Auto-detection means the port selects no protocol, so sitting on
@@ -614,7 +614,7 @@ TEST_CASE("CliParser: --help qualifies its sccache examples with the MSVC caveat
 {
     auto const usage = Pace::CliUsage();
 
-    // The examples above this recommend pointing sccache at a fastcached daemon
+    // The examples above this recommend pointing sccache at a pace-kv daemon
     // -- on Windows with an MSVC compile line, which is exactly the exposed
     // configuration. sccache hashes /EP output, which carries no paths, and
     // replays a hit's /showIncludes with the absolute paths of the checkout that
@@ -637,7 +637,7 @@ TEST_CASE("CliParser: --help qualifies its sccache examples with the MSVC caveat
     // is what holds that.
     REQUIRE(usage.contains("MSVC"));
     REQUIRE(usage.contains("clang-cl"));
-    REQUIRE(usage.contains("fastcache-cc"));
+    REQUIRE(usage.contains("pace-cc"));
 
     // And the caveat reads after what it qualifies, not before it. Both
     // positions are checked: with `caveat` at npos, `caveat > recommendation`

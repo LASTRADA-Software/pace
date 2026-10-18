@@ -80,12 +80,12 @@ set(FastCachedControlByteNames
     .clang-format .clang-format-ignore .clang-format-version .clang-tidy
     .clang-tidy-version .dockerignore .gitattributes .gitignore .tsan-suppressions
     Dockerfile LICENSE MANIFEST
-    # `packaging/macos/paths.d.fastcached` is an `/etc/paths.d` entry -- first-party
+    # `packaging/macos/paths.d.pace` is an `/etc/paths.d` entry -- first-party
     # text whose `.fastcached` suffix is a product name rather than a file type, so it
     # is named here rather than widening the extension list. Found by PRINTING the
     # unread count and then asking what those files were, which is the whole reason
     # that figure is in the output.
-    paths.d.fastcached)
+    paths.d.pace)
 
 # ---------------------------------------------------------------------------
 # The bytes. TAB (9) and LF (10) are the only C0 codes a file here may carry.

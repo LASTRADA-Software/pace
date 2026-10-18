@@ -9,14 +9,14 @@
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, sans-serif; font-size: 13px;">
 
-<p>This installs <b>fastcached</b>, a fast cache daemon speaking the memcached
-and Redis wire protocols, together with <b>fastcache-cc</b>, its compiler
+<p>This installs <b>Pace</b>: <b>pace-kv</b>, a fast cache daemon speaking the memcached
+and Redis wire protocols, together with <b>pace-cc</b>, its compiler
 launcher for shared compile caching.</p>
 
 <p>Both are installed into <code>/opt/fastcached/bin</code> and made available
 on your <code>PATH</code>.</p>
 
-<p>On the next screen you can choose whether fastcached starts automatically:</p>
+<p>On the next screen you can choose whether pace-kv starts automatically:</p>
 
 <ul>
   <li><b>Start at login</b> — runs as you, from your next login. This is the
@@ -29,7 +29,7 @@ on your <code>PATH</code>.</p>
 address, so if you select the system-wide service it takes precedence and the
 per-user one is skipped. Selecting neither installs the tools without starting
 anything, which you can change later with
-<code>fastcached --install-service</code>.</p>
+<code>pace-kv --install-service</code>.</p>
 
 </body>
 </html>

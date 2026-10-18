@@ -9,8 +9,8 @@
     service is registered and whether it is started:
 
       Node installed               node auto and started, with no property needed;
-                                   fastcached DISABLED and stopped
-      Daemon installed, no Node    fastcached auto and started (FASTCACHED_START_SERVICE=0 skips the start)
+                                   pace-kv DISABLED and stopped
+      Daemon installed, no Node    pace-kv auto and started (FASTCACHED_START_SERVICE=0 skips the start)
 
     It is applied on EVERY transaction that leaves a feature installed: a first
     install, a repair, a feature change and an upgrade. The binaries' own
@@ -39,7 +39,7 @@
     file is replaced. Windows Installer's Restart Manager is disabled
     (MSIRESTARTMANAGERCONTROL, below): it started a service this table had left
     stopped. An OLD package's removal, run inside an upgrade, still has its own
-    Restart Manager session, which is why fastcached beside the node is
+    Restart Manager session, which is why pace-kv beside the node is
     disabled rather than manual (FastCachedDisableForNode).
 
     Installers up to and including 0.3.0 delete both services in their own
@@ -68,7 +68,7 @@
 
   <!-- INSTALL_ROOT is CPack's name for the install root, NOT the WiX default
        INSTALLFOLDER: that one resolves to a directory built from the vendor and
-       product, with no fastcached.exe in it, and an action run there fails the
+       product, with no pace-kv.exe in it, and an action run there fails the
        install with error 1721. -->
   <CPackWiXFragment Id="#PRODUCT">
 
@@ -86,7 +86,7 @@
          stopped it for the node: it could not bind the port the node holds,
          crash-looped under its own recovery policy, and a restart landing while
          a later transaction had the node stopped took the port and failed that
-         transaction ("an upgrade deselecting fastcached", 1603). Its printed
+         transaction ("an upgrade deselecting pace-kv", 1603). Its printed
          log then MEASURED whose Restart Manager that was: not this package's,
          which logged "Disabled", but the OLD package's removal, nested in the
          upgrade (below). So disabling it here is necessary and NOT sufficient:
@@ -108,7 +108,7 @@
          wix-service-table refuse the package without this row.
 
          What it gives up: a NON-service process holding a replaced file (a
-         fastcache-cc inside a running build) is no longer offered for closing,
+         pace-cc inside a running build) is no longer offered for closing,
          and has no window for the FilesInUse dialog to list, so its file is
          replaced at the next boot (3010). And a maintenance transaction that
          removes a service relies on its process having exited between the stop
@@ -140,7 +140,7 @@
          it. CPack's properties.wxi sets INSTALL_ROOT only from
          Uninstall\[WIX_UPGRADE_DETECTED], which is empty outside an upgrade, so
          every maintenance transaction of a custom root fell back to the default
-         one: the uninstall ran the default root's fastcached.exe
+         one: the uninstall ran the default root's pace-kv.exe
          uninstall-service over a product installed elsewhere (Info 1721,
          ignored), removed the files, and left FastCached registered and pointing
          at a deleted binary (CI run 37456507637). Every action spelling
@@ -187,7 +187,7 @@
                  Before="CostFinalize" Sequence="both"
                  Condition="Installed AND FASTCACHE_INSTALL_LOCATION" />
 
-    <!-- 1 = start fastcached when the install leaves it the only service. -->
+    <!-- 1 = start pace-kv when the install leaves it the only service. -->
     <Property Id="FASTCACHED_START_SERVICE" Value="1" Secure="yes" />
 
     <!-- 1 = fail the install last, for the CI rollback proof (#1629). Secure so
@@ -225,7 +225,7 @@
     </Property>
 
     <!-- OPTIONAL: the ONE fleet the node may belong to, and the voters whose
-         key it takes that fleet's word from, as `fastcache-cli node` prints it
+         key it takes that fleet's word from, as `pacectl node` prints it
          (<cluster-id>@<key>[,<key>...]), passed VERBATIM as the node's fleet-id
          flag. Left out, discovery is trust-on-first-use. Security material: a
          value the node's parser refuses FAILS THE TRANSACTION, before anything
@@ -304,7 +304,7 @@
          FastCacheRemember actions below write them instead, on every transaction
          that leaves a service installed. The Guid is explicit and must NEVER be
          regenerated (see CPACK_WIX_UPGRADE_GUID). One key for both services,
-         because the firewall scope shapes fastcached's registration as well as
+         because the firewall scope shapes pace-kv's registration as well as
          the node's. -->
     <Component Id="FastCacheRememberedProperties" Directory="INSTALL_ROOT"
                Guid="87BB5EEE-8B9E-4401-9367-C86DB5061258" Bitness="always64">
@@ -342,7 +342,7 @@
     </Property>
 
     <!-- And the start type each registration had, as the raw search spells a
-         DWORD: #2 for auto, #3 for manual, #4 for disabled (fastcached beside
+         DWORD: #2 for auto, #3 for manual, #4 for disabled (pace-kv beside
          the node). What the binary's own restore is told when a failed
          transaction puts a re-applied registration back
          (FastCachedRestoreRegistration, FastCacheNodeRestoreRegistration). The
@@ -450,7 +450,7 @@
          CPACK_WIX_UPGRADE_GUID). Permanent: the operator's config outlives the
          package. -->
     <StandardDirectory Id="CommonAppDataFolder">
-      <Directory Id="FastCachedProgramData" Name="fastcached">
+      <Directory Id="FastCachedProgramData" Name="pace-kv">
         <Component Id="FastCachedProgramDataDir"
                    Guid="84BE18BD-514D-4D51-B22C-5BCF34255AE0"
                    Permanent="yes">
@@ -539,7 +539,7 @@
                  After="SetFastCachedRegisteredHereQuoted" Sequence="execute"
                  Condition="FASTCACHE_OWN_IMAGEPATH_RAW_PREFIX AND FASTCACHED_IMAGEPATH ~&lt;&lt; FASTCACHE_OWN_IMAGEPATH_RAW_PREFIX" />
 
-    <!-- The service table's start mode for fastcached, one row per case. -->
+    <!-- The service table's start mode for pace-kv, one row per case. -->
     <SetProperty Action="SetFastCachedStartManual" Id="FASTCACHED_START_MODE" Value="manual"
                  After="SetFastCachedSelected" Sequence="execute"
                  Condition="FASTCACHE_NODE_SELECTED = &quot;1&quot;" />
@@ -625,11 +625,11 @@
          FULL quoted path; a relative one cannot be launched (error 1721). -->
     <CustomAction Id="FastCachedSeedConfig"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcached.exe&quot; --seed-config=&quot;[INSTALL_ROOT]etc\fastcached.yaml.default&quot;"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --seed-config=&quot;[INSTALL_ROOT]etc\fastcached.yaml.default&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="FastCacheNodeSeedConfig"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe&quot; --seed-config=&quot;[INSTALL_ROOT]etc\fastcache-compile-node.yaml.default&quot;"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-node.exe&quot; --seed-config=&quot;[INSTALL_ROOT]etc\pace-node.yaml.default&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Registration. No config flag is passed: a path baked into the ImagePath
@@ -645,13 +645,13 @@
          properties. -->
     <CustomAction Id="FastCachedInstallService"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcached.exe&quot; --install-service --service-start=[FASTCACHED_START_MODE] [FastCacheFirewallAllowArgument]"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --install-service --service-start=[FASTCACHED_START_MODE] [FastCacheFirewallAllowArgument]"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
-    <!-- fastcached made manual may still be running from before (an earlier
+    <!-- pace-kv made manual may still be running from before (an earlier
          install, or a feature change adding the node). net.exe waits for the
          stop, which sc.exe does not, so the node does not start into a port
-         fastcached still holds. Whether it WAS running is written down first
+         pace-kv still holds. Whether it WAS running is written down first
          (InstallerRollback, FastCachedWasRunning), so a transaction that fails
          after this starts it again (FastCachedRestartAfterStop). -->
     <CustomAction Id="FastCachedStopForNode"
@@ -665,7 +665,7 @@
          (batch 4 review, B4-2): 0.3.0's uninstall stops FastCached without
          waiting, and the node, which binds 6674 exclusively, refused into a
          port the old process still held. Matched by executable path, so a
-         fastcached run by hand from elsewhere is not waited for: the path in
+         pace-kv run by hand from elsewhere is not waited for: the path in
          THIS install root, and the one the OLD registration named (below).
          Return="check": past 60 seconds the node would refuse anyway, and this
          names why, as exit code 1460 (ERROR_TIMEOUT) on this action.
@@ -673,7 +673,7 @@
          The old registration's directory too (batch 4 review, R4-1): CPack
          remembers no custom install directory, so an upgrade from a 0.3.0
          installed elsewhere installs to the default root, and a wait matching
-         the new root alone missed 0.3.0's lingering fastcached; the node then
+         the new root alone missed 0.3.0's lingering pace-kv; the node then
          refused into its port, a 1603 and a rollback. FASTCACHED_IMAGEPATH and
          FASTCACHE_NODE_IMAGEPATH hold the old registrations' command lines,
          read by AppSearch before RemoveExistingProducts deleted them. Both carry
@@ -686,7 +686,7 @@
          the one in the comment. -->
     <CustomAction Id="FastCachedAwaitExitForNode"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$p=@(\&quot;[INSTALL_ROOT]bin\fastcached.exe\&quot;);$c=(Get-CimInstance Win32_Process -Filter \&quot;ProcessId=$PID\&quot;).CommandLine;$n=$c.LastIndexOf(' FastCacheNode'+'ImagePath:');$f=$c.LastIndexOf(' FastCached'+'ImagePath:');if($f -ge 0 -and $n -gt $f)[\{]foreach($s in $c.Substring($f,$n-$f),$c.Substring($n))[\{]$a=$s.IndexOf('\&quot;');$b=$s.IndexOf('\&quot;',$a+1);if($a -ge 0 -and $b -gt $a)[\{]$d=Split-Path -Parent $s.Substring($a+1,$b-$a-1);$p+=\&quot;$d\fastcached.exe\&quot;[\}][\}][\}];$w=New-Object Diagnostics.Stopwatch;$w.Start();while(Get-Process -Name fastcached -ErrorAction SilentlyContinue|Where-Object Path -In $p)[\{]if($w.Elapsed.TotalSeconds -gt 60)[\{]exit 1460[\}];Start-Sleep -Milliseconds 250[\}] # FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$p=@(\&quot;[INSTALL_ROOT]bin\pace-kv.exe\&quot;);$c=(Get-CimInstance Win32_Process -Filter \&quot;ProcessId=$PID\&quot;).CommandLine;$n=$c.LastIndexOf(' FastCacheNode'+'ImagePath:');$f=$c.LastIndexOf(' FastCached'+'ImagePath:');if($f -ge 0 -and $n -gt $f)[\{]foreach($s in $c.Substring($f,$n-$f),$c.Substring($n))[\{]$a=$s.IndexOf('\&quot;');$b=$s.IndexOf('\&quot;',$a+1);if($a -ge 0 -and $b -gt $a)[\{]$d=Split-Path -Parent $s.Substring($a+1,$b-$a-1);$p+=\&quot;$d\pace-kv.exe\&quot;[\}][\}][\}];$w=New-Object Diagnostics.Stopwatch;$w.Start();while(Get-Process -Name pace-kv -ErrorAction SilentlyContinue|Where-Object Path -In $p)[\{]if($w.Elapsed.TotalSeconds -gt 60)[\{]exit 1460[\}];Start-Sleep -Milliseconds 250[\}] # FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]&quot;"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <!-- An upgrade's files are replaced only once the old product's service
@@ -711,11 +711,11 @@
          action in the directory it would have. -->
     <CustomAction Id="FastCacheAwaitServiceExit"
                   Directory="System64Folder"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$p=@(\&quot;[INSTALL_ROOT]bin\fastcached.exe\&quot;,\&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe\&quot;);$c=(Get-CimInstance Win32_Process -Filter \&quot;ProcessId=$PID\&quot;).CommandLine;$n=$c.LastIndexOf(' FastCacheNode'+'ImagePath:');$f=$c.LastIndexOf(' FastCached'+'ImagePath:');if($f -ge 0 -and $n -gt $f)[\{]foreach($s in $c.Substring($f,$n-$f),$c.Substring($n))[\{]$a=$s.IndexOf('\&quot;');$b=$s.IndexOf('\&quot;',$a+1);if($a -ge 0 -and $b -gt $a)[\{]$d=Split-Path -Parent $s.Substring($a+1,$b-$a-1);$p+=\&quot;$d\fastcached.exe\&quot;,\&quot;$d\fastcache-compile-node.exe\&quot;[\}][\}][\}];$w=New-Object Diagnostics.Stopwatch;$w.Start();while(Get-Process -Name fastcached,fastcache-compile-node -ErrorAction SilentlyContinue|Where-Object Path -In $p)[\{]if($w.Elapsed.TotalSeconds -gt 120)[\{]exit 1460[\}];Start-Sleep -Milliseconds 250[\}] # FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$p=@(\&quot;[INSTALL_ROOT]bin\pace-kv.exe\&quot;,\&quot;[INSTALL_ROOT]bin\pace-node.exe\&quot;);$c=(Get-CimInstance Win32_Process -Filter \&quot;ProcessId=$PID\&quot;).CommandLine;$n=$c.LastIndexOf(' FastCacheNode'+'ImagePath:');$f=$c.LastIndexOf(' FastCached'+'ImagePath:');if($f -ge 0 -and $n -gt $f)[\{]foreach($s in $c.Substring($f,$n-$f),$c.Substring($n))[\{]$a=$s.IndexOf('\&quot;');$b=$s.IndexOf('\&quot;',$a+1);if($a -ge 0 -and $b -gt $a)[\{]$d=Split-Path -Parent $s.Substring($a+1,$b-$a-1);$p+=\&quot;$d\pace-kv.exe\&quot;,\&quot;$d\pace-node.exe\&quot;[\}][\}][\}];$w=New-Object Diagnostics.Stopwatch;$w.Start();while(Get-Process -Name pace-kv,pace-node -ErrorAction SilentlyContinue|Where-Object Path -In $p)[\{]if($w.Elapsed.TotalSeconds -gt 120)[\{]exit 1460[\}];Start-Sleep -Milliseconds 250[\}] # FastCachedImagePath:[FASTCACHED_IMAGEPATH] FastCacheNodeImagePath:[FASTCACHE_NODE_IMAGEPATH]&quot;"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <!-- And DISABLED, so nothing can start it beside the node: both would
-         answer on 6674, and a start of fastcached there can only fail on the
+         answer on 6674, and a start of pace-kv there can only fail on the
          port and crash-loop under its recovery policy, racing the node for it
          whenever the node is stopped. One start is certain on an upgrade from a
          package that did not disable Restart Manager (0.3.0 and every build
@@ -729,7 +729,7 @@
          the start type it found (FastCachedRestoreRegistrationExactly).
 
          Only a registration that EXISTS is disabled. FastCachedInstallService is
-         Return="ignore" on purpose, so fastcached may be absent here (its
+         Return="ignore" on purpose, so pace-kv may be absent here (its
          install refused, say over a configuration an earlier install left), and
          an absent service is no more startable than a disabled one: the node's
          install must not fail and roll back over it, naming this action rather
@@ -737,7 +737,7 @@
          (ERROR_SERVICE_DOES_NOT_EXIST) for exactly that, MEASURED, and that one
          answer ends the action with 0; any other answer goes on to the disable.
          Return="check" for a disable that fails on a service that is THERE: a
-         fastcached left startable beside the node is exactly the race above.
+         pace-kv left startable beside the node is exactly the race above.
          msi-custom-action-commands step 14 runs this command against a service
          name nothing registers, both ways. -->
     <CustomAction Id="FastCachedDisableForNode"
@@ -757,7 +757,7 @@
          the registration that outranks the configuration file's cluster_dir for
          the life of the service.
 
-         Return="check", unlike fastcached's: the node's registration is not
+         Return="check", unlike pace-kv's: the node's registration is not
          optional state. An earlier package registered the node with a
          scheduler flag this node refuses at every start, so a re-registration
          that fails and is ignored leaves a node that cannot start, under an
@@ -766,7 +766,7 @@
          the refusal in the verbose log either way. -->
     <CustomAction Id="FastCacheNodeInstallService"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe&quot; --install-service --service-start=auto [FastCacheFirewallAllowArgument] [FastCacheNodeDiscoveryReplyArgument] [FastCacheFleetSeedArgument] [FastCacheFleetIdArgument]"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-node.exe&quot; --install-service --service-start=auto [FastCacheFirewallAllowArgument] [FastCacheNodeDiscoveryReplyArgument] [FastCacheFleetSeedArgument] [FastCacheFleetIdArgument]"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <!-- The node's arguments, checked by the node's own parser BEFORE anything
@@ -780,7 +780,7 @@
          which the registration's own install-service still does. -->
     <CustomAction Id="FastCacheNodeCheckArguments"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe&quot; --check-arguments --service-start=auto [FastCacheFirewallAllowArgument] [FastCacheNodeDiscoveryReplyArgument] [FastCacheFleetSeedArgument] [FastCacheFleetIdArgument]"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-node.exe&quot; --check-arguments --service-start=auto [FastCacheFirewallAllowArgument] [FastCacheNodeDiscoveryReplyArgument] [FastCacheFleetSeedArgument] [FastCacheFleetIdArgument]"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <!-- STOPPED first and started again, so a registration this transaction
@@ -844,11 +844,11 @@
          empty afterwards. -->
     <CustomAction Id="FastCacheNodeDeleteLeftoverFirewall"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'fastcached: FastCacheCompileNode' -ErrorAction SilentlyContinue&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'Pace: FastCacheCompileNode' -ErrorAction SilentlyContinue&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="FastCachedDeleteLeftoverFirewall"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'fastcached: FastCached' -ErrorAction SilentlyContinue&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;Remove-NetFirewallRule -Group 'Pace: FastCached' -ErrorAction SilentlyContinue&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Remember what this transaction registers, for the next one's AppSearch:
@@ -907,19 +907,19 @@
          those dropped it. -->
     <CustomAction Id="FastCachedUndoRegistration"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcached.exe&quot; --uninstall-service"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --uninstall-service"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="FastCachedRestoreRegistration"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcached.exe&quot; --install-service --service-start=[FastCachedStartModeBefore] [FastCacheFirewallAllowBeforeArgument]"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --install-service --service-start=[FastCachedStartModeBefore] [FastCacheFirewallAllowBeforeArgument]"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="FastCacheNodeUndoRegistration"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe&quot; --uninstall-service"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-node.exe&quot; --uninstall-service"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="FastCacheNodeRestoreRegistration"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe&quot; --install-service --service-start=[FastCacheNodeStartModeBefore] [FastCacheFirewallAllowBeforeArgument] [FastCacheNodeDiscoveryReplyArgument] [FastCacheFleetSeedBeforeArgument] [FastCacheFleetIdBeforeArgument]"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-node.exe&quot; --install-service --service-start=[FastCacheNodeStartModeBefore] [FastCacheFirewallAllowBeforeArgument] [FastCacheNodeDiscoveryReplyArgument] [FastCacheFleetSeedBeforeArgument] [FastCacheFleetIdBeforeArgument]"
                   Execute="rollback" Impersonate="no" Return="ignore" />
 
     <!-- The copy each exact restore reads: the service's whole key, under
@@ -1096,11 +1096,11 @@
          and Return="ignore" covers a registration that was never made. -->
     <CustomAction Id="FastCachedUninstallService"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcached.exe&quot; --uninstall-service"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-kv.exe&quot; --uninstall-service"
                   Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="FastCacheNodeUninstallService"
                   Directory="INSTALL_ROOT"
-                  ExeCommand="&quot;[INSTALL_ROOT]bin\fastcache-compile-node.exe&quot; --uninstall-service"
+                  ExeCommand="&quot;[INSTALL_ROOT]bin\pace-node.exe&quot; --uninstall-service"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <InstallExecuteSequence>
@@ -1220,7 +1220,7 @@
               Condition="FASTCACHED_SELECTED = &quot;1&quot; AND NOT (FASTCACHE_NODE_SELECTED = &quot;1&quot;) AND FASTCACHED_START_SERVICE = &quot;1&quot;" />
 
       <!-- The node is (re)registered on every transaction that leaves it
-           installed, as fastcached is: it needs no property, and the fleet
+           installed, as pace-kv is: it needs no property, and the fleet
            seed and the fleet pin are optional and arrive through
            FastCacheFleetSeedArgument and FastCacheFleetIdArgument.
            Re-registering is also what clears the scheduler flag an earlier
@@ -1325,7 +1325,7 @@
        characters WiX forbids in an Id turned into underscores. A mismatched Id
        fails the package ("Some XML patch fragments did not have matching IDs");
        the authoritative list is the generated _CPack_Packages/win64/WIX/files.wxs. -->
-  <CPackWiXFragment Id="CM_CP_Daemon.bin.fastcached.exe">
+  <CPackWiXFragment Id="CM_CP_Daemon.bin.pace-kv.exe">
     <ServiceControl Id="FastCachedStopForFiles" Name="FastCached" Stop="both" Wait="yes" />
   </CPackWiXFragment>
   <CPackWiXFragment Id="CM_CP_Node.bin.fastcache_compile_node.exe">
@@ -1333,7 +1333,7 @@
   </CPackWiXFragment>
 
   <!-- The install's bin directory on the system PATH, on the REQUIRED Cli
-       feature's component: attached to fastcached.exe, deselecting the daemon
+       feature's component: attached to pace-kv.exe, deselecting the daemon
        left every other binary unreachable by name. Part="last" appends;
        Permanent="no" lets the uninstall take it back out; System="yes" writes
        the machine PATH. Only processes started after the install see it. -->

@@ -846,7 +846,7 @@ run_case() {
         echo "a short line: status ${status}, [${short}]"
         # A column name this reader cannot read is a refused LAYOUT, never a column skipped in
         # silence -- which would shift every later column by one.
-        sed 's/\.name = "elapsed-ms"/.name = "elapsed_ms"/' "${source_dir}/src/apps/fastcache-cc/Stats.cpp" > "${scratch}/Stats.cpp"
+        sed 's/\.name = "elapsed-ms"/.name = "elapsed_ms"/' "${source_dir}/src/apps/pace-cc/Stats.cpp" > "${scratch}/Stats.cpp"
         grep -q 'elapsed_ms' "${scratch}/Stats.cpp" || echo "BUG: the odd column name was not planted"
         status=0
         e2e_launcher_log_layout "${scratch}/Stats.cpp" >/dev/null 2>&1 || status=$?
@@ -2635,7 +2635,7 @@ _selftest_metrics() {
 # flags differ between the BSD, GNU and OpenBSD builds and one of those is on
 # every platform CI runs, but never the same one.
 #
-# THE MARKER IS A PARAMETER, because `fastcached` has one of these lines too and
+# THE MARKER IS A PARAMETER, because `pace-kv` has one of these lines too and
 # it is a different one -- `ready, accepting connections`, from `ReadinessAnnouncer`
 # (#644). Two stand-ins would be two copies of a program whose every subtlety is
 # recorded here and in `_selftest_listener`, and the `exec`/lifetime pair is exactly
@@ -4531,7 +4531,7 @@ echo "   procsub: scanned ${procsub_scanned} script(s) under scripts/ (walked, n
 # **BSD `wc` pads its count with leading blanks; GNU `wc` does not.** So
 # `$(wc -c < f)` is `11` on Linux and `      11` on macOS, and a fixture that
 # captures it and compares it as a STRING is green on one platform and red on the
-# other. `fastcache-cli-e2e` shipped exactly that and failed on its first macOS run
+# other. `pacectl-e2e` shipped exactly that and failed on its first macOS run
 # with `--raw wrote       11 bytes, expected 11` -- a message whose two numbers are
 # EQUAL, which reads as the check being broken rather than as the shell, and is the
 # reading that gets an assertion deleted.

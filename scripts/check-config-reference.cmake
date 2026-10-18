@@ -16,7 +16,7 @@
 # ## Why this takes its files as PARAMETERS
 #
 # `check-node-config-reference.cmake` asks exactly this question about
-# `fastcache-compile-node`, and its own header says why it must be asked -- every
+# `pace-node`, and its own header says why it must be asked -- every
 # word of which is true of the daemon, which had no such check and is the binary
 # most operators actually run
 # ([#759](https://github.com/LASTRADA-Software/fastcached/issues/759)). Two checks

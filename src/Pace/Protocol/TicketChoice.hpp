@@ -19,7 +19,7 @@ namespace Pace::Cc
 /// none was minted.
 ///
 /// Header-only, over headers that are themselves std-only: the launcher includes it without linking
-/// `Pace`, and `fastcache-cli` and the node's operator verbs ask the same three questions, so
+/// `Pace`, and `pacectl` and the node's operator verbs ask the same three questions, so
 /// one answer serves all of them.
 
 /// Which credential one exchange presents.
@@ -36,7 +36,7 @@ enum class CredentialChoice : std::uint8_t
 /// Which credential an exchange going to @p audience presents.
 ///
 /// **The password goes to the ONE endpoint it was configured for** -- the cache at
-/// `FASTCACHE_ADDR`, a `fastcached --requirepass` -- and nowhere else: sent to every node it would
+/// `FASTCACHE_ADDR`, a `pace-kv --requirepass` -- and nowhere else: sent to every node it would
 /// stand in for a ticket, and a node admits no machine by a password. An audience that names no one
 /// machine presents nothing, asked through the MINTER's own rule (`NamesNoOneMachine`): loopback
 /// and `localhost` admit this machine as itself, a wildcard is nobody, and asking the node for a
@@ -92,7 +92,7 @@ enum class CredentialChoice : std::uint8_t
 ///
 /// **Every mint path dials under it, which is why it lives here and not beside the launcher's**
 /// (#1669): the launcher (`MintBudget`), the node's operator verbs (`OperatorCredentials`, whose
-/// exchange dials with the budget's connect) and `fastcache-cli` (`MintTicket`, over its own
+/// exchange dials with the budget's connect) and `pacectl` (`MintTicket`, over its own
 /// `--connect-timeout`), each capped through `ConnectAtMost`. The operator verbs used to dial under
 /// a fixed 2 s of their own, which on Windows is the whole refusal: a verb on a machine with no
 /// node waited it out before going anywhere.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Every RESP verb fastcached serves is documented, and every verb the docs claim is
+# Every RESP verb pace-kv serves is documented, and every verb the docs claim is
 # served exists.
 #
 # ## Why this exists

@@ -74,11 +74,11 @@ set(baseAppTable
 "# SPDX-License-Identifier: Apache-2.0
 set(FASTCACHED_APPS
     #  directory                   option                          default  description
-    \"fastcached|FASTCACHED_BUILD_DAEMON|ON|Build the fastcached daemon\"
-    \"fastcache-cc|FASTCACHED_BUILD_LAUNCHER|ON|Build the launcher\"
-    \"fastcache-compile-node|FASTCACHED_BUILD_NODE|ON|Build the compile worker\"
+    \"pace-kv|FASTCACHED_BUILD_DAEMON|ON|Build the pace-kv daemon\"
+    \"pace-cc|FASTCACHED_BUILD_LAUNCHER|ON|Build the launcher\"
+    \"pace-node|FASTCACHED_BUILD_NODE|ON|Build the compile worker\"
     \"compile-cache-testclient|FASTCACHED_BUILD_TESTCLIENT|OFF|Build the test client\"
-    \"fastcache-bench|FASTCACHED_BUILD_BENCHMARKS|OFF|Build the micro-benchmarks\"
+    \"pace-bench|FASTCACHED_BUILD_BENCHMARKS|OFF|Build the micro-benchmarks\"
 )
 ")
 
@@ -104,29 +104,29 @@ set(basePage
 The project ships three executables, and these are all of them: every target
 carrying an `install()` rule appears below.
 
-## `fastcached` — the cache daemon
+## `pace-kv` — the cache daemon
 
 The server. Start here: [Quickstart](../getting-started/quickstart.md).
 
-## `fastcache-cc` — the compiler launcher
+## `pace-cc` — the compiler launcher
 
 A drop-in replacement for [ccache](https://ccache.dev/) and
 [sccache](https://github.com/mozilla/sccache).
 
-Full reference: [fastcache-cc](fastcache-cc.md).
+Full reference: [pace-cc](pace-cc.md).
 
-## `fastcache-compile-node` — the compile worker
+## `pace-node` — the compile worker
 
 Takes translation units that missed the cache and compiles them.
 
-Full reference: [fastcache-compile-node](fastcache-compile-node.md).
+Full reference: [pace-node](pace-node.md).
 
 ## Which do I want?
 
 | Goal | Use |
 |------|-----|
-| Speed up compiles | `fastcache-cc` + a `fastcached` daemon |
-| A memcached- or Redis-compatible cache | `fastcached` alone |
+| Speed up compiles | `pace-cc` + a `pace-kv` daemon |
+| A memcached- or Redis-compatible cache | `pace-kv` alone |
 <!-- extra -->
 ")
 
@@ -202,9 +202,9 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
     file(WRITE "${tree}/docs/tools/index.md" "${pageText}")
 
     # Which apps install, before any mutation: the three real ones.
-    set(installedApps "fastcached" "fastcache-cc" "fastcache-compile-node")
-    set(allApps "fastcached" "fastcache-cc" "fastcache-compile-node"
-                "compile-cache-testclient" "fastcache-bench")
+    set(installedApps "pace-kv" "pace-cc" "pace-node")
+    set(allApps "pace-kv" "pace-cc" "pace-node"
+                "compile-cache-testclient" "pace-bench")
 
     if(NOT mutateApp STREQUAL "")
         if(NOT mutateApp IN_LIST allApps)
@@ -268,7 +268,7 @@ set(FastCachedToolsPageCases
     "documented not installed|page|<!-- extra -->|## `compile-cache-testclient` — the probe|`compile-cache-testclient` has a section on the Tools page and no `install()` rule|-"
 
     # Direction two, the quieter mirror: a binary users get and cannot find.
-    "installed not documented|install|fastcache-bench|on|`fastcache-bench` is installed and has no section on the Tools page|-"
+    "installed not documented|install|pace-bench|on|`pace-bench` is installed and has no section on the Tools page|-"
 
     # BRACKET ARM 2 of 3: the same violation, with an unbalanced `[` on the line
     # above it. A list-splitting reader merges the heading into the bracket line and
@@ -289,10 +289,10 @@ set(FastCachedToolsPageCases
     "app table matched nothing|apptable|set(FASTCACHED_APPS|set(FASTCACHED_PROGRAMS_RENAMED|the app table matched no rows|-"
 
     # The table names an app the tree does not have. Unknown is not absent.
-    "app named by the table is missing|omit|fastcache-cc|-|does not exist. Whether that app installs anything is therefore unknown|-"
+    "app named by the table is missing|omit|pace-cc|-|does not exist. Whether that app installs anything is therefore unknown|-"
 
     # Every install rule gone -- a renamed or restructured install idiom.
-    "no install rule anywhere|install|fastcached|off|-|-"
+    "no install rule anywhere|install|pace-kv|off|-|-"
 
     # The page still has headings, but not in the shape this scan reads.
     # Every backticked heading loses its backticks at once. Stripping only ONE leaves

@@ -142,7 +142,7 @@ set(FastCachedDuplicateNameExemptions
 # `*_test.cpp` suffix the convention uses.
 #
 # The suffix is a claim about where cases live, and it was wrong about eight files
-# carrying seventeen cases: the five `src/apps/fastcache-bench/*Bench.cpp`, and
+# carrying seventeen cases: the five `src/apps/pace-bench/*Bench.cpp`, and
 # `src/tests/`'s `CatchSkipCanary.cpp`, `ErrorPopupCanary.cpp` and
 # `OffThreadAssertionCanary.cpp`. Some of those sit outside the convention on
 # purpose -- a canary is not a test of the tree -- but a case in one is registered
@@ -365,7 +365,7 @@ foreach(source IN LISTS testSources)
         # `continue()`d -- so a `TEST_CASE(` whose name wraps to the next line was
         # not a violation, not a duplicate, not counted, and not reported: it left
         # the check entirely, in silence. One such case was live
-        # (`src/apps/fastcache-cli/LiveEventSource_test.cpp`, whose name is long
+        # (`src/apps/pacectl/LiveEventSource_test.cpp`, whose name is long
         # enough that the formatter wraps it), and nothing in the summary could
         # have said so -- a case that is never seen cannot lower a count anybody
         # is comparing against (#1261).

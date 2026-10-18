@@ -19,7 +19,7 @@ readable and silently ignored. Every rule below has already been one of them.
   Every function in `Platform/ServiceControl` took `Config const&` -- the *daemon's*
   configuration type -- so a second binary could reach none of it without either
   depending on the daemon's configuration or growing a parallel copy of a 1273-line
-  file. That is the whole reason `fastcache-compile-node` had no service integration
+  file. That is the whole reason `pace-node` had no service integration
   on macOS or Windows. Four things about the seam's shape are load-bearing:
   - **`daemonFlag` is a field rather than an argument**, because the two supervisors
     disagree and one spec has to answer both: the Windows SCM needs it (it is the
@@ -33,7 +33,7 @@ readable and silently ignored. Every rule below has already been one of them.
     never a parent -- `--storage=/var/db/fc` must not hand `/var/db`, shared with
     other system services, to an unprivileged cache account.
   - **An empty `serviceAccount` means root, so a worker names one.** A system-scope
-    launchd job with no `UserName` runs as root, and `fastcache-compile-node`
+    launchd job with no `UserName` runs as root, and `pace-node`
     compiles input that arrived over the network. Naming `fastcache-node` -- the
     account the Linux unit already uses -- puts the existing "that account does not
     exist" guard in the way, so a macOS system-scope install refuses rather than
@@ -41,7 +41,7 @@ readable and silently ignored. Every rule below has already been one of them.
     `_fastcached`: one account would let a compromised compile rewrite every cached
     object. **The package creates it** (issue #87), from the *Runtime* component and
     not the LaunchDaemon one -- which launchd choice an operator made for
-    `fastcached` says nothing about whether they will run a worker, and the
+    `pace-kv` says nothing about whether they will run a worker, and the
     installer's default is the per-user agent. One spelling reaches the binary, the
     packaging and the Linux unit; `ctest -R service-accounts` fails on every
     platform when they drift, because the failure itself is macOS-only and silent.
@@ -78,11 +78,11 @@ readable and silently ignored. Every rule below has already been one of them.
     platform** (#1676). The socket said 6676 on the reasoning that a scheduler hands
     out a worker's endpoint, so the port is "never a client-side default" -- true of
     the compile port, false once #290 put the node's cache verbs behind the same
-    socket: `fastcache-cc`, `CompileCache.cmake` and `fastcache-cli` all default to
+    socket: `pace-cc`, `CompileCache.cmake` and `pacectl` all default to
     `127.0.0.1:6674`, so no local build reached the node's cache while the docs said
     one needed nothing set. The MSI already registers the node on its default and
-    `fastcached` DISABLED beside it; on Linux the socket takes the port from the
-    daemon `%post` starts by `Conflicts=fastcached.service` **and** `Before=` -- with
+    `pace-kv` DISABLED beside it; on Linux the socket takes the port from the
+    daemon `%post` starts by `Conflicts=pace-kv.service` **and** `Before=` -- with
     no ordering the two ran in parallel and the bind failed `Address already in use`,
     and `After=` is a cycle through `sockets.target`. The packaging e2e steps assert
     the takeover, the .rpm one across a boot with both enabled.
@@ -108,7 +108,7 @@ readable and silently ignored. Every rule below has already been one of them.
     supervisors take different *kinds* of answer: launchd wants an account name that
     must already exist, while the SCM derives a per-service identity from the
     service's own name. `CreateService` passed `nullptr` for `lpServiceStartName`,
-    which is **LocalSystem** -- so on Windows `fastcache-compile-node` registered
+    which is **LocalSystem** -- so on Windows `pace-node` registered
     itself with the whole machine while the macOS spec was carefully naming an
     unprivileged account for the same binary. It names
     `WindowsLogonAccount::VirtualAccount` now: `NT SERVICE\<serviceName>`, created by
@@ -371,7 +371,7 @@ readable and silently ignored. Every rule below has already been one of them.
 - **A refusal in `main` still owes the SCM its answer.** The SCM waits for
   the service it started to CONNECT; a process that refuses and returns from `main`
   first is reported as error 1053, *did not respond in a timely fashion*, however
-  clearly it named the refusal in the event log -- and `fastcached`'s refusals there
+  clearly it named the refusal in the event log -- and `pace-kv`'s refusals there
   went to stderr, which a service does not have. So every refusal between choosing the
   host and entering it goes through `RefuseStart(host, logger, reason, code)`, which the
   foreground and POSIX hosts answer with the code and the service host answers by
@@ -648,7 +648,7 @@ readable and silently ignored. Every rule below has already been one of them.
   Aqua session, so an SSH install lands in `user/<uid>`. Re-probing at uninstall
   booted out a job that was never there and reported success while the real one
   kept the port. `BootOutEverywhere` walks the whole `ScopeTraits::domains` row,
-  and `fastcached-uninstall` mirrors it.
+  and `pace-uninstall` mirrors it.
 - **How a registration STARTS is part of it.** `ServiceSpec::startMode`, one
   `ServiceStartTable()` row per mode: the SCM start type (`auto` is 2, `manual` 3), launchd's
   `RunAtLoad`, and whether a launchd install kickstarts the job at once. There is no systemd
@@ -723,11 +723,11 @@ readable and silently ignored. Every rule below has already been one of them.
     `HKEY_LOCAL_MACHINE\`, a quoted path, a subkey, a `<RemoveRegistryKey>` element), as its own
     text states. The CI step `A failed upgrade restores the previous installation exactly` proves
     the behaviour end to end, with THREE controls on patched copies: (A) every rollback row that
-    rewrites fastcached's registration off -- the exact restore, its re-registration twin
-    `FastCachedRestoreRegistration` and the undo -- must differ in fastcached's registration;
+    rewrites pace-kv's registration off -- the exact restore, its re-registration twin
+    `FastCachedRestoreRegistration` and the undo -- must differ in pace-kv's registration;
     (B) only the twin off must differ in NOTHING, the exact restore working alone, and red there
     is a defect in the exact restore rather than a weak control; (C) the twin off and the discard
-    deferred again must differ in fastcached's registration. B and C differ only in the
+    deferred again must differ in pace-kv's registration. B and C differ only in the
     discard's phase, which is what isolates this fix. **Switching off the exact restore ALONE
     could not discriminate while N's registration matched what the twin rebuilds**: CI run
     37452107865 MEASURED an empty difference with both exact restores off. The twin is the
@@ -763,7 +763,7 @@ readable and silently ignored. Every rule below has already been one of them.
     `Uninstall\[ProductCode]`'s `InstallLocation`). CPack's `FindInstallLocation` reads only
     `Uninstall\[WIX_UPGRADE_DETECTED]`, which is empty outside an upgrade, so a repair, a feature
     change or an uninstall of a custom root resolved the DEFAULT root. CI run 37456507637
-    MEASURED the uninstall: it ran the default root's `fastcached.exe --uninstall-service`
+    MEASURED the uninstall: it ran the default root's `pace-kv.exe --uninstall-service`
     (Info 1721, ignored), removed the files, and left FastCached registered over a deleted
     binary, while the log showed the installed component's own directory (`CM_DP_Daemon.bin`)
     correct. The fix is one property rather than a component directory per action, because a
@@ -780,9 +780,9 @@ readable and silently ignored. Every rule below has already been one of them.
     `wix-service-table` pins the rows.
 - **The MSI's service table decides every start mode**, and is applied on every transaction that
   leaves a feature installed -- a first install, a repair, a feature change and an upgrade. With
-  the node installed, the node is registered `auto` and started, and fastcached stopped through
+  the node installed, the node is registered `auto` and started, and pace-kv stopped through
   `net stop`, which waits, and DISABLED (both would answer on 6674; below for why not `manual`);
-  with fastcached alone it
+  with pace-kv alone it
   is `auto` and started unless `FASTCACHED_START_SERVICE=0`. The node is re-registered on EVERY
   such transaction and needs no property -- a node that serves is refused `--scheduler`, and a
   registration kept as found would replay the one an earlier package wrote and fail at every
@@ -833,7 +833,7 @@ readable and silently ignored. Every rule below has already been one of them.
     FastCached running, FastCached stopped one second in (InstallValidate time) and was started
     again at 12:12:47, after the table had made it manual and stopped it for the node; it could not
     bind 6674, which the node holds exclusively, terminated three times before msiexec returned, and
-    its 30-second recovery restart took 6674 while "an upgrade deselecting fastcached" had the node
+    its 30-second recovery restart took 6674 while "an upgrade deselecting pace-kv" had the node
     stopped, failing that transaction with 1603. The row assertion after the upgrade read `Manual`
     and `Stopped`, between two restarts. That Restart Manager made that start was INFERRED then, and
     the run with the printed log MEASURED it (the bullet "An OLD package's removal keeps its own
@@ -860,8 +860,8 @@ readable and silently ignored. Every rule below has already been one of them.
     setting the property is seen by neither (they fail OPEN there); the per-transaction judgement
     below is what would see its effect.
   - **What `Disable` gives up.** Restart Manager offered to close a NON-service process holding a
-    file the transaction replaces, and now nothing does, in full UI either: `fastcache-cc` inside a
-    running build or a `fastcache-cli` in a console has no window, so the FilesInUse dialog never
+    file the transaction replaces, and now nothing does, in full UI either: `pace-cc` inside a
+    running build or a `pacectl` in a console has no window, so the FilesInUse dialog never
     lists it, and its file is replaced at the next boot (exit 3010). The services cannot raise it
     (no window) and are stopped before `InstallFiles`. And a MAINTENANCE transaction that removes a
     service (`REMOVE=CM_C_Node`, `/x`) now relies on the service PROCESS having exited between its
@@ -925,7 +925,7 @@ readable and silently ignored. Every rule below has already been one of them.
     process and exit codes, and the SCM events of `$script:ServiceControlEventMeanings` since the
     transaction began, from the read the verdict was taken from.
   - **An OLD package's removal keeps its own Restart Manager, and Windows Installer restarts what it
-    shut down AFTER the whole transaction**, so fastcached beside the node is `disabled`, never
+    shut down AFTER the whole transaction**, so pace-kv beside the node is `disabled`, never
     `manual`. MEASURED in PR 1634's CI, the upgrade from 0.3.0 (whose package sets no such property):
     this package logged "Disabled by MSIRESTARTMANAGERCONTROL property"; 0.3.0's removal, which
     `RemoveExistingProducts` runs as a nested installation with 0.3.0's properties, opened a session
@@ -944,11 +944,11 @@ readable and silently ignored. Every rule below has already been one of them.
     recovery restart and no race for 6674; the 352 is that refused start, and the upgrade still exits
     0 (MEASURED: it did with the crash too). Not the binary: a bind conflict is an I/O arm, `Failed`
     and restarted by design (`ProcessExit`, above), so a start that may not run must not be STARTABLE.
-    Removing the node re-applies fastcached `auto`, and a failed transaction puts back the start type
+    Removing the node re-applies pace-kv `auto`, and a failed transaction puts back the start type
     it found. The CI leg asserts the nested shutdown line beside the judgement, so "no start" cannot
     pass for want of a restart attempt.
     - **Only a registration that EXISTS is disabled, and the disable is `Return="check"`.**
-      `FastCachedInstallService` is `Return="ignore"` on purpose, so fastcached may be ABSENT there,
+      `FastCachedInstallService` is `Return="ignore"` on purpose, so pace-kv may be ABSENT there,
       which is no more startable than disabled; a checked disable of it failed the node's whole install
       over a step that was not the cause (rm-nested review, I-1). `sc.exe` answers 1060
       (ERROR_SERVICE_DOES_NOT_EXIST, MEASURED) for exactly that, and that one answer ends the action
@@ -960,7 +960,7 @@ readable and silently ignored. Every rule below has already been one of them.
       `Return="ignore"`) is left `manual`: the state before PR 1634, harmful only on a later upgrade
       from a package whose removal still has its own Restart Manager, so accepted rather than given a
       start mode the command line would never use.
-    - The RESIDUAL is fastcached WITHOUT the node: Windows Installer's restart of a FastCached that ran
+    - The RESIDUAL is pace-kv WITHOUT the node: Windows Installer's restart of a FastCached that ran
       before the upgrade succeeds, so `FASTCACHED_START_SERVICE=0` on an upgrade from 0.3.0 leaves it
       running; harmless (nothing else wants its port), and install.md says to stop it first. Every
       package from PR 1634 on disables Restart Manager, so the hazard is an upgrade FROM 0.3.0 or
@@ -968,16 +968,16 @@ readable and silently ignored. Every rule below has already been one of them.
 - **A stop states its drain.** `StopPendingPlanFor(--drain-timeout)` is the wait hint -- the drain
   plus `StopTeardownMargin`, clamped to what the SCM can carry -- and the checkpoint advances
   every `StopCheckpointInterval` until the body returns. A fixed hint shorter than the drain reads
-  as a hung service to the SCM and to an MSI waiting on the stop. fastcached has no drain of its
+  as a hung service to the SCM and to an MSI waiting on the stop. pace-kv has no drain of its
   own and passes none.
 - **Which ports an install OPENS follows the MERGED configuration, not the `ServiceSpec`**, which
   carries no port and no rule. Each binary's `main` derives the rules from the configuration the
   service will run with (`NodeFirewallRules`, `DaemonFirewallRules`) and hands them to
   `WithRegistrationFirewall` beside the registration. On a registration that succeeded, that
-  replaces the service's firewall group (`FirewallGroupFor`, `fastcached: <service>`) with one
+  replaces the service's firewall group (`FirewallGroupFor`, `pace-kv: <service>`) with one
   inbound allow rule per non-loopback endpoint the configuration binds -- the node's from
   `NodeSurfaceTable()` rows, so a surface or a default that turns one on is opened by its row
-  alone; fastcached's from its listeners and, with `--metrics`, its metrics endpoint. Replace,
+  alone; pace-kv's from its listeners and, with `--metrics`, its metrics endpoint. Replace,
   never append: a repair and an upgrade run the install again, and a surface that has since
   become loopback must lose its rule. A surface bound to the NAME `localhost` gets a rule, since
   `IsLoopbackHost` does not take a name to be loopback, and the install says why.
@@ -1042,7 +1042,7 @@ readable and silently ignored. Every rule below has already been one of them.
 
 <!-- agent-tripwire: A machine-wide config is obeyed only when only an administrator could have written it -->
 
-- **A candidate config location names an application, not `fastcached`.** Every row
+- **A candidate config location names an application, not `pace-kv`.** Every row
   of `DefaultConfigCandidates()` hardcoded the daemon's file name, so a second
   binary had nothing to generalize onto. The rows carry `{app}` now, and two things
   about that are deliberate: the table stays `constexpr` so its four `static_assert`s
@@ -1082,7 +1082,7 @@ readable and silently ignored. Every rule below has already been one of them.
   - **Privileged runs trust-check *every* row, per-user ones included.** `$HOME`
     and `$XDG_CONFIG_HOME` are inputs an unprivileged account often controls and
     sudo does not always reset, so checking only `System` rows would leave
-    `sudo -E fastcached` taking root's `storage_path:` from a file that account
+    `sudo -E pace-kv` taking root's `storage_path:` from a file that account
     wrote. A path named with `--config` is never checked — that is the operator's
     assertion to make, and it is the escape hatch when a location is refused.
 - **A machine-wide config is only obeyed when only an administrator could have
@@ -1332,7 +1332,7 @@ readable and silently ignored. Every rule below has already been one of them.
   under it, so replaying what the start resolved makes the two assemblies identical
   by construction rather than by inspection.
   - **And a REFORM shapes its body from the configuration IN FORCE, never the one the
-    process started with.** `fastcache-compile-node` replaces its serving body in-process
+    process started with.** `pace-node` replaces its serving body in-process
     when its formation mode changes (`RunNodeBodies`), and PUBLISHES the reformed
     configuration into the reloader as the one in force. Shaped from the start's `cfg`,
     which no reload changes, it reverted every accepted reload at the next yield,
@@ -1443,7 +1443,7 @@ readable and silently ignored. Every rule below has already been one of them.
   or documented but rejected. `CliOptions()` is now the single source of truth,
   and the help column is *derived* from `primary`/`alias`/`operand` rather than
   restated. Rendering lives in `Cli/UsageDoc`, which must stay dependency-free:
-  `fastcache-cc` compiles it in rather than linking `Pace`, so an include
+  `pace-cc` compiles it in rather than linking `Pace`, so an include
   of anything from `Config/` there breaks the launcher's link, not just its
   build. Two remaining hand-written spellings are guarded by tests rather than
   generated: `BuildServiceArgv` (a `ServiceControl_test` case walks
@@ -1549,7 +1549,7 @@ readable and silently ignored. Every rule below has already been one of them.
 Measured while closing #485, and expensive to rediscover — the ticket that raised it
 guessed, and guessed wrong in both directions. **A binary's console logger is not the
 sink in every deployment, and the supervisors do not agree about times.** For
-`fastcache-compile-node`, which is the shape both binaries have:
+`pace-node`, which is the shape both binaries have:
 
 <!-- table-total: none -->
 | deployment | the sink | who stamps |
@@ -1565,7 +1565,7 @@ Three consequences, and none is obvious from either end:
   deployment where the console logger is not the sink, so a default reasoned from "a
   supervisor stamps for us" is reasoning about a path the flag cannot reach.
 - **launchd stamps nothing**, and that plist is built by the shared
-  `ServiceControl.cpp` — so it is the same gap in `fastcached`. A per-binary default
+  `ServiceControl.cpp` — so it is the same gap in `pace-kv`. A per-binary default
   chosen to work around it papers over one packaging defect in whichever binary
   noticed and leaves the other writing timeless files.
 - **So a log default cannot be picked per binary.** Two binaries with the same flag

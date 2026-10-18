@@ -136,7 +136,7 @@ namespace
             if (!listener.has_value())
             {
                 logger.Logf(LogLevel::Error,
-                            "fastcached: cannot bind {}:{} : {}",
+                            "pace-kv: cannot bind {}:{} : {}",
                             bind.address,
                             bind.port,
                             listener.error().toString());
@@ -428,7 +428,7 @@ namespace
             auto bound = BindAndListen(core::net::defaultAddressResolver(), bind.address, bind.port, options.listenBacklog);
             if (!bound.has_value())
             {
-                logger.Logf(LogLevel::Error, "fastcached: cannot bind {}:{} : {}", bind.address, bind.port, bound.error());
+                logger.Logf(LogLevel::Error, "pace-kv: cannot bind {}:{} : {}", bind.address, bind.port, bound.error());
                 for (core::platform::NativeHandle const sock: listenSocks)
                     CloseNativeSocket(sock);
                 return EXIT_FAILURE;
@@ -616,7 +616,7 @@ namespace
                 if (!listener.has_value())
                 {
                     logger.Logf(LogLevel::Error,
-                                "fastcached: cannot bind {}:{} on reactor {}: {}",
+                                "pace-kv: cannot bind {}:{} on reactor {}: {}",
                                 bind.address,
                                 bind.port,
                                 i,
@@ -741,7 +741,7 @@ int RunReactorServer(ReactorServerOptions const& options,
 {
     if (options.binds.empty())
     {
-        logger.Log(LogLevel::Error, "fastcached: no listener configured (set --bind or --listen)");
+        logger.Log(LogLevel::Error, "pace-kv: no listener configured (set --bind or --listen)");
         return EXIT_FAILURE;
     }
     auto const reactorCount = std::max(1U, options.reactorThreads);
@@ -850,7 +850,7 @@ namespace Detail
             if (bind.tls && options.tlsContext == nullptr)
             {
                 logger.Logf(LogLevel::Fatal,
-                            "fastcached: TLS bind {}:{} requested but no TLS context configured",
+                            "pace-kv: TLS bind {}:{} requested but no TLS context configured",
                             bind.address,
                             bind.port);
                 return EXIT_FAILURE;

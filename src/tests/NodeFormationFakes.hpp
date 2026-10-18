@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
-#include <apps/fastcache-compile-node/NodeFormation.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
+#include <apps/pace-node/NodeFormation.hpp>
 
 /// @file NodeFormationFakes.hpp
 /// Shape a test configuration the way `main` shapes every configuration it judges.

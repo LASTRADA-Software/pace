@@ -2,7 +2,7 @@
 #
 # Nothing but `TextCell` itself may build a `CellKind::Text` cell.
 #
-# `fastcache-cli`'s `Cell` model carries a kind beside its text, and `CellKind::Text`
+# `pacectl`'s `Cell` model carries a kind beside its text, and `CellKind::Text`
 # means *these bytes are valid UTF-8* -- an invariant every renderer relies on, since
 # `--format=json` interpolates `lexical` into a document that must be UTF-8 end to end.
 # `TextCell` is where that is established: it asks `IsValidUtf8` and answers with a

@@ -44,12 +44,12 @@ struct DaemonCallSite
 /// and never a skip: a scan matching nothing is the failure mode a consistency
 /// check must not have.
 constexpr std::array CallSites {
-    DaemonCallSite { .file = "src/apps/fastcache-compile-node/main.cpp",
+    DaemonCallSite { .file = "src/apps/pace-node/main.cpp",
                      .spawnsCompiler = true,
                      .rationale = "The compile worker. It spawns a compiler per job and derives "
                                   "-fdebug-prefix-map rules from its own working directory, so `/` makes every "
                                   "absolute path in a dispatched object match a rule that keeps its tail." },
-    DaemonCallSite { .file = "src/apps/fastcached/main.cpp",
+    DaemonCallSite { .file = "src/apps/pace-kv/main.cpp",
                      .spawnsCompiler = false,
                      .rationale = "The cache daemon. It executes nothing at all, so no path-mapping rule is ever "
                                   "derived from its directory and `/` costs it nothing but a busy mount point." },

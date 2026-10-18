@@ -6,7 +6,7 @@
 # ## What went wrong
 #
 # `_fc_auto_start_fastcached` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
-# and reported `fastcached exited immediately (${_rc})`. The commonest failure there is a
+# and reported `pace-kv exited immediately (${_rc})`. The commonest failure there is a
 # dynamic loader that cannot resolve a library, which answers **127** — a number that
 # reads as *not found* for a binary CMake has just staged and knows the path of. The one
 # sentence that explains it, `error while loading shared libraries: libyaml-cpp.so.0.8`,
@@ -18,7 +18,7 @@
 # failed here was the ACQUISITION — two `execute_process` calls that threw the stream
 # away. A test over the helper would have passed on the broken tree. So this drives the
 # module's real path, through the same file:// mirror
-# `check-compile-cache-daemon-staging.cmake` uses, with a staged `fastcached` that fails
+# `check-compile-cache-daemon-staging.cmake` uses, with a staged `pace-kv` that fails
 # the way the loader fails.
 #
 # ## Both directions
@@ -50,8 +50,8 @@ cmake_minimum_required(VERSION 3.28)
 #
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
 set(FastCachedInstallOracle
-    "Linux|x86_64|Linux-x86_64|usr/bin/fastcache-cc|usr/bin/fastcached"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/fastcache-cc|opt/fastcached/bin/fastcached"
+    "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
+    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc|opt/fastcached/bin/pace-kv"
 )
 
 # Deliberately not a version that exists, so a bug that reached the real GitHub anyway
@@ -104,7 +104,7 @@ foreach(row IN LISTS FastCachedInstallOracle)
     endif()
 endforeach()
 if(NOT platform)
-    message("SKIP: no published fastcached is expected for "
+    message("SKIP: no published pace-kv is expected for "
             "${CMAKE_HOST_SYSTEM_NAME}-${hostProcessor}, so there is nothing to start")
     return()
 endif()
@@ -115,7 +115,7 @@ file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
 # Run one configure against a mirror whose staged daemon fails as described.
 #
 # @param case A short label for the failure message.
-# @param daemonBody The shell body the fake fastcached runs when it is NOT asked
+# @param daemonBody The shell body the fake pace-kv runs when it is NOT asked
 #                   --version; it must exit non-zero, which is what puts the module on
 #                   the branch under test.
 # @param addrPort A port nothing on this host listens on, so `_fc_daemon_answering`
@@ -137,7 +137,7 @@ function(RunFailingStart case daemonBody addrPort outVar)
     get_filename_component(launcherDir "${payloadRoot}/${stem}/${launcherMember}" DIRECTORY)
     file(MAKE_DIRECTORY "${launcherDir}")
     file(WRITE "${payloadRoot}/${stem}/${launcherMember}"
-         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fastcache-cc ${mirrorVersion}'; exit 0; fi\nexit 3\n")
+         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'pace-cc ${mirrorVersion}'; exit 0; fi\nexit 3\n")
     file(CHMOD "${payloadRoot}/${stem}/${launcherMember}"
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
@@ -147,7 +147,7 @@ function(RunFailingStart case daemonBody addrPort outVar)
     get_filename_component(daemonDir "${payloadRoot}/${stem}/${daemonMember}" DIRECTORY)
     file(MAKE_DIRECTORY "${daemonDir}")
     file(WRITE "${payloadRoot}/${stem}/${daemonMember}"
-         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fastcached ${mirrorVersion}'; exit 0; fi\n${daemonBody}\n")
+         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'pace-kv ${mirrorVersion}'; exit 0; fi\n${daemonBody}\n")
     file(CHMOD "${payloadRoot}/${stem}/${daemonMember}"
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
@@ -211,7 +211,7 @@ RunFailingStart("loader"
     18701
     loaderOutput)
 
-string(FIND "${loaderOutput}" "Not starting a daemon: fastcached exited immediately (127)" loaderStatusAt)
+string(FIND "${loaderOutput}" "Not starting a daemon: pace-kv exited immediately (127)" loaderStatusAt)
 if(loaderStatusAt EQUAL -1)
     list(APPEND violations
          "the configure never reported the daemon exiting immediately with 127:\n${loaderOutput}")
@@ -227,7 +227,7 @@ endif()
 # --- And the shape that says the capture is READ rather than pasted -------------------
 RunFailingStart("silent" "exit 4" 18702 silentOutput)
 
-string(FIND "${silentOutput}" "Not starting a daemon: fastcached exited immediately (4)" silentStatusAt)
+string(FIND "${silentOutput}" "Not starting a daemon: pace-kv exited immediately (4)" silentStatusAt)
 if(silentStatusAt EQUAL -1)
     list(APPEND violations
          "a daemon that died silently was not reported at all, or not with its status:\n${silentOutput}")
@@ -235,7 +235,7 @@ endif()
 # An empty capture must degrade to the old text rather than to text with a dangling
 # separator. Asserting on the colon is what distinguishes "no words were available" from
 # "the words were appended unconditionally and happened to be empty".
-string(FIND "${silentOutput}" "fastcached exited immediately (4):" silentSuffixAt)
+string(FIND "${silentOutput}" "pace-kv exited immediately (4):" silentSuffixAt)
 if(NOT silentSuffixAt EQUAL -1)
     list(APPEND violations
          "a daemon that said nothing still got a ':' suffix, so the message appends whatever it "

@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.28)
 # be free, or the check is the change-detector #633 explicitly warns against.
 # `shardPath` and `suffix` are the true positives -- the field-level assertions
 # that were unreachable by unit test, because the daemon's composer sits in an
-# anonymous namespace behind `add_executable(fastcached main.cpp)` with no test
+# anonymous namespace behind `add_executable(pace-kv main.cpp)` with no test
 # target, and the node's suffix is composed in a third file again.
 #
 # ## INCONCLUSIVE, and why this harness is born with it
@@ -76,14 +76,14 @@ function(fastcached_make_tree name pageText storageError cowTree daemon cacheTie
     file(MAKE_DIRECTORY "${tree}/docs/operations")
     file(MAKE_DIRECTORY "${tree}/src/Pace/Core/Errors")
     file(MAKE_DIRECTORY "${tree}/src/Pace/Cache")
-    file(MAKE_DIRECTORY "${tree}/src/apps/fastcached")
-    file(MAKE_DIRECTORY "${tree}/src/apps/fastcache-compile-node")
+    file(MAKE_DIRECTORY "${tree}/src/apps/pace-kv")
+    file(MAKE_DIRECTORY "${tree}/src/apps/pace-node")
     file(WRITE "${tree}/docs/operations/corrupt-store.md" "${pageText}")
     file(WRITE "${tree}/src/Pace/Core/Errors/StorageError.hpp" "${storageError}")
     file(WRITE "${tree}/src/Pace/Cache/CowTreeStorage.cpp" "${cowTree}")
-    file(WRITE "${tree}/src/apps/fastcached/main.cpp" "${daemon}")
-    file(WRITE "${tree}/src/apps/fastcache-compile-node/CacheTier.cpp" "${cacheTier}")
-    file(WRITE "${tree}/src/apps/fastcache-compile-node/main.cpp" "${nodeMain}")
+    file(WRITE "${tree}/src/apps/pace-kv/main.cpp" "${daemon}")
+    file(WRITE "${tree}/src/apps/pace-node/CacheTier.cpp" "${cacheTier}")
+    file(WRITE "${tree}/src/apps/pace-node/main.cpp" "${nodeMain}")
     set(${outVar} "${tree}" PARENT_SCOPE)
 endfunction()
 

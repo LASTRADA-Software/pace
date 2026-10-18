@@ -59,7 +59,7 @@ concept ByteBuffer = requires(Buffer& out, Buffer::value_type element, Buffer::v
 /// ## Where it lives
 ///
 /// Beside `ByteCursor` and under the same constraint, which `Core/WireFields.hpp`
-/// argues in full: it must be includable from a header `fastcache-cc` compiles
+/// argues in full: it must be includable from a header `pace-cc` compiles
 /// **without linking `Pace`**, so it stays header-only and reaches nothing but
 /// `Core/Bytes.hpp`, `Core/Endian.hpp`, `Core/WireFields.hpp` and the standard library.
 /// Anything added here keeps both properties.

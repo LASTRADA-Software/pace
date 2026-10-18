@@ -232,7 +232,7 @@ function(fastcached_stage_and_run name target from to outOutput outApplied)
         file(WRITE "${tree}/src/Pace/Core/Ranges_test.cpp" "${seamTestText}")
     endif()
     file(WRITE "${tree}/src/Pace/Core/Clean.cpp" "${baseCleanSource}")
-    file(WRITE "${tree}/src/apps/fastcache-cli/Documented.cpp" "${baseDocumentedSource}")
+    file(WRITE "${tree}/src/apps/pacectl/Documented.cpp" "${baseDocumentedSource}")
     file(WRITE "${tree}/vendor/upstream/src/Upstream.cpp" "${baseVendoredSource}")
     file(WRITE "${tree}/scripts/lib/third-party-roots.txt" "${rootsText}")
     if(NOT extraPath STREQUAL "")
@@ -290,10 +290,10 @@ set(FastCachedRangesSeamCases
 
     # --- THE RED ARM ---
     "planted iota|newfile|src/Pace/Core/Fresh.cpp|#include <vector>~n~void Fresh(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~}~n~|src/Pace/Core/Fresh.cpp:4: calls `std::ranges::iota` directly -- write `Ranges::Iota` (gated by __cpp_lib_ranges_iota) && 1 site(s) call a wrapped range algorithm directly|-"
-    "planted fold_left via git|newfile-git|src/apps/fastcache-compile-node/Fresh.cpp|int Fresh(std::array<int, 3> const& a)~n~{~n~    return std::ranges::fold_left(a, 0, std::plus {})~sc~~n~}~n~|src/apps/fastcache-compile-node/Fresh.cpp:3: calls `std::ranges::fold_left` directly -- write `Ranges::FoldLeft` && via git ls-files|-"
+    "planted fold_left via git|newfile-git|src/apps/pace-node/Fresh.cpp|int Fresh(std::array<int, 3> const& a)~n~{~n~    return std::ranges::fold_left(a, 0, std::plus {})~sc~~n~}~n~|src/apps/pace-node/Fresh.cpp:3: calls `std::ranges::fold_left` directly -- write `Ranges::FoldLeft` && via git ls-files|-"
     "bare ranges qualifier under using namespace std|newfile|src/Pace/Core/Bare.cpp|using namespace std~sc~~n~void Bare(vector<int>& v) { ranges::iota(v, 0)~sc~ }~n~|src/Pace/Core/Bare.cpp:2: calls `std::ranges::iota` directly|-"
     "a test is first-party too|newfile|src/Pace/Cache/Fresh_test.cpp|TEST_CASE(\"x\", \"~lb~cache~rb~\")~n~{~n~    std::vector<int> order(3)~sc~~n~    std::ranges::iota(order, 0)~sc~~n~}~n~|src/Pace/Cache/Fresh_test.cpp:4: calls|-"
-    "a header extension other than hpp|newfile|src/apps/fastcache-bench/Inline.inl|inline int Sum(std::span<int const> s) { return std::ranges::fold_left(s, 0, std::plus {})~sc~ }~n~|src/apps/fastcache-bench/Inline.inl:1: calls `std::ranges::fold_left`|-"
+    "a header extension other than hpp|newfile|src/apps/pace-bench/Inline.inl|inline int Sum(std::span<int const> s) { return std::ranges::fold_left(s, 0, std::plus {})~sc~ }~n~|src/apps/pace-bench/Inline.inl:1: calls `std::ranges::fold_left`|-"
     "two calls on two lines are both named|newfile|src/Pace/Core/Two.cpp|void Two(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~    (void) std::ranges::fold_left(v, 0, std::plus {})~sc~~n~}~n~|Two.cpp:3: calls `std::ranges::iota` && Two.cpp:4: calls `std::ranges::fold_left` && 2 site(s)|-"
     "line number survives brackets semicolons and a trailing backslash|newfile|src/Pace/Core/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~void Drift(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/Pace/Core/Drift.cpp:4: calls|-"
 
@@ -308,7 +308,7 @@ set(FastCachedRangesSeamCases
     "a facility the header does not wrap is not refused|newfile|src/Pace/Core/Right.cpp|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|none called directly|CMake Error"
 
     # --- THE EXEMPTION IS EXACT ---
-    "a file sharing the seam test name elsewhere is not exempt|newfile|src/apps/fastcache-cli/Ranges_test.cpp|void Other(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/apps/fastcache-cli/Ranges_test.cpp:1: calls|-"
+    "a file sharing the seam test name elsewhere is not exempt|newfile|src/apps/pacectl/Ranges_test.cpp|void Other(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/apps/pacectl/Ranges_test.cpp:1: calls|-"
 
     # --- THIRD-PARTY ROOTS ---
     "a vendored call is refused once the roots stop naming it|roots|vendor/upstream|vendor/elsewhere|vendor/upstream/src/Upstream.cpp:4: calls `std::ranges::iota` directly|-"

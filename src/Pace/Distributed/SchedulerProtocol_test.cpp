@@ -557,7 +557,7 @@ TEST_CASE("The two halves of the cache-capacity mapping agree", "[distributed][s
 {
     // The transposition hazard here is of a different kind from cores and memory:
     // the wire carries tiers by POSITION, because the wire header is compiled into
-    // `fastcache-cc` and cannot see `StorageTier`. Nothing but these two functions
+    // `pace-cc` and cannot see `StorageTier`. Nothing but these two functions
     // knows that index 1 is the disk tier, so a swap between them decodes perfectly
     // and reports a node's RAM budget as its disk budget. A distinct value per tier
     // is what makes such a swap visible at all.

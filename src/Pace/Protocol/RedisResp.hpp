@@ -30,7 +30,7 @@ namespace Pace
 /// The authoritative supported-command list is the `CommandTable` dispatch
 /// array in `RedisResp.cpp` (every row also feeds `COMMAND` introspection).
 /// At time of writing it covers — non-exhaustively, in broad strokes — the
-/// Redis surface that maps onto fastcached's engine primitives:
+/// Redis surface that maps onto pace-kv's engine primitives:
 /// GET/SET (with EX/PX/NX/XX), SETEX/PSETEX, MGET/MSET/MSETNX, DEL/UNLINK,
 /// EXISTS, EXPIRE/PEXPIRE/EXPIREAT/PEXPIREAT, TTL/PTTL, PERSIST,
 /// INCR/DECR/INCRBY/DECRBY/INCRBYFLOAT, SADD/SREM/SCARD/SISMEMBER/SMEMBERS/

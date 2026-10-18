@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include <apps/fastcache-compile-node/SharedCacheTier.hpp>
+#include <apps/pace-node/SharedCacheTier.hpp>
 #include <core/platform/Clock.hpp>
 
 namespace Pace::Testing

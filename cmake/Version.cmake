@@ -270,7 +270,7 @@ function(FastCachedRunGit OutputVar OutcomeVar)
     string(REPLACE "@GIT@" "${GIT_EXECUTABLE}" happened "${happened}")
     set_property(GLOBAL APPEND PROPERTY FastCachedVersionUnanswered "git ${query}")
     set_property(GLOBAL APPEND PROPERTY FastCachedVersionUnansweredKinds "${kind}")
-    message(WARNING "fastcached: git ${happened}: ${git_LOSS}")
+    message(WARNING "pace-kv: git ${happened}: ${git_LOSS}")
 endfunction()
 
 ## Suffix marking a work tree with uncommitted changes to tracked files.

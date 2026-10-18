@@ -38,7 +38,7 @@ namespace Pace::Testing
 /// - **`CompileCacheHandler_test`** takes an already-decoded `ReplyFrame` rather than
 ///   bytes and answers a `DecodedError { present, code, message }` built from
 ///   `DecodeErrorPayload`. Same name, different parameter and different return.
-/// - **`fastcache-cc/WorkerProtocol_test`** is TOTAL where the one below is partial:
+/// - **`pace-cc/WorkerProtocol_test`** is TOTAL where the one below is partial:
 ///   it returns a bare `ErrorCode`, using `MalformedFrame` as its cannot-read value
 ///   rather than `nullopt`, and all of its call sites compare with `==`. Folding it
 ///   would rewrite every one of them. **Reachability is not the reason** -- the

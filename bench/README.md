@@ -1,7 +1,7 @@
-# fastcached benchmark suite
+# pace-kv benchmark suite
 
 A reproducible, cross-platform (Windows / Linux / macOS) benchmark that builds
-two git refs of fastcached, drives them across all four wire protocols, and
+two git refs of pace-kv, drives them across all four wire protocols, and
 emits a side-by-side comparison — terminal tables, Markdown + JSON reports, and
 PNG / inline-Sixel charts.
 
@@ -13,16 +13,16 @@ still runs and reports — it just skips the images.
 
 ```sh
 # Build master (base) and HEAD (candidate), run the standard profile, compare:
-python bench/fastcached_bench.py
+python bench/pace_kv_bench.py
 
 # Faster iteration:
-python bench/fastcached_bench.py --profile quick
+python bench/pace_kv_bench.py --profile quick
 
 # Compare arbitrary refs:
-python bench/fastcached_bench.py --base v1.0 --candidate my-feature-branch
+python bench/pace_kv_bench.py --base v1.0 --candidate my-feature-branch
 
 # Skip building; compare two binaries you already have:
-python bench/fastcached_bench.py --no-build \
+python bench/pace_kv_bench.py --no-build \
     --base-binary path/to/base/fastcached \
     --candidate-binary path/to/candidate/fastcached
 
@@ -30,15 +30,15 @@ python bench/fastcached_bench.py --no-build \
 python -m pip install -r bench/requirements-plots.txt
 
 # Head-to-head against the REAL servers (the actual goal):
-python bench/fastcached_bench.py --no-build --candidate-binary <fastcached> \
+python bench/pace_kv_bench.py --no-build --candidate-binary <pace-kv> \
     --vs redis,memcached
 ```
 
 ## Comparing against real redis / memcached (`--vs`)
 
-`--vs redis,memcached` runs the candidate fastcached and each available real
+`--vs redis,memcached` runs the candidate pace-kv and each available real
 server over the same scenarios and reports throughput per target plus
-`fastcached vs best` (>1× means fastcached wins). Real servers are in-memory, so
+`pace-kv vs best` (>1× means pace-kv wins). Real servers are in-memory, so
 only the memory scenarios run against them; disk scenarios stay fastcached-only.
 
 Baseline discovery (optional; each is skipped with a notice if absent):
@@ -109,7 +109,7 @@ capability probe (or with `--charts sixel` to force; `--charts none` to disable)
 
 | File | Role |
 | --- | --- |
-| `fastcached_bench.py` | CLI orchestrator: build refs, run, compare, emit |
+| `pace_kv_bench.py` | CLI orchestrator: build refs, run, compare, emit |
 | `protocols.py` | dependency-free clients for the four wire protocols |
 | `workloads.py` | data-driven scenario catalog + profiles |
 | `runner.py` | daemon lifecycle, load generation, metric aggregation |

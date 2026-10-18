@@ -13,7 +13,7 @@
 #   * the uninstaller that REMOVES it again.
 #
 # Each of those has already been the odd one out. Issue #87 is the missing
-# creator: `fastcache-compile-node` named `fastcache-node` and the macOS package
+# creator: `pace-node` named `fastcache-node` and the macOS package
 # created only `_fastcached`, so a system-scope worker install was refused on the
 # one platform that ships the binary. A missing remover is quieter still -- a
 # stale account makes the next install pick a DIFFERENT uid, silently orphaning
@@ -56,8 +56,8 @@
 cmake_minimum_required(VERSION 3.28)
 
 set(FastCachedServiceAccounts
-    "FASTCACHED_MACOS_SERVICE_ACCOUNT|src/Pace/Platform/ServiceControl.cpp|The fastcached daemon. A system-wide launchd job with no UserName runs as root, and this one owns the cache storage every client's data lands in."
-    "FASTCACHED_MACOS_NODE_ACCOUNT|src/apps/fastcache-compile-node/NodeConfig.cpp|The compile worker. Deliberately NOT the daemon's: a worker runs a compiler on input that arrived over the network, so sharing one account would let a compromised compile rewrite every cached object."
+    "FASTCACHED_MACOS_SERVICE_ACCOUNT|src/Pace/Platform/ServiceControl.cpp|The pace-kv daemon. A system-wide launchd job with no UserName runs as root, and this one owns the cache storage every client's data lands in."
+    "FASTCACHED_MACOS_NODE_ACCOUNT|src/apps/pace-node/NodeConfig.cpp|The compile worker. Deliberately NOT the daemon's: a worker runs a compiler on input that arrived over the network, so sharing one account would let a compromised compile rewrite every cached object."
 )
 
 # The shell function packaging/macos/create-account.sh.inc defines. A postinstall
@@ -70,7 +70,7 @@ set(FastCachedCreateAccountHelper "fastcached_create_account")
 # renamed file is reported as missing instead of quietly scanning nothing.
 set(FastCachedAccountDeclaration "CMakeLists.txt")
 set(FastCachedAccountCreatorGlob "packaging/macos/postinstall-*.sh.in")
-set(FastCachedAccountRemover "packaging/macos/fastcached-uninstall.sh.in")
+set(FastCachedAccountRemover "packaging/macos/pace-uninstall.sh.in")
 set(FastCachedAccountHelperFile "packaging/macos/create-account.sh.inc")
 
 # ---------------------------------------------------------------------------

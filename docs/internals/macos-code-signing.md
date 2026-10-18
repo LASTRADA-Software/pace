@@ -110,7 +110,7 @@ The `.pkg` itself is signed by CPack via `CPACK_PKGBUILD_IDENTITY_NAME` and
 
 Binaries are signed with `--options=runtime --timestamp`: notarization
 rejects a submission missing either. No entitlements file is used — unlike a
-GUI app, fastcached needs neither JIT nor relaxed library validation, and
+GUI app, pace-kv needs neither JIT nor relaxed library validation, and
 entitlements it does not need only widen its attack surface.
 
 The `.dmg` is signed **without** `--options=runtime`: a disk image holds no

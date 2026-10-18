@@ -2,7 +2,7 @@
 
 ## Problem
 
-`fastcache-cc` reads the filesystem at three different moments and never checks that they
+`pace-cc` reads the filesystem at three different moments and never checks that they
 agree:
 
 - **T1, the key.** `RunCached` preprocesses the TU (`main.cpp:2861`) and derives the object
@@ -48,7 +48,7 @@ That second case is in the code but nobody has reproduced it.
 
 ## Components
 
-All of it lives in the launcher's own `_fc_cc_sources`, so it is in `fastcache-cc-tests`.
+All of it lives in the launcher's own `_fc_cc_sources`, so it is in `pace-cc-tests`.
 `main.cpp` is in no test target (#909).
 
 ### `InputFiles.hpp` / `InputFiles.cpp`, and `InputWitness.hpp` / `InputWitness.cpp`
@@ -206,7 +206,7 @@ Why each row is sound:
 ## What the operator sees
 
 - **Under `FASTCACHE_VERBOSE`:**
-  `fastcache-cc: an input changed during the compile: <path>; compiled, not stored`. For
+  `pace-cc: an input changed during the compile: <path>; compiled, not stored`. For
   `MovedDuringCompile` in direct mode the manifest is recorded FIRST and the line then says
   what happened (Ruling 15): `; manifest recorded from the keyed content`, or `; no manifest
   recorded` when the recording declined (its own note, on the line before, says why). The other
@@ -227,7 +227,7 @@ Why each row is sound:
 - **Its `## Open work`** gets the shadowing-header issue.
 - **`docs/operations/upgrading-a-fleet.md`** says, under "Coming from 0.4.0", that every
   direct-mode manifest is recorded once more, and that nothing recompiles.
-- **`docs/tools/fastcache-cc.md`** documents `INPUTS-MOVED`.
+- **`docs/tools/pace-cc.md`** documents `INPUTS-MOVED`.
 
 ## Known limits, stated rather than closed
 
@@ -256,7 +256,7 @@ Why each row is sound:
 
 ## Tests
 
-### Unit (`fastcache-cc-tests`)
+### Unit (`pace-cc-tests`)
 
 1. **`InputFiles_test.cpp`**, against this machine's filesystem:
    - change times are on the seam's own clock and unit;
@@ -292,7 +292,7 @@ Why each row is sound:
 forwards to the real compiler and, while a trigger file exists, overwrites a source either
 after a real compile or before a dispatch preprocess. Each fixture copies it under the real
 compiler's own file name, because the launcher picks its driver grammar by that name. It runs
-in `scripts/compile-cache-e2e.sh` and `src/apps/fastcache-cc/run-launcher-e2e.ps1`.
+in `scripts/compile-cache-e2e.sh` and `src/apps/pace-cc/run-launcher-e2e.ps1`.
 
 <!-- table-total: none -->
 | leg | expected |

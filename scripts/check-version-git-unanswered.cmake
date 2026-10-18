@@ -282,20 +282,20 @@ endfunction()
 # ---- every query answers: the positive control ---------------------------------------------
 # Each also asserts that no git warning was printed at all.
 fc_case("every query answers, clean: the tag row is Exact" none none OFF
-    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "fastcached: git")
+    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "pace-kv: git")
 fc_case("every query answers, dirty: the string says so" none FC_STUB_DIRTY=1 OFF
-    1.2.3 1.2.3-4-gabc1234-dirty STATUS "from git tag (v1.2.3)" "fastcached: git")
+    1.2.3 1.2.3-4-gabc1234-dirty STATUS "from git tag (v1.2.3)" "pace-kv: git")
 fc_case("every query answers under REQUIRE_EXACT: nothing to refuse" none none ON
-    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "fastcached: git")
+    1.2.3 1.2.3-4-gabc1234 STATUS "from git tag (v1.2.3)" "pace-kv: git")
 
 # ---- git answers "no", which is an answer ----------------------------------------------------
 # An untagged checkout, a shallow clone without tags, a tarball built where git is installed:
 # the most common Provisional paths. A non-zero exit there IS the answer, so no query may be
 # reported as unanswered, and nothing may blame the index or git itself.
 fc_case("no tag and everything else answers: the commit row, with no git warning" none FC_STUB_NO_TAG=1 OFF
-    0.0.0 0.0.0-0-gabc1234 WARNING "from git commit without a matching tag" "fastcached: git")
+    0.0.0 0.0.0-0-gabc1234 WARNING "from git commit without a matching tag" "pace-kv: git")
 fc_case("not a git repository: the declared fallback, with no git warning" none FC_STUB_NOT_REPO=1 OFF
-    0.0.0 0.0.0-unknown WARNING "from declared fallback" "fastcached: git")
+    0.0.0 0.0.0-unknown WARNING "from declared fallback" "pace-kv: git")
 
 # ---- one query does not answer -------------------------------------------------------------
 fc_case("the dirty check does not answer: -dirty-unknown, never clean, and Provisional" dirty none OFF

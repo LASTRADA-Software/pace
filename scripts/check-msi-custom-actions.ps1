@@ -86,8 +86,8 @@ $AnchorPhases = @{
 # The actions that only READ, and are therefore started for real. Each names the processes its
 # control runs from the install root, and the bound its control shortens.
 $RunnableActions = @{
-    FastCacheAwaitServiceExit  = @{ ControlImages = @('fastcached.exe', 'fastcache-compile-node.exe') }
-    FastCachedAwaitExitForNode = @{ ControlImages = @('fastcached.exe') }
+    FastCacheAwaitServiceExit  = @{ ControlImages = @('pace-kv.exe', 'pace-node.exe') }
+    FastCachedAwaitExitForNode = @{ ControlImages = @('pace-kv.exe') }
 }
 
 # The standard actions an anchor of the fragment ends on, with their InstallExecuteSequence
@@ -229,12 +229,12 @@ try {
         # R4-1's control: the OLD registrations named another directory -- a 0.3.0 installed
         # elsewhere, upgraded into the default root -- and a process running from THERE keeps the
         # wait waiting too, with nothing running from the new root. Each registration in a spelling
-        # AppSearch was measured or documented to return (service-actions.xml): fastcached's bare,
+        # AppSearch was measured or documented to return (service-actions.xml): pace-kv's bare,
         # the node's raw with `#%`, and both with a space in the path, as a custom one may have.
         $oldBin = Join-Path $scratch 'Old Custom Root\fastcached\bin'
         New-Item -ItemType Directory -Force -Path $oldBin | Out-Null
-        $knownProperties['FASTCACHED_IMAGEPATH'] = '"' + (Join-Path $oldBin 'fastcached.exe') + '" --daemon --service-name=FastCached'
-        $knownProperties['FASTCACHE_NODE_IMAGEPATH'] = '#%"' + (Join-Path $oldBin 'fastcache-compile-node.exe') + '" --daemon'
+        $knownProperties['FASTCACHED_IMAGEPATH'] = '"' + (Join-Path $oldBin 'pace-kv.exe') + '" --daemon --service-name=FastCached'
+        $knownProperties['FASTCACHE_NODE_IMAGEPATH'] = '#%"' + (Join-Path $oldBin 'pace-node.exe') + '" --daemon'
         try {
             $oldTarget = Format-Target $action.ExeCommand
             $quiet = Start-Target $oldTarget $workingDirectory
@@ -512,7 +512,7 @@ if ($failures.Count -eq $failuresBeforeDiscard) {
 # 12. A maintenance transaction resolves INSTALL_ROOT from the product's OWN install location.
 # CPack's properties.wxi sets it only from Uninstall\[WIX_UPGRADE_DETECTED], empty outside an
 # upgrade, so a repair, a feature change or an uninstall of a custom root fell back to the default
-# root: the uninstall ran a fastcached.exe that was not there and left the service registered
+# root: the uninstall ran a pace-kv.exe that was not there and left the service registered
 # (CI run 37456507637).
 #
 # The set is DERIVED: every scheduled action whose Directory is INSTALL_ROOT or whose command spells
@@ -611,13 +611,13 @@ if ($failures.Count -eq $failuresBeforeRestartManager) {
 }
 
 # 14. FastCachedDisableForNode disables only a registration that EXISTS (rm-nested review, I-1):
-# fastcached's registration is Return="ignore", so it may be absent, and a checked disable of an
+# pace-kv's registration is Return="ignore", so it may be absent, and a checked disable of an
 # absent service failed the node's whole install. The command is started for real, with each service
 # name it spells swapped for one nothing registers, so neither run can change a service.
 $failuresBeforeDisable = $failures.Count
 $disable = $actions | Where-Object { $_.Id -eq 'FastCachedDisableForNode' }
 if ($null -eq $disable) {
-    Fail 'FastCachedDisableForNode is not in the fragment, so nothing leaves fastcached disabled beside the node'
+    Fail 'FastCachedDisableForNode is not in the fragment, so nothing leaves pace-kv disabled beside the node'
 } else {
     $disableTarget = Format-Target $disable.ExeCommand
     $absent = 'FastCacheAbsent' + [guid]::NewGuid().ToString('N').Substring(0, 12)
@@ -630,14 +630,14 @@ if ($null -eq $disable) {
             $disableTarget -replace '\bquery FastCached\b', "query $queried" -replace '\bconfig FastCached\b', "config $configured" }
         $whenAbsent = Start-Target (& $swap $absent $absent) $system64
         if ($whenAbsent -ne 0) {
-            Fail "FastCachedDisableForNode exited $whenAbsent for a service that is not registered; it must exit 0, or a refused fastcached registration (Return=`"ignore`") fails the node's whole install and rolls it back, naming this action rather than the refusal"
+            Fail "FastCachedDisableForNode exited $whenAbsent for a service that is not registered; it must exit 0, or a refused pace-kv registration (Return=`"ignore`") fails the node's whole install and rolls it back, naming this action rather than the refusal"
         }
         # The control: the query finds a service every host has, and the disable still names the
         # absent one, so the disable runs and fails (1060). A guard that ended the command whatever
         # the query answered would pass the run above and fail here.
         $whenPresent = Start-Target (& $swap 'EventLog' $absent) $system64
         if ($whenPresent -ne 1060) {
-            Fail "FastCachedDisableForNode exited $whenPresent when the queried service exists and the disable fails (1060 expected): a disable that fails on a registered fastcached must fail the action"
+            Fail "FastCachedDisableForNode exited $whenPresent when the queried service exists and the disable fails (1060 expected): a disable that fails on a registered pace-kv must fail the action"
         }
     }
 }

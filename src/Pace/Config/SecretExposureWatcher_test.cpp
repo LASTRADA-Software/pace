@@ -368,14 +368,14 @@ TEST_CASE("SecretExposureWatcher: a reload reports a transition into exposure, o
 TEST_CASE("ReportSecretExposure: the arm for a process with no file to reload", "[config][secret]")
 {
     // **The other half of #868's wiring, and the half only a source scan asserted.**
-    // `fastcache-compile-node` started entirely from argv still names its key files
+    // `pace-node` started entirely from argv still names its key files
     // and takes this arm; a `main` reaching it against a function that reported
     // nothing would pass every text scan there is. So the arm is driven here rather
     // than left to the two call sites.
     //
     // The subject list is `DaemonSecretFiles` because that is the production one this
     // test binary can reach, NOT because it is the one the arm is handed: the only
-    // production caller is `fastcache-compile-node`, which hands `NodeSecretFiles`. A
+    // production caller is `pace-node`, which hands `NodeSecretFiles`. A
     // real subject list rather than a bespoke lambda, since a lambda would test the
     // loop and not the shape the loop exists for; that the WORKER reaches this arm at
     // all is `NodeConfig_test`'s wiring scan.
@@ -437,7 +437,7 @@ TEST_CASE("SecretExposureWatcher: the daemon attaches it, and that is asserted",
     // A source scan because `main.cpp` is in no test target. Comments are stripped
     // first: a COMMENT is not a call site, and this file's own subject is exactly the
     // kind of thing that gets discussed in a comment near where it is not called.
-    std::ifstream source { std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "fastcached"
+    std::ifstream source { std::filesystem::path { Pace::Testing::CheckoutSourceDir } / "src" / "apps" / "pace-kv"
                            / "main.cpp" };
     REQUIRE(source.is_open());
 

@@ -14,8 +14,8 @@ namespace Pace
 /// Which binary's startup line this row describes.
 enum class ReadinessMarker : std::uint8_t
 {
-    Daemon = 0,  ///< `fastcached`.
-    CompileNode, ///< `fastcache-compile-node`.
+    Daemon = 0,  ///< `pace-kv`.
+    CompileNode, ///< `pace-node`.
     Last,        ///< Count; never a marker.
 };
 

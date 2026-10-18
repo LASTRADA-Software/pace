@@ -47,7 +47,7 @@ inline constexpr std::string_view MarkupReplacement = "&#xFFFD;";
 /// One byte an output format must not carry literally, and what it writes instead.
 ///
 /// Here rather than in a `Detail` namespace because SEVERAL translation units spell
-/// the same rows: `fastcache-cli`'s `--format=tsv` writes the same four as
+/// the same rows: `pacectl`'s `--format=tsv` writes the same four as
 /// `/fleet.txt`, and an operator pipes both into one script. It was a second struct
 /// there, with the replacement field named `replacement` rather than `spelling` --
 /// and two names for one concept is the worse half of a duplicate, because a reader
@@ -178,7 +178,7 @@ namespace Detail
 /// Shared between all of them rather than copied, because N copies are N places for
 /// one of them to be forgotten.
 ///
-/// `apps/fastcache-cc/Stats.cpp` used to keep its own sibling of this, on the stated
+/// `apps/pace-cc/Stats.cpp` used to keep its own sibling of this, on the stated
 /// ground that the launcher does not link this library. That ground was real and it
 /// does not reach a header like this one: the launcher's rule is header-only AND
 /// std-only, `Markup.hpp` pulls in only `Core/Ranges.hpp` and `Core/Utf8.hpp`, and

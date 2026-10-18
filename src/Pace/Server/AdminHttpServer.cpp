@@ -37,7 +37,7 @@ AdminBindFailureReport DescribeToleratedAdminBindFailure(std::string_view addres
     return AdminBindFailureReport {
         .level = LogLevel::Warn,
         .message =
-            std::format("fastcached: cannot bind metrics endpoint {}:{} ({}); continuing without /metrics and /healthz",
+            std::format("pace-kv: cannot bind metrics endpoint {}:{} ({}); continuing without /metrics and /healthz",
                         address,
                         port,
                         error),

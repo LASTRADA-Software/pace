@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every fixture handed a launcher runs it against a state directory of the run's own.
 #
-# The launcher records every invocation in `<state>/fastcache-cc/invocations.log`, and
+# The launcher records every invocation in `<state>/pace-cc/invocations.log`, and
 # `-z` deletes that log. `<state>` is the DEVELOPER's -- `%LOCALAPPDATA%`, or
 # `$XDG_STATE_HOME` / `$HOME/.local/state` -- unless the fixture says otherwise, so a
 # fixture that does not either deletes their statistics or appends its own records to
@@ -71,7 +71,7 @@ command -v pwsh >/dev/null 2>&1 && have_pwsh=yes
 # --- the scan ------------------------------------------------------------------
 #
 # A FIXTURE is anything the build hands a launcher: a script named by an `add_test` that
-# passes `$<TARGET_FILE:fastcache-cc>` or any other `$<TARGET_FILE...:fastcache-cc>` --
+# passes `$<TARGET_FILE:pace-cc>` or any other `$<TARGET_FILE...:pace-cc>` --
 # directly, or through a `set()` variable carrying it, to any depth and across files -- and
 # any tracked script that declares a launcher parameter (`--launcher)` in a `.sh`,
 # `[string]$Launcher` in a `.ps1`), registered or not. Each must call its language's seam,
@@ -89,7 +89,7 @@ command -v pwsh >/dev/null 2>&1 && have_pwsh=yes
 # Its blind spots, failing OPEN: a fixture that runs the launcher without naming its
 # variable -- by a path it re-derived or took from the command line a second time, through
 # `${!name}` indirection, or from a function of a sourced library; and a launcher a
-# registration reaches without naming `$<TARGET_FILE...:fastcache-cc>` or a variable
+# registration reaches without naming `$<TARGET_FILE...:pace-cc>` or a variable
 # carrying it -- a path spelled from the build tree's layout, or a `find_program` of its
 # own. The seam's own checks -- a read-only
 # guard, a positive control, and a caller-log check on every exit -- catch the first, per
@@ -101,7 +101,7 @@ command -v pwsh >/dev/null 2>&1 && have_pwsh=yes
 LauncherFixtureRunners="scripts/run-check.sh:runs the check script named after it, and that script is the one judged"
 
 # What reaching the launcher looks like in CMake: its file, or its directory.
-LauncherTargetPattern='TARGET_FILE[A-Z_]*:fastcache-cc>'
+LauncherTargetPattern='TARGET_FILE[A-Z_]*:pace-cc>'
 
 # Run a command over every file in a newline-separated list, as trailing arguments, from a
 # root; nothing when the list is empty. ONE process for the whole list, not one per file:
@@ -431,7 +431,7 @@ _launcher_plant guarded.sh <<'PLANTED'
 |esac
 |trap cleanup EXIT
 |e2e_begin t "$w"
-|[[ -n "$launcher" && -x "$launcher" ]] || { echo "fastcache-cc not found: '$launcher'; skipping"; exit 77; }
+|[[ -n "$launcher" && -x "$launcher" ]] || { echo "pace-cc not found: '$launcher'; skipping"; exit 77; }
 |[ -x "$launcher" ] || skip "no ${launcher}"
 |launcher="$(cd "$(dirname "$launcher")" && pwd)/$(basename "$launcher")"
 |e2e_launcher_state_enter launcher
@@ -569,23 +569,23 @@ printf 'case "$1" in\n    --other) : ;;\nesac\n' > "${launcher_canary}/scripts/u
 printf 'case "$1" in\n    --cc) cc="$2" ;;\nesac\n' > "${launcher_canary}/scripts/p1.sh"
 printf 'case "$1" in\n    --tooldir) dir="$2" ;;\nesac\n' > "${launcher_canary}/scripts/p4.sh"
 cat > "${launcher_canary}/CMakeLists.txt" <<'PLANTED'
-add_test(NAME a COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/bare.sh" --launcher "$<TARGET_FILE:fastcache-cc>")
+add_test(NAME a COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/bare.sh" --launcher "$<TARGET_FILE:pace-cc>")
 add_test(
     NAME b
     COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/sealed.sh"
-        --launcher "$<TARGET_FILE:fastcache-cc>")
+        --launcher "$<TARGET_FILE:pace-cc>")
 set(_carrier
-    --launcher "$<TARGET_FILE:fastcache-cc>")
+    --launcher "$<TARGET_FILE:pace-cc>")
 add_test(NAME c COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/undeclared.sh" ${_carrier})
-add_test(NAME d COMMAND "$<TARGET_FILE:fastcache-cc>" --version)
+add_test(NAME d COMMAND "$<TARGET_FILE:pace-cc>" --version)
 add_test(NAME e COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/plain.sh")
-message(STATUS "$<TARGET_FILE:fastcache-cc>")
-set(_first "$<TARGET_FILE:fastcache-cc>")
-add_test(NAME h COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/p4.sh" --tooldir "$<TARGET_FILE_DIR:fastcache-cc>")
+message(STATUS "$<TARGET_FILE:pace-cc>")
+set(_first "$<TARGET_FILE:pace-cc>")
+add_test(NAME h COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/p4.sh" --tooldir "$<TARGET_FILE_DIR:pace-cc>")
 PLANTED
 printf 'set(_second "${_first}")\n' > "${launcher_canary}/src/sub/more.cmake"
 cat > "${launcher_canary}/src/sub/CMakeLists.txt" <<'PLANTED'
-add_test(NAME f COMMAND pwsh -File "${CMAKE_CURRENT_SOURCE_DIR}/sealed.ps1" -Launcher "$<TARGET_FILE:fastcache-cc>")
+add_test(NAME f COMMAND pwsh -File "${CMAKE_CURRENT_SOURCE_DIR}/sealed.ps1" -Launcher "$<TARGET_FILE:pace-cc>")
 add_test(NAME g COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/p1.sh" --cc "${_second}")
 list(APPEND _handed ${_second})
 PLANTED
@@ -712,7 +712,7 @@ printf 'int main() {}\n' > "${launcher_reader_dir}/no-body.cpp"
 # this section costs. Sourcing clears every FASTCACHE_* variable, which this check has no
 # reason to do to itself, hence the subshell. A query's index is its line, from 0; each
 # answer line is `INDEX:row`, or `INDEX:refused`.
-launcher_stats="${source_dir}/src/apps/fastcache-cc/Stats.cpp"
+launcher_stats="${source_dir}/src/apps/pace-cc/Stats.cpp"
 launcher_bash_queries="${launcher_reader_dir}/extra.cpp|windows
 ${launcher_reader_dir}/extra.cpp|posix
 ${launcher_reader_dir}/branches.cpp|windows
@@ -866,19 +866,19 @@ if [ -z "$launcher_seam_rows" ]; then
     echo "FAIL launcher-state-seam: cannot read this platform's rows, so the seam cannot be driven" >&2
     note_failure "launcher-state-seam"
 else
-    launcher_fake="${launcher_seam_dir}/fastcache-cc"
+    launcher_fake="${launcher_seam_dir}/pace-cc"
     {
         printf '%s\nbase=""\nlog_line=%q\n' "$launcher_seam_shebang" "$launcher_seam_log_line"
         while IFS='|' read -r launcher_name launcher_suffix; do
             printf 'if [ -z "$base" ] && [ -n "${%s-}" ]; then base="${%s}%s"; fi\n' "$launcher_name" "$launcher_name" "$launcher_suffix"
         done <<< "$launcher_seam_rows"
         cat <<'FAKE'
-log="${base}/fastcache-cc/invocations.log"
+log="${base}/pace-cc/invocations.log"
 case "${1-}" in
-    --show-stats) if [ -s "$log" ]; then echo "fastcache-cc statistics (${log})"; else echo "fastcache-cc: no statistics recorded yet (${log})."; fi ;;
+    --show-stats) if [ -s "$log" ]; then echo "pace-cc statistics (${log})"; else echo "pace-cc: no statistics recorded yet (${log})."; fi ;;
     -z) rm -f "$log" ;;
     *) if [ -z "${FASTCACHE_NO_STATS-}" ]; then
-           mkdir -p "${base}/fastcache-cc"
+           mkdir -p "${base}/pace-cc"
            for last in "$@"; do :; done
            # Split at the marker, never `${log_line/@SOURCE@/...}`: no spelling of that replacement
            # serves both shells. Unquoted, bash 5.2's `patsub_replacement` reads a `&` in it as the
@@ -915,7 +915,7 @@ FAKE
     _launcher_caller_hashes() {
         local name suffix log
         while IFS='|' read -r name suffix; do
-            log="${1}${suffix}/fastcache-cc/invocations.log"
+            log="${1}${suffix}/pace-cc/invocations.log"
             if [ -f "$log" ]; then printf '%s ' "$(cksum < "$log")"; else printf 'absent '; fi
         done <<< "$launcher_seam_rows"
     }
@@ -932,11 +932,11 @@ FAKE
         mkdir -p "$launcher_caller"
         while IFS='|' read -r launcher_name launcher_suffix; do
             if [ "$launcher_state" != absent ]; then
-                mkdir -p "${launcher_caller}${launcher_suffix}/fastcache-cc"
+                mkdir -p "${launcher_caller}${launcher_suffix}/pace-cc"
                 if [ "$launcher_state" = present ]; then
-                    printf 'HIT\tdefault\t1\t2\t/sentinel/a.cpp\t\t0\t0\t0\t0\t0\tNOT_ATTEMPTED\t\n' > "${launcher_caller}${launcher_suffix}/fastcache-cc/invocations.log"
+                    printf 'HIT\tdefault\t1\t2\t/sentinel/a.cpp\t\t0\t0\t0\t0\t0\tNOT_ATTEMPTED\t\n' > "${launcher_caller}${launcher_suffix}/pace-cc/invocations.log"
                 else
-                    : > "${launcher_caller}${launcher_suffix}/fastcache-cc/invocations.log"
+                    : > "${launcher_caller}${launcher_suffix}/pace-cc/invocations.log"
                 fi
             fi
         done <<< "$launcher_seam_rows"

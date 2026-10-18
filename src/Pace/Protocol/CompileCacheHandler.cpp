@@ -62,11 +62,11 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::Register,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache and no longer schedules; the fleet's scheduler is a "
-                                   "fastcache-compile-node, so point clients at one" },
+                                   "pace-node, so point clients at one" },
         Wire::RefusedVerb { .op = Wire::Op::Heartbeat,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache and no longer schedules; the fleet's scheduler is a "
-                                   "fastcache-compile-node, so point clients at one" },
+                                   "pace-node, so point clients at one" },
         // `DispatchNotPermitted` and never `UnknownOpcode`, even though this verb is
         // newer than most clients: *unimplemented is not served elsewhere*. A worker
         // told `UnknownOpcode` here would conclude this daemon is too OLD to know the
@@ -75,11 +75,11 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::Withdraw,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache and no longer schedules; the fleet's scheduler is a "
-                                   "fastcache-compile-node, so point clients at one" },
+                                   "pace-node, so point clients at one" },
         Wire::RefusedVerb { .op = Wire::Op::Lease,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache and no longer schedules; the fleet's scheduler is a "
-                                   "fastcache-compile-node, so point clients at one" },
+                                   "pace-node, so point clients at one" },
         // With the cordon row below, `Wire::NoCompileWorker`'s fact: a node started with
         // `--slots=0` refuses both verbs for the same reason and with the same code (#206).
         Wire::RefusedVerb { .op = Wire::Op::Compile,
@@ -89,30 +89,30 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::Release,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache and no longer schedules; the fleet's scheduler is a "
-                                   "fastcache-compile-node, so point clients at one" },
+                                   "pace-node, so point clients at one" },
         Wire::RefusedVerb { .op = Wire::Op::ClusterStatus,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
-                                   "fastcache-compile-node instead" },
+                                   "pace-node instead" },
         Wire::RefusedVerb { .op = Wire::Op::ClusterSet,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
-                                   "fastcache-compile-node instead" },
+                                   "pace-node instead" },
         Wire::RefusedVerb { .op = Wire::Op::ClusterForget,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
-                                   "fastcache-compile-node instead" },
+                                   "pace-node instead" },
         Wire::RefusedVerb { .op = Wire::Op::ClusterAdmit,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
-                                   "fastcache-compile-node instead" },
+                                   "pace-node instead" },
         // With `ClusterAdmit` and for its reason: the same replicated change, recording
         // the other seat (#1449), so one endpoint must not refuse the two spellings with
         // two codes.
         Wire::RefusedVerb { .op = Wire::Op::ClusterAdmitLearner,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
-                                   "fastcache-compile-node instead" },
+                                   "pace-node instead" },
         // **`DispatchNotPermitted` and never `UnknownOpcode`**, for the reason `Withdraw`
         // above states and which applies here with more force, these verbs being newer
         // than every deployed client: *unimplemented is not served elsewhere*. A client
@@ -126,7 +126,7 @@ namespace
         // need.
         Wire::RefusedVerb { .op = Wire::Op::NodeStatus,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
-                            .why = "this endpoint is a cache, not a compile node; ask a fastcache-compile-node "
+                            .why = "this endpoint is a cache, not a compile node; ask a pace-node "
                                    "what it is, or read this daemon's own /metrics" },
         Wire::RefusedVerb { .op = Wire::Op::NodeMetrics,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
@@ -139,7 +139,7 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::ExplainAdmission,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache, not a compile node: it folds no admission routes, so "
-                                   "there is nothing here to explain; ask a fastcache-compile-node which routes "
+                                   "there is nothing here to explain; ask a pace-node which routes "
                                    "admit a host" },
         // With the node rows and for their reason: a cordon asks about a worker
         // PROCESS, and this endpoint runs none. A client told this goes to the compile
@@ -147,14 +147,14 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::Cordon,
                             .code = Wire::NoCompileWorker::Code,
                             .why = "this endpoint runs no compile worker: it is a cache, so there is nothing here to "
-                                   "cordon; ask the fastcache-compile-node on this machine" },
+                                   "cordon; ask the pace-node on this machine" },
         // With the node rows and for their reason: a machine ticket is minted from THIS
         // machine's own identity, which a cache holds none of. A client told this goes to
         // the compile node on its machine, which is the only place that identity lives.
         Wire::RefusedVerb { .op = Wire::Op::MintTicket,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache, not a compile node: it mints no tickets; ask the "
-                                   "fastcache-compile-node on this machine to mint one" },
+                                   "pace-node on this machine to mint one" },
         // **`NoCluster`, with the cluster rows and NOT with the node rows
         // above.** `Enroll` is a self-service `ClusterAdmit` -- it asks to be written
         // into the replicated membership configuration, and `EnrollControl`'s `Approve`
@@ -173,18 +173,18 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::Enroll,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster, so there is nothing here to "
-                                   "join; ask a fastcache-compile-node that runs consensus instead" },
+                                   "join; ask a pace-node that runs consensus instead" },
         Wire::RefusedVerb { .op = Wire::Op::EnrollControl,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster, so it opens no enrollment "
-                                   "window; ask a fastcache-compile-node that runs consensus instead" },
+                                   "window; ask a pace-node that runs consensus instead" },
         // With the enrollment rows and for their reason: a fleet summary asks which fleet a node is
         // in, and this endpoint is a cache that belongs to none. `NoCluster` sends the asker to a
         // compile node; `UnimplementedVerb` would send it to upgrade a daemon that is current.
         // Pre-auth like `Enroll`, and for the same reason costs nothing to answer to anybody.
         Wire::RefusedVerb { .op = Wire::Op::FleetSummary,
                             .code = Wire::ErrorCode::NoCluster,
-                            .why = "this endpoint is a cache and belongs to no fleet; ask a fastcache-compile-node "
+                            .why = "this endpoint is a cache and belongs to no fleet; ask a pace-node "
                                    "which fleet it is in" },
         // `DispatchNotPermitted` with the node rows, for their reason: the fleet is served by a
         // compile node that schedules, not unimplemented, and a client told `UnknownOpcode` would
@@ -192,7 +192,7 @@ namespace
         Wire::RefusedVerb { .op = Wire::Op::FleetText,
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache, not a compile node, and serves no fleet; read it from "
-                                   "the fleet's scheduler, a fastcache-compile-node" },
+                                   "the fleet's scheduler, a pace-node" },
         // `NotSharedCache` and never `UnknownOpcode`: the fleet's shared cache is a
         // compile node the replicated setting names, and a client told the verb is unknown would
         // conclude this daemon is too OLD. Not `DispatchNotPermitted` either -- the code a node that
@@ -200,12 +200,12 @@ namespace
         // miss whichever wrong machine it reached.
         Wire::RefusedVerb { .op = Wire::Op::SharedFetch,
                             .code = Wire::ErrorCode::NotSharedCache,
-                            .why = "this endpoint is a fastcached daemon; the fleet's shared cache is the "
-                                   "fastcache-compile-node its shared-cache setting names" },
+                            .why = "this endpoint is a pace-kv daemon; the fleet's shared cache is the "
+                                   "pace-node its shared-cache setting names" },
         Wire::RefusedVerb { .op = Wire::Op::SharedStore,
                             .code = Wire::ErrorCode::NotSharedCache,
-                            .why = "this endpoint is a fastcached daemon; the fleet's shared cache is the "
-                                   "fastcache-compile-node its shared-cache setting names" },
+                            .why = "this endpoint is a pace-kv daemon; the fleet's shared cache is the "
+                                   "pace-node its shared-cache setting names" },
     };
 
     /// Whether every compile-family verb has a row here saying `Wire::NoCompileWorker`'s fact.
@@ -752,8 +752,8 @@ namespace
     /// @return Whether the command loop should continue or abort.
     [[nodiscard]] core::async::Task<Next> HandleDistributed(core::net::ISocket* socket, Wire::Op op)
     {
-        // Answered, never served. `fastcached` is a cache and nothing else: the fleet's
-        // scheduler moved to `fastcache-compile-node`, because
+        // Answered, never served. `pace-kv` is a cache and nothing else: the fleet's
+        // scheduler moved to `pace-node`, because
         // handing out capacity is a decision only one node may make at a time and
         // nothing here can establish which node that is.
         //
@@ -935,7 +935,7 @@ namespace
                 return std::nullopt;
             return Cc::RefuseWithoutCounter(
                 SubjectServedElsewhere,
-                "this daemon streams the cache subject only; subscribe to a node or the fleet at a fastcache-compile-node");
+                "this daemon streams the cache subject only; subscribe to a node or the fleet at a pace-node");
         }
 
         /// @copydoc ILiveGate::Recheck

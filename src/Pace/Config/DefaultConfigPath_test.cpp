@@ -435,7 +435,7 @@ TEST_CASE("DefaultConfigPath: a privileged process vouches for the per-user rows
 
     // $HOME and $XDG_CONFIG_HOME are inputs an unprivileged account frequently
     // controls, and sudo does not always reset them. Without this, a narrowly
-    // granted `sudo fastcached` would take root's storage_path from a file
+    // granted `sudo pace-kv` would take root's storage_path from a file
     // alice wrote — the machine-wide row is hardened against exactly that, and
     // the per-user rows outrank it.
     probe.MakeReadable(userPath);

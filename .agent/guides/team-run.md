@@ -1,6 +1,6 @@
 # Running the production-readiness work as a team
 
-This describes **how** the `fastcache-compile-node` production run is executed, so a new
+This describes **how** the `pace-node` production run is executed, so a new
 session — or a different account — can take it over without reconstructing the setup.
 
 It deliberately contains **no board state**. What is done, in progress and left is in
@@ -30,8 +30,8 @@ decides *who*, because that is what keeps three branches from colliding.
 <!-- table-total: none -->
 | Lane | Owns |
 |---|---|
-| **L — launcher** | `src/apps/fastcache-cc/` |
-| **N — node** | `src/apps/fastcache-compile-node/` |
+| **L — launcher** | `src/apps/pace-cc/` |
+| **N — node** | `src/apps/pace-node/` |
 | **D — library, tests, packaging** | `src/Pace/{Distributed,Consensus,Cluster}/`, `scripts/`, `packaging/`, `.github/` |
 
 A ticket spanning two lanes is **split into two tickets** with an explicit ordering, or held
@@ -156,7 +156,7 @@ Each of these is a scar, not a preference.
 - **New build directories need `--fresh`.** Existing trees can have `FASTCACHE_CC-NOTFOUND`
   baked into `CMakeCache`, and `find_program` never revisits a filled entry — they fall
   through to whatever else is installed, silently. Confirm the
-  `[cache] Enabling fastcache-cc` configure line. (Since #815 that fall-through is ccache
+  `[cache] Enabling pace-cc` configure line. (Since #815 that fall-through is ccache
   or nothing rather than sccache, which is now opt-in — the tree is no *less* silent about
   a stale `NOTFOUND`, because that is a launcher that was never found rather than one that
   answered and was refused, and only the second is warned about.)
@@ -670,7 +670,7 @@ That failure is worse than a stale reading, which is at least true when taken.
 ### A count that disagrees with its own enumeration
 
 A lane reported "six files changed" one clause after writing "the registration I
-flagged, and four under `src/apps/fastcache-cc/`" -- which, with the two it had
+flagged, and four under `src/apps/pace-cc/`" -- which, with the two it had
 already named, is seven. The tree said seven. Nothing was wrong with the branch.
 
 The same shape had already cost the run an hour that evening: a lane reported **eleven

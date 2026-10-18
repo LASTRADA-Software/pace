@@ -50,7 +50,7 @@ namespace Pace
 /// default since 5.4) or `kern.ipc.somaxconn` (BSD, macOS) -- so it asks for the same depth and
 /// changes nothing where that ceiling is 128: macOS's default, and Linux's before 5.4. **A
 /// socket-activated node does not reach this constant**: it adopts a listener systemd already
-/// made, whose depth is the unit's `Backlog=` (`packaging/linux/fastcache-compile-node.socket`,
+/// made, whose depth is the unit's `Backlog=` (`packaging/linux/pace-node.socket`,
 /// 4096 for this reason).
 inline constexpr int ListenQueueDepth = 4096;
 

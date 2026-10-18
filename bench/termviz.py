@@ -170,7 +170,7 @@ def _delta_cell(value: float | None, improvement_is_negative: bool, color_enable
 
 def print_environment(env: dict) -> None:
     color = supports_color()
-    print(_colorize("fastcached benchmark - base vs candidate", BOLD, color))
+    print(_colorize("pace-kv benchmark - base vs candidate", BOLD, color))
     keys = ("os", "cpu", "cores", "python", "preset", "profile", "reps",
             "base_ref", "base_sha", "candidate_ref", "candidate_sha")
     for key in keys:
@@ -220,7 +220,7 @@ def print_comparison_table(comparisons) -> None:
 
 
 def print_multitarget_table(target_names: list[str], rows: list) -> None:
-    """Print fastcached vs real servers: ops/s per target + fastcached speedup."""
+    """Print pace-kv vs real servers: ops/s per target + pace-kv speedup."""
     import report
 
     color = supports_color()

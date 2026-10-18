@@ -4,7 +4,7 @@
 #
 # Proves the core value-portability guarantee with REAL compilations: an object
 # compiled at a DEEP checkout path (mimicking a CI runner nested deeper) is
-# STOREd through fastcached, then FETCHed and localized from a SHALLOW checkout
+# STOREd through pace-kv, then FETCHed and localized from a SHALLOW checkout
 # path — and every localized /showIncludes header resolves on disk at the
 # shallow layout. This is exactly the scenario that poisons Ninja today.
 #
@@ -20,7 +20,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Fastcached  = "$PSScriptRoot/../../out/build/clangcl-debug/target/fastcached.exe",
+    [string]$Fastcached  = "$PSScriptRoot/../../out/build/clangcl-debug/target/pace-kv.exe",
     [string]$Client      = "$PSScriptRoot/../../out/build/clangcl-debug/target/compile-cache-testclient.exe",
     # Drawn per run when 0, for the reason `.agent/rules/testing.md` gives: a
     # fixed port needs a reaper, and this file had neither -- #220's defect
@@ -41,13 +41,13 @@ $exitCode = 0
 # refuse-or-reap decision and the draw both live in one module, so this fixture
 # cannot drift from its two siblings the way it did while each owned a copy.
 Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EPorts.psm1") -Force
-$Port = Get-E2EFixturePort $Port $Fastcached "fastcached"
+$Port = Get-E2EFixturePort $Port $Fastcached "pace-kv"
 
 function Start-Fastcached {
-    Write-Host "starting fastcached on 127.0.0.1:$Port ..."
+    Write-Host "starting pace-kv on 127.0.0.1:$Port ..."
     $p = Start-Process -FilePath $Fastcached -ArgumentList "--bind","127.0.0.1","--port","$Port" -PassThru -WindowStyle Hidden
     Start-Sleep -Milliseconds 600
-    if ($p.HasExited) { throw "fastcached exited immediately (exit $($p.ExitCode))" }
+    if ($p.HasExited) { throw "pace-kv exited immediately (exit $($p.ExitCode))" }
     return $p
 }
 
@@ -145,7 +145,7 @@ try {
     }
 }
 finally {
-    Write-Host "stopping fastcached"
+    Write-Host "stopping pace-kv"
     $server | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 

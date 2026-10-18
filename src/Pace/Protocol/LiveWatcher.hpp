@@ -14,7 +14,7 @@ namespace Pace
 /// machine's. An alias rather than a copy of the struct, so a fact a connection establishes reaches
 /// the per-tick re-gate by construction rather than by somebody remembering to copy it.
 ///
-/// Shareable: `fastcached` implements `ILiveGate` too and runs no node handshake, so its identity
+/// Shareable: `pace-kv` implements `ILiveGate` too and runs no node handshake, so its identity
 /// facts are honestly disengaged there rather than plausible defaults it must invent. It OWNS its
 /// host because `ILiveGate::Recheck` reads it on every tick for the life of a subscription (#366).
 using LiveWatcher = ConnectionFacts;

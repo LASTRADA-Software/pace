@@ -501,7 +501,7 @@ namespace
     }
 
     /// Synthetic `stats settings` — render the engine's effective
-    /// configuration. fastcached does not yet thread a `Config` object
+    /// configuration. pace-kv does not yet thread a `Config` object
     /// into the text handler, so this returns only the settings the
     /// engine itself can derive. A future pass will inject Config and
     /// add port / bind address / max_item_size / etc.
@@ -517,7 +517,7 @@ namespace
         append("verbosity", "0");
     }
 
-    /// Synthetic `stats items` — fastcached does not have slab classes,
+    /// Synthetic `stats items` — pace-kv does not have slab classes,
     /// so one synthetic class (id 1) represents the entire LRU.
     void AppendItems(std::string& out, StorageStats const& stats)
     {
@@ -778,10 +778,10 @@ core::async::Task<void> MemcachedTextHandler::Run(core::net::ISocket* socket,
         else if (command == "cache_memlimit")
             ok = co_await HandleCacheMemlimit(socket, engine, tail);
         else if (command == "verbosity")
-            // Accepted as a no-op — fastcached logs via ILogger.
+            // Accepted as a no-op — pace-kv logs via ILogger.
             ok = co_await WriteLine(socket, "OK");
         else if (command == "slabs" || command == "lru" || command == "lru_crawler")
-            // Synthetic stub — fastcached does not implement slab allocation
+            // Synthetic stub — pace-kv does not implement slab allocation
             // or a separate LRU crawler; capability probes get OK rather
             // than ERROR. See docs for the non-applicable rationale.
             ok = co_await WriteLine(socket, "OK");

@@ -188,7 +188,7 @@ struct RevokedKey
 ///
 /// Derived from `ClusterMember` and never stored or sent, so its ordinals carry no
 /// contract. It is the one question every renderer of a member asks, so the fleet page,
-/// `--cluster-status` and `fastcache-cli cluster-members` cannot answer it three ways.
+/// `--cluster-status` and `pacectl cluster-members` cannot answer it three ways.
 enum class SchedulerEndpointState : std::uint8_t
 {
     Announced,      ///< Recorded: where this member's `0xFC` port answers.
@@ -570,7 +570,7 @@ struct DissolveOrder
 /// is replicated to every member and kept until it is snapshotted, so what goes in it
 /// has to be state that changes rarely and matters everywhere. Cache entries are the
 /// opposite of both — multi-megabyte objects written constantly — which is why they
-/// live in a `fastcached` this state merely names.
+/// live in a `pace-kv` this state merely names.
 struct ClusterState
 {
     /// Members, sorted by id so two nodes that applied the same entries hold

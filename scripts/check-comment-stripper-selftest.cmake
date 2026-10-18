@@ -10,7 +10,7 @@
 # is a defect in all of them at once, silent in the direction that matters. It had one.
 #
 # A comment introducer inside a STRING LITERAL was read as a real introducer. On this tree
-# `src/apps/fastcache-cli/SocketExchange.cpp:410` carries `"...Accept: */*\r\n..."`, whose three
+# `src/apps/pacectl/SocketExchange.cpp:410` carries `"...Accept: */*\r\n..."`, whose three
 # characters `*` `/` `*` contain a `/*`; nothing closed it, and the remaining 51 lines of that
 # file -- a `for (;;)` among them -- were blanked while the caller printed a clean count over
 # lines it had never read. The sibling shape, a `//` inside a literal, truncated 21 lines across

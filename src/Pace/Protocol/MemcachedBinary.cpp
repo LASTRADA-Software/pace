@@ -945,7 +945,7 @@ core::async::Task<void> MemcachedBinaryHandler::Run(core::net::ISocket* socket,
                 keepGoing = co_await HandleStat(socket, engine, header, key);
                 break;
             case Opcode::Verbosity:
-                // Accepted as a no-op — fastcached logs via ILogger, not via
+                // Accepted as a no-op — pace-kv logs via ILogger, not via
                 // the verbosity dial. Reply Ok so capability-probing clients
                 // continue rather than abort.
                 keepGoing = co_await WriteResponse(socket, opcode, Status::Ok, header.opaque, 0, {}, {}, {});

@@ -152,7 +152,7 @@ TEST_CASE("A scrape tells a skew from a surface this process does not serve", "[
 
 TEST_CASE("The reason an absence has survives the wire", "[metrics][stats-reading]")
 {
-    // The renderer is not always in the process that captured the reading -- `fastcache-cli`'s
+    // The renderer is not always in the process that captured the reading -- `pacectl`'s
     // poll rung decodes one and re-renders Prometheus from it -- so the reason has to travel.
     // This is the case that fails if it is ever made local again.
     AtomicMetricsSink sink;

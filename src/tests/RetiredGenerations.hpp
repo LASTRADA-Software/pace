@@ -18,7 +18,7 @@ namespace Pace::Testing
 /// taken under it.
 ///
 /// Two tables in this tree keep this shape and kept it separately — the key space's
-/// schema tags (`apps/fastcache-cc/`, keyed on a string) and the stored-value
+/// schema tags (`apps/pace-cc/`, keyed on a string) and the stored-value
 /// contract's generations (`CompileCache/`, keyed on a `CompileValueVersion` byte).
 /// They could not share a definition because **a library test may not include an app
 /// header**, which is the same constraint that put `FleetHarness.hpp` here rather

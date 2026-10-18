@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// One `LiveStream` served on two REAL reactors, the shape `fastcached --threads 2` runs (#1399).
+// One `LiveStream` served on two REAL reactors, the shape `pace-kv --threads 2` runs (#1399).
 //
 // Every other live-stats case drives one `core::net::testing::TestLoop`, where one thread does everything and no
 // subscriber can wait on another. The daemon shares ONE stream across all of its reactors -- the

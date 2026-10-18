@@ -1,6 +1,6 @@
 # The compile cache key
 
-Rules for `src/apps/fastcache-cc/` and `src/Pace/CompileCache/`: what goes
+Rules for `src/apps/pace-cc/` and `src/Pace/CompileCache/`: what goes
 into a cache key, how paths are canonicalized so two machines derive the same one,
 what a direct-mode manifest may record, and what a hit is allowed to replay.
 
@@ -17,7 +17,7 @@ rule below has already been at least one of the two.
 
 <!-- agent-tripwire: Preprocess with line markers suppressed -->
 
-`fastcached` and `fastcache-cc` are both installed. Three things the launcher's
+`pace-kv` and `pace-cc` are both installed. Three things the launcher's
 cache key depends on, each of which has already caused a silent hit-rate
 collapse or a mis-serve and is now covered by regression tests:
 
@@ -354,7 +354,7 @@ same on both — the same defect with no MSVC anywhere near it.
   because the compiler has already opened every one of those files. A move is a different
   key by construction, so the *pre-move* entry survives the move rather than being
   overwritten — which is the property `check_header_move` asserts by moving the header
-  back and requiring a HIT. Anchored as `fastcache-cc: HIT`: the launcher prints
+  back and requiring a HIT. Anchored as `pace-cc: HIT`: the launcher prints
   `STALE HIT (...); recompiling` on its way to a MISS, so a bare `grep HIT` is satisfied by
   exactly the collapse the case exists to reject. `ComputeManifestKey`'s `manifest-v*` tag moves
   in lock-step with `objkey-v*` for a related reason — a manifest stores the object key
@@ -657,7 +657,7 @@ same on both — the same defect with no MSVC anywhere near it.
   - **A stream driver's notes must not reach the hashed text, and which stream carries them
     is not the driver table's answer to give.** No field encodes it -- `DriverSpec` carries
     no `includeStream`, and the claim lives only in `Flavor`'s doc comments and the driver
-    table in `docs/tools/fastcache-cc.md`, both of which describe the *compile* run; the probe is a different command line and clang moves the notes off
+    table in `docs/tools/pace-cc.md`, both of which describe the *compile* run; the probe is a different command line and clang moves the notes off
     whichever stream the preprocessed text is using — measured, `clang-cl /c /showIncludes`
     reports on **stdout** while `clang-cl /EP /showIncludes` reports on **stderr** (LLVM
     D46394). Routing the probe by that table therefore read an empty set on clang-cl and
@@ -672,7 +672,7 @@ same on both — the same defect with no MSVC anywhere near it.
     the reading: `clang-cl /c /showIncludes` reports on **stdout**, `clang-cl /EP
     /showIncludes` on **stderr** (LLVM D46394). **NOT MEASURED: `cl`.** Three sites assert it
     writes on stderr -- `Flavor::Cl`'s doc comment, the driver table in
-    `docs/tools/fastcache-cc.md`, and the stored-region comment in `fastcache-cc/main.cpp`
+    `docs/tools/pace-cc.md`, and the stored-region comment in `pace-cc/main.cpp`
     -- while the analysis on #700 and the review of #821 both say stdout. Nobody on this team
     has a Windows host, so **no reading has been taken either way**. The measurement is
     committed as `scripts/probes/msvc-showincludes-channel.ps1`, unrun -- it identifies a
@@ -993,7 +993,7 @@ same on both — the same defect with no MSVC anywhere near it.
     reached through a symlink stored `.../link/build/a.o:` and replayed
     `.../real/build/a.o:`, which Ninja rejects outright (`expected depfile ... to mention
     ...`) while make matches no rule at all and silently drops every header dependency.
-    `RootReconciler` (`apps/fastcache-cc/RootReconciler.cpp`) holds both layouts and is the only
+    `RootReconciler` (`apps/pace-cc/RootReconciler.cpp`) holds both layouts and is the only
     thing that sees the resolved one: it canonicalizes an emitted path against the
     resolved roots and localizes the token into the as-given roots. Everything downstream
     — the roots on the wire, the key, the manifest, the replay guard, the localized
@@ -1004,7 +1004,7 @@ same on both — the same defect with no MSVC anywhere near it.
       records.** `main.cpp` is in no test target, so logic that lives there has no unit
       coverage at all — the mistake this list notes having been made once with the wire
       framing. `RootReconciler.cpp` is compiled into both the launcher and
-      `fastcache-cc-tests`, and its tests drive it through a table-backed fake
+      `pace-cc-tests`, and its tests drive it through a table-backed fake
       `IPathResolver`: the conditions it exists for (an 8.3 short component, a `subst`
       drive, a junction) cannot be created on the host running the tests, and two of the
       three cannot be created on any host that is not Windows, so a fake stating the
@@ -1029,7 +1029,7 @@ same on both — the same defect with no MSVC anywhere near it.
     - **Symmetry is the property, and it is why this is a seam rather than a call at
       each comparison.** Expanding only the emitted paths breaks clang-cl exactly as
       spelling only the root long breaks `cl`. `Cc::IPathResolver`
-      (`apps/fastcache-cc/PathResolve.hpp`) is where the filesystem lives, and it lives
+      (`apps/pace-cc/PathResolve.hpp`) is where the filesystem lives, and it lives
       in the launcher because `PathCanon` also runs on the **daemon**, over a producing
       machine's roots that do not exist there (`CompileCacheHandler::HandleStore`), so it
       may never touch a filesystem. Hence `PathCanon::RewritePaths` taking the transform
@@ -1285,7 +1285,7 @@ same on both — the same defect with no MSVC anywhere near it.
 - **A cache that can fail a build is not optional, and a refusal nobody can read
   is not a refusal.** The launcher STOREs an object by streaming one frame, and the
   daemon refused an over-cap frame by replying and then closing — while the sender
-  was still writing. Two independent defects met there. Nothing in `fastcache-cc`
+  was still writing. Two independent defects met there. Nothing in `pace-cc`
   suppressed SIGPIPE (the daemon does, in `Net/BlockingSocket`, but the launcher
   deliberately does not link the library), so the write that met the closed peer
   **killed the launcher with signal 13**; the build system saw a compile die of a
@@ -1565,7 +1565,7 @@ served under a correct key — was actually observed
 
 The fact was already written down three times, in
 [`distributed-compilation.md`](distributed-compilation.md), in
-`scripts/dist-compile-e2e.ps1` and in `docs/tools/fastcache-compile-node.md` — and
+`scripts/dist-compile-e2e.ps1` and in `docs/tools/pace-node.md` — and
 none of those is a file anyone editing `HitVerification.cpp` opens. **That is why it
 is repeated here**, in the launcher's own rule file, rather than linked.
 
@@ -1718,7 +1718,7 @@ stops being one — the same confound that cost #493 a re-run.
   differ. That is the #203 symptom reappearing inside the fix for it, and the only
   instrument that sees it is reading `comp_dir` directly.
 - **The table KEYS all three spellings; the module ADDS the debug one always and
-  `-fmacro-prefix-map` under `fastcache-cc` alone.**
+  `-fmacro-prefix-map` under `pace-cc` alone.**
   `-fmacro-prefix-map` and `-ffile-prefix-map` rewrite `__FILE__`, which lands in the
   preprocessed text the key hashes — measured on both drivers with the source named
   absolutely, where `-fdebug-prefix-map` leaves that text byte-identical and the other
@@ -1737,7 +1737,7 @@ stops being one — the same confound that cost #493 a re-run.
     worker maps by its own `-fdebug-prefix-map` rules.
   - **The module maps `__FILE__` for the checkout (`<src>/=`) and the dependency cache
     (`<cache>/=deps/`, LAST)** — `_fc_source_prefix_map_rules`, checked by
-    `ctest -R debug-prefix-map-rules` — and only when `fastcache-cc` is the launcher, the
+    `ctest -R debug-prefix-map-rules` — and only when `pace-cc` is the launcher, the
     one that keys the rule portably. Measured on this repo before it: every Catch2 test
     object (358 of 1017) named its checkout and was stored per checkout.
   - **And the build tree's PLACE under the source root is keyed** whenever one is
@@ -1854,7 +1854,7 @@ stops being one — the same confound that cost #493 a re-run.
     fully mapped and only clang on such a node keeps the pre-#506 state, where refusing
     would cost every dispatched compile on every node installed from the shipped unit.
   - **`/` was the PRODUCTION value, and the repair was packaging.** The shipped
-    `fastcache-compile-node.service` set no `WorkingDirectory=`, so systemd started the
+    `pace-node.service` set no `WorkingDirectory=`, so systemd started the
     worker in `/` and the case above was not a corner but the ordinary Linux install
     ([#674](https://github.com/LASTRADA-Software/fastcached/issues/674)). It now names
     one, and names one the unit itself CREATES — `RuntimeDirectory=fastcache-node`,
@@ -2076,7 +2076,7 @@ anticipated all reach the same bytes. Folding the absolute roots into every key 
 source is spelled absolutely is correct, and ends cross-checkout sharing for every CMake
 compile -- the rejected alternative.
 
-**The mechanism is `apps/fastcache-cc/RootBinding.hpp`, and the header carries the whole
+**The mechanism is `apps/pace-cc/RootBinding.hpp`, and the header carries the whole
 argument.** At STORE time the launcher scans the object's program-visible sections for
 the parts of its own checkout -- source root, build tree, working directory, each in the
 build's spelling and the resolved one. An object naming none keeps today's key and
@@ -2630,7 +2630,7 @@ without reopening the argument:
   second probe spawn per compile to compare against. So this case is silent by
   construction, and that is the half most likely to be rediscovered as a bug and
   "fixed". It is not a bug; it is this row. The argument is on `CompilerBanner` in
-  `apps/fastcache-cc/ToolchainProbe.cpp`, which points here.
+  `apps/pace-cc/ToolchainProbe.cpp`, which points here.
 - MurmurHash3 is not collision-resistant against an adversary. Accepted because
   the key is not a security boundary: anyone who can STORE can already write a
   wrong object under a correct key. Closing it needs a keyed hash *and* a trust

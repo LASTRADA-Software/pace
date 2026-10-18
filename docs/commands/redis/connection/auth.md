@@ -2,7 +2,7 @@
 
 **Protocols:** Redis RESP2 / RESP3 · **Status:** Supported (when `--requirepass` is set)
 
-fastcached authenticates clients against a single shared secret configured
+pace-kv authenticates clients against a single shared secret configured
 with `--requirepass=<secret>` (or the `requirepass` YAML key). When no secret
 is configured, authentication is disabled: every command is served without a
 credential check, and `AUTH` replies with the redis-compatible

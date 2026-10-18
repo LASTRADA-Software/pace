@@ -11,7 +11,7 @@ using Pace::ParseFiniteDouble;
 using namespace std::string_view_literals;
 
 // `ParseFiniteDouble` was `RedisResp.cpp`'s private `ParseDouble` until it acquired a
-// second caller (`fastcache-cli`'s RESP3 double). Its behaviour is covered from the
+// second caller (`pacectl`'s RESP3 double). Its behaviour is covered from the
 // wire in `RedisResp_test.cpp` -- `INCRBYFLOAT` on `1,5`, on `1e+308` and on `2.5e1`
 // -- and that coverage is what makes the move safe. This file covers it DIRECTLY,
 // which those cases cannot: they reach it through one caller that only ever hands it

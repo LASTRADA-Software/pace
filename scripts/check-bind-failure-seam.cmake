@@ -20,8 +20,8 @@
 #
 # ## What is scanned, and what is not
 #
-# `src/apps/fastcache-compile-node/` only. The daemon binds too --
-# `src/apps/fastcached/main.cpp` and `src/Pace/Server/ReactorServerLoop.cpp`
+# `src/apps/pace-node/` only. The daemon binds too --
+# `src/apps/pace-kv/main.cpp` and `src/Pace/Server/ReactorServerLoop.cpp`
 # each decide a bind failure inline -- and they are deliberately NOT covered here:
 # `BindFailurePolicy` lives in the node's own `NodeSurfaces.hpp`, which the library
 # and the daemon cannot include. Widening this scan without first moving the seam
@@ -74,7 +74,7 @@ if(NOT DEFINED FASTCACHED_SOURCE_DIR)
 endif()
 
 set(seam "JudgeBindFailure")
-set(nodeDirectory "src/apps/fastcache-compile-node")
+set(nodeDirectory "src/apps/pace-node")
 
 # ---------------------------------------------------------------------------
 # What counts as opening a listening surface.

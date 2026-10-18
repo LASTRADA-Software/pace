@@ -10,7 +10,7 @@
 # file be the dpkg conffile, the macOS `.default` template and the MSI `.default`
 # template all at once.
 #
-# Nothing enforced that they all get shipped. `fastcache-compile-node.yaml` arrived
+# Nothing enforced that they all get shipped. `pace-node.yaml` arrived
 # with #291 as a Linux conffile, and the macOS `.pkg` and the Windows MSI shipped
 # NO worker configuration at all until #397 -- so an operator on either platform
 # had no annotated reference to start from, and every setting documented only in
@@ -99,7 +99,7 @@ endforeach()
 # default, so there is no live value -- and therefore no live absolute PATH, which
 # is the only thing in these files that could be platform-specific. Measured at the
 # commit that added this check: 0 live lines of 285 in fastcached.yaml and 0 of 296
-# in fastcache-compile-node.yaml, so the rule holds today and an ordinary edit
+# in pace-node.yaml, so the rule holds today and an ordinary edit
 # breaks it.
 #
 # Stated as `nothing is in force` rather than as a path-shaped regex, because a path

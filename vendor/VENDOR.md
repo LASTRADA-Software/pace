@@ -18,7 +18,7 @@ file names, so a new copy needs a row here the day it arrives.
 | `vendor/monocypher` | Monocypher 4.0.3, "`vendor/monocypher`" below | 6 | 4,182 |
 
 **`vendor/endo` is gone (#1596).** It was a verbatim copy of endo's terminal UI, with the slice of
-endo's platform layer and contour's coroutine vocabulary that UI needed, behind `fastcache-cli
+endo's platform layer and contour's coroutine vocabulary that UI needed, behind `pacectl
 live-stats`. That code is core-cpp's now (`core::tui`, fetched by CPM at a release tag), and every
 local change this copy carried is in core-cpp's v0.1.0: the four merged into endo as
 [contour-terminal/endo#184](https://github.com/contour-terminal/endo/pull/184), which core-cpp
@@ -58,7 +58,7 @@ attribute nothing, so they are left upstream; each file's hash is its `MANIFEST`
 **What the build does with it.** `cmake/Monocypher.cmake`, which is ours, declares one static
 library, `fastcache-monocypher`, from the two `.c` files compiled as C++ with upstream's
 `MONOCYPHER_CPP_NAMESPACE` -- that file says why C++, why the namespace, and why it is built
-unconditionally. It has no dependency, so `fastcache-cc` can
+unconditionally. It has no dependency, so `pace-cc` can
 link it without Pace.
 
 **Who may use it.** Only `src/Pace/Core/Ed25519.cpp` and `src/Pace/Core/X25519.cpp`

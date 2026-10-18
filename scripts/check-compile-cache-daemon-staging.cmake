@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Assert that cmake/portable/CompileCache.cmake's FASTCACHE_AUTO_START can
-# stage a fastcached daemon binary out of the same release archive
+# stage a pace-kv daemon binary out of the same release archive
 # FASTCACHE_AUTO_INSTALL already fetches for the launcher (issue #90) — one
 # download serving two members, not two downloads.
 #
@@ -12,7 +12,7 @@
 # shared rather than downloading the archive a second time, and
 # _fc_auto_install_stage_member placing the result under the right
 # version/platform directory) rather than whether a real daemon can bind a
-# real port — that needs a real fastcached and a real fastcache-cc, which is
+# real port — that needs a real pace-kv and a real pace-cc, which is
 # what the smoke-labelled check-compile-cache-daemon-start test covers
 # instead, with the two split for the same reason described there.
 #
@@ -36,8 +36,8 @@ cmake_minimum_required(VERSION 3.28)
 #
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
 set(FastCachedInstallOracle
-    "Linux|x86_64|Linux-x86_64|usr/bin/fastcache-cc|usr/bin/fastcached"
-    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/fastcache-cc|opt/fastcached/bin/fastcached"
+    "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
+    "Darwin|arm64|Darwin-arm64|opt/fastcached/bin/pace-cc|opt/fastcached/bin/pace-kv"
 )
 
 # Deliberately not a version that exists, so a bug that reached the real
@@ -86,7 +86,7 @@ foreach(row IN LISTS FastCachedInstallOracle)
     endif()
 endforeach()
 if(NOT platform)
-    message("SKIP: no published fastcached is expected for "
+    message("SKIP: no published pace-kv is expected for "
             "${CMAKE_HOST_SYSTEM_NAME}-${hostProcessor}, so there is nothing to stage")
     return()
 endif()
@@ -101,7 +101,7 @@ file(MAKE_DIRECTORY "${FASTCACHED_SCRATCH_DIR}")
 set(stem "fastcached-${mirrorVersion}-${platform}")
 set(payloadRoot "${FASTCACHED_SCRATCH_DIR}/payload")
 
-foreach(pair "launcher:${launcherMember}:fastcache-cc" "daemon:${daemonMember}:fastcached")
+foreach(pair "launcher:${launcherMember}:pace-cc" "daemon:${daemonMember}:pace-kv")
     string(REPLACE ":" ";" fields "${pair}")
     list(GET fields 1 relPath)
     list(GET fields 2 label)
@@ -169,17 +169,17 @@ if(NOT configureResult EQUAL 0)
     list(APPEND violations "configure failed (${configureResult})")
 endif()
 
-# The fake fastcached answers --version and nothing else, so the poll loop in
+# The fake pace-kv answers --version and nothing else, so the poll loop in
 # _fc_auto_start_fastcached never actually observes it listening — real
 # connectivity needs a real daemon, which is check-compile-cache-daemon-start's
 # job. This configure is still expected to report having tried, and to have
 # fallen through cleanly rather than failing.
-string(FIND "${output}" "fastcached" mentionedFastcached)
+string(FIND "${output}" "pace-kv" mentionedFastcached)
 if(mentionedFastcached EQUAL -1)
     list(APPEND violations "the configure never mentioned starting a daemon at all")
 endif()
 
-set(expectedLauncher "${stageDir}/${mirrorVersion}/${platform}/fastcache-cc")
+set(expectedLauncher "${stageDir}/${mirrorVersion}/${platform}/pace-cc")
 set(expectedDaemon "${stageDir}/${mirrorVersion}/${platform}/fastcached")
 
 if(NOT EXISTS "${expectedLauncher}")
@@ -199,7 +199,7 @@ else()
     string(STRIP "${stagedOutput}" stagedOutput)
     if(NOT stagedResult EQUAL 0)
         list(APPEND violations "the staged daemon does not run (${stagedResult})")
-    elseif(NOT stagedOutput STREQUAL "fastcached ${mirrorVersion}")
+    elseif(NOT stagedOutput STREQUAL "pace-kv ${mirrorVersion}")
         list(APPEND violations "the staged daemon answered '${stagedOutput}'")
     endif()
 endif()

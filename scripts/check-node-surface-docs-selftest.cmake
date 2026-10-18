@@ -73,8 +73,8 @@ endif()
 # The paths the check reads. Spelled once here and derived into every staged
 # tree, because a path restated per case is a case that silently stops staging
 # what the check reads and passes by never being reached.
-set(FastCachedSelftestSourceRel "src/apps/fastcache-compile-node/NodeSurfaces.cpp")
-set(FastCachedSelftestHeaderRel "src/apps/fastcache-compile-node/NodeSurfaces.hpp")
+set(FastCachedSelftestSourceRel "src/apps/pace-node/NodeSurfaces.cpp")
+set(FastCachedSelftestHeaderRel "src/apps/pace-node/NodeSurfaces.hpp")
 set(FastCachedSelftestDocRel "docs/operations/surfaces.md")
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ The four-surface table is what the node opens.
 Ask the binary:
 
 ```console
-$ fastcache-compile-node --print-surfaces --listen-node 6675 --listen-raft 6680 --discovery 255.255.255.255:6681
+$ pace-node --print-surfaces --listen-node 6675 --listen-raft 6680 --discovery 255.255.255.255:6681
 node              0.0.0.0:6675  TCP
 admin             -             not served
 raft              0.0.0.0:6680  TCP
@@ -355,13 +355,13 @@ set(FastCachedSurfaceSelftestCases
 
     # The other direction of the same rule: a command wrapped so the flag lands on its
     # indented continuation is still a transcript, and still held to the table.
-    "flag on a continuation line|doc|$ fastcache-compile-node --print-surfaces --listen-node 6675 --listen-raft 6680 --discovery 255.255.255.255:6681~n~node              0.0.0.0:6675  TCP~n~|$ fastcache-compile-node --listen-node 6675 --listen-raft 6680~n~      --print-surfaces --discovery 255.255.255.255:6681~n~|does not list the `node` surface|-"
+    "flag on a continuation line|doc|$ pace-node --print-surfaces --listen-node 6675 --listen-raft 6680 --discovery 255.255.255.255:6681~n~node              0.0.0.0:6675  TCP~n~|$ pace-node --listen-node 6675 --listen-raft 6680~n~      --print-surfaces --discovery 255.255.255.255:6681~n~|does not list the `node` surface|-"
 
     # A fence that INVOKES the command and pastes no output is documentation of
     # the command, not a transcript of it. This is the false-positive direction:
     # the check used to report all four surfaces missing from a page that made no
     # claim at all, which is the failure mode that gets a check switched off.
-    "invocation is not a transcript|doc|<!-- extra -->|```console~n~$ fastcache-compile-node --print-surfaces~n~```|node surface docs: 4 surface(s)|CMake Error"
+    "invocation is not a transcript|doc|<!-- extra -->|```console~n~$ pace-node --print-surfaces~n~```|node surface docs: 4 surface(s)|CMake Error"
 
     # The SECOND flag on the discovery row. Renaming it in the table while every
     # page keeps the old spelling is exactly what the flag rule exists to refuse,

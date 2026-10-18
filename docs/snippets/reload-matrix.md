@@ -1,4 +1,4 @@
-<!-- reloadable-for: fastcached -->
+<!-- reloadable-for: pace-kv -->
 <!-- Checked against CliOptions() by ctest -R reloadable-docs. A setting added to
      or removed from the reloadable column of that table without this row moving is a
      refusal, in BOTH directions: an omission costs a reader a stale page, and an

@@ -40,8 +40,8 @@ void SecureZero(void* data, std::size_t bytes) noexcept;
 /// And it covers REALLOCATION, where a destructor-based design cannot: a vector that grows
 /// moves its elements to a new block and frees the old one long before it dies, leaving a
 /// copy the destructor will never see. **Two holders in this tree grow one**, and both
-/// arrived with #1125: `ReadSecretFile` in `fastcache-cli/main.cpp` and in
-/// `fastcache-compile-node/AdminEndpoint.cpp` each `insert` chunk after chunk into an
+/// arrived with #1125: `ReadSecretFile` in `pacectl/main.cpp` and in
+/// `pace-node/AdminEndpoint.cpp` each `insert` chunk after chunk into an
 /// unreserved `SecureCharBuffer`, so a secret larger than one chunk is reallocated while
 /// it is being read and every intermediate block is freed before the buffer dies. This
 /// paragraph said there was no such holder, which was true when it was written and was

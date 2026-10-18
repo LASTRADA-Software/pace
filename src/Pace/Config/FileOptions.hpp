@@ -36,7 +36,7 @@ namespace Pace
 ///
 /// ## It lives in `Config/`, not `Cli/`
 ///
-/// `Cli/Options.hpp` is compiled into `fastcache-cc`, which does not link
+/// `Cli/Options.hpp` is compiled into `pace-cc`, which does not link
 /// `Pace` -- so an include of anything from `Config/` there breaks the
 /// launcher's link rather than merely its build. This header is where the option
 /// table meets the YAML reader, which is why it is on this side of that line.

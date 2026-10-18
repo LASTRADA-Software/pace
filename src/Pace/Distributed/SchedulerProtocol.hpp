@@ -40,7 +40,7 @@ namespace Pace::Distributed
 ///
 /// Paired with `CacheCapacityFromWire` for the reason every other pair here is,
 /// and with one extra hazard of its own: the wire carries tiers **positionally**,
-/// because `CompileCacheWire.hpp` is compiled into `fastcache-cc` and cannot see
+/// because `CompileCacheWire.hpp` is compiled into `pace-cc` and cannot see
 /// `StorageTier`. So these two functions are the only place that knows position
 /// *k* means the *k*-th enumerator, and a transposition between them is invisible
 /// to every compiler and to both ends of the wire — which is why
@@ -89,7 +89,7 @@ namespace Pace::Distributed
 /// The wire carries exactly `FleetMetric`'s slots, positionally.
 ///
 /// `CompileCacheWire.hpp` cannot include `FleetHistory.hpp` -- it stays
-/// dependency-free because `fastcache-cc` compiles it without linking `Pace` --
+/// dependency-free because `pace-cc` compiles it without linking `Pace` --
 /// so the count is spelled there too, and this file, which converts between the two,
 /// is the one place both spellings are visible. An eleventh metric added without
 /// moving `HistorySlotCount` would have every peer reading ten of them and silently

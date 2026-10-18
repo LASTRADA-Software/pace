@@ -13,7 +13,7 @@
 namespace Pace
 {
 
-/// fastcached's own compile-cache protocol handler (the "executor").
+/// pace-kv's own compile-cache protocol handler (the "executor").
 ///
 /// Unlike the redis/memcached handlers, this one knows a cached value is a
 /// **compile result** — an untouched object blob plus captured compiler text

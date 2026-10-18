@@ -1878,7 +1878,7 @@ TEST_CASE("A fleet with no registered worker reports no never-picked figure at a
 // ---------------------------------------------------------------------------
 // #1300: the same tables, for a reader with no JSON parser.
 //
-// `jq` is not on a Windows build box and `fastcache-cli` has no JSON parser -- it
+// `jq` is not on a Windows build box and `pacectl` has no JSON parser -- it
 // only emits -- so before `/fleet.txt` every one of these tables was reachable from
 // a browser and from nowhere else.
 // ---------------------------------------------------------------------------

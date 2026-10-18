@@ -3,7 +3,7 @@
 **Protocols:** Redis RESP2
 
 A compatibility stub for the handshake probes Redis client libraries
-send during connection setup. fastcached holds no per-client state, so
+send during connection setup. pace-kv holds no per-client state, so
 each sub-command is acknowledged benignly rather than erroring (an
 error here would abort the library's handshake).
 

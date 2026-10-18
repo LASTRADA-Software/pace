@@ -1,6 +1,6 @@
 # Cluster discovery
 
-How `fastcache-compile-node` machines find one another and become one fleet with no
+How `pace-node` machines find one another and become one fleet with no
 configuration, and how one proves which machine it is before anything it claims is
 believed.
 
@@ -9,7 +9,7 @@ empty `--discovery=` turns it off. A discovery proof is a signature by the node'
 identity key, the same key every consensus connection proves — see
 [Raft peer authentication](../operations/cluster-communication.md#raft-peer-authentication).
 The flags are under
-[finding peers instead of typing them](../tools/fastcache-compile-node.md#finding-peers-instead-of-typing-them);
+[finding peers instead of typing them](../tools/pace-node.md#finding-peers-instead-of-typing-them);
 where this exchange sits among everything else a fleet says to itself — and which ports
 it needs open — is [Cluster communication](../operations/cluster-communication.md).
 
@@ -60,8 +60,8 @@ given up and asked again later; a rejection keeps it from asking that fleet for 
 **A person approves it** — on the fleet's leader, or with `--scheduler` naming it:
 
 ```sh
-fastcache-compile-node --enroll-list
-fastcache-compile-node --enroll-approve=<id>@<key>
+pace-node --enroll-list
+pace-node --enroll-approve=<id>@<key>
 ```
 
 `--enroll-list` prints each waiting machine with the key it asked with and the paste-ready
@@ -70,18 +70,18 @@ when many machines join, an operator can delegate that comparison for a bounded 
 instead:
 
 ```sh
-fastcache-compile-node --enroll-auto-approve=15min
-fastcache-compile-node --enroll-auto-approve=off
+pace-node --enroll-auto-approve=15min
+pace-node --enroll-auto-approve=off
 ```
 
 The deadline lives in the leader's memory alone — at most `24h`, refused by name above
 that — so a restart or a change of leader ends it. `enrollment-window-open` is raised while
-it is armed, `fastcache-cli node` reads `auto-approve (N min left)`, `--enroll-list` marks every
+it is armed, `pacectl node` reads `auto-approve (N min left)`, `--enroll-list` marks every
 row it admitted with when it was armed, and
 `fastcache_enrollment_approvals_auto_total` counts them apart from a person's approvals.
 A machine that asks again under the same id with a different key is never auto-approved.
 Details are under
-[enrolling a machine instead of typing it](../tools/fastcache-compile-node.md#enrolling-a-machine-instead-of-typing-it).
+[enrolling a machine instead of typing it](../tools/pace-node.md#enrolling-a-machine-instead-of-typing-it).
 
 **Approved, the joiner dissolves its own cluster and becomes a learner.** It records the
 fleet it joined, archives its solitary cluster's consensus store under
@@ -97,12 +97,12 @@ machine that founded it — until somebody promotes another, with the id and add
 `--cluster-status` shows:
 
 ```sh
-fastcache-compile-node --cluster-admit=<id>=<host>:6680
+pace-node --cluster-admit=<id>=<host>:6680
 ```
 
 A promotion takes effect once the learner has caught up. Promote machines that stay on —
 two more for three voters, which survive losing one — and leave laptops as learners; see
-[a machine that is usually away](../tools/fastcache-compile-node.md#a-machine-that-is-usually-away-admitting-a-learner).
+[a machine that is usually away](../tools/pace-node.md#a-machine-that-is-usually-away-admitting-a-learner).
 
 ## What problem the beacon solves
 
@@ -329,8 +329,8 @@ included.
 
 The pin is the operator's remedy for exactly this, one setting per machine, while zero-config
 formation stays the default: see
-[pinning a node to one fleet](../tools/fastcache-compile-node.md#pinning-a-node-to-one-fleet).
-`fastcache-cli node` prints the pin to paste (`fleet-id`), so nobody composes keys by hand.
+[pinning a node to one fleet](../tools/pace-node.md#pinning-a-node-to-one-fleet).
+`pacectl node` prints the pin to paste (`fleet-id`), so nobody composes keys by hand.
 
 ## Implementation notes
 

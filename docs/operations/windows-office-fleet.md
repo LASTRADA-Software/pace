@@ -3,7 +3,7 @@
 This is the runbook for one shape of deployment: a handful of Windows developer PCs, some in
 the office and some at home over a VPN, sharing compiles and a cache. It says what to do, in
 order, and points at the reference pages for why. Every flag and condition named here is the
-binary's own; `fastcache-compile-node --help` and `fastcache-cli --help` are the authority if
+binary's own; `pace-node --help` and `pacectl --help` are the authority if
 the two ever disagree.
 
 ## The shape
@@ -12,9 +12,9 @@ the two ever disagree.
 |---|---|---|
 | **A**, the office PC | the node, always on | founds the fleet: its only voter, its leader and scheduler, a worker and a cache of its own |
 | **C**, the office cache host | the node, always on | a member the fleet's `shared-cache` setting names; every other node reads through to it |
-| every other PC | the node, plus `fastcache-cc` for its builds | joins as a **learner** (it votes for nothing), works for the fleet, and compiles with it |
+| every other PC | the node, plus `pace-cc` for its builds | joins as a **learner** (it votes for nothing), works for the fleet, and compiles with it |
 
-Every machine runs the same MSI and the same `fastcache-compile-node` service. Nobody types an
+Every machine runs the same MSI and the same `pace-node` service. Nobody types an
 address into a node: A forms a fleet of one at its first start, every later machine finds it
 (by LAN beacon, or by a seed name across the VPN), asks to join, and **keeps building on its
 own while it waits**. It becomes part of the fleet when an operator approves it on A.
@@ -33,14 +33,14 @@ see step 5).
 
 ## 1. Install A first
 
-On A, run the MSI and select **fastcache-compile-node** (silently:
+On A, run the MSI and select **pace-node** (silently:
 `msiexec /i fastcached.msi /qn ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher`). Pass no property.
 
 The `FastCacheCompileNode` service starts at once. With no fleet to join, A founds one: it is
 a cluster of one, leads it, schedules for it and works for it. Check:
 
 ```powershell
-fastcache-cli node
+pacectl node
 ```
 
 `scheduler-role` reads `leader`, `leader` reads `this node`, `consensus-standing` reads `voter`,
@@ -51,12 +51,12 @@ account. The install opens the Windows Firewall, on every network profile, for t
 which the package pins through `FASTCACHE_DISCOVERY_REPLY_PORT`).
 `FASTCACHE_FIREWALL_ALLOW=10.0.0.0/8` narrows the remote side of every rule to one address with
 an optional prefix, so pick one prefix that covers both the office LAN and the VPN pool. The
-node is the cache: if the **fastcached** feature is installed as well, its `FastCached` service
+node is the cache: if the **pace-kv** feature is installed as well, its `FastCached` service
 is disabled and stopped, since both want port 6674 and it must not be started beside the node.
 
 ### Pin the fleet
 
-`fastcache-cli node` on A also prints `fleet-id`: the cluster id and the identity key of every
+`pacectl node` on A also prints `fleet-id`: the cluster id and the identity key of every
 voter, `<cluster-id>@<key>[,<key>...]`. That is the **pin**. A node given one belongs to that
 fleet and no other, and takes that fleet's word only as one of the pinned voters signed it.
 **A key pin stops a LAN impostor; an unpinned node trusts on first use.** A cluster id alone is
@@ -75,13 +75,13 @@ Restart-Service FastCacheCompileNode
 Then pass the same value as `FASTCACHE_FLEET_ID` on every other install (step 2), at the least
 on every machine outside the office LAN. A laptop that hears another fleet on a hotel network or
 a VPN segment, or a machine claiming the office's id under a key of its own, is then never
-asked, and is reported as `foreign-fleet-visible` instead. `fastcache-cli node` shows the pin a
+asked, and is reported as `foreign-fleet-visible` instead. `pacectl node` shows the pin a
 node trusts by as `fleet-pin`, which reads `none` on an unpinned node.
 
 The installer checks the value with the node's own parser before it registers or remembers
 anything. A value the node refuses **fails the whole transaction** (msiexec exits 1603, and the
 log names `FastCacheNodeCheckArguments`), leaving the registration that was there before;
-`fastcache-compile-node --check-arguments --fleet-id=<value>` says what is wrong with it. A node
+`pace-node --check-arguments --fleet-id=<value>` says what is wrong with it. A node
 whose state already commits it to a cluster the pin does not admit refuses to start, naming
 both: to move it to the pinned fleet, stop the service, delete `%ProgramData%\fastcache-node`
 and start it again.
@@ -112,7 +112,7 @@ msiexec /i fastcached.msi ADDLOCAL=CM_C_Cli,CM_C_Node,CM_C_Launcher FASTCACHE_FL
 
 `FASTCACHE_FLEET_SEED` is one name or `name:port` (the port defaults to 6674); a node that needs
 more than one names them under `fleet_seed:` in its configuration file,
-`%ProgramData%\fastcache-compile-node\fastcache-compile-node.yaml`. An office whose PCs carry a
+`%ProgramData%\pace-node\pace-node.yaml`. An office whose PCs carry a
 DNS suffix can skip the property altogether: every node also asks DNS for
 `_fastcache._tcp.<its DNS suffix>`, so one SRV record whose target is A (port 6674) reaches
 every PC, at home included, once its VPN hands out that suffix.
@@ -138,19 +138,19 @@ literal address typed there stops the node from following the network.
 On A:
 
 ```powershell
-fastcache-compile-node --enroll-list
+pace-node --enroll-list
 ```
 
 Each waiting machine is a row with its id, its **whole** identity key, the address it claims
-and the host it came from. On the machine itself, `fastcache-cli node` prints `public-key`:
+and the host it came from. On the machine itself, `pacectl node` prints `public-key`:
 compare the two. That comparison is the whole of what makes an approval safe. Then paste the
 line `--enroll-list` prints for the row:
 
 ```powershell
-fastcache-compile-node --enroll-approve=<node-id>@<key>
+pace-node --enroll-approve=<node-id>@<key>
 ```
 
-The machine becomes a learner of the fleet at its next poll; `fastcache-cli node` on it then
+The machine becomes a learner of the fleet at its next poll; `pacectl node` on it then
 reads `consensus-standing` `learner`, and `leader` names the leader's scheduling endpoint -- the
 one the PC's launcher is sent to -- or `-` while it has heard from no leader within the election
 timeout. `--enroll-reject=<node-id>` refuses a row: that machine is
@@ -162,7 +162,7 @@ stops asking for ten minutes is dropped from the list.
 **On go-live day**, when every PC is installed within the hour, open a window instead:
 
 ```powershell
-fastcache-compile-node --enroll-auto-approve=15min
+pace-node --enroll-auto-approve=15min
 ```
 
 Until it ends, every machine that asks is admitted under the key it asks with, and nobody
@@ -170,26 +170,26 @@ compares anything. The duration is a whole number and one of `ms`, `s`, `min`, `
 `15min`, never `15m`, which is refused. At most `24h`; running it again re-arms it from now,
 `=off` ends it, and a restart or a change of leader ends it too. It also admits rows already
 waiting, so reject the ones that must not get in **before** you open it. While it is open the
-node raises `enrollment-window-open` and `fastcache-cli node` reads `auto-approve (N min left)`;
+node raises `enrollment-window-open` and `pacectl node` reads `auto-approve (N min left)`;
 afterwards `--enroll-list` marks every row it admitted.
 
 ## 4. The shared cache on C
 
 The fleet's shared cache is a member, named by its **id** in one replicated setting. No
-`fastcached` is needed and no node is configured to use it.
+`pace-kv` is needed and no node is configured to use it.
 
-1. On C, install the MSI with **fastcache-compile-node**, exactly as any PC (step 2). It is
+1. On C, install the MSI with **pace-node**, exactly as any PC (step 2). It is
    always on, so it may work as hard as it can: set `node_class: dedicated` in its
    configuration file, and `shared_cache_disk:` to the disk space you give the shared tier (the
    default is `64g`; `0` grows as needed). The budget is what the store occupies on disk, with
    compressed values at their compressed size. Run `Restart-Service FastCacheCompileNode` after
    editing the file.
 2. Approve it (step 3). Note its `node-id`, from the `--enroll-list` row or from
-   `fastcache-cli node` on C.
+   `pacectl node` on C.
 3. On A, name it, once:
 
    ```powershell
-   fastcache-compile-node --cluster-set=shared-cache=<id-of-C>
+   pace-node --cluster-set=shared-cache=<id-of-C>
    ```
 
 Every node then reads through to C after a local miss and offers it what it stores. It proves
@@ -199,20 +199,20 @@ nothing to restart. An unreachable C is a miss, never an error. C keeps the tier
 directory (`%ProgramData%\fastcache-node\shared-cache`), which the install already secured, so
 it needs no directory of its own.
 
-`fastcache-cli node` on any PC shows where its shared cache comes from (`shared-cache`), which
+`pacectl node` on any PC shows where its shared cache comes from (`shared-cache`), which
 machine and endpoint that is, and how the last attempt went (`shared-cache-state`, with
 `shared-cache-detail` saying why). The conditions are `shared-cache-unproven` on a PC that is
 not reaching C, and `shared-cache-unavailable` on C when its tier will not open.
 
 ## 5. Each developer's build environment
 
-`fastcache-cc` fronts every compile. For a CMake build:
+`pace-cc` fronts every compile. For a CMake build:
 
 ```powershell
 $env:FASTCACHE_SOURCE_DIR = 'D:\src\product'
 $env:FASTCACHE_BINARY_DIR = 'D:\src\product\build'
 $env:FASTCACHE_SCHEDULER  = '127.0.0.1:6674'
-cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=fastcache-cc -DCMAKE_CXX_COMPILER_LAUNCHER=fastcache-cc
+cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=pace-cc -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc
 ```
 
 - **`FASTCACHE_SOURCE_DIR` and `FASTCACHE_BINARY_DIR`** are required: with either unset, nothing
@@ -277,7 +277,7 @@ upgrade it together. The Windows SDK and the Visual Studio UI languages need not
 worker compiles text the client already preprocessed, so neither is part of the fingerprint. A
 worker notices a compiler upgraded under it and re-registers under the new fingerprint by
 itself. A PC whose compiler no worker serves compiles locally, and the leader raises
-`unserved-toolchain` naming the driver and the version. `fastcache-cc
+`unserved-toolchain` naming the driver and the version. `pace-cc
 --print-toolchain-fingerprint cl.exe` on a client is the number to compare with what a worker
 logs as `serving`.
 
@@ -296,7 +296,7 @@ refuses every compile grant and raises `consensus-leader-silent`, because the st
 check a grant against may be one its fleet has moved past. It clears at the first word from the
 leader, so it needs no action once A is back.
 
-Before a planned reboot, `fastcache-compile-node --cordon` on A stops its worker taking new
+Before a planned reboot, `pace-node --cordon` on A stops its worker taking new
 compiles and lets the running ones finish.
 
 ### Adding a second voter
@@ -312,16 +312,16 @@ two voters, or with most of them renumbered at once (a new router, a new DHCP sc
 not heal by itself ([#1644](https://github.com/LASTRADA-Software/fastcached/issues/1644)). Keep three or more voters on fixed addresses -- a DHCP
 reservation is enough -- or give the moved ones their old addresses back until a quorum
 re-forms, then move them one at a time. To
-promote one, read its `consensus-endpoint` from `fastcache-cli node` on
+promote one, read its `consensus-endpoint` from `pacectl node` on
 that machine, then on A:
 
 ```powershell
-fastcache-compile-node --cluster-admit=<node-id>=<consensus-host>:6680
+pace-node --cluster-admit=<node-id>=<consensus-host>:6680
 ```
 
 The key the cluster already holds for it stays. A promotion takes effect once the learner has
 caught up; it then opens its consensus port, which its install already let through the firewall.
-`fastcache-cli node` on any member prints the new `fleet-id`: put it in the new voter's own pin
+`pacectl node` on any member prints the new `fleet-id`: put it in the new voter's own pin
 and in the pin of every PC not installed yet (step 1).
 
 ### Taking a machine out
@@ -329,7 +329,7 @@ and in the pin of every PC not installed yet (step 1).
 On A:
 
 ```powershell
-fastcache-compile-node --cluster-forget=<node-id>
+pace-node --cluster-forget=<node-id>
 ```
 
 This removes the machine from the cluster and revokes the key it was admitted under, on every
@@ -355,13 +355,13 @@ Start on the machine whose builds are slow:
 
 | Ask | Where | It tells you |
 |---|---|---|
-| `fastcache-cli node` | any machine | what this node is, its role and standing, its leader, its pin, its shared cache and the conditions it has raised |
-| `fastcache-cli node-conditions` | any machine | every condition with its remedy; exits 1 when none is raised, so a loop over machines can test it |
-| `fastcache-cli fleet members` | A | who the fleet has agreed is a member, from the leader; a node that does not lead says where to ask instead |
-| `fastcache-compile-node --enroll-list` | A | who is waiting, and who an auto-approve window let in |
-| `fastcache-compile-node --cluster-status` | any machine in the fleet: a PC's own node sends the question on to the leader | what the cluster has agreed, settings included |
-| `fastcache-cli explain-admission <machine>` | A, or any machine with `--addr=office-a.example.com:6674` | why A admits or refuses that machine, naming every route that decided |
-| `fastcache-cc --show-stats` | the PC | this PC's hits, misses, dispatches and every fall-back reason |
+| `pacectl node` | any machine | what this node is, its role and standing, its leader, its pin, its shared cache and the conditions it has raised |
+| `pacectl node-conditions` | any machine | every condition with its remedy; exits 1 when none is raised, so a loop over machines can test it |
+| `pacectl fleet members` | A | who the fleet has agreed is a member, from the leader; a node that does not lead says where to ask instead |
+| `pace-node --enroll-list` | A | who is waiting, and who an auto-approve window let in |
+| `pace-node --cluster-status` | any machine in the fleet: a PC's own node sends the question on to the leader | what the cluster has agreed, settings included |
+| `pacectl explain-admission <machine>` | A, or any machine with `--addr=office-a.example.com:6674` | why A admits or refuses that machine, naming every route that decided |
+| `pace-cc --show-stats` | the PC | this PC's hits, misses, dispatches and every fall-back reason |
 
 The conditions an office fleet meets most:
 
@@ -399,7 +399,7 @@ refuses by name and the step that clears it. The procedure:
    node, the launcher and the CLI, so one upgrade per machine moves all three, and each
    upgrade stops the node it replaces before it starts the new one. Machines on two discovery
    versions simply do not see each other, with no counter and no log line.
-3. **Confirm** before releasing the builds: on each machine, `fastcache-cli node-metrics` shows
+3. **Confirm** before releasing the builds: on each machine, `pacectl node-metrics` shows
    the `*_refused_unsupported_version_total` counters, which stay at zero once nothing old is
    left talking to it. `mixed-node-versions` on A says the same for builds of one wire.
 
@@ -416,7 +416,7 @@ The go-live upgrade starts every machine afresh. On **every** machine, A include
    read rather than securing it, and the new node refuses one at startup. Deleting the directory
    also clears the old consensus state, formation record and roster file, which the new build
    would refuse to read.
-3. In `%ProgramData%\fastcache-compile-node\fastcache-compile-node.yaml`, remove every key the
+3. In `%ProgramData%\pace-node\pace-node.yaml`, remove every key the
    new build refuses: `scheduler`, the admission-by-address keys `fleet_member`,
    `scheduler_token_file`, `cluster_admit_client` and `cluster_forget_client`, the cluster-shape
    keys `raft_peer`, `raft_join`, `cluster_id` and `serve_scheduler`, and the principal-mode
@@ -506,6 +506,6 @@ assumption worth knowing about.
   ([#1627](https://github.com/LASTRADA-Software/fastcached/issues/1627)). If one does, the node
   raises `surface-not-accepting` and `/healthz` answers 503; restart the service.
 
-See also [the fastcache-compile-node page](../tools/fastcache-compile-node.md) for each of
-these in depth, and [fastcache-cc](../tools/fastcache-cc.md) for every fall-back reason a
+See also [the pace-node page](../tools/pace-node.md) for each of
+these in depth, and [pace-cc](../tools/pace-cc.md) for every fall-back reason a
 client reports.

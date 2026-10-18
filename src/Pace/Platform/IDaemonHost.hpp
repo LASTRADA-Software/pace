@@ -82,7 +82,7 @@ class IDaemonHost
     return host.Refuse(exitCode);
 }
 
-/// Foreground host: runs the body inline. Used by `fastcached` when neither
+/// Foreground host: runs the body inline. Used by `pace-kv` when neither
 /// `--daemon` nor a Windows service registration is in play, and by tests.
 class ForegroundHost final: public IDaemonHost
 {

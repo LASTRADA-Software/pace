@@ -16,7 +16,7 @@ namespace Pace
 /// (getenv_s reports the length *including* the NUL, so 0 means absent and 1
 /// means present but empty).
 ///
-/// `src/apps/fastcache-cc` is included in "every caller" despite not linking
+/// `src/apps/pace-cc` is included in "every caller" despite not linking
 /// this library: it compiles this file straight into the binary through the
 /// `_fc_cc_core` list, which is how the launcher stays free of vcpkg
 /// dependencies and CRT-static while still sharing the one implementation.

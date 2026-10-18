@@ -245,7 +245,7 @@ namespace detail
     /// figure that tracked its source would silently claim it was measured under
     /// conditions nobody checked.
     ///
-    /// The fixture is `src/apps/fastcache-bench/StreamCodecBench.cpp`, and it exercises
+    /// The fixture is `src/apps/pace-bench/StreamCodecBench.cpp`, and it exercises
     /// the entry and field runs -- 2 of the 5 -- so this is a claim about the dominant
     /// path rather than about all five.
     constexpr std::uint32_t ReserveCap = 64;

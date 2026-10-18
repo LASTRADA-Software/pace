@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# TLS smoke test (Windows). Start fastcached with TLS terminated using the
+# TLS smoke test (Windows). Start pace-kv with TLS terminated using the
 # checked-in self-signed cert, connect with a .NET SslStream (no external
 # openssl needed on the client side), send a RESP PING, and assert the daemon
 # answers +PONG over the encrypted channel.
@@ -12,7 +12,7 @@
 # a leftover listener is refused by name. See scripts/lib/E2EPorts.psm1.
 #
 # Exit codes: 0 = +PONG over TLS; 1 = ran but no PONG; 77 = a runtime
-# prerequisite (fastcached / cert) was missing — treated as a skip.
+# prerequisite (pace-kv / cert) was missing — treated as a skip.
 param(
     [string]$Fastcached = "",
     # Drawn per run, for the reason `.agent/rules/testing.md` gives: a fixed port
@@ -31,11 +31,11 @@ $SKIP = 77
 # The skips run FIRST and the port pre-flight second, deliberately: a missing
 # binary is a missing prerequisite, and reporting it as a port collision would
 # name the wrong subject.
-if (-not (Test-Path $Fastcached)) { Write-Host "fastcached not found: $Fastcached; skipping"; exit $SKIP }
+if (-not (Test-Path $Fastcached)) { Write-Host "pace-kv not found: $Fastcached; skipping"; exit $SKIP }
 if (-not (Test-Path $Cert) -or -not (Test-Path $Key)) { Write-Host "cert/key not found; skipping"; exit $SKIP }
 
 Import-Module (Join-Path $PSScriptRoot "lib/E2EPorts.psm1") -Force
-$Port = Get-E2EFixturePort $Port $Fastcached "fastcached (TLS)"
+$Port = Get-E2EFixturePort $Port $Fastcached "pace-kv (TLS)"
 
 $log = Join-Path ([System.IO.Path]::GetTempPath()) ('tls-smoke-' + [System.IO.Path]::GetRandomFileName() + '.log')
 $proc = Start-Process -FilePath $Fastcached `
@@ -48,7 +48,7 @@ try {
     # wrong subject, which is the shape `.agent/rules/testing.md` asks a wait to
     # separate. Measured against a build with no TLS compiled in, where the daemon
     # prints its reason and stops.
-    Wait-E2EPortAnswers $Port $proc "fastcached with TLS" @($log, "${log}.err")
+    Wait-E2EPortAnswers $Port $proc "pace-kv with TLS" @($log, "${log}.err")
     $tcp = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $Port)
     # Self-signed: accept any server certificate for the smoke test.
     $accept = { $true } -as [System.Net.Security.RemoteCertificateValidationCallback]

@@ -45,7 +45,7 @@ if(NOT EXISTS "${check}")
     message(FATAL_ERROR "the check under test is missing: ${check}")
 endif()
 
-set(nodeDirectory "src/apps/fastcache-compile-node")
+set(nodeDirectory "src/apps/pace-node")
 set(root "${FASTCACHED_SCRATCH_DIR}/bind-failure-selftest")
 file(REMOVE_RECURSE "${root}")
 

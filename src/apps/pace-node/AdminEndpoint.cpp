@@ -1,0 +1,1257 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "AdminEndpoint.hpp"
+#include "CacheTier.hpp"
+#include "NodeIdentity.hpp"
+
+#include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/StateFiles.hpp>
+#include <Pace/Core/StopAwareWait.hpp>
+
+#include <core/Ranges.hpp>
+#include <core/async/SyncRun.hpp>
+#include <core/async/Task.hpp>
+#if defined(FC_TLS_ENABLED)
+    #include <core/net/Tls.hpp>
+#endif
+#include <Pace/Distributed/FleetChart.hpp>
+#include <Pace/Distributed/FleetText.hpp>
+#include <Pace/Distributed/FleetView.hpp>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <fstream>
+#include <optional>
+#include <ranges>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace Pace::Node
+{
+
+AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sources,
+                                                           std::chrono::steady_clock::time_point startedAt)
+{
+    return [sources = std::move(sources), startedAt] {
+        auto const disk = sources.host->SpaceOn(sources.scratchRoot);
+        return MetricsSnapshot {
+            // The node's own cache, when it has one. It usually does --
+            // `--listen-node` is on by default and a local tier is what this
+            // program is FOR -- and this scrape reported `std::nullopt` regardless,
+            // so a node holding a quarter of a gigabyte of objects and one holding
+            // none produced the same bytes. Null only when the operator turned
+            // every half of the tier off, and then absent IS the truth.
+            .storage = sources.cache != nullptr ? std::optional { sources.cache->Snapshot() } : std::nullopt,
+            // And the halves that merged view cannot show apart: with `--cache-dir`
+            // the composite reports the on-disk store alone, so the in-memory tier
+            // an operator sized with `--cache-memory` would otherwise be invisible.
+            .storageTiers = sources.cache != nullptr ? sources.cache->SnapshotTiers() : TieredStorageStats {},
+            .host =
+                HostCapacity { .logicalCores = sources.host->LogicalCores(),
+                               .configuredSlots = sources.slots,
+                               .totalMemoryBytes = sources.host->TotalMemoryBytes(),
+                               .diskCapacityBytes = static_cast<std::uint64_t>(disk.capacityBytes),
+                               .diskFreeBytes = static_cast<std::uint64_t>(disk.freeBytes),
+                               .busySlots = sources.busySlots(),
+                               .cordoned = sources.cordoned && sources.cordoned() ? std::size_t { 1 } : std::size_t { 0 } },
+            // Raw counters rather than a utilization, so no reader's interval is cut by
+            // another's; see `NodeScrapeSources::load`.
+            .hostLoad =
+                sources.load != nullptr
+                    ? std::optional { HostLoadReading { .cpu = sources.load->Cpu(),
+                                                        .availableMemoryBytes = sources.load->AvailableMemoryBytes() } }
+                    : std::nullopt,
+            // Absent when there is no cache at all: a node running none has no
+            // upstream question to answer either, and a `0` there would claim it
+            // does and has none.
+            .upstreamConfigured = sources.cache != nullptr ? std::optional { sources.cache->HasUpstream() } : std::nullopt,
+            // And what this node counts as its own cluster, when it runs consensus
+            // at all. Sampled here rather than captured: a role and a term are what
+            // move, and a stale pair is worse than none because it looks current.
+            //
+            // Absent when there is no consensus -- and an absence rather than an
+            // empty member set, because a node that RUNS consensus and holds no
+            // configuration is the #388 state and has to be visible, not silent.
+            .consensus = sources.consensus ? std::optional { sources.consensus() } : std::nullopt,
+            .uptime =
+                Uptime { std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - startedAt) },
+        };
+    };
+}
+
+std::expected<Pace::SecureString, NodeRefusal> ReadSecretFile(std::filesystem::path const& path)
+{
+    std::ifstream file { path, std::ios::binary };
+    if (!file)
+        return std::unexpected { Refusal(NodeRefusalCause::CredentialIo, std::format("cannot read '{}'", path.string())) };
+
+    // **Read into SECURE character storage rather than through `std::ostringstream`.**
+    // That is what this used to do, and `buffer.str()` is an ordinary `std::string` while
+    // the stream keeps one of its own -- so the secret existed in two containers nothing
+    // wipes, and changing only the RETURN type would have left both. A half-fix that looks
+    // complete is the shape this repository keeps finding
+    // ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+    //
+    // Chunked rather than sized from `tellg()`: a credential file is not necessarily
+    // seekable -- a FIFO answers -1 -- and a reader that refuses one would be a new
+    // refusal smuggled in by a security change. The chunk is itself secure storage, so no
+    // stack buffer keeps a copy either.
+    //
+    // `std::istreambuf_iterator` stays avoided for the reason it always was: GCC at -O3
+    // inlines it far enough to see a path where the buffer pointer could be null and
+    // rejects it under `-Werror=null-dereference` (see `Cc::ReadBytes` and
+    // `DefaultConfigPath_test`'s `ReadFile`). A sized read has no iterator to inline.
+    constexpr std::size_t ReadChunkBytes = 4096;
+    Pace::SecureCharBuffer secret;
+    Pace::SecureCharBuffer chunk(ReadChunkBytes);
+    while (file.read(chunk.data(), static_cast<std::streamsize>(chunk.size())) || file.gcount() > 0)
+    {
+        secret.insert(secret.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(file.gcount()));
+        if (!file)
+            break;
+    }
+
+    // **A stream ERROR is not end of file, and answering a truncated secret as a success
+    // is the worse half.** `!file` above fires for `badbit` exactly as for `eofbit`, so an
+    // EIO part way through a credential file -- a network mount, a FIFO whose writer died
+    // -- would return the prefix that arrived AS the credential: the process starts, every
+    // legitimate caller is rejected, and nothing anywhere says the file was read halfway.
+    // The `std::ostringstream` form this replaced had the same hole, so it is a carried
+    // gap rather than a regression, and the loop is where it became cheap to close.
+    if (file.bad())
+        return std::unexpected { Refusal(NodeRefusalCause::CredentialIo,
+                                         std::format("could not read all of '{}'", path.string())) };
+
+    // Trailing whitespace is trimmed because every editor adds a newline, and an
+    // operator should not have to know that a secret which looks right is one byte
+    // longer than the one they typed. Leading whitespace is NOT trimmed: it is not
+    // something an editor adds, and a secret that legitimately begins with a space
+    // would otherwise be silently a different secret.
+    while (!secret.empty() && (secret.back() == '\n' || secret.back() == '\r'))
+        secret.pop_back();
+
+    if (secret.empty())
+        return std::unexpected { Refusal(NodeRefusalCause::CredentialFile,
+                                         std::format("'{}' is empty; a credential file nobody can fail to match "
+                                                     "is worse than none, because the surface looks guarded",
+                                                     path.string())) };
+
+    return Pace::SecureString { std::string_view { secret.data(), secret.size() } };
+}
+
+std::expected<AdminCredential, NodeRefusal> ReadDashboardToken(std::filesystem::path const& path)
+{
+    // The reading is `ReadSecretFile`'s, shared with every secret this node reads by
+    // path; what differs is only what the secret becomes. Written once, so the
+    // trailing-newline rule and the empty-file refusal cannot hold for one credential
+    // and not another.
+    return ReadSecretFile(path).transform(
+        [](Pace::SecureString secret) { return AdminCredential { std::move(secret) }; });
+}
+
+namespace
+{
+#if defined(FC_TLS_ENABLED)
+    /// Names a generated certificate should be valid for.
+    ///
+    /// Every modern client ignores a certificate's common name, so this list is
+    /// what decides whether a browser warns once or twice: an unknown issuer is one
+    /// warning an operator can accept, and a name mismatch on top of it is a second
+    /// one that is much harder to click past.
+    ///
+    /// Loopback always, because that is where the surface binds by default; the
+    /// machine's own network name, because that is what an operator types to reach
+    /// another node; and the admin bind address when it names a particular
+    /// interface rather than every one of them -- a wildcard is not a name anybody
+    /// can dial, so putting it in a certificate would say nothing.
+    /// @param cfg The parsed configuration.
+    /// @param host Where the machine's own facts come from.
+    /// @return The subject names, loopback first.
+    [[nodiscard]] std::vector<std::string> SelfSignedSubjectNames(NodeConfig const& cfg, IHostFactsSource const& host)
+    {
+        std::vector<std::string> names { "localhost", "127.0.0.1", "::1" };
+
+        if (auto const& hostName = host.Facts().hostName; !hostName.empty())
+            names.push_back(hostName);
+
+        // The address this surface will actually bind, from its own row. Derived here
+        // a second time, a certificate could name an address the surface no longer
+        // takes -- and a certificate naming the wrong host is the browser warning this
+        // function exists to avoid.
+        if (auto const endpoints = RowFor(NodeSurface::Admin).Resolve(cfg); !endpoints.empty())
+        {
+            constexpr std::array<std::string_view, 3> Wildcards { "0.0.0.0", "::", "[::]" };
+            auto const& bindHost = endpoints.front().host;
+            if (!std::ranges::contains(Wildcards, bindHost) && !std::ranges::contains(names, bindHost))
+                names.push_back(bindHost);
+        }
+
+        return names;
+    }
+#endif
+
+    /// One small HTML page, with the head a phone needs.
+    ///
+    /// The routes below answered with bare fragments -- a doctype, a `<title>` and a
+    /// `<p>`. **A document with no viewport meta renders at desktop zoom on a phone**,
+    /// and the 401 is the most-seen page of a rollout: it is what an operator meets
+    /// before they have a credential, often on the device they are holding.
+    ///
+    /// A shell rather than a `<meta>` copied into each body, so the viewport is stated
+    /// once here -- and the prologue itself is `Distributed::HtmlDocumentPrologue`,
+    /// because stating it once per BINARY still left it spelled twice per fleet
+    /// ([#1344](https://github.com/LASTRADA-Software/fastcached/issues/1344)).
+    ///
+    /// This used to say that `RenderFleetHtml` keeps its own head and that sharing one
+    /// would couple a one-paragraph refusal to a whole dashboard. That is right about
+    /// the HEAD -- the palette, the refresh interval and the title stay here -- and
+    /// wrong about the PROLOGUE, whose reasoning lives on the constant rather than
+    /// being argued a second time here.
+    /// @param body The body markup, already escaped by its caller.
+    /// @return The whole document.
+    [[nodiscard]] std::string MinimalHtmlPage(std::string_view body)
+    {
+        // The head below stays ONE spliced literal: every piece of it is constant, so
+        // adjacent literals are joined at compile time and what follows is a single
+        // append of that whole run rather than nine. No `{}` is spelled, which is what
+        // kept this off `std::format` -- a CSS block is mostly braces. The prologue
+        // cannot join them, being a `string_view` rather than a literal, so it is the
+        // string's initial value and the head is what gets appended to it.
+        std::string out { Distributed::HtmlDocumentPrologue };
+        out += R"(<title>fastcache fleet</title><style>)"
+               R"(body{margin:0;padding:2rem 1.25rem;color:#1c1f23;background:#f6f7f9;)"
+               R"(font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif})"
+               R"(main{max-width:34rem;margin:0 auto}h1{font-size:1.15rem;margin:0 0 .8rem})"
+               R"(p{margin:0 0 .8rem}code{font:13px/1.4 ui-monospace,monospace;)"
+               R"(background:#e8eaed;padding:.1em .35em;border-radius:3px;word-break:break-word})"
+               R"(@media(prefers-color-scheme:dark){body{color:#e6e8ea;background:#16181b})"
+               R"(code{background:#262a2f}})"
+               R"(</style></head><body><main>)";
+        out += body;
+        out += R"(</main></body></html>)";
+        return out;
+    }
+
+    /// The challenge an unauthorised caller is answered with.
+    ///
+    /// `Basic` is named first because it is the one a browser can prompt for, and
+    /// the page exists to be opened in one. Without a `WWW-Authenticate` header at
+    /// all a browser shows the body and no prompt, which reads as a broken page
+    /// rather than as a credential being required.
+    [[nodiscard]] AdminResponse Unauthorised(std::string_view contentType, std::string body)
+    {
+        return AdminResponse { .status = "401 Unauthorized",
+                               .contentType = contentType,
+                               .body = std::move(body),
+                               .extraHeaders = { R"(WWW-Authenticate: Basic realm="fastcache fleet")" } };
+    }
+
+    /// One `name=value` out of a query string.
+    ///
+    /// A parser rather than a dependency: this surface reads two names and would
+    /// otherwise gain a URL library to do it. `&`-separated, first match wins, and
+    /// an absent name is empty -- which every caller here distinguishes from a
+    /// present-but-unrecognised one, because those mean different things.
+    /// @param query Whatever followed the `?`.
+    /// @param name The parameter to find.
+    /// @return Its raw value, or empty when the query does not name it.
+    [[nodiscard]] std::string_view QueryValue(std::string_view query, std::string_view name)
+    {
+        while (!query.empty())
+        {
+            auto const separator = query.find('&');
+            auto const pair = query.substr(0, separator);
+            if (auto const equals = pair.find('='); equals != std::string_view::npos && pair.substr(0, equals) == name)
+                return pair.substr(equals + 1);
+            if (separator == std::string_view::npos)
+                break;
+            query.remove_prefix(separator + 1);
+        }
+        return {};
+    }
+
+    /// A query parameter naming something this surface does not serve.
+    ///
+    /// Refused rather than defaulted, deliberately, and these routes draw that line
+    /// one way: refuse where a silent substitution would mislead, default where it
+    /// cannot. A `range` quietly substituted puts a reader on a different axis than
+    /// the one they asked for, and a `section` hands them a different table -- with
+    /// nothing on the page, and nothing at all in a tab-separated document, to say
+    /// so. A `theme` quietly substituted costs them nothing, so it has a default.
+    ///
+    /// Named for the answer rather than for one of the parameters that reach it: the
+    /// name was `BadRange` while `range` was the only caller, which left whoever
+    /// added the second one deciding whether reusing it was a shortcut or a mistake.
+    [[nodiscard]] AdminResponse RefusedParameter(std::string_view contentType, std::string body)
+    {
+        return AdminResponse { .status = "400 Bad Request", .contentType = contentType, .body = std::move(body) };
+    }
+
+    /// Every range key this build serves, comma-separated.
+    ///
+    /// Walked out of the table rather than written into the message, because a
+    /// refusal that hand-lists what it accepts goes stale the first time a row is
+    /// added -- and it goes stale in the one place a reader who just guessed wrong is
+    /// looking. Two windows were named here while eight were served.
+    /// @return The keys, in the order the control renders them.
+    [[nodiscard]] std::string KnownRangeKeys()
+    {
+        std::string out;
+        for (auto const& row: Distributed::FleetRangeTable)
+        {
+            if (!out.empty())
+                out += ", ";
+            out += row.key;
+        }
+        return out;
+    }
+
+    /// Every `/fleet.txt` section this build serves, one per line with what it holds.
+    ///
+    /// Walked out of the table for the reason `KnownRangeKeys` is: a refusal that
+    /// hand-lists what it accepts goes stale the first time a section is added, in
+    /// the one place a reader who just guessed wrong is looking.
+    ///
+    /// The summary travels with the key because that reader usually guessed the WORD
+    /// and not the table -- given five bare nouns they are choosing again, with the
+    /// same information they got it wrong with the first time. It is also the only
+    /// thing that reads `FleetSectionRow::summary`, which is the point: a field
+    /// nothing reads cannot be wrong, so nothing keeps it true.
+    /// @return One indented `<key> <summary>` line per section, in document order.
+    [[nodiscard]] std::string KnownSections()
+    {
+        std::string out;
+        for (auto const& row: Distributed::FleetSectionTable)
+            out += std::format("  {:<9} {}\n", row.key, row.summary);
+        return out;
+    }
+
+    /// The range a key names, or the day when it names none -- never a silent substitution.
+    /// @param key What the reader typed, or empty.
+    /// @return The range, or nullopt for a key this build does not serve.
+    [[nodiscard]] std::optional<Distributed::FleetRange> RangeFromKeyOrDay(std::string_view key) noexcept
+    {
+        if (key.empty())
+            return Distributed::FleetRange::Day;
+        return Distributed::FleetRangeFromKey(key);
+    }
+
+    /// The history a view of @p range draws on.
+    /// @param history The record, or null to draw none.
+    /// @param range Which window.
+    /// @return The view.
+    [[nodiscard]] Distributed::FleetHistoryView HistoryViewFor(IFleetHistoryView const* history,
+                                                               Distributed::FleetRange range)
+    {
+        Distributed::FleetHistoryView view { .range = range,
+                                             .buckets = {},
+                                             .durable = history != nullptr && history->Durable() };
+        if (history != nullptr)
+            view.buckets = history->Buckets(range);
+        return view;
+    }
+
+    /// A chart tail that names nothing in the table.
+    [[nodiscard]] AdminResponse NoSuchChart()
+    {
+        return AdminResponse { .status = "404 Not Found", .contentType = "text/plain", .body = "no such chart\n" };
+    }
+
+    /// Answer a conditional GET, rendering only when the client's copy is stale.
+    ///
+    /// The `ETag` is the sampler's own bucket counter rather than a hash of the
+    /// body: it moves exactly when a rendered chart would, costs nothing to compute,
+    /// and is byte-exact rather than probabilistic. `Cache-Control` runs only to the
+    /// end of the bucket being drawn, because a fixed max-age would leave a viewer a
+    /// whole bucket behind for the rest of it.
+    /// @param request The request, for its `If-None-Match`.
+    /// @param history Where the generation and the bucket clock come from.
+    /// @param range Which range is being drawn.
+    /// @param identity What distinguishes this resource from the others.
+    /// @param status What a fresh answer's status would be.
+    /// @param contentType What the body is.
+    /// @param render Produces the body; called only when it will be sent.
+    /// @return The rendered answer, or a bodyless `304`.
+    template <typename Render>
+    [[nodiscard]] AdminResponse Conditional(AdminRequest const& request,
+                                            IFleetHistoryView const* history,
+                                            Distributed::FleetRange range,
+                                            std::string const& identity,
+                                            std::string_view status,
+                                            std::string_view contentType,
+                                            Render&& render)
+    {
+        if (history == nullptr)
+            return AdminResponse { .status = "503 Service Unavailable",
+                                   .contentType = "text/plain",
+                                   .body = "this node keeps no fleet history\n" };
+
+        auto const tag = std::format(R"("{}-{}")", identity, history->Generation());
+        // Bounded by the SAMPLE interval, not only by the bucket. The newest bucket is
+        // always still open and gains a reading every sample, so "until this bucket
+        // closes" is how long the chart's shape is settled -- not how long it is
+        // current. On a five-minute bucket the difference was four minutes of
+        // staleness; on the twelve-month view, whose buckets are a day wide, it is a
+        // chart frozen in the browser for twenty-four hours while the fleet moves.
+        // Revalidation is cheap: the ETag makes it a bodyless 304 whenever nothing
+        // closed.
+        auto const settled = history->UntilBucketCloses(range);
+        auto const maxAge = std::min(settled, Distributed::FleetSampleInterval).count();
+        std::vector<std::string> headers { std::format("ETag: {}", tag),
+                                           std::format("Cache-Control: max-age={}, must-revalidate", maxAge) };
+
+        if (request.Header(AdminHeader::IfNoneMatch) == tag)
+            // Bodyless, and the validators go with it: without them the client has
+            // nothing to revalidate against next time.
+            return AdminResponse { .status = "304 Not Modified", .extraHeaders = std::move(headers) };
+
+        return AdminResponse { .status = status,
+                               .contentType = contentType,
+                               .body = std::forward<Render>(render)(),
+                               .extraHeaders = std::move(headers) };
+    }
+} // namespace
+
+std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed::FleetSnapshot const& snapshot,
+                                                                    IFleetHistoryView const* history,
+                                                                    std::string_view sectionKey,
+                                                                    std::string_view rangeKey)
+{
+    auto const section = sectionKey.empty() ? std::optional<Distributed::FleetSection> { std::nullopt }
+                                            : Distributed::FleetSectionFromKey(sectionKey);
+    if (!sectionKey.empty() && !section.has_value())
+        return std::unexpected(
+            FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                .detail = std::format("unknown section; this build serves:\n{}", KnownSections()) });
+
+    // Asked for even when a section that ignores it was named: a parameter accepted on one section
+    // and silently dropped on another is a worse answer than refusing it everywhere.
+    auto const range = RangeFromKeyOrDay(rangeKey);
+    if (!range.has_value())
+        return std::unexpected(
+            FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                .detail = std::format("unknown range; this build serves: {}\n", KnownRangeKeys()) });
+
+    return FleetTextDocument { .leads = Distributed::LeadsTheFleet(snapshot),
+                               .leaderEndpoint = snapshot.leaderEndpoint,
+                               .body = Distributed::RenderFleetText(snapshot, HistoryViewFor(history, *range), section) };
+}
+
+std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
+                                        AdminCredential const& credential,
+                                        unsigned refreshSeconds,
+                                        IFleetHistoryView const* history)
+{
+    // Every route reads the fleet the same way and is gated the same way; only what
+    // it renders differs. **The gate is written once and the renderer is the
+    // parameter**, so a route added later cannot be one that forgot to check --
+    // which here would mean the fleet's whole history readable through an image URL
+    // while `/fleet` itself stays locked.
+    auto const gated = [sources, credential](auto refuse, auto render) {
+        return [sources, credential, refuse, render](AdminRequest const& request) -> AdminResponse {
+            if (!credential.Accepts(request.Header(AdminHeader::Authorization)))
+                return refuse();
+            return render(Distributed::CollectFleet(sources), request);
+        };
+    };
+
+    // A follower answers 503 rather than 200: its registry holds whatever registered
+    // against it rather than the fleet, so a 200 would be a partial picture
+    // presented as the whole one. It is `Gate()`'s `NotLeader` in HTTP's vocabulary
+    // -- not me, and here is who.
+    auto const statusFor = [](Distributed::FleetSnapshot const& snapshot) {
+        return Distributed::LeadsTheFleet(snapshot) ? "200 OK" : "503 Service Unavailable";
+    };
+
+    /// What the reader asked for, or the default -- never a silent substitution.
+    auto const rangeAsked = [](std::string_view query) {
+        return RangeFromKeyOrDay(QueryValue(query, "range"));
+    };
+
+    auto const viewFor = [history](Distributed::FleetRange range) {
+        return HistoryViewFor(history, range);
+    };
+
+    std::vector<AdminRoute> routes;
+
+    // **`/fleet` carries no `ETag`, and that is now MEASURED rather than an omission**
+    // (#143). Every poll is a fresh snapshot plus a full render, where each chart route
+    // above gets a bodyless `304` for the whole of a bucket -- so the obvious reading is
+    // that a browser left open on a wall display is a steady load on the one node that
+    // also schedules every compile in the fleet. #125 raised exactly that.
+    //
+    // It is not. `RenderFleetHtml`, min of N, `steady_clock`, Release (`-O2`, no
+    // sanitizers), 2026-09-11. Pinned rather than pointed at: this is one machine at one
+    // instant and must not track anything.
+    //
+    //     machines      1       10       50      200     1000
+    //     render    0.010 ms  0.019   0.055    0.193    1.010
+    //     html       21 KB    24 KB    39 KB    94 KB    387 KB
+    //
+    // A realistic fleet is tens of machines, so a poll costs TENS OF MICROSECONDS. Ten
+    // tabs at the page's own refresh interval is a few polls a second: comfortably
+    // under a thousandth of a core, against a leader whose unit of work is a compile
+    // measured in seconds. It does not show up in a profile, so there is nothing here
+    // for a cache to buy.
+    //
+    // **The same numbers under Debug read 0.66 to 22 ms -- 22x to 66x higher -- and
+    // would have argued for the cache.** That is why the row above says Release: an
+    // unoptimised render is not the shipping cost, and quoting one here would have
+    // justified adding staleness to the one page that exists to avoid it.
+    //
+    // So a validator is deliberately NOT added. It would cost nothing in staleness --
+    // the charts' bucket-counter tag is exact, not a TTL -- but it is machinery bought
+    // for a cost that is not there, and this page's snapshot has no equally exact
+    // generation to key on. Revisit if a fleet ever reaches the thousands, where the
+    // figure starts being a millisecond rather than a rounding error.
+    routes.push_back(AdminRoute {
+        .path = "/fleet",
+        .handler = gated(
+            [] {
+                // **The scheme sentence is NOT redundant with the header**, which is
+                // the objection to answer here rather than in a commit message. The
+                // response already carries `WWW-Authenticate: Basic`, and that fully
+                // serves a browser -- it is what makes the prompt appear. It serves a
+                // script user with nothing: `AdminCredential` also accepts `Bearer`,
+                // which the header does not advertise, and it IGNORES the username
+                // half of Basic, which is what makes `-u :<token>` the spelling. Two
+                // audiences, two mechanisms; the header reaches one of them.
+                return Unauthorised(
+                    "text/html; charset=utf-8",
+                    MinimalHtmlPage("<h1>This page needs a credential</h1>"
+                                    "<p>The node serves it only to a caller holding the token in the file named by "
+                                    "<code>--dashboard-token-file</code>.</p>"
+                                    "<p>A browser is prompted for it. A script presents it as either "
+                                    "<code>Authorization: Bearer &lt;token&gt;</code> or as Basic with the username left "
+                                    "empty &mdash; only the password half is read, so "
+                                    "<code>curl -u :&quot;$(cat &lt;file&gt;)&quot;</code> works.</p>"));
+            },
+            [refreshSeconds, statusFor, rangeAsked, viewFor](Distributed::FleetSnapshot const& snapshot,
+                                                             AdminRequest const& request) -> AdminResponse {
+                auto const range = rangeAsked(request.query);
+                if (!range.has_value())
+                    return RefusedParameter("text/html; charset=utf-8",
+                                            MinimalHtmlPage(std::format("<h1>Unknown range</h1>"
+                                                                        "<p>Try one of: <code>{}</code>.</p>",
+                                                                        KnownRangeKeys())));
+                return AdminResponse { .status = statusFor(snapshot),
+                                       .contentType = "text/html; charset=utf-8",
+                                       .body = Distributed::RenderFleetHtml(snapshot, viewFor(*range), refreshSeconds) };
+            }),
+    });
+
+    // `range` is accepted here for the same reason the page accepts it (#1302): three
+    // of the headline figures are history-derived, so the document answers FOR a
+    // window -- and a machine-readable surface pinned to one window while the page
+    // takes a parameter is the same fleet reporting two different Dispatched figures
+    // depending on who asked, which is the disagreement this key exists to prevent.
+    //
+    // REFUSED when it names nothing, never defaulted, exactly as on `/fleet`: a window
+    // quietly substituted hands a reader figures for a period they did not ask about,
+    // with nothing in the document to say so.
+    routes.push_back(AdminRoute {
+        .path = "/fleet.json",
+        .handler = gated([] { return Unauthorised("application/json", R"({"error":"credential required"})"); },
+                         [statusFor, rangeAsked, viewFor](Distributed::FleetSnapshot const& snapshot,
+                                                          AdminRequest const& request) -> AdminResponse {
+                             auto const range = rangeAsked(request.query);
+                             if (!range.has_value())
+                                 return RefusedParameter(
+                                     "application/json",
+                                     std::format(R"({{"error":"unknown range","accepted":"{}"}})", KnownRangeKeys()));
+                             return AdminResponse { .status = statusFor(snapshot),
+                                                    .contentType = "application/json",
+                                                    .body = Distributed::RenderFleetJson(snapshot, viewFor(*range)) };
+                         }),
+    });
+
+    // The same tables again, for a reader with no JSON parser (#1300). `jq` is not on
+    // a Windows build box and `pacectl` has no JSON *parser* -- it only emits --
+    // so until this route existed every fleet table was reachable from a browser and
+    // from nowhere else.
+    //
+    // `?section=` is REFUSED rather than defaulted when it names nothing, which is the
+    // same asymmetry the `range` parameter above draws and for the same reason: a
+    // section quietly substituted hands a reader a different table than the one they
+    // asked for, with nothing in a tab-separated document to say so. Asking for NO
+    // section is not a guess and gets every section, each behind a marker naming it --
+    // which is also how the accepted keys are discoverable without reading the docs.
+    //
+    // The document and both refusals are `AnswerFleetText`'s, which is also what the
+    // `fleet-text` verb answers from: this route renders nothing of its own (#1391).
+    routes.push_back(AdminRoute {
+        .path = "/fleet.txt",
+        .handler = gated(
+            [] { return Unauthorised("text/plain; charset=utf-8", "credential required\n"); },
+            [history, statusFor](Distributed::FleetSnapshot const& snapshot, AdminRequest const& request) -> AdminResponse {
+                auto answer = AnswerFleetText(
+                    snapshot, history, QueryValue(request.query, "section"), QueryValue(request.query, "range"));
+                if (!answer.has_value())
+                    return RefusedParameter("text/plain; charset=utf-8", std::move(answer.error().detail));
+                return AdminResponse { .status = statusFor(snapshot),
+                                       .contentType = "text/plain; charset=utf-8",
+                                       .body = std::move(answer->body) };
+            }),
+    });
+
+    routes.push_back(AdminRoute {
+        .path = std::string_view { Distributed::FleetSeriesPath },
+        .handler = gated(
+            [] { return Unauthorised("application/json", R"({"error":"credential required"})"); },
+            [history, statusFor, rangeAsked, viewFor](Distributed::FleetSnapshot const& snapshot,
+                                                      AdminRequest const& request) -> AdminResponse {
+                auto const range = rangeAsked(request.query);
+                if (!range.has_value())
+                    return RefusedParameter("application/json",
+                                            std::format(R"({{"error":"unknown range","known":"{}"}})", KnownRangeKeys()));
+                auto const view = viewFor(*range);
+                return Conditional(request,
+                                   history,
+                                   *range,
+                                   std::format("s-{}", Distributed::FleetRangeTable[static_cast<std::size_t>(*range)].key),
+                                   statusFor(snapshot),
+                                   "application/json",
+                                   [&view, &range] { return Distributed::RenderSeriesJson(view.buckets, *range); });
+            }),
+    });
+
+    routes.push_back(AdminRoute {
+        .path = std::string_view { Distributed::FleetChartPrefix },
+        .handler =
+            gated([] { return Unauthorised("text/plain", "credential required\n"); },
+                  [history, statusFor, rangeAsked, viewFor](Distributed::FleetSnapshot const& snapshot,
+                                                            AdminRequest const& request) -> AdminResponse {
+                      constexpr std::string_view Extension = ".svg";
+                      auto tail = request.path.substr(Distributed::FleetChartPrefix.size());
+                      if (!tail.ends_with(Extension))
+                          return NoSuchChart();
+                      tail.remove_suffix(Extension.size());
+                      auto const chart = Distributed::FleetChartFromKey(tail);
+                      if (!chart.has_value())
+                          return NoSuchChart();
+
+                      auto const range = rangeAsked(request.query);
+                      if (!range.has_value())
+                          return RefusedParameter("text/plain", std::format("unknown range; known: {}\n", KnownRangeKeys()));
+                      auto const theme = Distributed::FleetThemeFromKey(QueryValue(request.query, "theme"));
+                      auto const& row = Distributed::FleetChartTable[static_cast<std::size_t>(*chart)];
+
+                      auto const view = viewFor(*range);
+                      return Conditional(request,
+                                         history,
+                                         *range,
+                                         std::format("{}-{}-{}",
+                                                     row.key,
+                                                     Distributed::FleetRangeTable[static_cast<std::size_t>(*range)].key,
+                                                     Distributed::FleetThemeKey(theme)),
+                                         statusFor(snapshot),
+                                         "image/svg+xml",
+                                         [&row, &view, &range, theme] {
+                                             return Distributed::RenderChartSvg(row, view.buckets, *range, theme);
+                                         });
+                  }),
+        // A prefix route, so one row here covers every chart the table names: a
+        // route per chart would put the chart table's contents in a second place.
+        .match = AdminRouteMatch::Prefix,
+    });
+
+    return routes;
+}
+
+EnumTable<Distributed::FleetMetric, std::uint64_t> SampleFrom(Distributed::FleetSnapshot const& snapshot)
+{
+    EnumTable<Distributed::FleetMetric, std::uint64_t> values {};
+    auto const put = [&values](Distributed::FleetMetric metric, std::uint64_t value) {
+        values[static_cast<std::size_t>(metric)] = value;
+    };
+
+    // Matched by COUNTER rather than by position, and that is load-bearing now that
+    // `LeaseOutcomeTable` can grow somewhere other than its own end:
+    // `DispatchLeasesAllExcluded` landed beside `Withdrawn`, which shifted `duplicate`
+    // from index 4 to index 5. A position-keyed loop would have kept reading
+    // `duplicate`'s old slot -- `all-excluded`'s value -- into `FleetMetric::DispatchDuplicate`
+    // forever, silently, which is exactly what a neuter of this loop back to positional
+    // indexing demonstrated before this was written.
+    struct DispatchSlot
+    {
+        Distributed::FleetMetric metric;
+        IMetricsSink::Counter counter;
+    };
+    static constexpr std::array<DispatchSlot, 6> dispatchSlots {
+        DispatchSlot { .metric = Distributed::FleetMetric::DispatchGranted,
+                       .counter = IMetricsSink::Counter::DispatchLeasesGranted },
+        DispatchSlot { .metric = Distributed::FleetMetric::DispatchNoWorker,
+                       .counter = IMetricsSink::Counter::DispatchLeasesNoWorker },
+        DispatchSlot { .metric = Distributed::FleetMetric::DispatchNoCapacity,
+                       .counter = IMetricsSink::Counter::DispatchLeasesNoCapacity },
+        DispatchSlot { .metric = Distributed::FleetMetric::DispatchWithdrawn,
+                       .counter = IMetricsSink::Counter::DispatchLeasesWithdrawn },
+        DispatchSlot { .metric = Distributed::FleetMetric::DispatchAllExcluded,
+                       .counter = IMetricsSink::Counter::DispatchLeasesAllExcluded },
+        DispatchSlot { .metric = Distributed::FleetMetric::DispatchDuplicate,
+                       .counter = IMetricsSink::Counter::DispatchLeasesDuplicate },
+    };
+    // Two checks, not one: the lambda below proves every `LeaseOutcomeTable` ROW
+    // matches exactly one `dispatchSlots` entry, which says nothing about a SLOT
+    // matching no row -- a 7th slot naming a counter no row has would still pass it,
+    // and the loop's `findOrNull` would then come back null for that slot, making
+    // the pointer arithmetic below undefined behaviour. The size check closes that:
+    // with both facts holding, no slot can be left over one row short of a match,
+    // so together they prove a true bijection rather than only the direction the
+    // lambda checks on its own.
+    static_assert(dispatchSlots.size() == Distributed::LeaseOutcomeTable.size(),
+                  "every lease outcome needs a slot, or a refusal reason silently stops being recorded");
+    static_assert(
+        []() consteval {
+            for (auto const& row: Distributed::LeaseOutcomeTable)
+            {
+                auto matches = 0;
+                for (auto const& slot: dispatchSlots)
+                    if (slot.counter == row.counter)
+                        ++matches;
+                if (matches != 1)
+                    return false;
+            }
+            return true;
+        }(),
+        "every LeaseOutcomeTable counter must appear in dispatchSlots exactly once, or a lease outcome silently "
+        "stops reaching its FleetMetric slot");
+    for (auto const& slot: dispatchSlots)
+    {
+        // `findOrNull` rather than `std::ranges::find` because `LeaseOutcomeTable` is a
+        // `std::array`, whose iterator type is not portably nameable; see `core/Ranges.hpp`.
+        // Never null: the two static_asserts above together prove every slot's counter
+        // matches exactly one row, so there is nothing left to guard against here.
+        auto const* const row =
+            core::findOrNull(Distributed::LeaseOutcomeTable, slot.counter, &Distributed::LeaseOutcomeRow::counter);
+        auto const index = static_cast<std::size_t>(row - Distributed::LeaseOutcomeTable.data());
+        if (index < snapshot.leases.size())
+            put(slot.metric, snapshot.leases[index]);
+    }
+
+    // Summed over `NodeReports()`, never over `LiveWorkers()`: a node started with
+    // two --toolchain flags is two registry entries carrying one machine's cache,
+    // and summing there counts that cache once per toolchain.
+    //
+    // Every slot, including the ones a machine can also answer for itself. This is
+    // the FLEET series and a leader can answer for all ten -- these are fleet-wide
+    // sums, which is a different number from any one machine's and the one this page
+    // draws. `FleetMetricScope` is about what a NODE may claim about itself, not
+    // about what belongs here.
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+    for (auto const& node: snapshot.nodes)
+    {
+        hits += node.load.cache.hits.value_or(0);
+        misses += node.load.cache.misses.value_or(0);
+    }
+    put(Distributed::FleetMetric::CacheHits, hits);
+    put(Distributed::FleetMetric::CacheMisses, misses);
+
+    auto const totals = Distributed::TotalsFor(snapshot);
+    put(Distributed::FleetMetric::OfferableSlots, totals.free);
+    put(Distributed::FleetMetric::JobsInFlight, totals.inFlight);
+    return values;
+}
+
+EnumTable<Distributed::FleetMetric, std::uint64_t> NodeSampleFrom(IMetricsSink const& metrics,
+                                                                  MetricsSnapshot const& snapshot)
+{
+    EnumTable<Distributed::FleetMetric, std::uint64_t> values {};
+    auto const put = [&values](Distributed::FleetMetric metric, std::uint64_t value) {
+        auto const& row = Distributed::FleetMetricTable[static_cast<std::size_t>(metric)];
+        if (row.scope != Distributed::FleetMetricScope::Node)
+            return;
+        values[static_cast<std::size_t>(metric)] = value;
+    };
+
+    // From the SAME counters `CacheTier::Snapshot` reports to the fleet, not from
+    // `StorageStats::getHits`. Those are a different number -- the store's own GET
+    // tally, which also counts everything served over the cache port -- and using
+    // them here would have one page showing two disagreeing answers for one machine's
+    // cache, with nothing saying which was which.
+    //
+    // A node with no cache reports zero and zero, which is the truth about it: unlike
+    // `/metrics`, where absent and zero are different claims, a history slot has no
+    // way to say "no cache" and a rate across two zeroes is zero either way.
+    put(Distributed::FleetMetric::CacheHits, metrics.Read(IMetricsSink::Counter::NodeCacheHits));
+    put(Distributed::FleetMetric::CacheMisses, metrics.Read(IMetricsSink::Counter::NodeCacheMisses));
+
+    // Free slots, not configured ones: the series is about what a compile could have
+    // started on, and a machine with every slot busy is offering nothing however many
+    // it advertises. Saturating, because a scrape landing between the two figures
+    // moving must not wrap into billions.
+    //
+    // A process reporting no host capacity is not a worker, and zero offered with
+    // zero running is the truth about it rather than a gap this format could express.
+    if (snapshot.host.has_value())
+    {
+        auto const busy = snapshot.host->busySlots;
+        auto const configured = snapshot.host->configuredSlots;
+        put(Distributed::FleetMetric::OfferableSlots, configured > busy ? configured - busy : 0);
+        put(Distributed::FleetMetric::JobsInFlight, busy);
+    }
+    return values;
+}
+
+std::string_view HistoryFileNameOf(HistoryFile which) noexcept
+{
+    // One row per file, in enumerator order, so a fourth file is a row rather than a
+    // path spelled somewhere nobody looks. The fleet file keeps the name it always
+    // had, so an existing install's fleet series survives the upgrade that split it
+    // from the others.
+    struct FileNameRow
+    {
+        HistoryFile which;     ///< The file this row names.
+        std::string_view name; ///< What it is called.
+    };
+    // A row that states its own enumerator, and the guard every enumerator-indexed
+    // table in this tree carries. Filled positionally it compiled either way, and
+    // swapping two rows would have swapped two files -- silently for the pair that
+    // share a format, since each would then load the other's readings without
+    // complaint.
+    static constexpr EnumTable<HistoryFile, FileNameRow> fileNames {
+        FileNameRow { .which = HistoryFile::Node, .name = StateFileName(StateFile::NodeHistory) },
+        FileNameRow { .which = HistoryFile::Fleet, .name = StateFileName(StateFile::FleetHistory) },
+        FileNameRow { .which = HistoryFile::Received, .name = StateFileName(StateFile::ReceivedHistory) },
+    };
+    static_assert(RowsInEnumeratorOrder(fileNames, &FileNameRow::which));
+    return fileNames[static_cast<std::size_t>(which)].name;
+}
+
+std::filesystem::path HistoryPathFor(NodeConfig const& cfg, HistoryFile which)
+{
+    auto const name = HistoryFileNameOf(which);
+    // The state directory the node keeps, typed or the default its start resolved -- never the
+    // typed flag alone, which a node started with no configuration leaves empty while it keeps
+    // every other state file in the default. Its history went nowhere at all.
+    if (auto const chosen = ChosenStateDirectory(cfg); chosen.has_value())
+        return chosen->path / name;
+    if (!cfg.cacheDir.empty())
+        return cfg.cacheDir / name;
+    return {};
+}
+
+HistoryPaths HistoryPaths::For(NodeConfig const& cfg)
+{
+    return HistoryPaths { .fleet = HistoryPathFor(cfg, HistoryFile::Fleet),
+                          .node = HistoryPathFor(cfg, HistoryFile::Node),
+                          .received = HistoryPathFor(cfg, HistoryFile::Received) };
+}
+
+std::filesystem::path FleetHistoryPath(NodeConfig const& cfg)
+{
+    return HistoryPathFor(cfg, HistoryFile::Fleet);
+}
+
+FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
+                           IMetricsSink const& metrics,
+                           AdminHttpServer::SnapshotProvider node,
+                           core::platform::WallClockRef wall,
+                           HistoryPaths paths,
+                           ILogger& logger):
+    _sources { sources },
+    _metrics { metrics },
+    _nodeFacts { std::move(node) },
+    _fleet { wall },
+    _node { wall },
+    _received { wall },
+    // Every store is a row, so restoring and saving are one loop each. The received
+    // store is here rather than beside the loop because a store restored and never
+    // saved is a year of readings discovered missing at the next restart -- and what
+    // it holds is what makes a fleet's record survive an election, which a node
+    // advancing its own watermark and never resending cannot rebuild.
+    _stores { Store { .path = std::move(paths.fleet),
+                      .what = "fleet",
+                      .load = [this](auto const& at) { return _fleet.Load(at); },
+                      .save = [this](auto const& at) { return _fleet.Save(at, StateFile::FleetHistory); },
+                      .readOnly = [this] { return _fleet.ReadOnly(); },
+                      .worthWriting = [this] { return !_fleet.Empty(); } },
+              Store { .path = std::move(paths.node),
+                      .what = "node",
+                      .load = [this](auto const& at) { return _node.Load(at); },
+                      .save = [this](auto const& at) { return _node.Save(at, StateFile::NodeHistory); },
+                      .readOnly = [this] { return _node.ReadOnly(); },
+                      .worthWriting = [this] { return !_node.Empty(); } },
+              Store { .path = std::move(paths.received),
+                      .what = "received",
+                      .load = [this](auto const& at) { return _received.Load(at); },
+                      .save = [this](auto const& at) { return _received.Save(at, StateFile::ReceivedHistory); },
+                      .readOnly = [this] { return _received.ReadOnly(); },
+                      .worthWriting = [this] { return _received.Count() > 0; } } },
+    _logger { logger }
+{
+    // Every failure to read starts empty and says so once. History is a
+    // convenience, and no state of any of these files may keep a node from starting.
+    for (auto const& each: _stores)
+    {
+        if (each.path.empty())
+            continue;
+        if (each.load(each.path))
+            _logger.Logf(LogLevel::Info, "{} history restored from {}", each.what, each.path.string());
+        else if (each.readOnly())
+            // Named at WARN and named specifically, because this one is not the
+            // ordinary "nothing to restore": a later build wrote that file, this one
+            // cannot read it, and the reason it is not being replaced is that doing
+            // so would destroy readings the other build could still use. An operator
+            // who saw only "starts empty" would reasonably delete it.
+            _logger.Logf(LogLevel::Warn,
+                         "{} history at {} was written by a NEWER build; starting empty and leaving it alone. "
+                         "Sampling continues, nothing is persisted, and the file is safe for that build to read again",
+                         each.what,
+                         each.path.string());
+        else
+            _logger.Logf(LogLevel::Info, "{} history starts empty at {}", each.what, each.path.string());
+    }
+
+    // Reported, never estimated. A ring is allocated in full at construction, so
+    // this is what the process is holding now rather than what it might grow to --
+    // and a leader additionally holds one of these per machine that reports, which
+    // is the number an operator sizing a fleet's leader actually needs.
+    constexpr auto PerSeriesKiB = Distributed::FleetHistoryBytes() / 1024;
+    _logger.Logf(LogLevel::Info,
+                 "fleet history holds {} KiB per series ({} KiB for this node's own two), and a leader keeps a "
+                 "further {} KiB for every machine that reports to it",
+                 PerSeriesKiB,
+                 PerSeriesKiB * 2,
+                 PerSeriesKiB);
+
+    _thread = std::jthread { [this](std::stop_token const& stop) {
+        auto sinceSave = std::chrono::steady_clock::duration::zero();
+        while (!stop.stop_requested())
+        {
+            SampleOnce();
+            if (sinceSave >= SaveInterval)
+            {
+                Persist();
+                sinceSave = std::chrono::steady_clock::duration::zero();
+            }
+
+            // A stop ends the wait at once: one that had to wait out a full interval makes
+            // teardown look hung, which this repository has already paid for once as a
+            // `systemctl stop` that escalated to SIGKILL.
+            if (WaitForStopOr(stop, Distributed::FleetHistory::SampleInterval) == WaitEnd::Stopped)
+                break;
+            sinceSave += Distributed::FleetHistory::SampleInterval;
+        }
+    } };
+}
+
+FleetSampler::~FleetSampler()
+{
+    _thread.request_stop();
+    if (_thread.joinable())
+        _thread.join();
+    // One last write, so a clean shutdown does not throw away up to five minutes of
+    // what the page will be asked about the moment the node comes back.
+    Persist();
+}
+
+std::vector<Distributed::FleetBucket> FleetSampler::NextHistoryBatch(std::size_t limit) const
+{
+    return _node.ClosedBucketsAfter(_handedThrough.load(std::memory_order_relaxed), limit);
+}
+
+void FleetSampler::HistoryHandedThrough(std::int64_t startMillis) noexcept
+{
+    _handedThrough.store(startMillis, std::memory_order_relaxed);
+}
+
+std::vector<Distributed::FleetBucket> FleetSampler::Buckets(Distributed::FleetRange range) const
+{
+    auto view = _fleet.Buckets(range);
+    _received.BackfillInto(view, range);
+    return view;
+}
+
+bool FleetSampler::SampleOnce()
+{
+    // ALWAYS, whoever leads. What this machine's cache did and how many of its slots
+    // were busy are facts about the machine, and a node that stopped recording them
+    // the moment it lost an election is a node whose year of history belongs to
+    // whichever peer happened to be leading at the time. This is the half that
+    // survives an election, and in Phase 5 it is the half that rebuilds the leader's.
+    if (_nodeFacts)
+        _node.Record(NodeSampleFrom(_metrics, _nodeFacts()));
+
+    // A node with no scheduler has no fleet to answer for, and says so by recording
+    // nothing rather than by recording zeroes. It still keeps the series above,
+    // which is the whole point: a pure worker is exactly the machine whose windows
+    // the fleet would otherwise be missing.
+    if (!_sources.has_value())
+        return false;
+
+    auto const snapshot = Distributed::CollectFleet(*_sources);
+    // The fleet series stays leader-only, and for the original reason: a follower's
+    // registry holds whatever registered against IT, so a fleet-scoped sample there
+    // records a fraction as though it were the whole -- and the chart would show the
+    // fleet shrinking whenever leadership moved, which is the opposite of what
+    // happened. What changed is that this no longer stops the node recording itself.
+    if (!Distributed::LeadsTheFleet(snapshot))
+        return false;
+    _fleet.Record(SampleFrom(snapshot));
+    return true;
+}
+
+void FleetSampler::Persist()
+{
+    for (auto const& each: _stores)
+    {
+        if (each.path.empty() || !each.worthWriting())
+            continue;
+        // A refusal to overwrite a newer file is not a write failure, and reporting
+        // it as one every save interval would bury the single WARN at startup that
+        // explains it under a stream of "could not write" saying the opposite of
+        // what is true.
+        if (each.readOnly())
+            continue;
+        if (!each.save(each.path))
+            _logger.Logf(LogLevel::Warn, "could not write {} history to {}", each.what, each.path.string());
+    }
+}
+
+std::expected<AdminCredential, NodeRefusal> LoadDashboardCredentialOrExplain(NodeConfig const& cfg)
+{
+    // A file that cannot be read must not become "no credential": that is the single failure
+    // that turns a guarded fleet map into an open one.
+    if (cfg.dashboardTokenFile.empty())
+        return AdminCredential {};
+    auto read = ReadDashboardToken(cfg.dashboardTokenFile);
+    if (!read.has_value())
+        return std::unexpected { Refusal(read.error().cause,
+                                         std::format("--dashboard-token-file {}", read.error().reason)) };
+    return std::move(*read);
+}
+
+std::expected<AdminSurface, NodeRefusal> StartAdminSurfaceOrExplain(NodeConfig const& cfg,
+                                                                    [[maybe_unused]] IHostFactsSource const& host,
+                                                                    IMetricsSink& metrics,
+                                                                    AdminHttpServer::SnapshotProvider snapshot,
+                                                                    std::optional<Distributed::FleetSources> fleet,
+                                                                    FleetSampler const* sampler,
+                                                                    AdminCredential const& credential,
+                                                                    ILogger& logger,
+                                                                    NodeConditions& conditions,
+                                                                    core::net::AcceptLoopHealth& acceptLoops)
+{
+    AdminSurface surface;
+
+    // Off unless asked for, like every other surface this program serves. Nothing
+    // else here runs, so a node with no `--admin-listen` also reads no certificate
+    // and no token -- the flags that would be a silent no-op are refused by
+    // `StartupPolicyRejection` long before this.
+    if (cfg.adminListen.empty())
+        return surface;
+
+    // TLS is on by naming material or by asking for material to be made, never by
+    // a bare boolean: neither spelling can reach a state where TLS was requested
+    // and this node has nothing to serve it with.
+    if (cfg.tlsSelfSigned || !cfg.tlsCertFile.empty())
+    {
+#if defined(FC_TLS_ENABLED)
+        // The common name is this project's, stated rather than left to core-cpp's default of
+        // "localhost": a certificate a browser shows an operator names what it belongs to.
+        auto created = cfg.tlsSelfSigned
+                           ? core::net::makeSelfSignedServerContext(core::net::SelfSignedOptions {
+                                 .commonName = "fastcache-node", .subjectNames = SelfSignedSubjectNames(cfg, host) })
+                           : core::net::makeTlsServerContextFromFiles(cfg.tlsCertFile, cfg.tlsKeyFile);
+        if (!created.has_value())
+            return std::unexpected { Refusal(
+                NodeRefusalCause::TlsMaterial,
+                std::format("{}: {}", cfg.tlsSelfSigned ? "--tls-self-signed" : "--tls-cert/--tls-key", created.error())) };
+        surface.tls = std::move(*created);
+#else
+        // The startup table refuses this first (`BuildServesTls`), so `--print-surfaces` and
+        // `--install-service` do too; this is the belt for a configuration no argv produced,
+        // in the table's words.
+        return std::unexpected { Refusal(NodeRefusalCause::EarlierRule, std::string { TlsUnavailableRefusal }) };
+#endif
+    }
+
+    // Contributed only when the operator asked AND there is a fleet to read. A
+    // node with no scheduler passes nullopt, and `/fleet` is then a plain 404
+    // rather than a route answering with an empty fleet.
+    std::vector<AdminRoute> routes;
+    // The sampler is reached as an `IFleetHistoryView`, which is the ONLY door:
+    // the two halves of a leader's record -- what it sampled while leading, and
+    // what the other machines handed over for the windows it missed -- meet
+    // behind it, and no route can reach the raw series past it.
+    if (cfg.dashboard && fleet.has_value())
+        routes = MakeFleetRoutes(*fleet, credential, DashboardRefreshSeconds, sampler);
+
+    auto started = AdminEndpoint::Start(NodeSurface::Admin,
+                                        cfg,
+                                        metrics,
+                                        std::move(snapshot),
+                                        logger,
+                                        acceptLoops,
+                                        std::move(routes),
+#if defined(FC_TLS_ENABLED)
+                                        surface.tls.get());
+#else
+                                        nullptr);
+#endif
+    if (!started.has_value())
+        // `Listener` for the whole of `AdminEndpoint::Start`: it binds, and it also judges the
+        // address -- which the startup table has refused first -- so a refusal from it is mixed.
+        return std::unexpected { Refusal(NodeRefusalCause::Listener, std::format("--admin-listen {}", started.error())) };
+
+    surface.endpoint = std::move(*started);
+
+    auto const* const scheme =
+#if defined(FC_TLS_ENABLED)
+        surface.tls ? "https" : "http";
+#else
+        "http";
+#endif
+#if defined(FC_TLS_ENABLED)
+    // Printed because with a generated certificate this is the ONLY thing that
+    // authenticates the node: nothing signs it, so an operator compares what is
+    // logged here against what their browser shows and knows they reached the
+    // machine rather than something in between.
+    if (surface.tls && cfg.tlsSelfSigned)
+    {
+        logger.Logf(LogLevel::Info,
+                    "admin TLS uses a self-signed certificate generated at startup; SHA-256 fingerprint {} "
+                    "(it changes on every restart)",
+                    surface.tls->certificateFingerprint());
+        // And kept where somebody who was not watching the startup can read it (#1364): the line
+        // above scrolls, and the fingerprint is the one thing an operator can compare.
+        conditions.Raise(NodeCondition::GeneratedTlsCertificate,
+                         std::format("the admin surface serves a certificate generated at startup; SHA-256 fingerprint {}",
+                                     surface.tls->certificateFingerprint()));
+    }
+    else
+        conditions.Clear(NodeCondition::GeneratedTlsCertificate);
+#else
+    // A build without TLS cannot have generated one: `--tls-self-signed` is refused above.
+    conditions.Clear(NodeCondition::GeneratedTlsCertificate);
+#endif
+    logger.Logf(
+        LogLevel::Info, "metrics endpoint on {}://{}/metrics (and /healthz)", scheme, surface.endpoint->BoundEndpoint());
+    if (cfg.dashboard && fleet.has_value())
+        logger.Logf(LogLevel::Info,
+                    "fleet dashboard on {}://{}/fleet (and /fleet.json, /fleet/series.json, /fleet/chart/*.svg){}",
+                    scheme,
+                    surface.endpoint->BoundEndpoint(),
+                    credential.Required() ? "" : ", with no credential");
+
+    return surface;
+}
+
+AdminEndpoint::AdminEndpoint(std::unique_ptr<BlockingListener> listener,
+                             IMetricsSink& metrics,
+                             AdminHttpServer::SnapshotProvider snapshot,
+                             std::string boundEndpoint,
+                             ILogger& logger,
+                             core::net::AcceptLoopHealth& acceptLoops,
+                             std::vector<AdminRoute> routes,
+                             core::net::ITlsContext* tls,
+                             ServedSurfaces surfaces):
+    _listener { std::move(listener) },
+    _surfaces { surfaces },
+    _server { std::make_unique<AdminHttpServer>(
+        // `_surfaces`: what this node's configuration makes it serve. It has no cache-daemon
+        // accept path whatever the flags say, so the `fastcached_connections_*` rows read
+        // ABSENT on its `/metrics` rather than as a zero saying nothing has ever connected to
+        // it (#1484) -- and since #1501 the same holds for every other surface it does not
+        // run, so `--slots=0` reads `-` on the worker rows rather than a quiet zero.
+        *_listener,
+        metrics,
+        std::move(snapshot),
+        logger,
+        _clock,
+        acceptLoops,
+        // The loop owns its thread and its listener blocks, so a backoff blocks too.
+        DefaultDrainWait(),
+        std::move(routes),
+        tls,
+        _surfaces.Span()) },
+    _boundEndpoint { std::move(boundEndpoint) },
+    _thread { [server = _server.get()] { core::async::syncRun(server->Run()); } }
+{
+}
+
+AdminEndpoint::~AdminEndpoint()
+{
+    // Order, and the order is the whole fix (#260).
+    //
+    // This used to be `_server->Shutdown()` alone, leaving the jthread destructor
+    // to join afterwards. Shutdown() CLOSES the listener, which writes a member the
+    // accept thread reads on every pass -- ThreadSanitizer reports it as a data race
+    // at `BlockingListener::Close`, and the whole suite passes straight through it.
+    //
+    // Closing was never what wakes the loop: POSIX does not unblock a parked
+    // `accept()` when another thread closes the socket, which is precisely why
+    // `Start` arms `AdminHttpServer::AcceptPoll` through
+    // `BlockingListener::SetTimeouts`. The loop therefore leaves on its own within
+    // one poll interval of the flag being set, and waiting for it costs at most
+    // that -- so ask it to stop, JOIN, and only then close, at which point nobody
+    // is inside `Accept()` and there is nothing left to race.
+    _server->RequestStop();
+    if (_thread.joinable())
+        _thread.join();
+    _server->Shutdown();
+}
+
+std::expected<std::unique_ptr<AdminEndpoint>, std::string> AdminEndpoint::Start(NodeSurface surface,
+                                                                                NodeConfig const& cfg,
+                                                                                IMetricsSink& metrics,
+                                                                                AdminHttpServer::SnapshotProvider snapshot,
+                                                                                ILogger& logger,
+                                                                                core::net::AcceptLoopHealth& acceptLoops,
+                                                                                std::vector<AdminRoute> routes,
+                                                                                core::net::ITlsContext* tls)
+{
+    // Resolved by the row, so the loopback default that decides whether a credential
+    // is required is the same value this actually binds. A malformed address cannot
+    // arrive: `StartupPolicyRejection` walks these rows and refuses it by name first.
+    auto const resolved = SoleEndpointOf(surface, cfg);
+    if (!resolved.has_value())
+        return std::unexpected { resolved.error() };
+    auto const& endpoint = *resolved;
+
+    auto listener = BlockingListener::Bind(endpoint.host, endpoint.port);
+    if (!listener || !listener->IsBound())
+    {
+        // The verdict is the row's (#352), which carries why -- including why
+        // `pace-kv` answers this same surface differently and is right to.
+        auto judged = JudgeBindFailure(RowFor(surface),
+                                       std::format("cannot bind {} ({})",
+                                                   FormatHostPort(endpoint.host, endpoint.port),
+                                                   listener ? listener->BindError() : std::string_view { "null listener" }),
+                                       logger);
+        if (!judged.has_value())
+            return std::unexpected { std::move(judged).error() };
+
+        // Refused rather than tolerated, because this opener cannot carry a tolerated
+        // verdict (#352): `StartAdminSurfaceOrExplain` reads `surface.endpoint` with
+        // no null check to log where metrics and the dashboard are, so a null returned
+        // inside a satisfied `expected` is a startup crash rather than a degraded node.
+        return std::unexpected { BindToleranceUnsupported(
+            RowFor(surface), "the caller logs surface.endpoint->BoundEndpoint() unconditionally") };
+    }
+
+    // The endpoint's own values, not this caller's: the daemon serves the same
+    // server on the same terms, and two spellings of one decision drift.
+    listener->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
+
+    // `new` rather than `make_unique` because the constructor is private: the two
+    // ways to reach it are this factory, which has already proved the listener is
+    // bound, and nothing else.
+    return std::unique_ptr<AdminEndpoint> { new AdminEndpoint { std::move(listener),
+                                                                metrics,
+                                                                std::move(snapshot),
+                                                                std::format("{}:{}", endpoint.host, endpoint.port),
+                                                                logger,
+                                                                acceptLoops,
+                                                                std::move(routes),
+                                                                tls,
+                                                                NodeServedSurfacesFor(cfg) } };
+}
+
+} // namespace Pace::Node

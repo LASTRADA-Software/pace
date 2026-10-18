@@ -336,7 +336,7 @@ endforeach()
 # `FastCachedTsanThreadPrimitives` and the loop simply plants one case fewer, all
 # green. These two are the primitives this rule exists for -- `std::thread` is what
 # every exemption reason claimed, and `ThreadPoolExecutor` is how the stale
-# `fastcache-cli-tests` row went false without anybody spelling a thread -- so they
+# `pacectl-tests` row went false without anybody spelling a thread -- so they
 # are written out here independently of the list. A floor, not a mirror: the list
 # may grow past it, and it may not shrink below it.
 foreach(pinnedPrimitive IN ITEMS "std::thread" "ThreadPoolExecutor")

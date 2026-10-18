@@ -534,7 +534,7 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
               "uptime, components, its surface PORT MAP and where machines stand in its roster, "
               "which is why they are gated at all rather than being pre-auth. Unlike the cache "
               "tier's not-local refusal this is not ordinary on any deployment: an operator asking "
-              "is either admitted or is being told to be, so a steady rise is fastcache-cli run "
+              "is either admitted or is being told to be, so a steady rise is pacectl run "
               "from a machine the cluster has not admitted, or has forgotten, and a burst from one "
               "host is somebody scanning. Zero on a node nobody has asked, which is the "
               "common case and is not evidence the gate works.",
@@ -1504,7 +1504,7 @@ static_assert(RowsInEnumeratorOrder(CounterTable, &CounterDescriptor::counter),
 /// a version is not a tally the sink holds: it is a fact the READING carries
 /// (`StatsReading::version`), so the text and the binary encoding state one fact.
 ///
-/// Why it exists at all (#134): `fastcache-cli live-stats cache` titles its panel with
+/// Why it exists at all (#134): `pacectl live-stats cache` titles its panel with
 /// the daemon's version, and the scrape it reads carried none, so the title could only
 /// say `-`. The label is the version verbatim; the renderer escapes it, since
 /// `-DFASTCACHED_VERSION_STRING` accepts any text.

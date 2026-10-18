@@ -138,7 +138,7 @@ struct LocalityExpiryRow
 /// `IsLoopbackHost` is asked **first** and answers without touching the set or its
 /// lock. That is not an optimization of the cache -- it is what keeps essentially
 /// all real traffic away from it. The cache surface binds loopback by default, so
-/// every ordinary `fastcache-cc` on this machine is answered by a string compare,
+/// every ordinary `pace-cc` on this machine is answered by a string compare,
 /// and the address set bounds only the rare path: a caller arriving over a widened
 /// bind. A cache that only the unusual case reaches is a far weaker thing to have to
 /// get right.

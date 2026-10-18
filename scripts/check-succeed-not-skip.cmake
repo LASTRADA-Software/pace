@@ -15,7 +15,7 @@
 #
 # ## Why this is a check and not a comment
 #
-# The idiom spread by IMITATION. `src/apps/fastcache-cc/DirectManifest_test.cpp` carried
+# The idiom spread by IMITATION. `src/apps/pace-cc/DirectManifest_test.cpp` carried
 # it under a comment that explained, correctly, that the rule being demonstrated is
 # unconditional -- and the next test written was copied from it, comment and all. A
 # comment that was already right did not stop the copy, so a comment is not the fix.

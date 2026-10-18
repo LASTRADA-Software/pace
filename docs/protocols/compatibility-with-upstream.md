@@ -25,7 +25,7 @@ Reference: [memcached 1.6.x][mc].
 | Text `stats conns`                       | Empty (no connection registry) |
 | Text `stats reset`                       | Acknowledged, no-op |
 | Text `cache_memlimit`                    | Full  |
-| Text `verbosity`                         | No-op (fastcached uses ILogger) |
+| Text `verbosity`                         | No-op (pace-kv uses ILogger) |
 | Text `shutdown`                          | Not supported |
 | Text `slabs reassign` / `slabs automove` | Stub returns OK |
 | Text `lru tune` / `lru mode`             | Stub returns OK |
@@ -66,7 +66,7 @@ Reference: [Redis 7.x][redis], RESP2 subset only.
 | `INFO`                                   | Full   |
 | `HELLO 2`                                | Full   |
 | `HELLO 3` (RESP3)                        | Full -- upgrades the connection |
-| `COMMAND` / `COUNT` / `INFO`             | Full over fastcached's own table |
+| `COMMAND` / `COUNT` / `INFO`             | Full over pace-kv's own table |
 | `COMMAND DOCS`                           | Empty array (no metadata carried) |
 | `FLUSHDB` / `FLUSHALL`                   | Full   |
 | `QUIT`                                   | Full   |
@@ -91,9 +91,9 @@ separate effort and not included in the current scope.
 
 ## What "full" means here
 
-For an item marked **Full**, fastcached parses and honors the command
+For an item marked **Full**, pace-kv parses and honors the command
 as the upstream spec describes — including the edge cases listed in
-the per-command page. Where fastcached's storage model differs from
+the per-command page. Where pace-kv's storage model differs from
 upstream's (no slabs, single keyspace, no SASL backend), the affected
 commands are marked **Synthetic**, **Stub**, **Rejected**, or
 **Not supported** rather than **Full**.

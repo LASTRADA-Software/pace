@@ -1,13 +1,13 @@
 # Deployment
 
-fastcached ships the pieces needed to run it beyond a trusted LAN:
+pace-kv ships the pieces needed to run it beyond a trusted LAN:
 authentication, TLS, a Prometheus metrics endpoint, a health probe, and a
 container image. This page shows how they fit together.
 
 ## systemd
 
 The `.deb` and `.rpm` packages install a unit that runs the daemon as a
-dedicated `fastcached` system user and starts it on boot. See
+dedicated `pace-kv` system user and starts it on boot. See
 [Install](../getting-started/install.md) for the package-level workflow;
 this section covers what the unit does and how to adapt it.
 
@@ -19,7 +19,7 @@ both parents exit, which races `Type=forking` with `PIDFile=`. Running in
 the foreground avoids both and gives journald the daemon's stderr directly.
 
 ```sh
-journalctl -u fastcached -f
+journalctl -u pace-kv -f
 ```
 
 Two things about `--daemon` changed in the release that fixed
@@ -31,8 +31,8 @@ flag:
   run in. It used to resolve against `/`, because the host changed directory
   before writing it and only root can write there. An **absolute** `--pidfile` —
   which is what every documented invocation uses — is unaffected.
-- `fastcached --daemon` still changes directory to `/`; it executes nothing, so
-  that costs it nothing but a busy mount point. `fastcache-compile-node --daemon`
+- `pace-kv --daemon` still changes directory to `/`; it executes nothing, so
+  that costs it nothing but a busy mount point. `pace-node --daemon`
   now changes to a directory of its own instead, because it spawns a compiler and
   a worker running in `/` records rewritten paths in every object it produces.
 
@@ -41,7 +41,7 @@ is the default on Linux.
 
 A start the daemon **refuses** — a flag it does not know, a configuration file
 it read that does not load, a combination of settings a rule forbids, and for
-`fastcache-compile-node` also a credential file it read and found empty, or an
+`pace-node` also a credential file it read and found empty, or an
 identity key in its state directory it read and cannot use — exits **78**
 (`EX_CONFIG`; `systemctl status` shows `status=78/CONFIG`) and is **not**
 restarted: the unit says `RestartPreventExitStatus=78`, because the next start
@@ -72,11 +72,11 @@ Measured on systemd 259:
 The last row is the default start limit, which counts your starts as well as
 systemd's: five starts inside ten seconds are honoured, and a sixth — the fifth
 `systemctl restart` right after a start — is refused and leaves the service
-down until `systemctl reset-failed fastcached && systemctl start fastcached`.
+down until `systemctl reset-failed pace-kv && systemctl start pace-kv`.
 
 Only a start answers 1 or 78. A command that answers and exits —
 `--install-service`, `--uninstall-service`, `--migrate-storage` and
-`--seed-config` on either binary, and `fastcache-compile-node`'s
+`--seed-config` on either binary, and `pace-node`'s
 `--print-surfaces`, `--print-identity`, `--migrate-cache`, cluster,
 enrollment and cordon commands — is not supervised, and answers what a
 script calling it should do next:
@@ -87,14 +87,14 @@ script calling it should do next:
 | **2** | **a decision — do not retry** | a command line that did not parse (wherever the command was typed on it), a configuration file that did not parse or names a setting that does not exist, an install the startup rules refuse, a service name the registration will not use, access denied, a service that already exists or is not installed, a store in a format it cannot convert or that another process holds, a refusal the scheduler or seed **replied** with — except the ones listed under 1 |
 | 1 | **transient — a retry may help** | a scheduler, seed or node that **could not be reached** or broke off the exchange, a reply that decided nothing: another cluster change still committing, an endpoint or fleet at its capacity, a fleet with no worker registered for the toolchain yet (one that is still starting), a cluster with no leader right now, leaders that went on redirecting to each other, a machine that gave up waiting to be approved (run it again once an operator approves it), a file that is not there or could not be read or written (a named configuration file included, as at a start), a service-manager call that failed on its own, a conversion that stopped part-way (run it again to finish it) |
 
-`fastcached --healthcheck` is read by a container runtime, and Docker documents
+`pace-kv --healthcheck` is read by a container runtime, and Docker documents
 0 and 1 and reserves 2, so it answers 0 for healthy and **1 for everything
 else** — unhealthy, a refused command line, or a configuration file that did
 not load.
 
 ### Reloading
 
-`systemctl reload fastcached` sends `SIGHUP`, which re-reads the config file in
+`systemctl reload pace-kv` sends `SIGHUP`, which re-reads the config file in
 use — `/etc/fastcached/fastcached.yaml` for the packaged unit. Only part of the
 configuration is reloadable:
 
@@ -107,12 +107,12 @@ logged. Reload therefore either applies everything or nothing.
 
 ### Hardening
 
-fastcached never drops privileges on its own, so every restriction comes
+pace-kv never drops privileges on its own, so every restriction comes
 from the unit: `User=`/`Group=`, `StateDirectory=`, and the usual
 `Protect*`/`Restrict*` set. Check it with:
 
 ```sh
-systemd-analyze security fastcached.service
+systemd-analyze security pace-kv.service
 ```
 
 Two consequences worth knowing. `ProtectSystem=strict` and
@@ -121,7 +121,7 @@ still read — `/etc/fastcached/` is the natural place. And binding a port
 below 1024 needs capabilities the unit drops by default:
 
 ```ini
-# systemctl edit fastcached
+# systemctl edit pace-kv
 [Service]
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -129,7 +129,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 ### Persistent storage
 
-`StateDirectory=fastcached` provides `/var/lib/fastcached`, owned by the
+`StateDirectory=pace-kv` provides `/var/lib/fastcached`, owned by the
 service user. Point `storage_path` at it to enable the on-disk tier:
 
 ```yaml
@@ -147,8 +147,8 @@ available from the command line on any installation, and `--service-scope`
 picks the domain:
 
 ```sh
-fastcached --install-service --service-scope=user            # LaunchAgent
-sudo fastcached --install-service --service-scope=system      # LaunchDaemon
+pace-kv --install-service --service-scope=user            # LaunchAgent
+sudo pace-kv --install-service --service-scope=system      # LaunchDaemon
 ```
 
 The system scope needs the `_fastcached` service account, which the `.pkg`
@@ -156,8 +156,8 @@ creates; installing from a tarball or a source build fails with a message
 saying so rather than registering a job launchd cannot spawn.
 
 The `.pkg` creates a second account, `fastcache-node`, for
-`fastcache-compile-node`. It is deliberately not shared with `_fastcached`: a
-worker runs a compiler on input that arrived over the network while `fastcached`
+`pace-node`. It is deliberately not shared with `_fastcached`: a
+worker runs a compiler on input that arrived over the network while `pace-kv`
 owns the cache storage, so one account would let a compromised compile rewrite
 every cached object. It comes from the package's Runtime component, so it is
 present whichever launchd choice you made here, and the uninstaller removes both.
@@ -168,7 +168,7 @@ from a `--config` file are not: they stay in the file, so editing it and
 restarting the job keeps working.
 
 ```sh
-sudo fastcached --install-service --service-scope=system \
+sudo pace-kv --install-service --service-scope=system \
     --config=/opt/fastcached/etc/fastcached.yaml --threads=4
 ```
 
@@ -239,7 +239,7 @@ tail -f ~/Library/Logs/fastcached/software.lastrada.fastcached.err.log
 
 The system daemon logs to `/opt/fastcached/var/log/<label>/` instead — a
 directory per job, because that directory is owned by the account the job runs
-as and a machine may run both `fastcached` and `fastcache-compile-node`
+as and a machine may run both `pace-kv` and `pace-node`
 system-wide:
 
 ```sh
@@ -267,13 +267,13 @@ line outranks the file, as everywhere else.
 There is no reload equivalent to `systemctl reload`: send `SIGHUP` to the
 pid `launchctl print` reports, or kickstart the job.
 
-To remove it: `fastcached --uninstall-service --service-scope=<scope>`, or
-`sudo /opt/fastcached/bin/fastcached-uninstall` to remove the whole install.
+To remove it: `pace-kv --uninstall-service --service-scope=<scope>`, or
+`sudo /opt/fastcached/bin/pace-uninstall` to remove the whole install.
 
 ## Windows service
 
-The MSI registers `fastcached` as an auto-start service — a disabled one, left
-stopped, when the fastcache-compile-node feature is installed too, since both answer
+The MSI registers `pace-kv` as an auto-start service — a disabled one, left
+stopped, when the pace-node feature is installed too, since both answer
 on 6674 ([the MSI's service table](../getting-started/install.md#windows)) — and seeds
 `C:\ProgramData\fastcached\fastcached.yaml` from the template it ships, unless
 a config is already there. The registration passes **no** `--config`: the
@@ -284,9 +284,9 @@ defaults rather than failing.
 The same registration is available from the command line on any installation:
 
 ```powershell
-fastcached.exe --install-service
+pace-kv.exe --install-service
 sc.exe start FastCached
-fastcached.exe --uninstall-service
+pace-kv.exe --uninstall-service
 ```
 
 Pass `--config=C:\path\to\fastcached.yaml` only to point the service at a file
@@ -421,8 +421,8 @@ the service runs with.
 Registering also opens the Windows Firewall for every cache listener that binds
 beyond loopback and, with `--metrics`, for a metrics endpoint that does — nothing
 at all for the default `127.0.0.1:6674`. Each gets one inbound rule, admitting
-`fastcached.exe` running as this service, on every network profile, in the group
-`fastcached: FastCached`; the install line lists them. `--firewall-allow=<address[/prefix]>`
+`pace-kv.exe` running as this service, on every network profile, in the group
+`Pace: FastCached`; the install line lists them. `--firewall-allow=<address[/prefix]>`
 (IPv4 or IPv6, repeatable) limits which remote addresses they admit, and `/0` is
 refused: leave the flag out to allow any address.
 
@@ -442,8 +442,8 @@ A multi-stage [`Dockerfile`](../../Dockerfile) builds a Release binary with TLS
 enabled and copies it onto a slim Debian runtime:
 
 ```sh
-docker build -t fastcached .
-docker run --rm -p 6674:6674 -p 9259:9259 fastcached \
+docker build -t pace-kv .
+docker run --rm -p 6674:6674 -p 9259:9259 pace-kv \
     --bind=0.0.0.0 --metrics --metrics-bind=0.0.0.0 --requirepass=secret
 ```
 
@@ -455,7 +455,7 @@ that is exactly the deployment this bundle exists to secure, so pair it with
 
 ### Health check
 
-The image's `HEALTHCHECK` runs `fastcached --healthcheck`, which probes
+The image's `HEALTHCHECK` runs `pace-kv --healthcheck`, which probes
 `http://127.0.0.1:<metrics-port>/healthz` and exits 0 (healthy) or 1. It is
 self-contained — no `curl`/`wget` in the image — but requires the daemon to run
 with `--metrics`.
@@ -471,8 +471,8 @@ Only a closed listener ends a loop; a client that reset its queued connection is
 Set a shared secret to require clients to authenticate before any data command:
 
 ```sh
-fastcached --requirepass=secret            # redis AUTH + memcached binary SASL PLAIN
-fastcached --requirepass=secret --auth-username=alice
+pace-kv --requirepass=secret            # redis AUTH + memcached binary SASL PLAIN
+pace-kv --requirepass=secret --auth-username=alice
 ```
 
 - **Redis:** `AUTH secret` or `AUTH alice secret` → `+OK`; data commands before
@@ -489,7 +489,7 @@ TLS is compiled in with `-DFASTCACHED_ENABLE_TLS=ON` (the image enables it) and
 turned on at runtime:
 
 ```sh
-fastcached --tls --tls-cert=/etc/fastcached/server.crt --tls-key=/etc/fastcached/server.key
+pace-kv --tls --tls-cert=/etc/fastcached/server.crt --tls-key=/etc/fastcached/server.key
 # clients:
 redis-cli --tls --insecure -a secret ping
 ```
@@ -500,26 +500,26 @@ certificate (mutual TLS) auth is not yet implemented.
 ## Metrics
 
 ```sh
-fastcached --metrics --metrics-bind=0.0.0.0 --metrics-port=9259
+pace-kv --metrics --metrics-bind=0.0.0.0 --metrics-port=9259
 curl http://host:9259/metrics    # Prometheus text exposition
 curl http://host:9259/healthz    # 200 OK; 503 naming any bind that stopped accepting
 ```
 
 If the endpoint cannot be bound the daemon **carries on serving the cache without
 it**, and says so at `Warn`. That is deliberate: the admin surface is a scrape and
-probe convenience rather than the service. `fastcache-compile-node` answers the same
+probe convenience rather than the service. `pace-node` answers the same
 failure by refusing to start, because an operator who asked a *worker* for an
 endpoint is almost always wiring a probe to it.
 
-### The series `fastcached` exports
+### The series `pace-kv` exports
 
 Every counter in the build is exported by every process that serves this endpoint,
 without exception — a per-counter "does this apply?" predicate is exactly the
-mechanism that once left seven of nine live counters unexported. So a `fastcached`
+mechanism that once left seven of nine live counters unexported. So a `pace-kv`
 scrape also carries the `fastcache_worker_*`, `fastcache_node_*` and
 `fastcache_scheduler_*` series, and on a daemon they are **flat at zero**: nothing
 in this binary moves them. They belong to
-[`fastcache-compile-node`](../tools/fastcache-compile-node.md), which documents
+[`pace-node`](../tools/pace-node.md), which documents
 them. Read a zero there as *this process produces no such events*, never as *this
 process has no such subsystem* — a cumulative counter cannot tell you which, which
 is why the things that genuinely can be absent (`fastcached_items` and the whole
@@ -528,12 +528,12 @@ omitted from the exposition instead of reported as `0`.
 
 The same reading applies inside the daemon's own namespace: the
 `fastcached_dispatch_*` block below is the fleet scheduler's, and the scheduler is
-`fastcache-compile-node`. The `fastcached_` prefix on it is
+`pace-node`. The `fastcached_` prefix on it is
 historical.
 
 #### Command traffic
 
-Present only when the process has a cache, which for `fastcached` is always.
+Present only when the process has a cache, which for `pace-kv` is always.
 
 | Series | Says |
 |---|---|
@@ -608,7 +608,7 @@ published per tier and stays on the unlabelled series above.
 
 #### The compile-cache (`0xFC`) surface
 
-What `fastcache-cc` and `fastcache-compile-node` talk to this daemon with. These are
+What `pace-cc` and `pace-node` talk to this daemon with. These are
 the daemon's own counters, and they are **not** the node's identically-shaped
 `fastcache_node_cache_*` series: a mixed fleet moves both, and watching only the
 node's reads a fleet mid-upgrade as one that has converged.
@@ -629,8 +629,8 @@ node's reads a fleet mid-upgrade as one that has converged.
 
 #### Fleet dispatch
 
-The fleet scheduler's series. `fastcached` runs no scheduler, so **on a daemon these
-are flat at zero**; they move on a `fastcache-compile-node` that serves the scheduler, and
+The fleet scheduler's series. `pace-kv` runs no scheduler, so **on a daemon these
+are flat at zero**; they move on a `pace-node` that serves the scheduler, and
 [Distributed compilation](../getting-started/distributed-compilation.md#confirming-it-works)
 is where they are explained one by one.
 
@@ -666,7 +666,7 @@ is where they are explained one by one.
 |---|---|
 | `fastcached_uptime_seconds` | Seconds since this process started. A gauge; a reset is a restart. |
 | `fastcached_build_info` | The build this process runs, as `fastcached_build_info{version="0.4.1"} 1`. The value is always 1 and the version is the label, so a query joins on it rather than reading a number. |
-| `fastcached_metrics_surface_absent` | How many counters this build's catalogue names that belong to surfaces **this process does not serve**, so nothing here can ever write them. A gauge, and **a nonzero reading is the healthy state** of any binary that serves only some surfaces. Those series are omitted from the scrape rather than rendered as a zero. **Do not alert on this**; it is the row above that is a fault. **It moves with the configuration**: every catalogue row is attributed to a surface, and `fastcache-compile-node` derives its surfaces from the components it was told to run -- so a node started `--slots=0` reports the worker's refusal counters here rather than as zeroes claiming nothing was ever refused, and one with no `--listen-raft` does the same for the Raft peer wire. A reading that CHANGES after a flag change is therefore expected, and the daemon reports `0` because it claims every surface. |
+| `fastcached_metrics_surface_absent` | How many counters this build's catalogue names that belong to surfaces **this process does not serve**, so nothing here can ever write them. A gauge, and **a nonzero reading is the healthy state** of any binary that serves only some surfaces. Those series are omitted from the scrape rather than rendered as a zero. **Do not alert on this**; it is the row above that is a fault. **It moves with the configuration**: every catalogue row is attributed to a surface, and `pace-node` derives its surfaces from the components it was told to run -- so a node started `--slots=0` reports the worker's refusal counters here rather than as zeroes claiming nothing was ever refused, and one with no `--listen-raft` does the same for the Raft peer wire. A reading that CHANGES after a flag change is therefore expected, and the daemon reports `0` because it claims every surface. |
 | `fastcached_metrics_catalogue_skew` | How many counters this build's metrics catalogue names that its sink has no slot for. A gauge, and **zero on any correctly built process** -- a nonzero reading means the catalogue and the sink were compiled against different versions of the counter enum, so the binary is inconsistent and every counter at the affected ordinals is missing from this scrape rather than reading zero. Alert on `> 0`. |
 
 This table is checked against the exposition the daemon actually renders — see
@@ -680,26 +680,26 @@ A minimal Deployment with probes and a Prometheus scrape annotation:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fastcached
+  name: pace-kv
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: fastcached }
+    matchLabels: { app: pace-kv }
   template:
     metadata:
-      labels: { app: fastcached }
+      labels: { app: pace-kv }
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9259"
         prometheus.io/path: "/metrics"
     spec:
       containers:
-        - name: fastcached
-          image: fastcached:latest
+        - name: pace-kv
+          image: pace-kv:latest
           args: ["--bind=0.0.0.0", "--metrics", "--metrics-bind=0.0.0.0", "--requirepass=$(CACHE_SECRET)"]
           env:
             - name: CACHE_SECRET
-              valueFrom: { secretKeyRef: { name: fastcached, key: requirepass } }
+              valueFrom: { secretKeyRef: { name: pace-kv, key: requirepass } }
           ports:
             - { containerPort: 6674, name: cache }
             - { containerPort: 9259, name: metrics }

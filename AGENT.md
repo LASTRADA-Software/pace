@@ -1,7 +1,7 @@
-# fastcached - Fast Cache Daemon
+# pace-kv - Fast Cache Daemon
 
 A layered C++23 server: a memcached- and Redis-compatible cache daemon, plus a portable compile
-cache (`fastcache-cc`) and a distributed compile fleet (`fastcache-compile-node`). Each layer
+cache (`pace-cc`) and a distributed compile fleet (`pace-node`). Each layer
 reaches its collaborators through a narrow interface, so the whole thing is testable end-to-end
 against an in-memory transport, a manual clock and a scripted reactor.
 
@@ -23,7 +23,7 @@ src/Pace/
                 BindAndListen, AcceptRaw and BlockingListener for threads that block;
                 AdoptInheritedListener -- graduation candidates), LingeringClose, AcceptLoopReporter
   Cli/          UsageDoc (usage text as data) and Options (the one parse loop),
-                dependency-free so fastcache-cc compiles them in rather than linking
+                dependency-free so pace-cc compiles them in rather than linking
   Cache/        IStorage atomic primitives, CacheEntry, CacheEngine, InMemoryLruStorage,
                 CowTreeStorage (CoW B+tree), LayeredStorage (L1 LRU over L2 disk),
                 ShardedStorage, TracingStorage
@@ -66,19 +66,19 @@ so adding an executable is adding a row:
 ```
 src/apps/
   fastcached/               the daemon (FASTCACHED_BUILD_DAEMON, default ON)
-  fastcache-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER, ON) — an
+  pace-cc/             the compiler launcher (FASTCACHED_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
                             args; does NOT link the Pace library (`_fc_cc_core`)
-  fastcache-compile-node/   the compile worker AND the peer service
+  pace-node/   the compile worker AND the peer service
                             (FASTCACHED_BUILD_NODE, ON); may also be the scheduler, hold
                             a cache tier and run consensus — four surfaces, each off
                             unless asked for except the cache
-  fastcache-cli/            the operator's client (FASTCACHED_BUILD_CLI, ON), INSTALLED
+  pacectl/            the operator's client (FASTCACHED_BUILD_CLI, ON), INSTALLED
                             and documented on the Tools page
   compile-cache-testclient/ low-level 0xFC probe + cross-depth validation
                             (FASTCACHED_BUILD_TESTCLIENT, OFF, never installed, built by
                             the linux and clang-tidy jobs)
-  fastcache-bench/          in-process storage micro-benchmarks
+  pace-bench/          in-process storage micro-benchmarks
                             (FASTCACHED_BUILD_BENCHMARKS, OFF, never installed, built by
                             the linux and clang-tidy jobs)
 ```
@@ -159,7 +159,7 @@ the only place it is written down.
 > back.
 
 **[`.agent/rules/compile-cache.md`](.agent/rules/compile-cache.md)** — what the
-launcher's cache key is made of. Before `apps/fastcache-cc/`, `CompileCache/`.
+launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
 - Preprocess with line markers suppressed — `/EP` **alone** on MSVC, never `/EP /P`.
 - `/` introduces an option only on a Windows layout; on POSIX it starts a path.
 - Only machine-independent dependency paths are hashed, and a path is classified
@@ -199,7 +199,7 @@ launcher's cache key is made of. Before `apps/fastcache-cc/`, `CompileCache/`.
 - A compiler with debug info on records the WORKING DIRECTORY, which is on no command line, so no key relativizes
   it; `-fdebug-prefix-map` closes it on ELF and on NEITHER COFF driver, an accepted cost rather than open work.
   - `-ffile-prefix-map`/`-fmacro-prefix-map` are `SourcePrefixMap` rows: HEAD relativized, KEPT on the preprocess line,
-    build tree's place KEYED; the module ADDS the macro one under `fastcache-cc`, which a worker is SENT.
+    build tree's place KEYED; the module ADDS the macro one under `pace-cc`, which a worker is SENT.
   - The key relativizes the rule's HEAD (`PathValueRole::PrefixMap`, a table COLUMN) and leaves
     the replacement literal; the build-tree rule is mapped LAST, and a root with a SPACE is not
     mapped at all. `ctest -R debug-prefix-map-rules`.
@@ -219,7 +219,7 @@ launcher's cache key is made of. Before `apps/fastcache-cc/`, `CompileCache/`.
 
 **[`.agent/rules/distributed-compilation.md`](.agent/rules/distributed-compilation.md)**
 — dispatch, workers, the scheduler, the node's tiers. Before `Distributed/`,
-`apps/fastcache-compile-node/`.
+`apps/pace-node/`.
 - The text sent to a worker is **not** the text the key hashed; dispatch preprocesses a
   second time, with `#line` markers.
 - A worker is told its input is preprocessed *and* what language it is in; the extension is the
@@ -396,7 +396,7 @@ launcher's cache key is made of. Before `apps/fastcache-cc/`, `CompileCache/`.
   **Auto-approve is a DEADLINE, not a mode**: the leader's clock, in memory, ended by a restart or demotion.
 - Only a VERIFIED answer keeps a join waiting: a full list, a `NotLeader` naming nobody and a
   redirect are wire refusals nobody signs, and count towards the give-up exactly as silence does.
-- NODE-STATUS's `enrollment` field (`fastcache-cli node`) is ABSENT on a node serving no enrollment, `manual`
+- NODE-STATUS's `enrollment` field (`pacectl node`) is ABSENT on a node serving no enrollment, `manual`
   otherwise, and `auto-approve` with the minutes left while a deadline is armed — never a counter's.
 - A compile is awaited onto a `ThreadPoolExecutor` sized to the slot cap, never served inline and
   never on a reactor; on the merged `0xFC` surface that is TWO hops, and **back before the reply
@@ -536,7 +536,7 @@ launcher's cache key is made of. Before `apps/fastcache-cc/`, `CompileCache/`.
 **Backwards compatibility is not owed yet, and designing around it has already cost
 work.** Until this software is declared production ready, a wire format, an on-disk format,
 a cache-key version, an enumerator order, a CLI flag or a config key may change outright;
-`fastcache-compile-node` has ONE installation, so a format change costs one local rebuild
+`pace-node` has ONE installation, so a format change costs one local rebuild
 rather than a migration. **Two limits, and they are the whole of it:** it does not license
 changing a format without bumping its VERSION — the version is how a mismatch is *detected*,
 which is why `UnsupportedFormatVersion` and `Corrupt` are different answers
@@ -701,7 +701,7 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
 - A service to register is a `ServiceSpec`; what it runs as is part of it, as are how it STARTS and
   which ports it OPENS, and an empty `serviceAccount` means **root**. An MSI upgrade RE-APPLIES a
   registration, never deletes one, and its table decides every start mode: Restart Manager is OFF
-  (`MSIRESTARTMANAGERCONTROL`) and fastcached beside the node DISABLED: an OLD removal restarts it.
+  (`MSIRESTARTMANAGERCONTROL`) and pace-kv beside the node DISABLED: an OLD removal restarts it.
 - `--install-service` registers the *command-line* config, never the merged one, and carries the
   config PATH rather than the file's values or a resolved default.
 - An install is judged by the **startup** rules as well as the install-time ones: a registration
@@ -1579,7 +1579,7 @@ cmake --preset clang-tsan
 # The targets are the gate's TARGETS rows plus the canary. Nothing checks this list --
 # it had lost two rows -- but the gate refuses to run over a row whose binary was never
 # built, so a short list fails loudly rather than sanitizing less.
-cmake --build --preset clang-tsan --target PaceTest fastcache-compile-node-tests fastcache-cc-tests fastcache-cli-tests tsan-canary
+cmake --build --preset clang-tsan --target PaceTest pace-node-tests pace-cc-tests pacectl-tests tsan-canary
 bash scripts/tsan-gate.sh out/build/clang-tsan
 
 # Linux/macOS — RelWithDebInfo + Tracy profiler (.agent/guides/profiling-tracy.md)
@@ -1598,7 +1598,7 @@ cmake --build --preset clangcl-debug
 `PEDANTIC_COMPILER_WERROR=ON` is the default for Windows presets — warnings break the build, fix them at the source.
 
 `USE_COMPILER_CACHE` (default ON, `cmake/portable/CompileCache.cmake`) fronts the compiler with
-`fastcache-cc` when it is on `PATH` and a daemon answers — at `127.0.0.1:6674`, or wherever
+`pace-cc` when it is on `PATH` and a daemon answers — at `127.0.0.1:6674`, or wherever
 `FASTCACHE_ADDR=host:port` points. Configure *proves* the cache works by compiling one tiny file
 through it, because a launcher that cannot reach its daemon still compiles fine and would
 otherwise cost every TU a failed connect in silence. Falls through to `ccache`; `sccache` sits

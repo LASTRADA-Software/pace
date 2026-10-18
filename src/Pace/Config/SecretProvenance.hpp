@@ -16,8 +16,8 @@ namespace Pace
 /// What a start observed about where the secret in force came from.
 ///
 /// The three facts the provenance rule needs, separated from the two
-/// configuration types that can supply them. `fastcached` reads them off
-/// `Config` and `CliResult`; `fastcache-compile-node` reads them off `NodeConfig`
+/// configuration types that can supply them. `pace-kv` reads them off
+/// `Config` and `CliResult`; `pace-node` reads them off `NodeConfig`
 /// and a command-line-only parse of the same argv -- and the RULE over them is
 /// written once, which is the whole reason this struct exists rather than a
 /// second predicate spelled against the second pair of types.

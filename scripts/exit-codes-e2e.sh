@@ -30,7 +30,7 @@
 # bash 3.2: no `mapfile`, no `declare -A`, no `${var^^}`, no `local -n`.
 #
 # Usage:
-#   scripts/exit-codes-e2e.sh <path-to-fastcached> <path-to-fastcache-compile-node>
+#   scripts/exit-codes-e2e.sh <path-to-fastcached> <path-to-pace-node>
 #
 # Exit codes: 0 = every case behaved. 1 = at least one did not, or none ran.
 
@@ -39,7 +39,7 @@ set -u
 FASTCACHED="${1:-}"
 NODE="${2:-}"
 if [ -z "$FASTCACHED" ] || [ ! -x "$FASTCACHED" ] || [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
-    echo "exit-codes-e2e: usage: $0 <path-to-fastcached> <path-to-fastcache-compile-node>" >&2
+    echo "exit-codes-e2e: usage: $0 <path-to-fastcached> <path-to-pace-node>" >&2
     exit 1
 fi
 
@@ -114,49 +114,49 @@ expect_exit() {
     esac
 }
 
-# --- fastcached: a START ------------------------------------------------------
-expect_exit "fastcached: a start past its file ends at the serving rule (the control)" 78 "$DAEMON_BAIT_SAYS" \
+# --- pace-kv: a START ------------------------------------------------------
+expect_exit "pace-kv: a start past its file ends at the serving rule (the control)" 78 "$DAEMON_BAIT_SAYS" \
     "$FASTCACHED" "$EMPTY" "$DAEMON_BAIT"
-expect_exit "fastcached: a start with an absent named file fails, and is retried" 1 "FileNotFound" \
+expect_exit "pace-kv: a start with an absent named file fails, and is retried" 1 "FileNotFound" \
     "$FASTCACHED" "--config=$ABSENT" "$DAEMON_BAIT"
-expect_exit "fastcached: a start with a malformed file is refused" 78 "ParseError" \
+expect_exit "pace-kv: a start with a malformed file is refused" 78 "ParseError" \
     "$FASTCACHED" "--config=$WORK/malformed.yaml" "$DAEMON_BAIT"
-expect_exit "fastcached: a start whose command line does not parse is refused" 78 "--no-such-flag" \
+expect_exit "pace-kv: a start whose command line does not parse is refused" 78 "--no-such-flag" \
     "$FASTCACHED" "--no-such-flag"
 
-# --- fastcached: a ONE-SHOT command ends by the step, as a start does ------------
-expect_exit "fastcached: an install with an absent named file fails, and may be retried" 1 "FileNotFound" \
+# --- pace-kv: a ONE-SHOT command ends by the step, as a start does ------------
+expect_exit "pace-kv: an install with an absent named file fails, and may be retried" 1 "FileNotFound" \
     "$FASTCACHED" "--config=$ABSENT" --install-service "$REFUSED_NAME"
-expect_exit "fastcached: an install with a malformed file declines" 2 "ParseError" \
+expect_exit "pace-kv: an install with a malformed file declines" 2 "ParseError" \
     "$FASTCACHED" "--config=$WORK/malformed.yaml" --install-service "$REFUSED_NAME"
-expect_exit "fastcached: an install the serving rules refuse declines" 2 "$DAEMON_BAIT_SAYS" \
+expect_exit "pace-kv: an install the serving rules refuse declines" 2 "$DAEMON_BAIT_SAYS" \
     "$FASTCACHED" "$EMPTY" --install-service "$DAEMON_BAIT" "$REFUSED_NAME"
-expect_exit "fastcached: an uninstall with a malformed file declines" 2 "ParseError" \
+expect_exit "pace-kv: an uninstall with a malformed file declines" 2 "ParseError" \
     "$FASTCACHED" "--config=$WORK/malformed.yaml" --uninstall-service "$REFUSED_NAME"
 # Off Windows and macOS the registration's own stub declines before the name is read, so
 # the needle is the ending's and not the name rejection's text.
-expect_exit "fastcached: an uninstall that changes nothing declines" 2 "" \
+expect_exit "pace-kv: an uninstall that changes nothing declines" 2 "" \
     "$FASTCACHED" "$EMPTY" --uninstall-service "$REFUSED_NAME"
-expect_exit "fastcached: a conversion with an absent named file fails, and may be retried" 1 "FileNotFound" \
+expect_exit "pace-kv: a conversion with an absent named file fails, and may be retried" 1 "FileNotFound" \
     "$FASTCACHED" "--config=$ABSENT" --migrate-storage
-expect_exit "fastcached: a conversion with no store to convert declines" 2 "needs --storage" \
+expect_exit "pace-kv: a conversion with no store to convert declines" 2 "needs --storage" \
     "$FASTCACHED" "$EMPTY" --migrate-storage
 
-# --- fastcached: the verb anywhere in a command line that does not parse -------
-expect_exit "fastcached: a bad flag BEFORE the install is an install's refusal" 2 "--no-such-flag" \
+# --- pace-kv: the verb anywhere in a command line that does not parse -------
+expect_exit "pace-kv: a bad flag BEFORE the install is an install's refusal" 2 "--no-such-flag" \
     "$FASTCACHED" --no-such-flag --install-service
-expect_exit "fastcached: a bad flag AFTER the install is an install's refusal" 2 "--no-such-flag" \
+expect_exit "pace-kv: a bad flag AFTER the install is an install's refusal" 2 "--no-such-flag" \
     "$FASTCACHED" --install-service --no-such-flag
 
-# --- fastcached: a PROBE answers 0 or 1 only ------------------------------------
-expect_exit "fastcached: a health probe with an absent named file is unhealthy" 1 "FileNotFound" \
+# --- pace-kv: a PROBE answers 0 or 1 only ------------------------------------
+expect_exit "pace-kv: a health probe with an absent named file is unhealthy" 1 "FileNotFound" \
     "$FASTCACHED" "--config=$ABSENT" --healthcheck
-expect_exit "fastcached: a health probe with a malformed file is unhealthy, never 78" 1 "ParseError" \
+expect_exit "pace-kv: a health probe with a malformed file is unhealthy, never 78" 1 "ParseError" \
     "$FASTCACHED" "--config=$WORK/malformed.yaml" --healthcheck
-expect_exit "fastcached: a health probe whose command line does not parse is unhealthy" 1 "--no-such-flag" \
+expect_exit "pace-kv: a health probe whose command line does not parse is unhealthy" 1 "--no-such-flag" \
     "$FASTCACHED" --no-such-flag --healthcheck
 
-# --- fastcache-compile-node: a START -------------------------------------------
+# --- pace-node: a START -------------------------------------------
 expect_exit "node: a start past its file ends at the startup rule (the control)" 78 "$NODE_BAIT_SAYS" \
     "$NODE" "$EMPTY" "${NODE_STATE[@]}" "${NODE_BAIT[@]}"
 expect_exit "node: a start with an absent named file fails, and is retried" 1 "FileNotFound" \
@@ -164,7 +164,7 @@ expect_exit "node: a start with an absent named file fails, and is retried" 1 "F
 expect_exit "node: a start whose command line does not parse is refused" 78 "--no-such-flag" \
     "$NODE" --no-such-flag
 
-# --- fastcache-compile-node: a ONE-SHOT command ends by the step, as a start does -
+# --- pace-node: a ONE-SHOT command ends by the step, as a start does -
 expect_exit "node: the worksheet with an absent named file fails, and may be retried" 1 "FileNotFound" \
     "$NODE" "--config=$ABSENT" --print-surfaces
 expect_exit "node: the worksheet with a malformed file declines" 2 "ParseError" \
@@ -178,7 +178,7 @@ expect_exit "node: a conversion with no store to convert declines" 2 "needs --ca
 expect_exit "node: an uninstall that changes nothing declines" 2 "" \
     "$NODE" "$EMPTY" --uninstall-service "$REFUSED_NAME"
 
-# --- fastcache-compile-node: the NETWORK verbs, by where the answer came from ----
+# --- pace-node: the NETWORK verbs, by where the answer came from ----
 #
 # A port nothing answers on (`free_port`, from below the ephemeral range): a loopback
 # dial there is refused at once, so each is a transport that delivered no reply --

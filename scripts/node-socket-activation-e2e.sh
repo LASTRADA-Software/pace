@@ -54,7 +54,7 @@
 # `.github/workflows/build.yml`'s packaging job writes into the file the unit's ExecStart
 # names. Taken from the workflow rather than from a shape that seemed representative,
 # because #770 is precisely a configuration nobody thought to write down. The shipped
-# `fastcache-compile-node.yaml` carries no `advertise:` any more, so `--derive-advertise`
+# `pace-node.yaml` carries no `advertise:` any more, so `--derive-advertise`
 # is the configuration a stock package installs.
 #
 # Registered in `src/tests/CMakeLists.txt` rather than beside the node, for the reason
@@ -76,7 +76,7 @@ done
 readonly SKIP=77
 
 [[ -n "$node" && -x "$node" ]] \
-    || { echo "SKIP: fastcache-compile-node not found: '$node'"; exit "$SKIP"; }
+    || { echo "SKIP: pace-node not found: '$node'"; exit "$SKIP"; }
 
 # **A runner without systemd SKIPS, loudly and as its own outcome.** Never a quiet
 # fall back to a plain spawn: that would be a pass for the one case this fixture
@@ -213,7 +213,7 @@ grep -q 'a supervisor handed over a listening socket' "$log" \
 
 # **A CONTROLLED comparison, not a bare "is anything there".** The first spelling of
 # this check asked whether anything answered on 6674 and failed on this project's own
-# dogfood machine, where a `fastcached` daemon holds exactly that port -- conflating
+# dogfood machine, where a `pace-kv` daemon holds exactly that port -- conflating
 # "the worker bound its own port" with "somebody owns that port". A fixture that only
 # works on a clean machine is one developers learn to ignore, and the false positive
 # was found by running it rather than by reading it.

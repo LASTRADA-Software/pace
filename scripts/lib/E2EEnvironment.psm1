@@ -3,7 +3,7 @@
 # The environment a PowerShell e2e fixture starts from -- the PowerShell half of
 # `e2e_scrub_fastcache_environment` in `e2e-common.sh`.
 #
-# The launcher, fastcached and the node read their whole configuration from FASTCACHE_*
+# The launcher, pace-kv and the node read their whole configuration from FASTCACHE_*
 # variables, so one this process inherited decides what a fixture measures: an operator's
 # FASTCACHE_SCHEDULER dispatches each "local" compile to their fleet, whose objects name a
 # worker's scratch directory instead of the fixture's checkout, and FASTCACHE_VERIFY or
@@ -39,7 +39,7 @@ Clear-FastcacheEnvironment
 # A fixture's launcher records into a state directory of the run's own
 # ---------------------------------------------------------------------------
 #
-# The launcher keeps its statistics in `<state>/fastcache-cc/invocations.log`, and `-z`
+# The launcher keeps its statistics in `<state>/pace-cc/invocations.log`, and `-z`
 # DELETES that file. A fixture that runs `-z` against the developer's state directory
 # deletes their statistics; one that merely compiles appends its records to them. Both
 # happened: the Windows launcher e2e did the first, and three fixtures the second.
@@ -59,12 +59,12 @@ Clear-FastcacheEnvironment
 
 # Where the launcher decides its state directory. Read, never restated: a base the
 # launcher learns to honour later is redirected without anybody remembering this file.
-$script:LauncherStateSource = Join-Path $PSScriptRoot "../../src/apps/fastcache-cc/Stats.cpp"
+$script:LauncherStateSource = Join-Path $PSScriptRoot "../../src/apps/pace-cc/Stats.cpp"
 
 # Where under a state base the launcher keeps its log. RESTATED, because the caller's logs
 # are snapshotted at the fixture's startup, before any launcher may be asked;
 # `Enter-E2ELauncherState` refuses when the launcher's own answer disagrees.
-$script:LauncherStateLogRelative = 'fastcache-cc/invocations.log'
+$script:LauncherStateLogRelative = 'pace-cc/invocations.log'
 
 # How many trailing bytes of a present log a snapshot hashes. The launcher only appends and
 # deletes, so a smaller size or a changed tail is every way a record can be lost.
@@ -404,7 +404,7 @@ function Test-E2ELauncherJobBinding([System.Management.Automation.Language.Comma
         `$MyInvocation.BoundParameters.Launcher` (`Test-E2ELauncherBoundParameter`);
       * a path an exempt command derives from `$Launcher` and the fixture STORES in another
         variable, then runs through that variable (`$d = Split-Path $Launcher` and later
-        `& (Join-Path $d fastcache-cc.exe)`): an assignment is the one sink accepted without
+        `& (Join-Path $d pace-cc.exe)`): an assignment is the one sink accepted without
         following what the variable is used for next.
 .OUTPUTS
     References (how many were judged) and Violations (one line each).
@@ -468,13 +468,13 @@ $script:LauncherScanControls = @(
     @{ Text = 'Start-Process -FilePath $Launcher'; References = 1; Refused = 1 }
     @{ Text = '& (Resolve-Path $Launcher).Path -z'; References = 1; Refused = 1 }
     @{ Text = 'Start-Process -FilePath (Resolve-Path $Launcher) -ArgumentList "-z" -Wait'; References = 1; Refused = 1 }
-    @{ Text = '& (Join-Path (Split-Path $Launcher) "fastcache-cc.exe") -z'; References = 1; Refused = 1 }
+    @{ Text = '& (Join-Path (Split-Path $Launcher) "pace-cc.exe") -z'; References = 1; Refused = 1 }
     @{ Text = 'Start-Job -ScriptBlock { param($l) & $l -z } -ArgumentList $Launcher'; References = 1; Refused = 1 }
     @{ Text = '& $script:Launcher -z'; References = 1; Refused = 1 }
     @{ Text = '& $global:Launcher -z'; References = 1; Refused = 1 }
     @{ Text = 'Start-Job -ScriptBlock { & $using:Launcher -z }'; References = 1; Refused = 1 }
     @{ Text = '. (Resolve-Path $Launcher) -z'; References = 1; Refused = 1 }
-    @{ Text = '& "$(Split-Path $Launcher)\fastcache-cc.exe" -z'; References = 1; Refused = 1 }
+    @{ Text = '& "$(Split-Path $Launcher)\pace-cc.exe" -z'; References = 1; Refused = 1 }
     @{ Text = 'Invoke-Command -ScriptBlock { param($p) & $p } -ArgumentList (Resolve-Path $Launcher)'; References = 1; Refused = 1 }
     @{ Text = 'Resolve-Path $Launcher | ForEach-Object { & $_ -z }'; References = 1; Refused = 1 }
     @{ Text = '& (Get-Item (Resolve-Path $Launcher)) -z'; References = 1; Refused = 1 }
@@ -611,7 +611,7 @@ function Enter-E2ELauncherState([Parameter(Mandatory)][string]$Launcher, [Parame
 
     $rows = @(Get-E2ELauncherStateRows)
     $script:LauncherStateEntries++
-    $root = Join-Path ([IO.Path]::GetTempPath()) "fastcache-cc-e2e-state-$PID-$($script:LauncherStateEntries)"
+    $root = Join-Path ([IO.Path]::GetTempPath()) "pace-cc-e2e-state-$PID-$($script:LauncherStateEntries)"
     # Safe to clear ONLY because the name carries this process's id: what it can reach is
     # this process's own leftover, or a dead one's -- `src/tests/ScratchPath.hpp`'s argument.
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
@@ -768,7 +768,7 @@ function Exit-E2ELauncherState($Handle, [string[]]$RunTrees = @()) {
 function Test-E2ELauncherStateSeam {
     $failures = @()
     $cases = 0
-    $work = Join-Path ([IO.Path]::GetTempPath()) "fastcache-cc-seam-selftest-$PID"
+    $work = Join-Path ([IO.Path]::GetTempPath()) "pace-cc-seam-selftest-$PID"
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $work | Out-Null
     $rows = @(Get-E2ELauncherStateRows)
@@ -781,10 +781,10 @@ function Test-E2ELauncherStateSeam {
     Set-Content -LiteralPath $fake -Value @"
 `$base = `$null
 $pick
-`$state = Join-Path `$base 'fastcache-cc'
+`$state = Join-Path `$base 'pace-cc'
 `$log = Join-Path `$state 'invocations.log'
 switch (`$args[0]) {
-    '--show-stats' { if ((Test-Path -LiteralPath `$log) -and (Get-Item -LiteralPath `$log).Length -gt 0) { "fastcache-cc statistics (`$log)" } else { "fastcache-cc: no statistics recorded yet (`$log)." } }
+    '--show-stats' { if ((Test-Path -LiteralPath `$log) -and (Get-Item -LiteralPath `$log).Length -gt 0) { "pace-cc statistics (`$log)" } else { "pace-cc: no statistics recorded yet (`$log)." } }
     '-z' { Remove-Item -LiteralPath `$log -ErrorAction SilentlyContinue }
     default { if (-not `$env:FASTCACHE_NO_STATS) { New-Item -ItemType Directory -Force `$state | Out-Null; Add-Content -LiteralPath `$log ('$logLine'.Replace('@SOURCE@', `$args[-1])) } }
 }

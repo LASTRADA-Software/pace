@@ -28,7 +28,7 @@ namespace Pace
 /// ## Why this is a template, and what is deliberately NOT in it
 ///
 /// **Two executables have configuration files and there must be ONE reload
-/// mechanism.** `fastcached` reads `Config`; `fastcache-compile-node` reads
+/// mechanism.** `pace-kv` reads `Config`; `pace-node` reads
 /// `NodeConfig` through the option table's `yamlKey` column
 /// ([#291](https://github.com/LASTRADA-Software/fastcached/issues/291)). Writing a
 /// second reloader for the second one is what this codebase keeps a list about — the
@@ -192,7 +192,7 @@ class ConfigReloaderOf
 /// Shared rather than written per executable: the join and the `ConfigError` it
 /// builds take no table and no configuration type, so there was nothing left to
 /// vary — and two independently written copies had already drifted on the sentence
-/// they say. `fastcache-compile-node` still builds its own
+/// they say. `pace-node` still builds its own
 /// (`NodeConfig.cpp`'s `ValidateNodeReloadable`) and should adopt this.
 ///
 /// @param changed The settings that may not change, in the order they were found.

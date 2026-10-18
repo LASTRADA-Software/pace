@@ -27,7 +27,7 @@
 /// older build while the newer one is rolled out.
 ///
 /// Header-only and dependency-free for the reason `CompileCacheWire.hpp` is, which includes it:
-/// `fastcache-cc` compiles that header in without linking `Pace`. Its own file so the leader's
+/// `pace-cc` compiles that header in without linking `Pace`. Its own file so the leader's
 /// registry can name a row without taking the whole wire vocabulary with it.
 
 namespace Pace::CompileCacheWire

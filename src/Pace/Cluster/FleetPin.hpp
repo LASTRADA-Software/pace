@@ -91,7 +91,7 @@ struct FleetPin
 }
 
 /// Spell @p fleet as `--fleet-id` takes it: `<cluster-id>@<key>[,<key>...]`, every key through the
-/// one encoder. What `fastcache-cli node` prints for an operator to paste, so it round-trips through
+/// one encoder. What `pacectl node` prints for an operator to paste, so it round-trips through
 /// `ParsePinnedFleet`.
 /// @param fleet The pinned fleet.
 /// @return Its text.

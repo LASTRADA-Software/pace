@@ -683,7 +683,7 @@ namespace
         // captured into the config that gets baked into the service command line.
         { .primary = "--install-service",
           .select = SelectOutcome<&CliResult::outcome, CliOutcome::InstallService>(),
-          .description = "register fastcached to start automatically: a Windows SCM service, or a\n"
+          .description = "register pace-kv to start automatically: a Windows SCM service, or a\n"
                          "macOS launchd job (see --service-scope). Other flags are baked in.\n"
                          "Windows needs an elevated prompt; --service-scope=system needs sudo" },
         { .primary = "--uninstall-service",
@@ -971,7 +971,7 @@ namespace
           .body = "  $env:SCCACHE_REDIS = 'redis://127.0.0.1:{port}'" },
 #else
         { .title = "Use with sccache (memcached protocol):",
-          .body = "  fastcached &\n"
+          .body = "  pace-kv &\n"
                   "  export SCCACHE_MEMCACHED=tcp://127.0.0.1:{port}\n"
                   "  sccache <compiler> -c hello.c -o hello.o" },
         { .title = "Use with sccache (Redis protocol):", .body = "  export SCCACHE_REDIS=redis://127.0.0.1:{port}" },
@@ -996,9 +996,9 @@ namespace
     /// pins them here instead.
     constexpr auto UsageFooters = std::to_array<std::string_view>({
         "sccache <= 0.7 speaks memcached text; >= 0.8 speaks memcached binary;\n"
-        "either works because fastcached auto-detects the wire format.",
+        "either works because pace-kv auto-detects the wire format.",
 
-        "With MSVC or clang-cl, prefer fastcache-cc to sccache. sccache hashes /EP output,\n"
+        "With MSVC or clang-cl, prefer pace-cc to sccache. sccache hashes /EP output,\n"
         "which carries no paths, and replays a hit's /showIncludes with the absolute paths\n"
         "of the checkout that stored it -- so two checkouts at DIFFERENT paths sharing one\n"
         "cache record each other's headers, and an incremental build then rebuilds nothing\n"
@@ -1053,7 +1053,7 @@ std::string CliUsage(UsageColor color)
 
     std::span<UsageBlock const> const allBlocks { blocks };
     auto const sections = std::to_array<UsageSection>({
-        { .title = "usage:", .subject = " fastcached [options]" },
+        { .title = "usage:", .subject = " pace-kv [options]" },
         { .title = "OPTIONS", .blocks = allBlocks.subspan(0, 1) },
         { .title = "EXAMPLES", .blocks = allBlocks.subspan(1, exampleTexts.size()) },
         { .blocks = allBlocks.subspan(1 + exampleTexts.size(), UsageFooters.size()) },

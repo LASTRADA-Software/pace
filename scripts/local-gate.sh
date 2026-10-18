@@ -1654,7 +1654,7 @@ compiler_shim_verdict() {
 
     base="$(basename "$resolved")"
     case "$base" in
-        ccache | sccache | distcc | icecc | fastcache-cc)
+        ccache | sccache | distcc | icecc | pace-cc)
             echo "$base"
             return 0
             ;;
@@ -2823,7 +2823,7 @@ if [[ "$self_test" -eq 1 ]]; then
                 printf 'build x.o: CXX_COMPILER__foo x.cpp\n  DEP_FILE = x.o.d\n' \
                     > "$scratch/$1/build.ninja" ;;
             fronted)
-                printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/fastcache-cc \n' \
+                printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/pace-cc \n' \
                     > "$scratch/$1/build.ninja" ;;
             none) ;;
             # A mistyped or newly-invented mode would otherwise produce a directory
@@ -3003,7 +3003,7 @@ if [[ "$self_test" -eq 1 ]]; then
     # can get. The fronted fixture carries a real `LAUNCHER = ` line, verbatim from a
     # gate directory, rather than the bare word: what is being tested is that the
     # gate recognises what CMake actually emits, including the leading indent.
-    printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env FASTCACHE_ADDR=127.0.0.1:6674 /usr/bin/fastcache-cc \n  DEP_FILE = x.o.d\nbuild y.o: CXX_COMPILER__foo y.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/fastcache-cc \n' \
+    printf 'build x.o: CXX_COMPILER__foo x.cpp\n  LAUNCHER = /usr/bin/cmake -E env FASTCACHE_ADDR=127.0.0.1:6674 /usr/bin/pace-cc \n  DEP_FILE = x.o.d\nbuild y.o: CXX_COMPILER__foo y.cpp\n  LAUNCHER = /usr/bin/cmake -E env /usr/bin/pace-cc \n' \
         > "$scratch/ninja-fronted"
 
     # Two edges rather than one, because a count is what the refusal reports and a
@@ -3204,11 +3204,11 @@ CONTINUED" \
     # case using this run's own root would assert one thing in a lane worktree
     # and the opposite on CI, which is the blind spot being closed.
     _hdrs="src/Pace/Core/Base64.hpp
-src/apps/fastcached/Main.hpp"
+src/apps/pace-kv/Main.hpp"
     # The LAYOUT cases ask the `posix` spelling alone: they are about where a
     # checkout lives, and the historical patterns are /-only, so every spelling
     # would make each of them a separator case as well and assert two things at once.
-    _old='.*/(fastcached[^/]*|worktrees/[^/]+)/src/.*'
+    _old='.*/(pace[^/]*|worktrees/[^/]+)/src/.*'
     _slash='.*/src/(CowTree|Pace|apps|tests)/.*'
     _new='.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
     _exc=''
@@ -3298,7 +3298,7 @@ src/apps/fastcached/Main.hpp"
     # A partial match is its own outcome: an analyser blind to 1 of 2 headers
     # still reports findings, so it looks like it is working.
     expect "a partial match names how many and which" \
-        "1/2 src/apps/fastcached/Main.hpp" \
+        "1/2 src/apps/pace-kv/Main.hpp" \
         "$(header_filter_match '.*/src/Pace/.*' "" /w/fastcached posix <<< "$_hdrs")"
 
     # The reporter. `all` is the only arm that carries on -- asserted as the
@@ -3348,7 +3348,7 @@ src/apps/fastcached/Main.hpp"
     # and #1040 (where a checkout lives) must not be named for it.
     _p1="$(header_filter_match '(.*/src/(CowTree|Pace|apps|tests)/.*|.*[/\\]src[/\\]Pace[/\\].*)' "" /w/fastcached <<< "$_hdrs")"
     expect "P1: a partial miss in one spelling is named in that spelling" \
-        "1/2 src/apps/fastcached/Main.hpp (windows spelling)" "$_p1"
+        "1/2 src/apps/pace-kv/Main.hpp (windows spelling)" "$_p1"
     expect "P1: ... and its cause is the separators" \
         "said|1" "$(report_says 'the cause is the pattern'"'"'s SEPARATORS, not where this checkout lives' header_filter_report /w/.clang-tidy "$_p1")"
     expect "P1: ... and its remedy prints the class as .clang-tidy spells it" \
@@ -4511,8 +4511,8 @@ unresolved src/tests/CMakeLists.txt:288' 'alpha' 2 2)" == *"does not claim to ha
     #
     # The pure rows above cannot see a parser that reads the wrong files or the
     # wrong shape, and that is where this went wrong first: a draft matched every
-    # `NAME "..."` in the CMake sources and reported `DEB-DEFAULT`, `fastcached`
-    # and `fastcached.service` as unreachable tests -- CPack components and install
+    # `NAME "..."` in the CMake sources and reported `DEB-DEFAULT`, `pace-kv`
+    # and `pace-kv.service` as unreachable tests -- CPack components and install
     # RENAMEs, matched because the pattern was broader than its author read it.
     # Anchoring to `add_test(` is what fixed it, and only a run against the real
     # tree could have shown it.
@@ -4537,7 +4537,7 @@ unresolved src/tests/CMakeLists.txt:288' 'alpha' 2 2)" == *"does not claim to ha
         expect "a CPack component NAME is not read as a test registration" \
             "0" "$(printf '%s\n' "$coverage_declared" | grep -cx 'literal DEB-DEFAULT' || true)"
         expect "an install(RENAME) target is not read as a test registration" \
-            "0" "$(printf '%s\n' "$coverage_declared" | grep -cx 'literal fastcached.service' || true)"
+            "0" "$(printf '%s\n' "$coverage_declared" | grep -cx 'literal pace-kv.service' || true)"
         # The same-line shape, which 157 of 158 registrations do not use and which
         # a parser written from the common case alone would silently drop -- and it
         # is the one registration whose name genuinely cannot be resolved, so

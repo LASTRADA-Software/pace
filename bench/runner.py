@@ -298,7 +298,7 @@ def _aggregate(scenario: Scenario, reps: list[RepMetrics]) -> ScenarioResult:
 # --- Daemon lifecycle ---------------------------------------------------------
 
 class Daemon:
-    """Launches and stops a fastcached process for one scenario."""
+    """Launches and stops a pace-kv process for one scenario."""
 
     def __init__(self, binary: Path, scenario: Scenario, host: str, port: int, storage_dir: Path) -> None:
         self._binary = binary
@@ -403,7 +403,7 @@ def measure_running_server(
 ) -> ScenarioResult:
     """Measure a scenario against an ALREADY-RUNNING server at host:port.
 
-    Used both by the fastcached path (fresh daemon, ``flush_first=False``) and by
+    Used both by the pace-kv path (fresh daemon, ``flush_first=False``) and by
     the real-server baselines (a shared long-lived server, ``flush_first=True``
     to reset state between scenarios).
     """
@@ -433,7 +433,7 @@ def run_scenario(
     seed: int,
     op_timeout: float,
 ) -> ScenarioResult:
-    """Start a fastcached daemon, run warmup + measured reps, return aggregated metrics."""
+    """Start a pace-kv daemon, run warmup + measured reps, return aggregated metrics."""
     daemon = Daemon(binary, scenario, host, port, storage_dir)
     daemon.start()
     try:

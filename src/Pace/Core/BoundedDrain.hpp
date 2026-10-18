@@ -208,7 +208,7 @@ class EndProcessOnAbandonedDrain final: public IDrainAbandonment
   public:
     [[noreturn]] void Abandon() noexcept override
     {
-        std::fputs("fastcached: a bounded drain gave up with work still running and is ending this process "
+        std::fputs("pace-kv: a bounded drain gave up with work still running and is ending this process "
                    "(status 75). If this is a TEST binary, the case did not fail -- it vanished, and so did every "
                    "case after it: construct with an IDrainAbandonment that RETURNS (see Core/BoundedDrain.hpp).\n",
                    stderr);

@@ -2,8 +2,8 @@
 # Packaging (CPack)
 #
 # Generators:
-#   - Windows: WIX (MSI) — installs fastcached.exe + fastcache-cc.exe and
-#              registers fastcached as an auto-start service
+#   - Windows: WIX (MSI) — installs pace-kv.exe + pace-cc.exe and
+#              registers pace-kv as an auto-start service
 #   - Linux  : TGZ + DEB + RPM — installs both binaries plus the systemd units
 #   - macOS  : TGZ + productbuild (.pkg) — installs both binaries under
 #              /opt/fastcached, puts them on PATH, and offers the launchd
@@ -29,7 +29,7 @@ include(GNUInstallDirs)
 # Sourced from what the project already defines — project() and
 # cmake/Version.cmake — rather than restating the same strings here.
 
-set(CPACK_PACKAGE_NAME                "fastcached")
+set(CPACK_PACKAGE_NAME                "pace-kv")
 set(CPACK_PACKAGE_VERSION             "${FASTCACHED_VERSION}")
 set(CPACK_PACKAGE_VENDOR              "LASTRADA Software")
 set(CPACK_PACKAGE_HOMEPAGE_URL        "https://github.com/LASTRADA-Software/fastcached")
@@ -42,7 +42,7 @@ set(CPACK_RESOURCE_FILE_README        "${CMAKE_SOURCE_DIR}/README.md")
 # tree. Harmless for the archive/DEB/RPM generators, which take any path.
 configure_file("${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_BINARY_DIR}/LICENSE.txt" COPYONLY)
 set(CPACK_RESOURCE_FILE_LICENSE       "${CMAKE_BINARY_DIR}/LICENSE.txt")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY   "fastcached")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY   "pace-kv")
 set(CPACK_PACKAGE_FILE_NAME           "fastcached-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_VERBATIM_VARIABLES          ON)
 set(CPACK_STRIP_FILES                 ON)
@@ -97,7 +97,7 @@ endif()
 if(WIN32)
     if(NOT CPACK_GENERATOR)
         # The MSI installs; the ZIP is what a machine can unpack. cmake's
-        # portable/CompileCache.cmake fetches a prebuilt fastcache-cc out of the
+        # portable/CompileCache.cmake fetches a prebuilt pace-cc out of the
         # archives, and an .msi is not something it — or anyone without
         # Windows — can open. Linux and macOS already ship a TGZ for the same
         # reason, so this is Windows catching up rather than a new idea.
@@ -302,8 +302,8 @@ endif()
 if(WIN32)
     # Stable upgrade GUID. NEVER regenerate — without a stable GUID,
     # consecutive installer versions cannot upgrade each other in place.
-    # (Minted for fastcached; it must not be shared with any other product,
-    # or that product's installer would treat fastcached as an upgrade of it.)
+    # (Minted for pace-kv; it must not be shared with any other product,
+    # or that product's installer would treat pace-kv as an upgrade of it.)
     set(CPACK_WIX_UPGRADE_GUID "581D183D-47A3-44FC-97E9-4B5491E792D8")
 
     # WiX 4+ uses the unified `wix.exe` binary. CMake's CPack WIX module accepts
@@ -320,7 +320,7 @@ if(WIN32)
         endforeach()
     endif()
 
-    set(CPACK_WIX_PROGRAM_MENU_FOLDER "fastcached")
+    set(CPACK_WIX_PROGRAM_MENU_FOLDER "pace-kv")
     set(CPACK_WIX_PROPERTY_ARPHELPLINK     "${CPACK_PACKAGE_HOMEPAGE_URL}")
     set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "${CPACK_PACKAGE_HOMEPAGE_URL}")
 
@@ -357,7 +357,7 @@ if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
         message(FATAL_ERROR
             "FASTCACHED_MACOS_BUNDLE_ID is empty. CPACK_PRODUCTBUILD_IDENTIFIER would fall back to "
             "a generated identifier, the package receipts would not carry the prefix the uninstaller "
-            "greps for, and `fastcached-uninstall` would silently leave macOS believing fastcached "
+            "greps for, and `pace-uninstall` would silently leave macOS believing pace-kv "
             "is still installed.")
     endif()
     set(CPACK_PRODUCTBUILD_IDENTIFIER "${FASTCACHED_MACOS_BUNDLE_ID}")
@@ -434,10 +434,10 @@ if(WIN32)
     # table's component column; a component the build did not produce declares nothing.
     #   component | display name | description | required
     set(FASTCACHED_WINDOWS_FEATURES
-        "Cli|Command-line client|fastcache-cli, and the files every other feature shares.|REQUIRED"
-        "Daemon|fastcached cache daemon|The memcached- and Redis-compatible cache, registered as the FastCached service.|"
-        "Launcher|fastcache-cc compiler launcher|The launcher a build system runs in place of the compiler.|"
-        "Node|fastcache-compile-node|The compile worker and fleet node, registered as the FastCacheCompileNode service.|"
+        "Cli|Command-line client|pacectl, and the files every other feature shares.|REQUIRED"
+        "Daemon|pace-kv cache daemon|The memcached- and Redis-compatible cache, registered as the FastCached service.|"
+        "Launcher|pace-cc compiler launcher|The launcher a build system runs in place of the compiler.|"
+        "Node|pace-node|The compile worker and fleet node, registered as the FastCacheCompileNode service.|"
     )
     foreach(_fcFeature IN LISTS FASTCACHED_WINDOWS_FEATURES)
         string(REPLACE "|" ";" _fcFields "${_fcFeature}")
@@ -451,28 +451,28 @@ if(WIN32)
     endforeach()
 else()
     cpack_add_component(Runtime
-        DISPLAY_NAME "fastcached"
-        DESCRIPTION  "The fastcached daemon and the fastcache-cc compiler launcher."
+        DISPLAY_NAME "pace-kv"
+        DESCRIPTION  "The pace-kv daemon and the pace-cc compiler launcher."
         REQUIRED
     )
 endif()
 
 if(APPLE AND FASTCACHED_PACKAGE_ROOT_PREFIX)
     # The two launchd registrations are alternatives: both bind 127.0.0.1:6674
-    # and fastcached has no unix-socket endpoint to fall back on. productbuild
+    # and pace-kv has no unix-socket endpoint to fall back on. productbuild
     # cannot express mutual exclusion — CPack only ever generates && / ||
     # dependency expressions for a choice's `selected` attribute — so the
     # postinstall scripts arbitrate at install time (the daemon wins) and the
     # descriptions below tell the user what the checkboxes really mean.
     cpack_add_component(LaunchAgent
         DISPLAY_NAME "Start at login (recommended)"
-        DESCRIPTION  "Run fastcached as you, starting at login. Best for a development machine. Ignored if the system-wide service below is also selected."
+        DESCRIPTION  "Run pace-kv as you, starting at login. Best for a development machine. Ignored if the system-wide service below is also selected."
     )
     # DISABLED renders the choice unchecked (start_selected="false"), so a
     # click-through install gets the per-user agent rather than a root daemon.
     cpack_add_component(LaunchDaemon
         DISPLAY_NAME "Start at boot, system-wide"
-        DESCRIPTION  "Run fastcached as a dedicated service account from boot, shared by every user. Creates the _fastcached account. Takes precedence over the per-user option above."
+        DESCRIPTION  "Run pace-kv as a dedicated service account from boot, shared by every user. Creates the _fastcached account. Takes precedence over the per-user option above."
         DISABLED
     )
 endif()

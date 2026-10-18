@@ -149,7 +149,7 @@ file(MAKE_DIRECTORY "${tree}/docs")
 # reporting that it scanned nothing. The snippet include is the caveat by
 # identity, which is the whole point of there being one wording.
 file(WRITE "${tree}/docs/snippets/sccache-backend-caveat.md"
-    "The canonical caveat: MSVC / clang-cl, /showIncludes, use fastcache-cc.\n")
+    "The canonical caveat: MSVC / clang-cl, /showIncludes, use pace-cc.\n")
 file(WRITE "${tree}/README.md"
     "Point sccache at the daemon with SCCACHE_MEMCACHED.\n\n--8<-- \"sccache-backend-caveat.md\"\n")
 

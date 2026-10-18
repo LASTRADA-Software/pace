@@ -1,7 +1,7 @@
 # Distributed compilation
 
-Rules for `src/Pace/Distributed/`, `src/apps/fastcache-compile-node/` and the
-dispatch half of `src/apps/fastcache-cc/`: preparing a translation unit for a
+Rules for `src/Pace/Distributed/`, `src/apps/pace-node/` and the
+dispatch half of `src/apps/pace-cc/`: preparing a translation unit for a
 remote worker, running a worker as a service, the scheduler's gate, the node's
 own cache tier, and what the end-to-end fixtures assert.
 
@@ -244,7 +244,7 @@ is the reproducible lesson, since no unit test can reach either:
     intuition: a refusal must not be escapable by the shape rule that exists to NARROW an
     allowance. `-fplugin=evil` carries no separator and `-fplugin=/tmp/evil.so` does, so
     a `NoPathSeparator` deny matches the harmless-looking spelling and lets the one naming
-    a payload fall through. The rows are now `DeniedArguments` (`apps/fastcache-cc/ArgumentDenials.hpp`),
+    a payload fall through. The rows are now `DeniedArguments` (`apps/pace-cc/ArgumentDenials.hpp`),
     where EVERY row is a prefix whose remainder is not examined, so the property is the
     table's shape rather than a `static_assert` over a column.
   - **ONE table, read by both ends, and the launcher reads it BEFORE the lease.** A row
@@ -320,10 +320,10 @@ terminal, and each has already been a bug:
 
 **The scheduler lives where leadership lives, and that is not the cache daemon.**
 `WorkerRegistry` and `LeaseTable` used to be reached through a `Dispatch` role on one
-of `fastcached`'s listeners, which made the cache daemon a scheduler as well as a
+of `pace-kv`'s listeners, which made the cache daemon a scheduler as well as a
 store. The two have opposite deployment shapes: a cache is shared infrastructure
 somebody operates, while handing out capacity is a decision only **one** node may
-make at a time — and nothing in `fastcached` can establish which node that is.
+make at a time — and nothing in `pace-kv` can establish which node that is.
 `Distributed::SchedulerService` is that logic with leadership as a first-class
 input, and it is pure with respect to I/O for the reason the two tables under it
 are: every rule below is a `ManualClock` unit test rather than a socket and a sleep.
@@ -428,7 +428,7 @@ Consequences that are each load-bearing:
     the rule was written for — the failure #180 already paid for once on the member
     list. It also refuses an unnameable peer against an empty entry, which a raw
     compare admitted.
-  - **`NotAMember`, not a code of its own.** `fastcache-cc` reads a FETCH outcome as
+  - **`NotAMember`, not a code of its own.** `pace-cc` reads a FETCH outcome as
     "is this daemon worth a second command" and steps over this one, so a peer whose
     access was withdrawn compiles locally. A new code would be an unknown one to
     every launcher already deployed, and an unknown refusal is what cost this tree a
@@ -736,7 +736,7 @@ Consequences that are each load-bearing:
     - **The library↔wire mirror has ONE mapping**, `Distributed/MembershipWire.hpp`.
       `CompileCacheWire.hpp` must stay dependency-free so it MIRRORS `Membership` and
       `MembershipParticipant`, and a mirror needs a reader at each end — the node
-      ENCODES an answer and `fastcache-cli` RENDERS one. Two copies are two things
+      ENCODES an answer and `pacectl` RENDERS one. Two copies are two things
       that can disagree about which bit means which route, inside the verb whose whole
       subject is attributing a decision. The client's SPELLINGS are keyed on the
       participant rather than on the wire bit, and that is the guard rather than a
@@ -1571,7 +1571,7 @@ Consequences that are each load-bearing:
   `--bind` is the obvious answer to "is this port local",
   and it is wrong for a reason nothing in this tree stated until now. Under
   activation the unit owns the address -- the shipped
-  `fastcache-compile-node.socket` says `ListenStream=6674`, every interface -- and
+  `pace-node.socket` says `ListenStream=6674`, every interface -- and
   `--bind`/`--port` are read by nothing. The value is still *in* the configuration;
   it has simply stopped describing anything. So a keyless node carrying a stale
   `--bind=127.0.0.1` in its configuration, plus `--fleet-open`, passed the startup
@@ -1841,7 +1841,7 @@ Consequences that are each load-bearing:
   and a site that captures one is invisible until somebody rotates**
   ([#404](https://github.com/LASTRADA-Software/fastcached/issues/404)). On this worker
   `--requirepass` is presented and never required, and each of the three sites that
-  presented it — the shared `fastcached`, the scheduler round, a cluster admin verb —
+  presented it — the shared `pace-kv`, the scheduler round, a cluster admin verb —
   built its own `Cc::Credential` from `cfg.token` at construction. Marking the row `Reloadable::Yes`
   publishes a snapshot none of them reads, which is the "green while doing nothing"
   failure in the one area where the symptom is an authentication failure nobody can
@@ -2004,7 +2004,7 @@ the other. Three parts of that are each load-bearing:
   because no unit case can see it.** `main.cpp` is in no test target (#909), so the
   seam cases in `ReactorExchange_test.cpp` pin every value `RunCached` reads and cannot
   see a `return` added after the fetch. Measured: making a transport-failed fetch end the
-  invocation passed every `fastcache-cc-tests` case and the whole Windows launcher e2e,
+  invocation passed every `pace-cc-tests` case and the whole Windows launcher e2e,
   and was caught on POSIX by one leg pointed at a refusing port. So both fixtures
   (`run-launcher-e2e.ps1`, `compile-cache-e2e.sh`) compile against a peer that REFUSES,
   one that LISTENS and never accepts, and one that ACCEPTS then RESETS. Each must exit 0
@@ -2031,7 +2031,7 @@ the other. Three parts of that are each load-bearing:
 nothing connects the two.** `CacheProxy`'s STORE handler ignored the roots the
 client sent, with a comment saying why: *"Canonicalization is the SHARED cache's
 job ... What this tier stores is what this machine will replay."* Both halves were
-true. A node was a private tier in front of `fastcached`, which canonicalized every
+true. A node was a private tier in front of `pace-kv`, which canonicalized every
 store, and doing it twice would have been the redundancy the comment refused. Then
 [#229](https://github.com/LASTRADA-Software/fastcached/issues/229) made a node the
 shared cache in its own right, and neither half survived: there was no longer a
@@ -2161,7 +2161,7 @@ symptom was that they were slow.
     (`ClusterState::SchedulerEndpointOf`), never its Raft endpoint, read through
     `ISchedulingLeaderSource` rather than a reach into the consensus tier. NODE-STATUS reads its
     `leader` from that SAME object (`NodeRuntimeSources::schedulingLeader`,
-    [#1641](https://github.com/LASTRADA-Software/fastcached/issues/1641)), so `fastcache-cli node`
+    [#1641](https://github.com/LASTRADA-Software/fastcached/issues/1641)), so `pacectl node`
     and the redirect cannot disagree; the role stays ABSENT, since the node runs no scheduler.
   - **A silent leader is named by NOBODY once its silence passes the tier's own Raft
     `electionTimeoutMax`** — 300 ms today, judged once per 1 s reconcile pass, so the effective
@@ -2176,7 +2176,7 @@ symptom was that they were slow.
     hands the tier, the pass half `LeaderContactObserverFor`.
   - **RELEASE is refused `DispatchNotPermitted`**: it settles a lease with whoever granted it,
     and a learner granted none, so only a broken client sends one there.
-  - **A node running NO consensus follows no leader**, and answers as the `fastcached` daemon
+  - **A node running NO consensus follows no leader**, and answers as the `pace-kv` daemon
     does: the capacity verbs (`Register`, `Heartbeat`, `Withdraw`, `Lease`, `Release`,
     `NodeAnnounce`) `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
     `NodeAnnounce`'s code through `RefusalFor`'s fallback. The codes agree on every scheduling
@@ -2286,7 +2286,7 @@ other moves where the outage is observed and not whether it happens.
   holds only the call and the production `BlockingEndpointDialer`.
 
 **A node caches for itself, and what that saves is the round trip rather than the
-compile.** The shared `fastcached` holds every object, so a second copy on the node
+compile.** The shared `pace-kv` holds every object, so a second copy on the node
 looks redundant — it is not, because a developer who rebuilds one tree twenty times a
 day pays the network twenty times for objects that never left their machine, and on a
 slow or lossy link that is the difference between a cache that helps and one that
@@ -2381,7 +2381,7 @@ Six more about what the tier IS and who gets to see it:
   component": the merged listener's bind predicate (`AnswersAnyFamily`) and its
   session-ceiling fold (`MergedResponder::Largest`) both count the never-null operator
   families -- node, live and fleet -- or such a node names a port it does not bind -- or
-  binds one whose ceilings fold to zero and closes every connection, NODE-STATUS (`fastcache-cli node`)
+  binds one whose ceilings fold to zero and closes every connection, NODE-STATUS (`pacectl node`)
   included. The second was found only by a test that EXCHANGED a frame over the bound
   port; the bind alone passed. The bind, the fold and the connection sum all read
   `FamilyRoutes`, one row per `VerbFamily` with a presence column and a ceilings column
@@ -2531,7 +2531,7 @@ The cache facts themselves ride **nested**, inside the capacity and load records
 rather than beside them, for the reason those records are nested inside REGISTER
 and HEARTBEAT: `SplitFields` is exact by design, so a fact added at any fixed-arity
 level makes two builds of a fleet unable to speak at all. Tiers travel
-**positionally**, because `CompileCacheWire.hpp` is compiled into `fastcache-cc`
+**positionally**, because `CompileCacheWire.hpp` is compiled into `pace-cc`
 and cannot see `StorageTier` — which makes that enum's ORDER a wire contract, and
 makes `CacheCapacityToWire`/`FromWire` the only pair that knows index 1 is the disk
 tier. A transposition between them decodes perfectly and reports a node's RAM
@@ -2560,7 +2560,7 @@ spelled it the same way, which is what makes this a drift rather than a discover
 - **A cache answer that dials must not be serialized behind the accept loop.**
   `FrameEndpoint` owned a thread and served its connections ONE AT A TIME, and
   `RemoteUpstream` dials the shared cache from inside a cache answer -- so a single
-  upstream that took five seconds held every local `fastcache-cc` behind it, one
+  upstream that took five seconds held every local `pace-cc` behind it, one
   after another. A node whose shared cache was unreachable had an unusable port of
   its own, and nothing anywhere said so: every client eventually got a correct
   answer, just far too late. `NodeIoLoop` is the reactor both framed surfaces now
@@ -3281,7 +3281,7 @@ the pair is indistinguishable again.
 
 - **A scratch root is CLAIMED, not merely named — and claiming is the liveness
   check.** A worker's root came from `temp_directory_path() /
-  "fastcache-compile-node"` with jobs numbered from a counter starting at 1 in every
+  "pace-node"` with jobs numbered from a counter starting at 1 in every
   process, so a second node on one host derived the identical `job-1` and everything
   beneath it. `create_directories` succeeds on a directory that already exists, so
   nothing was told anything (#279). Two outcomes, and the quiet one is worse: one
@@ -3403,7 +3403,7 @@ every other non-answer; what it must never do is *use* that object.
 **And it is not counted, deliberately.** The issue asked for a `MetricsCatalog` row
 and there is nowhere for one to live. Only the client can detect a crossed reply -- a
 worker that knew its reply was crossed would not have sent it, so the server has
-nothing to count -- and the client is `fastcache-cc`, one short-lived process per
+nothing to count -- and the client is `pace-cc`, one short-lived process per
 translation unit with no metrics sink anywhere in its production path. A row
 incremented only by tests would export a `/metrics` series reading a permanent zero
 **while the defect fires**, which is worse than no series: it is the
@@ -3751,7 +3751,7 @@ resets the count, and a genuine loop never reaches that arm.
 **And the enrollment state is REPORTED, or the counters cannot be read.** Both enrollment
 series are rendered by every node and read zero on a machine that serves no enrollment at
 all, so *nothing served here* and *nothing has come through* are one number.
-NODE-STATUS's `enrollment` field (`fastcache-cli node`) is ABSENT on a node that serves no enrollment
+NODE-STATUS's `enrollment` field (`pacectl node`) is ABSENT on a node that serves no enrollment
 (`main` hands the status responder a window only where `ServesEnrollment` holds), `manual`
 otherwise, and `auto-approve` with the minutes left while a deadline is armed
 (`WireEnrollmentState`; `0x01` closed and `0x02` open are RETIRED, since every request is
@@ -3900,7 +3900,7 @@ ticket, is admitted by both routes, and an operator asking why has to be told ev
 
 **Every gate INCLUDES the live-stats one since #1512, and how that came about is the transferable
 part.** It was the one exception, and the reason was never about subscriptions: a subscription is
-re-gated on every tick through `Protocol::ILiveGate`, a seam `fastcached` shares, and that seam
+re-gated on every tick through `Protocol::ILiveGate`, a seam `pace-kv` shares, and that seam
 passed the peer as a bare host — so the re-gate *could not* see a proof, and a door honouring one
 alone would admit a proven watcher and end its stream one tick later, which is worse than
 refusing it. The exception was therefore a property of the SEAM, and it was recorded as a
@@ -4075,7 +4075,7 @@ half from passing. The in-process fleet asserts it from addresses nobody listed
   by nothing: the learner's `.schedulingLeader` wiring
   ([#1641](https://github.com/LASTRADA-Software/fastcached/issues/1641)) is a pointer `main`
   sets on `RedirectsScheduling`, as every other field of that record is set there, and a
-  wiring that dropped it would leave every case green while `fastcache-cli node` on a
+  wiring that dropped it would leave every case green while `pacectl node` on a
   learner named no leader again.
 - **[#148](https://github.com/LASTRADA-Software/fastcached/issues/148)** — every
   discovered compiler is spawned twice at startup with the same argv, once to learn

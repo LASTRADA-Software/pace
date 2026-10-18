@@ -1,6 +1,6 @@
 # memcached binary status codes
 
-Every status fastcached emits in the **memcached binary** response header.
+Every status pace-kv emits in the **memcached binary** response header.
 
 These codes are specific to that protocol and are not shared with any
 other. In particular the compile-cache protocol has its own, much smaller

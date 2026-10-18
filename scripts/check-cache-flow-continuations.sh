@@ -39,7 +39,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 selftest=0
 [ "${1:-}" = "--self-test" ] && selftest=1
 
-Subject="src/apps/fastcache-cc/main.cpp"
+Subject="src/apps/pace-cc/main.cpp"
 
 # One row per classified call site: <reason-substring>|<expected spelling>|<why>.
 # The reason string is the anchor because it is what the operator sees and what

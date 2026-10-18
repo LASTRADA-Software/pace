@@ -169,7 +169,7 @@ inline constexpr bool DefaultLogTimestamps =
 /// A scoped enum for the reason `LogSource` above is one, and then a second reason
 /// this flag paid for. `{ std::cerr, level, true }` says nothing at the call site --
 /// and an argument that reads as nothing is one whose ABSENCE reads as nothing
-/// either, which is how `fastcache-compile-node` shipped unable to emit a time at
+/// either, which is how `pace-node` shipped unable to emit a time at
 /// all ([#485](https://github.com/LASTRADA-Software/fastcached/issues/485)). The
 /// constructor takes it with **no default**, so omitting it is a compile error in
 /// every binary rather than a silent `false`.
@@ -230,7 +230,7 @@ class ConsoleLogger final: public ILogger
     /// Construct over a stream reference whose lifetime exceeds this logger.
     ///
     /// **Neither trailing parameter has a default, deliberately.** They had one, and
-    /// `fastcache-compile-node` was constructed with two arguments of the three -- so
+    /// `pace-node` was constructed with two arguments of the three -- so
     /// the node could not emit a timestamp, no flag existed to ask for one, and this
     /// class was correct throughout (#485). The argument was not wrong, it was ABSENT,
     /// which is the one mistake a defaulted parameter makes unreadable at the call

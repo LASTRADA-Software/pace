@@ -6,7 +6,7 @@ set -e
 SERVICE="@FASTCACHED_SERVICE_NAME@"
 # The socket is the unit an operator enables, so it is the one carrying
 # enable-state symlinks that have to be dropped here.
-NODE_SOCKET="fastcache-compile-node.socket"
+NODE_SOCKET="pace-node.socket"
 
 case "$1" in
     remove)
@@ -30,7 +30,7 @@ case "$1" in
             systemctl daemon-reload >/dev/null 2>&1 || true
         fi
         # Cached data is expendable and can be large; a purge should not leave
-        # it behind. The fastcached user is intentionally NOT deleted — files
+        # it behind. The pace-kv user is intentionally NOT deleted — files
         # elsewhere may still be owned by it.
         #
         # Never recurse into something the package does not own. systemd's

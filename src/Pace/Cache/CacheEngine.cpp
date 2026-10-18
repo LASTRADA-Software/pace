@@ -468,7 +468,7 @@ std::expected<std::vector<std::string>, StorageError> CacheEngine::SetPop(std::s
         if (!loaded.has_value())
             return std::unexpected(loaded.error());
         popped.clear();
-        // Deterministic "pop": take from the sorted front. fastcached has no
+        // Deterministic "pop": take from the sorted front. pace-kv has no
         // injected RNG seam, and a cache set's pop order is not contractual;
         // taking the lexicographically smallest members keeps it reproducible.
         auto const take = std::min(count, existing.size());

@@ -500,7 +500,7 @@ namespace
                                       } },
         FleetColumn<NodeReport> {
             .name = "version",
-            .help = "Which build of fastcache-compile-node this machine is running. Absent "
+            .help = "Which build of pace-node this machine is running. Absent "
                     "when the node predates the field and cannot report one.",
             .format = CellFormat::Text,
             // Detail at a narrow width, whatever it means during an upgrade: a build string is the widest
@@ -703,7 +703,7 @@ namespace
     constexpr std::array<FleetColumn<LeaseHolding>, 4> LeaseColumns {
         // The key earns its place despite being a digest, and it is the only column
         // that answers the question an operator arrives with. A client refused
-        // `already-in-flight` was refused ON a key, and `fastcache-cc` prints that
+        // `already-in-flight` was refused ON a key, and `pace-cc` prints that
         // same key when it dispatches -- so this is what joins a stuck build to
         // whoever is holding it.
         FleetColumn<LeaseHolding> { .name = "key",
@@ -1099,7 +1099,7 @@ namespace
     /// Not an empty field, which is the tempting spelling and the one that destroys
     /// the distinction: a blank cell and a value that genuinely IS the empty string
     /// would render alike, and *absent is not zero* means nothing once a reader
-    /// cannot tell them apart. This is the token `fastcache-cli`'s own human format
+    /// cannot tell them apart. This is the token `pacectl`'s own human format
     /// already uses, so a reader who learned one learned the other.
     constexpr std::string_view TextAbsent = "-";
 

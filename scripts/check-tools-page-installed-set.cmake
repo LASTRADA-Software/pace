@@ -10,10 +10,10 @@
 #
 # Nothing connected the two. `compile-cache-testclient` -- `FASTCACHED_BUILD_TESTCLIENT`
 # OFF by default, no `install()` rule, in no package -- sat on that page as the third
-# peer of `fastcache-cc` and `fastcache-compile-node` and was published to users at
+# peer of `pace-cc` and `pace-node` and was published to users at
 # `/fastcached/tools/compile-cache-testclient/` for months
 # ([#1030](https://github.com/LASTRADA-Software/fastcached/issues/1030)). It was moved
-# to `Internals`, where its sibling `fastcache-bench` already lived. This is the guard
+# to `Internals`, where its sibling `pace-bench` already lived. This is the guard
 # that was missing, filed as
 # [#1035](https://github.com/LASTRADA-Software/fastcached/issues/1035).
 #
@@ -67,16 +67,16 @@
 # This is the one a re-implementer gets wrong, so it is written down rather than left
 # to be rediscovered.
 #
-# `fastcached` is installed and has NO page of its own under `Tools` -- the overview's
+# `pace-kv` is installed and has NO page of its own under `Tools` -- the overview's
 # section for it routes to the Quickstart. So the `Tools` nav in `mkdocs.yml` lists three
 # pages plus an overview, while the installed set is four. A nav-derived check computes
 # 3 != 4 and REFUSES A CORRECT TREE.
 #
-# Those two figures were "two" and "three" until `fastcache-cli` joined both the app
+# Those two figures were "two" and "three" until `pacectl` joined both the app
 # table and the nav (#1439). The check reads both sides and was right throughout; only
 # this sentence rotted, which is what a hand-written number describing a derived set
 # does. The ARGUMENT is what this paragraph is for -- the nav will always be one short
-# of the installed set while `fastcached` has no page -- so read the figures as the
+# of the installed set while `pace-kv` has no page -- so read the figures as the
 # illustration and the inequality as the claim.
 #
 # The overview page's `##` sections are the thing that actually claims to enumerate the
@@ -323,7 +323,7 @@ if(documentedNotInstalled OR installedNotDocumented)
     message("")
     message("A tool documented but NOT installed is the #1030 defect: contributor")
     message("tooling advertised beside the product, published to readers who cannot")
-    message("install it. Move its page under `Internals`, where `fastcache-bench` and")
+    message("install it. Move its page under `Internals`, where `pace-bench` and")
     message("`compile-cache-testclient` already live, and drop its section here.")
     message("")
     message("A tool installed but NOT documented is the mirror: a binary users get and")

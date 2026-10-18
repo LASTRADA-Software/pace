@@ -116,7 +116,7 @@ _e2e_wait_seconds=20
 # A fixture inherits no FASTCACHE_* setting
 # ---------------------------------------------------------------------------
 #
-# The launcher, fastcached and the node read their whole configuration from
+# The launcher, pace-kv and the node read their whole configuration from
 # FASTCACHE_* variables, so one this shell inherited decides what a fixture
 # measures: an operator's FASTCACHE_SCHEDULER dispatches each "local" compile to
 # their fleet, whose objects name a worker's scratch directory instead of the
@@ -1264,7 +1264,7 @@ wait_until() {
 # `      11` on macOS. A fixture that captures that and compares it as a STRING is
 # green on one platform and red on the other, saying `wrote       11 bytes, expected
 # 11` -- a message whose two numbers are equal, which reads as the instrument being
-# broken rather than as the shell. `fastcache-cli-e2e` shipped that way and it was
+# broken rather than as the shell. `pacectl-e2e` shipped that way and it was
 # the fixture's first run on macOS that found it.
 #
 # Arithmetic contexts (`$(( ))`) and numeric tests (`[ x -eq y ]`) normalise on
@@ -1544,7 +1544,7 @@ wait_for_registration() {
 # behaviour are different jobs.
 E2eNodeReadyMarker="compile node ready"
 
-# The line `fastcached` logs once every acceptor is armed, and the marker
+# The line `pace-kv` logs once every acceptor is armed, and the marker
 # `wait_for_daemon_ready` below waits on.
 #
 # The second row of `Core/ReadinessMarker.hpp`, and the two constants here are that
@@ -1632,7 +1632,7 @@ wait_for_node_ready() {
     _e2e_wait_ready "$E2eNodeReadyMarker" wait_for_node_ready ${@+"$@"}
 }
 
-# Wait until a `fastcached` daemon is ACCEPTING, not merely bound.
+# Wait until a `pace-kv` daemon is ACCEPTING, not merely bound.
 #
 # The daemon's half of the rule above, and it is not a weaker version of it: its
 # marker is emitted by `ReadinessAnnouncer` once the LAST acceptor has armed, so
@@ -1940,7 +1940,7 @@ _e2e_counter_wait() {
 # SIGKILL cannot be caught, and that is not the same as prompt: the kernel finishes
 # a kill only when the process leaves the system call it is in, and one stuck in
 # uninterruptible I/O never does. Observed, not argued: on a WSL VM whose 9p client
-# sat in a kernel soft lockup, a `fastcached` that never became ready was still alive
+# sat in a kernel soft lockup, a `pace-kv` that never became ready was still alive
 # a second after SIGTERM and again a second after SIGKILL, and was only a zombie
 # minutes later -- and a local gate's `wait` on such a daemon hung for 80 minutes.
 # So nothing here `wait`s on a killed process until `kill -0` says it has gone; one
@@ -2048,9 +2048,9 @@ stop_and_require_exit() {
 # handler and every destructor after it never ran -- and for a process that handles
 # TERM, that teardown is the very thing this stop exists to watch. A process that does
 # NOT handle TERM names that with `term-ends-it` as the fifth argument, and only then
-# is 143 its clean stop. A `fastcache-compile-node` handles TERM; it is never one.
+# is 143 its clean stop. A `pace-node` handles TERM; it is never one.
 #
-# The shape it guards: `fastcache-compile-node`'s `~SharedCacheHost` ABORTS when a
+# The shape it guards: `pace-node`'s `~SharedCacheHost` ABORTS when a
 # reader still borrows the host, which is `main` destroying its locals in the wrong
 # ORDER -- deterministic, on every stop of every node holding a private tier and an
 # identity, and after the last line `main` logs ("compile node stopped"), so no grep
@@ -3291,7 +3291,7 @@ e2e_exit_if_reap_left_survivors() {
 # A fixture's launcher records into a state directory of the run's own
 # ---------------------------------------------------------------------------
 #
-# The launcher keeps its statistics in `<state>/fastcache-cc/invocations.log`, and `-z`
+# The launcher keeps its statistics in `<state>/pace-cc/invocations.log`, and `-z`
 # DELETES that file. A fixture that runs `-z` against the developer's state directory
 # deletes their statistics; one that merely compiles appends its records to them. Both
 # happened: the Windows launcher e2e did the first, and three fixtures the second.
@@ -3324,11 +3324,11 @@ e2e_exit_if_reap_left_survivors() {
 # log is the ordinary state of every CI runner and of anybody who just ran `-z`.
 
 # Where the launcher decides its state directory. Read, never restated.
-_e2e_launcher_state_source="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/src/apps/fastcache-cc/Stats.cpp"
+_e2e_launcher_state_source="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/src/apps/pace-cc/Stats.cpp"
 # Where under a state base the launcher keeps its log. RESTATED, because `e2e_begin` needs
 # it before any launcher may be asked; `e2e_launcher_state_enter` refuses when the
 # launcher's own answer disagrees, so a move is a refusal rather than an unchecked log.
-_e2e_launcher_state_log_rel="fastcache-cc/invocations.log"
+_e2e_launcher_state_log_rel="pace-cc/invocations.log"
 _e2e_launcher_state_root=""
 _e2e_launcher_state_log=""
 # This run's trees, one per line: a caller record naming one of them is this run's.
@@ -3629,7 +3629,7 @@ e2e_launcher_state_enter() {
     real="${!var-}"
     [ -n "$real" ] && [ -x "$real" ] || fail "e2e_launcher_state_enter: \$${var} is not an executable launcher: '${real}'"
     # Absolute before it is written into the shim, which may be run from any directory: CI passes
-    # `--launcher out/build/.../fastcache-cc`, and a fixture section that `cd`s first (the
+    # `--launcher out/build/.../pace-cc`, and a fixture section that `cd`s first (the
     # relative-paths case) then exec'd a path that resolved to nothing -- a red reading as a
     # failed compile, with no word about the launcher.
     case "$real" in

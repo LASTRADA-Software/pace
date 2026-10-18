@@ -176,7 +176,7 @@ TEST_CASE("A counter's exported name is unique", "[metrics][prometheus]")
 
 TEST_CASE("A process with no cache renders no cache metrics", "[metrics][prometheus]")
 {
-    // `fastcache-compile-node` serves this same endpoint and has no storage. A
+    // `pace-node` serves this same endpoint and has no storage. A
     // default-constructed `StorageStats` would report `fastcached_items 0` and
     // `fastcached_bytes_limit 0` -- an empty, unbounded cache -- which a dashboard
     // reads as a fact rather than as an absence. Absent means absent.

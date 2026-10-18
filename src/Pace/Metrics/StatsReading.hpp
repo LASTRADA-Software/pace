@@ -189,7 +189,7 @@ struct MetricsSnapshot
     /// worker has no storage and zeroes are not the truth about it: a scrape
     /// reporting `fastcached_items 0` and `fastcached_bytes_limit 0` says the
     /// cache is empty and unbounded, which an alert or a dashboard will read as
-    /// a fact rather than as an absence. `fastcache-compile-node` runs the same
+    /// a fact rather than as an absence. `pace-node` runs the same
     /// `AdminHttpServer` and shares this renderer, so the alternative was a
     /// second renderer that drifts from this one.
     std::optional<StorageStats> storage;
@@ -274,12 +274,12 @@ struct MetricsSnapshot
 /// `std::optional<std::uint64_t>` per counter and every absence meant the first reason below.
 /// `RenderPrometheus` reads that absence, omits the series with a `# SKEW` marker and bumps
 /// `fastcached_metrics_catalogue_skew` -- so giving the one spelling a second reason made
-/// `fastcache-compile-node`, which simply has no writer for the daemon's accept counters, scrape
+/// `pace-node`, which simply has no writer for the daemon's accept counters, scrape
 /// as a build whose catalogue and sink disagree. That is a confident wrong signal replacing a
 /// vague one, and it costs the skew counter its meaning.
 ///
 /// **The reason travels on the wire** rather than being re-derived by the renderer, because the
-/// renderer is not always in the process that captured the reading: `fastcache-cli`'s poll rung
+/// renderer is not always in the process that captured the reading: `pacectl`'s poll rung
 /// decodes a reading and renders Prometheus from it (`StatsSource.cpp`), so a local derivation
 /// would be a fact the CLI cannot reach.
 ///
@@ -393,7 +393,7 @@ enum class MetricsSurface : std::uint8_t
 {
     /// The cache daemon's accept path: `Server/Server.cpp` and `Server/ReactorServerLoop.cpp`,
     /// established by reading the tree as the only writers of `fastcached_connections_*`.
-    /// `fastcache-compile-node` serves none of it -- its own accept path has separate counters.
+    /// `pace-node` serves none of it -- its own accept path has separate counters.
     CacheAcceptPath = 0,
 
     /// The daemon's storage and expiry cycle: `Cache/CacheEngine.cpp`, `Cache/ExpiryReaper.cpp`
@@ -418,7 +418,7 @@ enum class MetricsSurface : std::uint8_t
     /// `FleetView.hpp`. Only a node whose mode serves the scheduler builds one.
     CompileScheduler,
 
-    /// The compile worker, on both sides of the dispatch: `fastcache-cc`'s `WorkerProtocol.cpp`
+    /// The compile worker, on both sides of the dispatch: `pace-cc`'s `WorkerProtocol.cpp`
     /// and `CodecEnvelope.cpp`, the node's `CompileCapacity.hpp`, `CompileResponder.*` and
     /// `WorkerTier.cpp`, and `Distributed/LeaseToken.hpp`'s worker-side outcome rows.
     /// `--slots=0` means no worker, and then none of these can move.
@@ -501,8 +501,8 @@ struct CounterSoleWriter
 /// **That asymmetry is why completeness here is safe and narrowing a BINARY is not.** This
 /// table says where a counter is written, which is a fact about the source; what decides
 /// whether a figure is hidden is the surface set a PROCESS states. So the table is complete and
-/// the statements stay conservative: `fastcached` still passes `EverySurface` and renders every
-/// row, and only `fastcache-compile-node`, whose components are decided by flags it already
+/// the statements stay conservative: `pace-kv` still passes `EverySurface` and renders every
+/// row, and only `pace-node`, whose components are decided by flags it already
 /// parses, narrows. Attributing a row wrongly here cannot hide anything on a process that
 /// claims every surface.
 ///

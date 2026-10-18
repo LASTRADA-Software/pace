@@ -537,14 +537,14 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     //
     // Moved by #1449: the consensus block's one member list became two -- voters, then
     // learners -- so `StatsReadingWire::Grammar` went to `-5` and the field is named
-    // `configuration`. Clients and nodes upgrade together: a `fastcache-cli` built before this
+    // `configuration`. Clients and nodes upgrade together: a `pacectl` built before this
     // refuses a node built after it by name (`ForeignLayout`), rather than reading the
     // learners as the leader's id.
     //
     // Moved by #1428: four counters joined the catalogue for the node proof, then under the cluster key
     // (`node_proofs_accepted`, `_rejected`, `_unchallenged`, `_malformed`), which changes which
     // cells every live-stats reading carries. Clients and nodes upgrade together -- a
-    // `fastcache-cli` built before this refuses a node built after it, by name
+    // `pacectl` built before this refuses a node built after it, by name
     // (`ForeignLayout`) rather than by decoding plausible numbers into the wrong fields.
     //
     // Moved by #1471: one counter joined the catalogue for the admission-explanation verb

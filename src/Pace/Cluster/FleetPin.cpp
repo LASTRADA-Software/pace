@@ -34,7 +34,7 @@ std::string PinText(FleetPin const& pin)
 std::expected<PinnedFleet, std::string> ParsePinnedFleet(std::string_view text)
 {
     constexpr auto Remedy = std::string_view { "append @<key>[,<key>...], the voters' identity keys, exactly as "
-                                               "`fastcache-cli node` prints the fleet-id on a machine of that fleet" };
+                                               "`pacectl node` prints the fleet-id on a machine of that fleet" };
     auto const at = text.find('@');
     auto const clusterId = text.substr(0, at);
     if (!IsMintedClusterId(clusterId))

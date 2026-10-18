@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include <apps/fastcache-compile-node/NodeConfig.hpp>
+#include <apps/pace-node/NodeConfig.hpp>
 
 namespace Pace::Testing
 {

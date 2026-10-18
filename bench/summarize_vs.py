@@ -2,8 +2,8 @@
 """Print a small/large value performance summary from a `--vs` summary.json.
 
 Usage: python bench/summarize_vs.py <results-dir>/summary.json
-Reports fastcached throughput vs redis and memcached, split by value size
-(small = 64 B, large = 64 KiB), with the geomean speedup (>1 = fastcached
+Reports pace-kv throughput vs redis and memcached, split by value size
+(small = 64 B, large = 64 KiB), with the geomean speedup (>1 = pace-kv
 faster) and the per-concurrency breakdown for the GET hot path.
 """
 from __future__ import annotations
@@ -32,17 +32,17 @@ def main() -> int:
         t = s["targets"]
         if comp not in t:
             return None
-        return t["fastcached"]["throughput_ops_per_sec"] / t[comp]["throughput_ops_per_sec"]
+        return t["pace-kv"]["throughput_ops_per_sec"] / t[comp]["throughput_ops_per_sec"]
 
-    small = [s for s in scn if s["targets"]["fastcached"]["value_bytes"] == 64]
-    large = [s for s in scn if s["targets"]["fastcached"]["value_bytes"] > 1000]
+    small = [s for s in scn if s["targets"]["pace-kv"]["value_bytes"] == 64]
+    large = [s for s in scn if s["targets"]["pace-kv"]["value_bytes"] > 1000]
 
     print(f"Environment: {env.get('cpu','?')} x{env.get('cores','?')} cores, "
           f"{env.get('os','?')}, preset={env.get('preset','?')}, reps={env.get('reps','?')}")
     print(f"Candidate: {env.get('candidate_ref','?')}  (redis = Valkey fork; memcached native)\n")
 
     print(f"{'='*72}")
-    print(f"{'GEOMEAN throughput speedup (fastcached / competitor; >1 = we win)':^72}")
+    print(f"{'GEOMEAN throughput speedup (pace-kv / competitor; >1 = we win)':^72}")
     print(f"{'='*72}")
     print(f"{'':16}{'vs memcached':>18}{'vs redis/Valkey':>20}")
     for label, group in (("small (64 B)", small), ("large (64 KiB)", large)):
@@ -54,13 +54,13 @@ def main() -> int:
 
     for comp, title in (("memcached", "vs memcached"), ("redis", "vs redis/Valkey")):
         print(f"\n{title} — GET throughput by value size x concurrency (ops/sec):")
-        print(f"  {'scenario':44}{'fastcached':>12}{comp:>12}{'ratio':>8}")
-        rows = [s for s in scn if s["targets"]["fastcached"]["op_mix"] == "get"
-                and s["targets"]["fastcached"]["storage"] == "memory" and comp in s["targets"]]
-        rows.sort(key=lambda s: (s["targets"]["fastcached"]["value_bytes"],
-                                 s["targets"]["fastcached"]["connections"]))
+        print(f"  {'scenario':44}{'pace-kv':>12}{comp:>12}{'ratio':>8}")
+        rows = [s for s in scn if s["targets"]["pace-kv"]["op_mix"] == "get"
+                and s["targets"]["pace-kv"]["storage"] == "memory" and comp in s["targets"]]
+        rows.sort(key=lambda s: (s["targets"]["pace-kv"]["value_bytes"],
+                                 s["targets"]["pace-kv"]["connections"]))
         for s in rows:
-            fc = s["targets"]["fastcached"]
+            fc = s["targets"]["pace-kv"]
             other = s["targets"][comp]["throughput_ops_per_sec"]
             r = speedup(s, comp)
             print(f"  {s['name']:44}{fc['throughput_ops_per_sec']:>12,.0f}{other:>12,.0f}{r:>7.2f}x")

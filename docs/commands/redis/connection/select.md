@@ -2,7 +2,7 @@
 
 **Protocols:** Redis RESP2
 
-Selects a logical database by index. fastcached has a single flat
+Selects a logical database by index. pace-kv has a single flat
 keyspace, so `SELECT` is accepted as a no-op for compatibility: any
 index replies `+OK` and the index is ignored.
 

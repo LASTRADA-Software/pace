@@ -8,12 +8,12 @@
 
 set(FASTCACHED_APPS
     #  directory                   option                          default  component  description
-    "fastcached|FASTCACHED_BUILD_DAEMON|ON|Daemon|Build the fastcached daemon"
-    "fastcache-cc|FASTCACHED_BUILD_LAUNCHER|ON|Launcher|Build the fastcache-cc compiler launcher"
-    "fastcache-compile-node|FASTCACHED_BUILD_NODE|ON|Node|Build the fastcache-compile-node compile worker"
-    "fastcache-cli|FASTCACHED_BUILD_CLI|ON|Cli|Build the fastcache-cli operator client"
+    "pace-kv|FASTCACHED_BUILD_DAEMON|ON|Daemon|Build the pace-kv daemon"
+    "pace-cc|FASTCACHED_BUILD_LAUNCHER|ON|Launcher|Build the pace-cc compiler launcher"
+    "pace-node|FASTCACHED_BUILD_NODE|ON|Node|Build the pace-node compile worker"
+    "pacectl|FASTCACHED_BUILD_CLI|ON|Cli|Build the pacectl operator client"
     "compile-cache-testclient|FASTCACHED_BUILD_TESTCLIENT|OFF|-|Build the compile-cache test client"
-    "fastcache-bench|FASTCACHED_BUILD_BENCHMARKS|OFF|-|Build the in-process storage micro-benchmarks"
+    "pace-bench|FASTCACHED_BUILD_BENCHMARKS|OFF|-|Build the in-process storage micro-benchmarks"
 )
 
 foreach(_app IN LISTS FASTCACHED_APPS)

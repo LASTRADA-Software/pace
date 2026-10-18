@@ -3,8 +3,8 @@
 Everything in this directory is written to be copied. Each module uses nothing
 but stock CMake, names no target of the project it sits in, and depends on no
 other file here — so another project can vendor one and have it work, whether or
-not it has ever heard of fastcached. That is the whole reason the directory
-exists: `../` holds the modules that only make sense while building fastcached,
+not it has ever heard of pace-kv. That is the whole reason the directory
+exists: `../` holds the modules that only make sense while building pace-kv,
 and this holds the ones that travel.
 
 Anything added here has to keep that property. Nothing checks it automatically —
@@ -42,7 +42,7 @@ suppressed. This project's rows are in `../PedanticSuppressions.cmake`.
 
 ## `CompileCache.cmake`
 
-Picks a compiler-cache launcher — `fastcache-cc`, `sccache` or `ccache` — and,
+Picks a compiler-cache launcher — `pace-cc`, `sccache` or `ccache` — and,
 when asked, installs one that is missing.
 
 ### Using it
@@ -60,12 +60,12 @@ any dependency is fetched, so fetched dependencies are cached too.
 
 It picks the first launcher that is both installed and usable:
 
-1. **`fastcache-cc`**, but only when a `fastcached` daemon actually answers.
+1. **`pace-cc`**, but only when a `pace-kv` daemon actually answers.
    Its cache entries are keyed independently of the checkout path, so a CI
    runner and a developer working from different directories share hits.
 2. **`sccache`**, but only with `-DALLOW_SCCACHE_FALLBACK=ON`. It is never picked
    for you: a launcher nobody chose is a launcher nobody checks, and it silently
-   standing in for a `fastcache-cc` that could not talk to its daemon is how a
+   standing in for a `pace-cc` that could not talk to its daemon is how a
    project stops noticing that its own cache is not in use. Opted into, it keeps
    this position, ahead of `ccache`.
 3. **`ccache`**
@@ -90,7 +90,7 @@ does not fail configures.
 ### Installing the launcher automatically
 
 By default the module uses what is already installed. `FASTCACHE_AUTO_INSTALL`
-lets it fetch `fastcache-cc` instead of leaving the build uncached:
+lets it fetch `pace-cc` instead of leaving the build uncached:
 
 ```cmake
 set(FASTCACHE_AUTO_INSTALL ON CACHE BOOL "" FORCE)   # before include(CompileCache)
@@ -116,8 +116,8 @@ here.
 | --- | --- | --- |
 | `USE_COMPILER_CACHE` | `ON` | Use a launcher at all. |
 | `ALLOW_SCCACHE_FALLBACK` | `OFF` | Let `sccache` be selected automatically. Off, it is skipped with a status line saying so. |
-| `FASTCACHE_ADDR` | `127.0.0.1:6674` | Where the daemon is. Empty opts out of `fastcache-cc` entirely. |
-| `FASTCACHE_AUTO_INSTALL` | `OFF` | Fetch `fastcache-cc` when no launcher is installed. |
+| `FASTCACHE_ADDR` | `127.0.0.1:6674` | Where the daemon is. Empty opts out of `pace-cc` entirely. |
+| `FASTCACHE_AUTO_INSTALL` | `OFF` | Fetch `pace-cc` when no launcher is installed. |
 | `FASTCACHE_AUTO_INSTALL_VERSION` | *(empty)* | Install this exact version instead of resolving the latest. |
 | `FASTCACHE_AUTO_INSTALL_DIR` | per-user cache dir | Where fetched binaries are staged. |
 | `FASTCACHE_AUTO_INSTALL_REPO` | `LASTRADA-Software/fastcached` | Repository to fetch from. |
@@ -166,7 +166,7 @@ laid out exactly as the release archive is.
 ### Starting a daemon automatically
 
 `FASTCACHE_AUTO_INSTALL` alone still leaves a genuinely clean machine
-uncached: `fastcache-cc` caches nothing unless a `fastcached` daemon answers
+uncached: `pace-cc` caches nothing unless a `pace-kv` daemon answers
 at `FASTCACHE_ADDR`, and installing the launcher does not install one.
 `FASTCACHE_AUTO_START` closes that gap:
 
@@ -175,7 +175,7 @@ set(FASTCACHE_AUTO_START ON CACHE BOOL "" FORCE)   # before include(CompileCache
 ```
 
 or `-DFASTCACHE_AUTO_START=ON` on the command line. When nothing answers at
-`FASTCACHE_ADDR`, the module stages a `fastcached` binary from the very same
+`FASTCACHE_ADDR`, the module stages a `pace-kv` binary from the very same
 release archive it fetched (or would fetch) the launcher from, and starts it
 in the background — persistently, with its cache on disk under
 `FASTCACHE_AUTO_START_STORAGE_DIR` so it survives being restarted. It keeps
@@ -186,7 +186,7 @@ It is a separate opt-in from `FASTCACHE_AUTO_INSTALL`, and defaults `OFF`
 independently, for two reasons. Starting a long-lived background process is a
 materially bigger side effect than downloading a file, so wanting one must not
 imply wanting the other. And several projects rely on CI having **no**
-`fastcached` reachable, so a build transparently falls through to whatever else
+`pace-kv` reachable, so a build transparently falls through to whatever else
 is installed and usable — `FASTCACHE_AUTO_START` would remove that boundary if it
 defaulted on for everyone rather than only those who ask for it. (Which launcher
 it lands on does not enter into that: `ccache`, an `sccache` that
@@ -201,7 +201,7 @@ it as its own. Losing that race is success, not failure.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `FASTCACHE_AUTO_START` | `OFF` | Start a fetched `fastcached` in the background when none answers at `FASTCACHE_ADDR`. |
+| `FASTCACHE_AUTO_START` | `OFF` | Start a fetched `pace-kv` in the background when none answers at `FASTCACHE_ADDR`. |
 | `FASTCACHE_AUTO_START_STORAGE_DIR` | `<FASTCACHE_AUTO_INSTALL_DIR>/daemon-storage` | Where the auto-started daemon keeps its persistent cache. |
 
 **It will not fail your configure either.** No daemon binary published for
