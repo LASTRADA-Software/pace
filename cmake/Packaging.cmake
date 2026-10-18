@@ -183,10 +183,10 @@ if(UNIX AND NOT APPLE)
 
     # systemd ships the sysusers/tmpfiles tooling the maintainer scripts use.
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "systemd")
-    # Pace is fastcached renamed, and installing it beside fastcached would put two
-    # daemons on one port under two sets of units: the package manager refuses, and
-    # the remedy is uninstalling fastcached (docs/upgrading-to-pace.md). A conflict
-    # and nothing more -- no Replaces/Obsoletes, which would remove fastcached as a
+    # Pace is the old package renamed, and installing it beside that package would put
+    # two daemons on one port under two sets of units: the package manager refuses, and
+    # the remedy is uninstalling the old package (docs/upgrading-to-pace.md). A conflict
+    # and nothing more -- no Replaces/Obsoletes, which would remove the old package as a
     # side effect of an install and skip its own service teardown.
     set(CPACK_DEBIAN_PACKAGE_CONFLICTS "fastcached")
 
@@ -313,8 +313,8 @@ if(WIN32)
     # (Minted for Pace in 0.6.0; it must not be shared with any other product,
     # or that product's installer would treat Pace as an upgrade of it.)
     #
-    # Pace is a NEW product rather than an upgrade of fastcached: fastcached's
-    # code (581D183D-...) is DETECTED by packaging/windows/service-actions.xml and
+    # Pace is a NEW product rather than an upgrade of the one it was renamed from:
+    # that product's code (581D183D-...) is DETECTED by packaging/windows/service-actions.xml and
     # refused with a remedy, never upgraded, because a major upgrade of it would
     # leave the old services registered over deleted binaries (a nested removal
     # does not run its uninstall-service actions). See docs/upgrading-to-pace.md.
@@ -401,7 +401,7 @@ if(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
 
     # <COMPONENT> in these variable names is the component name uppercased.
     if(PACE_MACOS_SCRIPT_DIR)
-        # The preinstall refuses while fastcached is installed (docs/upgrading-to-pace.md).
+        # The preinstall refuses while the old product is installed (docs/upgrading-to-pace.md).
         set(CPACK_PREFLIGHT_RUNTIME_SCRIPT       "${PACE_MACOS_SCRIPT_DIR}/preinstall-runtime")
         set(CPACK_POSTFLIGHT_RUNTIME_SCRIPT      "${PACE_MACOS_SCRIPT_DIR}/postinstall-runtime")
         set(CPACK_POSTFLIGHT_LAUNCHAGENT_SCRIPT  "${PACE_MACOS_SCRIPT_DIR}/postinstall-launchagent")

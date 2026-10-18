@@ -2719,6 +2719,37 @@ set_tests_properties("launcher-env-reference" PROPERTIES
     TIMEOUT 60
 )
 
+# The rename to Pace (0.6.0) is complete: no first-party tracked file or path spells the old
+# product name except where scripts/brand-leftovers-exemptions.tsv says why, and no row of
+# that table has outlived its reason. `docs-subject`, because most of what it reads is prose.
+add_test(
+    NAME "brand-leftovers"
+    COMMAND ${CMAKE_COMMAND}
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        -P "${CMAKE_SOURCE_DIR}/scripts/check-brand-leftovers.cmake"
+)
+set_tests_properties("brand-leftovers" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
+    LABELS "hygiene;docs-subject"
+    TIMEOUT 120
+)
+
+# Both directions over synthetic git trees: a planted leftover and a stale row refuse, an
+# exempted one and a clean tree pass, and a tracked PATH is never exempt. `hygiene` only, as every
+# selftest: its scratch directory is a build-tree fact, so it cannot run from a bare tree.
+add_test(
+    NAME "brand-leftovers-selftest"
+    COMMAND ${CMAKE_COMMAND}
+        "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPACE_SCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/brand-leftovers-selftest"
+        -P "${CMAKE_SOURCE_DIR}/scripts/check-brand-leftovers-selftest.cmake"
+)
+set_tests_properties("brand-leftovers-selftest" PROPERTIES
+    FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
+    LABELS "hygiene"
+    TIMEOUT 120
+)
+
 # The two files agree today, at 17 names each, so a green run exercises the ACCEPTING
 # direction only and says nothing about whether the check can refuse. Nine synthetic
 # trees drive both, including the two empty-scan guards -- two empty lists agree

@@ -465,6 +465,17 @@ function Get-MsiScalar([string] $Path, [string] $Query) {
     }
 }
 
+# The message a package's LaunchCondition row shows when its condition is false: the refusal
+# text, read from the built package rather than assumed from the fragment.
+#
+# @param Path The .msi file.
+# @param Condition The row's condition, exactly as the package spells it.
+# @return The row's Description, or $null when the package has no row with that condition.
+function Get-MsiLaunchConditionMessage([string] $Path, [string] $Condition) {
+    $quoted = $Condition.Replace("'", "''")
+    return Get-MsiScalar $Path "SELECT ``Description`` FROM ``LaunchCondition`` WHERE ``Condition`` = '$quoted'"
+}
+
 # Reads one row of a package's Property table.
 #
 # @param Path The .msi file.
@@ -3023,7 +3034,7 @@ function Invoke-MsiServiceTableSelfTest {
 }
 
 Export-ModuleMember -Function Get-ServiceObservation, Get-ServiceVerdict, Assert-ServiceState, Assert-ServiceTable,
-    Get-MsiProperty, Get-MsiCustomActionType, Get-InstalledProductCodes, Assert-InstalledProduct, Show-MsiLog, Invoke-Msiexec, Assert-MsiLog,
+    Get-MsiProperty, Get-MsiLaunchConditionMessage, Get-MsiCustomActionType, Get-InstalledProductCodes, Assert-InstalledProduct, Show-MsiLog, Invoke-Msiexec, Assert-MsiLog,
     Get-MsiRestartManagerLines, Show-MsiRestartManagerLines, Get-MsiLogTimeOfDay, Get-MsiLinesAround, Show-MsiLogAroundFindings,
     Get-MsiActionRanPattern, Get-ServiceStabilityVerdict, Get-UpgradeVersionVerdict, Remove-PaceMachineState,
     Assert-NodeStatePrivate, Get-NodeServiceAccessVerdict, Get-DirectoryOwnerVerdict, Get-NodeFirewallVerdict, Assert-NodeFirewall,

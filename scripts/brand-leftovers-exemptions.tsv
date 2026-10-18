@@ -1,0 +1,31 @@
+# Where the old product name stays after the rename to Pace (0.6.0), and why.
+# Read by scripts/check-brand-leftovers.cmake (`ctest -R brand-leftovers`) and by the rename
+# tool, which did not rewrite a match of a row's regex in a file its glob takes.
+#
+#   path-glob <TAB> regex <TAB> reason
+#
+# The glob is fnmatch's (`*` crosses `/`). The regex is read by CMake and by Python alike, so
+# it is spelled in what both read the same way: classes ([.], [?], [(]), |, *, +.
+# A row that covers nothing is refused as stale. The rows of #1713 go with the two refusals in 0.8.0.
+*	fastcache-[a-z0-9-]+-v[0-9]+	A signing or domain-separation label: signed bytes no user sees, so renaming one changes what is signed and needs a version bump (spec section 1).
+bench/inproc_bench.py	jitbit[/ -]FastCache|FastCache[.]Benchmarks|github[.]com/jitbit/FastCache|jitbit FastCache	jitbit/FastCache is another project's name: the benchmark's comparison subject.
+src/apps/*bench/StorageBench.cpp	jitbit/FastCache|FastCache[.]Benchmarks	jitbit/FastCache is another project's name: the benchmark's comparison subject.
+docs/internals/performance.md	jitbit/FastCache	jitbit/FastCache is another project's name: the benchmark's comparison subject.
+.agent/reference/source-map.md	jitbit/FastCache	jitbit/FastCache is another project's name: the benchmark's comparison subject.
+scripts/brand-leftovers-exemptions.tsv	[Ff][Aa][Ss][Tt][Cc][Aa][Cc][Hh][Ee]	This table spells the names it exempts.
+docs/upgrading-to-pace.md	[Ff][Aa][Ss][Tt][Cc][Aa][Cc][Hh][Ee]	The upgrade guide has to name the product, paths, services and variables it upgrades from.
+scripts/msi-refuses-retired-product.ps1	fastcached|RETIRED_FASTCACHED_PRODUCT	Installs the old product's last MSI to prove Pace refuses to install over it, and asserts the launch condition by its property.
+packaging/macos/preinstall-runtime.sh.in	fastcached	Detects the old product's receipts and names its uninstaller, which is the remedy.
+cmake/Packaging.cmake	_CONFLICTS "fastcached"	The deb and rpm Conflicts name the old package: it is how the package manager refuses.
+packaging/windows/service-actions.xml	RETIRED_FASTCACHED_PRODUCT|fastcached is installed[.] Uninstall it [(]Settings &gt; Apps &gt; fastcached[)]	The MSI detects the old product and its launch condition names it in the remedy.
+README.md	Coming from fastcached[?]|Pace is fastcached renamed|Upgrading from fastcached to Pace	The README's pointer to the upgrade guide.
+mkdocs.yml	Upgrading from fastcached	The upgrade guide's navigation entry.
+src/Pace/Cli/RetiredEnvironment*	FASTCACHE_	The environment refusal names the retired prefix, and its test plants it (#1713).
+cmake/RetiredOptions.cmake	FASTCACHED_	The configure refusal names the retired option prefix (#1713).
+scripts/check-retired-options.cmake	FASTCACHED_	The configure refusal's test plants the retired option prefix (#1713).
+CMakeLists.txt	FASTCACHED_[*]	The comment beside the configure refusal's include (#1713).
+src/tests/CMakeLists.txt	FASTCACHED_ entry	The registration of the configure refusal's test (#1713).
+.agent/rules/build-and-toolchain.md	`FASTCACHE_[*]`|`FASTCACHED_[*]`	The Open work entry for the two refusals (#1713).
+.agent/guides/team-run.md	D:/fastcached	The main checkout on the team's machine is still that directory; renaming the text would not move it.
+cmake/portable/CompileCache.cmake	/mnt/d/fastcached/[.][.][.]	A measurement, quoted with the checkout it was taken in.
+scripts/reap-my-gate.sh	/mnt/d/fastcached-worktrees/wire	An observed listing row, quoted with the worktree it was taken in.
