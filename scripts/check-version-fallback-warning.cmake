@@ -28,7 +28,7 @@
 # DECISION takes its four inputs as arguments and reads nothing, and the rows below
 # state each combination explicitly.
 #
-# What this cannot cover is the wiring — that `_fc_cache_pace_cc_rejected_why`
+# What this cannot cover is the wiring — that `_pace_cache_pace_cc_rejected_why`
 # is set where the row is rejected and read where the fallback is chosen. Stated
 # rather than implied: only a real configure exercises that, and the narrow guard
 # is that the reason is remembered as a VARIABLE rather than parsed back out of the
@@ -47,9 +47,9 @@ endif()
 
 include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 
-if(NOT COMMAND _fc_cache_rejection_warning)
+if(NOT COMMAND _pace_cache_rejection_warning)
     message(FATAL_ERROR
-        "_fc_cache_rejection_warning is not defined. Either the define-only guard in "
+        "_pace_cache_rejection_warning is not defined. Either the define-only guard in "
         "cmake/portable/CompileCache.cmake returned before the function, or it was renamed and "
         "this check now proves nothing.")
 endif()
@@ -116,7 +116,7 @@ foreach(_row IN LISTS _rows)
         set(_thisCaveat "")
     endif()
 
-    _fc_cache_rejection_warning(
+    _pace_cache_rejection_warning(
         "${_reason}" "${_predicts}" "${_rejectedName}" "${_winner}" "${_thisCaveat}" "${_detail}" _got)
     math(EXPR _checked "${_checked} + 1")
 
@@ -196,7 +196,7 @@ foreach(_f "${_module}" "${_wire}")
 endforeach()
 
 file(READ "${_module}" _moduleText)
-if(NOT _moduleText MATCHES "set\\(_fc_cache_pace_cc_predicts \"([^\"]*)\"\\)")
+if(NOT _moduleText MATCHES "set\\(_pace_cache_pace_cc_predicts \"([^\"]*)\"\\)")
     message(FATAL_ERROR
         "check-version-fallback-warning: could not find pace-cc's `predicts` column in "
         "${_module}. Either it was renamed or the column is gone, and this check now proves "
@@ -225,7 +225,7 @@ endif()
 # And it must be NARROW. A column matching everything warns on "not installed" and
 # "no answer", which is the alarm nobody reads -- and no row above can see it,
 # because they supply their own pattern.
-_fc_cache_rejection_warning(
+_pace_cache_rejection_warning(
     "no answer within 10s" "${_declared}" "pace-cc" "sccache" "${_caveat}" "${_detail}" _wide)
 if(NOT _wide STREQUAL "")
     message(FATAL_ERROR

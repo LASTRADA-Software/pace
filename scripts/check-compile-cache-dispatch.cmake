@@ -9,8 +9,8 @@
 # said only that pace-cc was the launcher: measured on a workstation, 341 misses and
 # `NOT_CONFIGURED` on every one of them, found from a fleet dashboard reading 0 compiling.
 # `cmake/portable/CompileCache.cmake` now decides dispatch at configure, holds it in the cache,
-# bakes it into the launcher and says which way it decided (`_fc_hold_setting`,
-# `_fc_dispatch_state`). `PACE_ADDR` is held by the same rule: the environment seeds a tree
+# bakes it into the launcher and says which way it decided (`_pace_hold_setting`,
+# `_pace_dispatch_state`). `PACE_ADDR` is held by the same rule: the environment seeds a tree
 # with no entry, and a later difference is REPORTED and never applied, because a rule that let
 # the environment retarget a held value could not see a `-D` typing the value already held.
 #
@@ -44,7 +44,7 @@ endforeach()
 
 # Under `cmake -P` the module returns after its pure computations.
 include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
-foreach(command _fc_hold_setting _fc_unapplied_note _fc_dispatch_state)
+foreach(command _pace_hold_setting _pace_unapplied_note _pace_dispatch_state)
     if(NOT COMMAND ${command})
         message(FATAL_ERROR
             "${command} is not defined: the define-only guard in cmake/portable/CompileCache.cmake returned "
@@ -61,7 +61,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/lib/CheckCommon.cmake")
 #
 # For PACE_SCHEDULER the fragment is looked for in the dispatch line. For PACE_ADDR it is
 # looked for in the unapplied-value note, and `<none>` means no note may be produced. `envValue`
-# is what the module passes: the raw scheduler, and for the address what `_fc_resolve_addr`
+# is what the module passes: the raw scheduler, and for the address what `_pace_resolve_addr`
 # resolved -- the default when the name is absent. No fragment may hold a ';' (CheckCommon.cmake).
 set(decisionRows
     "PACE_SCHEDULER|OFF||OFF|||dispatch: off (no PACE_SCHEDULER in the configure environment, and this build tree now holds that|first configure, nothing said anywhere: off, and it says how to turn it on"
@@ -100,7 +100,7 @@ set(decidedOff 0)
 set(decidedNotes 0)
 foreach(row IN LISTS decisionRows)
     pace_row_fields("${row}" setting cached cacheValue envPresent envValue wantValue wantFragment about)
-    _fc_hold_setting("${cached}" "${cacheValue}" "${envPresent}" "${envValue}" gotValue gotSeeded gotUnapplied)
+    _pace_hold_setting("${cached}" "${cacheValue}" "${envPresent}" "${envValue}" gotValue gotSeeded gotUnapplied)
     math(EXPR decisions "${decisions} + 1")
 
     if(NOT "${gotValue}" STREQUAL "${wantValue}")
@@ -111,7 +111,7 @@ foreach(row IN LISTS decisionRows)
     endif()
 
     if(setting STREQUAL "PACE_SCHEDULER")
-        _fc_dispatch_state("${gotValue}" "${gotSeeded}" "${gotUnapplied}" "${envValue}" gotLine gotEntry)
+        _pace_dispatch_state("${gotValue}" "${gotSeeded}" "${gotUnapplied}" "${envValue}" gotLine gotEntry)
         # One prefix for both states, so a reader or a script looking for `[cache] dispatch:` finds
         # the line whichever way the configure decided.
         string(FIND "${gotLine}" "[cache] dispatch: " prefixAt)
@@ -133,7 +133,7 @@ foreach(row IN LISTS decisionRows)
     else()
         set(gotLine "<none>")
         if(gotUnapplied)
-            _fc_unapplied_note("${setting}" "${gotValue}" "${envValue}" gotLine)
+            _pace_unapplied_note("${setting}" "${gotValue}" "${envValue}" gotLine)
             math(EXPR decidedNotes "${decidedNotes} + 1")
         endif()
     endif()

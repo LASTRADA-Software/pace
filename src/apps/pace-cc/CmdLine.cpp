@@ -1884,7 +1884,7 @@ std::optional<std::string> MappedByPrefixMapRules(std::span<std::string const> a
 
     // The LAST match wins, so the loop records rather than returns. Measured on gcc
     // 14 and clang 20, two rules over one directory: the second replacement is what
-    // `DW_AT_comp_dir` holds. It is also what `_fc_debug_prefix_map_rules` relies on
+    // `DW_AT_comp_dir` holds. It is also what `_pace_debug_prefix_map_rules` relies on
     // -- it emits the source rule first and the build-tree rule last precisely so the
     // build tree wins -- so a first-match model here would predict the source rule's
     // replacement and disagree with every object this project builds.

@@ -4628,7 +4628,7 @@ set_tests_properties("compile-cache-daemon-staging" PROPERTIES
 #
 # The staging test above is green whether or not that is explained: its stand-in exits 3
 # with nothing on either stream, so it reaches this very branch and asserts only that a
-# daemon was MENTIONED. `_fc_auto_start_pace_kv` spawned under `OUTPUT_QUIET
+# daemon was MENTIONED. `_pace_auto_start_pace_kv` spawned under `OUTPUT_QUIET
 # ERROR_QUIET` and reported `(127)` -- a number that reads as *not found* for a binary
 # the module has just staged and knows the path of, while the sentence that explains it
 # sat on the child's stderr.
@@ -5272,7 +5272,7 @@ endif()
 # PACE_AUTO_START spawn+probe (issue #90), the real-binary counterpart to
 # compile-cache-daemon-staging above. That test proves the staging plumbing
 # with fake --version-only stand-ins; a fake has no socket to accept on, so it
-# cannot prove _fc_auto_start_pace_kv actually starts something that
+# cannot prove _pace_auto_start_pace_kv actually starts something that
 # answers a real connection. This drives the real, freshly built pace-kv
 # and pace-cc instead: a configure with no daemon reachable spawns one, a
 # real translation unit compiled through the configured launcher reports a

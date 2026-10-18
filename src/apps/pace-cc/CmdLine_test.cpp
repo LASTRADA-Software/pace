@@ -1822,7 +1822,7 @@ TEST_CASE("MappedCompileDirectory answers nothing when no rule reaches this dire
 
 TEST_CASE("MappedCompileDirectory reads the build-tree rule this project emits")
 {
-    // The shape `_fc_debug_prefix_map_rules` produces: source rule first, build-tree
+    // The shape `_pace_debug_prefix_map_rules` produces: source rule first, build-tree
     // rule last, the working directory being the build tree. Measured on gcc 14 and
     // clang 20, such a compile records `.` as its `DW_AT_comp_dir`.
     std::vector<std::string> const argv {
@@ -1838,7 +1838,7 @@ TEST_CASE("MappedCompileDirectory reads the build-tree rule this project emits")
 TEST_CASE("MappedCompileDirectory follows the LAST matching rule, not the first")
 {
     // Both drivers honour the last match -- measured, two rules over one directory
-    // giving the second replacement. Not a detail: `_fc_debug_prefix_map_rules` emits
+    // giving the second replacement. Not a detail: `_pace_debug_prefix_map_rules` emits
     // the source rule first and the build-tree rule last SO THAT the build tree wins,
     // so a first-match model would predict the source rule's replacement for every
     // build this project does.
@@ -1940,7 +1940,7 @@ TEST_CASE("The source spelling and the compilation directory read the SAME rules
     // a replacement its own driver does not write is #506's disagreement rebuilt in
     // the other direction.
     //
-    // The build-tree rule LAST is what this project's own `_fc_debug_prefix_map_rules`
+    // The build-tree rule LAST is what this project's own `_pace_debug_prefix_map_rules`
     // emits, so the two rules here are the real arrangement rather than a synthetic
     // one.
     std::vector<std::string> const argv { "g++",

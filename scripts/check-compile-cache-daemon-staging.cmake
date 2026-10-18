@@ -8,9 +8,9 @@
 # This is the mirror half of that story, the counterpart to
 # check-compile-cache-install.cmake for the launcher: deterministic, offline,
 # and cheap, because what it exercises is the asset-table plumbing (the new
-# _daemon_member/_daemon_exe columns, _fc_auto_install_fetch_archive being
+# _daemon_member/_daemon_exe columns, _pace_auto_install_fetch_archive being
 # shared rather than downloading the archive a second time, and
-# _fc_auto_install_stage_member placing the result under the right
+# _pace_auto_install_stage_member placing the result under the right
 # version/platform directory) rather than whether a real daemon can bind a
 # real port — that needs a real pace-kv and a real pace-cc, which is
 # what the smoke-labelled check-compile-cache-daemon-start test covers
@@ -134,7 +134,7 @@ file(CREATE_LINK "${hostUname}" "${sandbox}/usr/bin/uname" COPY_ON_ERROR SYMBOLI
 set(stageDir "${PACE_SCRATCH_DIR}/stage")
 set(buildDir "${PACE_SCRATCH_DIR}/build")
 # PACE_ADDR names a port nothing on this host is listening on, so
-# _fc_daemon_answering's pre-check finds nothing and the module proceeds to
+# _pace_daemon_answering's pre-check finds nothing and the module proceeds to
 # stage — staging is all this test asserts; check-compile-cache-daemon-start
 # is what asserts the process actually gets spawned and answers.
 set(arguments
@@ -170,7 +170,7 @@ if(NOT configureResult EQUAL 0)
 endif()
 
 # The fake pace-kv answers --version and nothing else, so the poll loop in
-# _fc_auto_start_pace_kv never actually observes it listening — real
+# _pace_auto_start_pace_kv never actually observes it listening — real
 # connectivity needs a real daemon, which is check-compile-cache-daemon-start's
 # job. This configure is still expected to report having tried, and to have
 # fallen through cleanly rather than failing.

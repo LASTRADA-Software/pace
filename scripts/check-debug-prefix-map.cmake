@@ -32,9 +32,9 @@ endif()
 # daemon start.
 include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 
-if(NOT COMMAND _fc_debug_prefix_map_rules)
+if(NOT COMMAND _pace_debug_prefix_map_rules)
     message(FATAL_ERROR
-        "_fc_debug_prefix_map_rules is not defined. Either the define-only guard in "
+        "_pace_debug_prefix_map_rules is not defined. Either the define-only guard in "
         "cmake/portable/CompileCache.cmake returned before the function, or the function was renamed "
         "and this check now proves nothing.")
 endif()
@@ -105,7 +105,7 @@ foreach(row IN LISTS Layouts)
         set(expectedMapped ON)
     endif()
 
-    _fc_debug_prefix_map_rules("${binaryDir}" "${sourceDir}" rules mapped)
+    _pace_debug_prefix_map_rules("${binaryDir}" "${sourceDir}" rules mapped)
 
     if(NOT "${rules}" STREQUAL "${expectedRules}")
         message(STATUS "  binary='${binaryDir}' source='${sourceDir}'")
@@ -141,9 +141,9 @@ list(LENGTH Layouts layoutCount)
 # The dependency rule is LAST because GCC and Clang honour the last matching rule; a cache
 # kept inside the checkout must still name its files by the machine-independent `deps/`.
 
-if(NOT COMMAND _fc_source_prefix_map_rules)
+if(NOT COMMAND _pace_source_prefix_map_rules)
     message(FATAL_ERROR
-        "_fc_source_prefix_map_rules is not defined. Either the define-only guard in "
+        "_pace_source_prefix_map_rules is not defined. Either the define-only guard in "
         "cmake/portable/CompileCache.cmake returned before the function, or the function was renamed "
         "and this check now proves nothing.")
 endif()
@@ -172,7 +172,7 @@ foreach(row IN LISTS SourceLayouts)
         string(REPLACE "," ";" expectedRules "${expectedRules}")
     endif()
 
-    _fc_source_prefix_map_rules("${sourceDir}" "${depsDir}" rules)
+    _pace_source_prefix_map_rules("${sourceDir}" "${depsDir}" rules)
     if(NOT "${rules}" STREQUAL "${expectedRules}")
         message(STATUS "  source='${sourceDir}' deps='${depsDir}'")
         message(STATUS "    expected rules: ${expectedRules}")

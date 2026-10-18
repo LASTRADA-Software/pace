@@ -1887,7 +1887,7 @@ case13_at() {
     # `${proj}/build/mapcase`, so the source is OUTSIDE the mapped root and the
     # reference compile's own `-fdebug-prefix-map` never matches it. Both sides
     # therefore record the same raw absolute path and agree. A build whose source lies
-    # UNDER a mapped root -- which is what `_fc_debug_prefix_map_rules` produces for an
+    # UNDER a mapped root -- which is what `_pace_debug_prefix_map_rules` produces for an
     # in-tree build -- is the arrangement #800 is about, and this case cannot see it.
     #
     # Since #800 the launcher sends what its OWN compile would record: the source
@@ -1942,7 +1942,7 @@ case13_at() {
 
     # And the VALUE, where this platform's driver maps the way the rules assume.
     # Separate from the agreement above on purpose: agreement is the ticket's clause
-    # and holds everywhere, while `.` is what `_fc_debug_prefix_map_rules` produces
+    # and holds everywhere, while `.` is what `_pace_debug_prefix_map_rules` produces
     # and is a fact about the driver. A driver that accepts the flag and does not
     # remap `DW_AT_comp_dir` leaves the pair agreeing and unmapped, which is worth
     # saying out loud rather than either asserting or ignoring.
