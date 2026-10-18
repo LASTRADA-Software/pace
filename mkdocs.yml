@@ -104,6 +104,7 @@ nav:
   - How it works: how-it-works.md
   - Getting started:
     - Install: getting-started/install.md
+    - Upgrading from fastcached: upgrading-to-pace.md
     - Quickstart: getting-started/quickstart.md
     - Configuration: getting-started/configuration.md
     - Distributed compilation: getting-started/distributed-compilation.md

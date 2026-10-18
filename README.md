@@ -3,6 +3,9 @@
 [![Build](https://github.com/LASTRADA-Software/pace/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/LASTRADA-Software/pace/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/LASTRADA-Software/pace/branch/master/graph/badge.svg)](https://codecov.io/gh/LASTRADA-Software/pace)
 
+> **Coming from fastcached?** Pace is fastcached renamed, in 0.6.0, as a clean break:
+> see [Upgrading from fastcached to Pace](docs/upgrading-to-pace.md).
+
 Three things ship from this repository:
 
 - **`pace-kv`** — a fast in-memory cache daemon that speaks the memcached
