@@ -40,7 +40,7 @@ class AuthPolicy
     /// **By value and `SecureString`, so the caller's copy is the last ordinary one.**
     /// The secret is released through `SecureAllocator` from here on, at every copy and
     /// at every reload snapshot `ConfigReloader` retains
-    /// ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+    /// ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)).
     AuthPolicy(std::string username, SecureString secret) noexcept;
 
     /// @return True when a non-empty secret is configured (auth is required).

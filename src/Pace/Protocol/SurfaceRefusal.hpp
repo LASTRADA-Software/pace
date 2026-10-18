@@ -17,9 +17,9 @@ namespace Pace::Cc
 ///
 /// `CompileCacheWire::EncodeErrorReply` takes a code and knows nothing about a sink,
 /// so counting a refusal was a thing each author had to remember. Six sites forgot
-/// ([#327](https://github.com/LASTRADA-Software/fastcached/issues/327)), then five
+/// ([#327](https://github.com/LASTRADA-Software/pace/issues/327)), then five
 /// more accumulated on the merged listener through an entire surface migration
-/// ([#447](https://github.com/LASTRADA-Software/fastcached/issues/447)) -- and a
+/// ([#447](https://github.com/LASTRADA-Software/pace/issues/447)) -- and a
 /// refusal answered while nothing rises is indistinguishable, on `/metrics`, from a
 /// port nobody is talking to.
 ///
@@ -33,7 +33,7 @@ namespace Pace::Cc
 /// which is also how "forgot" is spelled. **A scan cannot tell a decision from an
 /// omission when the two produce identical text**, which is the silence-reads-as-
 /// coverage failure this file's own check exists to close, one level down
-/// ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)).
+/// ([#492](https://github.com/LASTRADA-Software/pace/issues/492)).
 ///
 /// So the three spellings are three different FACTS, each of which somebody has
 /// asserted:

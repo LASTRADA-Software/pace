@@ -18,7 +18,7 @@
 # because it matched POSIX paths only: a guard that could not fail on the defect it guards.
 #
 # The two dimensions are independent, and each has already shipped a defect: WHERE a checkout
-# lives (#1040 -- a pattern anchored on a directory name matched CI's `.../fastcached/` and no
+# lives (#1040 -- a pattern anchored on a directory name matched CI's `.../pace/` and no
 # lane worktree) and HOW its separators are spelled (the above). So a verdict is taken at a root
 # AND in every spelling of it.
 #

@@ -590,7 +590,7 @@ option(PACE_AUTO_INSTALL
        "Download pace-cc from GitHub Releases when no compiler-cache launcher is installed [default: OFF]"
        OFF)
 
-set(PACE_AUTO_INSTALL_REPO "LASTRADA-Software/fastcached" CACHE STRING
+set(PACE_AUTO_INSTALL_REPO "LASTRADA-Software/pace" CACHE STRING
     "owner/name of the GitHub repository to fetch prebuilt pace-cc binaries from")
 set(PACE_AUTO_INSTALL_API "https://api.github.com" CACHE STRING
     "base URL of the GitHub API used to resolve the latest release")
@@ -674,7 +674,7 @@ endif()
 #
 #   _fc_asset_<id>_system        CMAKE_HOST_SYSTEM_NAME this row serves
 #   _fc_asset_<id>_arch          host processor spellings mapping to this row
-#   _fc_asset_<id>_platform      asset-name infix, after "fastcached-<version>-"
+#   _fc_asset_<id>_platform      asset-name infix, after "pace-<version>-"
 #   _fc_asset_<id>_ext           archive extension
 #   _fc_asset_<id>_member        path to the launcher inside the archive's
 #                                top-level directory, which differs per
@@ -809,7 +809,7 @@ function(_fc_auto_install_release_json outVar reasonVar)
         endif()
     endforeach()
 
-    set(_tmp "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-download/latest.json")
+    set(_tmp "${CMAKE_BINARY_DIR}/CMakeFiles/pace-download/latest.json")
     file(DOWNLOAD
         "${PACE_AUTO_INSTALL_API}/repos/${PACE_AUTO_INSTALL_REPO}/releases/latest"
         "${_tmp}"
@@ -980,7 +980,7 @@ function(_fc_auto_install_fetch_archive row version json unpackDirVar reasonVar)
     set(_version "${version}")
     set(_json "${json}")
 
-    set(_stem "fastcached-${_version}-${_fc_asset_${_row}_platform}")
+    set(_stem "pace-${_version}-${_fc_asset_${_row}_platform}")
     set(_assetName "${_stem}.${_fc_asset_${_row}_ext}")
     set(_url "")
     set(_digest "")
@@ -1023,7 +1023,7 @@ function(_fc_auto_install_fetch_archive row version json unpackDirVar reasonVar)
 
     message(STATUS "[cache] Fetching the pace-kv ${_version} release archive for ${_fc_asset_${_row}_platform}")
 
-    set(_work "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-download")
+    set(_work "${CMAKE_BINARY_DIR}/CMakeFiles/pace-download")
     set(_archive "${_work}/${_assetName}")
     file(DOWNLOAD "${_url}" "${_archive}"
          STATUS _status
@@ -1227,7 +1227,7 @@ function(_fc_daemon_answering addr outVar)
     if(NOT PACE_CC)
         return()
     endif()
-    set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-probe")
+    set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/pace-probe")
     file(MAKE_DIRECTORY "${_dir}")
     set(_src "${_dir}/portcheck.cpp")
     if(NOT EXISTS "${_src}")
@@ -1384,7 +1384,7 @@ function(_fc_auto_start_pace_kv)
         # answers 127, which reads as "not found" for a binary this module has just
         # staged and knows the path of. The daemon's own first line says which
         # library, and it was captured by nobody until
-        # [#1538](https://github.com/LASTRADA-Software/fastcached/issues/1538) --
+        # [#1538](https://github.com/LASTRADA-Software/pace/issues/1538) --
         # `OUTPUT_QUIET ERROR_QUIET` here threw away the one sentence that explains
         # the number. An empty capture degrades to the number alone, which is what
         # this said before.
@@ -1479,7 +1479,7 @@ endif()
 function(_fc_probe_pace_cc outVar reasonVar)
     set(${outVar} FALSE PARENT_SCOPE)
 
-    set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/fastcache-probe")
+    set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/pace-probe")
     set(_src "${_dir}/probe.cpp")
     # Both the file and its content are fixed, so the probe itself is a cache
     # hit from the second configure onwards — which exercises FETCH rather than

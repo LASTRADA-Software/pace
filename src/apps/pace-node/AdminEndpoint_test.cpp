@@ -1283,19 +1283,19 @@ TEST_CASE("The history path follows the directories a node already has", "[node]
     // operator to point at the wrong disk.
     CHECK(FleetHistoryPath(cfg).empty());
 
-    cfg.cacheDir = "/var/lib/fastcache";
-    CHECK(FleetHistoryPath(cfg) == std::filesystem::path { "/var/lib/fastcache" } / "fleet-history.bin");
+    cfg.cacheDir = "/var/lib/pace";
+    CHECK(FleetHistoryPath(cfg) == std::filesystem::path { "/var/lib/pace" } / "fleet-history.bin");
     // Every file the node keeps comes out of the one table, so a third of them
     // cannot end up derived by string surgery on a second's answer.
     auto const paths = HistoryPaths::For(cfg);
-    CHECK(paths.fleet == std::filesystem::path { "/var/lib/fastcache" } / "fleet-history.bin");
-    CHECK(paths.node == std::filesystem::path { "/var/lib/fastcache" } / "node-history.bin");
-    CHECK(paths.received == std::filesystem::path { "/var/lib/fastcache" } / "received-history.bin");
+    CHECK(paths.fleet == std::filesystem::path { "/var/lib/pace" } / "fleet-history.bin");
+    CHECK(paths.node == std::filesystem::path { "/var/lib/pace" } / "node-history.bin");
+    CHECK(paths.received == std::filesystem::path { "/var/lib/pace" } / "received-history.bin");
 
     // The cluster directory wins: the history is a leader's record, and a leader is
     // a cluster member.
-    cfg.clusterDir = "/var/lib/fastcache-cluster";
-    CHECK(FleetHistoryPath(cfg) == std::filesystem::path { "/var/lib/fastcache-cluster" } / "fleet-history.bin");
+    cfg.clusterDir = "/var/lib/pace-cluster";
+    CHECK(FleetHistoryPath(cfg) == std::filesystem::path { "/var/lib/pace-cluster" } / "fleet-history.bin");
 }
 
 TEST_CASE("A node started with no configuration keeps its history in the state directory its start resolved",
@@ -1316,7 +1316,7 @@ TEST_CASE("A node started with no configuration keeps its history in the state d
     CHECK(paths.fleet.filename() == "fleet-history.bin");
 
     // Beside a cache directory too: the state directory is where the node's own files are.
-    cfg.cacheDir = "/var/lib/fastcache";
+    cfg.cacheDir = "/var/lib/pace";
     CHECK(FleetHistoryPath(cfg).parent_path() == NodeStateDirectory(cfg));
 }
 
@@ -1328,7 +1328,7 @@ namespace
 ///
 /// **That the history holds several readings a RENDER bucket apart is the whole point
 /// of this fixture rather than a detail of it**
-/// ([#1345](https://github.com/LASTRADA-Software/fastcached/issues/1345)). Against a
+/// ([#1345](https://github.com/LASTRADA-Software/pace/issues/1345)). Against a
 /// history holding one sample every series is a run of one -- which `FleetChart` draws
 /// as a `<circle>` dot and a bare `M x y` that strokes nothing -- so a route handing
 /// the renderer a populated history and a route handing it an empty one produce the

@@ -17,7 +17,7 @@ namespace Pace::Cc
 /// fresh compile it is checked against **by construction**. So the one instrument
 /// that turns a wrong object from invisible into loud reported a wrong object on
 /// every hit, on the platform where the defect it exists to detect was observed
-/// ([#493](https://github.com/LASTRADA-Software/fastcached/issues/493)).
+/// ([#493](https://github.com/LASTRADA-Software/pace/issues/493)).
 ///
 /// **The measurements this is built on, the reasoning, and the two conclusions that
 /// are easiest to get backwards live in ONE place**:

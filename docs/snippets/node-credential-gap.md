@@ -14,7 +14,7 @@
     establishes nothing, so a client configured with a token is never broken by a node —
     the node's scheduler once answered it `dispatch-not-permitted` instead, which the
     launcher treats as fatal
-    ([#340](https://github.com/LASTRADA-Software/fastcached/issues/340)).
+    ([#340](https://github.com/LASTRADA-Software/pace/issues/340)).
 
     A ticket travels in the clear, so it is bound to ONE endpoint, lives a minute and is
     spent once at the node that accepts it; a node proof is sealed from its first frame. A

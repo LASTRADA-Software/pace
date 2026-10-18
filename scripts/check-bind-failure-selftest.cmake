@@ -3,7 +3,7 @@
 # `bind-failure-seam` must be seen to fail, in each of the four ways it can.
 #
 # The check it drives is the CODE half of
-# [#352](https://github.com/LASTRADA-Software/fastcached/issues/352). The table half
+# [#352](https://github.com/LASTRADA-Software/pace/issues/352). The table half
 # is a `static_assert` and needs no selftest: a row omitting the column does not
 # compile, which is a fact anyone can verify by trying it. The code half is a source
 # scan, and a source scan that has never been watched refuse is indistinguishable

@@ -61,7 +61,7 @@ pace-kv --storage-max-value=512M
 |--------|---------------|-------------|--------------|
 | `gcc`, `g++`, `cc`, `c++` | GNU | `-o` | `-MD -MF <path>` depfile |
 | `clang`, `clang++` | GNU | `-o` | `-MD -MF <path>` depfile |
-| `cl` | MSVC | `/Fo` | `/showIncludes` on **stderr** — *unverified, [#825](https://github.com/LASTRADA-Software/fastcached/issues/825)* |
+| `cl` | MSVC | `/Fo` | `/showIncludes` on **stderr** — *unverified, [#825](https://github.com/LASTRADA-Software/pace/issues/825)* |
 | `clang-cl` | MSVC | `/Fo` | `/showIncludes` on **stdout** |
 
 The stream column describes a *compile* run, which is what the replay path
@@ -218,7 +218,7 @@ and the daemon accepts 1 at most, so the daemon is the older of the two. Every
 other reason (not installed, no answer, an uncacheable probe) describes a cache
 nobody set up and stays at `STATUS`, because a warning that fires for all of them
 is one everybody learns to skip. Issue
-[#815](https://github.com/LASTRADA-Software/fastcached/issues/815) is what that
+[#815](https://github.com/LASTRADA-Software/pace/issues/815) is what that
 warning is for: a packaged daemon a release behind a hand-built launcher, refusing
 every exchange, with the build silently going through a different cache for weeks.
 
@@ -350,7 +350,7 @@ environment) or `-DUSE_COMPILER_CACHE=OFF` -- both of which travel as command-li
 arguments rather than through an environment block.
 
 **The CMake integration honours the same opt-out, and until
-[#372](https://github.com/LASTRADA-Software/fastcached/issues/372) it did not.**
+[#372](https://github.com/LASTRADA-Software/pace/issues/372) it did not.**
 `cmake/portable/CompileCache.cmake` decides whether the launcher is used at all, and
 it folded a set-but-empty `PACE_ADDR` into the default -- so on a POSIX shell,
 where the spelling above *does* travel, `export PACE_ADDR=` reached the launcher
@@ -386,7 +386,7 @@ That matters here on one path only: a **dispatched** compile. A worker compiles
 preprocessed text, which has no `#include` left in it, so the worker's compiler
 reports no dependencies and the launcher writes the record itself from what its own
 probe saw. Until
-[#700](https://github.com/LASTRADA-Software/fastcached/issues/700) it wrote the
+[#700](https://github.com/LASTRADA-Software/pace/issues/700) it wrote the
 English `Note: including file:` unconditionally. On a localized build Ninja matched
 none of those lines, recorded **no dependencies** for the translation unit, printed
 the notes as ordinary compiler output, and stopped rebuilding it when its headers
@@ -472,7 +472,7 @@ than none.
 **The localized case is untested against a real localized compiler**, and that is
 recorded rather than implied: `VSLANG` selects among the language packs an
 installation *has*, so an English-only Visual Studio cannot be made to produce a
-German note. [#878](https://github.com/LASTRADA-Software/fastcached/issues/878) stays
+German note. [#878](https://github.com/LASTRADA-Software/pace/issues/878) stays
 open for that half. If you run a localized toolchain, set the variable.
 
 **Sharing a cache across UI languages is safe from generation 3 onward**, and this
@@ -494,18 +494,18 @@ storing values whose notes an English peer replayed and could not match — new 
 on a machine that had none, since the cache key does **not** fold the prefix (a German
 and an English Visual Studio of the same toolset key identically, deliberately, because
 the identity probe is forced to English,
-[#692](https://github.com/LASTRADA-Software/fastcached/issues/692)). Closing it moved
+[#692](https://github.com/LASTRADA-Software/pace/issues/692)). Closing it moved
 `CompileValueVersion` to 3
-([#879](https://github.com/LASTRADA-Software/fastcached/issues/879)), so a value written
+([#879](https://github.com/LASTRADA-Software/pace/issues/879)), so a value written
 by a generation-2 build is refused rather than replayed.
 
 The byte has moved three times since: to 4 for
-[#202](https://github.com/LASTRADA-Software/fastcached/issues/202), to 5 for
-[#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270), which put back the
+[#202](https://github.com/LASTRADA-Software/pace/issues/202), to 5 for
+[#1270](https://github.com/LASTRADA-Software/pace/issues/1270), which put back the
 half of the note anchor #891 gave away, and to **6**, where an MSVC-family compile's
 replayed warnings, errors and `note:` lines stopped naming the checkout that stored them
 and a stored path's `..` segments are collapsed
-([#1593](https://github.com/LASTRADA-Software/fastcached/issues/1593)). Each of those is
+([#1593](https://github.com/LASTRADA-Software/pace/issues/1593)). Each of those is
 its own cold cache, and the
 paragraph below applies to every one of them unchanged. **Expect one cold cache on the
 upgrade** — one, because a refused generation now falls through to the miss path and the
@@ -519,7 +519,7 @@ What this still does **not** cover. A *local* compile on a localized toolchain t
 has told it what prefix that compiler uses — an unmatched marker rewrites nothing, so
 such a machine is exactly where it was rather than worse. Discovering the prefix from
 the compiler is
-[#878](https://github.com/LASTRADA-Software/fastcached/issues/878), and it needs no
+[#878](https://github.com/LASTRADA-Software/pace/issues/878), and it needs no
 further generation: the stored form is already locale-free, so #878 only supplies a
 better value to normalize with. Setting this variable fixes a localized machine's
 dispatched notes, and for an **ASCII** prefix it also gets that machine's stored regions
@@ -536,7 +536,7 @@ region is stored uncanonicalized with no diagnostic. A **dispatched** compile on
 host is unaffected, because the launcher synthesises those notes from the same UTF-8
 value it compares against. Decoding the marker through the same policy as the paths is
 the repair, and it belongs with
-[#878](https://github.com/LASTRADA-Software/fastcached/issues/878), which is already the
+[#878](https://github.com/LASTRADA-Software/pace/issues/878), which is already the
 ticket for learning the prefix properly.
 
 ## How it works
@@ -837,7 +837,7 @@ none of them is a caching failure.
 | `this launcher and the fleet disagree about the wire` | A protocol, codec or framing mismatch, or a peer answering a compile with a refusal from another surface. Expected and bounded during a staggered upgrade; a count that keeps rising afterwards names a machine that never came back. Two machines of one build cannot produce it. |
 | `the fleet refused with a reason this launcher does not know` | A refusal code newer than this launcher. Upgrade `pace-cc`; the verbose line carries the code the fleet actually sent. |
 | `the fleet could not be reached` | Something past the LEASE did not answer, broke mid-reply, or ran out of budget — the scheduler's half is the four rows below, so this is usually the **worker** the lease named, and the verbose line names it. |
-| `the scheduler made no connection: its name did not resolve, it refused, or no connection completed within the connect bound` | The LEASE never reached the scheduler. If every compile shows this, check the address in `PACE_SCHEDULER` before suspecting the fleet — a wrong one, or a name that does not resolve, looks exactly like a fleet that is entirely down. Rising in bursts on a busy build, it is the scheduler node's accept queue overflowing ([#1668](https://github.com/LASTRADA-Software/fastcached/issues/1668)). |
+| `the scheduler made no connection: its name did not resolve, it refused, or no connection completed within the connect bound` | The LEASE never reached the scheduler. If every compile shows this, check the address in `PACE_SCHEDULER` before suspecting the fleet — a wrong one, or a name that does not resolve, looks exactly like a fleet that is entirely down. Rising in bursts on a busy build, it is the scheduler node's accept queue overflowing ([#1668](https://github.com/LASTRADA-Software/pace/issues/1668)). |
 | `the scheduler's connection broke before it answered` | The scheduler took the connection and it broke before the lease was answered — the scheduler node stopped or restarted mid-exchange. |
 | `the scheduler connected, and no answer arrived within the bound` | The connection completed and no lease answer came back in time. A completed connect is the kernel's, not proof the scheduler's loop took it, so this is a scheduler node too busy to answer — or one whose accept loop has stalled. |
 | `the scheduler stopped reporting progress` | The scheduler's progress pulses stopped mid-exchange: the node is alive at the TCP level and its answer stalled. |
@@ -885,7 +885,7 @@ ask.
 | `uses __TIME__/__DATE__/__TIMESTAMP__` | Deliberate: the TU is non-deterministic and would never hit. Reported as *uncacheable*, not as an error. |
 | `a command-line path is drive-relative under no root`, `a reported dependency path is drive-relative under no root` | Deliberate, and Windows-only. A path like `C:foo\bar.hpp` resolves against drive `C:`'s **own** current directory, which no cache entry records — so the launcher can neither key it (a header moved inside it would not re-key) nor check it on replay (there is no directory to `stat` it against). Caching such a compile could serve a stale dependency record under a zero exit code, so it is not cached at all. Reported as *uncacheable*, not as an error. Spell the path absolutely (`C:\foo\bar.hpp`), make it relative, or bring it under `PACE_SOURCE_DIR`/`PACE_BINARY_DIR`. The first is the rule applied to the command line, the second to what the compiler reported; `PACE_VERBOSE` names the offending path itself. |
 | `daemon does not support authentication; the configured credential was ignored` | `PACE_TOKEN` is set but the daemon predates the AUTH verb. Caching works normally — the daemon steps over the verb it does not know and serves the command — but this traffic is **not** authenticated. Said once per invocation rather than per exchange. Upgrade the daemon, or unset the token if it was not meant to apply here. |
-| `no machine ticket: this machine's node did not answer MINT-TICKET`, `... refused MINT-TICKET`, `... answered MINT-TICKET with none`, `... PACE_ADDR names no endpoint ...` | This machine's node could not mint the ticket an exchange with another machine presents, so that exchange carried none. Whether it was then refused is its audience's decision: a cache or scheduler that requires a ticket refuses it, and the reason is recorded in place of that refusal because it names the thing to fix. The node is asked over loopback at `PACE_ADDR`'s port, whatever `PACE_SCHEDULER` names: start it, or point `PACE_ADDR` at the port it listens on. `did not answer` with `it could not be reached` while a node runs on this machine is first a node that is not listening on loopback at that port — one on another port, or bound only to a non-loopback address, prints the same line; check that before anything else. A node that IS listening on loopback at that port and still prints it did not complete the loopback connect within the 50 ms cap — a node saturated by this machine's own build is the likely case, and it is not yet measured ([#1668](https://github.com/LASTRADA-Software/fastcached/issues/1668)). No setting raises that cap (`PACE_CONNECT_TIMEOUT` only lowers it). That invocation presents no ticket for the rest of its life, so a cache or scheduler that requires one refuses it and the compile runs locally; lowering the build's parallelism is the only lever until #1668 is decided, and it is an inferred one, not a measured one. The build succeeds either way; only the remote work is lost. `PACE_VERBOSE=1` says it with the endpoint and the node's own words, at most twice per invocation: once on the first failure, and once more if a later failure means the node is not asked again, since that changes what every later exchange carries. A node that did not answer is asked once per invocation and not again, under a connect bound sized for loopback rather than for the network, so a machine with no node pays about that bound, once per compile (on Linux, which refuses a closed loopback port at once, next to nothing); a cache with authentication off serves an exchange without one. |
+| `no machine ticket: this machine's node did not answer MINT-TICKET`, `... refused MINT-TICKET`, `... answered MINT-TICKET with none`, `... PACE_ADDR names no endpoint ...` | This machine's node could not mint the ticket an exchange with another machine presents, so that exchange carried none. Whether it was then refused is its audience's decision: a cache or scheduler that requires a ticket refuses it, and the reason is recorded in place of that refusal because it names the thing to fix. The node is asked over loopback at `PACE_ADDR`'s port, whatever `PACE_SCHEDULER` names: start it, or point `PACE_ADDR` at the port it listens on. `did not answer` with `it could not be reached` while a node runs on this machine is first a node that is not listening on loopback at that port — one on another port, or bound only to a non-loopback address, prints the same line; check that before anything else. A node that IS listening on loopback at that port and still prints it did not complete the loopback connect within the 50 ms cap — a node saturated by this machine's own build is the likely case, and it is not yet measured ([#1668](https://github.com/LASTRADA-Software/pace/issues/1668)). No setting raises that cap (`PACE_CONNECT_TIMEOUT` only lowers it). That invocation presents no ticket for the rest of its life, so a cache or scheduler that requires one refuses it and the compile runs locally; lowering the build's parallelism is the only lever until #1668 is decided, and it is an inferred one, not a measured one. The build succeeds either way; only the remote work is lost. `PACE_VERBOSE=1` says it with the endpoint and the node's own words, at most twice per invocation: once on the first failure, and once more if a later failure means the node is not asked again, since that changes what every later exchange carries. A node that did not answer is asked once per invocation and not again, under a connect bound sized for loopback rather than for the network, so a machine with no node pays about that bound, once per compile (on Linux, which refuses a closed loopback port at once, next to nothing); a cache with authentication off serves an exchange without one. |
 | `rejected (unauthenticated): ...` | The daemon requires a credential. `authentication required` means none was sent — set `PACE_TOKEN`. `authentication failed` means one was sent and was wrong. The two are deliberately different messages because they are different mistakes. Either way the build succeeds and only the caching is lost — the compile is still dispatched if `PACE_SCHEDULER` names a scheduler, and runs locally otherwise. |
 | `fetch exchange failed`, `fetch decoded malformed` | Transport or protocol trouble mid-request. Also how a `PACE_TIMEOUT` expiry surfaces: a daemon that accepted the connection and then went quiet. If these appear in bulk and each compile stalls for the full timeout first, suspect a wedged daemon rather than a flaky network. `fetch exchange failed` is also what a plainly wrong `PACE_ADDR` looks like — every compile, at once, with the fleet still doing the work. The two differ in what happens next: `fetch exchange failed` carries on and dispatches, while `fetch decoded malformed` — a daemon that answered with a value this launcher cannot read, which in practice means a mixed install — ends the invocation at a local compile. |
 | `fetch decoded another generation's value` | The daemon served a value that IS a compile value, well formed, written under a canonicalization generation this build does not implement. **Ordinary during a rolling upgrade**, and not a damaged cache — which is the whole reason it is not `fetch decoded malformed`. Either direction: a producer behind this launcher reads exactly like one ahead of it. The compile happens locally, nothing is stored, and it clears once every server and launcher in the fleet are on one generation. The wire code's side of it is [`foreign-value-generation`](../protocols/compile-cache.md#error-codes). |
@@ -1054,11 +1054,11 @@ Consequences worth knowing:
 
 The `#line` markers a worker is sent still carry the dispatching machine's paths,
 so a dispatched object's line table names the producing checkout's headers. That
-half is [#506](https://github.com/LASTRADA-Software/fastcached/issues/506)'s
+half is [#506](https://github.com/LASTRADA-Software/pace/issues/506)'s
 remainder rather than its subject: on gcc the file names come from those markers
 and already match a local compile's, and on clang the compilation unit's own name
 is the worker's scratch file
-([#660](https://github.com/LASTRADA-Software/fastcached/issues/660)).
+([#660](https://github.com/LASTRADA-Software/pace/issues/660)).
 
 **On Windows there is no equivalent and the paths stay.** `cl` has no path-map
 switch, and `-ffile-prefix-map` does not reach the records that matter for
@@ -1137,7 +1137,7 @@ Two things this is **not**:
   progress, so the worker says so itself: a running compile writes a `Status::Progress`
   frame every five seconds, carrying nothing, and `PACE_DISPATCH_IDLE` bounds
   the silence between them at thirty seconds
-  ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)). The launcher's fall-back
+  ([#245](https://github.com/LASTRADA-Software/pace/issues/245)). The launcher's fall-back
   line reports it as *stopped reporting progress*, which is a different remedy from *ran
   out of budget*.
 - Those pulses are why the `0xFC` protocol version is **3**, and why version 3 is also

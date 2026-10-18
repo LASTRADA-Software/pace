@@ -443,7 +443,7 @@ TEST_CASE("info accepts a verbatim payload as well as a bulk one", "[cli][verbs]
 
 TEST_CASE("version reports both ends", "[cli][verbs]")
 {
-    ScriptedExchange exchange { Answers({ Bulk("pace_version:9.9.9\r\nredis_version:6.0.0-fastcached\r\n") }) };
+    ScriptedExchange exchange { Answers({ Bulk("pace_version:9.9.9\r\nredis_version:6.0.0-pace\r\n") }) };
     auto const answer = Run("version", {}, exchange);
 
     CHECK(answer.outcome == Outcome::Affirmative);
@@ -452,7 +452,7 @@ TEST_CASE("version reports both ends", "[cli][verbs]")
     CHECK(FindField(answer.value, "client")->value.lexical == PACE_CLI_VERSION);
     REQUIRE(FindField(answer.value, "server") != nullptr);
     CHECK(FindField(answer.value, "server")->value.lexical == "9.9.9");
-    CHECK(FindField(answer.value, "resp_dialect")->value.lexical == "6.0.0-fastcached");
+    CHECK(FindField(answer.value, "resp_dialect")->value.lexical == "6.0.0-pace");
 }
 
 TEST_CASE("version still reports the client half when the server cannot be reached", "[cli][verbs]")

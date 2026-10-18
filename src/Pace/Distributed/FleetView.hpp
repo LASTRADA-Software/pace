@@ -213,7 +213,7 @@ struct FleetTotals
 /// The fleet-wide complement of `WorkerReport::lastPickedAge`, and the cheaper of
 /// the two to read: a per-worker column has to be scanned, and this is one number
 /// that is zero on a fleet where every toolchain is being used
-/// ([#1297](https://github.com/LASTRADA-Software/fastcached/issues/1297)).
+/// ([#1297](https://github.com/LASTRADA-Software/pace/issues/1297)).
 ///
 /// The grain is the **fingerprint**, not the registry entry and not the machine. A
 /// toolchain served by two machines where only one is ever chosen is being reached,
@@ -276,7 +276,7 @@ struct FleetHistoryView;
 /// A value nobody reported is `null`, never `0`.
 ///
 /// **Takes the history because the headline figures do**
-/// ([#1302](https://github.com/LASTRADA-Software/fastcached/issues/1302)). Three of the
+/// ([#1302](https://github.com/LASTRADA-Software/pace/issues/1302)). Three of the
 /// seven read a `FleetHistoryView` rather than the snapshot, so a renderer without one
 /// could carry four of them and would have to call the other three absent — which is a
 /// reading, not an absence. The window is the CALLER's: the page takes a `range` and
@@ -290,7 +290,7 @@ struct FleetHistoryView;
 /// One table of the fleet report, as a terminal reader asks for it.
 ///
 /// The page's sections, named so a reader can take one
-/// ([#1300](https://github.com/LASTRADA-Software/fastcached/issues/1300)). The
+/// ([#1300](https://github.com/LASTRADA-Software/pace/issues/1300)). The
 /// selection happens HERE, beside the tables, rather than in whatever client is
 /// reading: a client that filtered would have to know which columns belong to which
 /// section, which is the second place that mapping could be wrong.
@@ -333,7 +333,7 @@ struct FleetSectionRow
     /// JSON keys them by name rather than listing them. So `FleetColumnNames` has no
     /// answer for it — and this column is what lets the coverage test say that in both
     /// directions instead of carrying a silent exception, which is the shape
-    /// [#1320](https://github.com/LASTRADA-Software/fastcached/issues/1320) is about.
+    /// [#1320](https://github.com/LASTRADA-Software/pace/issues/1320) is about.
     ///
     /// **False for `Series` too**, for the same kind of reason: the page draws the history as
     /// charts and the JSON serves it at `FleetSeriesPath`, keyed by series, so neither has a
@@ -637,7 +637,7 @@ inline constexpr unsigned FleetJsonSchema = 2;
 ///
 /// Here so the coverage test can be **derived** rather than written out. It used to
 /// iterate four braced lists of column-name literals under a comment saying it walked
-/// the tables, which is [#492](https://github.com/LASTRADA-Software/fastcached/issues/492)'s
+/// the tables, which is [#492](https://github.com/LASTRADA-Software/pace/issues/492)'s
 /// rule one axis over: a column added to a table joined the test's blind spot silently,
 /// the case still passed, and the prose retired the suspicion that would have found the
 /// gap. Two node columns and the whole tier section were uncovered that way.
@@ -676,7 +676,7 @@ inline constexpr unsigned FleetJsonSchema = 2;
 /// The same door `FleetColumnNames` is, for the same reason: the strip's table is
 /// file-local to `FleetView.cpp` because its rows carry projections, and a coverage
 /// test that cannot name the table writes the list out instead — which is the defect
-/// [#1320](https://github.com/LASTRADA-Software/fastcached/issues/1320) records.
+/// [#1320](https://github.com/LASTRADA-Software/pace/issues/1320) records.
 ///
 /// KEYS rather than labels. A label is what the page calls a tile and is free to be
 /// reworded; the key is what a scraper keyed on `/fleet.json` depends on.

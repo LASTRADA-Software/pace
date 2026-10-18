@@ -2971,13 +2971,13 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += HtmlDocumentPrologue;
     if (refreshSeconds != 0)
         out += std::format(R"(<meta http-equiv="refresh" content="{}">)", refreshSeconds);
-    out += "<title>fastcache fleet</title><style>";
+    out += "<title>pace fleet</title><style>";
     out += DashboardStyle;
     out += "</style></head><body>";
 
     auto const leads = LeadsTheFleet(snapshot);
 
-    out += R"(<div class="statusbar"><div class="shell"><span class="brand">fastcache<span>/fleet</span></span>)";
+    out += R"(<div class="statusbar"><div class="shell"><span class="brand">pace<span>/fleet</span></span>)";
     out += std::format(R"(<span class="pill pill--{}"><span class="dot"></span>{}</span>)",
                        leads ? "leader" : "warn",
                        EscapeHtml(RoleName(snapshot.role)));

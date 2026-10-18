@@ -7,7 +7,7 @@
 # `check-sccache-backend-caveat` handed it ~19 patterns per root across two calls, and
 # on a DrvFs checkout — a supported working environment — it took **78.7 s against a
 # 60 s budget**, so the documented local gate could not go green for anyone working
-# that way ([#502](https://github.com/LASTRADA-Software/fastcached/issues/502)).
+# that way ([#502](https://github.com/LASTRADA-Software/pace/issues/502)).
 #
 # ## The measurement, with its conditions, because the number alone misleads
 #

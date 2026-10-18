@@ -92,7 +92,7 @@ template <typename Table>
 /// secret-file table and a public-path table over their own option table, and the
 /// rule joining the three is identical -- so it is written here rather than twice in
 /// two Catch2 cases that would then drift on which directions they check
-/// ([#864](https://github.com/LASTRADA-Software/fastcached/issues/864)). It lives in
+/// ([#864](https://github.com/LASTRADA-Software/pace/issues/864)). It lives in
 /// `src/tests/` and not in the library because nothing in production asks it: it is a
 /// property of the tables, checked at build time by whoever owns them.
 ///

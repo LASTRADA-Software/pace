@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// The banner is printed ONCE per executable, by a Catch2 listener
-/// ([#1439](https://github.com/LASTRADA-Software/fastcached/issues/1439)).
+/// ([#1439](https://github.com/LASTRADA-Software/pace/issues/1439)).
 ///
 /// ## Why a listener and not each bench file
 ///

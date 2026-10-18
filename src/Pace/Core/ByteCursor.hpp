@@ -32,7 +32,7 @@ namespace Pace
 ///
 /// The surface is deliberately only what a caller reaches today. `CompileValue`,
 /// `PrefetchGroupManifest` and `DirectManifest` still hand-roll a cursor, and
-/// converting them ([#304](https://github.com/LASTRADA-Software/fastcached/issues/304))
+/// converting them ([#304](https://github.com/LASTRADA-Software/pace/issues/304))
 /// is what should add the members they need — validated against a real caller rather
 /// than guessed ahead of one.
 ///

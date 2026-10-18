@@ -48,7 +48,7 @@
 # limit is shared by every job on a runner's address.
 #
 # Usage:
-#   bash scripts/rpm-package-e2e.sh <path/to/fastcached-*.rpm> [base-image]
+#   bash scripts/rpm-package-e2e.sh <path/to/pace-*.rpm> [base-image]
 #
 # Needs docker. Exit 0 on success, 1 on any failure -- including docker being
 # absent: this runs where it was asked for, and a run that could not happen is
@@ -59,7 +59,7 @@ set -euo pipefail
 rpm_path="${1:-}"
 base_image="${2:-quay.io/fedora/fedora:44}"
 
-[[ -n "$rpm_path" && -f "$rpm_path" ]] || { echo "usage: $0 <fastcached-*.rpm> [base-image]" >&2; exit 1; }
+[[ -n "$rpm_path" && -f "$rpm_path" ]] || { echo "usage: $0 <pace-*.rpm> [base-image]" >&2; exit 1; }
 command -v docker >/dev/null || { echo "rpm-package-e2e: docker is required and was not found" >&2; exit 1; }
 
 readonly NODE_ACCOUNT="pace-node"
@@ -71,10 +71,10 @@ readonly NODE_PORT=6674
 
 rpm_name="$(basename "$rpm_path")"
 workdir="$(mktemp -d)"
-container="fastcached-rpm-e2e-$$"
+container="pace-rpm-e2e-$$"
 # One image per base, reused across runs: it holds systemd and a compiler, and
 # nothing of the package under test, which is copied into each container fresh.
-image_tag="fastcached-rpm-e2e:$(printf '%s' "$base_image" | tr -c 'A-Za-z0-9_.-' '-')"
+image_tag="pace-rpm-e2e:$(printf '%s' "$base_image" | tr -c 'A-Za-z0-9_.-' '-')"
 
 cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true

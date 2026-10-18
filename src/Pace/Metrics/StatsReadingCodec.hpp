@@ -19,7 +19,7 @@ namespace Pace
 {
 
 /// The binary form of a `StatsReading`: what a live-stats snapshot carries over `0xFC`
-/// ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)).
+/// ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)).
 ///
 /// ## Positional, and protected by a layout digest
 ///

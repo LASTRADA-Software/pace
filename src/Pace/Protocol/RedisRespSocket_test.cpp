@@ -7,8 +7,8 @@
 // The pub/sub readable watcher is built entirely around parking on that call, so the
 // question it exists to answer -- who owns the socket's single read-op slot, and when
 // -- is exercised by nothing. That is not a gap in the coverage of a corner: it is the
-// reason [#755](https://github.com/LASTRADA-Software/fastcached/issues/755) and
-// [#710](https://github.com/LASTRADA-Software/fastcached/issues/710) could both sit in
+// reason [#755](https://github.com/LASTRADA-Software/pace/issues/755) and
+// [#710](https://github.com/LASTRADA-Software/pace/issues/710) could both sit in
 // this code behind a green suite.
 //
 // So these cases drive `RedisRespHandler::Run` over a socket accepted on a real

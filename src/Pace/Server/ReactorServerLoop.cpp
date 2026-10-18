@@ -86,7 +86,7 @@ namespace
         core::platform::IClock& clock = options.clock != nullptr ? *options.clock : ownClock;
 
         // **Declared FIRST, so destroyed LAST, and since
-        // [#1025](https://github.com/LASTRADA-Software/fastcached/issues/1025) that
+        // [#1025](https://github.com/LASTRADA-Software/pace/issues/1025) that
         // ordering carries a requirement it did not before.** It must outlive the
         // listeners and servers, which hold references to it -- but its destructor now
         // FREES the coroutine chains still parked on it, so their frames' destructors
@@ -104,7 +104,7 @@ namespace
         //
         // So: anything handed to a connection whose destructor does more than nothing
         // must outlive this reactor. **That sentence has a reader now, and it is not
-        // this comment** ([#1051](https://github.com/LASTRADA-Software/fastcached/issues/1051)).
+        // this comment** ([#1051](https://github.com/LASTRADA-Software/pace/issues/1051)).
         // It is `ConnectionHoldings` in `Server/Connection.hpp`: everything a connection
         // is handed other than its socket goes through one type, and one
         // `static_assert` refuses that type the moment anything in it grows a
@@ -193,7 +193,7 @@ namespace
 
         std::atomic<bool> watchdogQuit { false };
         // **`Stop()` and NOTHING else, because this runs on the watchdog's own thread**
-        // ([#1208](https://github.com/LASTRADA-Software/fastcached/issues/1208)).
+        // ([#1208](https://github.com/LASTRADA-Software/pace/issues/1208)).
         // `Server::Shutdown()` closes the listener, which reaches
         // `EpollReactor::Detach` and walks the batch `RunLoop` is dispatching -- so
         // shutting the servers down from here raced the loop by construction rather
@@ -491,7 +491,7 @@ namespace
         // deliberate, and it is the only thing that ends those threads.** The comment
         // above addresses double-close and says nothing about close-under-accept, which
         // reads like the second hazard went unexamined — it was
-        // ([#1238](https://github.com/LASTRADA-Software/fastcached/issues/1238)), and
+        // ([#1238](https://github.com/LASTRADA-Software/pace/issues/1238)), and
         // this paragraph is here because the next reader will arrive at the same
         // suspicion from the same comment.
         //

@@ -65,7 +65,7 @@ set(PaceAutoInstallRows
     "off-by-default||Not auto-installing pace-cc|"
     "opted-out-empty-addr|Not auto-installing pace-cc: PACE_ADDR is empty||-DPACE_AUTO_INSTALL=ON -DPACE_ADDR="
     "not-a-version|is not a numeric X.Y.Z version||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=not-a-version"
-    "no-such-release|Not auto-installing pace-cc: downloading fastcached-9.9.9-Linux-x86_64.tar.gz failed||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=9.9.9"
+    "no-such-release|Not auto-installing pace-cc: downloading pace-9.9.9-Linux-x86_64.tar.gz failed||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=9.9.9"
     "unpublished-platform|Not auto-installing pace-cc: no prebuilt binary is published for Linux-no-such-arch||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_HOST_SYSTEM=Linux -DPACE_AUTO_INSTALL_HOST_PROCESSOR=no-such-arch"
 )
 

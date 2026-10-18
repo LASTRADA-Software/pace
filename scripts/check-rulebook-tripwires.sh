@@ -587,7 +587,7 @@ Prose.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues -->
 
-- **[#876](https://github.com/LASTRADA-Software/fastcached/issues/876)** -- what is left.' \
+- **[#876](https://github.com/LASTRADA-Software/pace/issues/876)** -- what is left.' \
         "1 untriaged" "untriaged: 1 section(s) awaiting #876"
 
     # ... and the pairing is REQUIRED, or the marker outlives the issue that was
@@ -623,8 +623,8 @@ Prose.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues -->
 
-- **[#876](https://github.com/LASTRADA-Software/fastcached/issues/876)** -- a real entry.
-    - **[#4242](https://github.com/LASTRADA-Software/fastcached/issues/4242)** -- nested.' \
+- **[#876](https://github.com/LASTRADA-Software/pace/issues/876)** -- a real entry.
+    - **[#4242](https://github.com/LASTRADA-Software/pace/issues/4242)** -- nested.' \
         "does not name that issue as an ENTRY" "!carries no"
 
     # ... and the 0-3 boundary is a boundary: three spaces is still top level, so
@@ -644,7 +644,7 @@ Prose.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues -->
 
-   - **[#4242](https://github.com/LASTRADA-Software/fastcached/issues/4242)** -- three spaces.' \
+   - **[#4242](https://github.com/LASTRADA-Software/pace/issues/4242)** -- three spaces.' \
         "1 untriaged"
 
     # A neighbouring issue number must not satisfy it -- `#8761` is not `#876`.
@@ -662,7 +662,7 @@ Prose.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues -->
 
-- **[#8761](https://github.com/LASTRADA-Software/fastcached/issues/8761)** -- other.' \
+- **[#8761](https://github.com/LASTRADA-Software/pace/issues/8761)** -- other.' \
         "does not name that issue" "!carries no"
 
     # ... and a MENTION is not an entry. `check-rulebook-open-work.sh` extracts a
@@ -705,7 +705,7 @@ Prose.
 An entry looks like this:
 
 ```markdown
-- **[#876](https://github.com/LASTRADA-Software/fastcached/issues/876)** -- sample.
+- **[#876](https://github.com/LASTRADA-Software/pace/issues/876)** -- sample.
 ```' \
         "does not name that issue as an ENTRY"
 

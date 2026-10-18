@@ -74,7 +74,7 @@ class ISchedulerEndpointSource
 /// expired out of the new leader's registry inside the heartbeat timeout, and the
 /// leader answered every lease `NoWorker`. A launcher that correctly followed the
 /// redirect -- the client half of
-/// [#237](https://github.com/LASTRADA-Software/fastcached/issues/237) -- then
+/// [#237](https://github.com/LASTRADA-Software/pace/issues/237) -- then
 /// arrived at a leader with an empty fleet and compiled locally, behind a green
 /// build and counters that all read zero. This is the other half.
 ///

@@ -273,7 +273,7 @@ class RaftDriver
     /// It is also the ONE read anything outside this driver has of what a node
     /// believes about its own cluster, which is why the role and the leader belong
     /// here rather than on accessors of their own
-    /// ([#435](https://github.com/LASTRADA-Software/fastcached/issues/435)).
+    /// ([#435](https://github.com/LASTRADA-Software/pace/issues/435)).
     /// `RaftDriver::Node()` says in as many words that it is not synchronized, so a
     /// caller assembling this picture from `Node().CurrentRole()` and
     /// `Node().ActiveConfiguration()` would be reading two moments and reporting them as

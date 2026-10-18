@@ -18,7 +18,7 @@ namespace Pace::Node
 /// `--requirepass` here is presented to the shared cache behind `--upstream` and is never
 /// checked against anybody. The two are different shapes of the same word, and reaching
 /// for the daemon's type would put an inbound policy object on an outbound path
-/// ([#404](https://github.com/LASTRADA-Software/fastcached/issues/404)).
+/// ([#404](https://github.com/LASTRADA-Software/pace/issues/404)).
 ///
 /// ## To `--upstream` alone
 ///

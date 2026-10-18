@@ -129,7 +129,7 @@ differs by platform:
   path does. This page claimed the
   opposite — several threads draining one IOCP so a page-store `fsync` overlaps
   serving other connections — until
-  [#896](https://github.com/LASTRADA-Software/fastcached/issues/896); that
+  [#896](https://github.com/LASTRADA-Software/pace/issues/896); that
   mechanism is in no source.
 
 The disk backend is always wrapped in a thread-safe `ShardedStorage`, but that

@@ -124,8 +124,8 @@ if(${PEDANTIC_COMPILER})
         # which is why this survived: the only place it becomes visible is a
         # clang-tidy database from a build directory configured that way, where it
         # reads as a stale cache rather than as a rule
-        # ([#454](https://github.com/LASTRADA-Software/fastcached/issues/454),
-        # [#611](https://github.com/LASTRADA-Software/fastcached/issues/611)).
+        # ([#454](https://github.com/LASTRADA-Software/pace/issues/454),
+        # [#611](https://github.com/LASTRADA-Software/pace/issues/611)).
         #
         # `ctest -R pedantic-suppressions` is what holds this, by including this
         # file at both `WERROR` settings and refusing any difference that is not
@@ -243,7 +243,7 @@ if(${PEDANTIC_COMPILER_WERROR})
         #
         # Both fire inside libstdc++'s own headers, from inlining, on code that
         # has no defect to fix. GCC 16.2.1 reports them and g++-13/g++-14 do not
-        # ([#805](https://github.com/LASTRADA-Software/fastcached/issues/805)):
+        # ([#805](https://github.com/LASTRADA-Software/pace/issues/805)):
         #
         #   * `-Warray-bounds=` in `EncodeCompileValue`
         #     (`src/Pace/CompileCache/CompileValue.cpp`), out of

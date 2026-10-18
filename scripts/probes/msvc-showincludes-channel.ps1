@@ -191,7 +191,7 @@ int main() { return 0; }
     # And the SECOND question this run can answer for free, because it needs the
     # same `cl`: can this machine produce a LOCALIZED one at all?
     #
-    # [#878](https://github.com/LASTRADA-Software/fastcached/issues/878) asks for
+    # [#878](https://github.com/LASTRADA-Software/pace/issues/878) asks for
     # "a means of exercising the localized case that is not a stub asserting its
     # own premise", and says outright that *"this needs a machine we do not have"*
     # is a legitimate finding. It is only legitimate if somebody MEASURED it.

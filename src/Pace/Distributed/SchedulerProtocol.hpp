@@ -147,7 +147,7 @@ class SchedulerProtocol
     /// own payload. Those are decided here and were counted nowhere, on the one
     /// surface that carries lease grants and worker registration -- so an operator
     /// watching it being probed saw the same flat line as one nobody was talking to
-    /// ([#494](https://github.com/LASTRADA-Software/fastcached/issues/494)).
+    /// ([#494](https://github.com/LASTRADA-Software/pace/issues/494)).
     ///
     /// The sink is the one `SchedulerTier` already holds, so nothing new is
     /// constructed and no call site above it changes.

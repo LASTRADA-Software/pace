@@ -93,7 +93,7 @@ namespace
     /// **Not an excuse list.** Nothing here is overlooked; a difference confined to
     /// these still answers `Different`, because a hit whose object was built in
     /// another checkout is exactly
-    /// [#489](https://github.com/LASTRADA-Software/fastcached/issues/489) and is the
+    /// [#489](https://github.com/LASTRADA-Software/pace/issues/489) and is the
     /// case an operator runs the verifier to catch. It is a list of names that lets
     /// the MESSAGE say which finding this is -- a foreign build path, or different
     /// code -- because those are acted on differently and "wrong object" alone means

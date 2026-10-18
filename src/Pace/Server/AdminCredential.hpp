@@ -54,7 +54,7 @@ class AdminCredential
     ///
     /// `SecureString` rather than `std::string`, so the dashboard credential is released
     /// into zeroed storage like every other one
-    /// ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+    /// ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)).
     /// @param secret The shared secret; must not be empty.
     explicit AdminCredential(SecureString secret) noexcept:
         _secret { std::move(secret) }

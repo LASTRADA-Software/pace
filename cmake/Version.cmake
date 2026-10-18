@@ -48,7 +48,7 @@ set(PaceFallbackVersionTriple "0.0.0")
 
 # Escalate "could not resolve a version from a tag" from a warning to a hard
 # error. OFF everywhere except the CI jobs that publish artifacts: shipping
-# fastcached-0.0.0-Linux-x86_64.deb because a tag fetch silently broke is worse
+# pace-0.0.0-Linux-x86_64.deb because a tag fetch silently broke is worse
 # than failing the job that would have built it. See .github/workflows/build.yml.
 option(PACE_REQUIRE_EXACT_VERSION
     "Fail configuration when the version cannot be resolved from a git tag" OFF)
@@ -183,7 +183,7 @@ find_program(GIT_EXECUTABLE NAMES git DOC "git command line client")
 set(PaceVersionSources
     "explicit override|PaceVersionFromCache|Exact|The version was stated on the cmake command line, so nothing in the tree was consulted."
     "git tag|PaceVersionFromGitTag|Exact|The tag is the single source of truth for the version."
-    "git commit without a matching tag|PaceVersionFromGitCommit|Provisional|Create the first release tag with 'git tag -a v0.1.0 -m fastcached-0.1.0' and push it. In CI, check out with fetch-depth 0 so both the tags and enough history to reach them arrive on the runner."
+    "git commit without a matching tag|PaceVersionFromGitCommit|Provisional|Create the first release tag with 'git tag -a v0.1.0 -m pace-0.1.0' and push it. In CI, check out with fetch-depth 0 so both the tags and enough history to reach them arrive on the runner."
     "declared fallback|PaceVersionFallback|Provisional|Build from a git work tree that has tags, or state the version explicitly with -DPACE_VERSION=1.2.3 — an exported source tarball has no other way to know."
 )
 
@@ -506,7 +506,7 @@ endfunction()
 ## @param DetailOutVar Name of the variable to receive the source detail.
 # The exported-tarball case: no .git, no -D flag, and therefore nothing that
 # could possibly know the version. The string says `unknown` in as many words: a
-# bug report quoting fastcached-0.0.0-unknown has already answered the first
+# bug report quoting pace-0.0.0-unknown has already answered the first
 # question we would otherwise have to ask.
 function(PaceVersionFallback RequestedTripleName RequestedStringName
                                    TripleOutVar StringOutVar DetailOutVar)
@@ -550,7 +550,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
 
     # Unreachable while the last row is the unconditional fallback. Kept because
     # the alternative to a diagnostic here is project(VERSION "") and a CPack run
-    # that produces fastcached--Linux-x86_64.deb.
+    # that produces pace--Linux-x86_64.deb.
     if(resolvedTriple STREQUAL "")
         message(FATAL_ERROR
             "No version source produced a version. The last row of "

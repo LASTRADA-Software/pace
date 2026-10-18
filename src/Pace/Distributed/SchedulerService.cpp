@@ -1316,7 +1316,7 @@ SchedulerReply SchedulerService::Withdraw(CallerContext const& caller, std::stri
     // is NOT the operator-actionable "this job outlived its lease" timing signal --
     // nothing here says the lease bound is too short. Whatever splits those causes
     // must not fold this one in with them
-    // ([#1074](https://github.com/LASTRADA-Software/fastcached/issues/1074)).
+    // ([#1074](https://github.com/LASTRADA-Software/pace/issues/1074)).
     auto const reclaimed = _leases.ReleaseWorker(workerId);
 
     _metrics.Increment(IMetricsSink::Counter::DispatchWorkersWithdrawn);

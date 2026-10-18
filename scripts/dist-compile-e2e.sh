@@ -1870,7 +1870,7 @@ case13_at() {
         }
 
     # **And the SOURCE NAME the two objects record**
-    # ([#660](https://github.com/LASTRADA-Software/fastcached/issues/660)). A separate
+    # ([#660](https://github.com/LASTRADA-Software/pace/issues/660)). A separate
     # attribute answering a separate question, asserted here because this is the one
     # place a REAL dispatched object exists to read it out of.
     #

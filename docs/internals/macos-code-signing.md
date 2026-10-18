@@ -86,7 +86,7 @@ cd build && cpack -G productbuild
 Notarization needs a stored credential profile, once per machine:
 
 ```sh
-xcrun notarytool store-credentials fastcached-notary \
+xcrun notarytool store-credentials pace-notary \
       --key AuthKey_XXXXXXXXXX.p8 --key-id <KEY-ID> --issuer <ISSUER-UUID>
 ```
 
@@ -120,10 +120,10 @@ running process.
 ## Verifying
 
 ```sh
-pkgutil --check-signature fastcached-*.pkg
-spctl --assess --verbose=4 --type install fastcached-*.pkg   # what Gatekeeper decides
-xcrun stapler validate fastcached-*.pkg
-xcrun stapler validate fastcached-*.dmg
+pkgutil --check-signature pace-*.pkg
+spctl --assess --verbose=4 --type install pace-*.pkg   # what Gatekeeper decides
+xcrun stapler validate pace-*.pkg
+xcrun stapler validate pace-*.dmg
 ```
 
 ## Troubleshooting
@@ -132,7 +132,7 @@ xcrun stapler validate fastcached-*.dmg
 |---|---|
 | `codesign` hangs in CI | The key's ACL does not permit the tool. Needs both `security import -T /usr/bin/codesign` and `security set-key-partition-list`. |
 | `resource fork, Finder information, or similar detritus not allowed` | Stray extended attributes; `xattr -c` the file first. |
-| Notarization rejected, no reason given | Fetch it: `xcrun notarytool log <submission-id> --keychain-profile fastcached-notary`. |
+| Notarization rejected, no reason given | Fetch it: `xcrun notarytool log <submission-id> --keychain-profile pace-notary`. |
 | `The signature does not include a secure timestamp` | `--timestamp` was omitted. |
 | `Killed: 9` after install | The binary was stripped after signing. |
 | No Installer identity found | `security find-identity -v -p codesigning` does not list Installer certificates; drop `-p codesigning`. |

@@ -903,12 +903,12 @@ set_tests_properties("debug-prefix-map-rules" PROPERTIES
 #
 # Not labelled "smoke": it starts nothing and finishes in milliseconds.
 add_test(
-    NAME "fastcache-addr-opt-out"
+    NAME "pace-addr-opt-out"
     COMMAND ${CMAKE_COMMAND}
         "-DPACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-pace-addr-opt-out.cmake"
 )
-set_tests_properties("fastcache-addr-opt-out" PROPERTIES
+set_tests_properties("pace-addr-opt-out" PROPERTIES
     FAIL_REGULAR_EXPRESSION "${PACE_SCRIPT_CHECK_FAILED}"
     LABELS "hygiene"
     TIMEOUT 60
@@ -1547,7 +1547,7 @@ set_tests_properties("repository-hygiene-selftest" PROPERTIES
 # A stall is retried; a verdict is not.
 #
 # `cmake/MacOSNotarizePkg.cmake` bounds `notarytool submit --wait` and retries it
-# ([#376](https://github.com/LASTRADA-Software/fastcached/issues/376)). The property
+# ([#376](https://github.com/LASTRADA-Software/pace/issues/376)). The property
 # that needs a guard is not the timeout -- it is that Apple answering "Invalid" is an
 # ANSWER, so retrying it spends half an hour of the step budget to be told the same
 # thing. That condition is exactly what gets simplified away while making a retry
@@ -1598,7 +1598,7 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # The `clang-tidy` job runs on `ubuntu-24.04` and `scripts/local-gate.sh` tidies
 # through the Linux presets, so a TU whose whole body sits behind a guard that is
 # false on Linux preprocesses to nothing and is reported CLEAN without being read
-# ([#682](https://github.com/LASTRADA-Software/fastcached/issues/682)).
+# ([#682](https://github.com/LASTRADA-Software/pace/issues/682)).
 #
 # **Registered on Linux only, and that is about the SUBJECT rather than about
 # portability.** The question is what the CI sweep cannot see, and that sweep runs on
@@ -5165,7 +5165,7 @@ else()
     # fixture's decisions -- how a Prometheus series is read, and how a DWARF
     # attribute is read out of whichever of three readers a host has -- were
     # asserted nowhere, on the platform most CI legs run
-    # ([#597](https://github.com/LASTRADA-Software/fastcached/issues/597)).
+    # ([#597](https://github.com/LASTRADA-Software/pace/issues/597)).
     #
     # **The two self-tests do NOT cover the same decisions, and #597 asked that they
     # should.** They cannot: the Windows fixture compares COFF objects and this one
@@ -6174,7 +6174,7 @@ set_tests_properties("comment-stripper-selftest" PROPERTIES
 # `Windows-cl-debug`, plus the three Windows legs of one run -- span **97.39 to 114.64 s
 # against this 120 s budget**. It took required contexts red repeatedly, including on a
 # diff that changed nothing but a comment;
-# [#1150](https://github.com/LASTRADA-Software/fastcached/issues/1150) carries that
+# [#1150](https://github.com/LASTRADA-Software/pace/issues/1150) carries that
 # record and it is deliberately not tallied here, a hand-kept count beside a moving fact
 # being a second source of truth.
 #
@@ -6320,7 +6320,7 @@ set_tests_properties("hygiene-headroom-selftest" PROPERTIES
 # **36.01 to 45.89 s** across those same six hosted readings, rising to 55.70 s in the
 # run where its sibling timed out. On the shared 120 s budget that is 30-38% against its
 # sibling's 81-96%, which is the whole of why one fired and the other did not
-# ([#1150](https://github.com/LASTRADA-Software/fastcached/issues/1150)).
+# ([#1150](https://github.com/LASTRADA-Software/pace/issues/1150)).
 add_test(
     NAME "reloadable-docs"
     COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/run-check.sh" "${CMAKE_SOURCE_DIR}/scripts/check-reloadable-docs.sh" "${CMAKE_SOURCE_DIR}"

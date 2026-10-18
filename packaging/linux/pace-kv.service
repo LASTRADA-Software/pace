@@ -14,7 +14,7 @@
 
 [Unit]
 Description=pace-kv — fast cache daemon
-Documentation=https://github.com/LASTRADA-Software/fastcached
+Documentation=https://github.com/LASTRADA-Software/pace
 After=network-online.target
 Wants=network-online.target
 

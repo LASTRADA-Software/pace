@@ -188,11 +188,11 @@ class TempDir
         // separates two directories inside one case. The name stays in the path so a
         // leaked tree can still be traced to its case.
         //
-        // Reparented under `root / "fastcached-test"` through `UniqueScratchPath`'s own
+        // Reparented under `root / "pace-test"` through `UniqueScratchPath`'s own
         // parent parameter, rather than by taking only its filename and rebuilding the
         // rest by hand -- so the one clear that function makes reaches the path this
         // class actually uses, and a directory it cannot create still throws.
-        _path = Pace::Testing::UniqueScratchPath(name, root / "fastcached-test");
+        _path = Pace::Testing::UniqueScratchPath(name, root / "pace-test");
         std::filesystem::create_directories(_path);
     }
 

@@ -99,7 +99,7 @@ enum class WindowsLogonAccount : std::uint8_t
 /// `pace-kv` was the only file-configured service, and it left
 /// `pace-node` -- which reads a configuration file and has no
 /// `--storage` flag at all -- with no way to say so
-/// ([#396](https://github.com/LASTRADA-Software/fastcached/issues/396)). Its spec
+/// ([#396](https://github.com/LASTRADA-Software/pace/issues/396)). Its spec
 /// had to name no application, which is the SAFE direction (a registration
 /// carrying `--storage=` produces a job that answers its own command line with
 /// "unrecognised argument" at every start, reported installed and dead at every
@@ -220,7 +220,7 @@ struct OwnedPath
 /// so a symmetric renderer would make the emission table pure data and delete
 /// thirty hand-copied lines per binary. It is not written yet, and the reason is
 /// scope rather than principle --
-/// [#349](https://github.com/LASTRADA-Software/fastcached/issues/349) moved the
+/// [#349](https://github.com/LASTRADA-Software/pace/issues/349) moved the
 /// emission rule and left the shape alone. What keeps the hand-written table
 /// honest meanwhile is the guard, which drives ONE row at a time and asserts the
 /// emitted token MOVES when that row's own applier runs -- so a line naming
@@ -412,7 +412,7 @@ struct ServiceSpec
 /// `--install-service --max-memory=8g` registered no `--max-memory` at all, and
 /// the service re-derived its budget from RAM at every start: add memory and the
 /// pinned budget silently moved, for precisely the operator who bothered to pin
-/// it ([#349](https://github.com/LASTRADA-Software/fastcached/issues/349)). Every
+/// it ([#349](https://github.com/LASTRADA-Software/pace/issues/349)). Every
 /// other row was safe only because its default is a compile-time constant, which
 /// `logTimestamps` also was until #496 made it platform-dependent — so the rule
 /// is applied to the whole table rather than to the row that was caught.

@@ -162,7 +162,7 @@ struct ResolvedMarker
 ///   `PathCanon::IncludeNoteMarker` is spelled without a trailing space for the same
 ///   reason.
 /// - **Nothing may precede the marker**, which is the anchor every reader in this tree
-///   shares since [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270).
+///   shares since [#1270](https://github.com/LASTRADA-Software/pace/issues/1270).
 ///   A candidate line with leading blanks is refused rather than trimmed.
 ///
 /// **Disagreement is an answer, and the answer is *nothing*.** Two candidate lines

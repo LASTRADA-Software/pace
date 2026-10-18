@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// Decode cost for the stream value blob, which is what
-/// [#310](https://github.com/LASTRADA-Software/fastcached/issues/310) is a claim about.
+/// [#310](https://github.com/LASTRADA-Software/pace/issues/310) is a claim about.
 ///
 /// #309 deleted `StreamCodec`'s five `reserve(count)` calls rather than tightening
 /// them, and reported the cost as 34-47% on decoding large honest streams with short

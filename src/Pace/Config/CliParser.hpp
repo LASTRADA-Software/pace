@@ -199,8 +199,8 @@ struct ConfigFileSetting
 /// It used to be that column PLUS a second list of keys no flag could express, and
 /// the accessor existed so no consumer would walk one and be silently blind to the
 /// other — which is
-/// [#406](https://github.com/LASTRADA-Software/fastcached/issues/406)'s own failure
-/// shape one level up. [#623](https://github.com/LASTRADA-Software/fastcached/issues/623)
+/// [#406](https://github.com/LASTRADA-Software/pace/issues/406)'s own failure
+/// shape one level up. [#623](https://github.com/LASTRADA-Software/pace/issues/623)
 /// gave those three keys option rows and deleted the second source, so this now has
 /// one input; keeping the accessor is what made that a change to a *source* rather
 /// than to every consumer, and it is why the next such key costs nothing here.

@@ -794,7 +794,7 @@ run_case() {
     # nothing. And the harness knob row is the other direction -- a scrub that
     # cleared everything would pass the first two lines and switch `tsan-gate.sh`'s
     # bound off in silence.
-    fastcache-env-scrubbed)
+    pace-env-scrubbed)
         stub="${scratch}/stub-compile"
         printf '#!/bin/sh\nenv\n' > "$stub"
         chmod +x "$stub"
@@ -3335,7 +3335,7 @@ cases=(
     "clean-stop-bad-opt-in|1|unknown fifth argument 'term-is-fine'|!accepted status|!BUG:"
     "clean-stop-crashed|1|exited with status 134 when asked to stop|!accepted status|!BUG:"
     "clean-stop-refusal-line|1|refused to destroy its shared-cache host|exit status 0|!accepted status|!BUG:"
-    "fastcache-env-scrubbed|0|an inherited PACE_SCHEDULER did not reach the compile|the fixture's own PACE_VERBOSE did|the harness knob PACE_TSAN_TIMEOUT was kept|!BUG:"
+    "pace-env-scrubbed|0|an inherited PACE_SCHEDULER did not reach the compile|the fixture's own PACE_VERBOSE did|the harness knob PACE_TSAN_TIMEOUT was kept|!BUG:"
     "wait-success|0|the wait returned when the predicate became true|polls) for the staged marker"
     "wait-death-is-prompt|1|the process DIED|exit=3|of a 10s budget|!BUG:|!waited 9s|!waited 10s"
     "wait-timeout-silent|1|logged NOTHING for the whole 2s|!BUG:"

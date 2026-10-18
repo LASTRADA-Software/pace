@@ -123,7 +123,7 @@ struct WorkerTierParts
     /// Where this node tells clients to reach it, right now.
     ///
     /// **Owned by `main` rather than by this tier since
-    /// [#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440), because a node
+    /// [#1440](https://github.com/LASTRADA-Software/pace/issues/1440), because a node
     /// that runs no worker still has to announce an address** -- and there may be exactly ONE
     /// of these per process. A second would be a second value changing at a second moment,
     /// which is the defect #1279 closed *inside* the worker reopened one level up, between the

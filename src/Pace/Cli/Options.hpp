@@ -134,7 +134,7 @@ concept EmptyByType = requires(T const& value) {
 /// **Opt-in, and that default is the guard.** The daemon's reloader used to decide
 /// this in a hand-written ladder, which meant a flag added that day was *silently
 /// reloadable* -- measured at 10 of 38 members guarded, which is what
-/// [#406](https://github.com/LASTRADA-Software/fastcached/issues/406) was and what it
+/// [#406](https://github.com/LASTRADA-Software/pace/issues/406) was and what it
 /// closed by giving the daemon this column too. That pre-fix figure is kept because it
 /// is still the argument: defaulting to `No` inverts that failure, so a new flag is
 /// silently IMMUTABLE, and the worst a forgotten column costs is a reload refused with

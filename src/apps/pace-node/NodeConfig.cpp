@@ -2210,7 +2210,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
     //
     // **Both directions, at compile time, because the correspondence was verified by
     // hand once and nothing kept it in step.** That is exactly
-    // [#406](https://github.com/LASTRADA-Software/fastcached/issues/406)'s shape --
+    // [#406](https://github.com/LASTRADA-Software/pace/issues/406)'s shape --
     // a hand-checked list beside a table -- and reproducing it inside the change that
     // gives its sibling a column would be the joke telling itself. Row 39 arrives
     // without a comparator, and without this nothing says so: a reload would then
@@ -3283,7 +3283,7 @@ bool AdvertisedNameAwaited(NodeConfig const& cfg)
 ///
 /// **The startup reachability rules judged the advertised HOST and never its port**, so
 /// a node could tell every client to dial a port nothing on it listens on and start
-/// cleanly ([#594](https://github.com/LASTRADA-Software/fastcached/issues/594)). In the
+/// cleanly ([#594](https://github.com/LASTRADA-Software/pace/issues/594)). In the
 /// documented layout that is worse than a wrong number: `--advertise=host:6674` beside
 /// `--listen-node=6675` sends every dispatched compile to 6674, which is the shared
 /// `pace-kv` cache daemon. The registration succeeds, the scheduler hands the
@@ -3333,7 +3333,7 @@ bool AdvertisedNameAwaited(NodeConfig const& cfg)
         return std::nullopt; // Nothing is advertised, so there is nothing to be wrong.
 
     // **Only when the operator NAMED the port this is compared against**
-    // ([#770](https://github.com/LASTRADA-Software/fastcached/issues/770)). This rule
+    // ([#770](https://github.com/LASTRADA-Software/pace/issues/770)). This rule
     // says "you advertise a port on this machine that is not the one this node serves",
     // and with `--listen-node` unset the second half is a DEFAULT nobody typed --
     // so refusing on it is refusing on an assumption.
@@ -3378,7 +3378,7 @@ bool AdvertisedNameAwaited(NodeConfig const& cfg)
         return std::nullopt;
 
     // **ONE parser answers both halves, because two disagree about a bare IPv6
-    // literal** ([#822](https://github.com/LASTRADA-Software/fastcached/issues/822)).
+    // literal** ([#822](https://github.com/LASTRADA-Software/pace/issues/822)).
     //
     // The gate above asks `HostOfEndpoint`, which deliberately declines to split an
     // unbracketed IPv6 literal -- its own comment says why: `::1` is a host, and
@@ -3999,7 +3999,7 @@ std::optional<std::string> StartupPolicyRejection(NodeConfig const& cfg)
     // `--advertise` -- the one that costs something silently, since a worker whose
     // advertised address nobody can dial registers, heartbeats, is leased out, and
     // fails at every client -- and left the rest, which is
-    // [#968](https://github.com/LASTRADA-Software/fastcached/issues/968).
+    // [#968](https://github.com/LASTRADA-Software/pace/issues/968).
     //
     // **Each row carries its own predicate, because each flag has its own grammar**,
     // which is #208's own point and the reason one widened predicate will not do:

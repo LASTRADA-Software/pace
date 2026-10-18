@@ -23,7 +23,7 @@ journalctl -u pace-kv -f
 ```
 
 Two things about `--daemon` changed in the release that fixed
-[#784](https://github.com/LASTRADA-Software/fastcached/issues/784), and neither
+[#784](https://github.com/LASTRADA-Software/pace/issues/784), and neither
 affects a machine installed from the packages, since no shipped unit passes the
 flag:
 
@@ -357,7 +357,7 @@ hands over whatever `storage_path` is configured at the time it runs, so seeding
 the config first and installing second needs nothing extra.
 
 One exception: a `storage_path` that names a **single cache file** — an existing
-file, or a path with a file extension such as `D:\fastcached\cache.cow` — is only
+file, or a path with a file extension such as `D:\pace\cache.cow` — is only
 created by the installer if it is already there. Creating `cache.cow` as a
 *directory* would make the very next start treat it as a directory of shards and
 fan out inside it, so the installer refuses and says so. An upgrade therefore needs
@@ -368,7 +368,7 @@ and needs the `icacls` command below, run against the directory that will hold i
 If you add or move `storage_path` afterwards, grant it from an elevated prompt:
 
 ```powershell
-icacls "D:\fastcached\cache" /grant "NT SERVICE\pace-kv":(OI)(CI)F
+icacls "D:\pace\cache" /grant "NT SERVICE\pace-kv":(OI)(CI)F
 ```
 
 Re-running `--install-service` from an elevated prompt repairs it too: registering
@@ -392,7 +392,7 @@ it is open, so a second daemon started against the same `storage_path` refuses
 rather than sharing it:
 
 ```
-failed to open storage 'D:\fastcached\cache': StorageError(code=InUse system=0 context=FilePageStore::Open)
+failed to open storage 'D:\pace\cache': StorageError(code=InUse system=0 context=FilePageStore::Open)
 Another process already has this store open. A storage path belongs to one daemon:
 stop the other one, or give this daemon a path of its own.
 ```

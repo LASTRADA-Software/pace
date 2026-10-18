@@ -21,7 +21,7 @@ namespace Pace
 /// **One type rather than four parameters, because the rule that governs the SET is a
 /// compile-time one and a rule spread over a parameter list is a rule each new
 /// parameter sits outside of**
-/// ([#1051](https://github.com/LASTRADA-Software/fastcached/issues/1051)).
+/// ([#1051](https://github.com/LASTRADA-Software/pace/issues/1051)).
 ///
 /// The rule: a connection's coroutine frame can be DESTROYED rather than resumed. A
 /// reactor that stops with a chain parked on it frees that chain from its own

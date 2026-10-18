@@ -1000,7 +1000,7 @@ outright rather than drawing with a gap.
 <!-- agent-tripwire: A live stream's ending is a row named for what was OBSERVED -->
 
 A subscription is the one `0xFC` exchange whose ending is not an answer, so its endings are
-the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)).
+the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)).
 
 - **Each ending is a row, named for what was OBSERVED.** A goodbye (EOF), a reset, a stall, a
   revocation and a lost leadership are five different reasons a stream ended. Only the reset
@@ -1020,7 +1020,7 @@ the whole diagnosis ([#1399](https://github.com/LASTRADA-Software/fastcached/iss
 <!-- agent-tripwire: A condition an operator must act on is a row of `NodeConditionTable`, never a log line alone -->
 
 A node detects things an operator has to act on, and until
-[#1364](https://github.com/LASTRADA-Software/fastcached/issues/1364) each one reached only the
+[#1364](https://github.com/LASTRADA-Software/pace/issues/1364) each one reached only the
 log -- which scrolls, and which nobody reads across forty machines. A condition is now a row of
 `NodeConditionTable` (`apps/pace-node/NodeConditions.hpp`), kept in the one
 `NodeConditions` registry `main` declares and every component borrows, and carried to three
@@ -1126,7 +1126,7 @@ The log lines stay.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#592](https://github.com/LASTRADA-Software/fastcached/issues/592)** — whether the
+- **[#592](https://github.com/LASTRADA-Software/pace/issues/592)** — whether the
   fleet scheduler should count a non-member caller in a series of its own. #494 left it
   `RefuseWithoutCounter`, deferring to `SchedulerService::UncountedRefusals`, and that
   service's reason argues against *mixing* the series rather than against counting at

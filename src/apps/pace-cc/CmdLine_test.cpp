@@ -768,7 +768,7 @@ TEST_CASE("A path-valued -D is dispatchable, and the macro leaves only the worke
     // `dispatched 0` on the fleet page and no counter anywhere saying so. Any project
     // passing a source root, a config directory or a version string containing a slash
     // got the same silence.
-    std::vector<std::string> const argv { "g++", "-std=c++23", "-DPACE_SOURCE_DIR=\"/mnt/d/fastcached\"",
+    std::vector<std::string> const argv { "g++", "-std=c++23", "-DPACE_SOURCE_DIR=\"/mnt/d/pace\"",
                                           "-O2", "-c",         "a.cpp",
                                           "-o",  "a.o" };
     auto const cmd = ParseCommand(argv);
@@ -796,7 +796,7 @@ TEST_CASE("A path-valued -D is dispatchable, and the macro leaves only the worke
     // result under this program's key. A case asserting only the drop passes under
     // exactly that bug.
     auto const pp = PreprocessCommand(cmd, argv);
-    CHECK(std::ranges::contains(pp, "-DPACE_SOURCE_DIR=\"/mnt/d/fastcached\""));
+    CHECK(std::ranges::contains(pp, "-DPACE_SOURCE_DIR=\"/mnt/d/pace\""));
 }
 
 TEST_CASE("Both macro spellings leave the dispatched line, and an undefine is the same object")
@@ -1947,7 +1947,7 @@ TEST_CASE("The source spelling and the compilation directory read the SAME rules
     std::vector<std::string> const argv { "g++",
                                           "-c",
                                           "/home/ci/checkout/src/tu.cpp",
-                                          "-fdebug-prefix-map=/home/ci/checkout=/fastcache/src",
+                                          "-fdebug-prefix-map=/home/ci/checkout=/pace/src",
                                           "-fdebug-prefix-map=/home/ci/checkout/out/build/x=." };
 
     auto const directory = MappedCompileDirectory(argv, DriverFamily::Gnu, "/home/ci/checkout/out/build/x");
@@ -1959,7 +1959,7 @@ TEST_CASE("The source spelling and the compilation directory read the SAME rules
     // different path, which is what makes one function correct for both.
     auto const source = MappedByPrefixMapRules(argv, DriverFamily::Gnu, "/home/ci/checkout/src/tu.cpp");
     REQUIRE(source.has_value());
-    CHECK(Unwrap(source) == "/fastcache/src/src/tu.cpp");
+    CHECK(Unwrap(source) == "/pace/src/src/tu.cpp");
 }
 
 TEST_CASE("MappedCompileDirectory ignores a rule with no replacement")

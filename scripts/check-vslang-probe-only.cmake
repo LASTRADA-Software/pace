@@ -4,9 +4,9 @@
 #
 # `VSLANG` selects `cl`'s diagnostic language. The launcher sets it so that two
 # things it PARSES come back in a language it can read: the `/showIncludes` notes
-# ([#692](https://github.com/LASTRADA-Software/fastcached/issues/692)) and the
+# ([#692](https://github.com/LASTRADA-Software/pace/issues/692)) and the
 # version banner, which since #195 is the compiler's identity
-# ([#200](https://github.com/LASTRADA-Software/fastcached/issues/200)).
+# ([#200](https://github.com/LASTRADA-Software/pace/issues/200)).
 #
 # Both of those spawns are read by nobody but this process. The REAL compile is
 # different in kind: its diagnostics are the developer's, and forcing English there
@@ -22,7 +22,7 @@
 # WORDS are localized too", and in the Doxygen on both entry points. **Nothing read
 # it.** Every test that existed asserted the variable REACHES the probe -- which a
 # change that also set it on the compile spawn passes unchanged. A rule whose only
-# reader is prose is the shape [#683](https://github.com/LASTRADA-Software/fastcached/issues/683)
+# reader is prose is the shape [#683](https://github.com/LASTRADA-Software/pace/issues/683)
 # was filed about: a plausible claim that nothing can make fail. This is its reader.
 #
 # ## What is counted, and why it is the assignment rather than the word

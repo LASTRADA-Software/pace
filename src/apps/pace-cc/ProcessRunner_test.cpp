@@ -222,13 +222,13 @@ TEST_CASE("A spawn's added environment overrides an inherited variable of the sa
     // inherited, which makes this a real collision rather than a constructed one.
     auto const runner = MakeProcessRunner();
     std::array<EnvironmentAssignment, 1> const overriding { {
-        { .name = "PATH", .value = "fastcache-overrode-this" },
+        { .name = "PATH", .value = "pace-overrode-this" },
     } };
 
     auto const run = runner->RunCaptureSplit(EchoEnvironment("PATH"), overriding);
 
     REQUIRE(run.exitCode == 0);
-    CHECK(run.out.contains("fastcache-overrode-this"));
+    CHECK(run.out.contains("pace-overrode-this"));
 }
 
 TEST_CASE("A spawn with no additions inherits what it would have inherited anyway")

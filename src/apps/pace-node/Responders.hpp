@@ -797,7 +797,7 @@ class CacheResponder final: public IFrameResponder
 /// refusal move" were all answered by the port it came in on. One port cannot answer
 /// any of those, so each becomes a lookup: `CompileCacheWire::FamilyOf` names the
 /// family, and this picks the component that owns it
-/// ([#290](https://github.com/LASTRADA-Software/fastcached/issues/290)).
+/// ([#290](https://github.com/LASTRADA-Software/pace/issues/290)).
 ///
 /// **It is a router and nothing else.** Every policy stays in the component it
 /// belonged to before the merge -- the cache's locality rule, the scheduler's

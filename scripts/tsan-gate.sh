@@ -274,7 +274,7 @@ SUPPRESSIONS="${REPO_ROOT}/.tsan-suppressions"
 #
 # **It declares first-party since #178**, which gave the launcher's shared sources an
 # Ed25519 verifier -- the worker half checks a lease's signature -- and with it ONE
-# first-party archive, `fastcache-monocypher`. It still links no Pace library; what
+# first-party archive, `pace-monocypher`. It still links no Pace library; what
 # the row now asks is that the archive it does link was instrumented, which a "none" row
 # would have waved through unasked.
 #

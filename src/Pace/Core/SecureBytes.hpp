@@ -58,7 +58,7 @@ void SecureZero(void* data, std::size_t bytes) noexcept;
 /// One secret, one build, two answers.
 ///
 /// **That is what `SecureString` below is for, and it resolves the question this paragraph
-/// used to leave open** ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+/// used to leave open** ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)).
 /// The sentence here predicted *"a secret string needs this allocator AND an inline wipe"*.
 /// The second half turned out to be avoidable rather than necessary, and avoiding it is the
 /// stronger answer: a wipe of the inline footprint cannot be made correct, because a string
@@ -180,7 +180,7 @@ using SecureByteBuffer = std::vector<std::byte, SecureAllocator<std::byte>>;
 /// ones that arrive as TEXT — `--requirepass`, the dashboard credential, the contents of
 /// every `*-token-file` — were plain `std::string`s, released to the general allocator with
 /// their characters intact
-/// ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+/// ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)).
 ///
 /// **Why it is not `std::basic_string` with `SecureAllocator` in the third slot**, which is
 /// the one-line version, is the obvious shape, and is what #1125 expected to be. There are

@@ -21,7 +21,7 @@ reading.
 
 !!! warning "`Corrupt` is not automatically a failing disk"
 
-    Until [#296](https://github.com/LASTRADA-Software/fastcached/issues/296) an
+    Until [#296](https://github.com/LASTRADA-Software/pace/issues/296) an
     unprivileged client could plant a few bytes, tag them as a set, read them
     back, and make the daemon report `Corrupt` against a store whose every record
     still verified. That path is closed — those decoders answer `MalformedValue`
@@ -49,7 +49,7 @@ commit, and the last list written may still name them.
 syncs, so after a *power loss* the meta can be on disk while the free-list pages it
 names are not, and the walk then refuses the store with `Corrupt`. A process crash is
 not enough: the operating system still writes back what the process wrote. Before
-[#1624](https://github.com/LASTRADA-Software/fastcached/issues/1624) a `none` store
+[#1624](https://github.com/LASTRADA-Software/pace/issues/1624) a `none` store
 kept no list and opened; it now refuses, and like any damage `Open` touches, that stops
 `pace-kv` from starting. That is what `none`'s promise of no crash consistency
 costs. Here the power cut, not the disk, is the leading hypothesis, and the remedy is

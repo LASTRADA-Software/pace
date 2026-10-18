@@ -72,7 +72,7 @@ namespace
     /// The same defect reached `NodeCredential_test.cpp` on another branch in the same
     /// week, and the idiom is written out a third time in `pace-cc/FileBytes.hpp`
     /// and once more in `Config/DefaultConfigPath_test.cpp`. Four authors of one read
-    /// is what [#1029](https://github.com/LASTRADA-Software/fastcached/issues/1029) is
+    /// is what [#1029](https://github.com/LASTRADA-Software/pace/issues/1029) is
     /// for -- a SCAN, since a comment stating the rule reaches only the files that
     /// already obey it. Not consolidated here: this file has no business owning a
     /// shared file-reading seam, and reaching into `Pace::Cc` for one would put a

@@ -85,7 +85,7 @@ constexpr std::string_view ProgramName = "pacectl";
     // the stream keeps one of its own -- so the secret existed in two containers nothing
     // wipes, and changing only the RETURN type would have left both. A half-fix that looks
     // complete is the shape this repository keeps finding
-    // ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+    // ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)).
     //
     // Chunked rather than sized from `tellg()`: a credential file is not necessarily
     // seekable -- a FIFO answers -1 -- and a reader that refuses one would be a new

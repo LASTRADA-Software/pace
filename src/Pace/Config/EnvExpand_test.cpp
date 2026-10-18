@@ -21,7 +21,7 @@ TEST_CASE("EnvExpand: bare $NAME ends at the first non-name character", "[config
 {
     ScopedEnv const env { "FC_TEST_ROOT", "C:/ProgramData" };
 
-    auto const r = ExpandEnvironmentVariables("$FC_TEST_ROOT/fastcached/cache", "storage_path");
+    auto const r = ExpandEnvironmentVariables("$FC_TEST_ROOT/pace/cache", "storage_path");
     REQUIRE(r.has_value());
     REQUIRE(*r == "C:/ProgramData/pace/cache");
 }

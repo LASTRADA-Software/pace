@@ -1,4 +1,4 @@
-# pace-kv - Fast Cache Daemon
+# Pace - a distributed compile fleet with a cache
 
 A layered C++23 server: a memcached- and Redis-compatible cache daemon, plus a portable compile
 cache (`pace-cc`) and a distributed compile fleet (`pace-node`). Each layer
@@ -65,7 +65,7 @@ so adding an executable is adding a row:
 
 ```
 src/apps/
-  fastcached/               the daemon (PACE_BUILD_DAEMON, default ON)
+  pace/               the daemon (PACE_BUILD_DAEMON, default ON)
   pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
                             args; does NOT link the Pace library (`_fc_cc_core`)
@@ -122,7 +122,7 @@ migrates a coroutine across threads, which no awaitable here allows, and `RunMul
 runs one thread per reactor exactly as the POSIX path does. The one `ThreadPoolExecutor { 1 }` on
 each of the three serving paths runs the EXPIRY SWEEP; it drains no completion port and overlaps
 no `fsync` with anything. This paragraph claimed the opposite until
-[#896](https://github.com/LASTRADA-Software/fastcached/issues/896), and why a wrong sentence
+[#896](https://github.com/LASTRADA-Software/pace/issues/896), and why a wrong sentence
 *here* is worse than a stale one is in
 [`.agent/rules/wire-and-protocol.md`](.agent/rules/wire-and-protocol.md).
 
@@ -1456,7 +1456,7 @@ FIRST, because it decides whether to cache at all**: staleness that costs a refu
 retry is safe (it fails **closed** and self-heals), while staleness that produces a wrong answer
 which LOOKS right is not, however expensive the probe. **Expense is not the criterion; what a stale
 answer *does* is** — `DiscoverTargetTriple` is deliberately not memoized because a stale triple is a
-wrong hit rather than a miss ([#188](https://github.com/LASTRADA-Software/fastcached/issues/188)).
+wrong hit rather than a miss ([#188](https://github.com/LASTRADA-Software/pace/issues/188)).
 
 Where it IS safe, a cache still owes five things: **measure before choosing, on every platform**;
 **fast by construction before fast by cache** (`IsLoopbackHost` first and lock-free), so the cache

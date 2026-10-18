@@ -6,7 +6,7 @@
 # `cmake/MacOSNotarizePkg.cmake` bounds `notarytool submit --wait` and retries it,
 # because an unbounded wait hands the ending to the runner, which answers after
 # thirty minutes with no statement of what did not finish
-# ([#376](https://github.com/LASTRADA-Software/fastcached/issues/376)).
+# ([#376](https://github.com/LASTRADA-Software/pace/issues/376)).
 #
 # **The property that needs a guard is not the timeout, it is the distinction.**
 # Apple answering "Invalid" is an answer; retrying it spends the budget to be told

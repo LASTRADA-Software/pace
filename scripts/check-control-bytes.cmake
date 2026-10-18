@@ -81,7 +81,7 @@ set(PaceControlByteNames
     .clang-tidy-version .dockerignore .gitattributes .gitignore .tsan-suppressions
     Dockerfile LICENSE MANIFEST
     # `packaging/macos/paths.d.pace` is an `/etc/paths.d` entry -- first-party
-    # text whose `.fastcached` suffix is a product name rather than a file type, so it
+    # text whose `.pace` suffix is a product name rather than a file type, so it
     # is named here rather than widening the extension list. Found by PRINTING the
     # unread count and then asking what those files were, which is the whole reason
     # that figure is in the output.

@@ -529,7 +529,7 @@ struct ServedSurfaces
 /// The worksheet, plus whether this configuration would also START.
 ///
 /// **`--print-surfaces` printed the map and exited 0 for a configuration the node
-/// then refuses to run** ([#582](https://github.com/LASTRADA-Software/fastcached/issues/582)).
+/// then refuses to run** ([#582](https://github.com/LASTRADA-Software/pace/issues/582)).
 /// The flag prints the RESOLVED configuration, which is exactly what makes it the
 /// natural thing to reach for before writing a unit file -- so used that way it is a
 /// pre-flight check, and it answered "fine" to a command line with no chance of
@@ -546,7 +546,7 @@ struct ServedSurfaces
 /// **The refusal is `StartupPolicyRejection`'s own text, never a second phrasing.**
 /// A rule that depends on nothing but the parsed configuration belongs in that table,
 /// and a second copy of its wording is a second thing to be wrong -- which is the
-/// defect [#386](https://github.com/LASTRADA-Software/fastcached/issues/386) records
+/// defect [#386](https://github.com/LASTRADA-Software/pace/issues/386) records
 /// for this very ladder, one flag along.
 ///
 /// **Why this is a function here rather than four lines in `main()`.** It is one of

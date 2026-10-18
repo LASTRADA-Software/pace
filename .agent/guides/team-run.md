@@ -97,7 +97,7 @@ Each of these is a scar, not a preference.
   inside the `type/bug` count, indistinguishable from work nobody had started. A batch
   of eight does this eight times at once, and the next session either re-does one or
   spends its triage finding out it need not.
-  [#974](https://github.com/LASTRADA-Software/fastcached/issues/974); enforced by
+  [#974](https://github.com/LASTRADA-Software/pace/issues/974); enforced by
   `ctest -R pr-closing-keywords`, which refuses a pull request whose commits name a
   ticket its body does not.
 
@@ -263,7 +263,7 @@ causes below is not a cancellation at all:
 A watcher whose settle condition is *no `IN_PROGRESS` and no `QUEUED`* fires **before
 the matrix exists**. On #334 it reported `SETTLED` with 4 checks, 3 SUCCESS, 1 SKIPPED;
 the live state at that moment was 15 `IN_PROGRESS`, 1 `QUEUED`, 22 checks and climbing
-([#337](https://github.com/LASTRADA-Software/fastcached/issues/337)). Zero pending was
+([#337](https://github.com/LASTRADA-Software/pace/issues/337)). Zero pending was
 true, and meaningless — there was nothing yet to be pending *about*.
 
 `Decide what this change can affect` is what widens the window, and it is working as

@@ -179,7 +179,7 @@ TEST_CASE("SecretExposureWatcher: a reload reports a transition into exposure, o
     // because the two things that must be true are that the subscription is attached
     // at all and that what it asks reaches the filesystem. A fake reloader would
     // establish neither.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secret-reload" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secret-reload" };
 
     // `ScratchDirectory::Write` rather than a local `ofstream`: it closes the stream
     // and THROWS when the write did not land, where a local copy would discard the
@@ -379,7 +379,7 @@ TEST_CASE("ReportSecretExposure: the arm for a process with no file to reload", 
     // real subject list rather than a bespoke lambda, since a lambda would test the
     // loop and not the shape the loop exists for; that the WORKER reaches this arm at
     // all is `NodeConfig_test`'s wiring scan.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secret-once" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secret-once" };
     scratch.Write("tls.key", "not-a-real-key\n");
     auto const key = scratch / "tls.key";
 

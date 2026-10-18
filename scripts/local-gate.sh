@@ -74,7 +74,7 @@
 # A real run takes this host's gate lock ITSELF, before it reads the tree, so run it
 # bare -- see "One gate per host, and the lock is taken HERE" below (#1379).
 #
-#   PACE_GATE_LOCK       the lock file. Default `$HOME/.fastcached-local-gate.lock`.
+#   PACE_GATE_LOCK       the lock file. Default `$HOME/.pace-local-gate.lock`.
 #   PACE_GATE_LOCK_WAIT  seconds to queue for it before refusing. Default 10800.
 #   PACE_GATE_STOP_AFTER_LOCK  the self-test's seam: stop once the lock stage has
 #                              decided, checking nothing, with `no-gate-run`'s status.
@@ -1845,7 +1845,7 @@ header_filter_coverage() {
 # split from the enumeration so `--self-test` can drive them at a SYNTHETIC root:
 # where a checkout lives is part of the outcome, and a case that used the real root
 # would assert the opposite thing depending on which machine ran it -- passing on
-# CI's `.../fastcached/` for the very layout that fails in a lane worktree, which is
+# CI's `.../pace/` for the very layout that fails in a lane worktree, which is
 # #1040's own blind spot rebuilt inside its guard.
 
 # What the gate says about that coverage.
@@ -1916,7 +1916,7 @@ header_filter_report() {
             return 1
             ;;
         0/*)
-            echo "clang-tidy's HeaderFilterRegex in $config matches NONE of this tree's $total tracked first-party headers, so every header finding would be discarded as non-user code and the analyser would report clean by analysing nothing (#1040). This is a property of where this checkout LIVES: three patterns anchored on the directory name have now missed a real layout, most recently every lane worktree at .../fastcached-worktrees/<lane>/src/. Fix the pattern, do not delete this check"
+            echo "clang-tidy's HeaderFilterRegex in $config matches NONE of this tree's $total tracked first-party headers, so every header finding would be discarded as non-user code and the analyser would report clean by analysing nothing (#1040). This is a property of where this checkout LIVES: three patterns anchored on the directory name have now missed a real layout, most recently every lane worktree at .../pace-worktrees/<lane>/src/. Fix the pattern, do not delete this check"
             return 1
             ;;
     esac
@@ -3215,22 +3215,22 @@ src/apps/pace-kv/Main.hpp"
 
     # The three layouts the old pattern covered, which must not regress...
     expect "the old pattern covered the primary checkout" \
-        "2/2" "$(header_filter_match "$_old" "" /w/fastcached posix <<< "$_hdrs")"
+        "2/2" "$(header_filter_match "$_old" "" /w/pace posix <<< "$_hdrs")"
     expect "the old pattern covered a .claude worktree" \
-        "2/2" "$(header_filter_match "$_old" "" /w/fastcached/.claude/worktrees/w1 posix <<< "$_hdrs")"
+        "2/2" "$(header_filter_match "$_old" "" /w/pace/.claude/worktrees/w1 posix <<< "$_hdrs")"
     expect "the old pattern covered a wt-NNN checkout" \
-        "2/2" "$(header_filter_match "$_old" "" /w/fastcached-wt-139 posix <<< "$_hdrs")"
+        "2/2" "$(header_filter_match "$_old" "" /w/pace-wt-139 posix <<< "$_hdrs")"
 
     # ... and the one it did NOT, which is the ticket. Zero of two, and the
     # verdict names the first header that would have gone unanalysed.
     expect "the old pattern covered NO header in a lane worktree" \
         "0/2 src/Pace/Core/Base64.hpp" \
-        "$(header_filter_match "$_old" "" /w/fastcached-worktrees/lane-a posix <<< "$_hdrs")"
+        "$(header_filter_match "$_old" "" /w/pace-worktrees/lane-a posix <<< "$_hdrs")"
 
     # The /-only replacement covered all four as POSIX paths -- which is why this
     # guard read 363/363 over a filter that matched nothing on Windows.
-    for _root in /w/fastcached /w/fastcached/.claude/worktrees/w1 \
-                 /w/fastcached-wt-139 /w/fastcached-worktrees/lane-a; do
+    for _root in /w/pace /w/pace/.claude/worktrees/w1 \
+                 /w/pace-wt-139 /w/pace-worktrees/lane-a; do
         expect "the /-only pattern covers $_root as POSIX paths" \
             "2/2" "$(header_filter_match "$_slash" "$_exc" "$_root" posix <<< "$_hdrs")"
     done
@@ -3240,24 +3240,24 @@ src/apps/pace-kv/Main.hpp"
     # in one spelling and not another is a separator defect, not a location one.
     expect "the /-only pattern covers NO header in the all-backslash spelling" \
         "0/2 src/Pace/Core/Base64.hpp (windows spelling)" \
-        "$(header_filter_match "$_slash" "" /w/fastcached-worktrees/lane-a <<< "$_hdrs")"
+        "$(header_filter_match "$_slash" "" /w/pace-worktrees/lane-a <<< "$_hdrs")"
     # A pattern written for both separators as two separate copies -- the edit the
     # remedy text warns against -- still misses MSVC's mix: a backslashed include
     # directory, then a slashed `#include` name.
     _twocopies='(.*/src/(CowTree|Pace|apps|tests)/.*|.*\\src\\(CowTree|Pace|apps|tests)\\.*)'
     expect "two copies of the pattern miss the MSVC mix of separators" \
         "0/2 src/Pace/Core/Base64.hpp (msvc spelling)" \
-        "$(header_filter_match "$_twocopies" "" /w/fastcached <<< "$_hdrs")"
+        "$(header_filter_match "$_twocopies" "" /w/pace <<< "$_hdrs")"
     expect "... which is what the MSVC spelling IS" \
-        '\w\fastcached\src/Pace/Core/Base64.hpp' \
-        "$(header_filter_spell msvc /w/fastcached/src/Pace/Core/Base64.hpp)"
+        '\w\pace\src/Pace/Core/Base64.hpp' \
+        "$(header_filter_spell msvc /w/pace/src/Pace/Core/Base64.hpp)"
     expect "a spelling nobody defined is refused, never skipped" \
         "2" "$(header_filter_spell dos /w/x >/dev/null 2>&1; echo $?)"
 
     # The separator-agnostic pattern covers all four layouts in every spelling,
     # which is the point of naming neither a layout nor a separator.
-    for _root in /w/fastcached /w/fastcached/.claude/worktrees/w1 \
-                 /w/fastcached-wt-139 /w/fastcached-worktrees/lane-a; do
+    for _root in /w/pace /w/pace/.claude/worktrees/w1 \
+                 /w/pace-wt-139 /w/pace-worktrees/lane-a; do
         expect "the new pattern covers $_root in every spelling" \
             "2/2" "$(header_filter_match "$_new" "$_exc" "$_root" <<< "$_hdrs")"
     done
@@ -3271,7 +3271,7 @@ src/apps/pace-kv/Main.hpp"
     for _dep in "$_dep_deps" "$_dep_cpm"; do
         expect "a dependency header is reached in no spelling: $_dep" \
             "0/1" \
-            "$(header_filter_reach "$_new" "" /w/fastcached-worktrees/lane-a <<< "$_dep")"
+            "$(header_filter_reach "$_new" "" /w/pace-worktrees/lane-a <<< "$_dep")"
     done
     # A leak is a question of ANY spelling, and coverage's every-spelling count
     # cannot ask it: a filter taking catch2 only when it is spelled with
@@ -3279,10 +3279,10 @@ src/apps/pace-kv/Main.hpp"
     _depwin="${_new}|"'.*\\_deps\\.*'
     expect "a dependency taken in the backslash spelling alone is REACHED" \
         "1/1 $_dep_deps (windows spelling)" \
-        "$(header_filter_reach "$_depwin" "" /w/fastcached-worktrees/lane-a <<< "$_dep_deps")"
+        "$(header_filter_reach "$_depwin" "" /w/pace-worktrees/lane-a <<< "$_dep_deps")"
     expect "... where the every-spelling count would have read it as untaken" \
         "0/1 $_dep_deps (posix spelling)" \
-        "$(header_filter_match "$_depwin" "" /w/fastcached-worktrees/lane-a <<< "$_dep_deps")"
+        "$(header_filter_match "$_depwin" "" /w/pace-worktrees/lane-a <<< "$_dep_deps")"
 
     # Pinned as the inequality it is. The first #1040 fix -- broad
     # `.*/src/.*` with `_deps` excluded -- is correct for one layout and takes the
@@ -3290,16 +3290,16 @@ src/apps/pace-kv/Main.hpp"
     # clean. A case driven only against `_deps` passes under that bug.
     expect "the old broad+exclude pattern kept _deps out" \
         "0/1 $_dep_deps" \
-        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/fastcached-worktrees/lane-a posix <<< "$_dep_deps")"
+        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/pace-worktrees/lane-a posix <<< "$_dep_deps")"
     expect "... and TOOK the CPM layout, which is the defect CI caught" \
         "1/1" \
-        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/fastcached-worktrees/lane-a posix <<< "$_dep_cpm")"
+        "$(header_filter_match '.*/src/.*' '.*/_deps/.*' /w/pace-worktrees/lane-a posix <<< "$_dep_cpm")"
 
     # A partial match is its own outcome: an analyser blind to 1 of 2 headers
     # still reports findings, so it looks like it is working.
     expect "a partial match names how many and which" \
         "1/2 src/apps/pace-kv/Main.hpp" \
-        "$(header_filter_match '.*/src/Pace/.*' "" /w/fastcached posix <<< "$_hdrs")"
+        "$(header_filter_match '.*/src/Pace/.*' "" /w/pace posix <<< "$_hdrs")"
 
     # The reporter. `all` is the only arm that carries on -- asserted as the
     # STATUS beside the text, since a reporter that says the right words and
@@ -3315,7 +3315,7 @@ src/apps/pace-kv/Main.hpp"
     # headers were taken "as POSIX paths" -- that is the one spelling that did NOT take them, a
     # confident wrong signal. Driven through the real match, so the verdict is the one a gate
     # would produce, not one typed here.
-    _p3="$(header_filter_match '.*\\src\\(CowTree|Pace|apps|tests)\\.*' "" /w/fastcached <<< "$_hdrs")"
+    _p3="$(header_filter_match '.*\\src\\(CowTree|Pace|apps|tests)\\.*' "" /w/pace <<< "$_hdrs")"
     expect "P3: a backslash-only filter's miss is named in the posix spelling" \
         "0/2 src/Pace/Core/Base64.hpp (posix spelling)" "$_p3"
     # `if`, never `case`, inside `$( )`: bash 3.2 reads a case pattern's `)` as the
@@ -3346,7 +3346,7 @@ src/apps/pace-kv/Main.hpp"
     # P1: a filter taking one root in every spelling and another as POSIX paths only -- a
     # PARTIAL miss in one spelling. Driven through the real match. Its cause is the separators,
     # and #1040 (where a checkout lives) must not be named for it.
-    _p1="$(header_filter_match '(.*/src/(CowTree|Pace|apps|tests)/.*|.*[/\\]src[/\\]Pace[/\\].*)' "" /w/fastcached <<< "$_hdrs")"
+    _p1="$(header_filter_match '(.*/src/(CowTree|Pace|apps|tests)/.*|.*[/\\]src[/\\]Pace[/\\].*)' "" /w/pace <<< "$_hdrs")"
     expect "P1: a partial miss in one spelling is named in that spelling" \
         "1/2 src/apps/pace-kv/Main.hpp (windows spelling)" "$_p1"
     expect "P1: ... and its cause is the separators" \
@@ -4652,7 +4652,7 @@ fi
 # is what keeps every existing `flock <path> bash scripts/local-gate.sh` working after this
 # lands. Without that, `flock` taking a SECOND descriptor on the path would block against
 # the wrapper's own descriptor for the whole wait.
-gate_lock_path="${PACE_GATE_LOCK:-${HOME:+$HOME/.fastcached-local-gate.lock}}"
+gate_lock_path="${PACE_GATE_LOCK:-${HOME:+$HOME/.pace-local-gate.lock}}"
 if [[ -z "$gate_lock_path" ]]; then
     echo "$gate_lock_unusable_marker -- neither PACE_GATE_LOCK nor HOME is set, so there is no lock file to name."
     exit "$(gate_outcome_status lock-unusable)"

@@ -35,7 +35,7 @@ inline constexpr std::string_view DelimitedReplacement = "\xEF\xBF\xBD";
 /// differ.** `RenderFleetHtml` and the node's own one-paragraph pages -- its 401 and
 /// its bad-range refusal -- each spelled this prologue out, and the two copies had
 /// already drifted apart by a newline before anybody consolidated them
-/// ([#1344](https://github.com/LASTRADA-Software/fastcached/issues/1344)). Neither
+/// ([#1344](https://github.com/LASTRADA-Software/pace/issues/1344)). Neither
 /// half is cosmetic: a document with no viewport meta renders at desktop zoom on a
 /// phone, and the 401 is the most-seen page of a rollout, while a charset one document
 /// declares and the other does not is how a peer's display name comes back mojibake on
@@ -50,7 +50,7 @@ inline constexpr std::string_view DelimitedReplacement = "\xEF\xBF\xBD";
 ///
 /// **The two `<title>` literals are identical text today and are deliberately not in
 /// here**, and the reason is not that a title names its page -- in this tree it does
-/// not: `MinimalHtmlPage` hands the same `fastcache fleet` title to the 401 and to the
+/// not: `MinimalHtmlPage` hands the same `pace fleet` title to the 401 and to the
 /// bad-range refusal, so the title already spans three documents on one URL. The reason
 /// is that the prologue is a CORRECTNESS property of any document -- how it renders,
 /// which encoding it is read in, whether a screen reader knows its language -- while a

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// The banner's DECISION, driven over staged readings
-/// ([#1439](https://github.com/LASTRADA-Software/fastcached/issues/1439)).
+/// ([#1439](https://github.com/LASTRADA-Software/pace/issues/1439)).
 ///
 /// A build's own figures can only ever exercise one arm -- this binary is either optimised or
 /// it is not -- so the arm that matters is always the one the host cannot produce. Every case

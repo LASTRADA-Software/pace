@@ -1,7 +1,7 @@
-# pace-kv
+# Pace
 
-[![Build](https://github.com/LASTRADA-Software/fastcached/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/LASTRADA-Software/fastcached/actions/workflows/build.yml)
-[![codecov](https://codecov.io/gh/LASTRADA-Software/fastcached/branch/master/graph/badge.svg)](https://codecov.io/gh/LASTRADA-Software/fastcached)
+[![Build](https://github.com/LASTRADA-Software/pace/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/LASTRADA-Software/pace/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/LASTRADA-Software/pace/branch/master/graph/badge.svg)](https://codecov.io/gh/LASTRADA-Software/pace)
 
 Three things ship from this repository:
 
@@ -24,7 +24,7 @@ Three things ship from this repository:
 
 Use them together for a shared compile cache, or run `pace-kv` on its own as
 a memcached/Redis-compatible cache — including as a plain
-[sccache backend](#using-fastcached-as-an-sccache-backend), which comes with a
+[sccache backend](#using-pace-kv-as-an-sccache-backend), which comes with a
 caveat on MSVC and clang-cl.
 
 It is not a general-purpose replacement for memcached or Redis: it implements
@@ -32,7 +32,7 @@ only the slice of each protocol a cache backend needs. It is in production use
 as a shared compile cache for a large C++ codebase, backing both CI runners and
 developer machines.
 
-Full documentation: **<https://lastrada-software.github.io/fastcached/>**
+Full documentation: **<https://lastrada-software.github.io/pace/>**
 
 ## Install
 
@@ -58,13 +58,13 @@ docker run --rm -p 6674:6674 pace-kv
 
 Requires CMake 3.28+, a C++23 compiler, and Ninja. Full details — presets,
 dependencies, and platform notes — in
-[Install](https://lastrada-software.github.io/fastcached/getting-started/install/).
+[Install](https://lastrada-software.github.io/pace/getting-started/install/).
 
 **Neither install updates itself, and some fixes here are cache-correctness
 fixes** — a stale object served under a key that says otherwise, which every layer
 above reports as success. When you follow a `type/bug` fix, rebuild and redeploy on
 every machine, compile nodes included; `--version` says what is running
-([#181](https://github.com/LASTRADA-Software/fastcached/issues/181)).
+([#181](https://github.com/LASTRADA-Software/pace/issues/181)).
 
 ## Quick start: the cache daemon
 
@@ -96,7 +96,7 @@ from the unit tests, so they reflect exactly what the server emits:
 
 Protocol coverage is intentionally a subset — the commands a cache client
 actually uses. See the
-[coverage matrix](https://lastrada-software.github.io/fastcached/protocols/coverage-matrix/)
+[coverage matrix](https://lastrada-software.github.io/pace/protocols/coverage-matrix/)
 for the exact list.
 
 ## Quick start: caching your compiles
@@ -190,7 +190,7 @@ Supported compilers: `gcc`/`g++`, `clang`/`clang++` (including versioned names
 like `g++-14`), and MSVC `cl` / `clang-cl`. The full reference — every
 environment variable, exit codes, how the key is computed, and the known
 limitations — is in the
-[pace-cc docs](https://lastrada-software.github.io/fastcached/tools/pace-cc/).
+[pace-cc docs](https://lastrada-software.github.io/pace/tools/pace-cc/).
 
 ## Using pace-kv as an sccache backend
 
@@ -278,7 +278,7 @@ Binding `0.0.0.0` without `--requirepass` exposes the cache to the network —
 pair them. The image's `HEALTHCHECK` calls `pace-kv --healthcheck`, a
 self-contained probe needing no `curl` in the image. Full guide, including a
 Kubernetes manifest with liveness/readiness probes, in the
-[deployment docs](https://lastrada-software.github.io/fastcached/operations/deployment/).
+[deployment docs](https://lastrada-software.github.io/pace/operations/deployment/).
 
 ## Ports
 
@@ -342,7 +342,7 @@ requires that only an administrator could have put the file there.
 `--config=<path>` overrides the search entirely. The distinction matters for
 errors: a file you named must exist, while a default location that does not is
 simply skipped and the built-in defaults apply. See the
-[configuration docs](https://lastrada-software.github.io/fastcached/getting-started/configuration/).
+[configuration docs](https://lastrada-software.github.io/pace/getting-started/configuration/).
 
 ### Persistence and scaling
 
@@ -357,7 +357,7 @@ never block each other. `--threads=N` runs N single-threaded reactors, each
 pinned to its own core, with every connection pinned to one reactor for its
 lifetime — so the server scales across cores without cross-thread coroutine
 migration. Details in the
-[architecture docs](https://lastrada-software.github.io/fastcached/internals/architecture/).
+[architecture docs](https://lastrada-software.github.io/pace/internals/architecture/).
 
 ## Benchmarks
 
@@ -403,7 +403,7 @@ itself does. A shipped `GET` costs **~32 ns** there, against ~1.9 µs of server
 CPU for the same operation once a socket is involved. Reproduce with `python
 bench/inproc_bench.py`; the decomposition, the scaling curve and what they imply
 for tuning are on the
-[performance page](https://lastrada-software.github.io/fastcached/internals/performance/).
+[performance page](https://lastrada-software.github.io/pace/internals/performance/).
 
 ## Contributing
 

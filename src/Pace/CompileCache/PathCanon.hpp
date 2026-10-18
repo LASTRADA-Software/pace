@@ -150,7 +150,7 @@ enum class Grammar : std::uint8_t
 /// what Ninja matches under `deps = msvc`, it is `msvc_deps_prefix` rather than
 /// anything this project chose, and a Visual Studio carrying a language pack makes
 /// it a translated sentence
-/// ([#700](https://github.com/LASTRADA-Software/fastcached/issues/700)). So a
+/// ([#700](https://github.com/LASTRADA-Software/pace/issues/700)). So a
 /// producer whose notes carry another prefix rewrites them to this one on the way
 /// into the cache and a consumer rewrites them back to its own on the way out —
 /// `RewriteIncludeNoteMarker`, both directions — and everything in between, this
@@ -171,7 +171,7 @@ enum class Grammar : std::uint8_t
 /// variable on the CONSUMER answers a different question entirely. So the value
 /// arrives already normalized, and "every server on this wire canonicalizes
 /// identically" keeps holding by construction — which is why closing
-/// [#879](https://github.com/LASTRADA-Software/fastcached/issues/879) moved
+/// [#879](https://github.com/LASTRADA-Software/pace/issues/879) moved
 /// `CompileValueVersion` and changed neither server.
 ///
 /// Spelled HERE rather than in the launcher, though `Cc::IncludeNoteMarker` is the
@@ -192,8 +192,8 @@ inline constexpr std::string_view IncludeNoteMarker = "Note: including file:";
 /// nobody can find, or the reverse. This lives in the header rather than beside its
 /// first caller precisely because the third reader is in the other binary; two
 /// hand-maintained copies of a recognition rule is the mechanism that produced
-/// [#891](https://github.com/LASTRADA-Software/fastcached/issues/891) and then
-/// [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270).
+/// [#891](https://github.com/LASTRADA-Software/pace/issues/891) and then
+/// [#1270](https://github.com/LASTRADA-Software/pace/issues/1270).
 ///
 /// **Anchored at COLUMN ZERO: nothing may precede the marker, blanks included.**
 ///

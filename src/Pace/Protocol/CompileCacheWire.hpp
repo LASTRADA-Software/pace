@@ -112,24 +112,24 @@ using WireVersion = std::uint8_t;
 ///
 /// **3 added `Status::Progress`**, the liveness pulse a worker writes while a
 /// dispatched compile runs
-/// ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)).
+/// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)).
 ///
 /// **4 gave the REGISTER reply a shape.** It was the worker id as bare bytes; it is
 /// now a nested record carrying the id, the fleet identity and the scheduler epoch,
 /// so a worker learns which fleet it serves from the one exchange it has with the
 /// scheduler it was configured to reach
-/// ([#401](https://github.com/LASTRADA-Software/fastcached/issues/401)).
+/// ([#401](https://github.com/LASTRADA-Software/pace/issues/401)).
 ///
 /// **6 put the lease's lifetime on the LEASE grant.** The lifetime became a
 /// replicated setting, so the number a client must bound its wait by is no longer a
 /// constant both ends compile in -- it has to travel
-/// ([#522](https://github.com/LASTRADA-Software/fastcached/issues/522)).
+/// ([#522](https://github.com/LASTRADA-Software/pace/issues/522)).
 ///
 /// **7 gave the NODE-STATUS reply a runtime record**, so a node with the default
 /// configuration -- no `--admin-listen`, therefore no `/metrics` and no dashboard --
 /// can say what it is DOING and not only what it was configured as
-/// ([#1294](https://github.com/LASTRADA-Software/fastcached/issues/1294),
-/// [#1295](https://github.com/LASTRADA-Software/fastcached/issues/1295)).
+/// ([#1294](https://github.com/LASTRADA-Software/pace/issues/1294),
+/// [#1295](https://github.com/LASTRADA-Software/pace/issues/1295)).
 ///
 /// It is one new top-level field and it is intended to be the LAST one: what it
 /// carries is a nested variable-arity record, for the reason `EncodeCapacity` is
@@ -140,7 +140,7 @@ using WireVersion = std::uint8_t;
 /// only thing an operator learned was that the message had arrived; the id and the
 /// endpoint the leader wrote into the command now come back as bytes they can read
 /// against the machine being admitted
-/// ([#1296](https://github.com/LASTRADA-Software/fastcached/issues/1296)).
+/// ([#1296](https://github.com/LASTRADA-Software/pace/issues/1296)).
 ///
 /// A RECEIPT and not a confirmation, which is a constraint on the shape as much as on
 /// the wording: see `ClusterAdmitReceipt`. Exact arity of two, like every other reply
@@ -149,7 +149,7 @@ using WireVersion = std::uint8_t;
 /// **9 added `Status::Push` and `Op::Subscribe`**: a live-stats session subscribes on a
 /// connection of its own and the node PUSHES what the dashboard draws, instead of the
 /// dashboard polling `/metrics` and `/fleet.txt` over HTTP
-/// ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)). A reply carries a
+/// ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)). A reply carries a
 /// status byte and no kind, and `DecodeReplyHeader` refuses a status it does not know, so a
 /// new status is a new reply grammar for every reader and the floor moves with it -- the
 /// version-3 argument exactly.
@@ -157,11 +157,11 @@ using WireVersion = std::uint8_t;
 /// **Every node and every `pace-cc` upgrade together.** A launcher is a reader of this
 /// wire, and a version-8 launcher is refused by a version-9 node rather than served; on this
 /// project's one installation that is one rebuild of both binaries
-/// ([#332](https://github.com/LASTRADA-Software/fastcached/issues/332)).
+/// ([#332](https://github.com/LASTRADA-Software/pace/issues/332)).
 ///
 /// **10 made the NODE-METRICS reply a `StatsReading`** instead of the counter catalogue as
 /// `name value` pairs, so it carries every figure `/metrics` does
-/// ([#1406](https://github.com/LASTRADA-Software/fastcached/issues/1406)). The body of an
+/// ([#1406](https://github.com/LASTRADA-Software/pace/issues/1406)). The body of an
 /// existing verb changed shape, which no reader can step over: a version-9 client would read
 /// the reading as malformed rows and report a node whose answer it could not read, and a
 /// version-10 client would read a version-9 node's rows as a reading laid out by another build.
@@ -239,7 +239,7 @@ inline constexpr WireVersion CurrentVersion = 15;
 /// owed before the production-ready declaration. **That licence expires at the
 /// declaration**, and the release that creates fleets is the release that retires the
 /// premise a flag day rests on
-/// ([#998](https://github.com/LASTRADA-Software/fastcached/issues/998)). Documenting
+/// ([#998](https://github.com/LASTRADA-Software/pace/issues/998)). Documenting
 /// the flag day is what that ticket calls the cheapest honest option; widening the
 /// range per verb — `Op::Compile` has exact arity and is the binding constraint, the
 /// cache verbs are cheaper — remains open and is a decision rather than a defect.
@@ -260,7 +260,7 @@ inline constexpr WireVersion CurrentVersion = 15;
 /// every accepted request is version 3, so every client a worker answers understands
 /// a progress frame, and nothing has to remember a per-connection flag. Backwards
 /// compatibility on this wire is not owed
-/// ([#332](https://github.com/LASTRADA-Software/fastcached/issues/332)) — one
+/// ([#332](https://github.com/LASTRADA-Software/pace/issues/332)) — one
 /// installation, major version 0 — and a loud, named, immediate refusal is what that
 /// budget is best spent on.
 ///
@@ -312,7 +312,7 @@ inline constexpr WireVersion CurrentVersion = 15;
 /// Serving both shapes is the only other honest option and buys nothing here:
 /// `docs/operations/upgrading-a-fleet.md` already documents the stop-upgrade-start
 /// procedure, both binaries ship together, and this node has one installation
-/// ([#332](https://github.com/LASTRADA-Software/fastcached/issues/332)), so the cost
+/// ([#332](https://github.com/LASTRADA-Software/pace/issues/332)), so the cost
 /// of the flag day is one local rebuild. Opening a real window is the work that page
 /// describes and is not owed yet.
 ///
@@ -349,7 +349,7 @@ inline constexpr WireVersion CurrentVersion = 15;
 ///
 /// The cost is unchanged from every bump above and is stated rather than reasoned from
 /// again: one installation
-/// ([#332](https://github.com/LASTRADA-Software/fastcached/issues/332)), both binaries
+/// ([#332](https://github.com/LASTRADA-Software/pace/issues/332)), both binaries
 /// shipped together, and the stop-upgrade-start procedure that page already carries.
 ///
 /// Version 9 moves it for version 3's reason: `Status::Push` is a status an older reader
@@ -485,7 +485,7 @@ enum class Op : std::uint8_t
     /// it -- `ReapExpiredWorkers` runs BEFORE `Pick`, so an entry inside its window
     /// survives the reap and is handed out, and the client is granted a lease to a
     /// worker certain to refuse it
-    /// ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)).
+    /// ([#573](https://github.com/LASTRADA-Software/pace/issues/573)).
     ///
     /// **It names the `workerId` and nothing else, and that is a security decision
     /// rather than a shape one.** A withdrawal naming `(fingerprint, endpoint)` would
@@ -539,7 +539,7 @@ enum class Op : std::uint8_t
     /// consensus blocks beside them -- captured once and encoded as a live-stats cache
     /// subject streams it. It was the counter catalogue alone, as `name value` pairs, so a
     /// node with no admin surface showed none of its cache tier's figures
-    /// ([#1406](https://github.com/LASTRADA-Software/fastcached/issues/1406)). A client
+    /// ([#1406](https://github.com/LASTRADA-Software/pace/issues/1406)). A client
     /// renders it through the same `RenderPrometheus`, and a client of another layout is
     /// refused by the digest the encoding starts with rather than misreading it.
     NodeMetrics = 0x0F,
@@ -547,7 +547,7 @@ enum class Op : std::uint8_t
     // Runtime enrollment. A fresh install asks the leader to join under the identity key it
     // minted, and is told who else is in the cluster once a person -- or a deadline a person
     // armed -- approves it, instead of every member's key being typed onto forty machines by hand
-    // ([#1298](https://github.com/LASTRADA-Software/fastcached/issues/1298), #178). **No
+    // ([#1298](https://github.com/LASTRADA-Software/pace/issues/1298), #178). **No
     // secret crosses this exchange in either direction**: the request carries a public key
     // and the approved reply carries the roster, which is public too.
     //
@@ -635,7 +635,7 @@ enum class Op : std::uint8_t
     /// **The one-shot twin of subscribing to the fleet**, answered with the text `/fleet.txt`
     /// serves -- the same renderer, reached through one function both doors call -- so a terminal
     /// reads a fleet table from a node with no admin surface at all
-    /// ([#1391](https://github.com/LASTRADA-Software/fastcached/issues/1391)). A read rather than a
+    /// ([#1391](https://github.com/LASTRADA-Software/pace/issues/1391)). A read rather than a
     /// stream: a subscription taken for one frame and dropped is a stream misused as a query, and it
     /// could carry no range.
     ///
@@ -650,7 +650,7 @@ enum class Op : std::uint8_t
     FleetText = 0x14,
 
     /// An operator removes one key from the cache tier that answers
-    /// ([#1276](https://github.com/LASTRADA-Software/fastcached/issues/1276)).
+    /// ([#1276](https://github.com/LASTRADA-Software/pace/issues/1276)).
     ///
     /// The case is a stored value somebody has determined is wrong -- `PACE_VERIFY`
     /// naming a `WRONG OBJECT` and its key is the ordinary way to learn one -- on a
@@ -678,8 +678,8 @@ enum class Op : std::uint8_t
     // The node proof. Two verbs with which a caller establishes, on THIS connection, WHICH
     // machine it is -- by signing with the identity key the cluster admitted -- and after which
     // every frame both ways is sealed under a key the two ends agreed
-    // ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178),
-    // [#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428)).
+    // ([#178](https://github.com/LASTRADA-Software/pace/issues/178),
+    // [#1428](https://github.com/LASTRADA-Software/pace/issues/1428)).
     //
     // Their own block and their own family, and `VerbFamily::NodeProof` carries the
     // argument. **Neither is `OpenBeforeAuth`**, which is the one thing about this pair
@@ -730,7 +730,7 @@ enum class Op : std::uint8_t
     /// A node tells the scheduler it EXISTS, whatever components it runs.
     ///
     /// Its own verb rather than a `Register` with no fingerprint, and that is the whole
-    /// decision of [#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440).
+    /// decision of [#1440](https://github.com/LASTRADA-Software/pace/issues/1440).
     /// The registry keys on `(fingerprint, endpoint)`, so a fingerprint-less registration
     /// has no key -- and every consumer of `LiveWorkers()` would then walk an entry with no
     /// toolchain and no slots. That pseudo-worker is exactly the workaround #206 deleted, in
@@ -831,7 +831,7 @@ enum class Status : std::uint8_t
     /// consumes precisely one answer per request and pipelining stays well defined.
     ///
     /// **It says nothing about the compile, deliberately**
-    /// ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)). A
+    /// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)). A
     /// liveness signal that carried partial diagnostics would be a second, racy
     /// channel for output the result frame already carries in full — two sources for
     /// one fact, differing by however much of the compile had happened when each was
@@ -1168,14 +1168,14 @@ enum class ErrorCode : std::uint8_t
     /// malformed values sends an operator looking for a broken client, or -- worse,
     /// and the reason the disk rule exists -- to wipe a cache that is perfectly
     /// healthy. The remedy here is to finish the rollout or roll it back. A fleet is
-    /// permanently mid-upgrade ([#173](https://github.com/LASTRADA-Software/fastcached/issues/173)),
+    /// permanently mid-upgrade ([#173](https://github.com/LASTRADA-Software/pace/issues/173)),
     /// so this is not an exotic state.
     ///
     /// Refused rather than stored, and neither server on this wire has a choice about
     /// that: storing it would mean storing text this build cannot rewrite -- the
     /// producing checkout's absolute paths, under a key every machine computes, which
     /// is exactly what `CanonicalStoredValue` exists to prevent
-    /// ([#483](https://github.com/LASTRADA-Software/fastcached/issues/483)).
+    /// ([#483](https://github.com/LASTRADA-Software/pace/issues/483)).
     ///
     /// The two surfaces answering it keep **separate counters**, because a shared code
     /// is not a shared event: `SurfaceRefusal`'s row is the refusal, not the code.
@@ -1387,7 +1387,7 @@ enum class ErrorCode : std::uint8_t
 /// Whether a verb may be served before a credential has been accepted.
 ///
 /// **A type rather than a `bool`, so that a row which does not state its
-/// classification fails to COMPILE** ([#289](https://github.com/LASTRADA-Software/fastcached/issues/289)).
+/// classification fails to COMPILE** ([#289](https://github.com/LASTRADA-Software/pace/issues/289)).
 /// The default constructor is deleted, which makes an aggregate row that omits
 /// `.preAuth` ill-formed: designated initializers value-initialize an omitted
 /// member, and a class with no default constructor cannot be value-initialized.
@@ -1442,7 +1442,7 @@ inline constexpr PreAuth RequiresAuth { false };
 /// that omits the member value-initializes it to `0`, and `0` is a *meaningful*
 /// value -- "the operator's session cap governs". So a control verb added later
 /// would silently inherit a listener-wide 256 MiB ceiling, which is the failure
-/// [#284](https://github.com/LASTRADA-Software/fastcached/issues/284) is about, and
+/// [#284](https://github.com/LASTRADA-Software/pace/issues/284) is about, and
 /// it would compile and pass every test.
 ///
 /// Spelling it as a type with no default constructor makes the omission
@@ -1591,7 +1591,7 @@ enum class IdentityRequirement : std::uint8_t
 /// "Distributed execution", "Cluster administration" and nothing at all for the first
 /// three. A comment is enough while each family has a listener to itself, and stops
 /// being enough the moment one listener serves several
-/// ([#290](https://github.com/LASTRADA-Software/fastcached/issues/290)): a merged
+/// ([#290](https://github.com/LASTRADA-Software/pace/issues/290)): a merged
 /// `0xFC` surface routes each frame to the component that owns its family, and asks
 /// that component -- rather than the port -- whether the peer is admitted, whether a
 /// credential is required, and which counter a refusal belongs to.
@@ -2089,7 +2089,7 @@ static_assert(MaxRefusalReply <= MaxSealedReplyPayload && MaxSealedReplyPayload 
 /// has already reclaimed and may have re-granted for the same key; below it, a
 /// compile the fleet is still holding capacity for is thrown away. Neither end can
 /// pick its own value without describing a fleet the other end is not running
-/// ([#249](https://github.com/LASTRADA-Software/fastcached/issues/249)).
+/// ([#249](https://github.com/LASTRADA-Software/pace/issues/249)).
 ///
 /// It lives HERE for the reason `MaxAuthPayload` and `MaxControlPayload` do: this
 /// header is the only thing both ends can include. `pace-cc` does not link
@@ -3368,7 +3368,7 @@ struct PrePayloadRequest
 /// same question in the same order, and each used to answer it in its own code. That
 /// is the arrangement that produced three refusal tables which drifted (#283, #340);
 /// this is one predicate with two callers instead
-/// ([#289](https://github.com/LASTRADA-Software/fastcached/issues/289)).
+/// ([#289](https://github.com/LASTRADA-Software/pace/issues/289)).
 ///
 /// **The ceiling is checked BEFORE the credential, and the order is load-bearing.**
 /// `Op::Auth` is deliberately reachable unauthenticated, so if the credential gate
@@ -3903,7 +3903,7 @@ inline constexpr std::uint8_t IdentityCodec = 0;
 ///
 /// **`View` because `bytes` borrows the field it was decoded from**, and this is
 /// returned by value from `DecodeCodecEnvelope`. The name is the warning the type
-/// used to lack ([#366](https://github.com/LASTRADA-Software/fastcached/issues/366)):
+/// used to lack ([#366](https://github.com/LASTRADA-Software/pace/issues/366)):
 /// a caller that lets the decoded buffer die before reading `bytes` has a
 /// use-after-free.
 ///
@@ -4479,7 +4479,7 @@ struct CapacityFields
     /// What a person calls this machine, e.g. `buildnode-3`. Empty means "did not say".
     ///
     /// **A LABEL, and nothing may decide from it**
-    /// ([#1024](https://github.com/LASTRADA-Software/fastcached/issues/1024)). A node's
+    /// ([#1024](https://github.com/LASTRADA-Software/pace/issues/1024)). A node's
     /// identity is minted into its state directory and is what the cluster admits and
     /// counts votes against; this exists so an operator looking at that opaque id knows
     /// which box to walk to. Nothing keys on it, compares it, routes by it or admits by
@@ -4824,7 +4824,7 @@ struct CompileRequest
     ///
     /// **This said "the BASE NAME only" until #800 made it a path, and the stale
     /// sentence survived the change that falsified it**
-    /// ([#907](https://github.com/LASTRADA-Software/fastcached/issues/907)). clang takes
+    /// ([#907](https://github.com/LASTRADA-Software/pace/issues/907)). clang takes
     /// `DW_AT_name` from the INPUT FILE PATH, so a dispatched object recorded the
     /// worker's `<scratch>/job-N/<name>` -- a directory on no machine -- and two
     /// dispatches of ONE translation unit produced byte-differing objects under one key
@@ -4862,7 +4862,7 @@ struct CompileRequest
     /// key can distinguish two producers by it. #203 closed that for a local compile by
     /// appending mapping rules; a worker was sent none, so a dispatched object recorded
     /// a directory a locally mapped one does not, under the same key
-    /// ([#506](https://github.com/LASTRADA-Software/fastcached/issues/506)).
+    /// ([#506](https://github.com/LASTRADA-Software/pace/issues/506)).
     ///
     /// **WHICH directory a dispatched object records depends on the driver, so both
     /// travel.** Measured on gcc 14.2.0 and clang 20.1.2, one translation unit each way,
@@ -5987,7 +5987,7 @@ template <Op op>
 /// truth: by the time this record exists `ProposeToCluster` has returned, so the entry
 /// is appended and replicating already. Understating what a leader has done is the
 /// direction to err in; overstating it is the whole defect
-/// ([#1296](https://github.com/LASTRADA-Software/fastcached/issues/1296)).
+/// ([#1296](https://github.com/LASTRADA-Software/pace/issues/1296)).
 ///
 /// **What it buys, stated narrowly, because the wider claim is false.** The leader
 /// records verbatim what this client sent, so holding the echo against the same
@@ -6014,7 +6014,7 @@ template <Op op>
 /// always -- `AddMember` applies that field WHOLESALE, so a re-admit deliberately
 /// clears whatever the member had announced -- which would make a third field here a
 /// constant, and a constant on a wire is
-/// [#1295](https://github.com/LASTRADA-Software/fastcached/issues/1295)'s
+/// [#1295](https://github.com/LASTRADA-Software/pace/issues/1295)'s
 /// `worker = true` under a new name: a value that carries no information and that two
 /// builds can still disagree about. The CONSEQUENCE is real and an operator moving a
 /// node should be told it, but it follows from the VERB and belongs in what a renderer
@@ -6275,7 +6275,7 @@ struct CompileResult
     /// Nothing else did. The cache key covers the inputs, the fingerprint the
     /// toolchain and the lease the authorization -- every one of them upstream of the
     /// reply -- so a client sent a job and accepted whatever object came back on that
-    /// connection ([#280](https://github.com/LASTRADA-Software/fastcached/issues/280)).
+    /// connection ([#280](https://github.com/LASTRADA-Software/pace/issues/280)).
     ///
     /// Produced by `Cc::CompileCorrelation` in the RUNNER, from what it actually
     /// spawned and wrote, never recomputed at this layer from the decoded request: at
@@ -6316,7 +6316,7 @@ struct CompileResult
 /// struct in this header does (`LeaseGrant`, `CompileRequest`, `StoreRequest`).
 /// A decoder's result is different in kind -- it is returned **by value**, so a
 /// borrowing member outlives the call and dangles the moment the buffer goes
-/// ([#366](https://github.com/LASTRADA-Software/fastcached/issues/366)).
+/// ([#366](https://github.com/LASTRADA-Software/pace/issues/366)).
 ///
 /// `*Fields` rather than `*View` because the name has to say which it is, and this
 /// header already uses that suffix for exactly this: `CapacityFields`, `LoadFields`
@@ -6411,12 +6411,12 @@ struct SurfaceReport
 /// 300 s cold -- so *still looking* and *looked, found nothing* are the two states an
 /// operator most needs separated, and they are exactly the two that a "does this node
 /// run a worker" bit collapses
-/// ([#1295](https://github.com/LASTRADA-Software/fastcached/issues/1295)).
+/// ([#1295](https://github.com/LASTRADA-Software/pace/issues/1295)).
 ///
 /// **Three and not four, and the next reader will want to make it four.** The node's
 /// own `Node::SurveyOutcome` names `Served`, `NothingToServe`, `NoneCouldBeAsked` and
 /// `Cancelled`, and
-/// [#1060](https://github.com/LASTRADA-Software/fastcached/issues/1060) paid
+/// [#1060](https://github.com/LASTRADA-Software/pace/issues/1060) paid
 /// specifically to separate the middle two -- a machine that is misconfigured and
 /// stays so, against one that may be fine a beat later. Mirroring that here is the
 /// obvious improvement and it is wrong, for two independent reasons:

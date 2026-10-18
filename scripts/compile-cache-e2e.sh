@@ -296,7 +296,7 @@ EOF
     # believed.
     cmp "${workdir}/expected.o" "${proj}/build/a.o" \
         || fail "the wrong object was left on disk after being detected"
-    [[ ! -e "${proj}/build/a.o.fastcache-verify" ]] \
+    [[ ! -e "${proj}/build/a.o.pace-verify" ]] \
         || fail "verification left its scratch copy in the build tree"
     echo "   the wrong object was named, and the freshly compiled one was used"
 

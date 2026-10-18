@@ -85,7 +85,7 @@ set(_fc_cc_core
 # Core/Ed25519.cpp is what a grant is signed with since #178: the issuing voter's
 # own identity key, verified against the roster. It is the second deliberate
 # exception to the no-third-party rule, after Compression below, and it costs one
-# static library: fastcache-monocypher, a verbatim vendored copy built as C++ with no
+# static library: pace-monocypher, a verbatim vendored copy built as C++ with no
 # dependency of its own (cmake/Monocypher.cmake). Linked below for both targets that
 # compile these rows. The alternative -- a launcher build that cannot verify what
 # the worker it shares a file with must -- is not one.
@@ -208,7 +208,7 @@ if(PACE_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
 endif()
 
 # Core/Ed25519.cpp's primitive; see the comment on `_fc_cc_core`.
-target_link_libraries(pace-cc PRIVATE fastcache-monocypher)
+target_link_libraries(pace-cc PRIVATE pace-monocypher)
 
 if(WIN32)
     target_link_libraries(pace-cc PRIVATE ws2_32)
@@ -342,7 +342,7 @@ if(PACE_BUILD_TESTS)
         # ${_fc_cc_core} rows and links Pace no more than the launcher does.
         target_compile_definitions(pace-cc-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     endif()
-    target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads fastcache-monocypher core::async core::net)
+    target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads pace-monocypher core::async core::net)
     if(PACE_ENABLE_COMPRESSION AND _fc_cc_zstd AND _fc_cc_lz4)
         target_link_libraries(pace-cc-tests PRIVATE ${_fc_cc_zstd} ${_fc_cc_lz4})
         target_compile_definitions(pace-cc-tests PRIVATE FC_COMPRESSION_ENABLED=1)

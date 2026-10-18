@@ -61,11 +61,11 @@ namespace
 // line, then environment, every source through `CliOptions()`'s own appliers.
 // `main()` calls it at startup and `ConfigReloader` calls it again on every SIGHUP,
 // so a property asserted here holds at both
-// ([#622](https://github.com/LASTRADA-Software/fastcached/issues/622)).
+// ([#622](https://github.com/LASTRADA-Software/pace/issues/622)).
 
 TEST_CASE("AssembleEffectiveConfig: the file is the baseline and the command line runs over it", "[config][merge][assemble]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-precedence" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-precedence" };
     auto const assembled = Assemble(scratch, "port: 12000\nmax_memory: 4096\nlog_level: warn\n", { "--max-memory=1024" });
     REQUIRE(assembled.has_value());
 
@@ -83,7 +83,7 @@ TEST_CASE("AssembleEffectiveConfig: a command line typing the default still outr
     // The input no value comparison can answer for, and the one a per-field merge
     // shipped wrong four times: the operator typed the compiled-in default ON PURPOSE.
     // Precedence is which applier ran last, so the typed default wins because it ran.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-typed-default" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-typed-default" };
     auto const portFlag = std::format("--port={}", Pace::DefaultPort);
     auto const assembled = Assemble(scratch,
                                     "port: 12000\nstorage_shards: 4\nlru_mode: strict\n",
@@ -100,7 +100,7 @@ TEST_CASE("AssembleEffectiveConfig: with no file the command line stands alone",
     // Including the settings no file can carry -- `--daemon`, `--pidfile` -- and the
     // listener list, so assembling against no file is the parse itself rather than
     // "the defaults plus the rows a file shares".
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-nofile" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-nofile" };
     auto const assembled =
         Assemble(scratch, std::nullopt, { "--daemon", "--pidfile=/run/fc.pid", "--listen=127.0.0.1:11211", "--threads=5" });
     REQUIRE(assembled.has_value());
@@ -119,7 +119,7 @@ TEST_CASE("AssembleEffectiveConfig: a file of nothing but comments is the defaul
 {
     // Every shipped reference configuration is this shape until somebody uncomments a
     // line, and it must behave exactly like running with no flags.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-comments" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-comments" };
     auto const assembled = Assemble(scratch, "# port: 6674\n# max_memory: 4g\n");
     REQUIRE(assembled.has_value());
 
@@ -130,7 +130,7 @@ TEST_CASE("AssembleEffectiveConfig: a file of nothing but comments is the defaul
 
 TEST_CASE("AssembleEffectiveConfig: the environment applies only where nobody named the port", "[config][merge][assemble]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-env" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-env" };
     constexpr std::uint16_t EnvPort = 9999;
 
     SECTION("neither the file nor the command line named it")
@@ -165,7 +165,7 @@ TEST_CASE("AssembleEffectiveConfig: a file that is not there is FileNotFound", "
     // mistake in a file that does not exist. What to DO about it stays with the
     // caller, because a file the operator named and one the daemon merely found are
     // not the same failure.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-missing" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-missing" };
     auto const assembled = Pace::AssembleEffectiveConfig(scratch / "absent.yaml", Pace::ConfigSources {});
     REQUIRE_FALSE(assembled.has_value());
     CHECK(assembled.error().code == Pace::ConfigErrorCode::FileNotFound);
@@ -176,7 +176,7 @@ TEST_CASE("AssembleEffectiveConfig: a file that fails anywhere is refused whole"
     // Declined, never half-applied: "some of the settings, up to the bad line" is a
     // configuration nobody wrote. The good line comes FIRST, so a reader that applied
     // as it went would already have taken it.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-badkey" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-badkey" };
     auto const assembled = Assemble(scratch, "port: 12000\nprot: 12000\n");
     REQUIRE_FALSE(assembled.has_value());
     CHECK(assembled.error().code == Pace::ConfigErrorCode::UnknownKey);
@@ -190,7 +190,7 @@ TEST_CASE("AssembleEffectiveConfig: a setting named in the file is named, and on
     // `main()` asks this for a refusal a start makes once -- the legacy single-bind
     // triplet beside the listener list -- and it has to see a key the FILE declared,
     // not only a flag. It used to be ten hand-kept presence bits beside the reader.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-named" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-named" };
     auto const assembled = Assemble(scratch, "bind: 0.0.0.0\nport: 12000\n");
     REQUIRE(assembled.has_value());
     CHECK(assembled->Named(&Pace::CliResult::bindAddressExplicit));
@@ -202,7 +202,7 @@ TEST_CASE("AssembleEffectiveConfig: a file's listen and listen_tls fill one list
 {
     // Each key spells its flag, so a file lists `host:port` exactly as argv does --
     // IPv6 in brackets, and quoted, because a bare `[` starts a YAML sequence.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-listen" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-listen" };
     auto const assembled =
         Assemble(scratch, "listen:\n  - 10.0.0.1:11211\n  - \"[::1]:11212\"\nlisten_tls: 10.0.0.1:6380\n");
     REQUIRE(assembled.has_value());
@@ -224,7 +224,7 @@ TEST_CASE("AssembleEffectiveConfig: a command line naming either listener flag r
     // Mixing partial file endpoints with partial command-line ones would make which
     // ports are served depend on which spelling appeared where. A TLS flag replaces the
     // file's PLAIN listeners too, because both rows fill and clear one list.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-listen-replace" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-listen-replace" };
     constexpr std::string_view file = "listen: 10.0.0.1:11211\nlisten_tls: 10.0.0.1:6380\n";
 
     SECTION("a TLS flag over both file lists")
@@ -254,7 +254,7 @@ TEST_CASE("AssembleEffectiveConfig: a presence setting in a file is true or fals
     // The daemon's old reader took yaml-cpp's booleans, so `metrics: yes` and
     // `metrics: On` were accepted -- measured on 0.2.0-568 -- while the worker's file
     // refused both. One reader now, one rule.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-boolean" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-boolean" };
     constexpr auto spellings = std::to_array<std::string_view>({ "yes", "On", "1" });
     for (auto const spelling: spellings)
     {
@@ -277,7 +277,7 @@ TEST_CASE("AssembleEffectiveConfig: the timestamp setting is named by the flag's
     // cannot say OFF there: `log_timestamps: false` means "do not pass
     // `--log-timestamps`", which is the platform's answer. `no_log_timestamps: true` is
     // how a file says off, exactly as `--no-log-timestamps` is how argv says it.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-timestamps" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-timestamps" };
 
     SECTION("the negative key turns it off wherever the platform turns it on")
     {
@@ -348,7 +348,7 @@ TEST_CASE("AssembleEffectiveConfig: a path setting expands the environment from 
     // A file has no shell in front of it; argv had one. So `${NAME}` in `storage_path:`
     // is expanded, `--storage=${NAME}` arrives as the operator's shell left it, and a
     // secret beside it is never expanded -- a `$` in a password is part of the password.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-assemble-expand" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-assemble-expand" };
     Pace::Testing::ScopedEnv const root { "FC_ASSEMBLE_ROOT", "/srv/fc" };
 
     SECTION("from a file")
@@ -386,7 +386,7 @@ TEST_CASE("ValidateBindFlagShape: a legacy bind setting beside a listener is ref
 {
     // Pre-fix, main.cpp silently picked `binds` and discarded `bindAddress`. The two
     // shapes can arrive from different SOURCES, and the value is lost the same way.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-bind-shape" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-bind-shape" };
     struct Mix
     {
         std::optional<std::string_view> file;
@@ -414,7 +414,7 @@ TEST_CASE("ValidateBindFlagShape: a legacy bind setting beside a listener is ref
 
 TEST_CASE("ValidateBindFlagShape: either shape alone is accepted", "[config][bind][validate]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-bind-shape-alone" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-bind-shape-alone" };
 
     SECTION("listeners alone")
     {
@@ -539,7 +539,7 @@ TEST_CASE("The daemon's startup rules refuse what its body used to refuse only o
     {
         // #1624: `fsync` and `none` now write the free list at every commit, so the budget no
         // longer charges free pages after a restart and the refusal that guarded it is gone.
-        config.storagePath = "/var/cache/fastcached";
+        config.storagePath = "/var/cache/pace";
         config.storageMaxDiskBytes = std::size_t { 1 } << 30U;
         for (auto const durability: { Pace::StorageDurability::Batched,
                                       Pace::StorageDurability::Fsync,

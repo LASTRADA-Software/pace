@@ -176,7 +176,7 @@ class IMetricsSink
         /// exactly the reading `DispatchWorkersExpired`'s own note exists to protect.
         ///
         /// It is also the before/after measurement for
-        /// [#573](https://github.com/LASTRADA-Software/fastcached/issues/573): a
+        /// [#573](https://github.com/LASTRADA-Software/pace/issues/573): a
         /// withdrawal that lands is a 90-second dispatch window that did not happen.
         DispatchWorkersWithdrawn,
         /// Leases freed because the worker holding them was dropped.
@@ -523,7 +523,7 @@ class IMetricsSink
         /// worth looking at.
         ///
         /// It replaces `WorkerJobsRefusedLeaseStaleEpoch`, retired with
-        /// [#614](https://github.com/LASTRADA-Software/fastcached/issues/614): the
+        /// [#614](https://github.com/LASTRADA-Software/pace/issues/614): the
         /// refusal that counter described can no longer happen, because a worker now
         /// ADOPTS a scheduler term that went backwards instead of refusing it. A series
         /// reading zero because its event is impossible and one reading zero because
@@ -547,7 +547,7 @@ class IMetricsSink
 
         /// Times this worker adopted a scheduler term that went BACKWARDS.
         ///
-        /// Since [#614](https://github.com/LASTRADA-Software/fastcached/issues/614) a
+        /// Since [#614](https://github.com/LASTRADA-Software/pace/issues/614) a
         /// lower term is ADOPTED rather than refused -- replay is closed by grants being
         /// spendable once -- so it costs the fleet nothing, and the event would otherwise
         /// be invisible on the machine it happened to.
@@ -708,7 +708,7 @@ class IMetricsSink
         NodeStatusRequestsRefusedEndpointBusy,
 
         /// An `explain-admission` whose payload is not exactly one field naming its subject
-        /// ([#1471](https://github.com/LASTRADA-Software/fastcached/issues/1471)). The verb is
+        /// ([#1471](https://github.com/LASTRADA-Software/pace/issues/1471)). The verb is
         /// reachable before admission, so a caller the node refuses can move this too.
         ///
         /// Counted rather than uncounted, because a rise means something an operator acts on and
@@ -821,7 +821,7 @@ class IMetricsSink
         /// Node proofs that verified under an identity key the cluster holds live, so a connection
         /// was admitted by WHICH MACHINE it proved it is rather than by where it dialled from, and is
         /// sealed from then on (#178,
-        /// [#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428)).
+        /// [#1428](https://github.com/LASTRADA-Software/pace/issues/1428)).
         ///
         /// **The positive half, and it is not decoration.** Every other row about this exchange
         /// counts a refusal, and a fleet where the proof is configured but never taken reads
@@ -1055,7 +1055,7 @@ class IMetricsSink
         /// what was suppressed on purpose -- an empty reply, or a socket this node
         /// closed itself -- and a client that vanished unnoticed is this row staying
         /// flat while the object went out anyway
-        /// ([#691](https://github.com/LASTRADA-Software/fastcached/issues/691)).
+        /// ([#691](https://github.com/LASTRADA-Software/pace/issues/691)).
         ///
         /// **Not once per exchange**, which is what would bury it. Every ordinary
         /// client hangs up too -- `Cc::RunOneExchange` reads its reply and closes --
@@ -1099,7 +1099,7 @@ class IMetricsSink
         /// graceful half. A sibling rather than a split, because splitting would change
         /// what an existing row means for anyone already scraping it and a fleet here is
         /// permanently mid-upgrade
-        /// ([#173](https://github.com/LASTRADA-Software/fastcached/issues/173)); the
+        /// ([#173](https://github.com/LASTRADA-Software/pace/issues/173)); the
         /// total stays comparable across the change.
         ///
         /// **Only one of the two halves is worth an alert, which is the whole point of
@@ -1113,7 +1113,7 @@ class IMetricsSink
         /// The distinction is the transport's and not this code's guess:
         /// `WaitReadable` answers an ERROR for an abortive close and `0` for EOF, on
         /// epoll, kqueue and IOCP alike
-        /// ([#673](https://github.com/LASTRADA-Software/fastcached/issues/673)), and
+        /// ([#673](https://github.com/LASTRADA-Software/pace/issues/673)), and
         /// `WatchPeer` keeps those two arms apart for exactly this reason.
         FramePeerWatchDeparturesAbortive,
 

@@ -125,7 +125,7 @@ inline void PublishClusterKeys(Distributed::KeyRosterMembership& keys, Cluster::
 /// This node's admission policy, as the seam every surface holds.
 ///
 /// **It IS the oracle rather than handing one out, and that is what makes
-/// `--fleet-open` live** ([#405](https://github.com/LASTRADA-Software/fastcached/issues/405)).
+/// `--fleet-open` live** ([#405](https://github.com/LASTRADA-Software/pace/issues/405)).
 /// `Oracle()` used to return one of two owned objects chosen by a `bool` read once,
 /// and the surfaces bind that reference for their lifetime -- so flipping the flag on
 /// a running node would have changed a member nobody reads again. Answering `Classify`

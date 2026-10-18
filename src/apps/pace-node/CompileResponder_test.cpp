@@ -1527,7 +1527,7 @@ TEST_CASE("A compile outlives the five seconds that used to bound it", "[node][c
     //
     // **Its floor is therefore `HeaderTimeout + 2 * SweepInterval` = 7.5 s, and that
     // number is what a failure REPORT has to be read against**
-    // ([#831](https://github.com/LASTRADA-Software/fastcached/issues/831)). This case
+    // ([#831](https://github.com/LASTRADA-Software/pace/issues/831)). This case
     // was once seen dying at **5.21 s** under `ctest --parallel 32`, reported as
     // `Subprocess terminated`, and the coincidence with five seconds made it look like
     // a deadline. It is not one: nothing in this case can CONCLUDE before the sleep

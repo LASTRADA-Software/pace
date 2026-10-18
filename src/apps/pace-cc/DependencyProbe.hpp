@@ -60,7 +60,7 @@ struct ProbeText
 /// an ordinary source line vanish from the hashed bytes, so two revisions differing
 /// only in that line key identically. Measured, with `cl`, for both the mid-line
 /// shape and the leading-blank shape this admitted until
-/// [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270) — the latter
+/// [#1270](https://github.com/LASTRADA-Software/pace/issues/1270) — the latter
 /// being any indented raw string literal whose continuation line begins with the
 /// marker.
 ///

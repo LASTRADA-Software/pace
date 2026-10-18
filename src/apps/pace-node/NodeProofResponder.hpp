@@ -31,8 +31,8 @@ namespace Pace::Node
 /// Node-to-node admission on the `0xFC` surface was decided by the caller's SOURCE ADDRESS, and
 /// then by a MAC under a key every member shared -- so an address that changes per session could
 /// not be followed, and a machine the cluster removed kept every byte it needed to prove itself
-/// ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178),
-/// [#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428)). Each machine now signs
+/// ([#178](https://github.com/LASTRADA-Software/pace/issues/178),
+/// [#1428](https://github.com/LASTRADA-Software/pace/issues/1428)). Each machine now signs
 /// with its own identity key, and a revocation is one roster entry. `Distributed::NodeProof`
 /// carries the handshake and why every frame after it is sealed.
 ///

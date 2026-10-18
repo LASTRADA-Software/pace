@@ -3307,7 +3307,7 @@ struct BlockingHarness
     /// destruction then COMPLETED that pointer. ASan reported `heap-use-after-free` in
     /// `core::net::IoAwaitable::Complete` — in `Net/`, in production code, naming neither the case
     /// nor the assertion that actually failed
-    /// ([#888](https://github.com/LASTRADA-Software/fastcached/issues/888)).
+    /// ([#888](https://github.com/LASTRADA-Software/pace/issues/888)).
     ///
     /// **It is only reachable when a case FAILS**, which is what makes it worse than a
     /// latent test bug: a green suite says nothing about it, and the developer who meets

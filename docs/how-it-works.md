@@ -75,7 +75,7 @@ services on separate machines, so a failure of one says nothing about the other.
 Sending a miss to step 7 and a transport failure straight to step 8b is what made
 a mistyped `PACE_ADDR` turn every build on an estate local while the fleet
 sat idle and healthy, with the build green throughout
-([#236](https://github.com/LASTRADA-Software/fastcached/issues/236)). What the
+([#236](https://github.com/LASTRADA-Software/pace/issues/236)). What the
 launcher does *not* do afterwards is push the result at a daemon that just failed
 to answer — step 9 is skipped in that case, so reaching step 7 costs a wrong
 `PACE_ADDR` no more connections than it cost before.
@@ -442,7 +442,7 @@ member holds.
    the part to read — it tells you whether this node brought a cluster with it:
 
    ```
-   consensus on 0.0.0.0:6680 as n1 (3 member(s), state in /var/lib/fastcache-cluster/n1)
+   consensus on 0.0.0.0:6680 as n1 (3 member(s), state in /var/lib/pace-cluster/n1)
    consensus on 0.0.0.0:6680 as n4 (no cluster yet; waiting to be admitted, state in …)
    ```
 
@@ -533,7 +533,7 @@ membership is still a Raft decision. See
 |---|---|---|
 | Shared cached objects | `pace-kv`'s `--storage` path, or memory only without it | Only with `--storage` |
 | A node's own cache | Memory, plus `--cache-dir/objects.cow` if given | Only with `--cache-dir` |
-| Consensus state, and the node's identity | `--cluster-dir`, default `fastcache-cluster` | Yes — it must, or a node could vote twice in one term |
+| Consensus state, and the node's identity | `--cluster-dir`, default `pace-cluster` | Yes — it must, or a node could vote twice in one term |
 | Dashboard history | `fleet-history.bin` in the cluster dir, else the cache dir, else memory | Where a directory exists |
 | Launcher statistics | `%LOCALAPPDATA%\pace-cc` or `$XDG_STATE_HOME/pace-cc` | Yes |
 | Cached toolchain fingerprints | `toolchains/*.fingerprint` in that same state directory | Yes, until the toolchain changes |

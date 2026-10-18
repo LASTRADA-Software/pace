@@ -7,7 +7,7 @@
 # `clang-tidy` job), and `scripts/local-gate.sh` tidies through the Linux presets, so
 # a TU whose entire body sits inside a guard that is false on Linux preprocesses away
 # to nothing and is analysed by no analyser this project runs
-# ([#682](https://github.com/LASTRADA-Software/fastcached/issues/682)).
+# ([#682](https://github.com/LASTRADA-Software/pace/issues/682)).
 #
 # **The sweep already OBSERVES this, and that is not what this check adds.** #466 gave
 # `tidy-sweep.sh` a per-unit produced/empty/unknown verdict; it prints the count, lists

@@ -10,7 +10,7 @@
 # body, and nothing re-ran: the context stayed red with the defect already repaired, and
 # cleared only on an unrelated push. `gh run rerun --job` is refused while the parent run
 # is still in progress, so there was no way out that did not involve pushing something
-# ([#1045](https://github.com/LASTRADA-Software/fastcached/issues/1045)).
+# ([#1045](https://github.com/LASTRADA-Software/pace/issues/1045)).
 #
 # That is worse than the bug it replaced. A refusal naming an action that does not work
 # leaves a reader three conclusions -- the check is broken, my fix was wrong, or I should

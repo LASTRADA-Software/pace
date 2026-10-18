@@ -25,7 +25,7 @@ fi
 # These are the files the product's guidance tells operators to put `requirepass`
 # into, and `Platform/FileTrust` already warns when a secret is read from a
 # broadly-readable file -- the daemon complained about the file its own package
-# shipped ([#861](https://github.com/LASTRADA-Software/fastcached/issues/861)).
+# shipped ([#861](https://github.com/LASTRADA-Software/pace/issues/861)).
 #
 # DIFFERENT groups: the two units run as `pace-kv` and `pace-node`, and
 # `pace-node.sysusers` says sharing an account would let a compromised

@@ -298,7 +298,7 @@ class CompileResponder final: public IFrameResponder
     /// ran and this machine paid for it, and only the handover found nobody there.
     /// Stopping the compile as well needs a cancellable process seam, which
     /// `IProcessRunner` does not have and
-    /// [#661](https://github.com/LASTRADA-Software/fastcached/issues/661) is about.
+    /// [#661](https://github.com/LASTRADA-Software/pace/issues/661) is about.
     ///
     /// Not for a cordon, which is answered before a watch could see anything and is no
     /// job for a departure to be counted against.

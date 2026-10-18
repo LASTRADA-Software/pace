@@ -120,7 +120,7 @@ namespace
 ///
 /// A connection is swept for one of two reasons and they are opposite findings, so
 /// the tracker records which rather than leaving a sweep to guess
-/// ([#243](https://github.com/LASTRADA-Software/fastcached/issues/243)).
+/// ([#243](https://github.com/LASTRADA-Software/pace/issues/243)).
 enum class SweepPhase : std::uint8_t
 {
     /// Waiting for the peer to name a verb: `FrameServer::HeaderTimeout`.
@@ -554,7 +554,7 @@ struct FrameServer::State
     /// coroutine frame either way. So the entry is marked and left open, and the
     /// connection writes its own named refusal when `Answer` returns, from the one
     /// place that owns the write side. Exactly one writer, structurally rather than by
-    /// agreement ([#523](https://github.com/LASTRADA-Software/fastcached/issues/523)).
+    /// agreement ([#523](https://github.com/LASTRADA-Software/pace/issues/523)).
     ///
     /// The counters are unchanged in meaning: `SweepPhase` says which WINDOW expired,
     /// which is a different question from where the coroutine was standing, and
@@ -1249,7 +1249,7 @@ namespace
     /// arms, because those arms are exactly what nobody may forget: they set one flag,
     /// so a green suite proves nothing about which of them is live, and an arm that
     /// set the flag without the count would be invisible to the very row that exists
-    /// to show it ([#673](https://github.com/LASTRADA-Software/fastcached/issues/673)).
+    /// to show it ([#673](https://github.com/LASTRADA-Software/pace/issues/673)).
     ///
     /// **TWO questions guard the count, and neither covers the other.** They exclude
     /// two different things that both reach a parked watcher looking exactly like a
@@ -1328,7 +1328,7 @@ namespace
     ///
     /// So the probe `Read`, `PeerWatch::pulled` and the `PrimeWith` that undid the
     /// consumption were a mechanism whose justification had gone, and
-    /// [#1090](https://github.com/LASTRADA-Software/fastcached/issues/1090) removed
+    /// [#1090](https://github.com/LASTRADA-Software/pace/issues/1090) removed
     /// them. `WaitReadable` consumes nothing, so a pipelined request now simply stays
     /// in the kernel's receive queue until the loop's own reader collects it -- which
     /// deletes the prepend-ordering hazard rather than documenting it.
@@ -1336,7 +1336,7 @@ namespace
     /// **The two arms did NOT collapse into `!readable.has_value() || *readable == 0`,
     /// which is what #1090 proposed.** That form reaches the right verdict and cannot
     /// say WHICH departure it was, and the two are different diagnoses:
-    /// [#1092](https://github.com/LASTRADA-Software/fastcached/issues/1092) needs an
+    /// [#1092](https://github.com/LASTRADA-Software/pace/issues/1092) needs an
     /// abortive close told apart from a graceful one, because only the first is worth
     /// an alert. So the arms stay, each naming its `PeerDeparture`, and the cleanup
     /// keeps the distinction the transport already draws.
@@ -1476,7 +1476,7 @@ namespace
     /// It used to carry a second reason -- the watcher consumed bytes and `PrimeWith`
     /// prepended them back, which corrupts the stream if anything was already buffered.
     /// That hazard is gone rather than guarded: since
-    /// [#1090](https://github.com/LASTRADA-Software/fastcached/issues/1090) the watcher
+    /// [#1090](https://github.com/LASTRADA-Software/pace/issues/1090) the watcher
     /// only peeks, so there is nothing to prepend and nothing to order wrongly.
     ///
     /// The optional is consulted HERE and nowhere else; what travels on is a plain
@@ -1702,7 +1702,7 @@ namespace
     /// Write `Status::Progress` to the peer every `interval` until told to stop.
     ///
     /// **The liveness signal a dispatched compile owes its client**
-    /// ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)). A client
+    /// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)). A client
     /// bounds a compile with one flat deadline, and one number cannot answer both *how
     /// slow may this legitimately be* and *how fast is a worker that has stopped making
     /// progress noticed* -- the first is minutes by construction, so the second was

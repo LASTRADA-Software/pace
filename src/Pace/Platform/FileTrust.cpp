@@ -408,7 +408,7 @@ namespace
     /// secrecy are the same walk over a different mask: `PlantingRights` answers
     /// "could an unprivileged account have replaced this file", `ReadingRights`
     /// answers "can an unprivileged account read what is in it"
-    /// ([#384](https://github.com/LASTRADA-Software/fastcached/issues/384)). Two
+    /// ([#384](https://github.com/LASTRADA-Software/pace/issues/384)). Two
     /// scans differing only in a constant is the repetition a parameter exists to
     /// remove -- and a copy is the one that would never have learned about
     /// `GENERIC_ALL`.
@@ -746,7 +746,7 @@ bool IsPrivilegedProcess()
     // `ResolveDefaultConfigPath` skipped every `ConfigScope::System` row and the
     // daemon silently ran on built-in defaults: `requirepass` placed in
     // `%ProgramData%\pace\pace-kv.yaml` was not in force, and nothing was
-    // logged ([#860](https://github.com/LASTRADA-Software/fastcached/issues/860)).
+    // logged ([#860](https://github.com/LASTRADA-Software/pace/issues/860)).
     //
     // **Widening the LOOKUP does not widen TRUST.** The single caller uses this
     // answer for two things -- whether to consider a system row at all, and whether

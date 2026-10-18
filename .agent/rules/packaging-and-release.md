@@ -75,7 +75,7 @@ installer pane, the version derivation, or the release job's asset list.
   merge -- `check-release-gate` stops a red packaging job shipping, which means the
   cost lands at release time on whoever is cutting it. A guard deriving each
   packaging job's target list from the installed set is
-  [#1202](https://github.com/LASTRADA-Software/fastcached/issues/1202); until it
+  [#1202](https://github.com/LASTRADA-Software/pace/issues/1202); until it
   exists, the list above is the whole of it.
 - **One install component per application on Windows, one payload everywhere else.** The app
   table in `src/apps/CMakeLists.txt` carries each app's COMPONENT; on Windows it is an MSI

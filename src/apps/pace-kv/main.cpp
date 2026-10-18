@@ -357,7 +357,7 @@ struct StorageBackendBundle
                                  directory.string());
     }
 
-    auto const probe = directory / ".fastcached-access-probe";
+    auto const probe = directory / ".pace-access-probe";
     {
         std::ofstream out { probe };
         if (out)
@@ -765,7 +765,7 @@ int DaemonBody(Pace::Config const& effective,
     //
     // **And it is no longer only that file.** `WatchSecretExposure` asks
     // `DaemonSecretFiles`, which since
-    // [#864](https://github.com/LASTRADA-Software/fastcached/issues/864) also walks
+    // [#864](https://github.com/LASTRADA-Software/pace/issues/864) also walks
     // `DaemonSecretFileTable()` -- `--tls-key` today. Those are NOT provenance-gated:
     // the path is not the secret and the file is, so a world-readable private key is
     // exposed however its path was named. A further path-valued flag is a row there
@@ -776,7 +776,7 @@ int DaemonBody(Pace::Config const& effective,
     // `Reloadable::Yes`, so a file can GAIN a secret after startup -- an operator adds
     // `requirepass:` to a mode-0644 file and sends SIGHUP -- and a startup-only check
     // is silent on exactly the path #384 exists to close
-    // ([#753](https://github.com/LASTRADA-Software/fastcached/issues/753)). One call
+    // ([#753](https://github.com/LASTRADA-Software/pace/issues/753)). One call
     // rather than a second check written here: two copies of one rule is the shape
     // #396 and #726 already paid for, and the startup answer is what seeds the memory
     // the reload compares against.
@@ -1295,7 +1295,7 @@ int DaemonBody(Pace::Config const& effective,
 
 int main(int argc, char const* const* argv)
 {
-    CORE_THREAD_NAME("fastcached-main");
+    CORE_THREAD_NAME("pace-main");
     std::span<char const* const> const args { argv + 1, argc > 0 ? static_cast<std::size_t>(argc - 1) : 0 };
 
     // A command line refused still says what it named, from the WHOLE of it (`RecognisedCli`):

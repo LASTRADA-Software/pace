@@ -177,7 +177,7 @@ namespace
             /// this chain to a reactor that may be destroyed before it dequeues it,
             /// and only the parking coroutine's own promise type knows whether
             /// anything else can free it
-            /// ([#1025](https://github.com/LASTRADA-Software/fastcached/issues/1025)).
+            /// ([#1025](https://github.com/LASTRADA-Software/pace/issues/1025)).
             /// By the time `WakeOnce` runs the handle is erased, so this is the last
             /// place the question can be asked.
             /// @tparam Promise The suspending coroutine's promise type.
@@ -312,7 +312,7 @@ namespace
         /// ("#710 is the ticket about that missing primitive") -- which, left standing,
         /// is a comment telling the next reader not to try. `core::net::ISocket::CancelRead()`
         /// retires a parked read without closing the socket, and it is what
-        /// [#755](https://github.com/LASTRADA-Software/fastcached/issues/755) wants:
+        /// [#755](https://github.com/LASTRADA-Software/pace/issues/755) wants:
         /// the watcher surviving the exit from subscribe mode can be retired directly
         /// rather than through the `WatcherActive()` busy-check this shape needs. Not
         /// done here, because that is #755's change and not this one's.
@@ -629,7 +629,7 @@ namespace
             /// this chain to a reactor that may be destroyed before it dequeues it,
             /// and only the parking coroutine's own promise type knows whether
             /// anything else can free it
-            /// ([#1025](https://github.com/LASTRADA-Software/fastcached/issues/1025)).
+            /// ([#1025](https://github.com/LASTRADA-Software/pace/issues/1025)).
             /// @tparam Promise The suspending coroutine's promise type.
             /// @param handle The suspended blocking read.
             /// @return true to stay suspended; false when it resolved first.
@@ -702,7 +702,7 @@ namespace
     /// The ONE readability watch of a blocking read, shared with its trampoline.
     ///
     /// **`RunBlockingRead` used to arm a fresh watch per loop iteration and cancel
-    /// none** ([#710](https://github.com/LASTRADA-Software/fastcached/issues/710)). A
+    /// none** ([#710](https://github.com/LASTRADA-Software/pace/issues/710)). A
     /// pass that ended with the previous trampoline still parked in `WaitReadable`
     /// therefore armed a second one over it -- and a socket has ONE read operation
     /// (`core::net::ISocket::Read`, #663), so the parked awaitable's pointer is dropped: that
@@ -747,7 +747,7 @@ namespace
         /// resolves `> 0`**: nothing is armed, `_watching` goes false, and the loop is
         /// already parked on this pass's waiter, so a departure goes unobserved until
         /// the next registry wake
-        /// ([#899](https://github.com/LASTRADA-Software/fastcached/issues/899)). Not a
+        /// ([#899](https://github.com/LASTRADA-Software/pace/issues/899)). Not a
         /// regression -- reaching it needs pending bytes nothing consumes, which is the
         /// case `ArmDisconnect` already documents as uncovered, and the unconditional
         /// per-pass arming this replaced was equally blind there. **Do not close it by
@@ -1010,14 +1010,14 @@ namespace
     /// the socket readable, and the count is what distinguishes it from pending data
     /// (`core::net::ISocket::WaitReadable`, #677). Watching for the error alone therefore missed
     /// the ordinary way a client goes away, and leaked the socket on every graceful
-    /// close ([#673](https://github.com/LASTRADA-Software/fastcached/issues/673)).
+    /// close ([#673](https://github.com/LASTRADA-Software/pace/issues/673)).
     /// That arm was measured never to fire, by deleting it; the figures and the
     /// method are in `.agent/rules/wire-and-protocol.md` under the EOF rule, which is
     /// also where a passing suite is shown to prove nothing about either arm.
     ///
     /// **EOF abandons the read because that is what this wire decided EOF means**,
     /// measured against a running `redis-server` rather than argued
-    /// ([#671](https://github.com/LASTRADA-Software/fastcached/issues/671),
+    /// ([#671](https://github.com/LASTRADA-Software/pace/issues/671),
     /// `scripts/probes/redis-eof-semantics.py`): *"this peer has finished sending"* —
     /// a server answers what is already DETERMINED and abandons what is still
     /// PENDING, and a blocked read is a pending future. Replies the peer is already
@@ -1033,7 +1033,7 @@ namespace
     /// resolved**, so a wait that resumes and re-registers is watched again; a wait
     /// that stays parked with bytes pending is not, and is re-targeted rather than
     /// armed over. Arming per pass regardless was
-    /// [#710](https://github.com/LASTRADA-Software/fastcached/issues/710): the socket
+    /// [#710](https://github.com/LASTRADA-Software/pace/issues/710): the socket
     /// has one read operation, so the second arm dropped the first trampoline.
     ///
     /// **Two cases it therefore does not cover**, both stated rather than left to be
@@ -1047,7 +1047,7 @@ namespace
     ///    closing cleanly still parks. Code-read, not measured. Reporting EOF through
     ///    a TLS socket needs the record decrypted, which is a decision for that
     ///    layer, not something to soften here —
-    ///    [#712](https://github.com/LASTRADA-Software/fastcached/issues/712).
+    ///    [#712](https://github.com/LASTRADA-Software/pace/issues/712).
     ///  - **An RST on an idle connection**, which needs no pipelining peer at all.
     ///    MEASURED on Linux/epoll, stable over 5 runs: a peer set to
     ///    `SO_LINGER {1,0}` and closed with an EMPTY receive buffer makes `epoll_wait`
@@ -1056,7 +1056,7 @@ namespace
     ///    reads "data pending" with no data. The SECOND peek answers `0`, so the error
     ///    is consumed and a later arm would see the departure; that does not rescue
     ///    the window, because nothing arms again until the next pass
-    ///    ([#899](https://github.com/LASTRADA-Software/fastcached/issues/899)).
+    ///    ([#899](https://github.com/LASTRADA-Software/pace/issues/899)).
     ///
     ///    Recorded because #899's own clause 2 offered an exit -- *if the window is
     ///    only reachable behind a pipelining peer, it is the case this list already
@@ -1925,7 +1925,7 @@ namespace
     core::async::Task<bool> HandleInfo(core::net::ISocket* socket, CacheEngine* engine, RespVersion resp)
     {
         auto const stats = engine->Snapshot();
-        auto const body = std::format("# Server\r\npace_version:{}\r\nredis_version:6.0.0-fastcached\r\n"
+        auto const body = std::format("# Server\r\npace_version:{}\r\nredis_version:6.0.0-pace\r\n"
                                       "# Memory\r\nused_memory:{}\r\nmaxmemory:{}\r\n"
                                       "# Stats\r\ntotal_commands_processed:{}\r\nkeyspace_hits:{}\r\nkeyspace_misses:{}\r\n",
                                       RedisRespHandler::ServerVersion(),

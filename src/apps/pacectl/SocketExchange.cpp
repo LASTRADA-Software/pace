@@ -510,7 +510,7 @@ std::expected<NodeReply, ExchangeError> NodeExchange::ReadOne(Reading reading)
             if (!header.has_value())
                 return std::unexpected(ExchangeError { .kind = ExchangeFailure::Malformed,
                                                        .detail = std::format("{} answered something that is not a 0xFC "
-                                                                             "frame -- is that really a fastcache port?",
+                                                                             "frame -- is that really a pace port?",
                                                                              _endpoint) });
 
             auto const whole = CompileCacheWire::ReplyHeaderSize + header->payloadLength;

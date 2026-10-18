@@ -108,8 +108,8 @@ class ForegroundHost final: public IDaemonHost
 /// prefix-map rule appends the unmatched tail, and `<from>` = `/` therefore
 /// rewrites every absolute path in the object — `/usr/include/stdio.h` becomes
 /// `.usr/include/stdio.h`, under a cache key that is correct
-/// ([#784](https://github.com/LASTRADA-Software/fastcached/issues/784),
-/// [#674](https://github.com/LASTRADA-Software/fastcached/issues/674)).
+/// ([#784](https://github.com/LASTRADA-Software/pace/issues/784),
+/// [#674](https://github.com/LASTRADA-Software/pace/issues/674)).
 ///
 /// So the two binaries answer differently and each says which it is, rather than
 /// one of them inheriting an answer chosen for the other. No default parameter:

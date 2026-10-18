@@ -2337,13 +2337,13 @@ TEST_CASE("A client that vanishes mid-answer is noticed, and its object is not w
     client.CloseNow();
 
     // **Waited for BEFORE the answer is released, and that ordering is the fix to
-    // [#691](https://github.com/LASTRADA-Software/fastcached/issues/691).** The
+    // [#691](https://github.com/LASTRADA-Software/pace/issues/691).** The
     // departure and the answer are two reactor events with no order between them, so
     // releasing the responder first left the case asserting whichever won -- and on
     // kqueue and on IOCP the answer sometimes did, at which point nothing was ever
     // going to move the row below and the fifteen seconds were spent proving it.
     // Twice on macOS (#691) and once on Windows
-    // ([#776](https://github.com/LASTRADA-Software/fastcached/issues/776)), each time
+    // ([#776](https://github.com/LASTRADA-Software/pace/issues/776)), each time
     // dequeuing or reddening a pull request that could not reach this code. Waiting
     // here removes the order-dependence rather than widening the bound, which is the
     // remedy that ticket rules out at length: the watch has spoken before the answer

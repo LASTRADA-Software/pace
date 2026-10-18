@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What a machine with no worker is to the fleet that can see it
-// ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+// ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 //
 // These are the ticket's own acceptance cases, and they need two machines to say anything, so
 // they live here over `FleetHarness` rather than beside `WorkerRegistry`: the property is that

@@ -433,7 +433,7 @@ matter.** `launchctl kickstart` timing out at 60 s having burned almost no CPU i
 `LaunchctlFindingOf`'s `Waiting`, reported honestly as *"this does not say whether that
 was a busy host or a stall"* -- correct, and the end of what the CALLER's own readings
 can establish, because from outside the two causes look identical
-([#965](https://github.com/LASTRADA-Software/fastcached/issues/965)).
+([#965](https://github.com/LASTRADA-Software/pace/issues/965)).
 
 What separates them is whether launchd ever moved the job out of pending, and only
 launchd knows. So the fixture asks it, on the FAILURE PATH: `launchctl print` shows
@@ -551,7 +551,7 @@ limitation you can describe is one the instrument can apply.
 
 **An instrument that prints a remedy has to know when the remedy is under dispute,
 and it cannot.** "Raise the budget" is sound general advice, was printed by the
-branch that fires most often, and is exactly what [#354](https://github.com/LASTRADA-Software/fastcached/issues/354)
+branch that fires most often, and is exactly what [#354](https://github.com/LASTRADA-Software/pace/issues/354)
 refuses -- that budget has been raised twice already. State the finding and stop.
 
 And it is tested, by `ctest -R node-scratch-isolation-e2e-selftest`. **A classifier
@@ -576,14 +576,14 @@ reached a compile. The serialisation rested on waiting for `compile node ready`
 before starting the next node, which at the time meant **surveyed** -- a node
 fingerprinted before it bound.
 
-[#365](https://github.com/LASTRADA-Software/fastcached/issues/365) made a node bind
+[#365](https://github.com/LASTRADA-Software/pace/issues/365) made a node bind
 and serve first and survey afterwards, for good reasons of its own. The log line was
 not renamed, not moved and not reworded; it simply stopped carrying the fact the
 fixture was reading out of it. Every node now reached it in about a second, all three
 walked at once, and the measured rate on the `clangcl` runner fell to **2-5 file/s**
-against the ~30 file/s [#354](https://github.com/LASTRADA-Software/fastcached/issues/354)
+against the ~30 file/s [#354](https://github.com/LASTRADA-Software/pace/issues/354)
 measured with a single walker. 5136 files did not fit in the 600 s that
-[#428](https://github.com/LASTRADA-Software/fastcached/issues/428) had just moved
+[#428](https://github.com/LASTRADA-Software/pace/issues/428) had just moved
 onto the registration wait, and an unrelated pull request was ejected from the merge
 queue for it.
 
@@ -603,7 +603,7 @@ other, and a fixture that folds them cannot say which one happened.
 **And `compile node ready` is not the bind.** This file said "for the bind" and
 `AGENT.md` said #365 made the line mean *bound*; both were a shorthand and both were
 wrong in the same direction
-([#652](https://github.com/LASTRADA-Software/fastcached/issues/652)). Measured: the
+([#652](https://github.com/LASTRADA-Software/pace/issues/652)). Measured: the
 accept loop starts at `main.cpp:1128` and the line is logged at `:1454`, with the
 credential, the registrars, the startup toolchain count and the heartbeat thread in
 between --
@@ -619,7 +619,7 @@ accepted and then stalled in heartbeat setup sent its reader to check a port tha
 open and answering -- the one part that was working. The marker and the fact it names
 are now a row of `Core/ReadinessMarker.hpp`, whose `ReadinessFact` has **no `Bound`
 enumerator**, so the mistake cannot be spelled there
-([#654](https://github.com/LASTRADA-Software/fastcached/issues/654)).
+([#654](https://github.com/LASTRADA-Software/pace/issues/654)).
 
 **A comment stating the intent did not protect it.** The serialisation paragraph was
 correct, prominent and three lines above the wait that stopped implementing it. What
@@ -945,7 +945,7 @@ and what got it there is worth keeping:
   claimed exactly the guarantee it had, "two cases running in one binary cannot
   collide", and that scope is the bug.
 - **The sixth got it wrong in a NEW way, and that is the one worth reading**
-  ([#1507](https://github.com/LASTRADA-Software/fastcached/issues/1507)). Five copies
+  ([#1507](https://github.com/LASTRADA-Software/pace/issues/1507)). Five copies
   used a counter and were beaten by the pid; `StorageTestUtils.hpp`'s `TempFile` reached
   for `std::mt19937_64 { std::random_device {}() }()` instead -- which *looks* stronger
   than a counter and is not a counter at all, so none of the reasoning above applied to
@@ -1640,7 +1640,7 @@ draws 20000–31999, below that floor and below macOS's 49152, and every fixture
 reaches it through the shared helper inherits that. `migrate-storage-e2e.sh` does
 not: it spells the helper `port`, draws 40000–59999, and is therefore entirely
 inside Linux's default ephemeral range
-([#628](https://github.com/LASTRADA-Software/fastcached/issues/628)). A helper
+([#628](https://github.com/LASTRADA-Software/pace/issues/628)). A helper
 reimplemented under a different name is invisible to `check-e2e-helpers.sh`'s
 name-collision scan, which is what that scan's allowlist reasons are for.
 
@@ -1667,7 +1667,7 @@ below.
     fail "no node ever answered a cluster question; the cluster never elected a leader"
 
 Correct where it was written -- the first formation -- and false everywhere else it
-is called from. In [#388](https://github.com/LASTRADA-Software/fastcached/issues/388)
+is called from. In [#388](https://github.com/LASTRADA-Software/pace/issues/388)
 it fired in phase 6, *after* eight assertions had passed, one of which had printed
 the endpoint the cluster was being led from. The cluster had elected; what it could
 not do was elect **again**, which is a different defect with a different cause. The
@@ -1840,13 +1840,13 @@ Use `scripts/flake-rate.sh`, which keeps a tally. Two things it deliberately kee
 <!-- agent-tripwire: Assert what DISTINGUISHES, not what both sides produce -->
 
 In one evening four lanes found **five** tests that could not fail for the reason
-they existed ([#355](https://github.com/LASTRADA-Software/fastcached/issues/355)).
+they existed ([#355](https://github.com/LASTRADA-Software/pace/issues/355)).
 Not the same mistake in the same place — the same mistake in five shapes, and every
 one of them green.
 
 Two, which are enough to see the shape:
 
-- **[#286](https://github.com/LASTRADA-Software/fastcached/issues/286)'s acceptance
+- **[#286](https://github.com/LASTRADA-Software/pace/issues/286)'s acceptance
   did `REQUIRE(held)` on a bind** (implemented by pull request #348).
   `BlockingListener::Bind` returns a **non-null pointer in an errored state**, so a
   failed bind passes it. Both sections — a named port that must refuse, a defaulted
@@ -1919,7 +1919,7 @@ by an instance filed where nobody looking for it will read it.
 
 ### THREE more in one batch, and how each was actually found
 
-[#405](https://github.com/LASTRADA-Software/fastcached/issues/405) produced three, all
+[#405](https://github.com/LASTRADA-Software/pace/issues/405) produced three, all
 in fixtures its own author had just written and believed, all green. The number is the
 point: **one instance reads as bad luck, three read as the default outcome** — so the
 question to ask of a new fixture is not *is this careful* but *what would make it fail*.
@@ -1942,7 +1942,7 @@ it, or asking how the production code acquires what the fixture acquires.
 ### A fixture that RE-ACQUIRES what production binds ONCE is testing a different object
 
 The sixth shape, found in
-[#405](https://github.com/LASTRADA-Software/fastcached/issues/405) and not by review:
+[#405](https://github.com/LASTRADA-Software/pace/issues/405) and not by review:
 its first `--fleet-open` case called `membership.Oracle()` fresh after each reload and
 passed. Every production surface — `SchedulerTier::Start`, `CompileResponder` — takes an
 `IMembershipOracle const&` at construction and holds it for its lifetime. Against an
@@ -1982,14 +1982,14 @@ mutation, and read back through that binding afterwards.
 <!-- agent-tripwire: Where the answer cannot be determined, report that as its own outcome rather than the nearest neighbour -->
 
 A required-context checker was written for the shape
-[#542](https://github.com/LASTRADA-Software/fastcached/issues/542) names: read the
+[#542](https://github.com/LASTRADA-Software/pace/issues/542) names: read the
 required names, report each one's state, and keep ABSENT distinct from pending so a
 context that was never created cannot hide. Its first version captured
 `gh pr checks ... 2>/dev/null`. `gh` was not on `PATH` in that environment, so
 `command not found` went to the null device, the capture was empty, and the checker
 printed **ABSENT for all eleven required contexts** — while the data sat there,
 retrievable, one working invocation away
-([#557](https://github.com/LASTRADA-Software/fastcached/issues/557)).
+([#557](https://github.com/LASTRADA-Software/pace/issues/557)).
 
 *Eleven is what the instrument printed and what the required set held that day; it has
 grown since (#408, #629). The live figure is `RequiredContexts` in
@@ -2172,9 +2172,9 @@ targets are optional from `src/apps/CMakeLists.txt`'s app table rather than
 restating them, so a new app comes under the guard by existing.
 
 **The app table was not always the only place a target became optional**
-([#1369](https://github.com/LASTRADA-Software/fastcached/issues/1369)). While the root added
+([#1369](https://github.com/LASTRADA-Software/pace/issues/1369)). While the root added
 `vendor/` only under `PACE_BUILD_TUI`, every target `vendor/CMakeLists.txt` declared was
-as optional as an app, and an unguarded `$<TARGET_FILE:fastcache-tui-linkprobe>` planted in
+as optional as an app, and an unguarded `$<TARGET_FILE:pace-tui-linkprobe>` planted in
 `src/tests/CMakeLists.txt` passed: the check's source set had stopped describing the tree, and
 a list is exact about the files it knows and silent about the ones it does not. #1369 added a
 SECOND reader for directories the root gates that way, as a parallel derivation with its own
@@ -2214,7 +2214,7 @@ return any_of(_hosts, SameHost) ? Member : Outsider;      // nothing at all
 
 Today it is a proven key and a verified ticket, and the shape of the trap is unchanged.
 
-That is how [#235](https://github.com/LASTRADA-Software/fastcached/issues/235)
+That is how [#235](https://github.com/LASTRADA-Software/pace/issues/235)
 survived. A worker that admitted **only** its own machine — and therefore refused
 every dispatched compile the documented setup sent it — passed the whole distributed
 suite, because the suite only ever asked it to admit its own machine. The fixture
@@ -2663,8 +2663,8 @@ What makes this one worth writing down is where the rule already was.
 file -- 117 lines above the `--cluster-admit` that lacked it and 212 above the
 `--cluster-forget`. The argument was written down in a comment above it before
 either of the sessions that read the file noticed the sites it did not cover.
-Learned at [#117](https://github.com/LASTRADA-Software/fastcached/issues/117),
-learned again at [#172](https://github.com/LASTRADA-Software/fastcached/issues/172).
+Learned at [#117](https://github.com/LASTRADA-Software/pace/issues/117),
+learned again at [#172](https://github.com/LASTRADA-Software/pace/issues/172).
 A helper that implements a rule does not spread it; only a call site using the
 helper does.
 
@@ -2695,7 +2695,7 @@ found by walking every call site of the pattern, and it was found *because* the 
 was mechanical. Nothing about section 5 looked suspicious, and it never had been.
 When a failure is fixed, the question is not "is this site now correct" but "what
 else has this shape, and would I have seen it fail?"
-([#172](https://github.com/LASTRADA-Software/fastcached/issues/172))
+([#172](https://github.com/LASTRADA-Software/pace/issues/172))
 
 ## An identifier is READ, never reconstructed, and zero rows is not a verdict
 
@@ -2704,7 +2704,7 @@ else has this shape, and would I have seen it fail?"
 Two instrument failures in one session shared one shape, and neither returned an
 error. A query was answered about a set that did not contain the subject, and the
 caller promoted the empty result into a verdict
-([#683](https://github.com/LASTRADA-Software/fastcached/issues/683)).
+([#683](https://github.com/LASTRADA-Software/pace/issues/683)).
 
 **A fabricated SHA.** A lane read a head as the abbreviated `b4331297`, needed forty
 characters for an API call, and **padded it** instead of reading the full value. `gh`
@@ -3085,7 +3085,7 @@ passed.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1567](https://github.com/LASTRADA-Software/fastcached/issues/1567)** — three sections here have no `AGENT.md`
+- **[#1567](https://github.com/LASTRADA-Software/pace/issues/1567)** — three sections here have no `AGENT.md`
   tripwire: `## A shared failure message describes one caller, and lies to the others`,
   `## A reproduction models the wiring as it is`, and `## A path-scoped revert is scoped
   to the FILE, not to the mistake`. Each fires in no session that does not open this

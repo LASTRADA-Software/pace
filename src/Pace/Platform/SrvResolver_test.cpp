@@ -267,7 +267,7 @@ TEST_CASE("The system resolver answers a name that cannot exist with a fault and
     // `.invalid` is reserved (RFC 6761), so this is NXDOMAIN on a host with a resolver and a
     // resolver failure on one without; either is a fault, which is all this case can assert
     // everywhere. The case below is the positive direction.
-    auto const answer = resolver->Lookup("_pace._tcp.fastcache-nonexistent.invalid");
+    auto const answer = resolver->Lookup("_pace._tcp.pace-nonexistent.invalid");
     CHECK_FALSE(answer.has_value());
 }
 

@@ -118,7 +118,7 @@ enum class MembershipParticipant : std::uint8_t
     /// whose reachability is its boundary.
     OpenPolicy,
     /// A caller that PROVED, on this connection, an identity key the cluster holds live for the id
-    /// it claimed (`ProveNode`, sealed; #178, [#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428)).
+    /// it claimed (`ProveNode`, sealed; #178, [#1428](https://github.com/LASTRADA-Software/pace/issues/1428)).
     /// The one route that satisfies `CompileCacheWire::IdentityRequirement::ProvenNodeOnly`.
     ProvenIdentity,
     /// A caller whose AUTH presented a machine ticket this connection VERIFIED, signed by a key the
@@ -429,7 +429,7 @@ struct CallerContext
     /// it must decide what an unnameable caller means rather than assume a host.
     ///
     /// **Owned, not a view, and this struct is deliberately not named `*View`**
-    /// ([#395](https://github.com/LASTRADA-Software/fastcached/issues/395)). It was a
+    /// ([#395](https://github.com/LASTRADA-Software/pace/issues/395)). It was a
     /// `std::string_view` in a type whose name promised nothing, which is the third
     /// instance of #366's rule after `CapacityFields` and
     /// `CompileResult`/`CodecEnvelope`: **a `*View` type borrows and says so;
@@ -785,7 +785,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     ///
     /// **What a node sends when it has nothing to register.** A node with `--slots=0` runs no
     /// worker, so it never calls `Register` and never heartbeats -- and before
-    /// [#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440) that left it absent
+    /// [#1440](https://github.com/LASTRADA-Software/pace/issues/1440) that left it absent
     /// from the fleet page's Machines table AND silent, handing over no history at all. The
     /// most likely such machine is the LEADER, whose page this is.
     ///
@@ -825,7 +825,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// BEFORE `Pick`, so an entry inside its window survives the reap and is handed
     /// out, granting a lease to a worker certain to refuse it with
     /// `UnknownFingerprint`
-    /// ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)).
+    /// ([#573](https://github.com/LASTRADA-Software/pace/issues/573)).
     ///
     /// **Gated exactly as `Heartbeat` is, with no `GateScope` relaxation, and that is
     /// a decision rather than an omission.** `Release` is exempted because it settles
@@ -954,7 +954,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// parsed. Without it an operator's only check on a typed address was a flag
     /// against a memory, and a member recorded at an address nothing answers on is a
     /// symptom that points at consensus
-    /// ([#1296](https://github.com/LASTRADA-Software/fastcached/issues/1296)).
+    /// ([#1296](https://github.com/LASTRADA-Software/pace/issues/1296)).
     ///
     /// It is attached at this call site rather than inside `Offer`, so the other two
     /// verbs' reply shape is unchanged; the argument is at the attachment.
@@ -1089,7 +1089,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// never replicated, so the lease exists nowhere else and no other node can free
     /// it. Refusing it does not stop a demoted node from doing harm -- it stops it
     /// from cleaning up after itself, and the key stays pinned until it expires
-    /// ([#371](https://github.com/LASTRADA-Software/fastcached/issues/371)).
+    /// ([#371](https://github.com/LASTRADA-Software/pace/issues/371)).
     ///
     /// So the test for a future verb is not "does this feel administrative" but a
     /// checkable one: **does it act only on non-replicated state this node created
@@ -1133,7 +1133,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// Public and named because the transport asks it **before it reads a payload**:
     /// membership is a property of the peer, so a stranger can be refused without
     /// this process allocating for the frame it declared
-    /// ([#285](https://github.com/LASTRADA-Software/fastcached/issues/285)).
+    /// ([#285](https://github.com/LASTRADA-Software/pace/issues/285)).
     ///
     /// **`Gate()` calls this rather than repeating it, and that is the point.** Two
     /// call sites for one rule is how the two come to disagree -- an edit to what

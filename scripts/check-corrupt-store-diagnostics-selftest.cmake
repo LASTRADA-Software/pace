@@ -22,7 +22,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # ## INCONCLUSIVE, and why this harness is born with it
 #
-# [#747](https://github.com/LASTRADA-Software/fastcached/issues/747) records that
+# [#747](https://github.com/LASTRADA-Software/pace/issues/747) records that
 # this tree's two older selftest harnesses cannot tell *the rule fired* from *the
 # invocation never ran*: one reads any non-zero status as a refusal, the other
 # ignores `RESULT_VARIABLE` entirely. Under load -- a box at 82 across 32 CPUs,

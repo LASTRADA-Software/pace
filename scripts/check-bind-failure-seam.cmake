@@ -4,7 +4,7 @@
 # `JudgeBindFailure`, and no opener decides one itself.
 #
 # `NodeSurfaceTable()` carries a `BindFailurePolicy` column and a sentence saying why
-# ([#352](https://github.com/LASTRADA-Software/fastcached/issues/352)), and a
+# ([#352](https://github.com/LASTRADA-Software/pace/issues/352)), and a
 # `static_assert` refuses a row that omits either. That guard is exact about the
 # TABLE and says nothing about the CODE: a fifth opener can be written tomorrow that
 # binds a port and answers

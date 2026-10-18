@@ -18,7 +18,7 @@
 
 [Unit]
 Description=Pace compile worker socket
-Documentation=https://github.com/LASTRADA-Software/fastcached
+Documentation=https://github.com/LASTRADA-Software/pace
 
 # The node SUPERSEDES the plain daemon on this machine, as it does under the Windows
 # MSI, where pace-kv is registered DISABLED beside a node. Both serve the cache on

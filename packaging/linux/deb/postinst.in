@@ -34,7 +34,7 @@ case "$1" in
         # `requirepass` into, and `Platform/FileTrust` already warns when a secret is
         # read from a broadly-readable file -- so the daemon was built to complain
         # about the file its own package shipped
-        # ([#861](https://github.com/LASTRADA-Software/fastcached/issues/861)).
+        # ([#861](https://github.com/LASTRADA-Software/pace/issues/861)).
         #
         # DIFFERENT groups, not one: `pace-kv.service` runs as `pace-kv` and
         # `pace-node.service` as `pace-node`, and

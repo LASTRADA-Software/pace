@@ -89,7 +89,7 @@ list(SORT _tableKeys)
 # good tree. Measured, in this branch.
 #
 # Fifth-and-counting copy of this idiom; consolidating them is
-# [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) and is
+# [#495](https://github.com/LASTRADA-Software/pace/issues/495) and is
 # deliberately not done here.
 #
 # MEASURED: injecting one `]` into a comment in the reference YAML took this

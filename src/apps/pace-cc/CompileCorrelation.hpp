@@ -24,7 +24,7 @@ namespace Pace::Cc
 /// ## Why this exists
 ///
 /// Nothing else tied a reply to its request
-/// ([#280](https://github.com/LASTRADA-Software/fastcached/issues/280)). The cache key
+/// ([#280](https://github.com/LASTRADA-Software/pace/issues/280)). The cache key
 /// covers the inputs, the fingerprint covers the toolchain and the lease covers the
 /// authorization -- all of them upstream of the reply. The client sent a job and
 /// accepted whatever object came back on that connection, so any defect crossing two
@@ -42,7 +42,7 @@ namespace Pace::Cc
 /// It does **not** detect a runner that fed the right bytes and then read back the
 /// wrong object file. There the metadata is honest and only the object is foreign, and
 /// no input-side digest can see that. That is
-/// [#279](https://github.com/LASTRADA-Software/fastcached/issues/279)'s failure, and
+/// [#279](https://github.com/LASTRADA-Software/pace/issues/279)'s failure, and
 /// #279's exclusive scratch claim is what closes it. **#279 secures the output side and
 /// this secures the input side; neither alone is sufficient.** Do not write that this
 /// detects crossed objects without that qualification -- read as unconditional, it

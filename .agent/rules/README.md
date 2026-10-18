@@ -65,7 +65,7 @@ diffs. An *accepted trade-off* is different and does belong here, under
 An entry there is a top-level bullet whose **leading** reference is the issue:
 
 ```
-- **[#123](https://github.com/LASTRADA-Software/fastcached/issues/123)** — what is left.
+- **[#123](https://github.com/LASTRADA-Software/pace/issues/123)** — what is left.
     - a sub-point, indented FOUR spaces.
 ```
 
@@ -202,7 +202,7 @@ the split. Link them as plain markdown.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1572](https://github.com/LASTRADA-Software/fastcached/issues/1572)** — the
+- **[#1572](https://github.com/LASTRADA-Software/pace/issues/1572)** — the
   tripwire markers are required per `##` heading, and a rule arrives as a BULLET
   under existing prose, so a rule added to an already-marked section is invisible
   to `ctest -R rulebook-tripwires`. Measured: 137 sections watched against 391

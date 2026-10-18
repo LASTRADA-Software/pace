@@ -74,7 +74,7 @@ inline constexpr std::string_view FingerprintSchema = "toolchain-v3";
 /// own one include tree, so the two inputs above cannot tell them apart — and a worker
 /// looks a toolchain up by fingerprint, runs *its* driver, and appends the client's
 /// arguments verbatim, so a GNU driver serving an MSVC-spelled job reads `/std:c++20`
-/// as a filename ([#226](https://github.com/LASTRADA-Software/fastcached/issues/226)).
+/// as a filename ([#226](https://github.com/LASTRADA-Software/pace/issues/226)).
 /// The name comes from `DriverGrammarName`, never the enumerator's value, for the
 /// reason that function gives.
 ///

@@ -94,7 +94,7 @@ std::expected<Pace::SecureString, NodeRefusal> ReadSecretFile(std::filesystem::p
     // the stream keeps one of its own -- so the secret existed in two containers nothing
     // wipes, and changing only the RETURN type would have left both. A half-fix that looks
     // complete is the shape this repository keeps finding
-    // ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)).
+    // ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)).
     //
     // Chunked rather than sized from `tellg()`: a credential file is not necessarily
     // seekable -- a FIFO answers -1 -- and a reader that refuses one would be a new
@@ -204,7 +204,7 @@ namespace
     /// A shell rather than a `<meta>` copied into each body, so the viewport is stated
     /// once here -- and the prologue itself is `Distributed::HtmlDocumentPrologue`,
     /// because stating it once per BINARY still left it spelled twice per fleet
-    /// ([#1344](https://github.com/LASTRADA-Software/fastcached/issues/1344)).
+    /// ([#1344](https://github.com/LASTRADA-Software/pace/issues/1344)).
     ///
     /// This used to say that `RenderFleetHtml` keeps its own head and that sharing one
     /// would couple a one-paragraph refusal to a whole dashboard. That is right about
@@ -222,7 +222,7 @@ namespace
         // cannot join them, being a `string_view` rather than a literal, so it is the
         // string's initial value and the head is what gets appended to it.
         std::string out { Distributed::HtmlDocumentPrologue };
-        out += R"(<title>fastcache fleet</title><style>)"
+        out += R"(<title>pace fleet</title><style>)"
                R"(body{margin:0;padding:2rem 1.25rem;color:#1c1f23;background:#f6f7f9;)"
                R"(font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif})"
                R"(main{max-width:34rem;margin:0 auto}h1{font-size:1.15rem;margin:0 0 .8rem})"
@@ -247,7 +247,7 @@ namespace
         return AdminResponse { .status = "401 Unauthorized",
                                .contentType = contentType,
                                .body = std::move(body),
-                               .extraHeaders = { R"(WWW-Authenticate: Basic realm="fastcache fleet")" } };
+                               .extraHeaders = { R"(WWW-Authenticate: Basic realm="pace fleet")" } };
     }
 
     /// One `name=value` out of a query string.

@@ -9,7 +9,7 @@ namespace Pace
 /// Who a live subscription belongs to, for as long as it streams.
 ///
 /// **The same facts every membership gate folds** (`ConnectionFacts`), and the stream is re-gated on
-/// them every tick ([#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428), #178): a key
+/// them every tick ([#1428](https://github.com/LASTRADA-Software/pace/issues/1428), #178): a key
 /// revoked while a dashboard watches ends that dashboard's stream on the next tick, as the forgotten
 /// machine's. An alias rather than a copy of the struct, so a fact a connection establishes reaches
 /// the per-tick re-gate by construction rather than by somebody remembering to copy it.

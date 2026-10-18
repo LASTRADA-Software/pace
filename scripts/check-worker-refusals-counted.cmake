@@ -4,7 +4,7 @@
 # spellings, and no file reaches the raw encoder.
 #
 # Six sites in `WorkerProtocol.cpp` used to answer on the wire and increment nothing
-# ([#327](https://github.com/LASTRADA-Software/fastcached/issues/327)). A refusal
+# ([#327](https://github.com/LASTRADA-Software/pace/issues/327)). A refusal
 # answered while nothing rises is how a port being probed looks, on `/metrics`,
 # exactly like a port nobody is talking to -- and the six were not a coincidence but
 # the default: `CompileCacheWire::EncodeErrorReply` takes a code and knows nothing
@@ -21,7 +21,7 @@
 #
 # The list was exact about the files it knew and SILENT about the ones it did not,
 # and silence reads identically to complete coverage
-# ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)). So the list is
+# ([#492](https://github.com/LASTRADA-Software/pace/issues/492)). So the list is
 # gone: this globs `src/`, headers included, and a new file answering a refusal fails
 # it on the first bare call with nobody editing anything. An over-broad scan fails
 # CLOSED -- a file that should not be scanned produces a visible failure somebody

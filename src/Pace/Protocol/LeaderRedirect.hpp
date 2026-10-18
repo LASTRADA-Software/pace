@@ -26,7 +26,7 @@ namespace Pace
 ///
 /// **It lives here because it has three callers and had two authors.** `ClusterAdminCli`
 /// wrote this rule once and `pace-cc` wrote it again; that was
-/// [#237](https://github.com/LASTRADA-Software/fastcached/issues/237), closed by making
+/// [#237](https://github.com/LASTRADA-Software/pace/issues/237), closed by making
 /// the first ask the second. `pacectl` gaining the cluster verbs would have been
 /// the THIRD author, and the third one is the one nobody compares against the other two.
 /// A rule that works only while every copy agrees is a rule with a scheduled expiry.

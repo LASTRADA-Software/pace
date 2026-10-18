@@ -31,7 +31,7 @@ using Pace::Testing::Unwrap;
 ///
 /// `pace-kv` exported two compile-cache refusal counters that appeared in **no
 /// documentation at all**, while `pace-node` documented its twin of one
-/// of them ([#648](https://github.com/LASTRADA-Software/fastcached/issues/648)). An
+/// of them ([#648](https://github.com/LASTRADA-Software/pace/issues/648)). An
 /// operator watching a rolling upgrade follows the node series because it is the one
 /// the documentation names, sees it settle, and reads a mixed fleet as a converged
 /// one — which is the exact judgement those counters exist to support.

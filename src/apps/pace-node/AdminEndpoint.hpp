@@ -362,7 +362,7 @@ class FleetSampler final: public IFleetHistoryView
     /// today's tree**: two callers would each take a batch and each advance the
     /// cursor, splitting the buckets between two verbs and losing any batch one took
     /// and the other acknowledged. Since
-    /// [#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440) it is the
+    /// [#1440](https://github.com/LASTRADA-Software/pace/issues/1440) it is the
     /// presence loop, because that is the verb EVERY node sends -- a machine running
     /// no worker never registers, so a carrier riding `Register` could not serve it.
     /// @param limit The most buckets one announcement may carry.

@@ -128,7 +128,7 @@ is the reproducible lesson, since no unit test can reach either:
   prog,args`, `-fplugin=`, `-Xclang -load`, `-specs=`, `-B`. None carries a path
   separator, so the old "could this name a file?" filter admitted every one — a
   proven RCE as the node's service account
-  ([#240](https://github.com/LASTRADA-Software/fastcached/issues/240)). The flag
+  ([#240](https://github.com/LASTRADA-Software/pace/issues/240)). The flag
   space belongs to GCC, Clang and Microsoft and grows every release, so a denylist
   we audit against upstream forever **fails open** the day we miss one; the allowlist
   **fails safe** — an unrecognised flag costs one local compile, visible as
@@ -344,7 +344,7 @@ Consequences that are each load-bearing:
   lease exists nowhere else, and no other node can free it. Gating it on leadership
   did not stop a demoted node doing harm, it stopped it cleaning up after itself, and
   the key stayed pinned on the one machine that could have released it until it
-  expired ([#371](https://github.com/LASTRADA-Software/fastcached/issues/371)) — while
+  expired ([#371](https://github.com/LASTRADA-Software/pace/issues/371)) — while
   the client was doing exactly the right thing, because the rule below requires a
   release to go to whoever ISSUED the lease.
 
@@ -678,7 +678,7 @@ Consequences that are each load-bearing:
       the start), and `MakeWorkerLeaseValidator`'s activated-case backstop has already run. Widening
       would hand it an open unauthenticated compile port with every refusal counter
       reading zero, which is
-      [#282](https://github.com/LASTRADA-Software/fastcached/issues/282) arriving
+      [#282](https://github.com/LASTRADA-Software/pace/issues/282) arriving
       through the door #405 opens. Asked as a TRANSITION -- the candidate admits remote
       peers and the previous configuration did not -- because a keyless worker that
       already admits them passed its own startup rules, is running today, and must
@@ -695,7 +695,7 @@ Consequences that are each load-bearing:
       removed record held. The two look contradictory to a reader meeting them cold,
       which is why both are written down here rather than left to be re-derived.
   - **A fold that is right and unaskable is half a feature**
-    ([#1471](https://github.com/LASTRADA-Software/fastcached/issues/1471)). Every rule
+    ([#1471](https://github.com/LASTRADA-Software/pace/issues/1471)). Every rule
     above decides admission correctly and NONE of them could be asked about: an operator
     who finds a machine still served had no way to learn which route admits it -- the
     key it proved, a ticket it presented, or `--fleet-open`. So the decision is a `MembershipDecision` — a verdict and
@@ -1270,7 +1270,7 @@ Consequences that are each load-bearing:
   own slot accounting and its in-flight byte budget, never the lease. Anything built
   on "an unexpired lease implies the scheduler still holds capacity" is built on a
   guarantee that does not exist.
-- **A lease is single-use, and until [#614](https://github.com/LASTRADA-Software/fastcached/issues/614) nothing enforced it.** The scheduler mints
+- **A lease is single-use, and until [#614](https://github.com/LASTRADA-Software/pace/issues/614) nothing enforced it.** The scheduler mints
   one grant per lease, the client presents it in exactly one COMPILE frame with no retry
   (`Dispatch::CompileOnWorker`), and a RELEASE goes to the SCHEDULER rather than to a
   worker. So a token arriving twice at one worker is a replay and never an honest
@@ -1322,7 +1322,7 @@ Consequences that are each load-bearing:
 - **The learned term is a DIAGNOSTIC, not a gate — and the gate it replaced was exactly
   inverted.** #421 made a worker refuse any grant naming a term below the one it had
   learned, taking the maximum so a late message could not walk it backwards. Measured on
-  the tree before [#614](https://github.com/LASTRADA-Software/fastcached/issues/614), with a worker holding term 7 and a scheduler whose Raft
+  the tree before [#614](https://github.com/LASTRADA-Software/pace/issues/614), with a worker holding term 7 and a scheduler whose Raft
   directory had been wiped truthfully stating term 0: the **honest fresh grant was
   REFUSED** (0 < 7) and a **token captured under term 7 was ACCEPTED** (7 >= 7). The rule
   written to stop replay refused every legitimate grant and admitted the replayed one, in
@@ -1784,7 +1784,7 @@ Consequences that are each load-bearing:
       through `StartNetworkWatcherAt`, so the two call sites cannot both start one.
 - **A reloadable flag that feeds REGISTER is a claim, not a setting, and adopting one
   without telling the fleet is the silent failure the whole column exists to prevent**
-  ([#403](https://github.com/LASTRADA-Software/fastcached/issues/403)). `--toolchain`
+  ([#403](https://github.com/LASTRADA-Software/pace/issues/403)). `--toolchain`
   and `--no-toolchain-discovery` decide which fingerprints this node registers, so a
   reload of either has to re-derive the served set **and** re-register. Three things
   make that safe, and none of them was built for it:
@@ -1835,11 +1835,11 @@ Consequences that are each load-bearing:
   `(fingerprint, endpoint)` entry costs a failed dispatch and a local compile for at
   most one `DefaultHeartbeatTimeout`, never a wrong object. There is no wire verb that
   retires a registry entry, and adding one
-  ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)) is therefore a
+  ([#573](https://github.com/LASTRADA-Software/pace/issues/573)) is therefore a
   latency optimisation over a bounded, self-healing window — not a correctness fix.
 - **An OUTBOUND credential is read at the moment it is presented, through one seam,
   and a site that captures one is invisible until somebody rotates**
-  ([#404](https://github.com/LASTRADA-Software/fastcached/issues/404)). On this worker
+  ([#404](https://github.com/LASTRADA-Software/pace/issues/404)). On this worker
   `--requirepass` is presented and never required, and each of the three sites that
   presented it — the shared `pace-kv`, the scheduler round, a cluster admin verb —
   built its own `Cc::Credential` from `cfg.token` at construction. Marking the row `Reloadable::Yes`
@@ -1880,9 +1880,9 @@ Consequences that are each load-bearing:
     `AUTH` frame in any. An operator verb chooses per endpoint (`OperatorCredentials`) and
     a cordon asks this machine's own node, which checks none.
 - **A file's MODE is in no configuration, so the worker's secret-file check follows
-  the RELOAD and not only the start** ([#868](https://github.com/LASTRADA-Software/fastcached/issues/868)).
+  the RELOAD and not only the start** ([#868](https://github.com/LASTRADA-Software/pace/issues/868)).
   One of this binary's five secret settings is `Reloadable::Yes` since
-  [#404](https://github.com/LASTRADA-Software/fastcached/issues/404), so a node file
+  [#404](https://github.com/LASTRADA-Software/pace/issues/404), so a node file
   **can** now gain a `requirepass` across a reload exactly as the daemon's can, and
   that half of #753 is live here rather than absent — which is not a hole, because
   `SecretSubjectFiles` is a function of the LIVE snapshot: the re-ask below asks about
@@ -2033,14 +2033,14 @@ client sent, with a comment saying why: *"Canonicalization is the SHARED cache's
 job ... What this tier stores is what this machine will replay."* Both halves were
 true. A node was a private tier in front of `pace-kv`, which canonicalized every
 store, and doing it twice would have been the redundancy the comment refused. Then
-[#229](https://github.com/LASTRADA-Software/fastcached/issues/229) made a node the
+[#229](https://github.com/LASTRADA-Software/pace/issues/229) made a node the
 shared cache in its own right, and neither half survived: there was no longer a
 daemon behind it doing the job, and "this machine" is not one layout, because every
 checkout on it is a different one. Nothing failed at the moment the premise did.
 
 The result was that a value stored through a node kept the producing checkout's
 absolute paths in its text regions
-([#319](https://github.com/LASTRADA-Software/fastcached/issues/319)). Three things
+([#319](https://github.com/LASTRADA-Software/pace/issues/319)). Three things
 follow, and each is a rule of its own:
 
 - **A policy every server must apply belongs with the thing it applies to, not with
@@ -2082,7 +2082,7 @@ non-leader with the leader's endpoint. Only the interactive `--cluster-*` CLI ev
 it: the launcher dropped it into the same branch as `NoWorker` and `NoCapacity` and
 compiled locally, so a single election removed every client from the fleet until forty
 machines were re-pointed by hand
-([#237](https://github.com/LASTRADA-Software/fastcached/issues/237)). Everything looked
+([#237](https://github.com/LASTRADA-Software/pace/issues/237)). Everything looked
 healthy while it happened — the builds succeeded, the objects were correct, and the only
 symptom was that they were slow.
 
@@ -2146,7 +2146,7 @@ symptom was that they were slow.
   it for the whole lease timeout. That is the `already-in-flight` outage #212 records,
   reached from the client's side.
 - **A LEARNER answers the scheduling verbs with that redirect, so this machine's own node is a
-  scheduler to name** ([#1639](https://github.com/LASTRADA-Software/fastcached/issues/1639)).
+  scheduler to name** ([#1639](https://github.com/LASTRADA-Software/pace/issues/1639)).
   A node that runs consensus and serves no scheduler (`Node::RedirectsScheduling`,
   `RunsConsensus && !ServesScheduler`) knows where the leader is and used to answer every
   scheduling verb `UnimplementedVerb` instead, which a launcher reads as *this build is too old*
@@ -2161,7 +2161,7 @@ symptom was that they were slow.
     (`ClusterState::SchedulerEndpointOf`), never its Raft endpoint, read through
     `ISchedulingLeaderSource` rather than a reach into the consensus tier. NODE-STATUS reads its
     `leader` from that SAME object (`NodeRuntimeSources::schedulingLeader`,
-    [#1641](https://github.com/LASTRADA-Software/fastcached/issues/1641)), so `pacectl node`
+    [#1641](https://github.com/LASTRADA-Software/pace/issues/1641)), so `pacectl node`
     and the redirect cannot disagree; the role stays ABSENT, since the node runs no scheduler.
   - **A silent leader is named by NOBODY once its silence passes the tier's own Raft
     `electionTimeoutMax`** — 300 ms today, judged once per 1 s reconcile pass, so the effective
@@ -2235,7 +2235,7 @@ other moves where the outage is observed and not whether it happens.
   than storing it as a value equal to the default, or every diagnostic that says
   which endpoint this node is following becomes a lie.
 - **`--scheduler` is a LIST, and the fallback walks it — for REACHING the fleet,
-  never for deciding who leads** ([#1310](https://github.com/LASTRADA-Software/fastcached/issues/1310)).
+  never for deciding who leads** ([#1310](https://github.com/LASTRADA-Software/pace/issues/1310)).
   A registration replays its command line forever, so one value was one machine's
   address in every unit file, and retiring it meant re-registering the fleet. Three
   rules came with the list, and each is a way the obvious version is wrong:
@@ -2401,7 +2401,7 @@ Six more about what the tier IS and who gets to see it:
   `EndpointFlags`' install-time grammar (four surfaces), a `StartupPolicyRejection`
   row (raft), four `*ListenDefaultHost` constants, the six opener call sites, and the
   operator documentation -- and an operator's firewall list was the sixth
-  ([#288](https://github.com/LASTRADA-Software/fastcached/issues/288)). They are one
+  ([#288](https://github.com/LASTRADA-Software/pace/issues/288)). They are one
   table now, and the guard is the **type system**: `FrameEndpoint::Start` and
   `AdminEndpoint::Start` take an enumerator, so there is no argument to pass a bare
   string to and a port cannot be opened without a row. A guard that fails the build
@@ -2467,7 +2467,7 @@ Six more about what the tier IS and who gets to see it:
 
   **A bare `--listen-node` follows `--serve-scheduler` and nothing else, and that is a
   decision rather than an omission**
-  ([#463](https://github.com/LASTRADA-Software/fastcached/issues/463)). Widening it for
+  ([#463](https://github.com/LASTRADA-Software/pace/issues/463)). Widening it for
   a *fleet participant* -- `--scheduler`, `--fleet-open` -- restores
   no ergonomics: the wider bind is what makes `CompilePortFacesTheNetwork` true, so
   a way to check a lease becomes required, and the wider bind *becomes* the advertised
@@ -2490,7 +2490,7 @@ Six more about what the tier IS and who gets to see it:
   fixtures run, so neither the bind nor the advertise separates the two.
 
   **"The operator typed it" is `cfg.cacheListenExplicit`, never a comparison against
-  the default** ([#286](https://github.com/LASTRADA-Software/fastcached/issues/286)).
+  the default** ([#286](https://github.com/LASTRADA-Software/pace/issues/286)).
   Why a comparison cannot answer it, and why the registration side of the same flag
   had it wrong too, is
   [`platform-service-and-config.md`](platform-service-and-config.md) under
@@ -2811,7 +2811,7 @@ then fetch.
 > **The launcher's `PACE_VERIFY` answers a different question with the same
 > fact**, and for a long time answered it wrongly — it compared objects with
 > `memcmp`, so every Windows hit reported a wrong object
-> ([#493](https://github.com/LASTRADA-Software/fastcached/issues/493)). This
+> ([#493](https://github.com/LASTRADA-Software/pace/issues/493)). This
 > paragraph existed then, in this file and two others, and none of them is one
 > somebody editing `HitVerification.cpp` opens. The launcher's copy —
 > including why `.debug$S` and `.chks64` are **not** excused there, which is the
@@ -3013,7 +3013,7 @@ caught in review:
   fleet view then has to render. Separators are collapsed on every host, case only on
   Windows; a scripted host cannot catch it, because it normalizes on the way in.
 - **A fingerprint that names no compiler is refused, not registered**
-  ([#140](https://github.com/LASTRADA-Software/fastcached/issues/140)). A driver this
+  ([#140](https://github.com/LASTRADA-Software/pace/issues/140)). A driver this
   build cannot ask for a version falls back to a digest of its own basename, and
   discovery of its include tree is best-effort by construction; a toolchain that hits
   both at once digests to a value this repository could print with nothing installed. `ToolchainProbe.hpp` permits a
@@ -3023,7 +3023,7 @@ caught in review:
   both halves are known. An operator-pinned identity is never judged this way; it is
   the escape hatch for exactly the compiler this process cannot interrogate.
 - **A probe that did not RUN is not a probe that answered nothing**
-  ([#225](https://github.com/LASTRADA-Software/fastcached/issues/225)). Include-root
+  ([#225](https://github.com/LASTRADA-Software/pace/issues/225)). Include-root
   discovery spawns the driver, and `DiscoverIncludePaths` returned a bare vector
   documented "empty when undiscoverable" — so a spawn that failed produced the same
   value as a driver that ran and listed nothing, which is a state this fingerprint
@@ -3063,7 +3063,7 @@ caught in review:
     intermittent by nature. `IdentityDefect` carries which way an identity is
     unusable, and its reason and remedy are columns of a table because two surfaces
     report them — the node's refusal and `--print-toolchain-fingerprint`'s warning.
-  - Related: [#148](https://github.com/LASTRADA-Software/fastcached/issues/148) is the
+  - Related: [#148](https://github.com/LASTRADA-Software/pace/issues/148) is the
     same fact discarded one function away — `CompilerBanner` knows whether it spawned
     and reports only the banner, so `CanSpawn` runs the identical command again.
 - **`cc` and `gcc` stay two candidates.** Usually one binary under two names, and they
@@ -3087,7 +3087,7 @@ confirms.** This was once forced: every target variant of one toolset — x64, x
 arm64 — shares an include tree, and they shared a banner too, so all of them
 fingerprinted identically and offering them all registered one machine several times
 under ONE identity. That is retired
-([#195](https://github.com/LASTRADA-Software/fastcached/issues/195)) — the banner names
+([#195](https://github.com/LASTRADA-Software/pace/issues/195)) — the banner names
 the target now, so they are distinct toolchains, and until then a fleet would happily
 dispatch an x86 compile to an x64 worker. Offering them is therefore a capability
 nobody has asked for rather than a duplicate; the restriction stands as scope, and
@@ -3100,8 +3100,8 @@ installer directory is present and the Xcode row (which asks once *per compiler
 name*) only when `xcrun` is on the search path.
 
 **A driver's include roots come from what it OWNS, never from the environment**
-([#140](https://github.com/LASTRADA-Software/fastcached/issues/140),
-[#145](https://github.com/LASTRADA-Software/fastcached/issues/145)). `INCLUDE` is set
+([#140](https://github.com/LASTRADA-Software/pace/issues/140),
+[#145](https://github.com/LASTRADA-Software/pace/issues/145)). `INCLUDE` is set
 per shell by `vcvarsall` and a Windows service inherits none, so any mechanism that
 reads it gives a launcher in a developer prompt and a worker under the SCM two
 different answers for one compiler — and a fingerprint disagreement is invisible from
@@ -3132,7 +3132,7 @@ means different things to them:
 The corollary is the part that looks like an omission and is not: **the VC toolset and
 the Windows SDK stay out of every fingerprint** — `clang-cl`'s since #145, and `cl`'s
 and an MSVC-targeting `clang`/`clang++`'s since
-[#1656](https://github.com/LASTRADA-Software/fastcached/issues/1656). A worker compiles
+[#1656](https://github.com/LASTRADA-Software/pace/issues/1656). A worker compiles
 text the client already preprocessed and so opens no header from either, so folding them
 buys no discrimination while spending real matches: the newest-kit rule splits two boxes
 with different SDKs installed, and an installed VS language pack drops IntelliSense XML
@@ -3688,7 +3688,7 @@ RETIRED and refused by the decoder), states the endpoint its `0xFC` port answers
 seat with the key it first asked with; a voter is an operator's PROMOTION, never a role. The table
 has one row, pinned to the wire by `EnrollRoleTableMatchesTheWire`, and states no seat opinion
 beyond that, so an approval cannot promote a demoted learner. There is no removal column, because one
-verb removes any member ([#1555](https://github.com/LASTRADA-Software/fastcached/issues/1555)):
+verb removes any member ([#1555](https://github.com/LASTRADA-Software/pace/issues/1555)):
 `--cluster-forget` takes the id out of the record and revokes its key, so the
 reject-after-approve warning names it. Until #1555 it could not be named for a worker -- it
 touched members only, and a warning naming it would have sent an operator to a command that
@@ -4037,7 +4037,7 @@ half from passing. The in-process fleet asserts it from addresses nobody listed
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
-- **[#661](https://github.com/LASTRADA-Software/fastcached/issues/661)** — `IProcessRunner`
+- **[#661](https://github.com/LASTRADA-Software/pace/issues/661)** — `IProcessRunner`
   has no cancellable seam, so a compile whose client has GONE runs to completion and this
   machine pays for an object nobody will read. The departure is already detected and
   already counted (`WorkerJobsAbandonedClientGone`, #223, which measured 84 MB handed to a
@@ -4051,10 +4051,10 @@ half from passing. The in-process fleet asserts it from addresses nobody listed
   listed have since been implemented rather than deferred (`ISocket::CancelRead`,
   `ISocket::ShutdownWrite`, and #663's read-slot rule), which is why it is one entry and
   not four.
-- **[#201](https://github.com/LASTRADA-Software/fastcached/issues/201)** — a node
+- **[#201](https://github.com/LASTRADA-Software/pace/issues/201)** — a node
   offers only the NATIVE MSVC target variant, on a reason that no longer holds: the
   variants shared a banner and so a fingerprint, and
-  [#195](https://github.com/LASTRADA-Software/fastcached/issues/195) gave the banner the
+  [#195](https://github.com/LASTRADA-Software/pace/issues/195) gave the banner the
   target it names. They are distinct toolchains now, so offering the cross-target
   drivers is a capability rather than a duplicate -- but it multiplies one machine into
   six registrations, and capacity is per NODE, so it is not a one-line change to the
@@ -4070,14 +4070,14 @@ half from passing. The in-process fleet asserts it from addresses nobody listed
   as the tree's answer about itself. `ToolchainFingerprint_test.cpp`'s *One MSVC
   toolset's target variants are two toolchains* pins it now, over a deliberately
   byte-identical include tree, so it cannot go stale a second time in silence.
-- **[#1646](https://github.com/LASTRADA-Software/fastcached/issues/1646)** — `NodeRuntimeSources`
+- **[#1646](https://github.com/LASTRADA-Software/pace/issues/1646)** — `NodeRuntimeSources`
   is composed in `main`, which no test reaches, so which sources a node is handed is asserted
   by nothing: the learner's `.schedulingLeader` wiring
-  ([#1641](https://github.com/LASTRADA-Software/fastcached/issues/1641)) is a pointer `main`
+  ([#1641](https://github.com/LASTRADA-Software/pace/issues/1641)) is a pointer `main`
   sets on `RedirectsScheduling`, as every other field of that record is set there, and a
   wiring that dropped it would leave every case green while `pacectl node` on a
   learner named no leader again.
-- **[#148](https://github.com/LASTRADA-Software/fastcached/issues/148)** — every
+- **[#148](https://github.com/LASTRADA-Software/pace/issues/148)** — every
   discovered compiler is spawned twice at startup with the same argv, once to learn
   it can be spawned and once for its banner, and the first is in a serial loop in
   front of the pool built to hide exactly that. `CompilerBanner` knows both facts

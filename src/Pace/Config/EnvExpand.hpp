@@ -15,7 +15,7 @@ namespace Pace
 /// Grammar:
 ///   - `$NAME`    — `NAME` is `[A-Za-z_][A-Za-z0-9_]*`, ending at the first
 ///                  character outside that set, so `$ProgramData/pace`
-///                  expands the variable and keeps `/fastcached` literal.
+///                  expands the variable and keeps `/pace` literal.
 ///   - `${NAME}`  — `NAME` is everything up to the closing brace. Needed for
 ///                  names the bare form cannot spell, notably Windows'
 ///                  `${ProgramFiles(x86)}`.
@@ -26,7 +26,7 @@ namespace Pace
 /// not supporting it.
 ///
 /// A reference to an unset variable is an error rather than an empty string:
-/// silently expanding `$ProgramData/pace/cache` to `/fastcached/cache`
+/// silently expanding `$ProgramData/pace/cache` to `/pace/cache`
 /// would point the store at a path that is merely wrong instead of reporting
 /// the missing variable. A variable that is *set but empty* expands to empty,
 /// which is a deliberate value rather than a mistake.

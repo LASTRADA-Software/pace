@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// What one live-stats tick costs on the wire and at each end, text against binary
-/// ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)).
+/// ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)).
 ///
 /// A dashboard that polled rendered `/metrics` text every interval; a subscription pushes the
 /// same `StatsReading` as positional binary. This is the record of what that trade buys, under

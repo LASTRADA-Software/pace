@@ -29,7 +29,7 @@ namespace
     /// One directory is searched rather than every `Host<a>/<b>` combination a Visual
     /// Studio install contains, and the restraint is deliberate -- but NOT for the
     /// reason this comment used to give, which was false
-    /// ([#1126](https://github.com/LASTRADA-Software/fastcached/issues/1126)).
+    /// ([#1126](https://github.com/LASTRADA-Software/pace/issues/1126)).
     ///
     /// It said every target variant of one toolset shares an include tree AND a banner
     /// of the normalized basename, so all of them fingerprint IDENTICALLY, so offering
@@ -50,7 +50,7 @@ namespace
     /// headers is a different toolchain*, `ToolchainProbe_test.cpp`'s *Two MSVC
     /// toolsets do not share one identity* -- whose `a.contains("x64")` is exactly this
     /// property -- and
-    /// [#201](https://github.com/LASTRADA-Software/fastcached/issues/201), open, and
+    /// [#201](https://github.com/LASTRADA-Software/pace/issues/201), open, and
     /// titled *A node could offer its cross-target MSVC drivers now that they
     /// fingerprint apart*. The claim here was inherited from before #195 and never
     /// re-derived, which is how it came to sit beside a ticket contradicting it.

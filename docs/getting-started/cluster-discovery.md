@@ -113,7 +113,7 @@ stays independent of *where* they are — so the beacon also supplies the addres
 member now answers at.
 
 **It supplies addresses, never admissions**
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). A machine whose key
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). A machine whose key
 the roster does not hold proves it perfectly well and is still only *reported*: counted,
 and logged with its id, the address it came from, its key and the `--cluster-admit` that
 would admit it. Joining is the enrollment above. Under the retired shared key it was not: a
@@ -189,7 +189,7 @@ the challenge and the proof are both unicast back to wherever the previous datag
 from, a node answering out of the shared socket would be answering for its whole
 *machine*. Two nodes on one host therefore saw each other's beacons and never finished the
 handshake, with nothing logged, because every rejection along the way is one the protocol
-is supposed to make ([#126](https://github.com/LASTRADA-Software/fastcached/issues/126)).
+is supposed to make ([#126](https://github.com/LASTRADA-Software/pace/issues/126)).
 
 So every node holds two:
 
@@ -216,7 +216,7 @@ GRAMMAR change, which an older reader could only refuse as malformed:
 
 - **2** replaced the proof's 32-byte HMAC under the shared key with a 32-byte public key and
   a 64-byte signature, so its arity and its field widths changed. That is the opposite of
-  [#402](https://github.com/LASTRADA-Software/fastcached/issues/402), which changed only
+  [#402](https://github.com/LASTRADA-Software/pace/issues/402), which changed only
   what the MAC covered and rightly left the version alone.
 - **3** put the fleet's signed summary in the beacon and the proof where an id and an
   endpoint were, padded the beacon and the challenge by one field each, and made the proof

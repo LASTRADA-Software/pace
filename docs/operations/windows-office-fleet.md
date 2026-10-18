@@ -309,7 +309,7 @@ quorum while it sleeps. A voter whose address moves is followed -- with `adverti
 usually within seconds -- but one pinned to a name is reached again only once DNS catches up.
 That re-recording is a commit, so it needs the voters that did NOT move to be a quorum: with
 two voters, or with most of them renumbered at once (a new router, a new DHCP scope), it does
-not heal by itself ([#1644](https://github.com/LASTRADA-Software/fastcached/issues/1644)). Keep three or more voters on fixed addresses -- a DHCP
+not heal by itself ([#1644](https://github.com/LASTRADA-Software/pace/issues/1644)). Keep three or more voters on fixed addresses -- a DHCP
 reservation is enough -- or give the moved ones their old addresses back until a quorum
 re-forms, then move them one at a time. To
 promote one, read its `consensus-endpoint` from `pacectl node` on
@@ -460,50 +460,50 @@ Each of these is an open issue. None of them breaks a build; each costs speed, c
 assumption worth knowing about.
 
 - **An unpinned first join trusts on first use**
-  ([#1609](https://github.com/LASTRADA-Software/fastcached/issues/1609)). A machine installed
+  ([#1609](https://github.com/LASTRADA-Software/pace/issues/1609)). A machine installed
   with no `PACE_FLEET_ID` joins the fleet that proves itself first on its segment, once
   that fleet approves it. Pin every install (step 1).
 - **The shared tier holds less than its budget when its values are small**
-  ([#1623](https://github.com/LASTRADA-Software/fastcached/issues/1623)). The disk store frees
+  ([#1623](https://github.com/LASTRADA-Software/pace/issues/1623)). The disk store frees
   a page only once every entry in it is gone, so a store of small values evicts more than it
   frees and swings well below `shared_cache_disk`. Most object files are past the size where
   this applies, so a compile cache sees little of it.
 - **Pages a disk store leaks are lost to its budget for good**
-  ([#1624](https://github.com/LASTRADA-Software/fastcached/issues/1624)). A crash can leave a
+  ([#1624](https://github.com/LASTRADA-Software/pace/issues/1624)). A crash can leave a
   few pages that nothing reclaims, and they count against `shared_cache_disk` (or `cache_disk`)
   from then on. The amounts are small on a node.
 - **A Linux or macOS node waits up to 6 seconds for its own names before it serves**
-  ([#1621](https://github.com/LASTRADA-Software/fastcached/issues/1621)). POSIX only, so it
+  ([#1621](https://github.com/LASTRADA-Software/pace/issues/1621)). POSIX only, so it
   does not touch this shape; it matters only if such a machine joins the fleet.
 - **A wrong dial hint costs every dispatched compile 300 ms**
-  ([#1606](https://github.com/LASTRADA-Software/fastcached/issues/1606)). A client dials the
+  ([#1606](https://github.com/LASTRADA-Software/pace/issues/1606)). A client dials the
   address the scheduler last saw a worker at before the worker's name; behind a NAT or after a
   VPN address change, that address may be stale.
 - **A dispatched compile's source reaches whatever answers at that address**
-  ([#1626](https://github.com/LASTRADA-Software/fastcached/issues/1626)) before the worker has
+  ([#1626](https://github.com/LASTRADA-Software/pace/issues/1626)) before the worker has
   proved its key. A machine that is not the worker can no longer return an object the client
   accepts, but it does receive the source. Keep VPN DNS current.
 - **A voter pinned to a name is reached again only when DNS catches up after its address
-  changes** ([#1605](https://github.com/LASTRADA-Software/fastcached/issues/1605)); one left at
+  changes** ([#1605](https://github.com/LASTRADA-Software/pace/issues/1605)); one left at
   the default follows its own announcement instead, so this applies only to a typed
   `raft_self` name. And **a learner can take up to 30 seconds to reach a newly elected leader**
-  ([#1625](https://github.com/LASTRADA-Software/fastcached/issues/1625)). Both apply only once
+  ([#1625](https://github.com/LASTRADA-Software/pace/issues/1625)). Both apply only once
   you have promoted more voters, which is why step 6 asks for machines that are always on.
 - **`clang-cl` with `/Zi` is cached but never dispatched**
-  ([#1602](https://github.com/LASTRADA-Software/fastcached/issues/1602)). `/Z7`, as step 5
+  ([#1602](https://github.com/LASTRADA-Software/pace/issues/1602)). `/Z7`, as step 5
   asks, is not affected.
 - **One machine can hold the enrollment list full from many IPv6 addresses**
-  ([#1603](https://github.com/LASTRADA-Software/fastcached/issues/1603)). The four-row bound is
+  ([#1603](https://github.com/LASTRADA-Software/pace/issues/1603)). The four-row bound is
   per address, and a host may own a whole /64. `--enroll-clear` and `PACE_FIREWALL_ALLOW`
   are the remedies today.
 - **A `cluster_dir:` in the configuration file is not secured by the install**
-  ([#1604](https://github.com/LASTRADA-Software/fastcached/issues/1604)): the node then refuses
+  ([#1604](https://github.com/LASTRADA-Software/pace/issues/1604)): the node then refuses
   to start on it. Leave the state directory where the service puts it.
 - **A repair that cannot add a firewall rule leaves fewer rules than before**
-  ([#1612](https://github.com/LASTRADA-Software/fastcached/issues/1612)), since the old group
+  ([#1612](https://github.com/LASTRADA-Software/pace/issues/1612)), since the old group
   is removed first. If a port stops answering after a repair, repair again.
 - **It is unconfirmed whether a second Windows error ends an accept loop**
-  ([#1627](https://github.com/LASTRADA-Software/fastcached/issues/1627)). If one does, the node
+  ([#1627](https://github.com/LASTRADA-Software/pace/issues/1627)). If one does, the node
   raises `surface-not-accepting` and `/healthz` answers 503; restart the service.
 
 See also [the pace-node page](../tools/pace-node.md) for each of

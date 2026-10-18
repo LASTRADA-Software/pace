@@ -38,7 +38,7 @@ namespace Pace::Cc
 /// is wrong for every node whose address is not known when it starts: one behind a NAT
 /// or a load balancer, one on an interface configured after the service, one whose
 /// address is meant to be derived
-/// ([#1279](https://github.com/LASTRADA-Software/fastcached/issues/1279)).
+/// ([#1279](https://github.com/LASTRADA-Software/pace/issues/1279)).
 ///
 /// So it is asked where it is presented, exactly as `Node::ICredentialSource` is asked
 /// for the credential this worker presents, and for the same reason: **a change that
@@ -404,7 +404,7 @@ class WorkerProtocol
 /// declare a 256 MiB expansion, so a caller charging only the frame length admits
 /// `slots` of them having reserved almost nothing -- `slots` times the per-request
 /// ceiling, asked for by any cluster member
-/// ([#241](https://github.com/LASTRADA-Software/fastcached/issues/241)).
+/// ([#241](https://github.com/LASTRADA-Software/pace/issues/241)).
 ///
 /// The **larger** of the two rather than their sum, and the budget therefore bounds
 /// the surface at a constant multiple of one request rather than byte-exactly.
@@ -469,7 +469,7 @@ class WorkerProtocol
 ///
 /// A refusal used to be a phrase (`Register`) or a bare `false` (`Heartbeat`),
 /// which is why the worker half of
-/// [#237](https://github.com/LASTRADA-Software/fastcached/issues/237) existed:
+/// [#237](https://github.com/LASTRADA-Software/pace/issues/237) existed:
 /// `NotLeader` reached this node as text nothing could act on, so it logged the
 /// redirect and dialled the demoted scheduler again on the next round, forever.
 /// Meanwhile the launcher followed the same refusal correctly and arrived at a
@@ -584,7 +584,7 @@ class WorkerRegistrar
     /// Retire this registration, because the node no longer serves its toolchain.
     ///
     /// `Register`'s counterpart, and the whole of
-    /// [#573](https://github.com/LASTRADA-Software/fastcached/issues/573) on this
+    /// [#573](https://github.com/LASTRADA-Software/pace/issues/573) on this
     /// side. Without it a node that re-surveyed could only stop heartbeating and let
     /// the entry age out, during which the scheduler goes on picking it and granting
     /// leases this worker will refuse.
@@ -681,7 +681,7 @@ class WorkerRegistrar
 /// fact.** A registrar is per TOOLCHAIN and carries a scheduler-issued worker id; presence is
 /// per MACHINE, names no id and refreshes nothing. A node started with `--slots=0` has no
 /// registrar at all, and it is the reason this exists
-/// ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+/// ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 ///
 /// It lives beside the registrar so that how a node talks to a scheduler stays ONE place:
 /// `ExchangeWithScheduler`, which presents no credential, rather than a second answer.

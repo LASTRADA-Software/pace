@@ -51,7 +51,7 @@ set -o pipefail
 SKIP=77
 Root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 Mode="scan"
-Repo="${PACE_RULESET_REPO:-LASTRADA-Software/fastcached}"
+Repo="${PACE_RULESET_REPO:-LASTRADA-Software/pace}"
 Branch="${PACE_RULESET_BRANCH:-master}"
 StagedTable=""
 StagedRuleset=""

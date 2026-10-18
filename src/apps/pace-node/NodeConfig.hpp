@@ -444,11 +444,11 @@ struct NodeConfig
     /// live credential is what somebody later wires up on the assumption it was
     /// always meant to work, and a half-wired username on an authentication path is
     /// worse than no username at all
-    /// ([#385](https://github.com/LASTRADA-Software/fastcached/issues/385)). If one
+    /// ([#385](https://github.com/LASTRADA-Software/pace/issues/385)). If one
     /// is ever wanted it arrives as a row in `NodeOptions()`, like everything else.
     ///
     /// **Renamed from `token` and retyped, together, at
-    /// [#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125).** The type is
+    /// [#1125](https://github.com/LASTRADA-Software/pace/issues/1125).** The type is
     /// the fix: this is a credential held in a config struct, and `NodeConfig` is kept as
     /// TWO live snapshots by `ConfigReloader`, so as a `std::string` a rotated secret
     /// survived in the previous snapshot for as long as anything held it, released to the
@@ -569,14 +569,14 @@ struct NodeConfig
     /// each other.
     ///
     /// **It is also inside every lease grant's signature since
-    /// [#322](https://github.com/LASTRADA-Software/fastcached/issues/322)**, and that
+    /// [#322](https://github.com/LASTRADA-Software/pace/issues/322)**, and that
     /// is a second job rather than a promotion to credential. A grant naming another
     /// fleet is refused *after* its signature has verified -- so what the id decides is
     /// whose authentic grants this node honours, never whether a grant is authentic.
     /// Since #178 a grant is signed by a voter's own key and verified against the roster a
     /// worker holds, so two fleets share nothing a grant could verify under unless a voter
     /// belongs to both; where one does, this id is what keeps their grants apart.
-    std::string clusterId { "fastcache" };
+    std::string clusterId { "pace" };
 
     /// Where discovery beacons go, empty to leave discovery off.
     ///
@@ -1224,7 +1224,7 @@ inline constexpr std::array<std::string_view, 2> AdvertisedReloadableFlags { "--
 /// moves this row and changes nothing the scheduler keys on, and re-registering a fleet
 /// for that is the spurious direction. So the list forces the classification at the
 /// table and the comparison happens where the fact lives
-/// ([#1279](https://github.com/LASTRADA-Software/fastcached/issues/1279)).
+/// ([#1279](https://github.com/LASTRADA-Software/pace/issues/1279)).
 ///
 /// Stated because the alternative reads as an omission: an entry here is not a promise
 /// that something walks it, and the guard below is what keeps it honest by requiring the
@@ -1272,7 +1272,7 @@ inline constexpr std::array<std::string_view, 4> LocalReloadableFlags {
 /// precisely why it was needed, and `LocalReloadableFlags` -- three lines away -- got
 /// none of it. A guard sitting next to the place it is missing is the shape that
 /// survives review, because the reader sees the assert and reads it as coverage
-/// ([#1027](https://github.com/LASTRADA-Software/fastcached/issues/1027)).
+/// ([#1027](https://github.com/LASTRADA-Software/pace/issues/1027)).
 ///
 /// So the lists are enumerated ONCE, here, and the assertions in `NodeConfig.cpp` walk
 /// this. A third list is covered by being added to this array; naming the two lists in
@@ -1348,7 +1348,7 @@ enum class AllowlistMoment : std::uint8_t
 /// The line to log about a reload that changed who this node admits, or nothing.
 ///
 /// **The narrowing half is what this is for, and it is the half a silent
-/// implementation drops** ([#405](https://github.com/LASTRADA-Software/fastcached/issues/405)).
+/// implementation drops** ([#405](https://github.com/LASTRADA-Software/pace/issues/405)).
 /// The one admission setting a reload can move is `--fleet-open`, and both directions
 /// are said. Turning it ON announces itself the moment a stranger's build is served.
 /// Turning it OFF has no such signal: admission succeeding is the ordinary case, so a
@@ -1379,7 +1379,7 @@ enum class AllowlistMoment : std::uint8_t
 /// compiles and registers exactly as configured while being invisible to anything not
 /// on its own machine -- so over a fleet that is opt-in monitoring whose failure mode
 /// is silence
-/// ([#1304](https://github.com/LASTRADA-Software/fastcached/issues/1304)).
+/// ([#1304](https://github.com/LASTRADA-Software/pace/issues/1304)).
 ///
 /// **A remark and NOT a flipped default**, which is the ticket's own position and the
 /// right one: binding a port nobody asked for is the decision this binary refuses
@@ -1674,7 +1674,7 @@ inline constexpr std::string_view ConsensusDialRemedy = "give --raft-self";
 ///
 /// It was `NodeIdNamesNoPeerRefusal` and named `--node-id` as the thing that turns
 /// consensus on, which stopped being true at
-/// [#1022](https://github.com/LASTRADA-Software/fastcached/issues/1022). A message
+/// [#1022](https://github.com/LASTRADA-Software/pace/issues/1022). A message
 /// naming the wrong flag sends an operator to add the flag they already have; the
 /// rule itself did not move, only the flag that reaches it.
 ///
@@ -1813,7 +1813,7 @@ inline constexpr std::string_view NodeRunsNothingRefusal =
 /// its scheduler what term it is in.
 ///
 /// **A named predicate because two tiers have to agree about it, and they are built
-/// apart** ([#613](https://github.com/LASTRADA-Software/fastcached/issues/613)).
+/// apart** ([#613](https://github.com/LASTRADA-Software/pace/issues/613)).
 /// `StartConsensusOrExplain` answers "is there a cluster to start" and
 /// `SchedulerTier` answers "will somebody publish my role"; those are the same
 /// question, and while each spelled `cfg.nodeId.empty()` for itself they were two
@@ -1827,7 +1827,7 @@ inline constexpr std::string_view NodeRunsNothingRefusal =
 /// refusal asks.
 ///
 /// **A mode is the STATE held in the cluster dir** (`NodeFormation.hpp`). The switch was
-/// `--node-id` until [#1022](https://github.com/LASTRADA-Software/fastcached/issues/1022):
+/// `--node-id` until [#1022](https://github.com/LASTRADA-Software/pace/issues/1022):
 /// while the id's ABSENCE carried the mode, the id could never be given a default, because
 /// any default makes `nodeId.empty()` false forever and the one-machine deployment would be
 /// refused at every boot. #1022 moved it to the port; zero-config formation moves it again,
@@ -2100,7 +2100,7 @@ enum class ConsensusDialGap : std::uint8_t
 /// One path-valued worker flag whose file holds a secret.
 ///
 /// The shared row type, spelled for this binary. It was a struct of its own until
-/// [#864](https://github.com/LASTRADA-Software/fastcached/issues/864) gave the daemon
+/// [#864](https://github.com/LASTRADA-Software/pace/issues/864) gave the daemon
 /// the same two tables and the two definitions differed only in a type -- so
 /// `Config/SecretProvenance.hpp` holds the one row and both binaries name it.
 using NodeSecretFile = SecretFileRow<NodeConfig, std::filesystem::path>;
@@ -2128,7 +2128,7 @@ using NodePublicPathFlag = PublicPathFlag;
 /// owner. The files `NodeSecretFileTable()` names are not gated at all --
 /// the path is not the secret and the file is, so a world-readable key file is
 /// exposed however its path was named
-/// ([#752](https://github.com/LASTRADA-Software/fastcached/issues/752)).
+/// ([#752](https://github.com/LASTRADA-Software/pace/issues/752)).
 ///
 /// **A named file is reported whether or not a tier reads it**, and that is the
 /// lesson the retired `--cluster-key-file` refusal in `StartupPolicyRejection` was

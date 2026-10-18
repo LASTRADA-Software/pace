@@ -27,9 +27,9 @@
 # argument in its doc comment. That is about as loudly as a convention can be written
 # down, and it still spread -- to `compile-cache-testclient/main.cpp`, and then to two
 # more sites on a feature branch, one of which took `Linux-gcc-release` red at edge 495
-# of 691 ([#1029](https://github.com/LASTRADA-Software/fastcached/issues/1029)).
+# of 691 ([#1029](https://github.com/LASTRADA-Software/pace/issues/1029)).
 #
-# This is [#970](https://github.com/LASTRADA-Software/fastcached/issues/970)'s shape
+# This is [#970](https://github.com/LASTRADA-Software/pace/issues/970)'s shape
 # exactly. There, `producer | grep -q` under `pipefail` came back in eighteen sites
 # across twelve scripts, five of which carried a comment explaining why they avoided
 # the idiom, and the remedy was a scan rather than better prose. The tree's own
@@ -46,7 +46,7 @@
 # sibling behind it that was never reached; fixing only the named site would have
 # relocated the failure one file along, where it presents as a regression introduced
 # by the fix, with no failure history
-# ([#172](https://github.com/LASTRADA-Software/fastcached/issues/172)).
+# ([#172](https://github.com/LASTRADA-Software/pace/issues/172)).
 #
 # So this runs in the DEFAULT ctest set, where every developer meets it, rather than
 # waiting for the one CI leg that compiles at `-O3`.
@@ -62,7 +62,7 @@
 # That IS the exemption mechanism, and it is derived rather than listed. There is no
 # table of excused files here, deliberately: a hand-kept list is exact about the files
 # it knows and silent about the ones it does not, and silence reads identically to
-# complete coverage ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)).
+# complete coverage ([#492](https://github.com/LASTRADA-Software/pace/issues/492)).
 # A file that both explains the rule in prose AND breaks it in code is refused, which
 # is the shape a partial fix leaves behind.
 #

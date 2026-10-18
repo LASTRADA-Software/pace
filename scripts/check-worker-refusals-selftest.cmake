@@ -5,7 +5,7 @@
 # The check it drives replaced a hand-maintained list of source files with a glob,
 # because the list was exact about the files it knew and silent about the ones it did
 # not -- and silence reads identically to complete coverage
-# ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)). A glob is only
+# ([#492](https://github.com/LASTRADA-Software/pace/issues/492)). A glob is only
 # worth more than the list if it actually bites on a file that was never named, and
 # **a guard nobody has seen fire is not a guard**.
 #

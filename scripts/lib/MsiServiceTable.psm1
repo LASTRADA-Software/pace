@@ -2333,7 +2333,7 @@ function Invoke-MsiServiceTableSelfTest {
     $profileAfter = Format-FirewallRuleLine $privateOnly $portFilter $addressFilter ([pscustomobject] @{ Program = 'C:\Program Files\Pace\bin\pace-kv.exe' })
     ExpectThrow 'unchanged: a rollback that admits another PROGRAM is refused, naming it' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($programAfter) 'pace-kv: X') { throw $verdict }
-    } 'holds \[.*program=C:\\Elsewhere\\fastcached\.exe\]'
+    } 'holds \[.*program=C:\\Elsewhere\\pace\.exe\]'
     ExpectThrow 'unchanged: a rollback that changes the PROFILE is refused, naming it' {
         if ($verdict = Get-FirewallGroupUnchangedVerdict @($programBefore) @($profileAfter) 'pace-kv: X') { throw $verdict }
     } 'holds \[.*profile=Private'
@@ -2362,7 +2362,7 @@ function Invoke-MsiServiceTableSelfTest {
     # key in HKCU: each value kind, a subkey, the data unexpanded, and one volatile row excluded for its
     # own service and no other. Then the same key absent.
     $hkcu = [Microsoft.Win32.Registry]::CurrentUser
-    $scratchKey = 'Software\fastcached-selftest-' + [guid]::NewGuid().ToString('N')
+    $scratchKey = 'Software\pace-selftest-' + [guid]::NewGuid().ToString('N')
     $volatileRow = 'SelfTestSvc\Sub\Volatile'
     $created = $hkcu.CreateSubKey($scratchKey)
     try {

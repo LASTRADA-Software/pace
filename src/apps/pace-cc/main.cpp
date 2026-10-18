@@ -185,7 +185,7 @@ struct Config
     /// emit.
     ///
     /// Three-valued rather than a bool since
-    /// [#878](https://github.com/LASTRADA-Software/fastcached/issues/878) gave the
+    /// [#878](https://github.com/LASTRADA-Software/pace/issues/878) gave the
     /// launcher a way to ASK: "the operator said so", "the compiler said so" and
     /// "nobody said, so English" are three different things to tell an operator
     /// investigating a build that stopped rebuilding, and a bool can carry two.
@@ -249,7 +249,7 @@ struct Config
     /// ONE value with one place that decides it: `Cc::ResolveIncludeNoteMarker` asks the
     /// three sources in `Cc::MarkerSource`'s own order -- the operator's
     /// `PACE_MSVC_DEPS_PREFIX`, then a probe that ASKS the compiler
-    /// ([#878](https://github.com/LASTRADA-Software/fastcached/issues/878)), then this
+    /// ([#878](https://github.com/LASTRADA-Software/pace/issues/878)), then this
     /// English default -- and the first that answers lands here, with
     /// `showIncludesMarkerSource` recording which. The enumerator ORDER is the
     /// precedence and `MarkerSourceTable` carries the labels; the resolver spells one
@@ -718,7 +718,7 @@ void WarnAndCarryOn(InvocationRecord& record, std::string_view reason)
 /// the other's half. Before this axis existed, every non-answer from `Dispatch`
 /// reached only a verbose-gated `Note` and the record said nothing at all -- so a
 /// fleet in which every dispatch failed produced an ordinary miss rate and total
-/// silence ([#427](https://github.com/LASTRADA-Software/fastcached/issues/427)).
+/// silence ([#427](https://github.com/LASTRADA-Software/pace/issues/427)).
 /// @param record The invocation record this updates.
 /// @param recording The state and its FIXED tally reason; see `Cc::RecordingFor`.
 void ApplyDispatchRecording(InvocationRecord& record, Cc::DispatchRecording const& recording)
@@ -938,7 +938,7 @@ void NoteIfRootsDoNotDescribeCompile(InvocationRecord const& record,
 ///
 /// Constructed here because this file is the composition root, and reached by the
 /// same accessor idiom as `ProcessRunner()` and `ToolchainHost()` below. What
-/// changed in [#363](https://github.com/LASTRADA-Software/fastcached/issues/363) is
+/// changed in [#363](https://github.com/LASTRADA-Software/pace/issues/363) is
 /// not that the guard exists but WHERE: it used to be a `static bool` inside a
 /// function only the cache path called, so the six dispatch consumers -- three in
 /// other translation units, one in another executable -- had nothing to report
@@ -1132,7 +1132,7 @@ void ReplayStreams(std::string_view out, std::string_view err)
 /// on disk.
 ///
 /// **The mechanism that turns a wrong object from invisible into loud**
-/// ([#423](https://github.com/LASTRADA-Software/fastcached/issues/423)). Off unless
+/// ([#423](https://github.com/LASTRADA-Software/pace/issues/423)). Off unless
 /// `PACE_VERIFY` names a rate, because a verified hit costs a whole compile.
 ///
 /// It compiles to the SAME output path rather than a temporary one, having first
@@ -1166,7 +1166,7 @@ void ReplayStreams(std::string_view out, std::string_view err)
     // aside is scratch nobody reads while it is written, its error is checked, and a
     // failure is Inconclusive without touching the build's object, so the one-writer
     // rule does not reach it.
-    auto const aside = std::filesystem::path { *served }.concat(".fastcache-verify");
+    auto const aside = std::filesystem::path { *served }.concat(".pace-verify");
 
     std::error_code ec;
     std::filesystem::copy_file(*served, aside, std::filesystem::copy_options::overwrite_existing, ec);

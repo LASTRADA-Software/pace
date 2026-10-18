@@ -171,7 +171,7 @@ struct AdminBindFailureReport
 /// without one looks healthy to the very thing that would have reported it was not.
 ///
 /// The level is where that decision reaches an operator, and it was contradicting
-/// it ([#603](https://github.com/LASTRADA-Software/fastcached/issues/603)). `Error`
+/// it ([#603](https://github.com/LASTRADA-Software/pace/issues/603)). `Error`
 /// is what a site pages on and what a log scraper counts, and it costs in both
 /// directions at once: a site that alerts on `Error` gets paged for a working
 /// daemon, and a site that has learned to ignore this particular `Error` has been
@@ -234,7 +234,7 @@ class AdminHttpServer
     /// How long a peer may hold the connection having sent **nothing**.
     ///
     /// **Two questions were sharing one number and the shared answer was wrong for one
-    /// of them** ([#828](https://github.com/LASTRADA-Software/fastcached/issues/828)).
+    /// of them** ([#828](https://github.com/LASTRADA-Software/pace/issues/828)).
     /// A browser opens speculative *preconnect* sockets ahead of a navigation and may
     /// send on one long afterwards, so 2 s is simply the wrong answer to "is this peer
     /// going to ask anything" -- and it is the answer that makes an ordinary navigation

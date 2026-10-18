@@ -1032,7 +1032,7 @@ std::optional<std::string> WorkerSourceNameRule(std::string_view scratchSourcePa
     // once, not a per-job accident, so the place to say it is startup, in front of the
     // operator -- which is this repository's own rule about degradation decided per
     // request. That check is
-    // [#810](https://github.com/LASTRADA-Software/fastcached/issues/810); until it lands
+    // [#810](https://github.com/LASTRADA-Software/pace/issues/810); until it lands
     // this is a known silent case, recorded here rather than left looking deliberate.
     if (!SpellableInRule(scratchSourcePath, *row))
         return std::nullopt;

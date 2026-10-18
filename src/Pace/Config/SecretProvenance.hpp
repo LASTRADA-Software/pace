@@ -69,7 +69,7 @@ struct SecretProvenanceFacts
 /// no such second route: the path is not the secret and the file is, so a
 /// world-readable key is exposed whether the path was typed or read out of a
 /// file, and asking whether it was typed answers a question nobody has
-/// ([#752](https://github.com/LASTRADA-Software/fastcached/issues/752)). A caller
+/// ([#752](https://github.com/LASTRADA-Software/pace/issues/752)). A caller
 /// with a provenance gate applies it before building the list.
 ///
 /// A file that is **not there** is skipped rather than reported `Undetermined`.
@@ -157,7 +157,7 @@ struct SecretFileFinding
 /// as `std::string`. Two structs of two fields each, differing by a type, is exactly
 /// the repetition a table exists to delete -- and it is what lets ONE coverage guard
 /// be written against both
-/// ([#864](https://github.com/LASTRADA-Software/fastcached/issues/864)).
+/// ([#864](https://github.com/LASTRADA-Software/pace/issues/864)).
 ///
 /// **A projection rather than a member pointer** (#178), because a flag does not always
 /// NAME the file its secret lives in: `--cluster-dir` names a directory, and the secret is
@@ -199,7 +199,7 @@ struct PublicPathFlag
 /// world-readable one lets any local account impersonate this daemon to its clients
 /// or decrypt a captured session -- and `--requirepass` travels over that same
 /// connection, so the exposure composes with the one #384 was written about
-/// ([#864](https://github.com/LASTRADA-Software/fastcached/issues/864)).
+/// ([#864](https://github.com/LASTRADA-Software/pace/issues/864)).
 ///
 /// @return The table; stable for the life of the process.
 [[nodiscard]] std::span<SecretFileRow<Config, std::string> const> DaemonSecretFileTable() noexcept;
@@ -221,7 +221,7 @@ struct PublicPathFlag
 /// Every file `DaemonSecretFileTable()` names is not gated at all -- the path is not
 /// the secret and the file is, so a world-readable TLS private key is exposed however
 /// its path was named
-/// ([#864](https://github.com/LASTRADA-Software/fastcached/issues/864)). That is #752's
+/// ([#864](https://github.com/LASTRADA-Software/pace/issues/864)). That is #752's
 /// rule, and it was never specific to the worker.
 ///
 /// **A named file is reported whether or not a tier reads it.** `--tls-key` with no
@@ -230,7 +230,7 @@ struct PublicPathFlag
 /// its premise without guessing.
 ///
 /// The provenance half is the whole of
-/// [#384](https://github.com/LASTRADA-Software/fastcached/issues/384)'s gate, composed
+/// [#384](https://github.com/LASTRADA-Software/pace/issues/384)'s gate, composed
 /// from the two halves that can be tested separately: `SecretCameFromConfigFile` over
 /// the facts (provenance, pure) and `Platform/FileTrust`'s `SecretFileExposure` (the
 /// platform's answer about a mode or an access list), which whoever renders this list

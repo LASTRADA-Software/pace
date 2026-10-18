@@ -14,7 +14,7 @@ namespace Pace::Node
 /// Build the console logger this node's configuration asks for.
 ///
 /// **A factory rather than two arguments at the call site, and that is the whole
-/// point of the file** ([#485](https://github.com/LASTRADA-Software/fastcached/issues/485)).
+/// point of the file** ([#485](https://github.com/LASTRADA-Software/pace/issues/485)).
 /// The defect it closes was not a wrong logger: it was `main.cpp` constructing a
 /// `ConsoleLogger` with two of its three arguments, so `logTimestamps` existed
 /// nowhere, could not be asked for, and no amount of correct `ConsoleLogger`

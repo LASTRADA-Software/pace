@@ -424,7 +424,7 @@ TEST_CASE("Two nodes that name no cluster still agree", "[distributed][lease][to
 
 TEST_CASE("A legitimate scheduler reset is adopted rather than refused", "[distributed][lease][token][epoch]")
 {
-    // **The property [#614](https://github.com/LASTRADA-Software/fastcached/issues/614)
+    // **The property [#614](https://github.com/LASTRADA-Software/pace/issues/614)
     // exists for.** Wiping the Raft directory, re-bootstrapping, or turning consensus
     // off drops a scheduler's term back to 0. That answer is genuine, signed, and from
     // the right scheduler -- authenticity was never the issue -- and until #614 a

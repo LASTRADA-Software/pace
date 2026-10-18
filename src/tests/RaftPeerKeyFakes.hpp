@@ -38,7 +38,7 @@ namespace Pace::Testing
 /// @return Its key pair.
 [[nodiscard]] inline Ed25519KeyPair TestKeyPair(std::string const& machine)
 {
-    auto const seed = Sha256::Hash(WireFields::AsBytes("fastcache-test-node-key:" + machine));
+    auto const seed = Sha256::Hash(WireFields::AsBytes("pace-test-node-key:" + machine));
     auto pair = Ed25519KeyPair::FromSeed(seed);
     if (!pair.has_value())
         throw std::logic_error { "a 32-byte seed must make a key pair" };

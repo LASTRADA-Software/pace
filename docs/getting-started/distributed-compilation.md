@@ -213,7 +213,7 @@ pace-node \
 ```
 
 **A scheduler is a cluster, even of one**
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). It signs every
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). It signs every
 lease with its own identity key, and its workers check that signature against the
 cluster's voters and their keys as their own consensus applied them, so it holds
 replicated state and runs consensus to keep it. No flag asks for either: its first
@@ -233,7 +233,7 @@ record says that.
 
 There is **no shared secret to provision**: the pre-shared `--cluster-key-file` a fleet
 used to copy to every member is gone
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). Every machine
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). Every machine
 proves its own identity key instead -- a member to the other members, a worker to its
 scheduler -- and removing one machine is revoking that one key. What that buys is under
 [Security](#security).
@@ -259,7 +259,7 @@ surveys no compilers, claims no scratch directory, registers nothing and is neve
 sent a compile, so a setting only a worker reads — `--toolchain` or `--node-class`,
 say — refuses to start it, by name. What it can still run is the scheduler, consensus and a cache tier; a node
 running none of those is refused too. Until
-[#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440) its `/metrics`
+[#1440](https://github.com/LASTRADA-Software/pace/issues/1440) its `/metrics`
 and history still read 0 slots.
 
 ```sh
@@ -269,7 +269,7 @@ pace-node --slots=0 \
 
 Such a machine shows among the cluster's **members** when it runs consensus, and
 not among the fleet page's **machines**, which are built from worker registrations;
-its own history is not handed to a leader either ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+its own history is not handed to a leader either ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 
 Once several nodes schedule, exactly one of them may at a time, which is what the
 same consensus decides once it has more than one member: one machine founds the
@@ -301,7 +301,7 @@ spent.
 
 It does not gate the node's own **cache tier**, which serves this machine and
 nothing else however either list reads
-([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)): that tier is
+([#287](https://github.com/LASTRADA-Software/pace/issues/287)): that tier is
 a developer's whole build output, and contributing capacity does not entitle
 another machine to read it. Nor does it gate the shared `pace-kv`, where a
 non-member reads and writes objects exactly as before — that one is infrastructure
@@ -375,7 +375,7 @@ the part people leave off. Membership gates this node's *compile verbs*, so a wo
 that admits its own machine and nothing else is leased out, dialled, and the compile
 is refused `not-a-member` and run locally instead. The scheduler's counters stay flat
 and correct while that happens, because the lease *was* granted
-([#235](https://github.com/LASTRADA-Software/fastcached/issues/235)). The worker says
+([#235](https://github.com/LASTRADA-Software/pace/issues/235)). The worker says
 what it admits in its own startup line:
 
 ```
@@ -465,7 +465,7 @@ not the cache's `PACE_TIMEOUT`: a worker writes nothing
 until the compiler has finished, so the client waits out the whole compile in a
 single read, and while the two shared one number every translation unit taking
 longer than ten seconds was abandoned and rebuilt locally — precisely the ones
-worth distributing ([#223](https://github.com/LASTRADA-Software/fastcached/issues/223)).
+worth distributing ([#223](https://github.com/LASTRADA-Software/pace/issues/223)).
 Ten minutes because that is `LeaseTable`'s own lease timeout: waiting longer
 means waiting on a lease the scheduler has already reclaimed.
 
@@ -473,7 +473,7 @@ means waiting on a lease the scheduler has already reclaimed.
 other question: how long the worker may say **nothing**. It defaults to **`30s`**. A worker writes a five-byte progress frame every few seconds
 while a compile is running, so the client measures *silence* rather than
 *duration* — which is what lets this be seconds while the total above stays
-minutes ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)).
+minutes ([#245](https://github.com/LASTRADA-Software/pace/issues/245)).
 Setting it to `0s` turns it off and restores one flat deadline. All four are
 durations — a whole number and a unit (`ms`, `s`, `min`, `h`, `d`); a bare number is
 not one and is ignored, so the launcher runs under the default.
@@ -542,7 +542,7 @@ against a worker that has stopped, for the reason in the next box.
     launcher treats as fatal and returns in place of the answer to the request it
     actually sent — so every `LEASE` was declined and every compile happened
     locally, behind a green build
-    ([#340](https://github.com/LASTRADA-Software/fastcached/issues/340)).
+    ([#340](https://github.com/LASTRADA-Software/pace/issues/340)).
 
 ---
 
@@ -606,7 +606,7 @@ A non-member caller is **not** in this table: that refusal is decided one layer
 down, in `SchedulerService`, which deliberately counts it nowhere so a client
 retrying past a momentarily full surface cannot bury the credential series.
 Whether it should get a series of its own is
-[#592](https://github.com/LASTRADA-Software/fastcached/issues/592).
+[#592](https://github.com/LASTRADA-Software/pace/issues/592).
 
 On each **worker**, start it with `--admin-listen` and the same endpoint reports
 what that machine is doing:
@@ -616,7 +616,7 @@ what that machine is doing:
 | `pace_worker_jobs_started_total` | Jobs accepted. |
 | `pace_worker_jobs_completed_total` | Jobs that ran to an exit code — including a **non-zero** one, which is the client's answer rather than a worker failure. |
 | `pace_worker_compile_milliseconds_total` | Compile wall time. Divide by `..._jobs_completed_total` for the mean; both are counters, so a rate over a window gives you the current one. |
-| `pace_worker_jobs_abandoned_client_gone_total` | The client had **disconnected** before the object could be written back, so it was not sent. The compile still counts in `..._jobs_completed_total` — it ran and this machine paid for it, and only the delivery found nobody there. A rise is a client-side story: cancelled builds, `Ctrl-C`, a CI runner reclaimed mid-job. What it saves is the transfer; the CPU is spent either way until [#661](https://github.com/LASTRADA-Software/fastcached/issues/661). A client that half-closes its write side after sending and still waits for its object is read as gone and counted here — nothing shipped in this project does that, but a third-party client speaking the protocol over a raw socket could. |
+| `pace_worker_jobs_abandoned_client_gone_total` | The client had **disconnected** before the object could be written back, so it was not sent. The compile still counts in `..._jobs_completed_total` — it ran and this machine paid for it, and only the delivery found nobody there. A rise is a client-side story: cancelled builds, `Ctrl-C`, a CI runner reclaimed mid-job. What it saves is the transfer; the CPU is spent either way until [#661](https://github.com/LASTRADA-Software/pace/issues/661). A client that half-closes its write side after sending and still waits for its object is read as gone and counted here — nothing shipped in this project does that, but a third-party client speaking the protocol over a raw socket could. |
 | `pace_worker_jobs_refused_no_slot_total` | This worker is **full**. Pair it with the scheduler's `..._no_capacity_total`. |
 | `pace_worker_jobs_refused_unknown_fingerprint_total` | Somebody is dispatching a toolchain this worker does not have. |
 | `pace_worker_jobs_refused_rejected_argument_total` | A command line carrying something that could name a file. |
@@ -644,7 +644,7 @@ a full worker and a misconfigured one are different problems with different
 fixes, and one number covering both tells you neither.
 
 > **Retired series.** `pace_worker_jobs_refused_lease_stale_epoch_total` no longer
-> exists, as of [#614](https://github.com/LASTRADA-Software/fastcached/issues/614). If a
+> exists, as of [#614](https://github.com/LASTRADA-Software/pace/issues/614). If a
 > dashboard or alert of yours scrapes it, it will now find nothing — that is the change,
 > not a fault. The refusal it counted **can no longer happen**: a worker adopts a
 > scheduler term that went backwards instead of refusing it, because replay is closed by
@@ -669,8 +669,8 @@ fixes, and one number covering both tells you neither.
 The `..._lease_*` counters move only on a worker that checks leases: a consensus
 member -- a learner included -- against the state it applies. A worker that checks nothing says so at startup rather than leaving
 these at zero and looking healthy — and one another machine could dial is refused
-outright ([#282](https://github.com/LASTRADA-Software/fastcached/issues/282),
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178)).
+outright ([#282](https://github.com/LASTRADA-Software/pace/issues/282),
+[#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 
 **Four** of them — `..._unauthorized_total`, `..._signer_revoked_total`,
 `..._wrong_cluster_total` and `..._replayed_total` — share the wire code
@@ -696,7 +696,7 @@ A lease authorizes exactly one compile. The scheduler mints one grant per lease,
 launcher presents it in exactly one request with no retry, and it hands the lease back
 to the *scheduler* rather than to the worker — so a grant arriving twice at one worker
 is a replay and never an honest client. Since
-[#614](https://github.com/LASTRADA-Software/fastcached/issues/614) a worker enforces
+[#614](https://github.com/LASTRADA-Software/pace/issues/614) a worker enforces
 that: the second presentation is refused and
 `pace_worker_jobs_refused_lease_replayed_total` moves. Before it, a captured grant
 could be replayed at its worker until it expired.
@@ -945,7 +945,7 @@ would otherwise have your machine run their compiler on source they chose.
 
 Its **own cache tier admits this machine and nothing else**, whatever the roster
 says and whatever it is bound to
-([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)). A peer that
+([#287](https://github.com/LASTRADA-Software/pace/issues/287)). A peer that
 may spend this machine's CPU is not thereby entitled to read everything it has ever
 compiled, and the tier is exactly that. A cache several machines share is a
 `pace-kv` behind `--upstream`.
@@ -956,9 +956,9 @@ the scheduler for a slot. So a lease grant is a **signed capability**. The sched
 signs the granted worker's endpoint, the toolchain, the object key and an expiry with
 its own Ed25519 identity key, and the worker checks that signature — against the
 cluster's roster of voters, unrevoked — before it decompresses anything
-([#281](https://github.com/LASTRADA-Software/fastcached/issues/281),
-[#282](https://github.com/LASTRADA-Software/fastcached/issues/282),
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). The endpoint is
+([#281](https://github.com/LASTRADA-Software/pace/issues/281),
+[#282](https://github.com/LASTRADA-Software/pace/issues/282),
+[#178](https://github.com/LASTRADA-Software/pace/issues/178)). The endpoint is
 inside the signature, so a token captured on the way to one machine cannot be
 replayed against the rest of the fleet; and a signature is one machine's, so a
 scheduler the cluster removes stops being able to lease anything out the moment its
@@ -1000,7 +1000,7 @@ The two remaining credentials in this system are real and unaffected —
 `--requirepass` guards the shared cache.
 
 Also worth knowing: no **source address** admits anybody but a node's own machine
-([#180](https://github.com/LASTRADA-Software/fastcached/issues/180)) — a machine is
+([#180](https://github.com/LASTRADA-Software/pace/issues/180)) — a machine is
 admitted by its key — so a spoofed address buys a stranger nothing. A captured ticket buys
 one replay at no other node and no later moment, since each names one endpoint, lives a
 minute and is spent once.

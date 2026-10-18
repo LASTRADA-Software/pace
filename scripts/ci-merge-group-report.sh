@@ -44,7 +44,7 @@
 #
 # ## A push to master is the SECOND door, and it needed no new trigger
 #
-# [#774](https://github.com/LASTRADA-Software/fastcached/issues/774): a job failing
+# [#774](https://github.com/LASTRADA-Software/pace/issues/774): a job failing
 # on a push to master reaches nobody by the same mechanism. Master `dd4633b2` had
 # `Package (Linux .deb/.rpm)` and `Package (macOS .pkg)` red and it was found by a
 # human looking.

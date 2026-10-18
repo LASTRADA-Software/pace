@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Assert that when PACE_AUTO_START's daemon dies on startup, the configure says
-# WHY and not merely with what number ([#1538](https://github.com/LASTRADA-Software/fastcached/issues/1538)).
+# WHY and not merely with what number ([#1538](https://github.com/LASTRADA-Software/pace/issues/1538)).
 #
 # ## What went wrong
 #
@@ -128,7 +128,7 @@ file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 # @param outVar Receives the configure's combined output.
 function(RunFailingStart case daemonBody addrPort outVar)
     set(root "${PACE_SCRATCH_DIR}/${case}")
-    set(stem "fastcached-${mirrorVersion}-${platform}")
+    set(stem "pace-${mirrorVersion}-${platform}")
     set(payloadRoot "${root}/payload")
 
     # The launcher answers --version and nothing else, exactly as the staging test's
@@ -151,7 +151,7 @@ function(RunFailingStart case daemonBody addrPort outVar)
     file(CHMOD "${payloadRoot}/${stem}/${daemonMember}"
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
-    set(mirrorDir "${root}/mirror/fastcached-mirror/releases/download/v${mirrorVersion}")
+    set(mirrorDir "${root}/mirror/pace-mirror/releases/download/v${mirrorVersion}")
     file(MAKE_DIRECTORY "${mirrorDir}")
     # `cmake -E tar` rather than file(ARCHIVE_CREATE): the latter's WORKING_DIRECTORY
     # option needs CMake 3.31, newer than the 3.28 floor this script targets.
@@ -175,7 +175,7 @@ function(RunFailingStart case daemonBody addrPort outVar)
         "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
         "-DPACE_AUTO_INSTALL=ON"
         "-DPACE_AUTO_INSTALL_DIR=${root}/stage"
-        "-DPACE_AUTO_INSTALL_REPO=fastcached-mirror"
+        "-DPACE_AUTO_INSTALL_REPO=pace-mirror"
         "-DPACE_AUTO_INSTALL_VERSION=${mirrorVersion}"
         "-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=file://${root}/mirror"
         "-DPACE_AUTO_START=ON"

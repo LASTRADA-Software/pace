@@ -107,7 +107,7 @@ struct HostLoadReading
 
 /// What a node believes about its OWN consensus configuration.
 ///
-/// The gap [#435](https://github.com/LASTRADA-Software/fastcached/issues/435) is
+/// The gap [#435](https://github.com/LASTRADA-Software/pace/issues/435) is
 /// about: `--cluster-status` reports `ClusterState.members`, which is the FLEET's
 /// member record and a different set from the quorum, and only the leader answers
 /// it at all — so the one node whose view an operator needs during a stall is the
@@ -270,7 +270,7 @@ struct MetricsSnapshot
 /// Why a counter read back as nothing.
 ///
 /// **Two absences with one spelling is how a healthy process comes to report a broken build.**
-/// Before [#1484](https://github.com/LASTRADA-Software/fastcached/issues/1484) a reading carried
+/// Before [#1484](https://github.com/LASTRADA-Software/pace/issues/1484) a reading carried
 /// `std::optional<std::uint64_t>` per counter and every absence meant the first reason below.
 /// `RenderPrometheus` reads that absence, omits the series with a `# SKEW` marker and bumps
 /// `pace_metrics_catalogue_skew` -- so giving the one spelling a second reason made
@@ -289,7 +289,7 @@ enum class CounterAbsence : std::uint8_t
 {
     /// This build's sink has no slot for the row -- a catalogue compiled against a newer
     /// `Counter` than the sink it is reading
-    /// ([#1353](https://github.com/LASTRADA-Software/fastcached/issues/1353)).
+    /// ([#1353](https://github.com/LASTRADA-Software/pace/issues/1353)).
     /// `IMetricsSink::Carries` is the question, and a skew is what this means.
     NoSlotInThisBuild = 0,
 
@@ -509,7 +509,7 @@ struct CounterSoleWriter
 /// **Completeness is a `static_assert`, not a convention.** Every `Counter` enumerator has at
 /// least one row below, checked at compile time -- so the failure this ticket was filed about,
 /// a row silently absent from the attribution and indistinguishable from one nobody had
-/// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/fastcached/issues/1501)).
+/// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
 /// **How the 232 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 58
 /// of them and would have rendered the other 174 absent -- the same defect as the bug, three
@@ -1073,7 +1073,7 @@ static_assert(EveryCounterIsAttributed(),
 /// level up. So the sources are read ONCE, into this, and each encoding is a pure function of
 /// it: `RenderPrometheus` for the text, `EncodeStatsReading` for the binary, and
 /// `DecodeStatsReading` hands a client the same struct back
-/// ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)).
+/// ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)).
 ///
 /// Plain data, owning everything it holds, so a decoded reading outlives the bytes it came
 /// from (the `*View` rule in `.agent/rules/wire-and-protocol.md`).

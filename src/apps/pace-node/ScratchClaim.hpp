@@ -193,7 +193,7 @@ inline constexpr std::size_t DefaultMaxScratchRoots = 64;
 /// base a claim is taken under, and it is what `--daemon` chdirs into: a
 /// daemonizing host must leave the invocation directory, and `/` — the classical
 /// answer, and the one `PosixDaemonHost` used unconditionally until
-/// [#784](https://github.com/LASTRADA-Software/fastcached/issues/784) — makes the
+/// [#784](https://github.com/LASTRADA-Software/pace/issues/784) — makes the
 /// worker's own `-fdebug-prefix-map` rule match every absolute path in the object
 /// it produces.
 ///

@@ -21,7 +21,7 @@ namespace Pace::Node
 /// out on a connection, and in what order, is decided by one statement sequence. The
 /// property was *structural* -- the loop was the only writer because it was the only
 /// thing that wrote -- and structural is a property nothing tells you about
-/// ([#675](https://github.com/LASTRADA-Software/fastcached/issues/675)). The loop also
+/// ([#675](https://github.com/LASTRADA-Software/pace/issues/675)). The loop also
 /// sits at clang-tidy's cognitive-complexity ceiling, so the next lane that has to
 /// reduce it meets a function that punishes the obvious way of doing so: extract the
 /// nearest block and, as likely as not, you have extracted the write. The property is
@@ -42,7 +42,7 @@ namespace Pace::Node
 /// (`core/net/SocketContract.hpp`, core-cpp's since #893 moved there) is the write-side
 /// mirror of `claimReadSlot`, folded INTO the operation so no arm site has a line to forget it
 /// on -- which is the shape
-/// [#1218](https://github.com/LASTRADA-Software/fastcached/issues/1218) asked for and
+/// [#1218](https://github.com/LASTRADA-Software/pace/issues/1218) asked for and
 /// somebody else built while answering a TLS pump bug.
 ///
 /// **It reaches the case this table is about, and the reason is `WriteAll`.** That

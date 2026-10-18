@@ -44,7 +44,7 @@ namespace
     ///
     /// Versioned all the same, so a mismatch is *detected and named* by anything
     /// reading it rather than silently misread as the current shape.
-    constexpr std::string_view ClaimRecordMagic = "fastcache-scratch-claim";
+    constexpr std::string_view ClaimRecordMagic = "pace-scratch-claim";
 
     /// The record layout this build writes.
     constexpr int ClaimRecordVersion = 1;

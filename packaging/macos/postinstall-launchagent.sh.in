@@ -64,7 +64,7 @@ UID_OF_USER=$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null) || exit 0
 # Output is kept, not discarded. A postinstall must exit 0 whatever happens, so
 # `|| true` on its own turns a precise diagnostic into an agent that is simply
 # absent -- which is what happened to the daemon component once already.
-REGISTER_LOG="/var/log/fastcached-install.log"
+REGISTER_LOG="/var/log/pace-install.log"
 {
     echo "--- $(date -u '+%Y-%m-%dT%H:%M:%SZ') registering the ${CONSOLE_USER} agent"
     /bin/launchctl asuser "$UID_OF_USER" /usr/bin/sudo -u "$CONSOLE_USER" \

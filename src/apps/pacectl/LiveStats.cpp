@@ -140,7 +140,7 @@ std::expected<LivePlan, Answer> AdmitLiveStats(VerbContext const& context)
     // row, so this admission and `RunNodeFallback` give one endpoint one outcome. A kind
     // that establishes nothing answered in a protocol this client does not speak: no
     // subject, named or not, can be watched there, and `Protocol` is the outcome that says
-    // the peer may not be a fastcache at all.
+    // the peer may not be a pace at all.
     auto const established = EstablishedBy(kind);
     if (!established.has_value())
     {

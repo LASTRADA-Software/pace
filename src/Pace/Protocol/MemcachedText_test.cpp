@@ -101,7 +101,7 @@ TEST_CASE("memcached-text version yields VERSION line", "[protocol][text]")
 {
     TextFixture fix;
     auto const response = Exchange(fix, "version\r\n");
-    REQUIRE(response.starts_with("VERSION fastcached-"));
+    REQUIRE(response.starts_with("VERSION pace-"));
     REQUIRE(response.ends_with("\r\n"));
 }
 
@@ -451,7 +451,7 @@ TEST_CASE("memcached-text version still works when auth is required", "[protocol
     Pace::SessionContext const session { .authSource = &authSource };
     TextFixture fix;
     auto const response = Exchange(fix, "version\r\n", session);
-    REQUIRE(response.starts_with("VERSION fastcached-"));
+    REQUIRE(response.starts_with("VERSION pace-"));
 }
 
 TEST_CASE("memcached-text refused storage command does not desync the parser", "[protocol][text][auth]")

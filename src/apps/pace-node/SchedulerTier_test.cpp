@@ -108,7 +108,7 @@ Distributed::CallerContext const Insider { .membership = Distributed::Membership
 
 TEST_CASE("A clustered scheduler does not claim leadership before consensus reports", "[node][scheduler]")
 {
-    // **The defect** ([#613](https://github.com/LASTRADA-Software/fastcached/issues/613)).
+    // **The defect** ([#613](https://github.com/LASTRADA-Software/pace/issues/613)).
     // The constructor published `SetRole(Leader, {}, StandaloneSchedulerTerm)`
     // unconditionally, so a node configured for consensus answered `Lease` as leader,
     // at term 0, from the moment its listener began accepting until an election

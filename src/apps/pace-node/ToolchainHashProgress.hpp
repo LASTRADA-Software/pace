@@ -16,7 +16,7 @@ namespace Pace::Node
 /// Reports how fast the toolchain hash is going, while it is going.
 ///
 /// **The instrument
-/// [#354](https://github.com/LASTRADA-Software/fastcached/issues/354) has been
+/// [#354](https://github.com/LASTRADA-Software/pace/issues/354) has been
 /// waiting eight sightings for.** That phase has been observed running past 300 s
 /// on a CI runner without finishing, against a recorded cold cost of 5.00 ms per
 /// file that would put 5136 files at ~26 s serial and less than that 16-wide. The

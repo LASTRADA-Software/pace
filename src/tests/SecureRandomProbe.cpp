@@ -3,7 +3,7 @@
 // Draws handshake nonces and prints them, so a gate can ask whether two PROCESSES ever draw
 // the same one.
 //
-// [#1527](https://github.com/LASTRADA-Software/fastcached/issues/1527) is a defect no
+// [#1527](https://github.com/LASTRADA-Software/pace/issues/1527) is a defect no
 // in-process test can see. Nonces were drawn from an engine seeded ONCE per process from
 // `std::random_device`, and on the host #1507 was measured on that device answers zero for 57%
 // of draws -- so a process there seeds the engine with 0 about a third of the time (inferred:

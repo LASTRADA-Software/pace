@@ -85,10 +85,10 @@ namespace Pace::Cc
 /// On a Visual Studio carrying a language pack those differ, so a dispatched
 /// compile emitted notes Ninja did not recognise: no dependencies recorded for the
 /// translation unit, and the next header edit did not rebuild it
-/// ([#700](https://github.com/LASTRADA-Software/fastcached/issues/700)). A **wrong
+/// ([#700](https://github.com/LASTRADA-Software/pace/issues/700)). A **wrong
 /// build under a zero exit code**, reached through the build graph rather than
 /// through the cache — which is why it is the opposite direction from
-/// [#692](https://github.com/LASTRADA-Software/fastcached/issues/692) and worse.
+/// [#692](https://github.com/LASTRADA-Software/pace/issues/692) and worse.
 ///
 /// **Ninja matches the literal string and knows nothing about languages**, and it
 /// takes a localized prefix as readily as the English one — so neither the bug nor

@@ -258,8 +258,8 @@ jobs:
         # required context -- as FAILED, on step 3 of 5, with the two
         # clang-format steps skipped behind it: `Permission denied`, exit **126**,
         # reproduced locally against the same mode and the same invocation
-        # ([#723](https://github.com/LASTRADA-Software/fastcached/issues/723),
-        # and [#720](https://github.com/LASTRADA-Software/fastcached/issues/720)
+        # ([#723](https://github.com/LASTRADA-Software/pace/issues/723),
+        # and [#720](https://github.com/LASTRADA-Software/pace/issues/720)
         # for the mode across fourteen scripts).
         #
         # The mode is now 755, so the bare form would work -- and naming the
@@ -696,7 +696,7 @@ jobs:
         if: ${{ needs.changes.outputs.code != 'false' && (matrix.preset == 'clang-release') }}
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: |
             out/build/clang-release/target/pace-kv
             out/build/clang-release/target/pace-cc
@@ -1023,7 +1023,7 @@ jobs:
   # `clang-tidy` above runs on `ubuntu-24.04`, so six translation units wholly
   # inside `#if defined(_WIN32)` preprocess to nothing there and are read by no
   # analyser this project runs
-  # ([#858](https://github.com/LASTRADA-Software/fastcached/issues/858)).
+  # ([#858](https://github.com/LASTRADA-Software/pace/issues/858)).
   #
   # **This closes six of eleven, not eleven.** The other five are behind
   # `#if defined(__APPLE__)` and need a macOS leg; `scripts/tidy-blind-spots.txt`
@@ -1768,7 +1768,7 @@ jobs:
       - name: "Download pace-kv binary"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
       - name: "Make pace-kv executable"
         run: chmod +x bin/pace-kv
@@ -1819,7 +1819,7 @@ jobs:
       - name: "Download pace-kv binary"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
       - name: "Make pace-kv executable"
         run: chmod +x bin/pace-kv
@@ -1857,7 +1857,7 @@ jobs:
       - name: "Download pace-kv binary"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
       - name: "Make pace-kv executable"
         run: chmod +x bin/pace-kv
@@ -1905,7 +1905,7 @@ jobs:
       - name: "Download the pace-kv + pace-cc binaries"
         uses: actions/download-artifact@v4
         with:
-          name: fastcached-linux
+          name: pace-linux
           path: bin
       - name: "Make the binaries executable"
         run: chmod +x bin/pace-kv bin/pace-cc bin/mid-compile-edit-stub
@@ -2120,7 +2120,7 @@ jobs:
           }
 
       # A spawn BRACKET around `ctest`, and the pair is what makes the reading
-      # mean something ([#966](https://github.com/LASTRADA-Software/fastcached/issues/966)).
+      # mean something ([#966](https://github.com/LASTRADA-Software/pace/issues/966)).
       #
       # `Windows-cl-debug` once failed six tests, all with exit `0xc0000142`
       # (`STATUS_DLL_INIT_FAILED`), and they were exactly the six that spawn a
@@ -2228,7 +2228,7 @@ jobs:
         if: ${{ needs.changes.outputs.code != 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-windows-${{ matrix.preset }}${{ matrix.suffix }}
+          name: pace-windows-${{ matrix.preset }}${{ matrix.suffix }}
           path: out/build/${{ matrix.preset }}/target/pace-kv.exe
           if-no-files-found: error
 
@@ -2595,7 +2595,7 @@ jobs:
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
-          rpmfile=$(ls fastcached-*.rpm)
+          rpmfile=$(ls pace-*.rpm)
           echo "== contents"; rpm -qlp "$rpmfile"
           echo "== metadata"; rpm -qip "$rpmfile"
 
@@ -2650,7 +2650,7 @@ jobs:
           set -euo pipefail
           check="$GITHUB_WORKSPACE/scripts/check-obsolete-conffiles.sh"
           bash "$check" --deb "$(ls pace_*.deb)"  "$GITHUB_WORKSPACE"
-          bash "$check" --rpm "$(ls fastcached-*.rpm)" "$GITHUB_WORKSPACE"
+          bash "$check" --rpm "$(ls pace-*.rpm)" "$GITHUB_WORKSPACE"
 
       # The .rpm, installed where rpm is the package manager. The steps above only
       # INSPECT it; this one has dnf resolve its dependencies and run its
@@ -2661,7 +2661,7 @@ jobs:
       # cache_dir. What each leg asserts is in the script's header.
       - name: "Install the .rpm on Fedora and exercise the services"
         working-directory: out/build/gcc-release
-        run: bash "$GITHUB_WORKSPACE/scripts/rpm-package-e2e.sh" "$PWD/$(ls fastcached-*.rpm)"
+        run: bash "$GITHUB_WORKSPACE/scripts/rpm-package-e2e.sh" "$PWD/$(ls pace-*.rpm)"
 
       # Install for real and drive traffic through it. The GitHub runner has a
       # live systemd, so this exercises the actual unit — the service account,
@@ -2882,11 +2882,11 @@ jobs:
       - name: "Upload packages"
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-linux-packages
+          name: pace-linux-packages
           path: |
             out/build/gcc-release/pace_*.deb
-            out/build/gcc-release/fastcached-*.rpm
-            out/build/gcc-release/fastcached-*.tar.gz
+            out/build/gcc-release/pace-*.rpm
+            out/build/gcc-release/pace-*.tar.gz
           if-no-files-found: error
 
   package-macos:
@@ -3061,7 +3061,7 @@ jobs:
           set -eu
           KEY_PATH=$RUNNER_TEMP/notary-key.p8
           printf '%s' "$APPLE_API_KEY_P8" | base64 --decode -o "$KEY_PATH"
-          xcrun notarytool store-credentials fastcached-notary \
+          xcrun notarytool store-credentials pace-notary \
                 --key "$KEY_PATH" \
                 --key-id "$APPLE_API_KEY_ID" \
                 --issuer "$APPLE_API_ISSUER_ID"
@@ -3278,7 +3278,7 @@ jobs:
         working-directory: out/build/macos-package
         run: |
           set -euo pipefail
-          pkg=$(ls fastcached-*.pkg)
+          pkg=$(ls pace-*.pkg)
           echo "== choices"
           pkgutil --expand "$pkg" /tmp/pkgx
           grep -E '<choice id=' /tmp/pkgx/Distribution
@@ -3301,8 +3301,8 @@ jobs:
           RECORD: notarization-verdict.txt
         run: |
           set -euo pipefail
-          pkg=$(ls fastcached-*.pkg)
-          dmg=$(ls fastcached-*.dmg)
+          pkg=$(ls pace-*.pkg)
+          dmg=$(ls pace-*.dmg)
 
           # Signing is independent of notarization, so this half is asserted
           # whatever Apple did.
@@ -3355,16 +3355,16 @@ jobs:
         # means the test did not run and should not pass quietly.
         run: |
           sudo -n true || { echo "::error::passwordless sudo unavailable; the install test cannot run"; exit 1; }
-          ./scripts/macos-package-e2e.sh --scope daemon --pkg "$(ls out/build/macos-package/fastcached-*.pkg)"
+          ./scripts/macos-package-e2e.sh --scope daemon --pkg "$(ls out/build/macos-package/pace-*.pkg)"
 
       - name: "Upload packages"
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-macos-packages
+          name: pace-macos-packages
           path: |
-            out/build/macos-package/fastcached-*.pkg
-            out/build/macos-package/fastcached-*.dmg
-            out/build/macos-package/fastcached-*.tar.gz
+            out/build/macos-package/pace-*.pkg
+            out/build/macos-package/pace-*.dmg
+            out/build/macos-package/pace-*.tar.gz
           if-no-files-found: error
 
   package-windows:
@@ -3524,7 +3524,7 @@ jobs:
           $releaseProductCode = '{FDCDAB73-40AF-4EDA-9340-7C33986C3207}'
           $old = Join-Path $env:RUNNER_TEMP 'previous-release'
           New-Item -ItemType Directory -Force -Path $old | Out-Null
-          gh release download $release --repo LASTRADA-Software/fastcached --pattern '*.msi' --dir $old --clobber
+          gh release download $release --repo LASTRADA-Software/pace --pattern '*.msi' --dir $old --clobber
           if ($LASTEXITCODE -ne 0) { throw "could not download the $release MSI (gh exited $LASTEXITCODE)" }
           $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
           if (-not $previous) { throw "release $release carries no .msi, so this step cannot test the upgrade it exists for" }
@@ -3718,14 +3718,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
-          $latest = gh release view --repo LASTRADA-Software/fastcached --json tagName --jq .tagName
+          $latest = gh release view --repo LASTRADA-Software/pace --json tagName --jq .tagName
           if ($LASTEXITCODE -ne 0 -or -not $latest) { throw "could not read the latest release's tag (gh exited $LASTEXITCODE)" }
           if ($latest -eq 'v0.3.0') {
             Write-Host "::notice::the latest release is $latest, which the previous step upgrades from with its asset pinned; this leg is covered there"
           } else {
             $old = Join-Path $env:RUNNER_TEMP 'latest-release'
             New-Item -ItemType Directory -Force -Path $old | Out-Null
-            gh release download $latest --repo LASTRADA-Software/fastcached --pattern '*.msi' --dir $old --clobber
+            gh release download $latest --repo LASTRADA-Software/pace --pattern '*.msi' --dir $old --clobber
             if ($LASTEXITCODE -ne 0) { throw "could not download the $latest MSI (gh exited $LASTEXITCODE)" }
             $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
             if (-not $previous) { throw "release $latest carries no .msi, so this step cannot test the upgrade it exists for" }
@@ -4040,7 +4040,7 @@ jobs:
 
           Assert-ServiceTable -Row DaemonAlone -Log 'install.log'
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-          if ($machinePath -notlike '*\fastcached\bin*') { throw "machine PATH lacks the install's bin: $machinePath" }
+          if ($machinePath -notlike '*\pace\bin*') { throw "machine PATH lacks the install's bin: $machinePath" }
 
           # The identity it logs on as. Told nothing, CreateService uses LocalSystem
           # -- unrestricted access to every local resource, and a member of the local
@@ -4256,7 +4256,7 @@ jobs:
           Assert-ServiceTable -Row DaemonAlone -Log 'remove-node.log'
 
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-          if ($machinePath -notlike '*\fastcached\bin*') { throw "machine PATH lost the install's bin: $machinePath" }
+          if ($machinePath -notlike '*\pace\bin*') { throw "machine PATH lost the install's bin: $machinePath" }
 
       # The compile worker registering ITSELF, from its own command line. What is asserted
       # here is the identity it registers UNDER: told nothing, CreateService logs a
@@ -4460,7 +4460,7 @@ jobs:
       # not happen leaves a service running on built-in defaults and an operator
       # editing a file that is not there.
       # The POSITIVE CONTROL for the step below, and the half
-      # [#866](https://github.com/LASTRADA-Software/fastcached/issues/866) asks for
+      # [#866](https://github.com/LASTRADA-Software/pace/issues/866) asks for
       # by name. That step's assertions are all of the form "no entry matches", and
       # a mask or a filter that matches NOTHING passes every one of them on a
       # perfectly broken machine. #866's first half -- making `$planting` mirror
@@ -4765,13 +4765,13 @@ jobs:
             throw 'uninstall removed the configuration'
           }
 
-      # Named fastcached-<platform>-packages like the Linux and macOS jobs, so the
+      # Named pace-<platform>-packages like the Linux and macOS jobs, so the
       # release job below collects all three with one pattern and a new platform
       # is a new upload row rather than an edit there.
       - name: "Upload the MSI and the ZIP"
         uses: actions/upload-artifact@v4
         with:
-          name: fastcached-windows-packages
+          name: pace-windows-packages
           path: |
             out/build/cl-release/*.msi
             out/build/cl-release/*.zip
@@ -4830,7 +4830,7 @@ jobs:
       # below reads it back rather than restating it. No history needed.
       - uses: actions/checkout@v4
 
-      # Every packaging job uploads under fastcached-<platform>-packages. The
+      # Every packaging job uploads under pace-<platform>-packages. The
       # archives do not collide in a flat directory: CPack stamps the system name
       # into each (…-Linux-x86_64.tar.gz vs …-Darwin-arm64.tar.gz), which is also
       # why the asset list below names them separately and so catches one going
@@ -4838,7 +4838,7 @@ jobs:
       - name: "Download every platform's packages"
         uses: actions/download-artifact@v4
         with:
-          pattern: fastcached-*-packages
+          pattern: pace-*-packages
           merge-multiple: true
           path: dist
 
@@ -4902,10 +4902,10 @@ jobs:
             file="${hits[0]}"
             name="${file##*/}"
 
-            # `fastcached-<version>` followed by a separator, not a substring test:
+            # `pace-<version>` followed by a separator, not a substring test:
             # 0.1.1 would otherwise be satisfied by a 0.1.10 package.
             case "$name" in
-              fastcached-"$version"[-_.]* | pace_"$version"[-_.]*) ;;
+              pace-"$version"[-_.]* | pace_"$version"[-_.]*) ;;
               *)
                 echo "::error::$name does not carry the tag's version ($version): the build used a fallback version, so that checkout could not see the tag"
                 echo "| \`$pattern\` | $name | **wrong version** |" >> "$GITHUB_STEP_SUMMARY"
@@ -4958,7 +4958,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "pace-kv ${{ github.ref_name }}"
+          name: "Pace ${{ github.ref_name }}"
           # The whole point: CI assembles the release, a human publishes it with
           # /publish-release once the assets have been verified.
           draft: true
@@ -4972,17 +4972,17 @@ jobs:
           fail_on_unmatched_files: true
           # One row per shipped artifact, each specific enough that a single
           # platform dropping out breaks exactly one row: a shared
-          # `fastcached-*.tar.gz` would be satisfied by the Linux archive alone
+          # `pace-*.tar.gz` would be satisfied by the Linux archive alone
           # while macOS shipped nothing. macOS is arm64-only because the runner is
           # Apple Silicon, so the day an x86_64 package appears this list gains a
           # row. The version is deliberately a wildcard — it is pinned to the tag
           # by the assertion step above, which can say so in its own words.
           files: |
             dist/pace_*_amd64.deb
-            dist/fastcached-*.x86_64.rpm
-            dist/fastcached-*-Linux-x86_64.tar.gz
-            dist/fastcached-*-Darwin-arm64.pkg
-            dist/fastcached-*-Darwin-arm64.dmg
-            dist/fastcached-*-Darwin-arm64.tar.gz
-            dist/fastcached-*-Windows-AMD64.msi
-            dist/fastcached-*-Windows-AMD64.zip
+            dist/pace-*.x86_64.rpm
+            dist/pace-*-Linux-x86_64.tar.gz
+            dist/pace-*-Darwin-arm64.pkg
+            dist/pace-*-Darwin-arm64.dmg
+            dist/pace-*-Darwin-arm64.tar.gz
+            dist/pace-*-Windows-AMD64.msi
+            dist/pace-*-Windows-AMD64.zip

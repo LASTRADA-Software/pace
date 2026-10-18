@@ -2,7 +2,7 @@
 #pragma once
 
 /// What build produced the figures this binary prints
-/// ([#1439](https://github.com/LASTRADA-Software/fastcached/issues/1439)).
+/// ([#1439](https://github.com/LASTRADA-Software/pace/issues/1439)).
 ///
 /// A timing is a quantity UNDER CONDITIONS, and the condition that decides whether it is a
 /// cost at all is the build. Nothing in this binary's output used to say which build that

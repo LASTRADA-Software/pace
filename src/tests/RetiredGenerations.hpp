@@ -195,7 +195,7 @@ void RequireNoRetiredDigest(std::string_view live, std::span<Generation<Key> con
 /// asymmetry is a decision rather than an oversight.** A table keeping its retired
 /// rows holds DATED RECORDS: a digest describing the corpus as that generation met
 /// it, which nothing can recompute once the corpus or the behaviour has moved
-/// ([#583](https://github.com/LASTRADA-Software/fastcached/issues/583)). Demanding
+/// ([#583](https://github.com/LASTRADA-Software/pace/issues/583)). Demanding
 /// those digests be re-derivable is demanding they stop being dated records, and it
 /// would refuse a correct tree. That is worth saying HERE rather than only at the
 /// precondition, because an inconsistency between two tables in one header reads as

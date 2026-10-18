@@ -11,7 +11,7 @@ using namespace Pace;
 TEST_CASE("What a connection is handed is destructible without touching anything", "[server][connection][teardown]")
 {
     // **The rule `ReactorServerLoop` used to state in a comment nothing could read**
-    // ([#1051](https://github.com/LASTRADA-Software/fastcached/issues/1051)). A reactor
+    // ([#1051](https://github.com/LASTRADA-Software/pace/issues/1051)). A reactor
     // that stops with a connection chain parked on it frees that chain from its own
     // destructor (#1025), and a destructor body runs before the members declared beside
     // it -- so an abandoned connection frame unwinds AFTER the listeners, the servers,

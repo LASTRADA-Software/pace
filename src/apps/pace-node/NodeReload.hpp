@@ -117,7 +117,7 @@ struct ReloadBasis
 /// `WatchSecretExposure` is attached beside the reloader's own declaration, capturing
 /// only what `main` owns and what outlives the reloader -- which is the arrangement
 /// the paragraph above describes as safe rather than an exception to it
-/// ([#868](https://github.com/LASTRADA-Software/fastcached/issues/868)). Read as "the
+/// ([#868](https://github.com/LASTRADA-Software/pace/issues/868)). Read as "the
 /// worker cannot subscribe at all" the rule is one frame too wide, and it would leave
 /// the secret-file check startup-only on the binary that holds five such files.
 void ApplyReloadRequest(NodeReloader* reloader, NodeMembership& membership, NodeConditions& conditions, ILogger& logger);

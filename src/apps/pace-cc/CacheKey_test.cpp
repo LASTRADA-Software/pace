@@ -747,7 +747,7 @@ TEST_CASE("A prefix-map flag's root is relativized, so two checkouts still share
     // cross-checkout sharing the flag was added to preserve.
     //
     // Measured before the row existed: `RelativizeArgs` returned
-    // `-fdebug-prefix-map=/home/ci/checkout-aaa=/fastcache/src` byte-for-byte.
+    // `-fdebug-prefix-map=/home/ci/checkout-aaa=/pace/src` byte-for-byte.
     // So the fix would have read as a fix, produced correct objects, and turned
     // every cross-checkout hit into a miss -- silently, because a miss is what a
     // cold cache looks like too.
@@ -771,7 +771,7 @@ TEST_CASE("A prefix-map flag's root is relativized, so two checkouts still share
     };
     constexpr std::string_view RootA = "/home/ci/checkout-aaa";
     constexpr std::string_view RootB = "/home/ci/checkout-bbb";
-    constexpr std::string_view Shared = "/fastcache/src";
+    constexpr std::string_view Shared = "/pace/src";
 
     // The flag itself relativizes: the root becomes the canonical token and the
     // replacement half survives verbatim.
@@ -784,7 +784,7 @@ TEST_CASE("A prefix-map flag's root is relativized, so two checkouts still share
     // reaches the KEY -- the compiler is handed the argument as the build system
     // wrote it -- so what matters is that it is identical on every machine, and
     // trimming it would be a second spelling of one root for no reader.
-    CHECK(mapped[0] == "-fdebug-prefix-map=<SRCROOT>/=/fastcache/src");
+    CHECK(mapped[0] == "-fdebug-prefix-map=<SRCROOT>/=/pace/src");
 
     // Two checkouts mapping to the same replacement produce objects that are
     // byte-identical (measured on g++ and clang++; see the rulebook), so they

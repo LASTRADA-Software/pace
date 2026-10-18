@@ -995,7 +995,7 @@ and it is recorded here because the question will be asked again.
     asked to propose, with no log, no threads and no cluster.
 
 - **A replicated setting must not decide where a node sends a CREDENTIAL.** `upstream`
-  was such a row and is [#1123](https://github.com/LASTRADA-Software/fastcached/issues/1123).
+  was such a row and is [#1123](https://github.com/LASTRADA-Software/pace/issues/1123).
   It looked inert beside #1112's `fleet-open`, which decides ADMISSION: replicating an
   address reads as telling every member where the shared cache moved to. What that
   misses is that a node does not merely dial it — `CacheTier.cpp:227`/`:228` construct
@@ -1067,7 +1067,7 @@ and it is recorded here because the question will be asked again.
 
 - **A node IS its state directory, and its identity is MINTED there rather than derived
   from the machine**
-  ([#1024](https://github.com/LASTRADA-Software/fastcached/issues/1024)). An id had to
+  ([#1024](https://github.com/LASTRADA-Software/pace/issues/1024)). An id had to
   be invented per machine and typed twice -- once as `--node-id` and again inside
   `--raft-peer=<id>=<host>:<port>`, because a node that does not name itself is refused.
   It is now written into `--cluster-dir` on the first start and read back on every one
@@ -1151,7 +1151,7 @@ and it is recorded here because the question will be asked again.
     is in `SchedulerProtocol_test`, driving a real encoded REGISTER.
 
 - **A mode is the STATE held in the cluster dir, never a flag or a port**
-  ([#1022](https://github.com/LASTRADA-Software/fastcached/issues/1022), then zero-config
+  ([#1022](https://github.com/LASTRADA-Software/pace/issues/1022), then zero-config
   formation). `RunsConsensus` read `!cfg.nodeId.empty()`, so consensus was switched by an
   identity — and an identity whose absence carries a mode can never be given a
   default. Any default at all makes `nodeId.empty()` false forever, so
@@ -1407,7 +1407,7 @@ and it is recorded here because the question will be asked again.
     drift.
   - **A recovered snapshot reaches the APPLICATION, and constructing the driver is
     what hands it over**
-    ([#1542](https://github.com/LASTRADA-Software/fastcached/issues/1542)). A node
+    ([#1542](https://github.com/LASTRADA-Software/pace/issues/1542)). A node
     recovered from storage comes back with `_lastApplied` AT the snapshot's boundary,
     so nothing the snapshot covers is ever applied again -- and `RestoreSnapshot` was
     called only on `output.restoreSnapshot`, which only `OnInstallSnapshot` sets. So a
@@ -1446,7 +1446,7 @@ and it is recorded here because the question will be asked again.
     elects itself and becomes a second cluster. A recovered snapshot's log line says
     *recovered*, an installed one's *installed*.
   - **And a LEADER's snapshot the application cannot read is refused before the node
-    takes it on** ([#1552](https://github.com/LASTRADA-Software/fastcached/issues/1552)).
+    takes it on** ([#1552](https://github.com/LASTRADA-Software/pace/issues/1552)).
     Taken on, a snapshot resets the log, moves both indices past it, and is persisted
     and ACKNOWLEDGED inside one step; the application saw it only at the end, logged
     *keeping current state*, and every later entry was then applied on the state the
@@ -1705,7 +1705,7 @@ and it is recorded here because the question will be asked again.
     is reading the dump for.
 - **CheckQuorum measures SILENCE, and a member admitted a moment ago has not been
   silent — it has not been asked
-  ([#1061](https://github.com/LASTRADA-Software/fastcached/issues/1061)).**
+  ([#1061](https://github.com/LASTRADA-Software/pace/issues/1061)).**
   `ProposeMembership` adopts the new member set the instant the entry is appended,
   which is the §4.3 rule that makes the change committable at all — so `Quorum()`
   grows before the member it adds has been asked anything, while `_followerContact`
@@ -1713,7 +1713,7 @@ and it is recorded here because the question will be asked again.
   above, the leader deposes itself at its very next heartbeat, for a lack of
   contact that could not have existed. So while a change is UNCOMMITTED, CheckQuorum
   asks about the **committed** configuration — the set that elected this leader and
-  still answers it ([#1095](https://github.com/LASTRADA-Software/fastcached/issues/1095)).
+  still answers it ([#1095](https://github.com/LASTRADA-Software/pace/issues/1095)).
   - **At two members it is unsatisfiable by construction, and there is no
     recovery.** Growing from one member to two doubles the quorum, and the second
     member is the one that has never answered — so the arithmetic can only fail.
@@ -1934,7 +1934,7 @@ and it is recorded here because the question will be asked again.
         moves nothing it should not; and a LEARNER whose address moves resets nothing, because
         it dials in and its redial backoff finds the voters from wherever it now is.
       - **The move is RECORDED by a commit, so it heals only while the voters that did not move
-        are a quorum** ([#1644](https://github.com/LASTRADA-Software/fastcached/issues/1644)). The moved voter reaches the leader through any voter
+        are a quorum** ([#1644](https://github.com/LASTRADA-Software/pace/issues/1644)). The moved voter reaches the leader through any voter
         that did not move (its own scheduler hears no leader -- `AppliedSchedulers` walks the
         recorded voters after it), and the leader re-records it; but `LearnMembers` dials only
         committed endpoints and a beacon cannot move a coupled host, so nothing ELSE re-addresses
@@ -1951,7 +1951,7 @@ and it is recorded here because the question will be asked again.
     once elected and a value typed about somebody else would outrank what they say
     about themselves.
   - **A forget outranks an observation**
-    ([#1528](https://github.com/LASTRADA-Software/fastcached/issues/1528)). Everything
+    ([#1528](https://github.com/LASTRADA-Software/pace/issues/1528)). Everything
     the reconciler is handed is an OBSERVATION -- a peer proved the key, this node knows
     its own record -- and `--cluster-forget` leaves the machine running with the key, so
     discovery proves it again at its next beacon. `ConsensusTier::Desire` never prunes,
@@ -1978,7 +1978,7 @@ and it is recorded here because the question will be asked again.
     only removal this cluster has, and one an operator could undo by retyping the
     original token would be removal failing open by the front door.
   - **A forget means the same thing whoever currently leads**
-    ([#1539](https://github.com/LASTRADA-Software/fastcached/issues/1539)). After #1528 a
+    ([#1539](https://github.com/LASTRADA-Software/pace/issues/1539)). After #1528 a
     forgotten LEADER stopped recording itself and still led, counted, indefinitely:
     `NextQuorumChange` skipped `id == self`, and a node's own bootstrap set always names
     it. Now a leader that is FORGOTTEN proposes its own removal, LAST -- after every
@@ -2056,8 +2056,8 @@ and it is recorded here because the question will be asked again.
 
 <!-- agent-tripwire: Voting is a property of the CONFIGURATION, never of a role -->
 
-[#1449](https://github.com/LASTRADA-Software/fastcached/issues/1449), for the machine
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178) describes: an always-on
+[#1449](https://github.com/LASTRADA-Software/pace/issues/1449), for the machine
+[#178](https://github.com/LASTRADA-Software/pace/issues/178) describes: an always-on
 node and a laptop. With the laptop a voter, two voters are a quorum of two, so the laptop
 leaving the VPN costs the always-on node its majority and CheckQuorum deposes it at the next
 tick -- the scheduler answers `NotLeader` and the fleet page goes dark until it comes back.
@@ -2236,7 +2236,7 @@ tick -- the scheduler answers `NotLeader` and the fleet page goes dark until it 
 
 <!-- agent-tripwire: Only an ABSENT `node-key` mints (#178): a key file that is there and cannot be used is refused by name -->
 
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178) PR 2: every node with a
+[#178](https://github.com/LASTRADA-Software/pace/issues/178) PR 2: every node with a
 state directory holds an Ed25519 identity key, and `ClusterState` records members' keys and
 keys revoked for good (principals admitted by key alone existed until W5 retired them:
 CommandKind 6, op 0x1D and role 0x02 are reserved). PR 3 made the Raft peer wire VERIFY
@@ -2477,13 +2477,13 @@ right, because the wire now trusts it.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1644](https://github.com/LASTRADA-Software/fastcached/issues/1644)** — a voter move that leaves the voters that did not
+- **[#1644](https://github.com/LASTRADA-Software/pace/issues/1644)** — a voter move that leaves the voters that did not
   move without a quorum (a two-voter fleet, or a majority renumbered at once) does not heal by
   itself: the new address is recorded only by a commit, and nothing else re-addresses a recorded
   member. What is left is a recovery that needs no quorum without the moved voters -- for
   example a PROVEN self-announcement re-addressing a peer's transport before the commit --
   without letting a stale beacon revert a committed coupled address (#1528).
-- **[#144](https://github.com/LASTRADA-Software/fastcached/issues/144)** — a
+- **[#144](https://github.com/LASTRADA-Software/pace/issues/144)** — a
   follower answering `/fleet` names the leader but cannot link to it, because
   where a dashboard is served is local configuration and any URL it built would be
   a guess. A third recorded endpoint was priced and refused: a node ANNOUNCES it, so

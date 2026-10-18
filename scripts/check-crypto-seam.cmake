@@ -14,7 +14,7 @@
 # decided ONCE and checked against the RFC vectors. A second caller of Monocypher is a second
 # place to get each of them wrong, and nothing about a green build says it was.
 #
-# The build cannot say it: the include directories are PUBLIC on `fastcache-monocypher`, as they
+# The build cannot say it: the include directories are PUBLIC on `pace-monocypher`, as they
 # must be for the two units to reach them, and Pace links the library PRIVATE -- which keeps
 # the headers from Pace's CONSUMERS but not from any file inside Pace itself. So it is a
 # scan, in the default ctest set, like `ranges-seam`.

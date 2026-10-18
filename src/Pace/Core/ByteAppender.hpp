@@ -42,7 +42,7 @@ concept ByteBuffer = requires(Buffer& out, Buffer::value_type element, Buffer::v
 /// the writer's side went on being spelled by hand in six encoders -- four of them
 /// building the length prefix with `WriteBigEndian` into a local array, one with a shift
 /// chain, each then inserting the payload itself
-/// ([#305](https://github.com/LASTRADA-Software/fastcached/issues/305)). Naming one
+/// ([#305](https://github.com/LASTRADA-Software/pace/issues/305)). Naming one
 /// direction and not the other is the worse of the two states: the hand-rolled writer
 /// stops reading as leftover and starts reading as deliberate, and an encoder and a
 /// decoder that do not share a statement of the grammar are how the two drift.

@@ -544,7 +544,7 @@ namespace
         // tier: `--compression` decides what the CoW store writes to disk, these
         // decide what the L1 LRU holds in RAM, and a deployment routinely wants
         // zstd on disk and nothing in memory. They arrived as file-only keys
-        // ([#623](https://github.com/LASTRADA-Software/fastcached/issues/623)),
+        // ([#623](https://github.com/LASTRADA-Software/pace/issues/623)),
         // which made them invisible to everything the option table drives -- the
         // reload column could not answer for them, and `--install-service` replays
         // a command line, so an operator who set them in a file had no way for the
@@ -964,7 +964,7 @@ namespace
     constexpr auto UsageExamples = std::to_array<UsageExample>({
 #if defined(_WIN32)
         { .title = "Use with sccache (memcached protocol, PowerShell):",
-          .body = "  Start-Process fastcached\n"
+          .body = "  Start-Process pace\n"
                   "  $env:SCCACHE_MEMCACHED = 'tcp://127.0.0.1:{port}'\n"
                   "  sccache <compiler> /c hello.cpp /Fo:hello.obj" },
         { .title = "Use with sccache (Redis protocol, PowerShell):",

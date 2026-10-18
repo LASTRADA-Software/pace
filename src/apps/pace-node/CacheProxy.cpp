@@ -20,7 +20,7 @@ namespace
     namespace Wire = CompileCacheWire;
 
     /// What this tier does about each refusal it answers
-    /// ([#491](https://github.com/LASTRADA-Software/fastcached/issues/491)).
+    /// ([#491](https://github.com/LASTRADA-Software/pace/issues/491)).
     ///
     /// Rows rather than arguments at the call sites, for the reason `CompileRefusal`
     /// is: a row pairs the wire code a client acts on with the counter an operator
@@ -101,7 +101,7 @@ namespace
         /// Reachable by the ordinary path rather than a direct `Answer`: it is what a
         /// launcher at another generation produces, and a fleet is permanently
         /// mid-upgrade
-        /// ([#173](https://github.com/LASTRADA-Software/fastcached/issues/173)).
+        /// ([#173](https://github.com/LASTRADA-Software/pace/issues/173)).
         ///
         /// What an operator does about it is what they do about the version row above
         /// — find the machine that is out of step, finish or roll back — and it is the

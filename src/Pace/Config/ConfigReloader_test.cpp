@@ -25,13 +25,13 @@ namespace
 {
 
 /// The directory is per PROCESS and removed with it, not a fixed path shared by
-/// every test binary on the machine. It used to be `temp / "fastcached-test"`,
+/// every test binary on the machine. It used to be `temp / "pace-test"`,
 /// which two cases writing the same stem would collide on -- and which nothing
 /// ever cleaned up, so it grew without bound. Static rather than per call so the
 /// several files a case writes stay together.
 std::filesystem::path WriteYaml(std::string_view stem, std::string_view content)
 {
-    static Pace::Testing::ScratchDirectory const scratch { "fastcached-yaml-test" };
+    static Pace::Testing::ScratchDirectory const scratch { "pace-yaml-test" };
     auto path = scratch.Path() / (std::string { stem } + ".yaml");
     std::ofstream out { path };
     out << content;
@@ -385,7 +385,7 @@ TEST_CASE("ConfigReloader: Reload with no config path returns FileNotFound", "[c
 
 TEST_CASE("ConfigReloader: a reload re-applies the command line", "[config][reload]")
 {
-    // **[#622](https://github.com/LASTRADA-Software/fastcached/issues/622).** The
+    // **[#622](https://github.com/LASTRADA-Software/pace/issues/622).** The
     // candidate used to be a re-read of the file and nothing else, so a reloadable
     // setting given on the command line and absent from the file was published at
     // its built-in default at the first SIGHUP. `--max-memory` is the sharp one:

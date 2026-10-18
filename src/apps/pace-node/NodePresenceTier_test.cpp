@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What a machine with no worker owes the fleet
-// ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+// ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 //
 // The half worth testing is `AnnounceMachineOnce`, and the reason it is a free function over a
 // record is this file: the loop around it acquires a thread, a real host sampler and a real

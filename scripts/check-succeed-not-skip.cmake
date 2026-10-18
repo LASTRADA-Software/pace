@@ -5,9 +5,9 @@
 # `SUCCEED("...")` records a passing assertion. Where a case bails out because its
 # environment could not be arranged -- no loopback listener, no IPv6 stack, no symlink
 # privilege, running as root -- that is a green result for a property nothing
-# established ([#685](https://github.com/LASTRADA-Software/fastcached/issues/685)).
+# established ([#685](https://github.com/LASTRADA-Software/pace/issues/685)).
 #
-# It is the converse of [#499](https://github.com/LASTRADA-Software/fastcached/issues/499),
+# It is the converse of [#499](https://github.com/LASTRADA-Software/pace/issues/499),
 # and the insidious direction. A false RED gets investigated; a false GREEN is believed,
 # and it fires exactly where coverage is already thinnest -- a constrained runner, a
 # host without IPv6, a Windows agent without the symlink privilege. Those are the runs

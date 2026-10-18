@@ -113,7 +113,7 @@ function Pass([string] $what) { Write-Host "ok   $what" }
 
 $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("msi-custom-actions-" + [guid]::NewGuid().ToString('N'))
 # A root with a SPACE in it, as Program Files has, and absent until a phase says it exists.
-$root = Join-Path $scratch 'Program Files Probe\fastcached\'
+$root = Join-Path $scratch 'Program Files Probe\pace\'
 $system64 = Join-Path $env:SystemRoot 'System32\'
 $knownDirectories = @{ INSTALL_ROOT = $root; System64Folder = $system64 }
 # Properties a case sets, beside the directories; empty but for the old-registration control below.
@@ -231,7 +231,7 @@ try {
         # wait waiting too, with nothing running from the new root. Each registration in a spelling
         # AppSearch was measured or documented to return (service-actions.xml): pace-kv's bare,
         # the node's raw with `#%`, and both with a space in the path, as a custom one may have.
-        $oldBin = Join-Path $scratch 'Old Custom Root\fastcached\bin'
+        $oldBin = Join-Path $scratch 'Old Custom Root\pace\bin'
         New-Item -ItemType Directory -Force -Path $oldBin | Out-Null
         $knownProperties['PACE_IMAGEPATH'] = '"' + (Join-Path $oldBin 'pace-kv.exe') + '" --daemon --service-name=pace-kv'
         $knownProperties['PACE_NODE_IMAGEPATH'] = '#%"' + (Join-Path $oldBin 'pace-node.exe') + '" --daemon'

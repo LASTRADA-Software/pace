@@ -16,13 +16,13 @@ namespace Pace::Cc
 ///
 /// The file is separate from `main.cpp` for the reason `HitVerification.hpp`,
 /// `CacheProtocol.cpp` and `RootReconciler.cpp` are: **`main.cpp` is in no test
-/// target** ([#370](https://github.com/LASTRADA-Software/fastcached/issues/370)), so
+/// target** ([#370](https://github.com/LASTRADA-Software/pace/issues/370)), so
 /// every decision made there is unreachable from the suite.
 /// `src/tests/CMakeLists.txt` cites that fact in four separate places as the reason
 /// something cannot be tested, which is the measure of how much has accumulated
 /// behind it.
 ///
-/// [#909](https://github.com/LASTRADA-Software/fastcached/issues/909) is the ticket,
+/// [#909](https://github.com/LASTRADA-Software/pace/issues/909) is the ticket,
 /// and what makes it more than "some code is untested" is that **two shipping
 /// blockers on one branch were both invisible for exactly this reason, and both were
 /// caught by review rather than by a test.** Both are fixed; this is the half that

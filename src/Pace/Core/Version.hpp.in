@@ -28,6 +28,6 @@ inline constexpr std::string_view VersionString = "@PACE_VERSION_STRING@";
 
 /// Full server-version banner emitted by `version` (memcached text) and
 /// `INFO` (Redis RESP).
-inline constexpr std::string_view ServerVersionBanner = "fastcached-@PACE_VERSION_STRING@";
+inline constexpr std::string_view ServerVersionBanner = "pace-@PACE_VERSION_STRING@";
 
 } // namespace Pace

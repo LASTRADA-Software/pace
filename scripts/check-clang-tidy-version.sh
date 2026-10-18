@@ -300,7 +300,7 @@ InstallHint() {
 # Where a local run looks when PACE_CLANG_TIDY names nothing: one directory per declared version, so a declaration
 # that moves finds nothing rather than a stale install.
 DefaultSite() {
-    printf '%s/fastcached/clang-tidy/%s' "${XDG_DATA_HOME:-${HOME:-~}/.local/share}" "$DeclaredVersion"
+    printf '%s/pace/clang-tidy/%s' "${XDG_DATA_HOME:-${HOME:-~}/.local/share}" "$DeclaredVersion"
 }
 
 # $1 = source dir. The analyser a local run uses, checked; path on stdout, everything else on stderr.
@@ -500,20 +500,20 @@ if [ "$Mode" = "self-test" ]; then
     Expect "--installed: nothing at that path" refuse "is not a file" \
         --installed "$Work/usr/bin/missing" "$Work/good"
     Expect "--installed: the refusal says how to install the declared build" refuse \
-        "pip install --target '$Work/data/fastcached/clang-tidy/22.1.8' 'clang-tidy==22.1.8'" \
+        "pip install --target '$Work/data/pace/clang-tidy/22.1.8' 'clang-tidy==22.1.8'" \
         --installed "$Work/usr/bin/clang-tidy" "$Work/good"
 
     # --resolve: what a local run uses. Cases run with a scratch XDG_DATA_HOME, so no real install decides them.
-    mkdir -p "$Work/data/fastcached/clang-tidy"
-    Wheel "$Work/data/fastcached/clang-tidy/22.1.8" 22.1.8 "$FakeDigest"
-    Expect "--resolve: the default site holds the declared build" pass "$Work/data/fastcached/clang-tidy/22.1.8/clang_tidy/data/bin/clang-tidy" \
+    mkdir -p "$Work/data/pace/clang-tidy"
+    Wheel "$Work/data/pace/clang-tidy/22.1.8" 22.1.8 "$FakeDigest"
+    Expect "--resolve: the default site holds the declared build" pass "$Work/data/pace/clang-tidy/22.1.8/clang_tidy/data/bin/clang-tidy" \
         --resolve "$Work/good"
     Expect "--resolve: PACE_CLANG_TIDY names another identified wheel" pass "$Work/site-good/clang_tidy/data/bin/clang-tidy" \
         --resolve "$Work/good" PACE_CLANG_TIDY="$Work/site-good/clang_tidy/data/bin/clang-tidy"
     Expect "--resolve: PACE_CLANG_TIDY names a distribution's analyser" refuse "cannot be identified" \
         --resolve "$Work/good" PACE_CLANG_TIDY="$Work/usr/bin/clang-tidy"
     Expect "--resolve: nothing installed, and the refusal names the install command for that site" refuse \
-        "pip install --target '$Work/empty/fastcached/clang-tidy/22.1.8' 'clang-tidy==22.1.8'" --resolve "$Work/good" XDG_DATA_HOME="$Work/empty"
+        "pip install --target '$Work/empty/pace/clang-tidy/22.1.8' 'clang-tidy==22.1.8'" --resolve "$Work/good" XDG_DATA_HOME="$Work/empty"
     Expect "--resolve: an installed release that is not the declared one" refuse "is clang-tidy 22.1.7" \
         --resolve "$Work/good" PACE_CLANG_TIDY="$Work/site-old/clang_tidy/data/bin/clang-tidy"
 

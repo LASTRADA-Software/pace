@@ -19,7 +19,7 @@
 # `pace-node`, and its own header says why it must be asked -- every
 # word of which is true of the daemon, which had no such check and is the binary
 # most operators actually run
-# ([#759](https://github.com/LASTRADA-Software/fastcached/issues/759)). Two checks
+# ([#759](https://github.com/LASTRADA-Software/pace/issues/759)). Two checks
 # differing only in two paths is the copy-paste this project treats as a defect, so
 # this one is parameterised from the start.
 #
@@ -126,7 +126,7 @@ list(SORT _tableKeys)
 # blanking them makes that check refuse on a good tree. Measured, not assumed.
 #
 # Another copy of this idiom; consolidating them is
-# [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) and is
+# [#495](https://github.com/LASTRADA-Software/pace/issues/495) and is
 # deliberately not done here.
 file(READ "${_reference}" _referenceText)
 pace_split_lines_tokenised("${_referenceText}" _lines)

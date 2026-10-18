@@ -400,7 +400,7 @@ struct VerbSpec
     /// will -- the honest answer there is a refusal naming what the endpoint IS, not a
     /// second attempt that cannot work. A row carrying one is a verb whose QUESTION a
     /// node can also answer: `version` asks *what are you running*, which every
-    /// fastcache binary knows about itself.
+    /// pace binary knows about itself.
     ///
     /// Reached only after the primary wire failed AND the endpoint was probed, so it
     /// costs the common case nothing. `RunNodeFallback` is the one door.

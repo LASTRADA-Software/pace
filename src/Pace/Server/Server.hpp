@@ -117,7 +117,7 @@ class Server
     /// exited immediately (a closed or already-shut-down listener) rather than
     /// having armed. `Detail::ArmAcceptLoops` uses exactly that distinction, and it
     /// is what stops the daemon's readiness line naming an acceptor that is not
-    /// there ([#646](https://github.com/LASTRADA-Software/fastcached/issues/646)).
+    /// there ([#646](https://github.com/LASTRADA-Software/pace/issues/646)).
     [[nodiscard]] bool IsAccepting() const noexcept
     {
         return _accepting.load(std::memory_order_acquire);

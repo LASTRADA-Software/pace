@@ -21,7 +21,7 @@
 # key from a GET reply, `ME`'s key, a meta flag value -- where no caller can assert
 # anything about the encoding. A non-UTF-8 KEY therefore rendered as raw bytes and
 # `--format=json` produced a document that was not UTF-8
-# ([#1356](https://github.com/LASTRADA-Software/fastcached/issues/1356)).
+# ([#1356](https://github.com/LASTRADA-Software/pace/issues/1356)).
 #
 # The fix folded the question into `TextCell`, which is the stronger half of this
 # tree's rule: **a guard folded INTO the operation is self-enforcing; a guard called
@@ -62,7 +62,7 @@
 #
 # A hand-kept allowlist would be exact about the files it knows and silent about the
 # ones it does not, and silence reads identically to complete coverage
-# ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492)). Worse for this
+# ([#492](https://github.com/LASTRADA-Software/pace/issues/492)). Worse for this
 # check specifically: a listed path survives the file being MOVED, so the rename that
 # relocated the factory would leave the check happily excusing a path that no longer
 # exists while refusing the factory's new home -- and the fix a hurried reader reaches
@@ -114,7 +114,7 @@ set(factoryShape "a line beginning `Cell TextCell(` at namespace scope")
 # escaping them.
 #
 # Consolidating the copies of that idiom is
-# [#495](https://github.com/LASTRADA-Software/fastcached/issues/495) and is not this
+# [#495](https://github.com/LASTRADA-Software/pace/issues/495) and is not this
 # ticket -- absorbing it here would close one ticket by swallowing another.
 #
 # The walk is O(n^2) in the file's length, which is why the caller applies a whole-file

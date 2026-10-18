@@ -178,7 +178,7 @@ struct WorkerReport
     /// **Absent is not zero**, and here the two are opposite claims: zero says a job
     /// went to this worker just now, and a worker nothing has ever been sent to has
     /// no such instant to report. That is the whole signal
-    /// ([#1297](https://github.com/LASTRADA-Software/fastcached/issues/1297)) -- a
+    /// ([#1297](https://github.com/LASTRADA-Software/pace/issues/1297)) -- a
     /// worker whose toolchain the scheduler never selects registers, heartbeats and
     /// reads healthy from every angle, because nothing arrives to be refused and so
     /// no counter on either machine moves. Rendered as an absence at the CELL rather
@@ -251,7 +251,7 @@ struct NodeReport
     /// ambiguous -- it could only ever mean *a machine with no worker*, said in the vocabulary
     /// of *a worker offering nothing*, and the fleet page would render it as a real ceiling of
     /// zero rather than as a cell with nothing in it
-    /// ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+    /// ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
     ///
     /// Not inferred from `fingerprints` being empty either. That would be the same fact read
     /// off a different field, which is an inference a later change can falsify; a machine's
@@ -313,7 +313,7 @@ struct NodeCacheReport
 /// A record rather than loose parameters for `WorkerRegistration`'s reason: the UTF-8 gate is
 /// a TABLE over a record's fields, and text another machine will read is refused where it
 /// enters. Two fields here rather than five, which changes the table's length and not whether
-/// there is one ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+/// there is one ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 struct NodePresence
 {
     std::string_view endpoint;   ///< host:port the machine answers on; the key its row is filed under.
@@ -490,7 +490,7 @@ class WorkerRegistry
     /// **Not a pure query, and that is deliberate.** It stamps the chosen entry's
     /// `lastPickedAt`, which is the one record of the fleet's selection behaviour
     /// this registry keeps
-    /// ([#1297](https://github.com/LASTRADA-Software/fastcached/issues/1297)). It is
+    /// ([#1297](https://github.com/LASTRADA-Software/pace/issues/1297)). It is
     /// folded into the selection rather than left beside it -- in the scheduler's
     /// lease path, say -- so that a second caller of `Pick` cannot record nothing by
     /// omission: there is no separate line to forget. The guard rides on something
@@ -550,7 +550,7 @@ class WorkerRegistry
     /// **Presence is not a registration and adds no capacity.** It is keyed by the machine's
     /// ENDPOINT, held apart from `_workers`, and nothing may lease against it: a node that runs
     /// no worker is a row on the fleet page and a place for its history to be filed, never a
-    /// place to send work ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+    /// place to send work ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
     ///
     /// Held apart rather than as a `_workers` entry with an absent fingerprint, because this
     /// registry keys on `(fingerprint, endpoint)` and every consumer of `LiveWorkers()` walks
@@ -585,7 +585,7 @@ class WorkerRegistry
     /// toolchains is several entries keyed `(fingerprint, endpoint)` with an id each,
     /// so withdrawing one leaves the rest registered; anything that dropped the
     /// endpoint would take a node's whole fleet presence away on a routine
-    /// re-survey ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)).
+    /// re-survey ([#573](https://github.com/LASTRADA-Software/pace/issues/573)).
     ///
     /// @param workerId The id issued at registration.
     /// @return Whether an entry was erased. False means the id is unknown -- already

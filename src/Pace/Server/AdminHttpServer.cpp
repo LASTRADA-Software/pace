@@ -106,7 +106,7 @@ namespace
     /// on one long after opening it, so past `AdminHttpServer::RequestTimeout` a
     /// perfectly valid `GET /fleet` was answered `400`, intermittently, in the browser
     /// and never under `curl` -- which sends immediately, which is why every fixture in
-    /// this tree passed ([#824](https://github.com/LASTRADA-Software/fastcached/issues/824)).
+    /// this tree passed ([#824](https://github.com/LASTRADA-Software/pace/issues/824)).
     ///
     /// This is the enum the repository's own rule asks for: *an outcome that can be "not
     /// attempted" is an enum, not a `bool`, and it is fixed at the seam rather than at
@@ -407,7 +407,7 @@ namespace
         std::string buffer;
         bool sawHeadEnd = false;
         // **The socket carries the two per-read bounds; the clock carries the total**
-        // ([#828](https://github.com/LASTRADA-Software/fastcached/issues/828)). A silent
+        // ([#828](https://github.com/LASTRADA-Software/pace/issues/828)). A silent
         // peer is a preconnect and gets the long deadline; the moment a byte arrives it
         // is a request in progress and gets the short one.
         //

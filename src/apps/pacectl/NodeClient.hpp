@@ -226,7 +226,7 @@ struct RemoteKindSpec
     ///
     /// `PaceWireOnly` is named `pace-kv` although a node older than the operator verbs
     /// classifies the same way: a title is only drawn over a granted live-stats stream, and a
-    /// node that old grants none. Empty for a kind that is no fastcache at all.
+    /// node that old grants none. Empty for a kind that is no pace at all.
     std::string_view product;
 };
 

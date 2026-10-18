@@ -13,7 +13,7 @@
 #
 # `StorageTestUtils.hpp`'s `TempFile` named its file
 # `std::mt19937_64 { std::random_device {}() }()`. On the WSL2/libstdc++ host
-# [#1507](https://github.com/LASTRADA-Software/fastcached/issues/1507) was reproduced on,
+# [#1507](https://github.com/LASTRADA-Software/pace/issues/1507) was reproduced on,
 # `std::random_device` answers **zero for 57% of draws** -- 1652 of 2880, measured across 32
 # concurrent processes -- and `mt19937_64 { 0 }()` is always `2947667278772165694`. So 31 of
 # those 32 processes agreed on one filename, and whichever opened it second was refused

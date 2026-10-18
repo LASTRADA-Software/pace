@@ -37,7 +37,7 @@ enum class CredentialOutcome : std::uint8_t
 /// **One decision, two callers.** The daemon's `0xFC` handler and the compile node's
 /// frame server both terminate this verb, and the rules below are subtle enough that
 /// writing them twice would be writing them differently
-/// ([#289](https://github.com/LASTRADA-Software/fastcached/issues/289)). What each
+/// ([#289](https://github.com/LASTRADA-Software/pace/issues/289)). What each
 /// caller still owns is how to *answer* -- the two surfaces reply through different
 /// machinery -- not what is true.
 ///

@@ -25,7 +25,7 @@ enum class ReadinessMarker : std::uint8_t
 /// markers are logged strictly after their listener is already accepting, so a
 /// fixture that waits on one and then reports a *bind* failure names a fact that was
 /// true long before -- which is exactly what
-/// [#652](https://github.com/LASTRADA-Software/fastcached/issues/652) found in
+/// [#652](https://github.com/LASTRADA-Software/pace/issues/652) found in
 /// `node-scratch-isolation-e2e.ps1`, and what two rulebook files described the
 /// node's marker as. Leaving the enumerator out means the mistake cannot be spelled
 /// here.
@@ -33,7 +33,7 @@ enum class ReadinessMarker : std::uint8_t
 /// `Unstated` is the zero value, so a row that omits the column has it and the
 /// `static_assert` below refuses the build. That is `BindFailurePolicy`'s idiom and
 /// it is the answer to the `0 of 0` shape
-/// ([#736](https://github.com/LASTRADA-Software/fastcached/issues/736)): a fact
+/// ([#736](https://github.com/LASTRADA-Software/pace/issues/736)): a fact
 /// nobody stated must not read as a fact that happens to be false.
 enum class ReadinessFact : std::uint8_t
 {
@@ -54,7 +54,7 @@ enum class ReadinessFact : std::uint8_t
 ///
 /// `compile node ready` is a readiness contract for **four fixtures in two
 /// languages** and was named by no constant and pinned by no test
-/// ([#654](https://github.com/LASTRADA-Software/fastcached/issues/654)). Rewording a
+/// ([#654](https://github.com/LASTRADA-Software/pace/issues/654)). Rewording a
 /// human-facing log line is an ordinary thing to do; every unit test would pass, the
 /// build would be green, and four fixtures would then wait on a string nothing
 /// writes -- each failing by TIMEOUT, the slowest and least informative failure

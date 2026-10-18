@@ -17,8 +17,8 @@ namespace Pace::Cc
 /// Deciding whether a cache hit is one of the sampled ones, and what came of it.
 ///
 /// **The one mechanism that turns a wrong object from invisible into loud**
-/// ([#423](https://github.com/LASTRADA-Software/fastcached/issues/423), split out of
-/// [#368](https://github.com/LASTRADA-Software/fastcached/issues/368)). A wrong
+/// ([#423](https://github.com/LASTRADA-Software/pace/issues/423), split out of
+/// [#368](https://github.com/LASTRADA-Software/pace/issues/368)). A wrong
 /// object under a correct key is this project's worst failure class, and until now it
 /// was detectable only by luck: #368 was found because the stale object happened to
 /// crash, and one that still linked and still passed would have left no trace at all.
@@ -57,7 +57,7 @@ enum class HitVerdict : std::uint8_t
     /// asking again: `Inconclusive` means the attempt failed and the next one may
     /// not, while this is a property of the toolchain that will hold for every hit
     /// until this program learns the format. Answering `Mismatched` here is the
-    /// defect [#493](https://github.com/LASTRADA-Software/fastcached/issues/493)
+    /// defect [#493](https://github.com/LASTRADA-Software/pace/issues/493)
     /// records -- a precise wrong answer, which is worse than none, and exactly how
     /// a verifier gets switched off for good.
     Unsupported,

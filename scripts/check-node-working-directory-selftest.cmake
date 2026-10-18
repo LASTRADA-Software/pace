@@ -332,7 +332,7 @@ ExecStart=/usr/bin/pace-node
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
-StateDirectory=fastcache-worker
+StateDirectory=pace-worker
 " "REFUSE" "the node declines it"
     "systemd hands over a directory the node does not take, since it takes only one named NodeStateDirectoryName")
 
@@ -353,7 +353,7 @@ ExecStart=/usr/bin/pace-node
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
-StateDirectory=fastcache-cache pace-node
+StateDirectory=pace-cache pace-node
 " "PASS" ""
     "one assignment may name several directories, and the node's is among them")
 
@@ -397,7 +397,7 @@ ExecStart=/usr/bin/pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
 StateDirectory=pace-node
-CacheDirectory=fastcache-other pace-node
+CacheDirectory=pace-other pace-node
 " "PASS" ""
     "one assignment may name several directories, and the cited one is among them")
 
@@ -409,8 +409,8 @@ pace_file_case("cited-state-directory" "docs/tools/pace-node.md"
     "a cache_dir inside the state directory is writable and stops the node starting, so a page citing one must be refused")
 
 pace_file_case("cited-other-name" "docs/tools/pace-node.md"
-"| `--cache-dir=/var/cache/fastcache-worker` | Both halves. |
-" "REFUSE" "cites cache_dir /var/cache/fastcache-worker"
+"| `--cache-dir=/var/cache/pace-worker` | Both halves. |
+" "REFUSE" "cites cache_dir /var/cache/pace-worker"
     "a /var/cache directory the unit does not declare is read-only to it, whatever its name says")
 
 pace_file_case("cited-space-spelling" "docs/tools/pace-node.md"
@@ -430,7 +430,7 @@ pace_file_case("cited-not-a-citation" "docs/tools/pace-node.md"
 
 # The stated blind spot, pinned in its stated direction: only /var/ is judged.
 pace_file_case("cited-outside-var" "docs/tools/pace-node.md"
-"    pace-node --cache-dir=/srv/fastcache
+"    pace-node --cache-dir=/srv/pace
 " "PASS" ""
     "the check reads only /var/, since the same text is right for a node started by hand -- the blind spot fails OPEN and says so")
 

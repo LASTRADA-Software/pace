@@ -177,7 +177,7 @@ generator happened to share. Pin both before comparing anything.
 
 The wire suite runs pace-kv, native `redis-server` and native `memcached`
 through identical scenarios on one host. The headline lives in the
-[README](https://github.com/LASTRADA-Software/fastcached#benchmarks): a tie at
+[README](https://github.com/LASTRADA-Software/pace#benchmarks): a tie at
 one connection, ~3× redis and ~1.07× memcached at 16 connections, ~4.4× redis
 and ~1.6× memcached at 64–256. The multi-core reactor architecture is what wins
 there — not per-operation cost.

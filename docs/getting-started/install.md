@@ -11,7 +11,7 @@ launcher) — and register the daemon as a service that starts on boot.
 
 ```sh
 sudo apt install ./pace_<version>_<arch>.deb
-sudo dnf install ./fastcached-<version>.<arch>.rpm
+sudo dnf install ./pace-<version>.<arch>.rpm
 ```
 
 Installing creates a dedicated `pace-kv` system user, enables the unit,
@@ -276,7 +276,7 @@ else in the file applies normally. To choose the cache location, name the file
 at registration time instead:
 
 ```sh
-pace-kv --install-service --service-scope=user --config=~/my-fastcached.yaml
+pace-kv --install-service --service-scope=user --config=~/my-pace.yaml
 ```
 
 Whichever file you name governs `storage_path` too: the registration passes
@@ -317,12 +317,12 @@ pace-kv builds with CMake 3.28 or newer and a C++23 compiler.
     perfectly happy with a wrong object.
 
     So when you follow a `type/bug` fix in
-    [the changelog](https://github.com/LASTRADA-Software/fastcached/releases),
+    [the changelog](https://github.com/LASTRADA-Software/pace/releases),
     **rebuild and redeploy** — both executables and any service registration, on
     every machine, including the compile nodes. `--version` on either binary
     reports what is running; comparing it against the latest release is a manual
     step today
-    ([#181](https://github.com/LASTRADA-Software/fastcached/issues/181)).
+    ([#181](https://github.com/LASTRADA-Software/pace/issues/181)).
 
     Two things make the staleness outlive a restart rather than expire with it:
     the on-disk cache tier persists, so a wrong object survives reboots until

@@ -433,7 +433,7 @@ class ILiveGate
     /// The door and the per-tick re-gate must answer ONE question: a door that admitted on
     /// something `Recheck` cannot see would admit a watcher and end its stream one tick later,
     /// which is worse than refusing it outright
-    /// ([#1512](https://github.com/LASTRADA-Software/fastcached/issues/1512)). Widening one
+    /// ([#1512](https://github.com/LASTRADA-Software/pace/issues/1512)). Widening one
     /// without the other is not a partial fix, it is a regression.
     /// @param watcher Who is asking.
     /// @return The encoded refusal, or nullopt to go on.

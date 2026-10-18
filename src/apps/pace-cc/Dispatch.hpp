@@ -118,7 +118,7 @@ constexpr std::chrono::milliseconds DefaultDispatchTotal = CompileCacheWire::Def
 ///
 /// The other half of `DefaultDispatchTotal`, and what finally splits the two questions
 /// a flat deadline could not answer at once
-/// ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)): the total goes
+/// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)): the total goes
 /// on being sized for the slowest legitimate translation unit, while *how fast is a
 /// worker that has stopped making progress noticed* drops from ten minutes to thirty
 /// seconds.
@@ -255,7 +255,7 @@ struct DispatchBudgetKnobs
 /// better by the fleet than by this process.
 ///
 /// **What is left of the grant, never the whole of it**
-/// ([#1122](https://github.com/LASTRADA-Software/fastcached/issues/1122)). A lease
+/// ([#1122](https://github.com/LASTRADA-Software/pace/issues/1122)). A lease
 /// lifetime runs end to end from the MINT, and this budget starts when the compile
 /// leg starts -- which is after the `LEASE` round trip has already happened. Taking
 /// the full lifetime restarts the client's countdown, so it waited past the grant by
@@ -373,7 +373,7 @@ enum class DispatchStatus : std::uint8_t
     /// The scheduler or the worker could not be reached, or the exchange broke.
     Unavailable,
     /// The worker answered about a compile other than the one it was asked for
-    /// ([#280](https://github.com/LASTRADA-Software/fastcached/issues/280)).
+    /// ([#280](https://github.com/LASTRADA-Software/pace/issues/280)).
     ///
     /// **Its own status rather than an `Unavailable`, because it is the only one
     /// here that is not ordinary.** Every other way a dispatch ends is a fleet
@@ -422,7 +422,7 @@ enum class DispatchStatus : std::uint8_t
 /// declined this compile" -- for every way a fleet can say no. A wall of those tells
 /// nobody whether to add a machine, wait, or fix a credential, and those are not
 /// adjacent remedies
-/// ([#618](https://github.com/LASTRADA-Software/fastcached/issues/618)).
+/// ([#618](https://github.com/LASTRADA-Software/pace/issues/618)).
 ///
 /// **The rows are operator ACTIONS, not wire codes.** Several codes share a row
 /// where the answer is the same, and one code can mean the same thing from either

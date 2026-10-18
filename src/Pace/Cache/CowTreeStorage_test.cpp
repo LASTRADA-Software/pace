@@ -3294,7 +3294,7 @@ namespace
 /// zstd/lz4 shrink it dramatically. Deterministic (no baked-in literal).
 std::vector<std::byte> CompressibleBytes(std::size_t size)
 {
-    static constexpr std::string_view pattern = "fastcached-compresses-this-well-0123456789 ";
+    static constexpr std::string_view pattern = "pace-compresses-this-well-0123456789 ";
     std::vector<std::byte> out;
     out.reserve(size);
     for (auto const i: std::views::iota(std::size_t { 0 }, size))
@@ -3624,7 +3624,7 @@ TEST_CASE("The expiry sweep reads a TTL without inflating the value", "[cowstora
 
 TEST_CASE("A reopened store's index reports what has been TOUCHED, not what is on disk", "[cowstorage][index][capacity]")
 {
-    // The measurement [#175](https://github.com/LASTRADA-Software/fastcached/issues/175)
+    // The measurement [#175](https://github.com/LASTRADA-Software/pace/issues/175)
     // turns on, taken rather than read. That ticket's cheapest option is to reserve the
     // index at startup, from `StorageStats` -- and this is what decides whether that
     // option exists at all.

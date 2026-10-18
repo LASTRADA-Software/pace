@@ -33,7 +33,7 @@
 
 [Unit]
 Description=pace-kv — fast cache daemon (user instance)
-Documentation=https://github.com/LASTRADA-Software/fastcached
+Documentation=https://github.com/LASTRADA-Software/pace
 After=network-online.target
 
 [Service]

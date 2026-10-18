@@ -45,7 +45,7 @@
 /// Only the scheduler half. It **mints** a signed grant and authenticates one handed
 /// back to `Release`; no worker checks a token before it spawns a compiler yet, so a
 /// compile port's boundary today is still reachability plus membership. That half is
-/// [#282](https://github.com/LASTRADA-Software/fastcached/issues/282), and until it
+/// [#282](https://github.com/LASTRADA-Software/pace/issues/282), and until it
 /// lands `VerifyLeaseToken` and `LeaseRefusalTable` below have no production caller.
 /// A signed grant nobody verifies buys nothing on its own; what it buys is that the
 /// format, the wire codes and the counters exist for #282 to be written against,
@@ -131,7 +131,7 @@ struct LeaseClaims
     /// configuration to a second site or cloning staging from production -- the MAC
     /// verified, the endpoint matched, the fingerprint matched, the expiry was in the
     /// future, and cluster B's worker compiled work leased by a scheduler that was not its
-    /// own ([#322](https://github.com/LASTRADA-Software/fastcached/issues/322)). A grant is
+    /// own ([#322](https://github.com/LASTRADA-Software/pace/issues/322)). A grant is
     /// signed by a voter's own identity key now, and the same outcome survives one layer
     /// down: a state directory copied to a second site copies the node, key included.
     ///
@@ -291,7 +291,7 @@ struct LeaseRefusalDescriptor
 ///
 /// There used to be an `EpochMismatch` row here, refusing an authentic grant that named
 /// a superseded scheduler term, and it is gone rather than merely unused
-/// ([#614](https://github.com/LASTRADA-Software/fastcached/issues/614)). `Replayed` is
+/// ([#614](https://github.com/LASTRADA-Software/pace/issues/614)). `Replayed` is
 /// what stops a captured grant being spent twice, and once that is enforced a lower term
 /// is a scheduler that was legitimately reset -- see `KnownSchedulerTerm`, which now
 /// adopts one instead of refusing it. Keeping the row would have left a refusal nothing
@@ -525,7 +525,7 @@ namespace Detail
     /// Whether a grant that expires at @p expiresAt is still good at @p now.
     ///
     /// **The acceptance window, in one expression, because two things depend on it and
-    /// they must not be able to disagree** ([#614](https://github.com/LASTRADA-Software/fastcached/issues/614)).
+    /// they must not be able to disagree** ([#614](https://github.com/LASTRADA-Software/pace/issues/614)).
     /// `VerifyLeaseToken` asks it to decide whether to accept a grant; `SpentLeases`
     /// asks it to decide how long to remember one. Written twice, the second copy is
     /// free to prune at `expiresAt` while the first goes on accepting for another five
@@ -759,7 +759,7 @@ struct TermChange
 /// The most recent scheduler term a worker has been told about, if any.
 ///
 /// **It is a diagnostic now, and it used to be a gate.** Until
-/// [#614](https://github.com/LASTRADA-Software/fastcached/issues/614) this was a
+/// [#614](https://github.com/LASTRADA-Software/pace/issues/614) this was a
 /// monotonic maximum and a verifier refused any grant naming a lower term
 /// (`LeaseEpochCheck`, deleted with that ticket). The monotonic rule was standing in
 /// for replay protection, and `SpentLeases` below now provides that directly -- so the
@@ -839,7 +839,7 @@ class KnownSchedulerTerm
 /// The grants this worker has already spent, so no grant is spent twice.
 ///
 /// **A lease is single-use by construction, and until
-/// [#614](https://github.com/LASTRADA-Software/fastcached/issues/614) nothing enforced
+/// [#614](https://github.com/LASTRADA-Software/pace/issues/614) nothing enforced
 /// it.** The scheduler mints one grant per lease and the client presents it exactly
 /// once -- `Dispatch::CompileOnWorker` sends one COMPILE frame with no retry, and a
 /// RELEASE goes to the scheduler rather than to a worker -- so a token arriving twice at
@@ -974,7 +974,7 @@ class SpentLeases
 /// reader learns the wrong mechanism.
 ///
 /// **The signal it replaces was not missing, it was WRONG**
-/// ([#614](https://github.com/LASTRADA-Software/fastcached/issues/614)). Three ordinary
+/// ([#614](https://github.com/LASTRADA-Software/pace/issues/614)). Three ordinary
 /// operator actions drop a scheduler's term back to 0 -- wiping the Raft directory,
 /// re-bootstrapping the cluster, turning consensus off -- and before #614 every worker
 /// that had learned a higher term then refused every grant until its process restarted.

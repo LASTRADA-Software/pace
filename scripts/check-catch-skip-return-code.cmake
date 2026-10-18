@@ -23,7 +23,7 @@
 # thing that tells ctest an exit code means *skipped* rather than *failed*, and none
 # of the five Catch2 registrations set it -- so the binary printed `1 skipped` and
 # ctest printed `***Failed` for the very same run
-# ([#499](https://github.com/LASTRADA-Software/fastcached/issues/499)). Measured on
+# ([#499](https://github.com/LASTRADA-Software/pace/issues/499)). Measured on
 # one forced skip:
 #
 #     CowTreeTests "[skiprepro]"   ->  test cases: 1 | 1 skipped   BINARY EXIT: 4

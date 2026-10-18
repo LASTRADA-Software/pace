@@ -78,7 +78,7 @@ set(exemptionTable "scripts/cli-ambient-read-exemptions.txt")
 # `;`, `\`, `[` and `]` are CMake list structure and C++ is full of all four, so the walk
 # is `FIND`/`SUBSTRING` rather than a split -- immune to them by construction, the reason
 # `check-cli-text-cell.cmake` walks the same way. Consolidating the copies of this idiom
-# is [#495](https://github.com/LASTRADA-Software/fastcached/issues/495), not this ticket.
+# is [#495](https://github.com/LASTRADA-Software/pace/issues/495), not this ticket.
 function(pace_ambient_hits content outHits)
     set(hits "")
     set(rest "${content}")

@@ -162,7 +162,7 @@ $ pacectl fleet machines --addr=10.0.0.7:6674 | column -t
 ```
 
 **It needs no admin surface and no second address**
-([#1391](https://github.com/LASTRADA-Software/fastcached/issues/1391)). The text is the one
+([#1391](https://github.com/LASTRADA-Software/pace/issues/1391)). The text is the one
 `/fleet.txt` serves -- the leader renders both from one function -- but it arrives over
 `0xFC`, so a leader started without `--admin-listen`, or serving its admin surface over TLS,
 answers it all the same.
@@ -174,7 +174,7 @@ to parse a figure back out of.
 
 `series` is the history the dashboard's charts draw, as a table: one row per bucket of the
 window, one column per series, a bucket with no reading an absent cell rather than a zero
-([#1390](https://github.com/LASTRADA-Software/fastcached/issues/1390)). `--range` names the
+([#1390](https://github.com/LASTRADA-Software/pace/issues/1390)). `--range` names the
 window, as the leader names it; without it the leader answers for the day. The same flag
 moves the history-derived figures of `kpi`, and a key the leader does not serve is refused
 with every key it does:
@@ -306,7 +306,7 @@ demotes that voter, and `cluster-admit` on a learner promotes it; either way the
 cluster moves one member at a time, and a demotion that would leave no voter is never
 proposed. A voter — admitted or promoted — is counted only once it has caught up with
 the leader's log; until then it is replicated to as a learner, and the leader logs that
-it is waiting ([#1537](https://github.com/LASTRADA-Software/fastcached/issues/1537)).
+it is waiting ([#1537](https://github.com/LASTRADA-Software/pace/issues/1537)).
 
 Hold the values against the machine being brought in: the id it minted into its own
 `--cluster-dir`, the address it answers consensus on (`--raft-self` together with
@@ -428,12 +428,12 @@ Beside them, what that worker is offering and whether anyone knows about it:
   claiming to be in one; an `undecided` node reports the `leader` cell as absent,
   because no leader is known yet. The leader itself names no other leader, and reports
   `leader` as `this node`, the spelling the `node` panel draws
-  ([#1647](https://github.com/LASTRADA-Software/fastcached/issues/1647)). So in JSON
+  ([#1647](https://github.com/LASTRADA-Software/pace/issues/1647)). So in JSON
   `leader` is a `host:port` endpoint, the string `"this node"`, or `null` when no leader
   is named. A node that runs consensus and no scheduler — a
   learner — reports no role but still reports `leader`: the leader's scheduling endpoint
   it redirects launchers to, read from the same place the redirect is
-  ([#1641](https://github.com/LASTRADA-Software/fastcached/issues/1641)), and absent while
+  ([#1641](https://github.com/LASTRADA-Software/pace/issues/1641)), and absent while
   it has heard from no leader within the election timeout. A node running no consensus
   reports neither field.
 - **`consensus-endpoint`** — the `host:port` this node's consensus peers DIAL it at,
@@ -447,12 +447,12 @@ Beside them, what that worker is offering and whether anyone knows about it:
   configuration names others and not it). This field, not `scheduler-role`, says whether
   the node stands for election when the leader goes: a node recorded as a voter that
   consensus does not count until it is dialable and has caught up
-  ([#1537](https://github.com/LASTRADA-Software/fastcached/issues/1537)) reports
+  ([#1537](https://github.com/LASTRADA-Software/pace/issues/1537)) reports
   `follower` beside a `learner` standing, exactly as a following voter's role reads. A
   node still seated as a learner runs no scheduler and reports no role at all. A node
   running no consensus reports no such field.
 - **`roster-version`, `roster-voters`, `roster-revoked`** — the roster this node checks
-  lease grants against ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)):
+  lease grants against ([#178](https://github.com/LASTRADA-Software/pace/issues/178)):
   which one, how many voters sign grants under it, and how many keys the cluster revoked.
   It is the state this node's own consensus applied, so it never lapses. A node that
   checks no grant reports none of them rather than a roster of nobody.
@@ -566,7 +566,7 @@ decided-by  -
 ```
 
 **Every route that decided, not only the winning one**
-([#1471](https://github.com/LASTRADA-Software/fastcached/issues/1471)). Admission is a fold
+([#1471](https://github.com/LASTRADA-Software/pace/issues/1471)). Admission is a fold
 over several participants and more than one can be right at once -- a machine's key admits it
 as a proven node and as a ticket holder, and `--fleet-open` admits it again -- so naming only
 the winner would send an operator to change a setting that changes nothing.
@@ -803,7 +803,7 @@ explicit about the difference:
 ```console
 $ pacectl stats --format=kv
 source=info
-pace_version=fastcached-0.2.0
+pace_version=pace-0.2.0
 ...
 pacectl: RESP INFO on the data port returned 7 field(s); start the daemon with its metrics listener enabled, or pass --admin-addr, for the full counter set
 pacectl: the admin surface's /metrics endpoint was not asked: no admin address is known and no 0xFC connection was opened to discover one
@@ -914,7 +914,7 @@ it came from `cache`, `node` or `fleet`. Percentages are a rendering for a perso
 the terminal panels and the leader's HTML page show `75.0 %` from the same value --
 and no machine-read surface writes one.
 
-Until [#1445](https://github.com/LASTRADA-Software/fastcached/issues/1445) the fleet
+Until [#1445](https://github.com/LASTRADA-Software/pace/issues/1445) the fleet
 subject wrote a share as a per-mille integer (`750`) while `cache` and `node` wrote a
 fraction, with no unit in either header, so a script reading two subjects compared
 `750` with `0.74`. `/fleet.json` carries a `schema` number for that reason: the

@@ -200,13 +200,13 @@ extern "C" void HandleNodeReloadSignal(int /*signum*/)
 /// reload -- its toolchain table is what its registration advertised, so re-reading it
 /// would leave the scheduler dispatching against a set this worker no longer serves.*
 ///
-/// The premise stopped being true when [#291](https://github.com/LASTRADA-Software/fastcached/issues/291)
+/// The premise stopped being true when [#291](https://github.com/LASTRADA-Software/pace/issues/291)
 /// gave the node a configuration file. **The reasoning did not**, and it is exactly why
 /// reloadability is a column of `NodeOptions()` rather than a property of the reload
 /// path: those fields must refuse to change, for precisely the reason that paragraph
 /// gives. Restated rather than deleted, because a correct argument attached to a false
 /// premise is worth more than either half
-/// ([#292](https://github.com/LASTRADA-Software/fastcached/issues/292)).
+/// ([#292](https://github.com/LASTRADA-Software/pace/issues/292)).
 ///
 /// So SIGHUP is handled, and **what it can change is decided by the table** --
 /// `NodeOptions()`'s `reloadable` column, which is the one place that answer lives.
@@ -2817,13 +2817,13 @@ int main(int argc, char** argv)
     // identical for `--requirepass` out of a configuration file, and WIDER for the
     // secrets reached by path -- a world-readable identity key is this machine's signature on
     // every proof it makes, handed to every account on the machine
-    // ([#752](https://github.com/LASTRADA-Software/fastcached/issues/752)).
+    // ([#752](https://github.com/LASTRADA-Software/pace/issues/752)).
     //
     // **And re-asked at every accepted reload**, which is the half a snapshot cannot
     // answer: a file's MODE is in no configuration, so an operator who loosens a key
     // file an hour after this worker started was met with silence for
     // the rest of the process's life
-    // ([#868](https://github.com/LASTRADA-Software/fastcached/issues/868)).
+    // ([#868](https://github.com/LASTRADA-Software/pace/issues/868)).
     //
     // `lookup.path` UNGUARDED by `fileApplied`, and never `cfg.configPath`. The
     // resolved path is what was opened, and a discovered machine-wide file is named by

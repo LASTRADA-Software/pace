@@ -78,7 +78,7 @@ using namespace Pace::Node;
 /// `--scheduler` -- refused by an inline `if` in `main.cpp` rather than by the table.
 ///
 /// That gap is **a bug in the table, not a boundary of this check**
-/// ([#386](https://github.com/LASTRADA-Software/fastcached/issues/386)): the rule
+/// ([#386](https://github.com/LASTRADA-Software/pace/issues/386)): the rule
 /// depends on nothing but the parsed configuration, which is precisely what
 /// `platform-service-and-config.md` says belongs in a table "never in the tier that
 /// happens to need it". Its install-time twin already IS a row, so the two agree by

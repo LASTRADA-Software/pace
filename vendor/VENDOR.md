@@ -56,7 +56,7 @@ attribution. The tests, the manual, the makefile, the README and the changelog b
 attribute nothing, so they are left upstream; each file's hash is its `MANIFEST` line.
 
 **What the build does with it.** `cmake/Monocypher.cmake`, which is ours, declares one static
-library, `fastcache-monocypher`, from the two `.c` files compiled as C++ with upstream's
+library, `pace-monocypher`, from the two `.c` files compiled as C++ with upstream's
 `MONOCYPHER_CPP_NAMESPACE` -- that file says why C++, why the namespace, and why it is built
 unconditionally. It has no dependency, so `pace-cc` can
 link it without Pace.

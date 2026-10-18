@@ -264,7 +264,7 @@ void ReportInstallRefusal(std::optional<Consensus::RaftDriver::InstallRefusal> c
 /// again — so the joiner that change was going to admit is never counted, is excused
 /// from every deadline for having no cluster, and the cluster silently loses the
 /// ability to re-elect once one more member goes away
-/// ([#388](https://github.com/LASTRADA-Software/fastcached/issues/388)).
+/// ([#388](https://github.com/LASTRADA-Software/pace/issues/388)).
 ///
 /// The single symptom was one `Warn` naming an index that no longer exists.
 ///

@@ -748,7 +748,7 @@ case "$1" in
         case "$WaitTimeout"  in ''|*[!0-9]*) Fatal "--wait-timeout takes whole seconds, not '$WaitTimeout'" ;; esac
         [[ "$WaitInterval" -gt 0 ]] || Fatal "--wait-interval must be above zero, or the poll is a spin"
         command -v gh >/dev/null 2>&1 || Unavailable "gh is not on PATH"
-        repo="${PACE_REPO:-LASTRADA-Software/fastcached}"
+        repo="${PACE_REPO:-LASTRADA-Software/pace}"
         rec="$(mktemp)"; req="$(mktemp)"; dec="$(mktemp)"
         # shellcheck disable=SC2064
         trap "rm -f '$rec' '$req' '$dec'" EXIT

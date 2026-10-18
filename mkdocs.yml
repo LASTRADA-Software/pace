@@ -35,11 +35,11 @@ validation:
 not_in_nav: |
   snippets/*
 
-site_name: pace-kv
+site_name: Pace
 site_description: A memcached- and Redis-compatible cache daemon, and a portable compile cache
-site_author: pace-kv contributors
-site_url: https://lastrada-software.github.io/fastcached/
-repo_url: https://github.com/LASTRADA-Software/fastcached
+site_author: Pace contributors
+site_url: https://lastrada-software.github.io/pace/
+repo_url: https://github.com/LASTRADA-Software/pace
 edit_uri: edit/master/docs/
 copyright: Apache-2.0 licensed. Memcached and Redis are registered trademarks of their respective owners.
 

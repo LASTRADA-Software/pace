@@ -167,7 +167,7 @@ TEST_CASE("The same banner over different headers is a different toolchain", "[t
 TEST_CASE("The same banner and headers under two grammars are two toolchains", "[toolchain][fingerprint]")
 {
     // The THIRD input, and the one the other two cannot supply
-    // ([#226](https://github.com/LASTRADA-Software/fastcached/issues/226)).
+    // ([#226](https://github.com/LASTRADA-Software/pace/issues/226)).
     // `clang-cl`, `clang++` and `clang` from one LLVM install print the same banner --
     // clang's does not name its own `argv[0]` the way a GNU driver's does -- and own
     // one include tree, so both cases above hold them EQUAL by construction and the

@@ -138,7 +138,7 @@ enum class LogSource : std::uint8_t
 /// Whether a console log line carries a time by default on THIS platform.
 ///
 /// **A platform default rather than a constant, because the fact it encodes is a
-/// property of the platform** ([#496](https://github.com/LASTRADA-Software/fastcached/issues/496)).
+/// property of the platform** ([#496](https://github.com/LASTRADA-Software/pace/issues/496)).
 /// Nothing on macOS stamps a service's output: launchd redirects both standard
 /// streams straight to a plain file, and omitting those keys sends them to
 /// `/dev/null` instead, so a macOS log answers *when* only if the process says so.
@@ -170,7 +170,7 @@ inline constexpr bool DefaultLogTimestamps =
 /// this flag paid for. `{ std::cerr, level, true }` says nothing at the call site --
 /// and an argument that reads as nothing is one whose ABSENCE reads as nothing
 /// either, which is how `pace-node` shipped unable to emit a time at
-/// all ([#485](https://github.com/LASTRADA-Software/fastcached/issues/485)). The
+/// all ([#485](https://github.com/LASTRADA-Software/pace/issues/485)). The
 /// constructor takes it with **no default**, so omitting it is a compile error in
 /// every binary rather than a silent `false`.
 enum class LogTimestamps : std::uint8_t

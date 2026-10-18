@@ -98,7 +98,7 @@ file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 # interior layout as a real release, holding both a launcher and a daemon that
 # each answer --version and nothing else — scripts rather than compiled
 # binaries, because what is under test is the staging plumbing, not the files.
-set(stem "fastcached-${mirrorVersion}-${platform}")
+set(stem "pace-${mirrorVersion}-${platform}")
 set(payloadRoot "${PACE_SCRATCH_DIR}/payload")
 
 foreach(pair "launcher:${launcherMember}:pace-cc" "daemon:${daemonMember}:pace-kv")
@@ -113,7 +113,7 @@ foreach(pair "launcher:${launcherMember}:pace-cc" "daemon:${daemonMember}:pace-k
          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endforeach()
 
-set(mirrorDir "${PACE_SCRATCH_DIR}/mirror/fastcached-mirror/releases/download/v${mirrorVersion}")
+set(mirrorDir "${PACE_SCRATCH_DIR}/mirror/pace-mirror/releases/download/v${mirrorVersion}")
 file(MAKE_DIRECTORY "${mirrorDir}")
 # See check-compile-cache-install.cmake for why this is `cmake -E tar` rather
 # than `file(ARCHIVE_CREATE)`: the latter's WORKING_DIRECTORY option needs
@@ -144,7 +144,7 @@ set(arguments
     "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
     "-DPACE_AUTO_INSTALL=ON"
     "-DPACE_AUTO_INSTALL_DIR=${stageDir}"
-    "-DPACE_AUTO_INSTALL_REPO=fastcached-mirror"
+    "-DPACE_AUTO_INSTALL_REPO=pace-mirror"
     "-DPACE_AUTO_INSTALL_VERSION=${mirrorVersion}"
     "-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=file://${PACE_SCRATCH_DIR}/mirror"
     "-DPACE_AUTO_START=ON"
@@ -211,7 +211,7 @@ endif()
 # counting HTTP requests, which file:// has none of) is what this mirror can
 # actually observe: exactly one archive of this name under the module's
 # per-build-tree download directory.
-file(GLOB_RECURSE downloadedArchives "${buildDir}/CMakeFiles/fastcache-download/*.tar.gz")
+file(GLOB_RECURSE downloadedArchives "${buildDir}/CMakeFiles/pace-download/*.tar.gz")
 list(LENGTH downloadedArchives archiveCount)
 if(archiveCount GREATER 1)
     list(APPEND violations "expected one downloaded archive, found ${archiveCount}: [${downloadedArchives}]")

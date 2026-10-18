@@ -67,7 +67,7 @@ def git_sha(ref: str) -> str:
 def build_ref(ref: str, preset: str) -> Path:
     """Build ``ref`` in an isolated worktree and return its pace-kv binary path."""
     sha = git_sha(ref)
-    worktree = Path(tempfile.gettempdir()) / "fastcached-bench" / sha
+    worktree = Path(tempfile.gettempdir()) / "pace-bench" / sha
     binary = worktree / "out" / "build" / preset / "target" / binary_name()
     if binary.exists():
         print(f"  [{ref} @ {sha}] reusing cached build at {binary}")
@@ -95,7 +95,7 @@ def build_ref(ref: str, preset: str) -> Path:
 
 def remove_worktree(ref: str) -> None:
     sha = git_sha(ref)
-    worktree = Path(tempfile.gettempdir()) / "fastcached-bench" / sha
+    worktree = Path(tempfile.gettempdir()) / "pace-bench" / sha
     if worktree.exists():
         subprocess.run(["git", "-C", str(REPO_ROOT), "worktree", "remove", "--force", str(worktree)], check=False)
         shutil.rmtree(worktree, ignore_errors=True)
@@ -283,7 +283,7 @@ def main() -> int:
     if args.vs:
         vs_names = [name.strip() for name in args.vs.split(",") if name.strip()]
         env = gather_env(args, base_sha, candidate_sha)
-        with tempfile.TemporaryDirectory(prefix="fastcached-bench-storage-") as storage_root_str:
+        with tempfile.TemporaryDirectory(prefix="pace-bench-storage-") as storage_root_str:
             target_names, rows = run_multitarget(
                 candidate_binary, vs_names, args.profile, Path(storage_root_str),
                 args.port, args.reps, args.warmup, args.seed, args.op_timeout, args.redis_server,
@@ -303,7 +303,7 @@ def main() -> int:
         print(f"Summary: {out_dir / 'summary.json'}")
         return 0
 
-    with tempfile.TemporaryDirectory(prefix="fastcached-bench-storage-") as storage_root_str:
+    with tempfile.TemporaryDirectory(prefix="pace-bench-storage-") as storage_root_str:
         storage_root = Path(storage_root_str)
         with concurrent.futures.ProcessPoolExecutor(max_workers=pool_size) as executor:
             print("\nRunning base suite ...")

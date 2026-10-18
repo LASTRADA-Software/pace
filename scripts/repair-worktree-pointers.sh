@@ -627,11 +627,11 @@ repair_self_test() {
     # path which does not exist, so both are pinned with the literals this machine
     # actually uses.
     _rw_expect "worktree -> admin directory" \
-        "../../fastcached/.git/worktrees/gate" \
-        "$(relative_path /mnt/d/fastcached-worktrees/gate /mnt/d/fastcached/.git/worktrees/gate)"
+        "../../pace/.git/worktrees/gate" \
+        "$(relative_path /mnt/d/pace-worktrees/gate /mnt/d/pace/.git/worktrees/gate)"
     _rw_expect "admin directory -> worktree/.git" \
-        "../../../../fastcached-worktrees/gate/.git" \
-        "$(relative_path /mnt/d/fastcached/.git/worktrees/gate /mnt/d/fastcached-worktrees/gate/.git)"
+        "../../../../pace-worktrees/gate/.git" \
+        "$(relative_path /mnt/d/pace/.git/worktrees/gate /mnt/d/pace-worktrees/gate/.git)"
     _rw_expect "a target inside the source is a plain descent" \
         "a/b" "$(relative_path /x /x/a/b)"
     # A relative input is REFUSED, never walked: `dirname .` is `.`, and the walk spun

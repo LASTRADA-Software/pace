@@ -277,7 +277,7 @@ enum class DirectoryPolicy : std::uint8_t
 /// member — and files created in it inherit that grant, so the config the
 /// product tells operators to move `requirepass:` into was readable by every
 /// local account
-/// ([#741](https://github.com/LASTRADA-Software/fastcached/issues/741)). The file
+/// ([#741](https://github.com/LASTRADA-Software/pace/issues/741)). The file
 /// therefore gets an access list of its own, protected against that inheritance;
 /// see `Platform/FileTrust`'s `SecureSecretFileForServices`.
 ///

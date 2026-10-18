@@ -163,7 +163,7 @@ class LeaseTable
     /// telling an operator about -- a `leaseTimeout` shorter than the slowest
     /// translation unit, which this type's own `Release` documentation already named
     /// as such -- had nowhere to be observed
-    /// ([#1074](https://github.com/LASTRADA-Software/fastcached/issues/1074)).
+    /// ([#1074](https://github.com/LASTRADA-Software/pace/issues/1074)).
     ///
     /// **Every enumerator names what was OBSERVED, never the cause inferred from
     /// it**, and that is deliberate rather than fussy. The mapping from observation

@@ -215,7 +215,7 @@ TEST_CASE("FileTrust: the POSIX acquisition reports what the mode bits say", "[p
     // through the composed `SecretFileExposure`, because what an operator gets is
     // the composition and a record that is right while the composition is not
     // would be a test passing for the wrong reason.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secret-mode" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secret-mode" };
 
     auto const modeIs = [&scratch](char const* stem, ::mode_t mode) {
         return SecretFileAtMode(scratch, stem, mode);
@@ -314,7 +314,7 @@ TEST_CASE("FileTrust: securing a secret file takes read away from everyone but i
     // by the `package-windows` CI job -- there is no way to exercise a DACL here,
     // and pretending otherwise is what a synthesised record is for elsewhere in
     // this file.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secure-secret" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secure-secret" };
 
     auto const path = SecretFileAtMode(scratch, "exposed.yaml", S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
@@ -348,13 +348,13 @@ TEST_CASE("FileTrust: securing a file that is not there fails rather than claimi
     // "I could not tell" and "nothing else can read it" have to lead to different
     // places, and this is the caller-facing end of that: a seed that could not
     // restrict what it wrote must not report that it did.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secure-absent" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secure-absent" };
     CHECK_FALSE(Pace::SecureSecretFileForServices(scratch / "absent.yaml"));
 }
 
 TEST_CASE("FileTrust: securing a secret for its owner takes read away from group and other", "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secure-owner" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secure-owner" };
 
     // Group- AND world-readable, so the case cannot pass on a function that removed only one.
     auto const path = SecretFileAtMode(scratch, "node-key", S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -377,7 +377,7 @@ TEST_CASE("FileTrust: securing an absent secret for its owner answers that it co
           "[platform][filetrust][secret]")
 {
     // `Undetermined`, never `None`: a caller that minted nothing must not be told it secured something.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secure-owner-absent" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secure-owner-absent" };
     CHECK(Pace::SecureSecretFileForOwner(scratch / "absent") == SecretExposure::Undetermined);
 }
 
@@ -393,7 +393,7 @@ TEST_CASE("FileTrust: securing a secret for its owner replaces a broad access li
     // The file starts UNPROTECTED, carrying entries INHERITED from its directory -- `BUILTIN\Users`
     // read, which is what a file inherits under `%ProgramData%` -- so only a list applied WITH
     // protection drops them: one applied without it keeps every inherited entry beside its own.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secure-owner-dacl" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secure-owner-dacl" };
     auto const directory = scratch / "inheriting";
     std::filesystem::create_directories(directory);
     REQUIRE(Pace::Testing::ApplyAccessList(directory, L"D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FR;;;BU)"));
@@ -424,7 +424,7 @@ TEST_CASE("FileTrust: a file others may write is told apart from one only its ow
     // The question the state directory's walk asks of every entry: whoever OWNS a file, one another
     // account can rewrite holds contents that account chose. Both directions, on the real
     // filesystem, and the remedy names the entry.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-others-may-write" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-others-may-write" };
     auto const path = scratch / "formation";
     auto created = Pace::CreateStateFile(path, Pace::StateFile::Formation);
     REQUIRE(created.has_value());
@@ -451,7 +451,7 @@ TEST_CASE("FileTrust: a file others may write is told apart from one only its ow
 TEST_CASE("FileTrust: a regular file is opened, and anything else is refused without blocking",
           "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-open-regular" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-open-regular" };
     auto const file = scratch / "node-key";
     {
         auto stream = std::ofstream { file, std::ios::binary };
@@ -481,7 +481,7 @@ TEST_CASE("FileTrust: a secret created owner-only is protected from its first in
 {
     // Access is decided at OPEN: a list applied after the create would leave readable every handle
     // opened in between. So the list is part of the create, and on Windows so is share mode 0.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-owner-only-create" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-owner-only-create" };
     auto const directory = scratch / "inheriting";
     std::filesystem::create_directories(directory);
     REQUIRE(Pace::Testing::ApplyAccessList(directory, L"D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FR;;;BU)"));
@@ -512,7 +512,7 @@ TEST_CASE("FileTrust: a directory other accounts may add to is not its owner's a
 {
     // `BUILTIN\Users` add-file and add-subdirectory: the list measured on this project's own
     // `%ProgramData%\pace-node`, and exactly the directory a planted key would be put in.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-directory-writers" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-directory-writers" };
     auto const directory = scratch / "state";
     std::filesystem::create_directories(directory);
     REQUIRE(Pace::Testing::ApplyAccessList(directory, L"D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;0x1200af;;;BU)"));
@@ -541,7 +541,7 @@ TEST_CASE("FileTrust: the printed directory remedy, run as printed, restricts a 
     // there and removed nothing (the removal ran before the conversion made the entries
     // explicit), so the next start refused with the same line: a loop. Built here the same way,
     // the remedy is RUN exactly as printed, and the directory judged afterwards.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-inherited-remedy" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-inherited-remedy" };
     auto const programData = scratch / "programdata";
     std::filesystem::create_directories(programData);
     REQUIRE(Pace::Testing::ApplyAccessList(programData,
@@ -574,7 +574,7 @@ TEST_CASE("FileTrust: a directory that lets other accounts only DELETE its entri
     // The deletion half of planting: `FILE_DELETE_CHILD` alone lets `BUILTIN\Users` remove the key,
     // and a node that then finds none mints a new identity and falls out of its cluster, saying
     // only `minted`. No add-file right is granted, so only delete-child can make this `Others`.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-directory-delete-child" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-directory-delete-child" };
     auto const directory = scratch / "state";
     std::filesystem::create_directories(directory);
     REQUIRE(Pace::Testing::ApplyAccessList(directory, L"D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;;0x40;;;BU)"));
@@ -590,7 +590,7 @@ TEST_CASE("FileTrust: a directory that lets other accounts only DELETE its entri
 TEST_CASE("FileTrust: a file this process created is its own, and so is its scratch directory",
           "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-file-owner" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-file-owner" };
     scratch.Write("mine", "x");
     CHECK(Pace::FileOwnerOf(scratch / "mine").standing == Pace::FileOwnerStanding::ThisProcess);
     CHECK_FALSE(Pace::FileOwnerOf(scratch / "mine").name.empty());
@@ -604,7 +604,7 @@ TEST_CASE("FileTrust: an owner's platform id is what an account resolves to", "[
     // `FileOwner::id` is what a caller's trusted-owner set compares against an account it resolved
     // (`AccountIdOf`), never a name. Run through the production code on the real filesystem, with
     // nothing outside a scratch directory and the operating system's own account database.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-owner-id" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-owner-id" };
     scratch.Write("mine", "x");
     auto const owner = Pace::FileOwnerOf(scratch / "mine");
     REQUIRE(owner.standing == Pace::FileOwnerStanding::ThisProcess);
@@ -631,7 +631,7 @@ TEST_CASE("FileTrust: an owner's platform id is what an account resolves to", "[
 TEST_CASE("FileTrust: who besides a directory's owner may plant entries is asked apart from the owner",
           "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-beyond-owner" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-beyond-owner" };
     CHECK(Pace::DirectoryWritersBeyondOwner(scratch.Path()) == Pace::DirectoryWriters::OwnerOnly);
     CHECK(Pace::DirectoryWritersBeyondOwner(scratch / "absent") == Pace::DirectoryWriters::Undetermined);
 }
@@ -641,7 +641,7 @@ TEST_CASE("FileTrust: a link is judged as itself, never as what it points at", "
     // A DANGLING link is where the two readings disagree: following it finds nothing and answers
     // `Undetermined`, while the entry itself is this process's -- so an owner read through the
     // link is caught here even though this account owns both ends of any link it can make.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-link-entry" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-link-entry" };
     scratch.Write("file", "x");
     auto const link = scratch / "link";
     auto failure = std::error_code {};
@@ -658,7 +658,7 @@ TEST_CASE("FileTrust: a link is judged as itself, never as what it points at", "
 TEST_CASE("FileTrust: a directory created owner-only is, and one already there is left alone",
           "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-owner-only-directory" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-owner-only-directory" };
     auto const directory = scratch / "parent" / "state";
     REQUIRE(Pace::CreateOwnerOnlyDirectory(directory).has_value());
     CHECK(Pace::DirectoryWritersOf(directory) == Pace::DirectoryWriters::OwnerOnly);
@@ -707,7 +707,7 @@ TEST_CASE("FileTrust: every state file is created with exactly its row's mode, w
     {
         CAPTURE(mask);
         Pace::Testing::ScopedUmask const scoped { static_cast<::mode_t>(mask) };
-        Pace::Testing::ScratchDirectory const scratch { "fastcached-state-file-modes" };
+        Pace::Testing::ScratchDirectory const scratch { "pace-state-file-modes" };
         for (auto const file: Pace::Enumerators<Pace::StateFile>())
         {
             auto const path = scratch / Pace::StateFileName(file);
@@ -730,7 +730,7 @@ TEST_CASE("FileTrust: a link where a file is expected is refused as not a file, 
     // The FIFO half of the same rule -- an entry that would BLOCK an ordinary open -- is the node
     // key case's, which bounds its wait and releases a blocked reader; asserted here it would hang
     // the whole binary the day the open blocks again.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-open-link" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-open-link" };
     auto const target = scratch / "target";
     {
         auto stream = std::ofstream { target };
@@ -745,7 +745,7 @@ TEST_CASE("FileTrust: a link where a file is expected is refused as not a file, 
 TEST_CASE("FileTrust: a service's private directory keeps nothing for the group or anyone else",
           "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-private-dir" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-private-dir" };
     auto const directory = scratch.Path() / "state";
     std::filesystem::create_directories(directory);
     std::filesystem::permissions(directory, std::filesystem::perms::all, std::filesystem::perm_options::replace);
@@ -1017,7 +1017,7 @@ TEST_CASE("FileTrust: a service's private directory keeps nothing for a broad pr
 {
     REQUIRE_OWNER_SETTING();
 
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-private-dir" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-private-dir" };
     auto const directory = scratch.Path() / "state";
     std::filesystem::create_directories(directory);
 
@@ -1076,7 +1076,7 @@ TEST_CASE("FileTrust: an exposed entry's remedy is per kind -- delete a credenti
 
     SECTION("the identity key is told to be deleted, not reset")
     {
-        Pace::Testing::ScratchDirectory const scratch { "fastcached-remedy-key" };
+        Pace::Testing::ScratchDirectory const scratch { "pace-remedy-key" };
         auto const directory = scratch.Path() / "state";
         scratch.Write("state/node-key", "identity seed");
         auto const key = directory / "node-key";
@@ -1092,7 +1092,7 @@ TEST_CASE("FileTrust: an exposed entry's remedy is per kind -- delete a credenti
 
     SECTION("an ordinary state file is told to inherit the directory's list")
     {
-        Pace::Testing::ScratchDirectory const scratch { "fastcached-remedy-state" };
+        Pace::Testing::ScratchDirectory const scratch { "pace-remedy-state" };
         auto const directory = scratch.Path() / "state";
         scratch.Write("state/roster", "not a credential");
         auto const roster = directory / "roster";
@@ -1112,7 +1112,7 @@ TEST_CASE("FileTrust: a junctioned or symlinked state directory is refused", "[p
     // C1(a): `SetNamedSecurityInfoW` on a junction writes the list onto the junction and leaves
     // its target -- a directory the planter owns -- untouched, so a list applied to one secures
     // nothing. Refused before anything is written, which needs no owner-setting right.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-junction-dir" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-junction-dir" };
     auto const target = scratch.Path() / "attacker";
     std::filesystem::create_directories(target);
     auto const directory = scratch.Path() / "state";
@@ -1130,7 +1130,7 @@ TEST_CASE("FileTrust: a junctioned child inside the state directory is refused",
 {
     // C1(a), the child case: the walk lists a junction without following it, and a key could be
     // read through a link the planter still resolves. Refused in the read-only pre-pass.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-junction-child" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-junction-child" };
     auto const target = scratch.Path() / "attacker";
     std::filesystem::create_directories(target);
     auto const directory = scratch.Path() / "state";
@@ -1152,7 +1152,7 @@ TEST_CASE("FileTrust: a foreign-owned entry is refused with the deletion remedy"
     // contents, so a key adopted from it is a key the planter holds. The suite owns what it
     // creates, so it hands a DIFFERENT resolvable account as the service, making its own
     // ownership foreign -- and this is a read-only pre-pass check, so it needs no elevation.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-foreign-owner" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-foreign-owner" };
     auto const directory = scratch.Path() / "state";
     scratch.Write("state/node-key", "planted");
     auto const key = directory / "node-key";
@@ -1194,7 +1194,7 @@ TEST_CASE("FileTrust: a hard-linked entry is refused with the deletion remedy", 
     // apply rewrote the outside file. `nNumberOfLinks > 1` catches it, in the read-only pre-pass,
     // so this needs no elevation. The account is the suite's own so the LINK reason fires, not
     // the owner one.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-hardlink" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-hardlink" };
     auto const directory = scratch.Path() / "state";
     std::filesystem::create_directories(directory);
     auto const outside = scratch.Path() / "outside";
@@ -1225,7 +1225,7 @@ TEST_CASE("FileTrust: a tree mutated between the pre-pass and the apply is caugh
 
     SECTION("a child planted with an explicit broad grant is caught")
     {
-        Pace::Testing::ScratchDirectory const scratch { "fastcached-race-grant" };
+        Pace::Testing::ScratchDirectory const scratch { "pace-race-grant" };
         auto const directory = scratch.Path() / "state";
         std::filesystem::create_directories(directory);
 
@@ -1245,7 +1245,7 @@ TEST_CASE("FileTrust: a tree mutated between the pre-pass and the apply is caugh
 
     SECTION("a hard link planted in the window is caught")
     {
-        Pace::Testing::ScratchDirectory const scratch { "fastcached-race-link" };
+        Pace::Testing::ScratchDirectory const scratch { "pace-race-link" };
         auto const directory = scratch.Path() / "state";
         std::filesystem::create_directories(directory);
         auto const outside = scratch.Path() / "outside";
@@ -1267,13 +1267,13 @@ TEST_CASE("FileTrust: a service account that does not resolve applies nothing", 
 {
     // Resolved BEFORE the list is replaced: a protected list naming no service would lock the
     // service out of its own directory, which is a worse state than the one refused.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-private-unresolved" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-private-unresolved" };
     auto const directory = scratch.Path() / "state";
     std::filesystem::create_directories(directory);
     GrantBroadRead(directory, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
     auto const before = DaclText(directory);
 
-    auto const account = std::format("NT SERVICE\\fastcached-no-such-service-{}", scratch.Path().filename().string());
+    auto const account = std::format("NT SERVICE\\pace-no-such-service-{}", scratch.Path().filename().string());
     auto const secured = Pace::SecureDirectoryForService(directory, account);
     REQUIRE_FALSE(secured.has_value());
     CHECK(secured.error().contains(account));
@@ -1361,7 +1361,7 @@ class ImpersonatingWithoutAdministrators
 TEST_CASE("FileTrust: the service's own entry lets it create owner-only state in its directory",
           "[platform][filetrust][secret]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-service-creates" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-service-creates" };
     auto const directory = scratch.Path() / "state";
     std::filesystem::create_directories(directory);
     auto const dacl = Pace::Detail::ServiceDirectoryAccessList(CurrentAccountName());
@@ -1418,6 +1418,6 @@ TEST_CASE("FileTrust: a service's private directory that is not there is refused
     // On both platforms, and for the reason `SecureSecretFileForServices` refuses an absent
     // file: the answer is read back, and "I could not tell" must not arrive as "secured". No
     // account, so on Windows the refusal is the list's rather than a name that did not resolve.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-private-absent" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-private-absent" };
     CHECK_FALSE(Pace::SecureDirectoryForService(scratch / "absent", std::string {}).has_value());
 }

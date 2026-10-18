@@ -43,7 +43,7 @@ ReadinessAnnouncer::~ReadinessAnnouncer()
     //
     // So the SEAL is reported, not inferred from the counts: it is the fact that
     // separates them, and it is the one the counts cannot carry
-    // ([#736](https://github.com/LASTRADA-Software/fastcached/issues/736)).
+    // ([#736](https://github.com/LASTRADA-Software/pace/issues/736)).
     auto const expected = ExpectedCount();
     auto const armed = ArmedCount();
 

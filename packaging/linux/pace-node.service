@@ -19,7 +19,7 @@
 
 [Unit]
 Description=Pace compile worker
-Documentation=https://github.com/LASTRADA-Software/fastcached
+Documentation=https://github.com/LASTRADA-Software/pace
 Requires=pace-node.socket
 After=pace-node.socket network-online.target
 Wants=network-online.target

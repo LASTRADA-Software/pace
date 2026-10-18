@@ -117,7 +117,7 @@ TEST_CASE("ServiceControl: a command line that named nothing registers nothing",
     // the host-derived ones.
     Pace::CliResult const cli {};
     auto const cmd = CommandLineFor(std::filesystem::path { "pace-kv" }, cli);
-    REQUIRE(cmd == "\"fastcached\" --daemon --service-name=pace-kv");
+    REQUIRE(cmd == "\"pace\" --daemon --service-name=pace-kv");
 }
 
 TEST_CASE("ServiceControl: the executable path is always quoted", "[platform][service]")
@@ -502,7 +502,7 @@ TEST_CASE("ServiceControl: scope defaults are filled in for a file-configured se
 
 TEST_CASE("ServiceControl: each scope default is accepted on its own", "[platform][service][launchd]")
 {
-    // **The mechanical guard for [#396](https://github.com/LASTRADA-Software/fastcached/issues/396),
+    // **The mechanical guard for [#396](https://github.com/LASTRADA-Software/pace/issues/396),
     // and it is mechanical for one reason: naming the two flags by hand passes
     // under the very defect.** `applicationName` used to decide both defaults, so
     // a spec that had files got `--config` AND `--storage`. A case asserting "the
@@ -1262,7 +1262,7 @@ TEST_CASE("ServiceControl: a service name that escapes its directory is refused"
     // traversal only separators can express would be a poor trade.
     REQUIRE(!rejects("pace-kv"));
     REQUIRE(!rejects("My Cache"));
-    REQUIRE(!rejects("fastcached-2"));
+    REQUIRE(!rejects("pace-2"));
 }
 
 TEST_CASE("ServiceControl: every registration rule gates an install", "[platform][service]")
@@ -2764,7 +2764,7 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
     {
         INFO(verdict.why);
         Pace::Testing::ScriptedScmCalls calls { verdict.script };
-        auto const result = Pace::ScmInstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), calls);
+        auto const result = Pace::ScmInstall(RegistrableSpec("C:/pace/pace-kv.exe"), calls);
         INFO(result.message);
         CHECK(result.Ending() == verdict.ending);
         CHECK(result.message.contains(verdict.says));
@@ -2807,7 +2807,7 @@ TEST_CASE("An SCM registration declines on a decision and fails on a call that f
     {
         INFO(verdict.why);
         Pace::Testing::ScriptedScmCalls calls { verdict.script };
-        auto const result = Pace::ScmUninstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), calls);
+        auto const result = Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), calls);
         INFO(result.message);
         CHECK(result.Ending() == verdict.ending);
         CHECK(result.message.contains(verdict.says));
@@ -2822,14 +2822,14 @@ TEST_CASE("An SCM removal forgets the event source only once the service is gone
     // short of a reinstall puts it back: a failed delete must leave the event source alone.
     using Pace::Testing::ScmScript;
     Pace::Testing::ScriptedScmCalls removed { ScmScript {} };
-    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), removed).Ending()
+    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), removed).Ending()
             == Pace::CommandEnding::Completed);
     CHECK(removed.Calls()
           == std::vector<std::string> {
               "OpenManager(Connect)", "Open", "Stop", "StillRunning", "Delete", "Close", "Close", "RemoveEventSource" });
 
     Pace::Testing::ScriptedScmCalls stuck { ScmScript { .deleteError = 1072 } };
-    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), stuck).Ending()
+    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), stuck).Ending()
             == Pace::CommandEnding::Failed);
     CHECK(std::ranges::count(stuck.Calls(), std::string { "RemoveEventSource" }) == 0);
 }
@@ -2844,11 +2844,11 @@ TEST_CASE("An SCM registration opens the manager with the least each operation n
     CHECK(Pace::ScmManagerAccessMask(Pace::ScmManagerAccess::Connect) == 0x0001);
 
     Pace::Testing::ScriptedScmCalls installing { Pace::Testing::ScmScript {} };
-    REQUIRE(Pace::ScmInstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), installing).Ending()
+    REQUIRE(Pace::ScmInstall(RegistrableSpec("C:/pace/pace-kv.exe"), installing).Ending()
             == Pace::CommandEnding::Completed);
     CHECK(std::ranges::count(installing.Calls(), std::string { "OpenManager(Create)" }) == 1);
     Pace::Testing::ScriptedScmCalls removing { Pace::Testing::ScmScript {} };
-    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), removing).Ending()
+    REQUIRE(Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), removing).Ending()
             == Pace::CommandEnding::Completed);
     CHECK(std::ranges::count(removing.Calls(), std::string { "OpenManager(Connect)" }) == 1);
 }
@@ -2856,7 +2856,7 @@ TEST_CASE("An SCM registration opens the manager with the least each operation n
 TEST_CASE("An SCM registration asks for the service it was given, under the logon it names", "[platform][service][scm]")
 {
     Pace::Testing::ScriptedScmCalls calls { Pace::Testing::ScmScript {} };
-    auto const spec = RegistrableSpec("C:/fastcached/pace-kv.exe");
+    auto const spec = RegistrableSpec("C:/pace/pace-kv.exe");
     REQUIRE(Pace::ScmInstall(spec, calls).Ending() == Pace::CommandEnding::Completed);
     auto const& requested = Unwrap(calls.Requested());
     CHECK(requested.name == spec.serviceName);
@@ -2873,7 +2873,7 @@ TEST_CASE("A registration says whether it created the service or re-applied one 
     using Pace::ServiceControlOutcome;
     using Pace::Testing::LaunchdScript;
     using Pace::Testing::ScmScript;
-    auto const spec = RegistrableSpec("C:/fastcached/pace-kv.exe");
+    auto const spec = RegistrableSpec("C:/pace/pace-kv.exe");
 
     Pace::Testing::ScriptedScmCalls fresh { ScmScript {} };
     CHECK(Pace::ScmInstall(spec, fresh).outcome == ServiceControlOutcome::Created);
@@ -2904,7 +2904,7 @@ TEST_CASE("An SCM install a private path refuses deletes the registration it cre
     // starts the service whatever the install answered, so a registration THIS install created
     // must not outlive the refusal -- and one it merely re-applied was there before it.
     using Pace::Testing::ScmScript;
-    auto spec = RegistrableSpec("C:/fastcached/pace-kv.exe");
+    auto spec = RegistrableSpec("C:/pace/pace-kv.exe");
     spec.ownedPaths.push_back(Pace::OwnedPath {
         .path = "C:/ProgramData/pace/state", .privacy = Pace::PathPrivacy::Private, .credentialFiles = {} });
 
@@ -2937,7 +2937,7 @@ TEST_CASE("An SCM removal waits for the service to stop, bounded, and says when 
     using Pace::Testing::ScmScript;
     Pace::Testing::SteppedDrainWait stoppedWait;
     Pace::Testing::ScriptedScmCalls stopping { ScmScript { .runningPolls = 3 } };
-    auto const removed = Pace::ScmUninstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), stopping, stoppedWait);
+    auto const removed = Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), stopping, stoppedWait);
     INFO(removed.message);
     CHECK(removed.outcome == Pace::ServiceControlOutcome::Removed);
     CHECK(std::ranges::count(stopping.Calls(), std::string { "StillRunning" }) == 4);
@@ -2946,7 +2946,7 @@ TEST_CASE("An SCM removal waits for the service to stop, bounded, and says when 
     // The control: a service that never reports STOPPED is deleted at the bound, and SAID to be.
     Pace::Testing::SteppedDrainWait ceilingWait;
     Pace::Testing::ScriptedScmCalls running { ScmScript { .runningPolls = 1'000'000 } };
-    auto const marked = Pace::ScmUninstall(RegistrableSpec("C:/fastcached/pace-kv.exe"), running, ceilingWait);
+    auto const marked = Pace::ScmUninstall(RegistrableSpec("C:/pace/pace-kv.exe"), running, ceilingWait);
     INFO(marked.message);
     CHECK(marked.outcome == Pace::ServiceControlOutcome::Removed);
     CHECK(marked.message.contains(std::format("it had not stopped after {} s", Pace::UninstallStopCeiling.count())));

@@ -254,7 +254,7 @@ TEST_CASE("an INFO body parses, classifying numbers apart from text", "[cli][sta
 {
     auto const body = std::string { "# Server\r\n"
                                     "pace_version:0.2.0\r\n"
-                                    "redis_version:6.0.0-fastcached\r\n"
+                                    "redis_version:6.0.0-pace\r\n"
                                     "# Memory\r\n"
                                     "used_memory:1234\r\n" };
 
@@ -265,9 +265,9 @@ TEST_CASE("an INFO body parses, classifying numbers apart from text", "[cli][sta
 
     REQUIRE(FindField(record, "redis_version") != nullptr);
     // Text, and NOT a number truncated at the first dot -- which is what a lax
-    // classifier would produce, turning 6.0.0-fastcached into 6.
+    // classifier would produce, turning 6.0.0-pace into 6.
     CHECK(FindField(record, "redis_version")->value.kind == CellKind::Text);
-    CHECK(FindField(record, "redis_version")->value.lexical == "6.0.0-fastcached");
+    CHECK(FindField(record, "redis_version")->value.lexical == "6.0.0-pace");
 
     CHECK(FindField(record, "pace_version")->value.lexical == "0.2.0");
     // The section headers contributed nothing.

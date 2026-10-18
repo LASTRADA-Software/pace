@@ -77,8 +77,8 @@ enum class Outcome : std::uint8_t
 /// stderr line that deliberately leaves the recorded outcome alone. A fleet in
 /// which *every* dispatch failed therefore produced a perfectly ordinary miss rate
 /// and total silence about distribution
-/// ([#427](https://github.com/LASTRADA-Software/fastcached/issues/427)) — the shape
-/// [#236](https://github.com/LASTRADA-Software/fastcached/issues/236) already cost
+/// ([#427](https://github.com/LASTRADA-Software/pace/issues/427)) — the shape
+/// [#236](https://github.com/LASTRADA-Software/pace/issues/236) already cost
 /// this project once, arriving one layer further in.
 ///
 /// **Not attempted, refused here, declined and unreachable are four states, not a
@@ -120,7 +120,7 @@ enum class DispatchOutcome : std::uint8_t
     Unreachable,
     /// A worker answered about a compile other than the one it was asked for, and
     /// this client refused the object
-    /// ([#280](https://github.com/LASTRADA-Software/fastcached/issues/280)). Kept
+    /// ([#280](https://github.com/LASTRADA-Software/pace/issues/280)). Kept
     /// apart for the reason `DispatchStatus::Mismatched` gives: every other state
     /// here is a fleet declining to help, and this one is a defect somebody has to
     /// look at. Folded in with `Unreachable` it would read as a network blip.

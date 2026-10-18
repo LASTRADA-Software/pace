@@ -129,17 +129,17 @@ class NodeIoLoop final: public IReactorHome
     /// reactor owns is destroyed on that reactor's worker thread, or with that
     /// reactor stopped, because clearing a pending awaitable anywhere else races the
     /// completion dispatch
-    /// ([#668](https://github.com/LASTRADA-Software/fastcached/issues/668)).
+    /// ([#668](https://github.com/LASTRADA-Software/pace/issues/668)).
     /// `~FrameEndpoint` could satisfy neither on its own: it runs on whatever thread
     /// owns the endpoint, and `FrameServer::Shutdown()`'s drain waits for the very
     /// condition that *triggers* the stop -- the last loop decrements before it calls
     /// `NoteLoopFinished()`, and `Stop()` only sets a flag and posts a wakeup, so
     /// `Running()` stays true until `Run()` returns. The endpoint's members were then
     /// destroyed inside that gap
-    /// ([#840](https://github.com/LASTRADA-Software/fastcached/issues/840)), which is
+    /// ([#840](https://github.com/LASTRADA-Software/pace/issues/840)), which is
     /// what `Windows-cl-debug` reported intermittently and in a different
     /// `FrameEndpoint_test` case each run
-    /// ([#737](https://github.com/LASTRADA-Software/fastcached/issues/737)).
+    /// ([#737](https://github.com/LASTRADA-Software/pace/issues/737)).
     ///
     /// **Deferring is not the same as posting, and it is why this is here rather than
     /// in the endpoint.** Posting the destruction onto the reactor and waiting for it

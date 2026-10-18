@@ -152,7 +152,7 @@ compressing it.
     worker's endpoint, the toolchain fingerprint, the object key, an absolute
     expiry and the id of the scheduler that issued it, plus an **Ed25519 signature**
     over all of them made with that scheduler's own identity key
-    ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). A worker
+    ([#178](https://github.com/LASTRADA-Software/pace/issues/178)). A worker
     checks it against the cluster's *roster* — its voters and their keys, as the state
     the worker's own consensus applied records them — so a grant is good only while the
     machine that signed it is an unrevoked voter.
@@ -206,7 +206,7 @@ on the worker.
     touched rather than lazily reserved. A frame of a few dozen bytes could therefore
     ask a worker for a 4 GiB allocation, and the surface's in-flight byte budget
     charged only the frame length, so it sailed through admission
-    ([#241](https://github.com/LASTRADA-Software/fastcached/issues/241)).
+    ([#241](https://github.com/LASTRADA-Software/pace/issues/241)).
 
     Both ends now refuse a declared expansion above their own request ceiling
     **before decompressing a byte**, answering `payload-too-large` — a reply, not a
@@ -250,7 +250,7 @@ and refuses anything else, naming the offending flag. An allowlist fails safe: a
 flag it does not yet recognise costs one local compile (visible as
 `pace_worker_jobs_refused_rejected_argument_total`), where a denylist that
 missed one flag was code execution
-([#240](https://github.com/LASTRADA-Software/fastcached/issues/240)).
+([#240](https://github.com/LASTRADA-Software/pace/issues/240)).
 
 The `-f*` family is spelled out flag by flag rather than admitted as a prefix,
 which is what makes that guarantee hold for future compiler releases:
@@ -276,7 +276,7 @@ A worker runs **`slots` compiles at once**, each on its own thread, while the po
 goes straight back to accepting. That is the number it registered, so what the
 scheduler dispatches against and what the machine actually serves are the same
 figure. Until
-[#213](https://github.com/LASTRADA-Software/fastcached/issues/213) they were not:
+[#213](https://github.com/LASTRADA-Software/pace/issues/213) they were not:
 the port served each connection to completion before accepting the next, so a node
 advertising thirty ran one, and the busiest reading a saturated fleet could show
 was `1 / 30 compiling`. Everything a job touches is derived per thread rather than
@@ -485,10 +485,10 @@ an IP literal stays exactly where it was typed.
 `REGISTER` carries the `--advertise` endpoint, and the scheduler hands it to
 clients verbatim — they dial it and send the whole preprocessed translation unit.
 That endpoint is **not** checked against the address the registration arrived
-from ([#242](https://github.com/LASTRADA-Software/fastcached/issues/242)). A
+from ([#242](https://github.com/LASTRADA-Software/pace/issues/242)). A
 registration therefore asserts where a toolchain's work should be sent, and the
 only thing standing in front of it is membership, which is itself a source-address
-check ([#180](https://github.com/LASTRADA-Software/fastcached/issues/180)).
+check ([#180](https://github.com/LASTRADA-Software/pace/issues/180)).
 
 What exists today is a **measurement**, not a control. When an endpoint's host
 differs from the caller's, the registration is still accepted and the scheduler
@@ -545,7 +545,7 @@ records for each member. That is the one leg of this page whose every byte is
 authenticated; what it checks and how a failure shows is under
 [Raft peer authentication](#raft-peer-authentication). The same key signs every lease a
 member issues and is what a member proves on the node port; there is no shared secret any
-member holds ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)).
+member holds ([#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 
 That cadence is the reason the consensus port wants a network that is not
 congested. Nothing breaks if it is — an election settles again — but leadership
@@ -564,7 +564,7 @@ itself, so only its `0xFC` endpoint is moved. Two counters show it:
 ([the node's metrics](../tools/pace-node.md#when-this-nodes-address-moves)).
 
 **The move is recorded by a commit, so it heals only while the voters that did not move
-are a quorum** ([#1644](https://github.com/LASTRADA-Software/fastcached/issues/1644)). A moved voter whose own scheduler no longer hears a leader
+are a quorum** ([#1644](https://github.com/LASTRADA-Software/pace/issues/1644)). A moved voter whose own scheduler no longer hears a leader
 announces through the other voters it knows, and the leader re-records it; but nothing
 else re-addresses a recorded member. A two-voter fleet where either voter moves, or a
 majority of voters renumbered at once (a router replacement, a DHCP scope change), has no
@@ -584,7 +584,7 @@ kernel-chosen unless `--discovery-reply-port` pins it, which is what a site with
 host firewall scoped to the beacon port alone has to open.
 
 Discovery **admits nobody**
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). It reports which
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)). It reports which
 members proved the key the cluster holds for them, and hands another fleet's proven
 summary to formation, which decides whether this machine asks to join it. Admission is an
 operator's act — an `--enroll-approve`, or a time-boxed `--enroll-auto-approve` — or
@@ -607,7 +607,7 @@ participants:
 
 The **cache tier is not one of them** and asks a different question entirely —
 "is this caller on this machine" — which no route can answer and none is consulted
-for. That is [#287](https://github.com/LASTRADA-Software/fastcached/issues/287), below.
+for. That is [#287](https://github.com/LASTRADA-Software/pace/issues/287), below.
 
 **An address admits nobody but this machine.** A machine on a VPN, behind NAT or on
 DHCP has no address worth listing, so every machine is admitted by the key it holds in
@@ -635,7 +635,7 @@ question about any one connection or machine.
 
 **`--cluster-forget=<id>` revokes the machine's key, and that reaches everything.** The
 record leaves the cluster and the key it held is revoked in the same entry
-([#1555](https://github.com/LASTRADA-Software/fastcached/issues/1555)). Every node asks
+([#1555](https://github.com/LASTRADA-Software/pace/issues/1555)). Every node asks
 the replicated keys on every request, so the forget reaches every node as it applies the
 entry — every surface, every connection already open, from any address, including this
 machine's own loopback — with nothing to edit or reload on any machine. A connection that
@@ -682,7 +682,7 @@ questions are:
   machine's own build output, and its verbs answer this machine alone whatever the bind.
 
     It is served to **this machine and to nothing else**, always
-    ([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)). Not to a
+    ([#287](https://github.com/LASTRADA-Software/pace/issues/287)). Not to a
     machine the cluster admitted, by proof or by ticket: a peer that may spend this
     machine's CPU is not thereby entitled to read everything it has ever compiled. The rule belongs to the **verb**, so
     widening the bind does not widen who is served, and every off-box `FETCH` is
@@ -772,11 +772,11 @@ notes:
     peers can dial.
     (`--listen-raft` needed a `--cluster-key-file` as well, and
     `--discovery` a key rule of its own, until
-    [#178](https://github.com/LASTRADA-Software/fastcached/issues/178) moved every proof to
+    [#178](https://github.com/LASTRADA-Software/pace/issues/178) moved every proof to
     each node's identity key.) An earlier version of this transcript omitted the five that
     applied then, and the binary refused it with exit 2 — the printed table was right, the
     invocation was not
-    ([#807](https://github.com/LASTRADA-Software/fastcached/issues/807)).
+    ([#807](https://github.com/LASTRADA-Software/pace/issues/807)).
 
 The node opens its ports from the same table that prints, so the list and the sockets
 cannot disagree — which is the point of generating a worksheet rather than
@@ -838,7 +838,7 @@ open.
     The scheduler and the compile verbs answer on the same `--listen-node` port as the
     cache verbs, so that port faces whatever network the fleet does. The cache verbs answer
     this machine alone whatever the bind
-    ([#287](https://github.com/LASTRADA-Software/fastcached/issues/287)), but the port is
+    ([#287](https://github.com/LASTRADA-Software/pace/issues/287)), but the port is
     the surface that makes a compiler **run** on this machine: scope its rule with
     `--firewall-allow` where the fleet's machines share a range.
 
@@ -849,7 +849,7 @@ open.
 | A worker never appears in the fleet at all | node → scheduler | Is the worker's key admitted to the cluster? A `REGISTER` from a key the cluster does not hold is refused, and `pace_scheduler_requests_refused_node_identity_required_total` or `pace_node_proofs_refused_unknown_key_total` climbs on the scheduler. Does `--advertise` name an address others can reach? |
 | Workers appear, then vanish, then reappear | node → scheduler | Heartbeats are not arriving inside 90 s. On the dashboard, registrations and expiries both climbing is this, not a growing fleet |
 | Every compile happens locally, build stays green | client → scheduler | Is `PACE_SCHEDULER` set? Is this machine admitted — does a node run here, at `PACE_ADDR`, to mint its tickets, and is that node's key admitted to the cluster? `pacectl explain-admission <machine>` on the scheduler says. Run with `PACE_VERBOSE=1`, which names the refusal |
-| A lease is granted, then the compile runs locally anyway | client → node | The worker refused the client `not-a-member`. Is that worker a member of the fleet, so the state it applies admits the machines the cluster admitted? Or give it `--fleet-open`: membership gates its compile port, not only a scheduler's. The scheduler's counters stay correct and flat — the lease *was* granted — so look at the **worker**: its ready line names who it admits, and `pace_worker_jobs_refused_not_a_member_total` counts each turned-away client ([#235](https://github.com/LASTRADA-Software/fastcached/issues/235)) |
+| A lease is granted, then the compile runs locally anyway | client → node | The worker refused the client `not-a-member`. Is that worker a member of the fleet, so the state it applies admits the machines the cluster admitted? Or give it `--fleet-open`: membership gates its compile port, not only a scheduler's. The scheduler's counters stay correct and flat — the lease *was* granted — so look at the **worker**: its ready line names who it admits, and `pace_worker_jobs_refused_not_a_member_total` counts each turned-away client ([#235](https://github.com/LASTRADA-Software/pace/issues/235)) |
 | `no-worker`, though the toolchain looks identical | client → scheduler | Fingerprints must match byte for byte. Compare the node's `serving …` startup lines against the client's |
 | `/fleet` answers `503` | operator → dashboard | You are asking a follower. The reply names the leader |
 | Peers are seen but never authenticated | node → segment | The reply port is being dropped while the beacon port passes. Scope the rule to the program, or pin `--discovery-reply-port` and open that port; on Windows, run `--install-service` again, which opens it. If `pace_discovery_proofs_refused_unknown_key_total` climbs instead, the handshake completes and the key is one the cluster does not hold: discovery admits nobody, so enrol the machine or `--cluster-admit` it under the key the warning names |
@@ -951,7 +951,7 @@ it on its first start. It is decided once, at startup, and never per connection:
 quietly ran consensus unsigned would look healthy from both ends while trusting anybody.
 The pre-shared `--cluster-key-file` a consensus node once also needed is gone: the leases
 and the node port prove identity keys too
-([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)).
+([#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 
 **Upgrading.** The consensus wire is version 5: it moved to 4 with identity keys (it was 2
 with the first handshake, which proved the cluster key, and 3 with learners), and to 5 when
@@ -1009,10 +1009,10 @@ after it name both member ids. The full list, with a description of each series,
 A lease grant is a **signed capability** rather than a serial number: the scheduler
 signs the granted endpoint, the toolchain, the object key, an expiry and its own id
 with its own Ed25519 identity key
-([#281](https://github.com/LASTRADA-Software/fastcached/issues/281),
-[#178](https://github.com/LASTRADA-Software/fastcached/issues/178)), and the worker
+([#281](https://github.com/LASTRADA-Software/pace/issues/281),
+[#178](https://github.com/LASTRADA-Software/pace/issues/178)), and the worker
 checks that signature before it decompresses anything, let alone compiles
-([#282](https://github.com/LASTRADA-Software/fastcached/issues/282)). A token is
+([#282](https://github.com/LASTRADA-Software/pace/issues/282)). A token is
 unforgeable, and one minted for one worker does not authenticate against another.
 
 The check costs a job one signature verification over a few hundred bytes, with no

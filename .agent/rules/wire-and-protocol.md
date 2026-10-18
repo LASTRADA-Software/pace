@@ -59,7 +59,7 @@ Every rule below has already been a bug.
   process had stopped making progress went unnoticed. Keepalive (#247) answers a dead
   HOST and is blind to a kernel that answers every probe while nothing above it does;
   only a periodic *I am still here* separates those, and only the party doing the work
-  can send it ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)).
+  can send it ([#245](https://github.com/LASTRADA-Software/pace/issues/245)).
   Four consequences, each load-bearing:
   - **A reply carries a status byte and a length and NO KIND, so the extensibility the
     request framing has does not exist on the way back.** `DecodeReplyHeader` refuses
@@ -120,7 +120,7 @@ Every rule below has already been a bug.
       requires at least two frames, and keeps a control on a surface that pulses nothing.
 - **`Status::Push` is the second exception: a `SUBSCRIBE` is answered by a stream of pushes
   and then exactly one terminal**
-  ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)). `Ok` is an orderly
+  ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)). `Ok` is an orderly
   end, an `Error` names why the stream was refused or revoked, and a close is the watcher
   having left, reset or stalled. The version moved to 9 at both ends for `Progress`'s reason.
   - **Which verb admits it is the same column**, `static_assert`ed by `PushIsSubscribeOnly`.
@@ -207,7 +207,7 @@ Every rule below has already been a bug.
   relation to the compressed bytes beside it turned a thirty-byte frame into a
   4 GiB allocation. The surface's in-flight byte budget charged only the *frame*
   length, so it passed admission having reserved nothing like what it cost
-  ([#241](https://github.com/LASTRADA-Software/fastcached/issues/241)).
+  ([#241](https://github.com/LASTRADA-Software/pace/issues/241)).
   - **Both headers already said so, and neither was implemented.**
     `Core/Compression.hpp` states the precondition — `originalLen` is "the trusted
     expected size taken from the record header", which off a socket it is neither —
@@ -318,14 +318,14 @@ Every rule below has already been a bug.
   frame must already contain* — not a request, and not a size to allocate from. Every
   element costs some fixed minimum in the shared field grammar, so the claim is
   checkable, and `WireFields::DeclaredCountFits` is where that check lives
-  ([#267](https://github.com/LASTRADA-Software/fastcached/issues/267)). **This is a
+  ([#267](https://github.com/LASTRADA-Software/pace/issues/267)). **This is a
   class, not a list of sites** — it has now been found four times, in four unrelated
   formats, and each was written by somebody who knew the rule for the *length* fields
   in the same decoder. `DecodeCompileValue` (~172 GB from a **nine-byte** frame —
   measured, `sizeof(TextRegion)` is 40, and under a 2 GiB address-space cap the
   pre-fix decoder aborts on `std::bad_alloc`), `PrefetchGroupManifest`'s key list,
   `DirectManifest` (~274 GB from thirteen bytes), and `SetCodec` (~137 GB from
-  **six**, [#271](https://github.com/LASTRADA-Software/fastcached/issues/271)).
+  **six**, [#271](https://github.com/LASTRADA-Software/pace/issues/271)).
   **Grep for `reserve(`, `resize(` and `assign(` in any decoder you touch, and ask of
   each one where its argument came from.**
   - **A value blob is a peer's bytes too, and that is where the worst one hid.**
@@ -340,7 +340,7 @@ Every rule below has already been a bug.
     engine serves, never an assumption** — and a shared `CacheEngine` means every
     front end is every other front end's writer.
     - **`Cache/StreamCodec` was the same door, on the clamping shape**
-      ([#269](https://github.com/LASTRADA-Software/fastcached/issues/269), fixed).
+      ([#269](https://github.com/LASTRADA-Software/pace/issues/269), fixed).
       `FcTypeStream` (`0x5E700002`) is the second tag a memcached `set` can choose, and
       its **five** declared counts went through `detail::BoundedReserve` —
       `reserve(min(count, remaining))`, the variant this rule's own header argues
@@ -361,7 +361,7 @@ Every rule below has already been a bug.
     malformed frame alive and merely makes its allocation smaller, so the decode fails
     later having already committed memory. `Cache/StreamCodec`'s `BoundedReserve` was
     that weaker shape *and* assumed one byte per element, at all five of its counts
-    ([#269](https://github.com/LASTRADA-Software/fastcached/issues/269)). Both halves
+    ([#269](https://github.com/LASTRADA-Software/pace/issues/269)). Both halves
     mattered: forty trailing bytes bought forty reserved elements where the format can
     hold at most two, and the *entry* minimum is twenty. It is deleted, not tightened
     — a second, weaker mechanism beside the guard is how a decoder ends up reaching for
@@ -377,14 +377,14 @@ Every rule below has already been a bug.
     bounds-checked the *length* fields a few lines away — nothing about `ReadU32` says a
     count is different. So `Core/ByteCursor::ReadCount(out, minBytesEach)` obtains a
     count and takes the bound as an argument with no default, which it will never get
-    ([#272](https://github.com/LASTRADA-Software/fastcached/issues/272)). Same reasoning
+    ([#272](https://github.com/LASTRADA-Software/pace/issues/272)). Same reasoning
     as putting a payload ceiling in the verb table rather than at each consumer.
     **It is not yet the only way to obtain a count, so do not read this as an
     invariant.** `Cache/StreamCodec` and `Cache/SetCodec` go through it; `CompileValue`,
     `PrefetchGroupManifest` and `DirectManifest` still hand-roll a cursor and guard the
     count beside it. Those three carry the guard already, so the remaining conversion is
     a refactor with no security delta and is tracked separately by
-    [#304](https://github.com/LASTRADA-Software/fastcached/issues/304) — deliberately
+    [#304](https://github.com/LASTRADA-Software/pace/issues/304) — deliberately
     not ridden along with a security fix. Until it lands, a new decoder uses
     `ByteCursor`; an old one is not evidence that hand-rolling is still sanctioned.
   - **A per-element minimum is a security bound, not a sizing hint** — the distinction a
@@ -750,7 +750,7 @@ Every rule below has already been a bug.
 - **The lift this section prepared for has happened.** `Net/` and `Async/` were kept free of
   `Core/` -- a table of allowed edges and `ctest -R net-boundary` -- so they could leave this tree,
   and they did: they are core-cpp's `core::net` and `core::async` since
-  [#1596](https://github.com/LASTRADA-Software/fastcached/issues/1596), with TLS as `core::net_tls`
+  [#1596](https://github.com/LASTRADA-Software/pace/issues/1596), with TLS as `core::net_tls`
   and the three leaf headers the table let travel (`Clock`, `Ranges`, `Profiling`) as core-cpp's
   `core::platform` clock and `core::` base headers. The check went with them, because the
   boundary is now a CMake target edge: pace-kv's code cannot reach into core-cpp's internals
@@ -856,7 +856,7 @@ Every rule below has already been a bug.
   applies it, and `SocketAddress_test` asserts the socket is **still not probing**
   after `ApplyHotSocketOptions` — the negative half, which is the assertion that
   fails when somebody later folds the two together for tidiness
-  ([#247](https://github.com/LASTRADA-Software/fastcached/issues/247)). Four things
+  ([#247](https://github.com/LASTRADA-Software/pace/issues/247)). Four things
   come with it:
   - **Bare `SO_KEEPALIVE` is worth nothing.** Without the intervals it inherits the
     system default — two hours on Linux — which is longer than any deadline it would
@@ -1020,7 +1020,7 @@ Every rule below has already been a bug.
   server answers what is already determined while abandoning what is still
   pending.** Three places in this tree answered that question and disagreed, so it
   was settled against a running reference rather than by argument
-  ([#671](https://github.com/LASTRADA-Software/fastcached/issues/671)).
+  ([#671](https://github.com/LASTRADA-Software/pace/issues/671)).
 
   **How it was determined, because a citation without its conditions outlives its
   own truth.** `redis-server 7.0.15` on `Linux 5.15.167.4-microsoft-standard-WSL2`,
@@ -1090,7 +1090,7 @@ Every rule below has already been a bug.
 
   - **The error-only reading detected neither way a client leaves**, and
     `ArmDisconnect` now reads the COUNT
-    ([#673](https://github.com/LASTRADA-Software/fastcached/issues/673)).
+    ([#673](https://github.com/LASTRADA-Software/pace/issues/673)).
     `RedisResp.cpp`'s *"a full peer close surfaces as the error case"* is false on
     IOCP — a full close arrives as readable, measured while landing #662 — and the
     table above adds that a **half**-close is acted on too, which an error-only rule
@@ -1112,12 +1112,12 @@ Every rule below has already been a bug.
   - **And on the compile surface those two arms are now COUNTED apart, so they may not
     be folded even though both reach one outcome.** `WatchPeer` sets `gone` either
     way, which is what makes the fold look free — and
-    [#1090](https://github.com/LASTRADA-Software/fastcached/issues/1090) proposed
+    [#1090](https://github.com/LASTRADA-Software/pace/issues/1090) proposed
     exactly it, collapsing to `!readable.has_value() || *readable == 0` once the probe
     `Read` went. That form reaches the right verdict and **cannot say which departure
     it was**: a peer that RESET and one that said goodbye are different diagnoses, and
     only the first is worth an alert
-    ([#1092](https://github.com/LASTRADA-Software/fastcached/issues/1092)). A graceful
+    ([#1092](https://github.com/LASTRADA-Software/pace/issues/1092)). A graceful
     mid-answer departure is a cancelled build or a reclaimed CI runner and its rate
     means nothing; a rise in abortive closes is crashing clients, a lost route, or a
     middlebox resetting long-lived connections. Both landed together for that reason —
@@ -1144,7 +1144,7 @@ Every rule below has already been a bug.
   bad".** The admin HTTP surface read its request head behind a `bool ok` and refused
   every falsy reason `400 Bad Request`, so a connection the peer had opened and left
   silent past the request deadline was *told its request was malformed*
-  ([#824](https://github.com/LASTRADA-Software/fastcached/issues/824)). This is the
+  ([#824](https://github.com/LASTRADA-Software/pace/issues/824)). This is the
   EOF rule above evaluated on a fourth surface, and it lands the other way from
   RESP's: a reply is owed for what is already DETERMINED, and a peer that has not
   spoken has determined nothing.
@@ -1271,7 +1271,7 @@ Every rule below has already been a bug.
     may a peer be silent before it starts* and *how long may a head take*. That is
     the same defect `.agent/rules/distributed-compilation.md` records for the compile
     deadline, on another wire.
-    [#828](https://github.com/LASTRADA-Software/fastcached/issues/828).
+    [#828](https://github.com/LASTRADA-Software/pace/issues/828).
 
 - **A TLS peer says "I have finished sending" with a RECORD, so the raw socket
   cannot answer that question, and delegating to it was reporting the opposite.**
@@ -1280,7 +1280,7 @@ Every rule below has already been a bug.
   deferred to `_raw->WaitReadable()`, which peeked, saw the alert as data and
   answered `>0`. #673's EOF arm therefore declined for every TLS client, on the one
   transport where the graceful close is the ORDINARY close rather than a corner
-  ([#712](https://github.com/LASTRADA-Software/fastcached/issues/712)). The record
+  ([#712](https://github.com/LASTRADA-Software/pace/issues/712)). The record
   is decrypted now, by `SSL_peek`, which removes nothing OpenSSL decoded -- so
   `SSL_pending()` reports the whole record afterwards and the caller's next `Read`
   returns every byte of it. Four things travel with it:
@@ -1306,7 +1306,7 @@ Every rule below has already been a bug.
     "never parked at all". Measured on Linux x86-64 (GCC 15 / libstdc++, OpenSSL
     3.5): 3 of 5 cases fail on the parent commit, `1 == 0`.
 - **`TlsSocket` forwards `SetReceiveDeadline` to the socket a read blocks on**
-  ([#1557](https://github.com/LASTRADA-Software/fastcached/issues/1557)). It inherited
+  ([#1557](https://github.com/LASTRADA-Software/pace/issues/1557)). It inherited
   the base's no-op, so under TLS #828's preconnect budget never reached the socket, which
   kept the `RequestTimeout` its listener gave it at accept -- a silent TLS peer held the
   admin thread for as long as that, whatever the surface asked for. `ISocket`'s no-op
@@ -1317,7 +1317,7 @@ Every rule below has already been a bug.
 - **A close over unread input is a RESET, and a reset destroys the answer the peer had
   not read yet -- so a server that answers a request it did not finish reading, and
   then closes, closes through `CloseLingering`**
-  ([#1554](https://github.com/LASTRADA-Software/fastcached/issues/1554)). Measured on
+  ([#1554](https://github.com/LASTRADA-Software/pace/issues/1554)). Measured on
   loopback (#1553): Windows drops every byte already buffered for the reader and fails
   the read at once; Linux and macOS hand those bytes over first. So every refusal written
   over a request the server stopped reading -- `-ERR Protocol error` past
@@ -1364,7 +1364,7 @@ Every rule below has already been a bug.
 - **An AcceptEx socket is not a whole socket until `SO_UPDATE_ACCEPT_CONTEXT`**, the
   mirror of the `SO_UPDATE_CONNECT_CONTEXT` `IocpConnector` already sets. Without it
   `shutdown` fails `WSAENOTCONN`, and `ShutdownWrite` ignores its result, so until
-  [#1556](https://github.com/LASTRADA-Software/fastcached/issues/1556) every socket
+  [#1556](https://github.com/LASTRADA-Software/pace/issues/1556) every socket
   `IocpListener` accepted half-closed as a silent no-op: no FIN, and writes went on
   succeeding. Best-effort rather than a failed accept, because a failed accept ends an
   accept loop over a socket that still reads and writes. Found by pinning the in-memory
@@ -1536,7 +1536,7 @@ Every rule below has already been a bug.
   that reactor STOPPED** — `IReactor::TeardownIsSerialisedWithDispatch()`, which is
   `!Running() || IsOnWorkerThread()`. Clearing a pending awaitable anywhere else races
   the completion dispatch that would read it.
-  [#668](https://github.com/LASTRADA-Software/fastcached/issues/668) landed the
+  [#668](https://github.com/LASTRADA-Software/pace/issues/668) landed the
   predicate, `Detail::AssertTeardownIsSerialisedWithDispatch` and the must-die
   `reactor-teardown-canary`; **it did not land a rule here, and that is the reason
   this entry exists** — the constraint was expressed only in code, so it fired for
@@ -1551,7 +1551,7 @@ Every rule below has already been a bug.
     last loop decrements its own counter *before* calling `NodeIoLoop::NoteLoopFinished()`,
     and `Stop()` only sets a flag and posts a wakeup, so `Running()` stays true until
     `Run()` returns. `~FrameEndpoint` destroyed its listener inside exactly that gap
-    ([#840](https://github.com/LASTRADA-Software/fastcached/issues/840)).
+    ([#840](https://github.com/LASTRADA-Software/pace/issues/840)).
   - **Posting the teardown and waiting for it is the tempting fix and it hangs on the
     ordinary case.** A node runs ONE framed surface, so the endpoint being dropped is
     usually the last loop: the reactor is already stopping, the posted task is never
@@ -1562,7 +1562,7 @@ Every rule below has already been a bug.
     descriptor, which `Shutdown()` already closed) lives as long as the loop.
   - **Its one observer was `Windows-cl-debug`, which does not gate**, and it fired
     intermittently in a different `FrameEndpoint_test` case each run
-    ([#737](https://github.com/LASTRADA-Software/fastcached/issues/737)) — which is
+    ([#737](https://github.com/LASTRADA-Software/pace/issues/737)) — which is
     what a race looks like when every case shares one teardown. **Reproduced on
     Linux** by adding the shared assertion to `~EpollListener` and delaying
     `EpollReactor::RunLoop()`'s return by 200 ms: `[frame]` aborted **20 of 20** runs
@@ -1574,7 +1574,7 @@ Every rule below has already been a bug.
     which is what gives the class an observer on every leg instead of one that does
     not gate. It could not be added until both owners that broke it were fixed --
     `~FrameEndpoint` (#840) and `RaftPeerServer::Shutdown`
-    ([#885](https://github.com/LASTRADA-Software/fastcached/issues/885)) -- and the
+    ([#885](https://github.com/LASTRADA-Software/pace/issues/885)) -- and the
     proof that it is a GUARD rather than decoration is that it has been watched
     refusing: with #885 alone neutered, `cluster-e2e` aborts 134 and the whole suite
     is green again with it restored.
@@ -1601,7 +1601,7 @@ Every rule below has already been a bug.
   timer heap and the submit queue exactly where they were, and both were destroyed as
   containers of non-owning `std::coroutine_handle<>`. Every frame parked at that moment,
   and everything reachable from it, leaked with no diagnostic
-  ([#1025](https://github.com/LASTRADA-Software/fastcached/issues/1025)). LeakSanitizer
+  ([#1025](https://github.com/LASTRADA-Software/pace/issues/1025)). LeakSanitizer
   reports it as an **indirect-only** set -- not an oddity, a signature: nothing in the
   set is reachable from a root, because a `Task` chain refers to itself through its own
   continuations.
@@ -1684,7 +1684,7 @@ Every rule below has already been a bug.
     was filed for: a reused descriptor number answering yes for the wrong reason would be
     `EINVAL`, and nothing here opens a descriptor between those closes and the member
     destruction that follows them
-    ([#1054](https://github.com/LASTRADA-Software/fastcached/issues/1054)).
+    ([#1054](https://github.com/LASTRADA-Software/pace/issues/1054)).
   - **The case it replaces could not fail because it was written against the DOUBLE**,
     and the transferable part is not *use a real reactor*. `TestReactor` owns no
     descriptors, so it has no later moment differing from the earlier one and the single
@@ -1724,7 +1724,7 @@ Every rule below has already been a bug.
   `IExecutor::Submit(ParkedWork)`, so through an `IReactor&` -- which is what every
   parking site in this tree holds -- only the BORROWING overload existed. The seven
   `Submit(handle)` sites of
-  [#1041](https://github.com/LASTRADA-Software/fastcached/issues/1041) did not neglect to
+  [#1041](https://github.com/LASTRADA-Software/pace/issues/1041) did not neglect to
   hand ownership over: **they could not**, and the call each of them wrote bound to the
   overload that drops what it is given. `Schedule` declares both, which is precisely why
   `SleepUntil` could hand ownership over and nothing that submits could -- one interface,
@@ -1822,7 +1822,7 @@ Every rule below has already been a bug.
   point `self` is the awaitable living in the awaiting coroutine's frame, not this
   local"* -- and `InMemoryListener::Accept` two hundred lines away did
   `_pendingAwaitable = &awaitable;` instead
-  ([#734](https://github.com/LASTRADA-Software/fastcached/issues/734)). Both `Close`
+  ([#734](https://github.com/LASTRADA-Software/pace/issues/734)). Both `Close`
   and `TryCompletePendingAccept` then completed through it. `SetSuspendCallback` is
   the seam that makes the right answer the only reachable one, which is why every
   other awaitable in that file uses it.
@@ -1883,7 +1883,7 @@ Every rule below has already been a bug.
   `EpollSocket::WaitReadable` tries `recv(MSG_PEEK)` before either reaches
   `ClaimReadSlot`, so whichever call would have claimed an occupied slot returns early
   the moment there is anything to read. Measured while reproducing
-  [#755](https://github.com/LASTRADA-Software/fastcached/issues/755): a fixture that
+  [#755](https://github.com/LASTRADA-Software/pace/issues/755): a fixture that
   sent one more command after `UNSUBSCRIBE` PASSED against the unfixed tree, and the
   same fixture with the wire left quiet aborted in `ClaimReadSlot` every time. **Keep
   the wire silent and let the parks happen**, or the case is green for the same reason
@@ -1905,7 +1905,7 @@ Every rule below has already been a bug.
   drops the parked awaitable: that coroutine is never resumed and never freed, with
   no assertion, no error and no log, and the leak is proportional to traffic on
   whatever path did it
-  ([#663](https://github.com/LASTRADA-Software/fastcached/issues/663)). The one
+  ([#663](https://github.com/LASTRADA-Software/pace/issues/663)). The one
   correct statement of the discipline in this tree was a comment in `RedisResp.cpp`
   about that file's own watcher -- so somebody writing the next `WaitReadable` user
   read `ISocket::WaitReadable`, which documented what the call does and said nothing
@@ -1964,7 +1964,7 @@ Every rule below has already been a bug.
 - **The WRITE slot is the same rule, and it is enforced the same way.** One write op
   per socket per direction, so arming a `Write` over a parked one drops that coroutine
   exactly as #663's read side does. `Detail::ClaimWriteSlot` (`Net/WriteSlot.hpp`,
-  [#893](https://github.com/LASTRADA-Software/fastcached/issues/893)) folds the claim
+  [#893](https://github.com/LASTRADA-Software/pace/issues/893)) folds the claim
   and the `assert` into one expression, for the reason the read side gives: a guard
   folded INTO the operation is self-enforcing, and one called alongside it needs a
   scan. It ends the process in every build since core-cpp 0.3.0 (Debug-only before), and
@@ -1984,7 +1984,7 @@ Every rule below has already been a bug.
     that objected to every write would pass a refusal-only gate and surface days later
     as a different defect. That canary did not exist when `WriteSlot.hpp` first claimed
     in its own doc comment that it did, which is
-    [#1218](https://github.com/LASTRADA-Software/fastcached/issues/1218).
+    [#1218](https://github.com/LASTRADA-Software/pace/issues/1218).
   - **What is still NOT enforced** is that a new helper can simply name `Loop`: the
     scan behind `EndpointWriterTable` cannot say which FUNCTION a call sits in without
     parsing bodies, so that half stays a refusal by ROW, which a reviewer sees, rather
@@ -1995,7 +1995,7 @@ Every rule below has already been a bug.
   only thing that could take a parked wait back was `Close()` -- so the caller-side
   discipline above had no spelling for *abandon* short of tearing the connection down.
   `RunBlockingRead` is the caller that could not follow it
-  ([#710](https://github.com/LASTRADA-Software/fastcached/issues/710)): it armed a
+  ([#710](https://github.com/LASTRADA-Software/pace/issues/710)): it armed a
   fresh readability watch per loop pass and cancelled none, so every pass that ended
   with the previous trampoline parked dropped that coroutine, and the blocking read's
   own exit left one for the connection loop's next `Read` to drop. One frame plus its
@@ -2038,7 +2038,7 @@ Every rule below has already been a bug.
     completion is dequeued, a LATER turn, so `IocpSocket` retires the waiter inline and
     stands the whole operation NODE down -- `Op::self` keeps it alive for the kernel --
     while the next read gets a fresh one.
-    [#884](https://github.com/LASTRADA-Software/fastcached/issues/884) was leaving the
+    [#884](https://github.com/LASTRADA-Software/pace/issues/884) was leaving the
     waiter in place instead, and it was worse than the leak it looks like: the next
     `Read` zeroes `OVERLAPPED::Internal`, `IocpReactor` reads the operation's error out
     of exactly that field, so the abort dispatched as `err == 0, bytes == 0` -- a
@@ -2066,7 +2066,7 @@ Every rule below has already been a bug.
   backends, a zero-length `WSARecv` completing with `bytesReceived == 0`,
   `InMemorySocket::TryPull` pulling nothing. So a caller reaching `Read` with an
   empty span was told its peer closed
-  ([#838](https://github.com/LASTRADA-Software/fastcached/issues/838)) -- **the one
+  ([#838](https://github.com/LASTRADA-Software/pace/issues/838)) -- **the one
   way this interface can still make the exact false claim the EOF rule above exists
   to stop anyone making by accident.** An off-by-one in a `subspan(got)`
   accumulation loop, or a decorator narrowing a chunk to zero, and the loop
@@ -2158,7 +2158,7 @@ Every rule below has already been a bug.
       doubles to write `{}` with no reason beside it, which is *forgot* spelled in
       the vocabulary of *decided*: `RefuseWithoutCounter`'s own argument, pointed at
       the proposal that invoked it. The scan is
-      [#892](https://github.com/LASTRADA-Software/fastcached/issues/892).
+      [#892](https://github.com/LASTRADA-Software/pace/issues/892).
   - **And a canary watching one site is not coverage of six**, which is the trap an
     additive guard sets and a folded one does not. **A canary aborts at the FIRST
     violation, so it watches ONE site whatever it picks -- and which site is an
@@ -2243,7 +2243,7 @@ Every rule below has already been a bug.
   - **It happened twice, and the second time nobody was warned either.**
     `CompileResult` and `CodecEnvelope` in `CompileCacheWire.hpp` were the same
     shape -- returned by value from a decoder, borrowing what they decoded -- and
-    neither name said so ([#366](https://github.com/LASTRADA-Software/fastcached/issues/366)).
+    neither name said so ([#366](https://github.com/LASTRADA-Software/pace/issues/366)).
     `CompileResult` reached four borrowing members before anyone counted; #280 added
     the fourth.
 
@@ -2281,7 +2281,7 @@ Every rule below has already been a bug.
   - **It happened a THIRD time, and the per-type question is a CONJUNCTION.**
     `Distributed::CallerContext::peerId` was a `std::string_view` in a type whose
     name promised nothing
-    ([#395](https://github.com/LASTRADA-Software/fastcached/issues/395)). Ask both
+    ([#395](https://github.com/LASTRADA-Software/pace/issues/395)). Ask both
     halves -- does every consumer read it in scope, AND does something depend on this
     not copying -- because one clause false is not a tie. This type satisfied the
     first, and measuring the second killed it: the figures live on `CallerContext`
@@ -2342,7 +2342,7 @@ Every rule below has already been a bug.
   exactly as the POSIX path does — `--threads N` is N independent single-threaded
   reactors each owning its own port, never N threads sharing one.
   - **`AGENT.md` claimed the opposite until
-    [#896](https://github.com/LASTRADA-Software/fastcached/issues/896), and that is the
+    [#896](https://github.com/LASTRADA-Software/pace/issues/896), and that is the
     reason this bullet exists rather than only the corrected sentence.** A wrong
     sentence in `AGENT.md` is worse than a stale one, twice over: it is the document a
     session reads FIRST and is told to obey, so it *licenses* the defect — a reader

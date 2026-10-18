@@ -11,11 +11,11 @@
 # Nothing connected the two. `compile-cache-testclient` -- `PACE_BUILD_TESTCLIENT`
 # OFF by default, no `install()` rule, in no package -- sat on that page as the third
 # peer of `pace-cc` and `pace-node` and was published to users at
-# `/fastcached/tools/compile-cache-testclient/` for months
-# ([#1030](https://github.com/LASTRADA-Software/fastcached/issues/1030)). It was moved
+# `/pace/tools/compile-cache-testclient/` for months
+# ([#1030](https://github.com/LASTRADA-Software/pace/issues/1030)). It was moved
 # to `Internals`, where its sibling `pace-bench` already lived. This is the guard
 # that was missing, filed as
-# [#1035](https://github.com/LASTRADA-Software/fastcached/issues/1035).
+# [#1035](https://github.com/LASTRADA-Software/pace/issues/1035).
 #
 # ## Why a sentence was not enough
 #
@@ -58,7 +58,7 @@
 # Every scan here fails CLOSED. Two empty lists agree perfectly, so a scan whose file
 # moved would otherwise report a clean tree in exactly the voice of a correct one --
 # `node-config-reference` already refuses that way, for the same reason
-# ([#492](https://github.com/LASTRADA-Software/fastcached/issues/492): a list is exact
+# ([#492](https://github.com/LASTRADA-Software/pace/issues/492): a list is exact
 # about what it knows and silent about what it does not, and silence reads identically
 # to complete coverage).
 #

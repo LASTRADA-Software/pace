@@ -848,7 +848,7 @@ TEST_CASE("Every dispatch verb round-trips its fields", "[wire]")
         // `-fdebug-prefix-map` rules -- clang takes `DW_AT_name` from the input file
         // path, so without it a dispatched object records the worker's scratch
         // directory -- and the header went on saying "the base name only" for months
-        // afterwards ([#907](https://github.com/LASTRADA-Software/fastcached/issues/907)).
+        // afterwards ([#907](https://github.com/LASTRADA-Software/pace/issues/907)).
         // So the wire test was exercising a value shape the wire no longer carries.
         //
         // **The `!=` arm is the assertion, not decoration.** A round trip alone passes

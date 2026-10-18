@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /// What authenticating a Raft peer frame costs
-/// ([#1308](https://github.com/LASTRADA-Software/fastcached/issues/1308),
-/// [#178](https://github.com/LASTRADA-Software/fastcached/issues/178)).
+/// ([#1308](https://github.com/LASTRADA-Software/pace/issues/1308),
+/// [#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 ///
 /// Every frame on a proven connection is sealed by the sender and opened by the receiver: one
 /// HMAC-SHA256 each, under the session's own key, over the frame's position, its header and its

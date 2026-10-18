@@ -432,7 +432,7 @@ TEST_CASE("every setting a file can carry reaches the configuration exactly as i
     // same code, or both accept with the same configuration and the same provenance.
     // Agreement alone would pass a table that refused everything, which is what the
     // accepted sample is for.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-file-argv-parity" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-file-argv-parity" };
 
     auto keyed = std::size_t { 0 };
     for (auto const& spec: CliOptions())
@@ -508,7 +508,7 @@ TEST_CASE("a key no option row declares is refused, and so is every key a releas
     // The retired keys are the sharper half: `listeners` is where the daemon's endpoints
     // lived until they became `listen:` and `listen_tls:`, and a file still naming it
     // must be told so at start rather than serve the defaults.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-unknown-keys" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-unknown-keys" };
     constexpr auto keys = std::to_array<std::string_view>({
         "prot",
         "--port",

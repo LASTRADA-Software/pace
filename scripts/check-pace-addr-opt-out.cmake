@@ -9,7 +9,7 @@
 # and decided it from `if("$ENV{PACE_ADDR}" STREQUAL "")` — true for an unset
 # name and for an empty one alike, so `export PACE_ADDR=` was folded straight
 # back into the default and kept caching
-# ([#372](https://github.com/LASTRADA-Software/fastcached/issues/372)).
+# ([#372](https://github.com/LASTRADA-Software/pace/issues/372)).
 #
 # ## Why a pure function rather than a configure
 #

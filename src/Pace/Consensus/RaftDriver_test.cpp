@@ -892,7 +892,7 @@ TEST_CASE("CurrentProgress reports the role and the leader, under the same lock"
 {
     // `CurrentProgress` is the ONE read anything outside this driver has of what a
     // node believes about its own cluster
-    // ([#435](https://github.com/LASTRADA-Software/fastcached/issues/435)), and until
+    // ([#435](https://github.com/LASTRADA-Software/pace/issues/435)), and until
     // it carried these two it could not answer the question at all: a member set and
     // a commit index say nothing about whether this node is campaigning or who it
     // follows.

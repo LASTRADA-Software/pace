@@ -25,7 +25,7 @@ the field it expected and continues. Refusing the older version outright is
 sent. A loud, immediate, named refusal is the better failure.
 
 Version 9 is such a step: it adds the live-stats stream `pacectl live-stats`
-subscribes to ([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)), and
+subscribes to ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)), and
 every node, every `pace-kv` serving `0xFC`, every `pace-cc` and every
 `pacectl` has to move to it together.
 

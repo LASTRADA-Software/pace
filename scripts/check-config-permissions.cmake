@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.28)
 # is the only place the mode can be set. Those are two files in two directories
 # with nothing connecting them, which is how the packaging shipped a world-readable
 # `requirepass` location for as long as it did
-# ([#861](https://github.com/LASTRADA-Software/fastcached/issues/861)).
+# ([#861](https://github.com/LASTRADA-Software/pace/issues/861)).
 #
 # DERIVED from the asset table rather than restating it: a config row added later is
 # checked without a second author. And it refuses when either scan matches nothing,

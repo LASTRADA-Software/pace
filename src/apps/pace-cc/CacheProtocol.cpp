@@ -97,7 +97,7 @@ namespace
     /// reader, and it always consumes a whole frame.
     /// **A progress frame is stepped over rather than returned**, which is what makes
     /// `Status::Progress` a liveness signal instead of a second kind of answer
-    /// ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)). Zero or
+    /// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)). Zero or
     /// more of them precede exactly one terminal status, so this still consumes
     /// precisely one answer per request and the pipelining rule above is untouched.
     ///

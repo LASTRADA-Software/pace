@@ -110,11 +110,11 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x21` | worker-compiler-unclassified | The worker ran the program its own `--toolchain` names and cannot tell what it is, so it cannot build a command line for it. Split from `worker-spawn-failed`, which says the program could not be run at all. |
 | `0x22` | *(reserved)* | Never sent. Was `enrollment-closed`, the answer a closed enrollment window gave; since zero-config formation a joiner's request is always recorded and the approval is the gate. The number is burnt. |
 | `0x23` | enrollment-full | The pending list is full, so the request was not recorded. A refusal rather than an eviction, so a flood cannot push the real joiner off the list the operator is reading. |
-| `0x24` | *(reserved)* | Never sent. Was `enrollment-already-collected`, which made a key hand-over spendable once; an approved enrollment no longer carries a secret ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)). The number is burnt. |
+| `0x24` | *(reserved)* | Never sent. Was `enrollment-already-collected`, which made a key hand-over spendable once; an approved enrollment no longer carries a secret ([#178](https://github.com/LASTRADA-Software/pace/issues/178)). The number is burnt. |
 | `0x25` | unknown-fleet-selector | A fleet read named a section or a range this build does not serve. The message lists the ones it does. |
 | `0x26` | node-proof-unchallenged | A node proof arrived with no challenge outstanding on this connection — never asked for one, or already spent it. The exchange was got wrong, so ask for a challenge; not a statement about the key. |
 | `0x27` | node-proof-rejected | A node proof's signature did not verify under the identity key it presented. One answer for every way that happens, since naming the field would be an oracle, and asked **before** the roster is consulted. |
-| `0x28` | *(reserved)* | Never sent. Was `roster-expired`, named for the certified roster's lapse ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)); what it still meant is `grant-unverifiable`. The number is burnt. |
+| `0x28` | *(reserved)* | Never sent. Was `roster-expired`, named for the certified roster's lapse ([#178](https://github.com/LASTRADA-Software/pace/issues/178)); what it still meant is `grant-unverifiable`. The number is burnt. |
 | `0x29` | node-key-unknown | A node proof verified, under a key this cluster does not hold for the id it named: a machine nobody admitted, or one presenting a key other than the one admitted under its id. The remedy is an admission, not a new key. |
 | `0x2a` | node-key-revoked | A node proof verified under a key the cluster has **revoked** — the forgotten machine itself. The connection is kept and marked, and every later verb on it is refused as the forgotten machine's, from any address, this machine's included. |
 | `0x2b` | node-identity-required | A verb only a machine that **proved** its identity may send — REGISTER, NODE-ANNOUNCE, HEARTBEAT, WITHDRAW — arrived on a connection that has not, loopback included. A machine ticket admits a client and never satisfies these: a ticketed connection is not sealed. |
@@ -320,7 +320,7 @@ four cluster-administration verbs (`CLUSTER-STATUS` `0x08`, `CLUSTER-SET` `0x09`
 `CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`), which the **leader** answers and
 only to a member. `COMPILE` goes to a worker on the **same** `--listen-node` port
 that carries its cache verbs and, where the node's mode serves them, the scheduler's:
-[#290](https://github.com/LASTRADA-Software/fastcached/issues/290) merged what were
+[#290](https://github.com/LASTRADA-Software/pace/issues/290) merged what were
 three ports into one `0xFC` surface, so the listener is no longer the policy. Which
 caller is admitted to which verb is a property of the **verb**, asked of the
 component that owns it, and never of the port a frame arrived on. A verb this node
@@ -368,7 +368,7 @@ directory and all. A compiler records the name of the file it was handed, so an 
 built under an invented name is gratuitously different from a locally built one — and
 clang takes that name from the *input file path* rather than from the `#line` marker,
 so a dispatched object recorded the worker's per-job scratch directory until
-[#660](https://github.com/LASTRADA-Software/fastcached/issues/660). That directory
+[#660](https://github.com/LASTRADA-Software/pace/issues/660). That directory
 carries a counter, so two dispatches of one translation unit produced two different
 objects under one cache key.
 
@@ -502,7 +502,7 @@ against a clock this one has no relationship with. The mint happened somewhere i
 that round trip, so charging the whole of it over-states the elapsed and the client
 gives up a little early rather than a little late. Taking the lifetime whole made it
 wait past its own grant by roughly a round trip
-([#1122](https://github.com/LASTRADA-Software/fastcached/issues/1122)), which was
+([#1122](https://github.com/LASTRADA-Software/pace/issues/1122)), which was
 harmless only because the worker declines an outrun job first.
 
 ### Bulk fields carry a codec envelope
@@ -528,7 +528,7 @@ since it carries a whole translation unit.
 
 A machine that **joins the fleet** — registers a worker, announces itself, heartbeats,
 withdraws — proves which machine it is before it sends any of those verbs, and every frame
-after that proof is sealed ([#178](https://github.com/LASTRADA-Software/fastcached/issues/178)).
+after that proof is sealed ([#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 A client asking for a lease or a cache entry runs no handshake and pays no round trip for
 any of this. A remote one proves its machine with a machine ticket instead (`AUTH`, below);
 only a loopback caller is admitted by its address, and `--fleet-open` admits everyone.
@@ -796,7 +796,7 @@ an entry no matter how many differently-rooted machines produce it.
     Unchecked, a **nine-byte** STORE payload declaring `0xFFFFFFFF` regions asked for
     roughly 172 GB — reachable on the daemon's STORE path, and from a worker's reply
     to the launcher
-    ([#267](https://github.com/LASTRADA-Software/fastcached/issues/267)). Validating
+    ([#267](https://github.com/LASTRADA-Software/pace/issues/267)). Validating
     the count is necessary and not sufficient: a validated count is still an amplifier
     whenever the in-memory element is bigger than its wire minimum, so any capacity a
     decoder reserves is sized from something *it* owns — the bytes already in hand, or

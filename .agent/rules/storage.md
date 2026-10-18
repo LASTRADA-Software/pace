@@ -443,7 +443,7 @@ system error and then discarded it, so the refusal reached a log as
 `code=14 errno=0 ctx=FilePageStore::Open` — `InUse`, and nothing about which errno decided it.
 
 That one missing integer is the whole cost of
-[#1507](https://github.com/LASTRADA-Software/fastcached/issues/1507). `InUse` asserts *somebody
+[#1507](https://github.com/LASTRADA-Software/pace/issues/1507). `InUse` asserts *somebody
 holds this file*, and on the failure that opened the ticket **that claim was false**: 31 of 32
 test processes had drawn the same filename, because `std::random_device` answers zero for 57% of
 draws on that host, so `flock` was refusing exactly as designed. Diagnosing it meant patching
@@ -557,7 +557,7 @@ not support. It undercounts, which is the honest direction.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1633](https://github.com/LASTRADA-Software/fastcached/issues/1633)** — under Fsync, a
+- **[#1633](https://github.com/LASTRADA-Software/pace/issues/1633)** — under Fsync, a
   meta that `CommitMetaLocked` has written whose fsync then FAILS leaves `_lastDurableSlot`
   where it was, and `CowTree::AbortTxn` returns that transaction's pages to `_freeList`. The
   next commit's list pages and data pages may then be written into pages that the possibly

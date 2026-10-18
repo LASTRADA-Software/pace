@@ -202,7 +202,7 @@ class RaftPeerServer
     ///
     /// **The closes are POSTED onto the reactor, never performed here**, and that
     /// is not caution
-    /// ([#885](https://github.com/LASTRADA-Software/fastcached/issues/885)). With
+    /// ([#885](https://github.com/LASTRADA-Software/pace/issues/885)). With
     /// pace-kv's own reactor, `Close` on epoll and kqueue completed a parked read by
     /// resuming its coroutine **inline**, so closing from the stopping thread ran each
     /// per-connection task there -- while the reactor thread was still driving the

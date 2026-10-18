@@ -1,4 +1,4 @@
-# pace-kv benchmark suite
+# Pace benchmark suite
 
 A reproducible, cross-platform (Windows / Linux / macOS) benchmark that builds
 two git refs of pace-kv, drives them across all four wire protocols, and

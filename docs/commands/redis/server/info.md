@@ -21,7 +21,7 @@ A bulk string with three sections and a fixed, minimal field set:
 ```text
 # Server
 pace_version:<version>
-redis_version:6.0.0-fastcached
+redis_version:6.0.0-pace
 # Memory
 used_memory:<bytes>
 maxmemory:<byte limit>

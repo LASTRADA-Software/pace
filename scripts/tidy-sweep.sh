@@ -1872,12 +1872,12 @@ C:/Temp/src\\Pace/${hdrInc}:4:1: error: variable is non-const [cppcoreguidelines
     # The generated-sources step asks for exactly the object-order phonies, once each,
     # and nothing else: not `all`, which would compile the tree, and not an object.
     Expect "the object-order phony targets are selected, once each, and nothing else" \
-           "cmake_object_order_depends_target_FastCache cmake_object_order_depends_target_unicode_ucd" \
+           "cmake_object_order_depends_target_Pace cmake_object_order_depends_target_unicode_ucd" \
            "$(ObjectOrderTargets "$(printf '%s\n' \
                'cmake_object_order_depends_target_unicode_ucd: phony' \
                'all: phony' \
                'CMakeFiles/Pace.dir/src/Pace/Core/Base64.cpp.o: CXX_COMPILER__Pace_unscanned_Debug' \
-               'cmake_object_order_depends_target_FastCache: phony' \
+               'cmake_object_order_depends_target_Pace: phony' \
                'cmake_object_order_depends_target_unicode_ucd: phony')" | tr '\n' ' ' | sed 's/ $//')"
     Expect "a listing with no object-order phony selects nothing, which the step refuses" \
            "" "$(ObjectOrderTargets "$(printf 'all: phony\nclean: CLEAN\n')")"

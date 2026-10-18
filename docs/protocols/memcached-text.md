@@ -49,9 +49,9 @@ verbatim and returns on `get`.
     declaring more elements than its bytes can supply is refused, and the verb answers
     `-ERR storage failure` rather than the daemon attempting the allocation — for a
     set's member count
-    ([#271](https://github.com/LASTRADA-Software/fastcached/issues/271)) and for each of
+    ([#271](https://github.com/LASTRADA-Software/pace/issues/271)) and for each of
     a stream's five counts, which previously clamped the reservation instead of
-    refusing it ([#269](https://github.com/LASTRADA-Software/fastcached/issues/269)).
+    refusing it ([#269](https://github.com/LASTRADA-Software/pace/issues/269)).
 
     Every other flags value is stored and returned untouched.
 

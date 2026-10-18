@@ -374,7 +374,7 @@ TEST_CASE("An identity the generator cannot draw is refused by name, and nothing
 TEST_CASE("The state directory has one author, and the default names no identity", "[node][identity]")
 {
     // `ConsensusTier::Start` was the second author of this default until #1024, and it
-    // had to change with the identity: the old one was `fastcache-cluster/<node-id>`,
+    // had to change with the identity: the old one was `pace-cluster/<node-id>`,
     // and an identity READ OUT of the state directory cannot name the directory it is
     // read from. The default is the platform's now, resolved at startup -- into scratch
     // here, through the scripted probe -- and it names no identity either.

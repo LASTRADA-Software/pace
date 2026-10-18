@@ -328,7 +328,7 @@ enum class PathClass : std::uint8_t
 /// LIBRARY and this one is in the launcher, and the constant is a property of the
 /// stored-value contract rather than of either binary. `PathCanon::SplitLine`
 /// carried its own copy of the same literal until
-/// [#879](https://github.com/LASTRADA-Software/fastcached/issues/879) -- three
+/// [#879](https://github.com/LASTRADA-Software/pace/issues/879) -- three
 /// spellings of one wire constant with nothing making them agree. See
 /// `PathCanon::IncludeNoteMarker` for why the stored form is normalized to it.
 inline constexpr std::string_view IncludeNoteMarker = PathCanon::IncludeNoteMarker;
@@ -348,7 +348,7 @@ inline constexpr std::string_view IncludeNoteMarker = PathCanon::IncludeNoteMark
 /// a hypothetical in either direction: a mid-line rule is tripped by
 /// `char const* s = "Note: including file: x";`, and the leading-blank rule this
 /// carried until
-/// [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270) is tripped
+/// [#1270](https://github.com/LASTRADA-Software/pace/issues/1270) is tripped
 /// by any indented raw string literal whose continuation line begins with the
 /// marker — which is what a C++ source line inside a function looks like.
 ///

@@ -51,7 +51,7 @@
 #
 # **It checks EVERY binary in `SubjectTable` below, not just the node.** This was written
 # for `pace-node` (#1026) and the daemon joined at
-# [#1070](https://github.com/LASTRADA-Software/fastcached/issues/1070), which is why the
+# [#1070](https://github.com/LASTRADA-Software/pace/issues/1070), which is why the
 # file and its two ctest entries lost their node-shaped names: a check whose name has
 # stopped describing its subject is a defect here rather than cosmetics.
 #
@@ -114,7 +114,7 @@ readonly TableArrayMarker="std::to_array<OptionSpec"
 # and the option table that is the truth for it.
 #
 # **A TABLE rather than one `Subject`, which is what #1070 is**
-# ([#1070](https://github.com/LASTRADA-Software/fastcached/issues/1070)). #1026 built this
+# ([#1070](https://github.com/LASTRADA-Software/pace/issues/1070)). #1026 built this
 # for the node and hard-coded one binary, and the daemon's matrix -- `docs/snippets/reload-matrix.md`,
 # included into two pages -- then stated a set for `CliOptions()` with nothing deriving it.
 # The marker mechanism was designed for exactly this: a second binary is a row here plus a
@@ -172,7 +172,7 @@ refuse() {
 # cannot express it.
 #
 # **A row ends where the next one BEGINS, and that is a correction rather than a
-# tidy-up** ([#1070](https://github.com/LASTRADA-Software/fastcached/issues/1070)). This
+# tidy-up** ([#1070](https://github.com/LASTRADA-Software/pace/issues/1070)). This
 # used to terminate a row on `/^        },$/` -- a closing brace alone at eight spaces,
 # which is how `NodeConfig.cpp` lays most of its rows out. `CliParser.cpp` uses the
 # compact style, where the open brace shares the `.primary` line and the row closes with a

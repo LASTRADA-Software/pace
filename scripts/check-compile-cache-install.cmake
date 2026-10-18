@@ -107,7 +107,7 @@ file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 # same interior layout a real release has, holding a launcher that answers
 # --version and nothing else. A script rather than a compiled binary, because
 # what is under test is the plumbing around the file, not the file.
-set(stem "fastcached-${mirrorVersion}-${platform}")
+set(stem "pace-${mirrorVersion}-${platform}")
 set(payloadRoot "${PACE_SCRATCH_DIR}/payload")
 get_filename_component(memberDir "${payloadRoot}/${stem}/${member}" DIRECTORY)
 file(MAKE_DIRECTORY "${memberDir}")
@@ -116,7 +116,7 @@ file(WRITE "${payloadRoot}/${stem}/${member}"
 file(CHMOD "${payloadRoot}/${stem}/${member}"
      PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
-set(mirrorDir "${PACE_SCRATCH_DIR}/mirror/fastcached-mirror/releases/download/v${mirrorVersion}")
+set(mirrorDir "${PACE_SCRATCH_DIR}/mirror/pace-mirror/releases/download/v${mirrorVersion}")
 file(MAKE_DIRECTORY "${mirrorDir}")
 # Deliberately `cmake -E tar` rather than `file(ARCHIVE_CREATE)`, and the reason
 # is the interior layout. A real release tarball holds `${stem}/...` relative
@@ -151,7 +151,7 @@ set(arguments
     "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY"
     "-DPACE_AUTO_INSTALL=ON"
     "-DPACE_AUTO_INSTALL_DIR=${stageDir}"
-    "-DPACE_AUTO_INSTALL_REPO=fastcached-mirror"
+    "-DPACE_AUTO_INSTALL_REPO=pace-mirror"
     "-DPACE_AUTO_INSTALL_VERSION=${mirrorVersion}"
     "-DPACE_AUTO_INSTALL_DOWNLOAD_BASE=file://${PACE_SCRATCH_DIR}/mirror")
 if(PACE_MAKE_PROGRAM)

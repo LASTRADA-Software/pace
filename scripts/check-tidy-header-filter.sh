@@ -126,7 +126,7 @@ src/tests/ScratchPath.hpp
 src/apps/pace-cc/Cache.hpp
 src/CowTree/Tree.hpp"
     vendored="vendor/monocypher/src/monocypher.h"
-    lane=/w/fastcached-worktrees/lane-a
+    lane=/w/pace-worktrees/lane-a
     configured="$(header_filter_config .clang-tidy HeaderFilterRegex)"
     Expect "the configured filter takes every spelling and nothing third-party" 0 "ok 4" \
         "$configured" "$lane" "$planted" "$vendored"

@@ -974,7 +974,7 @@ TEST_CASE("NodeConfig: an install is judged by the startup rules too", "[node][s
     // for itself: refuse where an operator is watching, not where nobody is.
     auto certWithoutKey = Installable();
     certWithoutKey.adminListen = "0.0.0.0:6680";
-    certWithoutKey.tlsCertFile = "/etc/fastcache/server.pem";
+    certWithoutKey.tlsCertFile = "/etc/pace/server.pem";
 
     // Passes the install table, which knows nothing about TLS.
     REQUIRE_FALSE(NodeServiceRejection(certWithoutKey).has_value());
@@ -1030,8 +1030,8 @@ TEST_CASE("NodeConfig: a registration that can work is still accepted", "[node][
     // Including with the surfaces the startup table governs actually configured.
     auto full = Installable();
     full.adminListen = "0.0.0.0:6680";
-    full.tlsCertFile = "/etc/fastcache/server.pem";
-    full.tlsKeyFile = "/etc/fastcache/server.key";
+    full.tlsCertFile = "/etc/pace/server.pem";
+    full.tlsKeyFile = "/etc/pace/server.key";
     CHECK(NodeInstallRejection(full) == TlsVerdictOfThisBuild());
 }
 
@@ -1159,7 +1159,7 @@ TEST_CASE("NodeConfig: the worker's registration survives its own parser", "[nod
     auto const spec = MakeNodeServiceSpec(
         std::filesystem::path { "pace-node" }, Installable(), Testing::InstallerPathProbe());
 
-    // Since [#396](https://github.com/LASTRADA-Software/fastcached/issues/396) the
+    // Since [#396](https://github.com/LASTRADA-Software/pace/issues/396) the
     // worker NAMES an application and accepts one default rather than none. Those
     // used to be a single answer, so the only safe thing it could say was nothing
     // -- at the cost of the system-scope `--config=` default and the install-time
@@ -1193,7 +1193,7 @@ TEST_CASE("NodeConfig: the worker's registration survives its own parser", "[nod
 
 TEST_CASE("NodeConfig: a service running consensus with no --cluster-dir is installed", "[node][service]")
 {
-    // It used to be refused: consensus state defaulted to `fastcache-cluster/<node-id>` relative to
+    // It used to be refused: consensus state defaulted to `pace-cluster/<node-id>` relative to
     // the working directory, which is C:\Windows\System32 for the SCM and / for launchd. The
     // default is the platform's machine-wide state directory now, resolved by the service as the
     // process it runs as, so there is no relative path left to refuse.
@@ -1650,7 +1650,7 @@ TEST_CASE("NodeConfig: the consensus switch is --listen-raft, not --node-id", "[
 TEST_CASE("NodeConfig: the packaged socket-activated worker starts", "[node][policy]")
 {
     // **The configuration that took the packaging jobs red on master**
-    // ([#770](https://github.com/LASTRADA-Software/fastcached/issues/770)), written out
+    // ([#770](https://github.com/LASTRADA-Software/pace/issues/770)), written out
     // exactly as `.github/workflows/build.yml` writes it into the file the unit's
     // ExecStart names:
     //
@@ -1751,7 +1751,7 @@ TEST_CASE("NodeConfig: --advertise naming this machine at a port it does not ser
 {
     // **The startup reachability rules judged the advertised HOST and never its port**,
     // so a node could tell every client to dial a port nothing on it listens on and
-    // start cleanly ([#594](https://github.com/LASTRADA-Software/fastcached/issues/594)).
+    // start cleanly ([#594](https://github.com/LASTRADA-Software/pace/issues/594)).
     // In the documented layout that sends every dispatched compile to 6674 -- the shared
     // `pace-kv` cache daemon -- while the registration succeeds and every counter
     // reads normally.
@@ -4480,7 +4480,7 @@ TEST_CASE("NodeSecretFiles: every path-valued flag is classified, secret or not"
     // `NodeOptions()` has nine of them today, five secret and four public.
     //
     // The join itself is `Testing::ClassifyPathFlags`, shared with the daemon's twin
-    // since [#864](https://github.com/LASTRADA-Software/fastcached/issues/864) gave
+    // since [#864](https://github.com/LASTRADA-Software/pace/issues/864) gave
     // that binary the same two tables -- one rule asked of two option tables, rather
     // than two Catch2 cases that drift on which directions they check.
     auto const secret = NodeSecretFileTable();
@@ -5163,7 +5163,7 @@ TEST_CASE("An --advertise that clients cannot dial is refused at startup", "[nod
 TEST_CASE("NodeConfig: the addresses this node DIALS are judged for shape, each by its own grammar",
           "[node][policy][dialled-address]")
 {
-    // [#968](https://github.com/LASTRADA-Software/fastcached/issues/968), the residual
+    // [#968](https://github.com/LASTRADA-Software/pace/issues/968), the residual
     // #208 left behind. `StartupPolicyRejection`'s address loop walks
     // `NodeSurfaceTable()`, and a surface is a port this process BINDS -- so every
     // address the node asks somebody ELSE about was unjudged except `--advertise`.

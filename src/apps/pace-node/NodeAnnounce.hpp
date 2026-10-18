@@ -191,7 +191,7 @@ struct HeartbeatRound
     /// A re-survey replaces `registrars` wholesale, which throws away the very thing a
     /// withdrawal needs -- the scheduler-issued `WorkerId` of the entry being dropped.
     /// So the dropped registrars are moved here instead of destroyed, and this round
-    /// retires them ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)).
+    /// retires them ([#573](https://github.com/LASTRADA-Software/pace/issues/573)).
     ///
     /// **Drained on every round, whatever each attempt answered.** A withdrawal that
     /// failed is not retried: the heartbeat expiry it is an optimisation over is
@@ -259,7 +259,7 @@ struct AnnounceOutcome
 /// being dropped, which is the one thing `Op::Withdraw` names -- so a re-survey used
 /// to leave the scheduler dispatching to a fingerprint this worker had already stopped
 /// serving until the entry aged out
-/// ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)). The dropped
+/// ([#573](https://github.com/LASTRADA-Software/pace/issues/573)). The dropped
 /// registrars are moved onto @p withdrawals instead of destroyed.
 ///
 /// **A free function rather than a lambda in `WorkerBody`, and clang-tidy is what
@@ -279,7 +279,7 @@ struct AnnounceOutcome
 /// advertises rebuilds every registrar with the SAME fingerprints, so nothing was ever
 /// retired and the scheduler kept an entry naming an address this worker no longer
 /// answers on -- handing out leases whose MAC covers it
-/// ([#1279](https://github.com/LASTRADA-Software/fastcached/issues/1279)).
+/// ([#1279](https://github.com/LASTRADA-Software/pace/issues/1279)).
 ///
 /// Derived from @p rebuilt rather than from the served map, which is what deletes the
 /// `Served` parameter: @p rebuilt IS the new set, one registrar per served fingerprint
@@ -437,7 +437,7 @@ static_assert(RecordAwaitedInterval < SchedulerUnreachableCadence);
 /// **It carries no history, and that absence is the design rather than an omission.** History
 /// is filed under the MACHINE, so it rides NODE-ANNOUNCE -- the one verb every node sends,
 /// including one that runs no worker and therefore never registers anything to hang it on
-/// ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)). Two callers of
+/// ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)). Two callers of
 /// `FleetSampler::NextHistoryBatch` would each take a batch and each advance the cursor, so the
 /// buckets would be split between two verbs and a batch taken by one and acknowledged by the
 /// other would be lost. One carrier, and it is the one that always exists.
@@ -525,7 +525,7 @@ struct ReportableAddresses
 /// `DialAndAnnounce` below and must live in exactly one place. A second loop with its own copy
 /// of those rules is the shape this repository keeps paying for, and the rules would then have
 /// two answers depending on whether the node happened to run a worker
-/// ([#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440)).
+/// ([#1440](https://github.com/LASTRADA-Software/pace/issues/1440)).
 ///
 /// So what varies is only what is SAID once a connection exists, which is this.
 class IAnnouncement

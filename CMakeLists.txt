@@ -57,7 +57,7 @@ include(GNUInstallDirs)
 #
 # This is OFF by default, including on Linux, so that the ordinary
 # `cmake --install --prefix /usr/local` keeps putting the daemon at
-# /usr/local/bin/fastcached. Defaulting it ON rebased every developer install
+# /usr/local/bin/pace-kv. Defaulting it ON rebased every developer install
 # onto <prefix>/usr/bin, which is on nobody's PATH — a successful install that
 # left `pace-kv` reporting "command not found".
 #
@@ -702,7 +702,7 @@ target_link_libraries(Pace PUBLIC core::async core::net)
 # PRIVATE: no Pace header includes a Monocypher header, so nothing that links Pace
 # compiles against it -- `Core/Ed25519.hpp` and its siblings are the seam, and `ctest -R
 # crypto-seam` refuses any other first-party file reaching past them.
-target_link_libraries(Pace PRIVATE fastcache-monocypher)
+target_link_libraries(Pace PRIVATE pace-monocypher)
 
 # Tracy is linked PUBLIC so the Tracy include dirs propagate transitively to the
 # pace-kv executable (thread naming in main.cpp). core-cpp's `core::base` links

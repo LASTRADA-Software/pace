@@ -40,7 +40,7 @@ namespace
     /// Whether @p text is exactly an unsigned integer.
     ///
     /// Used to decide whether a value is a `Number` cell, which decides whether JSON
-    /// quotes it. Strict, so `6.0.0-fastcached` stays text rather than becoming a
+    /// quotes it. Strict, so `6.0.0-pace` stays text rather than becoming a
     /// truncated 6.
     /// @param text The value text.
     /// @return The value, or nullopt.

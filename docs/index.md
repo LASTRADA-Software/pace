@@ -1,6 +1,6 @@
-# pace-kv
+# Pace
 
-pace-kv is a cache daemon that speaks four wire protocols off a
+Pace's pace-kv is a cache daemon that speaks four wire protocols off a
 single storage engine: memcached ASCII text, memcached binary,
 memcached meta (1.6+), and Redis RESP2. The protocols are detected
 automatically from the first bytes a client sends, so any one

@@ -24,7 +24,7 @@ TEST_CASE("PathKind: what exists answers for itself", "[core][path]")
     {
         // Deliberately extension-less, because the spelling rule below would say
         // otherwise: an operator who pointed a previous release at
-        // `/var/db/fastcached` and got one CoW file there must keep getting one
+        // `/var/db/pace` and got one CoW file there must keep getting one
         // file, or the next start fans out beside a cache that then reads empty.
         auto const legacy = scratch / "cache";
         std::ofstream { legacy } << "not really a CoW file";

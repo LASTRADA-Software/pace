@@ -28,7 +28,7 @@ namespace Pace
 /// at every reload — `--max-memory=8g` published as the host-derived default, and
 /// `InMemoryLruStorage::Resize` evicting down to it, with nothing in the logs
 /// naming the flag
-/// ([#622](https://github.com/LASTRADA-Software/fastcached/issues/622)).
+/// ([#622](https://github.com/LASTRADA-Software/pace/issues/622)).
 ///
 /// So this is not a startup detail: it is the *other two* sources, kept so that
 /// `AssembleEffectiveConfig` is the one place any of them is applied.

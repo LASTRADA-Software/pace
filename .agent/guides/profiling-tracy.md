@@ -71,7 +71,7 @@ Workflow — the client listens on TCP **8086**:
    `redis-benchmark -p 6674 -t set,get -n 100000`, or a quick
    `printf 'set foo 0 0 3\r\nbar\r\nget foo\r\nquit\r\n' | nc 127.0.0.1 6674`.
 
-What the instrumentation surfaces: thread rows named `fastcached-main` /
+What the instrumentation surfaces: thread rows named `pace-main` /
 `fc-worker-N` / `fc-reactor`; one frame per request; the nested zone breakdown
 `socket.read → LineReader.TryExtractLine → memcached.Handle*.dispatch →
 CacheEngine::* → ShardedStorage::* → LruStorage::* / EvictToFit → socket.write`;

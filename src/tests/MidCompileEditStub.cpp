@@ -3,7 +3,7 @@
 // A stub compiler that saves a file in the middle of one launcher invocation -- #1650's
 // reproduction, end to end.
 //
-// [#1650](https://github.com/LASTRADA-Software/fastcached/issues/1650): an editor's save that
+// [#1650](https://github.com/LASTRADA-Software/pace/issues/1650): an editor's save that
 // lands WHILE `pace-cc` compiles is a moment the launcher cannot see from outside. It took
 // its key from the content before the save and, before the fix, recorded its manifest from the
 // content after it, so the saved content became a direct HIT on the object of the content it

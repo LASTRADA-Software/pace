@@ -10,14 +10,14 @@
 # one concern, so the four presets that inherit `PEDANTIC_COMPILER=ON` from `base`
 # without turning `WERROR` on -- `clang-coverage`, `clang-asan-ubsan`, `clang-tsan`,
 # `clang-tracy` -- got the warnings and none of the suppressions
-# ([#611](https://github.com/LASTRADA-Software/fastcached/issues/611)).
+# ([#611](https://github.com/LASTRADA-Software/pace/issues/611)).
 #
 # Measured on 0db96dc8 before the fix, each preset in its OWN fresh build directory
 # with `/usr/bin/clang++` pinned by absolute path and no compiler-cache launcher:
 # **7049 `-Wc2y-extensions` warnings across 195 translation units, identically in
 # all four**, every one of them `'__COUNTER__' is a C2y extension` from Catch2's
 # `TEST_CASE`. That is the diagnostic
-# [#454](https://github.com/LASTRADA-Software/fastcached/issues/454) reported and
+# [#454](https://github.com/LASTRADA-Software/pace/issues/454) reported and
 # could not explain.
 #
 # ## Why this is a check and not a comment

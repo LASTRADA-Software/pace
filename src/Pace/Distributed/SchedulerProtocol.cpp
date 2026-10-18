@@ -102,7 +102,7 @@ std::optional<std::vector<std::byte>> SchedulerProtocol::RefusePeer(CallerContex
     // Whether the scheduler should count non-member callers in a series of its OWN --
     // the service's reason argues against mixing rather than against counting, and
     // this is the surface a credential-guessing client reaches first -- is
-    // [#592](https://github.com/LASTRADA-Software/fastcached/issues/592), which
+    // [#592](https://github.com/LASTRADA-Software/pace/issues/592), which
     // belongs in the service's table beside the existing decision.
     return Cc::RefuseWithoutCounter(
         { .code = refusal->error,

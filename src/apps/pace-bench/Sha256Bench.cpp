@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /// SHA-256 throughput per engine, which is what
-/// [#1420](https://github.com/LASTRADA-Software/fastcached/issues/1420) is a claim about.
+/// [#1420](https://github.com/LASTRADA-Software/pace/issues/1420) is a claim about.
 ///
 /// Every HMAC in this tree goes through `Sha256`: discovery proofs, lease grants, cluster
 /// signing, and on #1308's branch every Raft peer frame, sealed and opened on the reactor

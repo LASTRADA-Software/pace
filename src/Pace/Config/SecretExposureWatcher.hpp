@@ -22,7 +22,7 @@ namespace Pace
 /// #384's readability check runs at a START, and `requirepass` is `Reloadable::Yes`
 /// -- so a configuration file can **gain** a secret after startup and that path was
 /// silent in exactly the way the ticket was written to close
-/// ([#753](https://github.com/LASTRADA-Software/fastcached/issues/753)).
+/// ([#753](https://github.com/LASTRADA-Software/pace/issues/753)).
 ///
 /// **It re-asks the filesystem and compares against a REMEMBERED answer. It does not
 /// diff the two configuration snapshots, and that is the whole design.** A file's
@@ -137,7 +137,7 @@ using SecretSubjectFiles = std::function<std::vector<SecretFileSubject>(ConfigT 
 ///
 /// **A template over the configuration type**, because both binaries have this
 /// exposure and only one of them had the check
-/// ([#868](https://github.com/LASTRADA-Software/fastcached/issues/868)). #753 declined
+/// ([#868](https://github.com/LASTRADA-Software/pace/issues/868)). #753 declined
 /// to generalise it on the reading that the worker could not adopt a `Subscribe` at
 /// all; that reading was one frame too wide. `ApplyReloadRequest`'s decline is about a
 /// subscriber capturing **`WorkerBody`'s** locals -- the reloader is declared in

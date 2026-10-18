@@ -37,7 +37,7 @@
     A `pace-kv`-backed sccache is *definitionally* one cache shared by every
     checkout and every machine pointed at it, so the developer machines behind it
     are exposed even where CI is not. On MSVC and clang-cl, use
-    [`pace-cc`](https://lastrada-software.github.io/fastcached/tools/pace-cc/)
+    [`pace-cc`](https://lastrada-software.github.io/pace/tools/pace-cc/)
     instead: it rewrites a hit's paths into the consuming checkout before replaying
     them, and refuses a hit whose replayed dependency is not there — which is why
     it does not have this failure mode, and why its entries are portable across

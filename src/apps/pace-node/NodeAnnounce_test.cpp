@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What a re-survey owes the scheduler when a toolchain goes away
-// ([#573](https://github.com/LASTRADA-Software/fastcached/issues/573)) -- and what a
+// ([#573](https://github.com/LASTRADA-Software/pace/issues/573)) -- and what a
 // node owes it when the ADDRESS it is registered under moves
-// ([#1279](https://github.com/LASTRADA-Software/fastcached/issues/1279)). Two causes,
+// ([#1279](https://github.com/LASTRADA-Software/pace/issues/1279)). Two causes,
 // one rule: a registration is retired unless the new set re-registers exactly it, and
 // "exactly" is the registry's own key, `(fingerprint, endpoint)`.
 //

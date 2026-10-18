@@ -49,7 +49,7 @@ class NodeIoLoop;
 ///
 /// Every one of these was answered in the accept loop with `Wire::EncodeErrorReply`
 /// and counted nothing, which is
-/// [#447](https://github.com/LASTRADA-Software/fastcached/issues/447): the merged
+/// [#447](https://github.com/LASTRADA-Software/pace/issues/447): the merged
 /// listener refused correctly on the wire while the only thing an operator can see
 /// stayed flat.
 ///
@@ -91,7 +91,7 @@ enum class EndpointRefusal : std::uint8_t
     /// a declared payload -- is ended by the close, because the close is the only
     /// thing that ends a parked read and it is the write side gone. See
     /// `FrameServer::CloseOverdue` for why that asymmetry is the design rather than
-    /// a shortfall ([#523](https://github.com/LASTRADA-Software/fastcached/issues/523)).
+    /// a shortfall ([#523](https://github.com/LASTRADA-Software/pace/issues/523)).
     ///
     /// **Counted by the ENDPOINT, not by the surface**, which is why every responder
     /// answers it through `Cc::RefuseWithoutCounter`. The deadline is the endpoint's
@@ -451,8 +451,8 @@ class INodeProver
 /// Two facts rather than one string, and the second is why this type exists: admission used to
 /// be decided from the peer's ADDRESS alone, which is a stand-in for *this is one of our nodes*
 /// and stops being one the moment an address is not stable
-/// ([#1428](https://github.com/LASTRADA-Software/fastcached/issues/1428),
-/// [#178](https://github.com/LASTRADA-Software/fastcached/issues/178) item 1).
+/// ([#1428](https://github.com/LASTRADA-Software/pace/issues/1428),
+/// [#178](https://github.com/LASTRADA-Software/pace/issues/178) item 1).
 ///
 /// Answers one framed request.
 ///
@@ -511,8 +511,8 @@ class IFrameResponder
     /// budget. So a caller the surface was always going to refuse could still make
     /// this process allocate for it, which is the cheapest denial there is: the
     /// refusal cost exactly what serving would have
-    /// ([#285](https://github.com/LASTRADA-Software/fastcached/issues/285),
-    /// [#377](https://github.com/LASTRADA-Software/fastcached/issues/377)).
+    /// ([#285](https://github.com/LASTRADA-Software/pace/issues/285),
+    /// [#377](https://github.com/LASTRADA-Software/pace/issues/377)).
     ///
     /// **Only decisions that depend on the PEER alone belong here.** That is what
     /// makes the question answerable before the frame exists. A surface's membership
@@ -642,7 +642,7 @@ class IFrameResponder
     /// including which counter moves. Every one of these used to be encoded in the
     /// accept loop with `Wire::EncodeErrorReply` and counted nothing, so a merged
     /// listener answered them correctly and left the series flat
-    /// ([#447](https://github.com/LASTRADA-Software/fastcached/issues/447)).
+    /// ([#447](https://github.com/LASTRADA-Software/pace/issues/447)).
     ///
     /// **A verb is always known here**, which is what separates these from the
     /// endpoint's one verbless refusal. A connection turned away because the surface
@@ -809,7 +809,7 @@ class IFrameResponder
     /// awaitable, so the second arm drops the first coroutine's resume handle and
     /// leaks its frame, silently and permanently, with no assertion and no log
     /// (`IocpSocket` has the same shape;
-    /// [#663](https://github.com/LASTRADA-Software/fastcached/issues/663) is about
+    /// [#663](https://github.com/LASTRADA-Software/pace/issues/663) is about
     /// making that loud rather than leaving it as prose in another file).
     ///
     /// Stated here as the *reason* rather than left at the close itself, because an
@@ -902,7 +902,7 @@ class IFrameResponder
     /// nullopt not to pulse it at all.
     ///
     /// **The liveness signal a long verb owes its client**
-    /// ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)). A client
+    /// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)). A client
     /// bounds a dispatched compile with one flat deadline, which has to be as long as
     /// the slowest translation unit anybody compiles -- so that same number is how long
     /// a worker whose process has stopped making progress goes unnoticed. TCP keepalive
@@ -1340,7 +1340,7 @@ class FrameEndpoint
     /// The one door `Start` and `StartAdopted` both arrive at once they have a bound
     /// listener, so the adopt-and-serve half exists once rather than twice, and the
     /// **test seam for the teardown rule**
-    /// ([#840](https://github.com/LASTRADA-Software/fastcached/issues/840)). That
+    /// ([#840](https://github.com/LASTRADA-Software/pace/issues/840)). That
     /// defect is about *which thread* -- and with *what* running -- the listener this
     /// endpoint owns is destroyed on, and neither factory above lets a case supply a
     /// listener it can ask. Without this, a test can pin the defect's precondition and

@@ -49,7 +49,7 @@ struct CompileJob
     /// builds itself. gcc takes it from the `#line` marker inside the preprocessed
     /// text, which names the CLIENT's path: a string on no command line this worker
     /// sees and matching no rule derived from its scratch root
-    /// ([#883](https://github.com/LASTRADA-Software/fastcached/issues/883)). A rewrite
+    /// ([#883](https://github.com/LASTRADA-Software/pace/issues/883)). A rewrite
     /// rule needs two operands, so the raw half has to travel too.
     ///
     /// Neither is a path this worker opens.
@@ -217,9 +217,9 @@ struct CompileOutcome
 /// receives `argv` AFTER the runner has recorded what it is about to compile, so it can
 /// make the OUTPUT wrong but cannot make the execution diverge from the record. The
 /// only crossed-job fixture the tree could build was therefore
-/// [#279](https://github.com/LASTRADA-Software/fastcached/issues/279)'s half -- right
+/// [#279](https://github.com/LASTRADA-Software/pace/issues/279)'s half -- right
 /// input, foreign object -- and never
-/// [#280](https://github.com/LASTRADA-Software/fastcached/issues/280)'s, where a runner
+/// [#280](https://github.com/LASTRADA-Software/pace/issues/280)'s, where a runner
 /// reports on work other than the work it was asked for. See `CompileOutcome`'s
 /// `correlation`.
 ///
@@ -273,11 +273,11 @@ class ICompileJobRunner
 /// this machine was surveyed and serves nothing, or it has not been surveyed yet. A
 /// node now comes up and serves its cache tier while it walks its include trees --
 /// over 300 s on a cold Windows runner
-/// ([#354](https://github.com/LASTRADA-Software/fastcached/issues/354)) -- so the
+/// ([#354](https://github.com/LASTRADA-Software/pace/issues/354)) -- so the
 /// second state is one a running worker is genuinely in, and a client that reaches
 /// the compile port during it must be told "not yet" rather than "wrong toolchain".
 /// Those send an operator to opposite conclusions
-/// ([#365](https://github.com/LASTRADA-Software/fastcached/issues/365)).
+/// ([#365](https://github.com/LASTRADA-Software/pace/issues/365)).
 ///
 /// **No default constructor**, for the reason `PreAuth` and `PayloadCap` have none:
 /// a defaulted value would answer the question by omission, and the answer it would
@@ -570,7 +570,7 @@ class CompileJobRunner final: public ICompileJobRunner
 /// `DW_AT_comp_dir` is the directory the compiler ran in. It is on no command line, so
 /// no cache key can distinguish two producers by it, and a dispatched object recorded a
 /// directory a locally mapped one does not, under the same key
-/// ([#506](https://github.com/LASTRADA-Software/fastcached/issues/506)). One half of
+/// ([#506](https://github.com/LASTRADA-Software/pace/issues/506)). One half of
 /// the rule the worker needs is a path on THIS machine, which the client has never
 /// seen, so the client sends its own directory and its own replacement and this builds
 /// the rules.
@@ -659,7 +659,7 @@ class CompileJobRunner final: public ICompileJobRunner
 /// it from the `#line` marker the preprocessed text carries, so a dispatched object
 /// already reads what a locally built one does; **clang takes it from the input file
 /// path**, so it recorded this worker's scratch —
-/// [#660](https://github.com/LASTRADA-Software/fastcached/issues/660).
+/// [#660](https://github.com/LASTRADA-Software/pace/issues/660).
 ///
 /// That is two defects and the second is the one that matters. The debug path names a
 /// directory that exists on no developer's machine; and the scratch directory carries a
@@ -701,7 +701,7 @@ class CompileJobRunner final: public ICompileJobRunner
 /// this worker's scratch file, so a rule this worker builds from a path it chose itself
 /// repairs it. gcc reads the `#line` marker in the preprocessed text, which names the
 /// path on the CLIENT's machine -- a string this worker cannot derive from anything it
-/// has ([#883](https://github.com/LASTRADA-Software/fastcached/issues/883)). So the
+/// has ([#883](https://github.com/LASTRADA-Software/pace/issues/883)). So the
 /// client sends both halves and this spells the rule.
 ///
 /// The pair is sent only when a client-side rule actually CHANGED the spelling, so
@@ -746,7 +746,7 @@ class CompileJobRunner final: public ICompileJobRunner
 /// build unspellable, and every dispatched object it produces silently goes back to
 /// recording `<scratch>/job-N/<name>` — nondeterministic between two dispatches of one
 /// translation unit, stored under one cache key
-/// ([#810](https://github.com/LASTRADA-Software/fastcached/issues/810)).
+/// ([#810](https://github.com/LASTRADA-Software/pace/issues/810)).
 ///
 /// **A startup property is reported at startup, never decided per request.** That is
 /// this repository's own rule about the worker's lease check, for the same reason: a

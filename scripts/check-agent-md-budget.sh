@@ -408,7 +408,7 @@ total-lines|8' '# T
 
 ## The rulebook
 
-- A short rule, see [#8](https://github.com/LASTRADA-Software/fastcached/issues/8).
+- A short rule, see [#8](https://github.com/LASTRADA-Software/pace/issues/8).
 - Another one, also short.
 
 x

@@ -16,13 +16,13 @@ namespace
 {
 
 /// The directory is per PROCESS and removed with it, not a fixed path shared by
-/// every test binary on the machine. It used to be `temp / "fastcached-test"`,
+/// every test binary on the machine. It used to be `temp / "pace-test"`,
 /// which two cases writing the same stem would collide on -- and which nothing
 /// ever cleaned up, so it grew without bound. Static rather than per call so the
 /// several files a case writes stay together.
 std::filesystem::path WriteTempYaml(std::string_view stem, std::string_view content)
 {
-    static Pace::Testing::ScratchDirectory const scratch { "fastcached-yaml-test" };
+    static Pace::Testing::ScratchDirectory const scratch { "pace-yaml-test" };
     auto path = scratch.Path() / (std::string { stem } + ".yaml");
     std::ofstream out { path };
     out << content;
@@ -149,7 +149,7 @@ TEST_CASE("YamlReader: a file that is not there is FileNotFound, not ParseError"
     // file: <path>", which arriving as ParseError sends somebody hunting for a
     // syntax mistake in a file that does not exist -- and a typo in `--config` is
     // the ordinary way to produce it.
-    static Pace::Testing::ScratchDirectory const scratch { "fastcached-yaml-missing" };
+    static Pace::Testing::ScratchDirectory const scratch { "pace-yaml-missing" };
     auto const missing = scratch.Path() / "definitely-not-here.yaml";
     REQUIRE_FALSE(std::filesystem::exists(missing));
 
@@ -166,7 +166,7 @@ TEST_CASE("YamlReader: a file that is there and cannot be read is FileUnreadable
     // Two different answers to an OPERATOR -- a path to correct, or a permission -- though one to a
     // supervisor, which retries both. yaml-cpp reports both as one "bad file", so the reader asks
     // the filesystem which it was.
-    static Pace::Testing::ScratchDirectory const scratch { "fastcached-yaml-unreadable" };
+    static Pace::Testing::ScratchDirectory const scratch { "pace-yaml-unreadable" };
     auto const path = scratch.Path() / "unreadable.yaml";
     Pace::Testing::UnreadablePath const held { path, "port: 11211\n" };
     if (!held.Held())

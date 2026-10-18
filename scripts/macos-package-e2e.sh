@@ -340,9 +340,9 @@ e2e_begin "macOS package E2E" "$workdir"
 # evidence of a step that declined to run -- and without them a failure here
 # looks like "the service is just missing".
 dump_install_logs() {
-    if [[ -r /var/log/fastcached-install.log ]]; then
-        echo "--- /var/log/fastcached-install.log ---" >&2
-        tail -40 /var/log/fastcached-install.log >&2
+    if [[ -r /var/log/pace-install.log ]]; then
+        echo "--- /var/log/pace-install.log ---" >&2
+        tail -40 /var/log/pace-install.log >&2
     fi
     sudo grep -i pace-kv /var/log/install.log 2>/dev/null | tail -20 >&2 || true
 
@@ -719,7 +719,7 @@ if ! node_log="$(sudo "${PREFIX}/bin/pace-node" --install-service --service-scop
     # **Ask launchd what it did with the job before giving up on the reading.**
     #
     # This failed once in a merge group with
-    # [#965](https://github.com/LASTRADA-Software/fastcached/issues/965):
+    # [#965](https://github.com/LASTRADA-Software/pace/issues/965):
     # `launchctl kickstart` timed out at 60 s having consumed almost no CPU, which
     # `LaunchctlFindingOf` classifies `Waiting` and reports honestly as "this does
     # not say whether that was a busy host or a stall". That verdict is correct and
@@ -794,7 +794,7 @@ echo "   worker registered as ${NODE_ACCOUNT}"
 
 # --- 5. an operator edit must survive a reinstall --------------------------
 echo "== reinstalling over an edited config"
-readonly MARKER="# fastcached-e2e-marker"
+readonly MARKER="# pace-e2e-marker"
 echo "$MARKER" | sudo tee -a "${PREFIX}/etc/pace-kv.yaml" >/dev/null
 
 reinstall_log="$(sudo installer -pkg "$pkg" -applyChoiceChangesXML "$choices" -target / 2>&1)" \

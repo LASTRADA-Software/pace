@@ -19,7 +19,7 @@ constexpr std::string_view CurrentVersionKey = R"(SOFTWARE\Microsoft\Windows NT\
 
 /// A key nothing has ever installed. Named once so the two absence cases below
 /// cannot drift into testing different things.
-constexpr std::string_view AbsentKey = R"(SOFTWARE\fastcached-no-such-key-9f3a)";
+constexpr std::string_view AbsentKey = R"(SOFTWARE\pace-no-such-key-9f3a)";
 } // namespace
 
 TEST_CASE("A key that does not exist reads as absent rather than empty", "[registry]")

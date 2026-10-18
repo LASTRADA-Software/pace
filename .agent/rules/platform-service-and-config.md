@@ -183,7 +183,7 @@ readable and silently ignored. Every rule below has already been one of them.
   applied four rules where seventeen were fatal: `--install-service` with
   `--tls-cert` and no `--tls-key` registered cleanly and exited `ExitUsage` at every
   boot, and so did `--dashboard` with no `--admin-listen` and a dozen more
-  ([#166](https://github.com/LASTRADA-Software/fastcached/issues/166)). Every
+  ([#166](https://github.com/LASTRADA-Software/pace/issues/166)). Every
   startup rule is a **pure invariant of the parsed configuration** -- no clock, no
   filesystem, no port -- so each is decided the moment the command line is typed,
   and `--install-service` bakes that command line in. That makes a startup rule
@@ -198,7 +198,7 @@ readable and silently ignored. Every rule below has already been one of them.
   target -- which is exactly how a gap between two well-tested tables survived.
 
   `--toolchain` used to, and **no longer does** -- the reversal is the whole of
-  [#139](https://github.com/LASTRADA-Software/fastcached/issues/139). Registering a
+  [#139](https://github.com/LASTRADA-Software/pace/issues/139). Registering a
   worker before anybody knows what a machine holds is precisely what makes
   installing the package the entire setup; the node surveys the machine at boot and
   answers the question itself. What still cannot work is `--no-toolchain-discovery`
@@ -219,7 +219,7 @@ readable and silently ignored. Every rule below has already been one of them.
   peer, and an unusable `--listen-raft` -- and the install path returns long before
   any tier is built. So `--install-service --node-id=n1` with no peer passed both
   rejection tables, was reported installed, and exited `ExitUsage` at every boot
-  ([#168](https://github.com/LASTRADA-Software/fastcached/issues/168)). The rule
+  ([#168](https://github.com/LASTRADA-Software/pace/issues/168)). The rule
   above closed that shape for the rules in the tables; this is what keeps a rule
   from living outside them in the first place. Being *reachable only through a
   tier* is not a reason for a check to live there: the question is whether the
@@ -255,7 +255,7 @@ readable and silently ignored. Every rule below has already been one of them.
   **The line is "pure function of the command line", and it is narrower than "would
   be fatal".** `--serve-scheduler`, `--admin-listen`, `--listen-node` and
   `--discovery` were the same defect one tier along
-  ([#186](https://github.com/LASTRADA-Software/fastcached/issues/186)): each names an
+  ([#186](https://github.com/LASTRADA-Software/pace/issues/186)): each names an
   address, each grammar was checked where the surface is opened, and a typo therefore
   registered cleanly and killed the node at every boot. They were one `EndpointFlag`
   table, because four rules differing only in a flag name and a grammar are the
@@ -263,7 +263,7 @@ readable and silently ignored. Every rule below has already been one of them.
   to miss: its failure is fatal only once the address is *named*, and a value that
   does not parse is named by construction.
 
-  **Since [#288](https://github.com/LASTRADA-Software/fastcached/issues/288) that
+  **Since [#288](https://github.com/LASTRADA-Software/pace/issues/288) that
   table is `NodeSurfaceTable()`, and `--listen-raft` is in it. The old exclusion was
   CORRECT and stopped being so.** `EndpointFlags` deliberately left raft out, on the
   reasoning that its own rules already refuse it both absent and unusable and a second
@@ -296,7 +296,7 @@ readable and silently ignored. Every rule below has already been one of them.
   the presence check and the message check fail in different circumstances, and the
   presence check is the one that cannot fail. Measured while adding a second
   `StartupPolicyRejection` row for an advertised endpoint no remote client can reach
-  ([#290](https://github.com/LASTRADA-Software/fastcached/issues/290)): with the new
+  ([#290](https://github.com/LASTRADA-Software/pace/issues/290)): with the new
   row disabled, `REQUIRE(refusal.has_value())` **still passed**, because an unrelated
   row fires for the same configuration, and only the per-row phrase went red. A test
   written the obvious way would have gone on passing while the rule it was named after
@@ -324,8 +324,8 @@ readable and silently ignored. Every rule below has already been one of them.
   not exist when a service is installed may exist by the time it boots.
 
   **The DIALLED addresses are a second table beside it, one predicate per row, and the
-  per-row part is the rule** ([#208](https://github.com/LASTRADA-Software/fastcached/issues/208),
-  [#968](https://github.com/LASTRADA-Software/fastcached/issues/968)). One widened
+  per-row part is the rule** ([#208](https://github.com/LASTRADA-Software/pace/issues/208),
+  [#968](https://github.com/LASTRADA-Software/pace/issues/968)). One widened
   predicate cannot serve them, because they do not share a grammar:
 
   - `--advertise`, `--scheduler` and `--upstream` are DIALLED, so a bare port names no
@@ -548,7 +548,7 @@ readable and silently ignored. Every rule below has already been one of them.
 
   Both sides of a flag ask this question, and getting one right is not getting the
   flag right. `--listen-node` had it wrong on both
-  ([#286](https://github.com/LASTRADA-Software/fastcached/issues/286)): the tier
+  ([#286](https://github.com/LASTRADA-Software/pace/issues/286)): the tier
   compared `cfg.cacheListen` against `NodeConfig{}.cacheListen` to decide whether a
   bind failure was **fatal**, so a pinned default port was read as a convenience
   nobody asked for and the node started healthy serving no cache — and
@@ -583,7 +583,7 @@ readable and silently ignored. Every rule below has already been one of them.
 
   **The paragraph above was written before the code it governs obeyed it**, and the
   daemon did the opposite for as long as it existed
-  ([#349](https://github.com/LASTRADA-Software/fastcached/issues/349)): every one of
+  ([#349](https://github.com/LASTRADA-Software/pace/issues/349)): every one of
   `BuildServiceArgv`'s thirty-one provenance-bearing flags was emitted by value
   comparison, `--max-memory` following host RAM among them. A rule nothing checks
   cannot make code fail, which is the general finding — and it is why the fix landed
@@ -1234,7 +1234,7 @@ readable and silently ignored. Every rule below has already been one of them.
   exposed however its path was named, and asking whether it was typed answers a
   question nobody has (#752). That rule was never specific to the worker, and the
   daemon went on carrying its own for one file
-  ([#864](https://github.com/LASTRADA-Software/fastcached/issues/864)): `--tls-key`,
+  ([#864](https://github.com/LASTRADA-Software/pace/issues/864)): `--tls-key`,
   the private key terminating TLS on the **cache** port — so a loose one lets any local
   account impersonate the daemon to its clients or decrypt the session `--requirepass`
   itself travels over, which is the earlier exposure composed with this one.
@@ -1322,7 +1322,7 @@ readable and silently ignored. Every rule below has already been one of them.
   one is **published**, so `--max-memory=8g` became a fraction of host RAM at the
   first logrotate hook, `InMemoryLruStorage::Resize` evicted down to it, and nothing
   in the logs connected any of that to a flag nobody re-read
-  ([#622](https://github.com/LASTRADA-Software/fastcached/issues/622)). There is one
+  ([#622](https://github.com/LASTRADA-Software/pace/issues/622)). There is one
   `AssembleEffectiveConfig` — file, then command line, then environment — and
   `main()` and `ConfigReloader` both call it. The sources besides the file are held
   for the life of the process in a `ConfigSources`, which the reloader takes as a
@@ -1352,7 +1352,7 @@ readable and silently ignored. Every rule below has already been one of them.
   *complete* while a documented setting slipped past — and no `--install-service`
   could carry them, because a registration replays a command line. They have rows now
   and the second source is deleted
-  ([#623](https://github.com/LASTRADA-Software/fastcached/issues/623)). Note that the
+  ([#623](https://github.com/LASTRADA-Software/pace/issues/623)). Note that the
   two AREAS move together: giving a key a row forces `BuildServiceArgv` to emit it, or
   `ServiceControl_test`'s mechanical sweep goes red — so splitting such a change
   across lanes leaves either a flag the installer drops or a sweep nobody can make
@@ -1467,7 +1467,7 @@ readable and silently ignored. Every rule below has already been one of them.
   - **`--cluster-forget`.** Its operand *is* the offending id. A check covering it
     would make a member admitted by an older peer impossible to remove, and it would
     count towards quorum forever — the trap
-    [#159](https://github.com/LASTRADA-Software/fastcached/issues/159) records.
+    [#159](https://github.com/LASTRADA-Software/pace/issues/159) records.
   - **Every path-valued flag.** On a host that transcodes nothing a legacy filename
     is a perfectly good filename; refusing one would break a working node over a
     rule about a field it is not.
@@ -1573,7 +1573,7 @@ Three consequences, and none is obvious from either end:
   them. One spelling, one default, and fix the gap where the gap is.
 
 **The gap is the platform's, so the default is the platform's**
-([#496](https://github.com/LASTRADA-Software/fastcached/issues/496)).
+([#496](https://github.com/LASTRADA-Software/pace/issues/496)).
 `Core/Logger.hpp` carries `DefaultLogTimestamps`, true under `__APPLE__` and false
 everywhere else, and both binaries' config structs initialise from it. Two things
 about that placement:
@@ -1590,7 +1590,7 @@ about that placement:
   it defensible.
 
 **A two-sided flag needs a two-sided emitter**
-([#507](https://github.com/LASTRADA-Software/fastcached/issues/507), a prerequisite
+([#507](https://github.com/LASTRADA-Software/pace/issues/507), a prerequisite
 for the above rather than a follow-up from it). `emitSwitchIfSet` emits the POSITIVE
 flag whenever a value differs from its default, which spells *on* — correct while
 every default is false, and **inverted** the moment one is not. Under the macOS
@@ -1632,7 +1632,7 @@ boot, silently, because a registration replays its command line forever. So:
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
-- **[#1567](https://github.com/LASTRADA-Software/fastcached/issues/1567)** — two sections here have
+- **[#1567](https://github.com/LASTRADA-Software/pace/issues/1567)** — two sections here have
   no `AGENT.md` tripwire: `## The daemon host, and what a machine IS` — an
   architecture is what the compiler BUILT FOR and not what the kernel is running, so a
   scheduler weighing an x86-64 process under Rosetta or WOW64 is told `arm64` — and
@@ -1640,7 +1640,7 @@ boot, silently, because a registration replays its command line forever. So:
   default cannot be picked per binary. Both marked `untriaged:` and not `none:`, and
   `ctest -R rulebook-tripwires` prints the count against this issue on every run.
 
-- **[#867](https://github.com/LASTRADA-Software/fastcached/issues/867)** — the seeded
+- **[#867](https://github.com/LASTRADA-Software/pace/issues/867)** — the seeded
   config grants read to `NT AUTHORITY\SERVICE` (S-1-5-6), which is every principal
   logged on as a service and not only this daemon. It is far narrower than the
   `BUILTIN\Users` grant it replaced and is what the seed can name — the per-service

@@ -124,7 +124,7 @@ rate as each builder sees it, which is what actually determines build times.
 `pacectl live-stats` pointed at the `0xFC` port draws the same reading live: the
 daemon streams its **cache** subject, the counters and snapshot `/metrics` renders, pushed
 on a fixed tick rather than scraped
-([#1399](https://github.com/LASTRADA-Software/fastcached/issues/1399)). The node and fleet
+([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)). The node and fleet
 subjects belong to a compile node, and the daemon refuses them by name. A stream is held to
 the connection's credential while it runs, not only when it opens: a connection that never
 authenticated loses its stream on the tick `--requirepass` takes effect, and one that did

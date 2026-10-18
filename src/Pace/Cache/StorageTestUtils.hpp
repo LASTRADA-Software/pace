@@ -62,7 +62,7 @@ struct TempFile
 
     /// @param prefix Filename prefix identifying the test that owns the file.
     /// @param extension File extension including the dot (default `.cow`).
-    explicit TempFile(std::string_view prefix = "fastcache-storage-test", std::string_view extension = ".cow")
+    explicit TempFile(std::string_view prefix = "pace-storage-test", std::string_view extension = ".cow")
     {
         // `UniqueScratchPath` and NOT a random draw. This built its name from
         // `std::mt19937_64 { std::random_device {}() }()`, and on the host #1507 was

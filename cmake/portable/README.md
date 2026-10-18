@@ -120,7 +120,7 @@ here.
 | `PACE_AUTO_INSTALL` | `OFF` | Fetch `pace-cc` when no launcher is installed. |
 | `PACE_AUTO_INSTALL_VERSION` | *(empty)* | Install this exact version instead of resolving the latest. |
 | `PACE_AUTO_INSTALL_DIR` | per-user cache dir | Where fetched binaries are staged. |
-| `PACE_AUTO_INSTALL_REPO` | `LASTRADA-Software/fastcached` | Repository to fetch from. |
+| `PACE_AUTO_INSTALL_REPO` | `LASTRADA-Software/pace` | Repository to fetch from. |
 | `PACE_AUTO_INSTALL_API` | `https://api.github.com` | API used to resolve the latest release. |
 | `PACE_AUTO_INSTALL_DOWNLOAD_BASE` | `https://github.com` | Where release archives are downloaded from. |
 | `PACE_AUTO_INSTALL_TTL_HOURS` | `24` | How long a resolved "latest" is reused before asking again. |
@@ -160,7 +160,7 @@ version:
 ```
 
 The archive is then expected at
-`<base>/<repo>/releases/download/v<version>/fastcached-<version>-<platform>.tar.gz`,
+`<base>/<repo>/releases/download/v<version>/pace-<version>-<platform>.tar.gz`,
 laid out exactly as the release archive is.
 
 ### Starting a daemon automatically

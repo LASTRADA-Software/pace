@@ -107,7 +107,7 @@
 # Why this does not read the gate lock
 # ---------------------------------------------------------------------------
 #
-# The gate takes `$HOME/.fastcached-local-gate.lock` ITSELF now (#1379). This section
+# The gate takes `$HOME/.pace-local-gate.lock` ITSELF now (#1379). This section
 # used to name `~/gate-logs/.gate.lock` and to say a gate run by hand takes no lock --
 # both were one lane's wrapper convention, which is exactly what that ticket retired.
 # Reading the lock to find the victim is still declined, for three reasons rather than

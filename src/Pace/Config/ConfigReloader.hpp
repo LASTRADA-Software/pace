@@ -30,7 +30,7 @@ namespace Pace
 /// **Two executables have configuration files and there must be ONE reload
 /// mechanism.** `pace-kv` reads `Config`; `pace-node` reads
 /// `NodeConfig` through the option table's `yamlKey` column
-/// ([#291](https://github.com/LASTRADA-Software/fastcached/issues/291)). Writing a
+/// ([#291](https://github.com/LASTRADA-Software/pace/issues/291)). Writing a
 /// second reloader for the second one is what this codebase keeps a list about — the
 /// two would drift on the questions that matter, which are the ordering of the swap
 /// and what happens on a partial failure, not on the parsing.
@@ -45,10 +45,10 @@ namespace Pace
 ///   command line wins" stays a question of which loop ran second, at a reload as
 ///   much as at a start. The daemon used to read the file and nothing else, which
 ///   published a setting nobody had asked for at every SIGHUP
-///   ([#622](https://github.com/LASTRADA-Software/fastcached/issues/622)).
+///   ([#622](https://github.com/LASTRADA-Software/pace/issues/622)).
 /// - **`ImmutabilityCheck`** — whether the candidate may replace the live snapshot.
 ///   Both executables now derive this from a **column of their own option table**
-///   ([#406](https://github.com/LASTRADA-Software/fastcached/issues/406) closed the
+///   ([#406](https://github.com/LASTRADA-Software/pace/issues/406) closed the
 ///   daemon's hand-written ladder), so the strategy varies only in which table it
 ///   reads. One reloader with two tables is one mechanism; two reloaders would not
 ///   be.
@@ -229,7 +229,7 @@ class ConfigReloaderOf
 /// arrived here as a setting being changed back to its default: refused by name for
 /// an immutable one, and for a reloadable one *published*, which is how
 /// `--max-memory=8g` became the host default at the first SIGHUP
-/// ([#622](https://github.com/LASTRADA-Software/fastcached/issues/622)). The
+/// ([#622](https://github.com/LASTRADA-Software/pace/issues/622)). The
 /// candidate is now built by the same `AssembleEffectiveConfig` the start used, so
 /// what the operator asked for is in it whichever source they asked through, and a
 /// difference reaching this function is one the FILE really did introduce.

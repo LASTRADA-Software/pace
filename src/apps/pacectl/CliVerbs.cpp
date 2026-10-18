@@ -1529,7 +1529,7 @@ namespace
     /// very connection when no subject is given, as THIS node folds it.
     ///
     /// **Every route that decided, not just the winner**
-    /// ([#1471](https://github.com/LASTRADA-Software/fastcached/issues/1471)). An operator who
+    /// ([#1471](https://github.com/LASTRADA-Software/pace/issues/1471)). An operator who
     /// closes a node and finds a machine still served needs to know its key admits it too; naming
     /// only the winning route answers a question they did not ask, and sends them to change a
     /// setting that will change nothing.
@@ -1940,7 +1940,7 @@ namespace
     ///
     /// **The one cluster verb that answers with more than *accepted*, and the
     /// difference is the whole of
-    /// [#1296](https://github.com/LASTRADA-Software/fastcached/issues/1296).** The
+    /// [#1296](https://github.com/LASTRADA-Software/pace/issues/1296).** The
     /// address typed here and the one the joining node answers consensus on --
     /// `--raft-self` with `--listen-raft` -- are two spellings of one address, and
     /// nothing compared them. When they disagree the member is in the committed
@@ -2392,7 +2392,7 @@ namespace
           .session = nullptr },
         { .name = "live-stats",
           // `Stats` for ADMISSION only: `0xFC` identifies the endpoint, and RESP opening
-          // beside it is what lets a refusal say *a Redis answered, a fastcache did not*.
+          // beside it is what lets a refusal say *a Redis answered, a pace did not*.
           // Every reading then arrives on the session's own subscription (#1399).
           .wire = Wire::Stats,
           .minOperands = 0,

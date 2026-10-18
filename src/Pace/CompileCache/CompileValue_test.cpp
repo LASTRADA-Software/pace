@@ -1182,7 +1182,7 @@ constexpr std::array StoredValueGenerations {
 /// One corpus row's own contribution to a generation's conformance digest.
 ///
 /// The aggregate digest is a FOLD, and a fold destroys precisely what
-/// [#583](https://github.com/LASTRADA-Software/fastcached/issues/583) needs: it
+/// [#583](https://github.com/LASTRADA-Software/pace/issues/583) needs: it
 /// answers *the contract's behaviour moved* and cannot answer WHICH rows moved, so it
 /// cannot check the one claim a bump actually makes.
 struct RowDigest
@@ -1271,7 +1271,7 @@ struct FrozenGeneration
 /// bump, and pretending otherwise by hand-pruning the claim would make the bump row a
 /// second source of truth that nothing checks.
 ///
-/// That is [#1568](https://github.com/LASTRADA-Software/fastcached/issues/1568), and it
+/// That is [#1568](https://github.com/LASTRADA-Software/pace/issues/1568), and it
 /// has a DEADLINE rather than a backlog slot: repairing it means re-deriving
 /// `Generation4Rows` under a material layout that excludes the version byte, which can
 /// only be done while generation 4 is still the generation this build implements. After

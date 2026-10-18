@@ -29,9 +29,9 @@
 # `required_status_checks`, and nothing offline can verify a copy of a server-side
 # setting. Read the live list with:
 #
-#   gh api repos/LASTRADA-Software/fastcached/rulesets \
+#   gh api repos/LASTRADA-Software/pace/rulesets \
 #     --jq '.[] | select(.name == "default-master") | .id'
-#   gh api repos/LASTRADA-Software/fastcached/rulesets/<id> \
+#   gh api repos/LASTRADA-Software/pace/rulesets/<id> \
 #     --jq '.rules[] | select(.type == "required_status_checks")
 #           | .parameters.required_status_checks[].context'
 #

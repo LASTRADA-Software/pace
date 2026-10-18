@@ -274,7 +274,7 @@ struct Config
     /// then rejects data commands.
     ///
     /// **`SecureString`, and this is the largest credential holder in the tree**
-    /// ([#1125](https://github.com/LASTRADA-Software/fastcached/issues/1125)). It is
+    /// ([#1125](https://github.com/LASTRADA-Software/pace/issues/1125)). It is
     /// `Reloadable::Yes`, and `ConfigReloader` keeps `_current` alongside a `previous`
     /// snapshot for as long as a reader still holds one -- so as a `std::string` this
     /// secret was multiplied by every reload, each copy released to the general

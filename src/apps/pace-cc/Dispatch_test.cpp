@@ -153,7 +153,7 @@ class ScriptedFleet final: public IEndpointExchange
     /// which models a peer that is slow to answer and advances nothing. This models
     /// the round trip PASSING, which is a fact about the client and is what
     /// `UnderGrantedLease` charges against a grant
-    /// ([#1122](https://github.com/LASTRADA-Software/fastcached/issues/1122)). Folding
+    /// ([#1122](https://github.com/LASTRADA-Software/pace/issues/1122)). Folding
     /// the two would have silently moved the clock under every case that already uses
     /// `AnswersAfter` to test a deadline, which is the one place a moving clock is the
     /// subject rather than the scenery.
@@ -281,7 +281,7 @@ constexpr std::string_view Worker = "worker:6676";
 /// Deliberately restated here rather than reached from `Dispatch.cpp`, so that a change
 /// to which part of the path travels shows up as a failing test instead of being
 /// mirrored automatically into the expectation. It did exactly that at
-/// [#660](https://github.com/LASTRADA-Software/fastcached/issues/660): this used to
+/// [#660](https://github.com/LASTRADA-Software/pace/issues/660): this used to
 /// return the final component, and the two cases that broke are the two that say what
 /// changed. It is an identity now and stays a named function for that reason -- the next
 /// change to the rule has to come through here too.

@@ -41,7 +41,7 @@ enum class CacheOutcomeKind : std::uint8_t
 /// Which way a `Transport` outcome went wrong.
 ///
 /// **Three states, not one, and the collapse was the bug**
-/// ([#247](https://github.com/LASTRADA-Software/fastcached/issues/247)). Every one
+/// ([#247](https://github.com/LASTRADA-Software/pace/issues/247)). Every one
 /// of these is answered the same way -- compile locally, because the client is
 /// holding the source -- and that sameness is exactly why they were folded into one
 /// sentence. But the same ACTION is not the same DIAGNOSIS: "that machine is off"
@@ -214,7 +214,7 @@ struct CacheOutcome
 /// reference, because they are not frames that can outlive their caller.
 ///
 /// **The once-guard is a member and the output is a sink**, which is the whole point
-/// ([#363](https://github.com/LASTRADA-Software/fastcached/issues/363)). It was a
+/// ([#363](https://github.com/LASTRADA-Software/pace/issues/363)). It was a
 /// function-local `static bool` inside the launcher's `main.cpp`, so exactly one of
 /// the seven consumers of an outcome could report: the cache path. Every dispatch
 /// path -- COMPILE, LEASE, RELEASE, REGISTER, HEARTBEAT and the cluster admin verbs,
@@ -422,7 +422,7 @@ struct ExchangeBudget
     /// Ceiling on SILENCE, once the connection is open; non-positive means unbounded.
     ///
     /// **The third deadline, and the one that finally splits the question `total`
-    /// could never answer alone** ([#245](https://github.com/LASTRADA-Software/fastcached/issues/245)).
+    /// could never answer alone** ([#245](https://github.com/LASTRADA-Software/pace/issues/245)).
     /// `total` asks *how slow may this exchange legitimately be*, and on a dispatched
     /// compile the honest answer is "as slow as the slowest translation unit anybody
     /// compiles" — minutes, which is then also how long a worker making no progress
@@ -452,7 +452,7 @@ struct ExchangeBudget
     /// Whether the connection probes a peer that has stopped answering.
     ///
     /// **The third thing, and it is here because `total` alone cannot answer both
-    /// questions** ([#247](https://github.com/LASTRADA-Software/fastcached/issues/247)).
+    /// questions** ([#247](https://github.com/LASTRADA-Software/pace/issues/247)).
     /// *How slow may this exchange legitimately be* and *how fast is a dead peer
     /// noticed* are separate, and #223 already established that collapsing them
     /// costs the wrong one: shortening `total` to notice a dead worker abandons
@@ -519,7 +519,7 @@ struct ExchangeBudget
 /// `NoCapacity` are answers about the fleet, while this one is an instruction about
 /// WHOM to ask, and a client that reads it as the former takes itself out of
 /// distribution over a leader election it could simply have followed
-/// ([#237](https://github.com/LASTRADA-Software/fastcached/issues/237)).
+/// ([#237](https://github.com/LASTRADA-Software/pace/issues/237)).
 ///
 /// **Judged by PARSING the message, never by asking whether it is empty.** An empty
 /// message is replaced with the error table's default sentence before it reaches the

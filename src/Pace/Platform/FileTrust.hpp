@@ -191,7 +191,7 @@ struct SecretFileFacts
 /// file, and the whole reason to put it there is that a command line is visible in
 /// `ps`, so an operator who moves it into a mode-0644 file has undone the point of
 /// the exercise and had no signal at all
-/// ([#384](https://github.com/LASTRADA-Software/fastcached/issues/384)).
+/// ([#384](https://github.com/LASTRADA-Software/pace/issues/384)).
 ///
 /// **The POSIX rule is "not world-readable, and group-readable only when owned by
 /// root", and the second clause is what stops this becoming an alarm nobody
@@ -220,7 +220,7 @@ struct SecretFileFacts
 /// `requirepass:` in is readable by every local account, which means the advice
 /// moves the secret from one world-readable place to another. Two correct-looking
 /// decisions in conflict, tracked as
-/// [#741](https://github.com/LASTRADA-Software/fastcached/issues/741) against
+/// [#741](https://github.com/LASTRADA-Software/pace/issues/741) against
 /// packaging (seed the live file with its own tighter list rather than letting it
 /// inherit). There is deliberately **no suppression for that path here**: a check
 /// that goes silent about a real exposure because the fix belongs to someone else
@@ -294,7 +294,7 @@ struct SecretFileFacts
 /// account, which is an ordinary `BUILTIN\Users` member -- and that grant is
 /// inherited by everything created inside it, including the one file
 /// `InlineCredentialRejection` tells operators to put `requirepass:` in
-/// ([#741](https://github.com/LASTRADA-Software/fastcached/issues/741)). So the
+/// ([#741](https://github.com/LASTRADA-Software/pace/issues/741)). So the
 /// FILE carries a list of its own, protected against that inheritance, rather
 /// than the directory being narrowed for every reader at once.
 ///

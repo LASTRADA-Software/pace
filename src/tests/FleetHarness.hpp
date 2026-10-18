@@ -425,7 +425,7 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
     /// `RegisterWorker` rather than folded into it: a machine with `--slots=0` sends this and
     /// never registers anything, and a harness that could only express a registration could
     /// not build the fleet
-    /// [#1440](https://github.com/LASTRADA-Software/fastcached/issues/1440) is about -- a
+    /// [#1440](https://github.com/LASTRADA-Software/pace/issues/1440) is about -- a
     /// scheduler-only leader whose own row and own history the page has to carry.
     /// @param scheduler Which scheduler to tell.
     /// @param machineEndpoint The machine announcing itself.

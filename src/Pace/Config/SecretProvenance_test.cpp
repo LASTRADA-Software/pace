@@ -131,7 +131,7 @@ TEST_CASE("SecretProvenance: the startup warning fires on an exposed file and no
     // most: a secret in a correctly-restricted file must produce NOTHING, or the
     // check becomes an alarm everyone learns to ignore -- and 0600 is the ordinary
     // case, so a rule that warned about it would fire on nearly every deployment.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secret-warning" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secret-warning" };
 
     auto const configAt = [&scratch](char const* stem, ::mode_t mode) {
         scratch.Write(stem, "requirepass: hunter2\n");
@@ -255,7 +255,7 @@ TEST_CASE("SecretProvenance: which paths are never asked about at all", "[config
     // untested on the platform whose answer for a file it cannot inspect
     // (`Undetermined`, from an unreadable security descriptor) is the one that would
     // turn a mistyped `--tls-key` into a sentence about permissions.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-secret-skips" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-secret-skips" };
 
     SECTION("a path that is not there says nothing")
     {
@@ -391,7 +391,7 @@ TEST_CASE("DaemonSecretFiles: an exposed --tls-key warns and a private one does 
     // only showed the warning arriving would pass just as well against an
     // implementation that warns about every key file it is handed, which is the alarm
     // that gets the real one ignored.
-    Pace::Testing::ScratchDirectory const scratch { "fastcached-daemon-tls-key" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-daemon-tls-key" };
     scratch.Write("server.key", "-----BEGIN PRIVATE KEY-----\n");
     auto const key = scratch / "server.key";
 

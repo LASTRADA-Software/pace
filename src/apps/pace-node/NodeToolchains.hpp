@@ -102,11 +102,11 @@ enum class ToolchainSource : std::uint8_t
 /// three orders of magnitude apart. Deciding the set is a spawn per candidate;
 /// identifying them walks every byte under every include root, which has been
 /// measured at 5136 files and over 300 s on a cold Windows CI runner
-/// ([#354](https://github.com/LASTRADA-Software/fastcached/issues/354)). Keeping the
+/// ([#354](https://github.com/LASTRADA-Software/pace/issues/354)). Keeping the
 /// cheap half synchronous is what lets a misconfigured node still be refused at
 /// startup, promptly, while the expensive half moves off the path that blocks the
 /// node from serving anything at all
-/// ([#365](https://github.com/LASTRADA-Software/fastcached/issues/365)).
+/// ([#365](https://github.com/LASTRADA-Software/pace/issues/365)).
 struct DiscoveredToolchains
 {
     std::vector<ToolchainEntry> entries; ///< What to fingerprint, in table order.
@@ -319,7 +319,7 @@ enum class SurveyOutcome : std::uint8_t
     /// because it could not be ASKED at all.
     ///
     /// **Not a refusal, and the distinction is the whole of
-    /// [#1060](https://github.com/LASTRADA-Software/fastcached/issues/1060).** These
+    /// [#1060](https://github.com/LASTRADA-Software/pace/issues/1060).** These
     /// are opposite machines: one is misconfigured and stays misconfigured until an
     /// operator acts, the other may be fine one beat later -- a compiler mid-upgrade,
     /// a fork that failed under momentary memory pressure, a filesystem not mounted
@@ -464,7 +464,7 @@ enum class ClaimsReloaded : std::uint8_t
 /// changed what this worker ADVERTISES.
 ///
 /// **The join, and a pure function for `RecheckDepthFor`'s own reason: `main.cpp` is
-/// in no test target** ([#587](https://github.com/LASTRADA-Software/fastcached/issues/587)).
+/// in no test target** ([#587](https://github.com/LASTRADA-Software/pace/issues/587)).
 /// It was an expression inside the heartbeat loop computing the very argument the
 /// function below consumes, so both decisions either side of it were tested and the
 /// step connecting them was verified only by reading -- this repository's

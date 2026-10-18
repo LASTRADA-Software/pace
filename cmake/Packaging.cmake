@@ -32,7 +32,7 @@ include(GNUInstallDirs)
 set(CPACK_PACKAGE_NAME                "pace-kv")
 set(CPACK_PACKAGE_VERSION             "${PACE_VERSION}")
 set(CPACK_PACKAGE_VENDOR              "LASTRADA Software")
-set(CPACK_PACKAGE_HOMEPAGE_URL        "https://github.com/LASTRADA-Software/fastcached")
+set(CPACK_PACKAGE_HOMEPAGE_URL        "https://github.com/LASTRADA-Software/pace")
 set(CPACK_PACKAGE_CONTACT             "Christian Parpart <christian@parpart.family>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
 set(CPACK_RESOURCE_FILE_README        "${CMAKE_SOURCE_DIR}/README.md")
@@ -43,7 +43,7 @@ set(CPACK_RESOURCE_FILE_README        "${CMAKE_SOURCE_DIR}/README.md")
 configure_file("${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_BINARY_DIR}/LICENSE.txt" COPYONLY)
 set(CPACK_RESOURCE_FILE_LICENSE       "${CMAKE_BINARY_DIR}/LICENSE.txt")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY   "pace-kv")
-set(CPACK_PACKAGE_FILE_NAME           "fastcached-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_FILE_NAME           "pace-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_VERBATIM_VARIABLES          ON)
 set(CPACK_STRIP_FILES                 ON)
 
@@ -60,7 +60,7 @@ set(PACE_MACOS_SIGN_IDENTITY_APP "" CACHE STRING
     "Developer ID Application identity: signs the Mach-O binaries and the .dmg")
 set(PACE_MACOS_SIGN_IDENTITY_PKG "" CACHE STRING
     "Developer ID Installer identity: signs the .pkg (a different certificate type)")
-set(PACE_MACOS_NOTARY_PROFILE "fastcached-notary" CACHE STRING
+set(PACE_MACOS_NOTARY_PROFILE "pace-notary" CACHE STRING
     "notarytool keychain profile (see `xcrun notarytool store-credentials`)")
 option(PACE_MACOS_NOTARIZE "Submit the macOS artifacts to Apple's notary service" OFF)
 option(PACE_MACOS_BUILD_DMG "Also wrap the macOS .pkg in a .dmg" ON)
@@ -110,7 +110,7 @@ elseif(UNIX AND NOT APPLE)
 
     # Root the payload at / rather than the conventional /usr, because /etc
     # cannot live under a /usr prefix and systemd will not read config from
-    # /usr/etc/fastcached. Every prefix-relative destination therefore spells
+    # /usr/etc/pace. Every prefix-relative destination therefore spells
     # its own `usr/` — see PACE_INSTALL_* in the top-level CMakeLists.txt
     # and the asset table in packaging/CMakeLists.txt.
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")

@@ -391,7 +391,7 @@ TEST_CASE("The worker decides where a byte lands, whatever the client asked to c
 TEST_CASE("A dispatched object records the client's source spelling, not the worker's scratch",
           "[compile-job][prefix-map][source-name]")
 {
-    // **[#660](https://github.com/LASTRADA-Software/fastcached/issues/660).** clang takes
+    // **[#660](https://github.com/LASTRADA-Software/pace/issues/660).** clang takes
     // `DW_AT_name` from the input file path, so a dispatched object recorded
     // `<scratch>/job-N/tu.cpp` -- a directory on no developer's machine, and one whose
     // counter advances between two dispatches of the SAME translation unit, giving two

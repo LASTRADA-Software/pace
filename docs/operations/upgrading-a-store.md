@@ -30,7 +30,7 @@ If what you are actually looking at is `Corrupt`, this is the wrong page —
 
     A set or a stream is an ordinary value distinguished only by its flags word,
     and the memcached text verbs let any client choose that word — so until
-    [#296](https://github.com/LASTRADA-Software/fastcached/issues/296) a client
+    [#296](https://github.com/LASTRADA-Software/pace/issues/296) a client
     could plant a few bytes, tag them as a set, read them back, and make the
     daemon report **`Corrupt` against a store whose every record still verified**.
     It moved `pace_write_errors_total` and wrote a `storage write failed`
@@ -120,5 +120,5 @@ find that out by guessing.
 !!! warning "Run it with the daemon stopped"
 
     Nothing enforces this yet — the store takes no inter-process lock
-    ([issue #135](https://github.com/LASTRADA-Software/fastcached/issues/135)).
+    ([issue #135](https://github.com/LASTRADA-Software/pace/issues/135)).
     Converting a store a running daemon has open will corrupt it.

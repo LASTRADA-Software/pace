@@ -9,10 +9,10 @@
 # Neither mentions the other, and one rejection reason — a WIRE VERSION mismatch —
 # is exactly the one that predicts the hazard: a daemon IS running, the operator
 # installed it, and it is out of step with the launcher
-# ([#658](https://github.com/LASTRADA-Software/fastcached/issues/658)).
+# ([#658](https://github.com/LASTRADA-Software/pace/issues/658)).
 #
 # **And the winner decides a paragraph, not whether there is a message**
-# ([#815](https://github.com/LASTRADA-Software/fastcached/issues/815)). #658 warned
+# ([#815](https://github.com/LASTRADA-Software/pace/issues/815)). #658 warned
 # only when the winner carried a caveat, which is a property of the COMPILER — true
 # on MSVC and clang-cl, false on GCC and Clang. The host that filed #815 is Linux
 # with ccache installed, so it satisfied every clause and heard nothing above

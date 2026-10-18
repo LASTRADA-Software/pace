@@ -27,10 +27,10 @@ namespace Pace
 /// they are framed in. Two servers stamping one number onto text they rewrote by
 /// different rules is a wrong value under a correct key, at fleet scale, on a
 /// correctly-maintained fleet: a fleet is permanently mid-upgrade
-/// ([#173](https://github.com/LASTRADA-Software/fastcached/issues/173)), so
+/// ([#173](https://github.com/LASTRADA-Software/pace/issues/173)), so
 /// "every server on this wire canonicalizes identically" is a property that has to
 /// hold ACROSS versions or it does not hold at all
-/// ([#483](https://github.com/LASTRADA-Software/fastcached/issues/483)).
+/// ([#483](https://github.com/LASTRADA-Software/pace/issues/483)).
 ///
 /// So the coupling is **asserted, not remembered**. `CompileValue_test.cpp` runs a
 /// fixed conformance corpus through `CanonicalStoredValue` and
@@ -41,7 +41,7 @@ namespace Pace
 /// `PathCanon.hpp` and enforced by nothing, which is the difference between an
 /// invariant and a hope.
 /// **Generation 2** retired generation 1 at
-/// [#547](https://github.com/LASTRADA-Software/fastcached/issues/547), the first
+/// [#547](https://github.com/LASTRADA-Software/pace/issues/547), the first
 /// real customer of the machinery above. A bare root — `/`, `C:\` — is its own
 /// trailing separator, and neither side of the transformation knew it: the producer
 /// matched nothing, so a value stored by a build rooted at the filesystem root kept
@@ -63,17 +63,17 @@ namespace Pace
 /// and only the localization moved.
 ///
 /// **Generation 3 retired generation 2 at
-/// [#879](https://github.com/LASTRADA-Software/fastcached/issues/879) and
-/// [#891](https://github.com/LASTRADA-Software/fastcached/issues/891), which are two
+/// [#879](https://github.com/LASTRADA-Software/pace/issues/879) and
+/// [#891](https://github.com/LASTRADA-Software/pace/issues/891), which are two
 /// ways for one grammar to find no path spans at all.** `Grammar::ShowIncludes`
 /// recognised a note only when the line began with the literal English
 /// `Note: including file:`. A localized `cl` prints a translated prefix (#879), so the
 /// region was stored with the producing checkout's absolute paths in it —
-/// [#229](https://github.com/LASTRADA-Software/fastcached/issues/229) reached through
+/// [#229](https://github.com/LASTRADA-Software/pace/issues/229) reached through
 /// the grammar rather than through a missing canonicalizer, and a replayed region
 /// becomes the object's dependency record, so those never invalidate. #891 rode along
 /// on a reading of `cl`'s indentation that
-/// [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270) later measured
+/// [#1270](https://github.com/LASTRADA-Software/pace/issues/1270) later measured
 /// and reversed; generation 5 is where that lands.
 ///
 /// What moves with the byte is the marker becoming a CANONICAL FORM — see
@@ -87,11 +87,11 @@ namespace Pace
 /// What it does NOT close: a localized toolchain whose prefix nothing has told this
 /// build about still stores an unnormalized region, because an unmatched marker
 /// rewrites nothing. Discovering that prefix from the compiler is
-/// [#878](https://github.com/LASTRADA-Software/fastcached/issues/878), and it needs no
+/// [#878](https://github.com/LASTRADA-Software/pace/issues/878), and it needs no
 /// further generation — the stored form is already locale-free, so #878 only supplies
 /// a better value to normalize with.
 /// **Generation 5 retired generation 4 at
-/// [#1270](https://github.com/LASTRADA-Software/fastcached/issues/1270), which put
+/// [#1270](https://github.com/LASTRADA-Software/pace/issues/1270), which put
 /// back the half of the anchor #891 gave away.** #891 read `cl`'s inclusion-depth
 /// indentation as preceding the marker and widened `Grammar::ShowIncludes` to skip
 /// leading blanks. Measured on both installed toolsets and on `clang-cl`, under `/c`
@@ -141,7 +141,7 @@ namespace Pace
 ///   refusal costs a miss; a generation-5 value holds foreign paths nothing marks, and
 ///   this byte is what retires it.
 /// - **`CanonicalizeRegion` collapses `..` out of a span before matching the roots**
-///   ([#1593](https://github.com/LASTRADA-Software/fastcached/issues/1593)). A driver
+///   ([#1593](https://github.com/LASTRADA-Software/pace/issues/1593)). A driver
 ///   reports `D:\proj\build\..\inc\a.hpp` for a header reached through a relative
 ///   include chain, and generation 5 stored it as `<BUILDTREE>/../inc/a.hpp` -- a token
 ///   naming a file the path does not name, which localizes into a consumer whose build
@@ -331,10 +331,10 @@ struct CompileValue
 /// stored value written by another generation. A launcher at generation N storing
 /// into a node at N+1 put the producing checkout's absolute paths into the shared
 /// cache under a key every machine computes, which is
-/// [#229](https://github.com/LASTRADA-Software/fastcached/issues/229) /
-/// [#319](https://github.com/LASTRADA-Software/fastcached/issues/319) reached by
+/// [#229](https://github.com/LASTRADA-Software/pace/issues/229) /
+/// [#319](https://github.com/LASTRADA-Software/pace/issues/319) reached by
 /// nothing worse than a rolling upgrade
-/// ([#483](https://github.com/LASTRADA-Software/fastcached/issues/483)).
+/// ([#483](https://github.com/LASTRADA-Software/pace/issues/483)).
 enum class CanonicalizationOutcome : std::uint8_t
 {
     /// Decoded and rewritten. `bytes` is what the server must store.
@@ -413,10 +413,10 @@ struct StoredValueCanonicalization
 /// two root fields, rewrite the regions, re-encode. That recipe used to be spelled
 /// out in `Protocol/CompileCacheHandler` and nowhere else, so when a compile node
 /// became a second server for this wire
-/// ([#229](https://github.com/LASTRADA-Software/fastcached/issues/229)) there was
+/// ([#229](https://github.com/LASTRADA-Software/pace/issues/229)) there was
 /// one copy and nothing said the other end lacked it — `grep` answered "one caller",
 /// which reads exactly like normal
-/// ([#319](https://github.com/LASTRADA-Software/fastcached/issues/319)). Sharing
+/// ([#319](https://github.com/LASTRADA-Software/pace/issues/319)). Sharing
 /// only the rewrite would leave "two callers", which reads the same way: a third
 /// server would still have to know the layout comes from those two fields, that the
 /// rewrite precedes the encode, and that the encode is what gets stored. A policy
@@ -435,7 +435,7 @@ struct StoredValueCanonicalization
 /// text differently cannot both call themselves generation N; and
 /// `ForeignGeneration` below is what a server does when it meets a generation it is
 /// not, which is refuse rather than guess
-/// ([#483](https://github.com/LASTRADA-Software/fastcached/issues/483)).
+/// ([#483](https://github.com/LASTRADA-Software/pace/issues/483)).
 ///
 /// **Refusing is the caller's business for ONE of the three outcomes.** Bytes that
 /// are not a stored value at all (`NotACompileValue`) are still each server's own

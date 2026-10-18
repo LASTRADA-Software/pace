@@ -184,7 +184,7 @@ enum class TargetDiscovery : std::uint8_t
 };
 
 /// Which of a driver's include roots its toolchain FINGERPRINT walks
-/// ([#1656](https://github.com/LASTRADA-Software/fastcached/issues/1656)).
+/// ([#1656](https://github.com/LASTRADA-Software/pace/issues/1656)).
 ///
 /// Separate from `IncludeDiscovery` because the two answer different questions. That
 /// one says where a driver SEARCHES, and the answer also feeds the fingerprint cache's
@@ -267,7 +267,7 @@ enum class PathValueRole : std::uint8_t
     /// by construction -- that is what it is for -- so an argument nothing
     /// relativized would put that root into every key and cost exactly the
     /// cross-checkout sharing the flag was added to preserve. Measured before the
-    /// row existed: `-fdebug-prefix-map=/home/ci/checkout-aaa=/fastcache/src` came
+    /// row existed: `-fdebug-prefix-map=/home/ci/checkout-aaa=/pace/src` came
     /// back from `RelativizeArgs` byte-for-byte.
     ///
     /// The replacement half is deliberately NOT rewritten. Two machines that map
@@ -469,7 +469,7 @@ struct PathValueMatch
 /// driver, and appends the client's `args` verbatim. A GNU driver handed `/std:c++20`
 /// reads it as a filename, so on a machine with both, one family was always routed to a
 /// driver that cannot read its arguments and distribution was silently off for it
-/// ([#226](https://github.com/LASTRADA-Software/fastcached/issues/226)).
+/// ([#226](https://github.com/LASTRADA-Software/pace/issues/226)).
 ///
 /// **A NAME rather than the enumerator's value.** A fingerprint is compared between
 /// machines and across builds, so folding an integer would make reordering the enum a
@@ -1002,7 +1002,7 @@ struct ParsedCommand
 /// `/tmp/l506f-link/build`, unmapped. So this cannot be answered by canonicalizing both
 /// sides and comparing filesystem identities: that is more permissive than the driver,
 /// and it would send a worker a mapping the local compile did not apply — manufacturing
-/// [#506](https://github.com/LASTRADA-Software/fastcached/issues/506)'s disagreement in
+/// [#506](https://github.com/LASTRADA-Software/pace/issues/506)'s disagreement in
 /// the other direction. The driver does a byte compare against one particular spelling,
 /// so this returns that spelling and lets `MappedCompileDirectory` go on doing a byte
 /// compare too.
@@ -1042,7 +1042,7 @@ struct MappedCompileDir
 /// relativize it. `RemoteCompileArgs` drops every path-valued flag, the prefix-map row
 /// included, so a worker received no mapping and a dispatched object recorded a
 /// directory a locally mapped one does not, under the same key
-/// ([#506](https://github.com/LASTRADA-Software/fastcached/issues/506)).
+/// ([#506](https://github.com/LASTRADA-Software/pace/issues/506)).
 ///
 /// The flag itself cannot be forwarded: a worker needs a rule whose left-hand side is a
 /// path on the WORKER, which this machine has never seen. So this pair travels and the
@@ -1085,7 +1085,7 @@ struct MappedCompileDir
 /// paragraphs above are its measurements.
 ///
 /// A second value needs it, which is why it is a function of its own
-/// ([#800](https://github.com/LASTRADA-Software/fastcached/issues/800)). A compiler
+/// ([#800](https://github.com/LASTRADA-Software/pace/issues/800)). A compiler
 /// with debug info on records the **name of the file it was handed**, DWARF's
 /// `DW_AT_name`, and `RemoteCompileArgs` drops the client's rules by design — so a
 /// client whose source argument is ABSOLUTE and whose line carries a rule matching it
