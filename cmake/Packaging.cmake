@@ -29,7 +29,7 @@ include(GNUInstallDirs)
 # Sourced from what the project already defines — project() and
 # cmake/Version.cmake — rather than restating the same strings here.
 
-set(CPACK_PACKAGE_NAME                "pace-kv")
+set(CPACK_PACKAGE_NAME                "pace")
 set(CPACK_PACKAGE_VERSION             "${PACE_VERSION}")
 set(CPACK_PACKAGE_VENDOR              "LASTRADA Software")
 set(CPACK_PACKAGE_HOMEPAGE_URL        "https://github.com/LASTRADA-Software/pace")
@@ -42,7 +42,7 @@ set(CPACK_RESOURCE_FILE_README        "${CMAKE_SOURCE_DIR}/README.md")
 # tree. Harmless for the archive/DEB/RPM generators, which take any path.
 configure_file("${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_BINARY_DIR}/LICENSE.txt" COPYONLY)
 set(CPACK_RESOURCE_FILE_LICENSE       "${CMAKE_BINARY_DIR}/LICENSE.txt")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY   "pace-kv")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY   "Pace")
 set(CPACK_PACKAGE_FILE_NAME           "pace-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_VERBATIM_VARIABLES          ON)
 set(CPACK_STRIP_FILES                 ON)
@@ -183,6 +183,12 @@ if(UNIX AND NOT APPLE)
 
     # systemd ships the sysusers/tmpfiles tooling the maintainer scripts use.
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "systemd")
+    # Pace is fastcached renamed, and installing it beside fastcached would put two
+    # daemons on one port under two sets of units: the package manager refuses, and
+    # the remedy is uninstalling fastcached (docs/upgrading-to-pace.md). A conflict
+    # and nothing more -- no Replaces/Obsoletes, which would remove fastcached as a
+    # side effect of an install and skip its own service teardown.
+    set(CPACK_DEBIAN_PACKAGE_CONFLICTS "fastcached")
 
     # dpkg reads the architecture from the build host. CMAKE_SYSTEM_PROCESSOR
     # is the wrong spelling for it (x86_64 vs amd64, aarch64 vs arm64), so ask
@@ -265,6 +271,8 @@ if(UNIX AND NOT APPLE)
     # Same reasoning as SHLIBDEPS above: let rpmbuild derive the dependencies.
     set(CPACK_RPM_PACKAGE_AUTOREQ ON)
     set(CPACK_RPM_PACKAGE_REQUIRES "systemd")
+    # The deb rule above, for the same reason: a conflict, never Obsoletes.
+    set(CPACK_RPM_PACKAGE_CONFLICTS "fastcached")
 
     if(PACE_SCRIPTLET_DIR)
         set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE   "${PACE_SCRIPTLET_DIR}/rpm/post")
@@ -302,9 +310,15 @@ endif()
 if(WIN32)
     # Stable upgrade GUID. NEVER regenerate — without a stable GUID,
     # consecutive installer versions cannot upgrade each other in place.
-    # (Minted for pace-kv; it must not be shared with any other product,
-    # or that product's installer would treat pace-kv as an upgrade of it.)
-    set(CPACK_WIX_UPGRADE_GUID "581D183D-47A3-44FC-97E9-4B5491E792D8")
+    # (Minted for Pace in 0.6.0; it must not be shared with any other product,
+    # or that product's installer would treat Pace as an upgrade of it.)
+    #
+    # Pace is a NEW product rather than an upgrade of fastcached: fastcached's
+    # code (581D183D-...) is DETECTED by packaging/windows/service-actions.xml and
+    # refused with a remedy, never upgraded, because a major upgrade of it would
+    # leave the old services registered over deleted binaries (a nested removal
+    # does not run its uninstall-service actions). See docs/upgrading-to-pace.md.
+    set(CPACK_WIX_UPGRADE_GUID "C1481926-BE48-4A34-B279-516B5006C257")
 
     # WiX 4+ uses the unified `wix.exe` binary. CMake's CPack WIX module accepts
     # only the values "3" or "4" — WiX 5 is API-compatible with WiX 4 and is
@@ -320,7 +334,7 @@ if(WIN32)
         endforeach()
     endif()
 
-    set(CPACK_WIX_PROGRAM_MENU_FOLDER "pace-kv")
+    set(CPACK_WIX_PROGRAM_MENU_FOLDER "Pace")
     set(CPACK_WIX_PROPERTY_ARPHELPLINK     "${CPACK_PACKAGE_HOMEPAGE_URL}")
     set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "${CPACK_PACKAGE_HOMEPAGE_URL}")
 
@@ -387,6 +401,8 @@ if(APPLE AND PACE_PACKAGE_ROOT_PREFIX)
 
     # <COMPONENT> in these variable names is the component name uppercased.
     if(PACE_MACOS_SCRIPT_DIR)
+        # The preinstall refuses while fastcached is installed (docs/upgrading-to-pace.md).
+        set(CPACK_PREFLIGHT_RUNTIME_SCRIPT       "${PACE_MACOS_SCRIPT_DIR}/preinstall-runtime")
         set(CPACK_POSTFLIGHT_RUNTIME_SCRIPT      "${PACE_MACOS_SCRIPT_DIR}/postinstall-runtime")
         set(CPACK_POSTFLIGHT_LAUNCHAGENT_SCRIPT  "${PACE_MACOS_SCRIPT_DIR}/postinstall-launchagent")
         set(CPACK_POSTFLIGHT_LAUNCHDAEMON_SCRIPT "${PACE_MACOS_SCRIPT_DIR}/postinstall-launchdaemon")
@@ -451,8 +467,8 @@ if(WIN32)
     endforeach()
 else()
     cpack_add_component(Runtime
-        DISPLAY_NAME "pace-kv"
-        DESCRIPTION  "The pace-kv daemon and the pace-cc compiler launcher."
+        DISPLAY_NAME "Pace"
+        DESCRIPTION  "Pace: the pace-kv daemon, the pace-node compile node, the pace-cc compiler launcher and pacectl."
         REQUIRED
     )
 endif()

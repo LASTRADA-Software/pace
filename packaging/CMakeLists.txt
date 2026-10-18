@@ -256,6 +256,7 @@ elseif(PACE_PACKAGE_ROOT_PREFIX AND APPLE)
     # Packaging.cmake through CPACK_POSTFLIGHT_<COMPONENT>_SCRIPT; the
     # uninstaller is payload and is installed by the asset table above.
     set(PACE_MACOS_SCRIPTS
+        "preinstall-runtime"
         "postinstall-runtime"
         "postinstall-launchagent"
         "postinstall-launchdaemon"

@@ -90,11 +90,6 @@ $ErrorActionPreference = 'Stop'
 # state the service must reach, as Win32_Service spells them; $null means the
 # service must not be registered at all.
 #
-#   Release030WithNode  -- 0.3.0 installed with both node properties: pace-kv
-#                          auto and started, the node registered auto and never
-#                          started (that installer starts only pace-kv). The
-#                          starting point of the upgrade, not a row of the
-#                          current table.
 #   NodeSelected        -- the node feature is installed: node auto and running,
 #                          pace-kv DISABLED and stopped (both would answer on 6674,
 #                          and an old package's removal inside an upgrade has Windows
@@ -107,7 +102,6 @@ $ErrorActionPreference = 'Stop'
 #                          registered auto and left stopped.
 #   NothingInstalled    -- after an uninstall.
 $script:ServiceTable = [ordered]@{
-    Release030WithNode   = [ordered]@{ 'pace-kv' = @('Auto', 'Running'); 'pace-node' = @('Auto', 'Stopped') }
     NodeSelected         = [ordered]@{ 'pace-node' = @('Auto', 'Running'); 'pace-kv' = @('Disabled', 'Stopped') }
     NodeAlone            = [ordered]@{ 'pace-node' = @('Auto', 'Running'); 'pace-kv' = $null }
     DaemonAlone          = [ordered]@{ 'pace-node' = $null; 'pace-kv' = @('Auto', 'Running') }
@@ -2633,7 +2627,7 @@ function Invoke-MsiServiceTableSelfTest {
     # What each row makes an expectation of: the services it leaves NOT RUNNING (stopped, or not
     # registered) are watched for a start, and the node's start is the 7036 control where it runs.
     $wantNotRunning = @{
-        Release030WithNode = 'pace-node'; NodeSelected = 'pace-kv'; NodeAlone = 'pace-kv'
+        NodeSelected = 'pace-kv'; NodeAlone = 'pace-kv'
         DaemonAlone = 'pace-node'; DaemonAloneUnstarted = 'pace-node,pace-kv'; NothingInstalled = 'pace-node,pace-kv'
     }
     foreach ($rowName in $script:ServiceTable.Keys) {
@@ -3021,7 +3015,7 @@ function Invoke-MsiServiceTableSelfTest {
     }
     Pass "watch: a failed observation is counted ($($watched.FailedPolls) round(s)) and the watch goes on to the process's exit"
 
-    $expectedCases = 183
+    $expectedCases = 182
     if ($script:SelfTestCases -ne $expectedCases) {
         throw "ran $script:SelfTestCases cases, expected ${expectedCases}: a case was added or lost without this count moving"
     }

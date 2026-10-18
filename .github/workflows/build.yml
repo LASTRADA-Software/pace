@@ -3502,7 +3502,13 @@ jobs:
       #
       # A script, because the subject is Windows Installer and the service control
       # manager across two packages, which no in-process test reaches.
-      - name: "Upgrade from the 0.3.0 MSI, then between two builds of this one"
+      # Pace is a NEW product, and fastcached's upgrade code is DETECTED, never upgraded
+      # (packaging/windows/service-actions.xml): an install over fastcached 0.5.0 must be
+      # REFUSED with the condition's message and leave nothing of Pace installed, and once
+      # fastcached is uninstalled through its own path, Pace installs. The old product's
+      # transactions run through plain msiexec: Invoke-Msiexec judges THIS table's services,
+      # which fastcached does not register under these names.
+      - name: "Refused while fastcached is installed, installed once it is not"
         shell: pwsh
         working-directory: out/build/cl-release
         env:
@@ -3510,29 +3516,65 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
-          # 0.3.0's installer registers its node only with a scheduler; this one takes none, and a
-          # node that serves refuses one. Its advertise property is 0.3.0's; this package has none.
-          $release030NodeProperties = @('PACE_NODE_SCHEDULER=127.0.0.1:6675', 'PACE_NODE_ADVERTISE=127.0.0.1:6674')
+          $retiredUpgradeCode = '{581D183D-47A3-44FC-97E9-4B5491E792D8}'
+          $refusal = 'fastcached is installed. Uninstall it (Settings > Apps > fastcached), then install Pace.'
+          function Invoke-RawMsiexec([string[]] $Arguments) {
+            Write-Host "msiexec $($Arguments -join ' ')"
+            return (Start-Process msiexec.exe -ArgumentList $Arguments -Wait -PassThru).ExitCode
+          }
+
+          $old = Join-Path $env:RUNNER_TEMP 'fastcached-0.5.0'
+          New-Item -ItemType Directory -Force -Path $old | Out-Null
+          gh release download v0.5.0 --repo LASTRADA-Software/pace --pattern 'fastcached-0.5.0-*.msi' --dir $old --clobber
+          if ($LASTEXITCODE -ne 0) { throw "step 1: could not download the fastcached 0.5.0 MSI (gh exited $LASTEXITCODE)" }
+          $fastcached = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
+          if (-not $fastcached) { throw "step 1: release v0.5.0 carries no fastcached MSI, so the refusal cannot be tested" }
+          if ((Get-MsiProperty $fastcached 'UpgradeCode') -ne $retiredUpgradeCode) {
+            throw "step 1: $fastcached is not of fastcached's family $retiredUpgradeCode"
+          }
+          $pace = (Get-ChildItem -Filter *.msi | Select-Object -First 1).FullName
+          $family = Get-MsiProperty $pace 'UpgradeCode'
+          if ($family -eq $retiredUpgradeCode) { throw "Pace's MSI still carries fastcached's upgrade code $family" }
+          # The condition is the package's own row, so the refusal below is THIS condition and not
+          # some other failure that happens to exit non-zero.
+          $condition = Get-MsiScalar $pace "SELECT ``Condition`` FROM ``LaunchCondition`` WHERE ``Condition`` = 'Installed OR NOT RETIRED_FASTCACHED_PRODUCT'"
+          if (-not $condition) { throw "Pace's MSI has no LaunchCondition refusing RETIRED_FASTCACHED_PRODUCT" }
+
+          $code = Invoke-RawMsiexec @('/i', "`"$fastcached`"", '/qn', '/l*v', "`"$PWD\fastcached-0.5.0.log`"")
+          if ($code -notin 0, 3010) { throw "step 2: installing fastcached 0.5.0 exited $code" }
+
+          $code = Invoke-RawMsiexec @('/i', "`"$pace`"", '/qn', '/l*v', "`"$PWD\refused.log`"")
+          if ($code -eq 0) { throw "step 3: Pace installed over fastcached 0.5.0 (exit 0); the launch condition did not refuse it" }
+          if (-not (Select-String -LiteralPath 'refused.log' -SimpleMatch $refusal -Quiet)) {
+            Show-MsiLog 'refused.log'
+            throw "step 3: the install exited $code, but refused.log does not carry the condition's message, so something else failed"
+          }
+          if (@(Get-InstalledProductCodes $family).Count -ne 0) { throw "step 3: the refused install left a Pace product registered" }
+          Write-Host "step 3: refused with exit $code and the condition's message"
+
+          $code = Invoke-RawMsiexec @('/x', "`"$fastcached`"", '/qn', '/l*v', "`"$PWD\fastcached-0.5.0-uninstall.log`"")
+          if ($code -notin 0, 3010) { throw "step 4: uninstalling fastcached 0.5.0 exited $code" }
+          if (@(Get-InstalledProductCodes $retiredUpgradeCode).Count -ne 0) { throw "step 4: fastcached is still registered after its uninstall" }
+
+          Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $pace -Log 'after-fastcached.log' -What 'step 4: installing Pace once fastcached is gone'
+          Assert-ServiceTable -Row NodeSelected -Log 'after-fastcached.log'
+          Invoke-Msiexec -Leaves NothingInstalled -Operation '/x' -Package $pace -Log 'after-fastcached-uninstall.log' -What 'step 5: uninstalling Pace'
+          Assert-InstalledProduct $family ''
+          Assert-ServiceTable -Row NothingInstalled -Log 'after-fastcached-uninstall.log'
+          Remove-PaceMachineState
+
+      - name: "Upgrade between two builds of this one"
+        shell: pwsh
+        working-directory: out/build/cl-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
+          # Pace's own upgrades only: Pace is a new product, and the fastcached releases (0.3.0,
+          # 0.5.0) are refused rather than upgraded, which the step above proves.
           $paceKvOnly = 'ADDLOCAL=CM_C_Cli,CM_C_Daemon,CM_C_Launcher'
           $oldSession = 'Adding UPGRADINGPRODUCTCODE property|UPGRADINGPRODUCTCODE=\{'
-
-          # The asset this step's expectations were written against. A release asset
-          # can be replaced under the same tag; a different file is a different
-          # subject, refused by name rather than tested.
-          $release = 'v0.3.0'
-          $releaseSha256 = 'BBF565C835A72D9F537F6869B3B46AC0176967A574F7CF7337AAC3FAE646CEAB'
-          $releaseProductCode = '{FDCDAB73-40AF-4EDA-9340-7C33986C3207}'
-          $old = Join-Path $env:RUNNER_TEMP 'previous-release'
-          New-Item -ItemType Directory -Force -Path $old | Out-Null
-          gh release download $release --repo LASTRADA-Software/pace --pattern '*.msi' --dir $old --clobber
-          if ($LASTEXITCODE -ne 0) { throw "could not download the $release MSI (gh exited $LASTEXITCODE)" }
-          $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
-          if (-not $previous) { throw "release $release carries no .msi, so this step cannot test the upgrade it exists for" }
-          $sha256 = (Get-FileHash -Algorithm SHA256 -Path $previous).Hash
-          if ($sha256 -ne $releaseSha256) { throw "the $release MSI's SHA256 is $sha256, not the pinned ${releaseSha256}: the asset was replaced" }
-          if ((Get-MsiProperty $previous 'ProductCode') -ne $releaseProductCode) {
-            throw "the $release MSI's ProductCode is $(Get-MsiProperty $previous 'ProductCode'), not the pinned $releaseProductCode"
-          }
 
           # The build the Package step made, which the steps after this one install
           # and the upload ships, and a second cpack run of the same tree beside it.
@@ -3557,58 +3599,18 @@ jobs:
           # What makes each transaction below an UPGRADE rather than a second
           # product or a repair, checked against the packages rather than assumed.
           $family = Get-MsiProperty $first 'UpgradeCode'
-          foreach ($package in $previous, $newer) {
-            if ((Get-MsiProperty $package 'UpgradeCode') -ne $family) { throw "$package is not of this package's family $family" }
-          }
+          if ((Get-MsiProperty $newer 'UpgradeCode') -ne $family) { throw "$newer is not of this package's family $family" }
           $productOf = @{}
-          foreach ($package in $previous, $first, $newer) { $productOf[$package] = Get-MsiProperty $package 'ProductCode' }
-          if (@($productOf.Values | Sort-Object -Unique).Count -ne 3) {
-            throw "two of the three packages share a ProductCode, so one install would be a repair: $($productOf.Values -join ', ')"
+          foreach ($package in $first, $newer) { $productOf[$package] = Get-MsiProperty $package 'ProductCode' }
+          if (@($productOf.Values | Sort-Object -Unique).Count -ne 2) {
+            throw "the two builds share a ProductCode, so the upgrade would be a repair: $($productOf.Values -join ', ')"
           }
 
-          # The starting point: 0.3.0 with the node registered.
-          Invoke-Msiexec -Leaves Release030WithNode -Released -Operation '/i' -Package $previous -Log 'previous.log' -Properties $release030NodeProperties -What "installing $release"
-          Assert-InstalledProduct $family $productOf[$previous]
-          Assert-ServiceTable -Row Release030WithNode -Log 'previous.log'
-
-          # Exactly 0, as every upgrade here: 0.3.0 stops its services WITHOUT waiting, and this
-          # package waits for their processes to exit before it replaces a file
-          # (PaceAwaitServiceExit) -- 3010 was a file one of them still held, replaced at the
-          # next boot, with the node's checked steps then running whichever binary was on the disk.
-          # No property: the node registration exists and runs afterwards all the same.
-          # And nothing the table did not ask for may happen DURING it, which a row read afterwards
-          # cannot see: Invoke-Msiexec judges every transaction against the row it -Leaves (here: no
-          # unexpected termination, and no start of pace-kv, which NodeSelected leaves stopped).
-          # pace-kv ran before this upgrade, and PR 1634's CI MEASURED where its stray start came
-          # from: 0.3.0's removal, nested in this upgrade with 0.3.0's own properties, opened a Restart
-          # Manager session and shut pace-kv down, and Windows Installer restarted it by name after
-          # the whole transaction had ended ("Failed while restarting applications. Error: 352"), onto
-          # the port the node holds. Nothing of this package can run after that, so the table leaves
-          # pace-kv DISABLED beside the node, and that start fails with no process.
-          Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $first -Log 'upgrade.log' -What "the upgrade from $release"
+          # The starting point: this build, default features, so the node is selected.
+          Invoke-Msiexec -Leaves NodeSelected -Operation '/i' -Package $first -Log 'first.log' -What 'installing this build'
           Assert-InstalledProduct $family $productOf[$first]
-          # The control that keeps the judgement above from passing VACUOUSLY: the nested session did
-          # shut pace-kv down, so Windows Installer did try to restart it, and only the disabled
-          # start type kept that from starting anything. Wording MEASURED on PR 1634's runner.
-          Assert-MsiLog -Path 'upgrade.log' -Present 'RESTART MANAGER: Successfully shut down all applications in the service''s session that held files in use'
-          # The ORDER is the fix (batch 4 review, B4-2): 0.3.0's own uninstall-service ran FIRST
-          # (RemoveExistingProducts is scheduled afterInstallInitialize); the files waited for 0.3.0's
-          # service processes; pace-kv, kept and disabled, was stopped and its PROCESS waited
-          # for -- it held 6674, which the node binds exclusively; and only then was the node
-          # registered and started, both checked, so either failing fails the transaction above. And
-          # what is registered now carries no --scheduler, which the node refuses at every start.
-          Assert-MsiActionOrder -Path 'upgrade.log' -Actions 'PaceNodeUninstallService', 'PaceAwaitServiceExit', `
-            'PaceAwaitExitForNode', 'PaceNodeInstallService', 'PaceNodeStartService'
-          Assert-NodeRegistrationLacks '--scheduler'
-          Assert-ServiceTable -Row NodeSelected -Log 'upgrade.log'
-
-          # The upgrade re-applied an OLD, exposed 0.3.0 state directory: assert it is now
-          # private, both directions. A 0.3.0 directory owned by the service or SYSTEM is
-          # secured in place; one a foreign account owns or that was junctioned now REFUSES
-          # the ACL by design, which would surface here as this assertion's throw.
+          Assert-ServiceTable -Row NodeSelected -Log 'first.log'
           Assert-NodeStatePrivate
-          # And its firewall opens what the service does: the record the 0.3.0 directory held is
-          # read only after the install secured it, so the rules carry consensus and discovery.
           Assert-NodeFirewall
 
           # Keeping both features, with NO node property: the node is registered again
@@ -3628,6 +3630,16 @@ jobs:
           Assert-InstalledProduct $family $productOf[$newer]
           Assert-MsiLog -Path 'upgrade-newer.log' -Present $oldSession, (Get-MsiActionRanPattern 'PaceForgetNodeAdvertise') `
             -Absent (Get-MsiActionRanPattern 'PaceNodeUninstallService'), (Get-MsiActionRanPattern 'PaceUninstallService')
+          # The ORDER is the fix (batch 4 review, B4-2), asserted on the upgrade that keeps the node: the
+          # files waited for the old product's service processes; pace-kv, kept and disabled, was stopped
+          # and its PROCESS waited for -- it held 6674, which the node binds exclusively; and only then
+          # was the node registered and started, both checked. The node's uninstall-service is not in
+          # this order because a Pace-to-Pace upgrade keeps the registration (its absence is asserted
+          # above). The Restart Manager control is Invoke-Msiexec's own: every transaction of this
+          # build's package must log that MSIRESTARTMANAGERCONTROL disabled it, and the old Pace
+          # package's nested removal carries the same row, so it opens no session to restart pace-kv.
+          Assert-MsiActionOrder -Path 'upgrade-newer.log' -Actions 'PaceAwaitServiceExit', 'PaceAwaitExitForNode', `
+            'PaceNodeInstallService', 'PaceNodeStartService'
           Assert-ServiceTable -Row NodeSelected -Log 'upgrade-newer.log'
           if ($null -ne (Get-ItemProperty -Path $installerKey -Name 'NodeAdvertise' -ErrorAction SilentlyContinue)) {
             throw "the upgrade left the remembered NodeAdvertise value in $installerKey; nothing reads it, and the property is gone"
@@ -3710,7 +3722,7 @@ jobs:
       #     so a branch that does not contain the latest release's tag would
       #     install as a downgrade, which msiexec refuses with 1603. That is
       #     refused before any install, naming the cause: rebase.
-      - name: "Upgrade from the latest release, when that is not 0.3.0"
+      - name: "Upgrade from the latest release, when that is Pace"
         shell: pwsh
         working-directory: out/build/cl-release
         env:
@@ -3720,16 +3732,19 @@ jobs:
           Import-Module (Join-Path $env:GITHUB_WORKSPACE 'scripts/lib/MsiServiceTable.psm1')
           $latest = gh release view --repo LASTRADA-Software/pace --json tagName --jq .tagName
           if ($LASTEXITCODE -ne 0 -or -not $latest) { throw "could not read the latest release's tag (gh exited $LASTEXITCODE)" }
-          if ($latest -eq 'v0.3.0') {
-            Write-Host "::notice::the latest release is $latest, which the previous step upgrades from with its asset pinned; this leg is covered there"
+          # A release of fastcached (0.5.0 and earlier) is a different product: refused, not
+          # upgraded, which "Refused while fastcached is installed" proves. Asked of the asset's
+          # upgrade code rather than of the tag, so the first Pace release turns this leg on.
+          $retiredUpgradeCode = '{581D183D-47A3-44FC-97E9-4B5491E792D8}'
+          $old = Join-Path $env:RUNNER_TEMP 'latest-release'
+          New-Item -ItemType Directory -Force -Path $old | Out-Null
+          gh release download $latest --repo LASTRADA-Software/pace --pattern '*.msi' --dir $old --clobber
+          if ($LASTEXITCODE -ne 0) { throw "could not download the $latest MSI (gh exited $LASTEXITCODE)" }
+          $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
+          if (-not $previous) { throw "release $latest carries no .msi, so this step cannot test the upgrade it exists for" }
+          if ((Get-MsiProperty $previous 'UpgradeCode') -eq $retiredUpgradeCode) {
+            Write-Host "::notice::the latest release $latest is fastcached, which Pace refuses rather than upgrades; the refusal step covers it"
           } else {
-            $old = Join-Path $env:RUNNER_TEMP 'latest-release'
-            New-Item -ItemType Directory -Force -Path $old | Out-Null
-            gh release download $latest --repo LASTRADA-Software/pace --pattern '*.msi' --dir $old --clobber
-            if ($LASTEXITCODE -ne 0) { throw "could not download the $latest MSI (gh exited $LASTEXITCODE)" }
-            $previous = (Get-ChildItem -Path $old -Filter *.msi | Select-Object -First 1).FullName
-            if (-not $previous) { throw "release $latest carries no .msi, so this step cannot test the upgrade it exists for" }
-
             $first = (Get-ChildItem -Filter *.msi | Select-Object -First 1).FullName
             $family = Get-MsiProperty $first 'UpgradeCode'
             if ((Get-MsiProperty $previous 'UpgradeCode') -ne $family) { throw "$previous is not of this package's family $family" }

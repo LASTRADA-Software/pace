@@ -133,6 +133,23 @@
          restart and no race for 6674 (PaceDisableForNode). -->
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
 
+    <!-- Pace is a NEW product (its own upgrade code, cmake/Packaging.cmake), and
+         fastcached 0.5.x and earlier is DETECTED here, never upgraded: a major
+         upgrade of the old code would leave the old half's services registered,
+         because a removal nested in an upgrade does not run its
+         uninstall-service actions (NOT UPGRADINGPRODUCTCODE), and they would
+         point at binaries the upgrade deleted. So the install refuses while
+         fastcached is installed, and names the remedy: uninstall it -- through
+         its own, tested path, which removes its services -- then install Pace.
+         `Installed` keeps the condition off a repair or removal of Pace itself.
+         The code below is fastcached's, and must never change (#1713). -->
+    <Upgrade Id="581D183D-47A3-44FC-97E9-4B5491E792D8">
+      <UpgradeVersion OnlyDetect="yes" Minimum="0.0.0" IncludeMinimum="yes"
+                      Property="RETIRED_FASTCACHED_PRODUCT" />
+    </Upgrade>
+    <Launch Condition="Installed OR NOT RETIRED_FASTCACHED_PRODUCT"
+            Message="fastcached is installed. Uninstall it (Settings &gt; Apps &gt; fastcached), then install Pace. See docs/upgrading-to-pace.md." />
+
     <!-- A MAINTENANCE transaction (a repair, a feature change, an uninstall)
          resolves INSTALL_ROOT from where this product IS installed: the
          InstallLocation of its OWN uninstall entry, read by AppSearch and set
