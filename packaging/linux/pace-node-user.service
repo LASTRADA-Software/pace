@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Per-user pace-node unit, installed as `pace-node.service` under the systemd
+# user directory:
+#
+#     systemctl --user enable --now pace-node
+#
+# Runs as the invoking user with no privileged setup at all -- no service
+# account, no /var/lib, no root -- the way pace-kv-user.service runs the cache
+# daemon. Enable one of the two, not both: each serves on 6674.
+#
+# No socket activation, deliberately: the node binds its own ports, and the
+# guards that judge those binds (the surface table, the exclusive-address claim)
+# stay in force exactly as they do for a node started by hand.
+#
+# The config file is NOT shipped for user installs (a package cannot write into
+# a home directory), so this unit starts on built-in defaults. To customise it,
+# put a file where pace-node already looks -- no unit override needed:
+#
+#     mkdir -p ~/.config/pace
+#     cp /etc/pace/pace-node.yaml ~/.config/pace/pace-node.yaml
+#     systemctl --user restart pace-node
+#
+# ExecStart passes no --config, for pace-kv-user.service's reason: naming a file
+# the package does not ship fails the very first start.
+
+[Unit]
+Description=pace-node — Pace compile node (user instance)
+Documentation=https://github.com/LASTRADA-Software/pace
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/pace-node
+ExecReload=/bin/kill -HUP $MAINPID
+
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+Restart=on-failure
+RestartSec=1
+# A refusal exits 78 (EX_CONFIG) and would refuse again; see pace-node.service.
+RestartPreventExitStatus=78
+
+# The node's identity lives here: systemd creates %S/pace-node
+# (~/.local/state/pace-node) and hands it over as STATE_DIRECTORY, which is the
+# directory the node chooses for itself with no unit at all -- NodeDefaults'
+# per-user default, $XDG_STATE_HOME/pace-node. One directory, so one identity
+# whether the node is started by this unit or by hand; a test holds the two
+# together (`[defaults][user-unit]`).
+StateDirectory=pace-node
+StateDirectoryMode=0700
+
+# A compile records its working directory, so the node never starts in `/`
+# (see pace-node.service and scripts/check-node-working-directory.cmake).
+# %t is $XDG_RUNTIME_DIR.
+RuntimeDirectory=pace-node
+RuntimeDirectoryMode=0700
+WorkingDirectory=%t/pace-node
+
+# --- Hardening -------------------------------------------------------------
+# The subset of the system unit's that a user manager supports, as
+# pace-kv-user.service takes it. MemoryDenyWriteExecute is left out as the
+# system unit leaves it out: the node spawns compilers, which inherit it.
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+[Install]
+WantedBy=default.target

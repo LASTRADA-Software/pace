@@ -70,6 +70,7 @@ if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
     set(PACE_PLATFORM_ASSETS
         "linux/pace-kv.service|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-kv.service|Runtime"
         "linux/pace-kv-user.service|${PACE_SYSTEMD_USER_DIR}|data|pace-kv.service|Runtime"
+        "linux/pace-node-user.service|${PACE_SYSTEMD_USER_DIR}|data|pace-node.service|Runtime"
         "linux/pace-kv.sysusers|${PACE_SYSUSERS_DIR}|data|pace-kv.conf|Runtime"
         "linux/pace-kv.tmpfiles|${PACE_TMPFILES_DIR}|data|pace-kv.conf|Runtime"
         "config/pace-kv.yaml|${PACE_SYSCONF_DIR}|config|pace-kv.yaml|Runtime"

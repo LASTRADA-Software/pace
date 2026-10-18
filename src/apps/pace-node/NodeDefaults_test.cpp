@@ -22,6 +22,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -36,6 +37,7 @@
 
 #include <core/Ranges.hpp>
 #include <tests/BoundedWait.hpp>
+#include <tests/CheckoutPaths.hpp>
 #include <tests/HostNamingFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/ScratchPath.hpp>
@@ -922,3 +924,67 @@ TEST_CASE("A service registration's defaulted state directory loses its group an
 }
 
 #endif
+
+namespace
+{
+
+/// The value of the last `<directive>=` assignment in a systemd unit, the one in force; a
+/// commented line configures nothing and is skipped.
+/// @param unitPath The unit file.
+/// @param directive The directive's name, e.g. `StateDirectory`.
+/// @return The value, or a disengaged optional when no line assigns it.
+[[nodiscard]] std::optional<std::string> UnitDirective(std::filesystem::path const& unitPath, std::string_view directive)
+{
+    std::ifstream in { unitPath, std::ios::binary };
+    REQUIRE(in.good());
+    auto const prefix = std::format("{}=", directive);
+    std::optional<std::string> value;
+    std::string line;
+    while (std::getline(in, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.starts_with(prefix))
+            value = line.substr(prefix.size());
+    }
+    return value;
+}
+
+} // namespace
+
+TEST_CASE("The per-user node unit and LaunchAgent keep the identity where the node keeps it by itself",
+          "[node][defaults][user-unit]")
+{
+    // pace-node-user.service hands the node `StateDirectory=` as STATE_DIRECTORY, and a node
+    // started by hand takes NodeDefaults' per-user default. Were the two to choose a directory
+    // each, one person's node would have two identities depending on how it was started -- so
+    // the unit's directory is read out of the shipped file, never restated here.
+    auto const unit = std::filesystem::path { Testing::CheckoutSourceDir } / "packaging" / "linux" / "pace-node-user.service";
+    auto const handedOver = UnitDirective(unit, "StateDirectory");
+    REQUIRE(handedOver.has_value());
+    // systemd appends the name to $XDG_STATE_HOME; the node appends NodeStateDirectoryName to it.
+    CHECK(Unwrap(handedOver) == NodeStateDirectoryName);
+
+#if !defined(_WIN32)
+    // And the resolution itself, both ways in: with the unit's handover, and with none.
+    auto environment = std::map<std::string, std::string, std::less<>> { { "XDG_STATE_HOME", "/s" }, { "HOME", "/h" } };
+    auto const byHand = DefaultNodeClusterDirectory(ScriptedConfigPathProbe { environment, Privilege::Unprivileged });
+    REQUIRE(byHand.has_value());
+    CHECK(Unwrap(byHand).path == std::filesystem::path { "/s" } / Unwrap(handedOver));
+
+    environment.emplace(ServiceStateDirectoryVariable, (std::filesystem::path { "/s" } / Unwrap(handedOver)).string());
+    auto const byUnit = DefaultNodeClusterDirectory(ScriptedConfigPathProbe { environment, Privilege::Unprivileged });
+    REQUIRE(byUnit.has_value());
+    CHECK(Unwrap(byUnit).path == Unwrap(byHand).path);
+#endif
+
+    // The LaunchAgent is `pace-node --install-service --service-scope=user`'s, labelled
+    // software.lastrada.pace-node. It must hand over NOTHING -- no STATE_DIRECTORY and no
+    // --cluster-dir -- so the agent's node takes the same per-user default as one started by hand.
+    auto const spec = MakeNodeServiceSpec(
+        std::filesystem::path { "pace-node" }, Testing::FirstStart(NodeConfig {}), Testing::InstallerPathProbe());
+    CHECK(LaunchdLabel(spec) == "software.lastrada.pace-node");
+    CHECK(std::ranges::none_of(spec.arguments, [](std::string const& a) { return a.starts_with("--cluster-dir"); }));
+    auto const agent = BuildLaunchdPlist(spec, ServiceScope::User, std::filesystem::path { "/tmp" });
+    CHECK_FALSE(agent.contains(ServiceStateDirectoryVariable));
+}

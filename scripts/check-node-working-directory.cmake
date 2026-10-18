@@ -146,6 +146,7 @@ set(PaceUnitWorkingDirectories
     "linux/pace-node.service|yes|The compile worker. Its entire purpose is to spawn a compiler, and the prefix-map rules it builds are derived from this directory."
     "linux/pace-kv.service|no|The cache daemon. It executes nothing at all, so no prefix-map rule is ever derived from its directory and a working directory of / costs it nothing but a busy mount point."
     "linux/pace-kv-user.service|no|The per-user cache daemon. Executes nothing, exactly as the system daemon does not."
+    "linux/pace-node-user.service|yes|The per-user compile worker. It spawns compilers exactly as the system unit's does, so its directory feeds the same prefix-map rules."
 )
 
 # One row per shipped unit whose program keeps a NODE IDENTITY and runs unprivileged:
@@ -155,6 +156,7 @@ set(PaceUnitWorkingDirectories
 # A unit named here that does not exist is a failure, for the table above's reason.
 set(PaceUnitNodeStateDirectories
     "linux/pace-node.service|The compile node, running as the unprivileged pace-node account: without StateDirectory= naming its directory it would keep the machine's identity in that account's home, / under sysusers and read-only under ProtectSystem=strict."
+    "linux/pace-node-user.service|The per-user compile node: the directory its unit hands over must be the one the node chooses with no unit, NodeDefaults' per-user default, or one person's node has two identities depending on how it was started."
 )
 
 # Where the node's own name for its state directory is spelled, and the pattern that
