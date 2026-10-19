@@ -55,7 +55,7 @@ class ScopedStateDir
 {
   public:
     ScopedStateDir():
-        _dir { "fc-node-tc" },
+        _dir { "pace-node-tc" },
         _env { StateVariable, _dir.Path().string() }
     {
     }
@@ -946,7 +946,7 @@ TEST_CASE("NodeToolchains: the witness is the identity's own evidence and is pro
     // A real directory, because the stamp reaches the filesystem with no seam in front
     // of it and an unstattable stand-in would leave `Watchable()` false -- which is
     // exactly the state a witness that recorded nothing would also be in.
-    Pace::Testing::ScratchDirectory tree { "fc-node-witness" };
+    Pace::Testing::ScratchDirectory tree { "pace-node-witness" };
     tree.Write("inc/a.hpp", "content");
     tree.Write("clang", "#!/bin/sh\n");
     auto const compiler = (tree / "clang").string();
@@ -1003,7 +1003,7 @@ TEST_CASE("NodeToolchains: never probed and probed-but-unstampable stay two stat
     // Nothing today branches on the difference, which is why nothing noticed. This
     // pins it anyway: restoring a distinction after something starts depending on it
     // is a schema change, and keeping it costs an `optional`.
-    Pace::Testing::ScratchDirectory tree { "fc-node-two-states" };
+    Pace::Testing::ScratchDirectory tree { "pace-node-two-states" };
     tree.Write("inc/a.hpp", "content");
     auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
 
@@ -1122,7 +1122,7 @@ TEST_CASE("NodeToolchains: a toolchain patched under a running node is noticed",
     // pre-upgrade digest while spawning the post-upgrade compiler. Clients receive
     // objects built by a compiler they did not key against and store them in the
     // shared cache under the old key, where the whole fleet reads them.
-    Pace::Testing::ScratchDirectory const scratch { "fc-node-stale" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-node-stale" };
     auto const compiler = scratch.Path() / "cc";
     auto const headers = scratch.Path() / "include";
     std::filesystem::create_directories(headers);

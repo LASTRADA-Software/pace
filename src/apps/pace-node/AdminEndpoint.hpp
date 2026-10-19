@@ -42,7 +42,7 @@
 // Under TLS the surface below OWNS a context, so the complete type is needed for
 // its deleter; without it the class is only ever a pointer that is always null,
 // and the forward declaration keeps this header free of OpenSSL either way.
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     #include <core/net/Tls.hpp>
 #else
 namespace core::net
@@ -646,7 +646,7 @@ class AdminEndpoint
 /// `SchedulerTier` are each one object rather than five locals.
 struct AdminSurface
 {
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     /// Server TLS context when a certificate was named, else null.
     std::shared_ptr<core::net::ITlsContext> tls;
 #endif

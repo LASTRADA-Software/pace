@@ -388,7 +388,7 @@ TEST_CASE("(#290) one peer on one listener has a FETCH refused and a COMPILE adm
     NodeIoLoop io;
     CapturingLogger logger;
     NeverSpawns runner;
-    Pace::Testing::ScratchDirectory const scratch { "fc-290-acceptance" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-290-acceptance" };
     Cc::CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() };
     Cc::WorkerProtocol protocol { jobs,    Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
                                   metrics, Cc::IgnoreJobRefusals() };

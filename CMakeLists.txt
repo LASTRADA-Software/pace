@@ -189,7 +189,7 @@ option(PACE_BUILD_TESTS "Build unit tests" ON)
 
 # TLS is opt-in and off by default so the standard build stays dependency-free
 # (mirroring TRACY_ENABLE). When on, the build links OpenSSL and our code keys
-# off the FC_TLS_ENABLED compile definition; when off, no OpenSSL header is
+# off the PACE_TLS_ENABLED compile definition; when off, no OpenSSL header is
 # included and the TLS sources are not compiled. On Windows the OpenSSL package
 # is pulled in via the vcpkg manifest's "tls" feature (see vcpkg.json).
 option(PACE_ENABLE_TLS "Enable TLS support (requires OpenSSL)" OFF)
@@ -199,7 +199,7 @@ option(PACE_ENABLE_TLS "Enable TLS support (requires OpenSSL)" OFF)
 # `--compression none`). When explicitly built OFF, no compression library is
 # fetched or linked, the codec table degrades to identity-only, and selecting
 # zstd/lz4 from config becomes a clean startup error. Our code keys off the
-# FC_COMPRESSION_ENABLED compile definition (set in src/Pace/CMakeLists.txt).
+# PACE_COMPRESSION_ENABLED compile definition (set in src/Pace/CMakeLists.txt).
 option(PACE_ENABLE_COMPRESSION "Enable on-disk value compression (zstd + lz4)" ON)
 
 # Tracy profiler. TRACY_ENABLE is Tracy's own gate; reusing the name means the

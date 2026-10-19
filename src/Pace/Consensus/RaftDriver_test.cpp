@@ -1091,7 +1091,7 @@ TEST_CASE("A node restarted after compacting comes back holding every cluster fa
     // fix the recovered node's applied index sat at the snapshot's boundary and nothing
     // handed the snapshot to the application, so all of them were gone -- and a forgotten
     // machine's key was admitted again, with nothing reporting it: removal failing OPEN.
-    ScratchDirectory scratch { "fc-raft-restore" };
+    ScratchDirectory scratch { "pace-raft-restore" };
     NullLogger logger;
     NoPeers transport;
     ScriptedRandomSource random { { 0 } };

@@ -683,7 +683,7 @@ cat > "${launcher_reader_dir}/extra.cpp" <<'PLANTED'
         std::string base;
         if (auto const local = Pace::ReadEnvironmentVariable("LOCALAPPDATA"); local.has_value())
             base = *local;
-        auto const extra = Pace::ReadEnvironmentVariable("FC_STATE_EXTRA");
+        auto const extra = Pace::ReadEnvironmentVariable("PACE_STATE_EXTRA");
         if (extra.has_value())
             base = *extra + "/sub";
         return base;
@@ -750,7 +750,7 @@ _launcher_query() {
 }
 # What the first four queries must read as, in their order.
 launcher_index=0
-for launcher_want in "LOCALAPPDATA|;FC_STATE_EXTRA|/sub" "LOCALAPPDATA|;FC_STATE_EXTRA|/sub" "WIN_ONLY|" "POSIX_ONLY|/s"; do
+for launcher_want in "LOCALAPPDATA|;PACE_STATE_EXTRA|/sub" "LOCALAPPDATA|;PACE_STATE_EXTRA|/sub" "WIN_ONLY|" "POSIX_ONLY|/s"; do
     ran=$(( ran + 1 ))
     launcher_query="$(_launcher_query "$launcher_index")"
     launcher_file="${launcher_query%|*}"; launcher_file="${launcher_file##*/}"; launcher_platform="${launcher_query##*|}"

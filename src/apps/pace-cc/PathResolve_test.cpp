@@ -71,7 +71,7 @@ TEST_CASE("A path that does not exist comes back usable rather than empty")
     // `UniqueScratchPath` creates nothing, which is exactly what a case about an
     // absent path wants -- and it cannot be made to exist by a leftover from an
     // older run, which a fixed name could.
-    auto const absent = (Pace::Testing::UniqueScratchPath("fc-resolve-absent") / "nope.hpp").string();
+    auto const absent = (Pace::Testing::UniqueScratchPath("pace-resolve-absent") / "nope.hpp").string();
     auto const resolved = resolver->Resolve(absent);
     CHECK_FALSE(resolved.empty());
     CHECK(std::filesystem::path { resolved }.filename() == "nope.hpp");
@@ -82,7 +82,7 @@ TEST_CASE("Two spellings of one directory resolve to the same answer")
     // The property the whole module exists for. A symlink is the portable stand-in
     // for the 8.3 short name measured on Windows: same directory, two spellings,
     // and a string prefix comparison that cannot tell they are the same file.
-    Pace::Testing::ScratchDirectory const scratch { "fc-resolve-alias" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-resolve-alias" };
     auto const real = scratch / "real";
     auto const file = MakeFile(scratch, "real/inc/h1.h");
 
@@ -106,7 +106,7 @@ TEST_CASE("A root's own final component is resolved, unlike a file's")
     // reports; a layout root passed through it would keep whatever spelling its
     // last component had — and a root whose last component is the aliased one is
     // exactly the shape issue #66 describes.
-    Pace::Testing::ScratchDirectory const scratch { "fc-resolve-rootleaf" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-resolve-rootleaf" };
     auto const real = scratch / "real";
     std::error_code ec;
     std::filesystem::create_directories(real, ec);
@@ -125,7 +125,7 @@ TEST_CASE("Resolution is memoized per directory, not per path")
     // headers from a few dozen directories, so per-path resolution is only
     // affordable if the filesystem is asked once per directory. Ten files in one
     // directory must not be ten probes.
-    Pace::Testing::ScratchDirectory const scratch { "fc-resolve-memo" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-resolve-memo" };
     auto const directory = scratch / "inc";
     for (auto const index: std::views::iota(0, 10))
         (void) MakeFile(scratch, "inc/h" + std::to_string(index) + ".h");
@@ -146,7 +146,7 @@ TEST_CASE("Resolution is idempotent")
 {
     // RecordManifest reconciles its own inputs even though its caller already did,
     // which is only safe because resolving an already-resolved path is a no-op.
-    Pace::Testing::ScratchDirectory const scratch { "fc-resolve-idempotent" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-resolve-idempotent" };
     auto const file = MakeFile(scratch, "inc/h1.h");
 
     auto const resolver = MakePathResolver();

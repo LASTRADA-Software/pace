@@ -557,9 +557,9 @@ TEST_CASE("DefaultConfigPath: the platform's locations are the ones the packagin
     REQUIRE(lists("%ProgramData%\\pace\\pace-kv.yaml"));
     REQUIRE(lists("%APPDATA%\\pace\\pace-kv.yaml"));
 #else
-    // FC_SYSCONF_DIR is handed down from CMake, from the same variable that
+    // PACE_SYSCONF_PATH is handed down from CMake, from the same variable that
     // decides where packaging/ installs the file.
-    REQUIRE(lists(FC_SYSCONF_DIR "/pace-kv.yaml"));
+    REQUIRE(lists(PACE_SYSCONF_PATH "/pace-kv.yaml"));
     REQUIRE(lists("~/.config/pace/pace-kv.yaml"));
 #endif
 }

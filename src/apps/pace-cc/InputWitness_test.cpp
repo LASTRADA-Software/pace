@@ -337,8 +337,8 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
 {
     // Spec invariant 1, at the seam: identities differ in every field between the two
     // checkouts (and between two machines), and nothing of them may reach the record.
-    Pace::Testing::ScratchDirectory const scratchA { "fc-witness-share-a" };
-    Pace::Testing::ScratchDirectory const scratchB { "fc-witness-share-b-deeper" };
+    Pace::Testing::ScratchDirectory const scratchA { "pace-witness-share-a" };
+    Pace::Testing::ScratchDirectory const scratchB { "pace-witness-share-b-deeper" };
     std::array<std::string, 2> encoded;
     std::array<std::string, 2> manifestKeys;
     for (auto const index: { std::size_t { 0 }, std::size_t { 1 } })

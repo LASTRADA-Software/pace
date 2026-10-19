@@ -168,7 +168,7 @@ endforeach()
 # - `if(X)  # why` is a frame. The comment is dropped before matching, where the old pattern
 #   pushed nothing and let the matching `endif()` pop the frame ENCLOSING it.
 # - A condition spelled across lines is a frame too: lines are accumulated until the
-#   parentheses balance. This tree has one (src/tests/CMakeLists.txt, `_fc_caveat_msvc_like`).
+#   parentheses balance. This tree has one (src/tests/CMakeLists.txt, `_pace_caveat_msvc_like`).
 function(pace_step_frames line framesVar pendingVar codeOut conditionOut unbalancedOut)
     set(frames "${${framesVar}}")
     set(pending "${${pendingVar}}")

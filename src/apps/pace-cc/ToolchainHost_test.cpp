@@ -171,7 +171,7 @@ TEST_CASE("An extensionless wrapper does not shadow the real executable", "[tool
 
 TEST_CASE("The real host tells a directory from a file and lists each", "[toolchain-host]")
 {
-    Pace::Testing::ScratchDirectory tree { "fc-tch-listing" };
+    Pace::Testing::ScratchDirectory tree { "pace-tch-listing" };
     tree.Write("bin/marker.txt", "hello");
     tree.Write("include/header.h", "#pragma once\n");
 
@@ -197,7 +197,7 @@ TEST_CASE("The real host tells a directory from a file and lists each", "[toolch
 
 TEST_CASE("The real host reads a text file whole and reports an absent one", "[toolchain-host]")
 {
-    Pace::Testing::ScratchDirectory tree { "fc-tch-read" };
+    Pace::Testing::ScratchDirectory tree { "pace-tch-read" };
     // A trailing newline is what `Microsoft.VCToolsVersion.default.txt` actually
     // carries, and it comes back rather than being trimmed here -- trimming is the
     // caller's decision, and a reader that did it silently would make a file whose
@@ -221,21 +221,21 @@ TEST_CASE("The real host reads a text file whole and reports an absent one", "[t
 
 TEST_CASE("The real host resolves this process's own executable on PATH", "[toolchain-host]")
 {
-    Pace::Testing::ScratchDirectory tree { "fc-tch-search" };
+    Pace::Testing::ScratchDirectory tree { "pace-tch-search" };
 #if defined(_WIN32)
-    tree.Write("bin/fc-probe.exe", "not really a program");
-    auto const executable = tree / "bin/fc-probe.exe";
-    constexpr std::string_view bareName = "fc-probe";
+    tree.Write("bin/pace-probe.exe", "not really a program");
+    auto const executable = tree / "bin/pace-probe.exe";
+    constexpr std::string_view bareName = "pace-probe";
     // A wrapper with no extension, beside the real thing -- ordinary in an MSYS2
     // or Cygwin bindir. Written FIRST so a search preferring the bare spelling
     // would find it, since `ExecutableExists` cannot see an execute bit on
     // Windows and accepts any regular file. Windows resolves a bare name through
     // PATHEXT and never runs this one.
-    tree.Write("bin/fc-probe", "#!/bin/sh\n");
+    tree.Write("bin/pace-probe", "#!/bin/sh\n");
 #else
-    tree.Write("bin/fc-probe", "#!/bin/sh\n");
-    auto const executable = tree / "bin/fc-probe";
-    constexpr std::string_view bareName = "fc-probe";
+    tree.Write("bin/pace-probe", "#!/bin/sh\n");
+    auto const executable = tree / "bin/pace-probe";
+    constexpr std::string_view bareName = "pace-probe";
     std::filesystem::permissions(executable, std::filesystem::perms::owner_all, std::filesystem::perm_options::add);
 #endif
 
@@ -250,7 +250,7 @@ TEST_CASE("The real host resolves this process's own executable on PATH", "[tool
     REQUIRE(resolved.has_value());
     CHECK(std::filesystem::path { Pace::Testing::Unwrap(resolved) }.filename() == executable.filename());
 
-    CHECK_FALSE(host->ResolveOnSearchPath("fc-definitely-not-installed").has_value());
+    CHECK_FALSE(host->ResolveOnSearchPath("pace-definitely-not-installed").has_value());
 }
 
 TEST_CASE("The real host answers for the machine, and agrees with a second reading of it", "[toolchain-host]")

@@ -239,15 +239,15 @@ namespace
         if (!claimed)
             return std::nullopt;
 
-        files.header = files.directory / "fc-marker-probe.h";
-        files.source = files.directory / "fc-marker-probe.cpp";
+        files.header = files.directory / "pace-marker-probe.h";
+        files.source = files.directory / "pace-marker-probe.cpp";
 
         // Empty but for a comment: the probe asks what a note LOOKS like, and a header
         // with declarations in it would only give the compiler more to say. The TU's
         // include is quoted and the header sits beside it, so no `-I` is needed and the
         // driver resolves it to the absolute path this function knows.
         if (!WriteTextFile(files.header, "/* pace-cc: reads this file's name back out of a note. */\n")
-            || !WriteTextFile(files.source, "#include \"fc-marker-probe.h\"\n"))
+            || !WriteTextFile(files.source, "#include \"pace-marker-probe.h\"\n"))
         {
             RemoveProbeFiles(files);
             return std::nullopt;

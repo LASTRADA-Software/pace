@@ -1063,7 +1063,7 @@ TEST_CASE("The test-support include check fires on a planted include and passes 
 
     // And through the file reader the scan uses, over a planted production file: a commented-out
     // include is no include, a live one is found at its line.
-    Pace::Testing::ScratchDirectory const scratch { "fc-test-support-include" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-test-support-include" };
     auto const planted = scratch.Path() / "Planted.cpp";
     {
         // Binary, so the planted file is LF as every file in this tree is (`.gitattributes`); text mode

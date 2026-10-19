@@ -65,7 +65,7 @@ namespace Pace::Cc
 /// It is header-only on purpose. `Refuse` is one increment and one call, its only
 /// dependencies are `CompileCacheWire.hpp` (header-only and dependency-free, because
 /// the launcher does not link `Pace`) and `IMetricsSink.hpp` (standard library
-/// only), so this costs `_fc_cc_core` no row and the build no translation unit.
+/// only), so this costs `_pace_cc_core` no row and the build no translation unit.
 /// `CompileCacheWire.hpp` itself is untouched and stays dependency-free.
 
 /// One refusal a `0xFC` surface answers with AND counts: the wire code a client acts

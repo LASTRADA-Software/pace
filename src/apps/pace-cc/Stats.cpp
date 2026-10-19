@@ -2,7 +2,7 @@
 #include "Stats.hpp"
 
 #include <Pace/Core/EnumTable.hpp>
-// Header-only and std-only, so they add no row to `_fc_cc_core` -- which the
+// Header-only and std-only, so they add no row to `_pace_cc_core` -- which the
 // launcher's CMakeLists is strict about, since it does not link the library.
 // `Markup.hpp` pulls in `Ranges.hpp` and `Utf8.hpp` and there is no `.cpp` between
 // the three, which is what makes the shared escaper reachable from here at all.

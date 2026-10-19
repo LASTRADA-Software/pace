@@ -222,7 +222,7 @@ namespace Detail
     struct AcceptorThreadOptions
     {
         std::string surface;                    ///< Names the loop in its log lines and readiness, e.g. `acceptor thread 0`.
-        std::string threadName;                 ///< The OS thread's name, e.g. `fc-acceptor-0`.
+        std::string threadName;                 ///< The OS thread's name, e.g. `pace-acceptor-0`.
         std::unique_ptr<IRawAcceptor> acceptor; ///< Owned by the thread for as long as it runs.
         ILogger& logger;                        ///< Where a failed accept is warned about and an unexpected end reported.
         core::net::AcceptLoopHealth&

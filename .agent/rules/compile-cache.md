@@ -1694,7 +1694,7 @@ stops being one — the same confound that cost #493 a re-run.
   the cache" a property of the key rather than a line of advice — a disagreeing
   machine misses instead of mis-serving.
 - **The rules are computed by one function and checked as a computation.**
-  `_fc_debug_prefix_map_rules` in `cmake/portable/CompileCache.cmake`, driven by
+  `_pace_debug_prefix_map_rules` in `cmake/portable/CompileCache.cmake`, driven by
   `ctest -R debug-prefix-map-rules` over a table of layouts. It was wrong twice
   before it was ever run, in ways invisible in the layout a developer has:
   `file(RELATIVE_PATH)` answers with a **trailing separator**, so the rewritten
@@ -1736,7 +1736,7 @@ stops being one — the same confound that cost #493 a re-run.
     `-ffile-prefix-map` is REFUSED by name, because it also rewrites debug records the
     worker maps by its own `-fdebug-prefix-map` rules.
   - **The module maps `__FILE__` for the checkout (`<src>/=`) and the dependency cache
-    (`<cache>/=deps/`, LAST)** — `_fc_source_prefix_map_rules`, checked by
+    (`<cache>/=deps/`, LAST)** — `_pace_source_prefix_map_rules`, checked by
     `ctest -R debug-prefix-map-rules` — and only when `pace-cc` is the launcher, the
     one that keys the rule portably. Measured on this repo before it: every Catch2 test
     object (358 of 1017) named its checkout and was stored per checkout.

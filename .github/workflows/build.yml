@@ -2683,17 +2683,17 @@ jobs:
 
           # Proves the daemon is NOT daemonizing: journald only sees stderr
           # from a foreground process.
-          sudo journalctl -u pace-kv --no-pager | tee /tmp/fc-journal.txt
-          grep -q 'ready, accepting connections' /tmp/fc-journal.txt \
+          sudo journalctl -u pace-kv --no-pager | tee /tmp/pace-journal.txt
+          grep -q 'ready, accepting connections' /tmp/pace-journal.txt \
             || { echo "::error::startup banner missing from the journal"; exit 1; }
 
           # It must run as the packaged system account, not as root.
           test "$(systemctl show -p User --value pace-kv)" = pace-kv
 
           # End-to-end round trip against the packaged default config.
-          printf 'set k 0 0 5\r\nhello\r\nget k\r\nquit\r\n' | timeout 10 nc -q1 127.0.0.1 6674 | tee /tmp/fc-proto.txt
-          grep -q STORED /tmp/fc-proto.txt
-          grep -q hello  /tmp/fc-proto.txt
+          printf 'set k 0 0 5\r\nhello\r\nget k\r\nquit\r\n' | timeout 10 nc -q1 127.0.0.1 6674 | tee /tmp/pace-proto.txt
+          grep -q STORED /tmp/pace-proto.txt
+          grep -q hello  /tmp/pace-proto.txt
 
           # The machine-wide config may hold a secret, so the package restricts it
           # to the service account (#861). Assert the INSTALLED result: the ctest

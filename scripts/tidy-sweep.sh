@@ -1985,7 +1985,7 @@ trap "rm -rf '$scratch'" EXIT
 # equivalent to the build-driven tidy it replaced. A source compiled into two
 # targets is two translation units with two preprocessor states -- `Stats.cpp`
 # builds into `pace-cc`, `pace-cc-tests` and `pace-node`,
-# and those targets do not agree about `FC_COMPRESSION_ENABLED` -- so one
+# and those targets do not agree about `PACE_COMPRESSION_ENABLED` -- so one
 # invocation per file would silently stop checking the other configurations.
 #
 # `clang-tidy -p <dir> <file>` does NOT take the first matching entry: libTooling's
@@ -2495,7 +2495,7 @@ fi
 # "produced no code in this configuration" and not "on this platform": of the
 # thirteen such files measured in a default Linux build, eleven are platform-gated
 # and two (`TlsContext_test.cpp`, `TlsSocket_test.cpp`) are gated on
-# `FC_TLS_ENABLED` and would contribute on this very platform with TLS on. Naming
+# `PACE_TLS_ENABLED` and would contribute on this very platform with TLS on. Naming
 # the platform would tell a reader the file belongs to another OS when it belongs to
 # another build -- and this must never read as a fault, because an empty unit here
 # is the guard working.

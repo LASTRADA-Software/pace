@@ -578,7 +578,7 @@ determinism rests on.
     - **The fallback is compiled and tested on EVERY platform**, under `Ranges::Detail`,
       and held to agree with the standard facility wherever one exists. A fallback compiled
       only where it is selected is compiled only on the leg nobody builds locally.
-      `FC_RANGES_FORCE_FALLBACK`, as a WHOLE-BUILD define only (a per-TU define is an ODR
+      `PACE_RANGES_FORCE_FALLBACK`, as a WHOLE-BUILD define only (a per-TU define is an ODR
       violation), selects it everywhere so a Linux or Windows build can compile the real call
       sites against it -- the only local stand-in for Apple's libc++.
     - **A copy of the function object, not a reference, and `Iota` rather than `iota`.**
@@ -2886,7 +2886,7 @@ makes it anyway and says so there.
 
 - **The unit of work is a compile command, not a file, and that is what makes the
   swap lossless.** `Stats.cpp` builds into `pace-cc`, `pace-cc-tests`
-  and `pace-node`, which do not agree about `FC_COMPRESSION_ENABLED`.
+  and `pace-node`, which do not agree about `PACE_COMPRESSION_ENABLED`.
   `clang-tidy -p <dir> <file>` does **not** take the first matching entry:
   libTooling's `ClangTool::run` loops over *every* command the database returns for
   that file. So a file with one command needs nothing special, and a file with
@@ -3630,7 +3630,7 @@ makes it anyway and says so there.
   - **A global flag is wrong even when it is set on one file.** A translation unit built with
     `-msha -msse4.1` emits its own out-of-line copies of every inline function it uses:
     `std::span::subspan`, the `views::iota` iterator, and so on. The linker keeps one arbitrary
-    copy for the whole program -- the ODR shape of `FC_RANGES_FORCE_FALLBACK`'s per-TU define
+    copy for the whole program -- the ODR shape of `PACE_RANGES_FORCE_FALLBACK`'s per-TU define
     above. The scalar fallback, running on a CPU without those instructions, can then execute
     the copy that has them and die of SIGILL. The attribute keeps the instructions inside the
     attributed bodies. It also needs no per-source flag in each target that compiles the file,
@@ -4188,7 +4188,7 @@ carriage return, so such a script does not misbehave — it fails to start at al
     answers an unknown `-f...` with warning D9002 and exits 0, so the check has to be
     kept away from it by the guard rather than expected to reject it.
   - **Anything this module computes and appends is a function, checked as a
-    computation.** `_fc_debug_prefix_map_rules` + `ctest -R debug-prefix-map-rules`,
+    computation.** `_pace_debug_prefix_map_rules` + `ctest -R debug-prefix-map-rules`,
     which is in the default set and needs no compiler. The alternative is two
     ~40-second configures per layout, so the layouts that break it — out-of-tree,
     another mount, in-source — are exactly the ones nobody has locally and nobody
@@ -4219,7 +4219,7 @@ turned off and MSVC debug info is forced to `/Z7`
 (a modmap flag makes the launcher's preprocess step fail, and a PCH or shared
 PDB is a second artefact no hit can reproduce).
 
-- **An environment value SEEDS a build tree and never steers one** (`_fc_hold_setting`).
+- **An environment value SEEDS a build tree and never steers one** (`_pace_hold_setting`).
   `PACE_ADDR` and `PACE_SCHEDULER` are taken from the environment only by the
   configure that creates their cache entry; a later configure whose environment differs
   REPORTS it, naming the `-D` that would apply it, and applies nothing. Both used to
@@ -4228,7 +4228,7 @@ PDB is a second artefact no hit can reproduce).
   already held, `OptionSpec::explicitBit`'s blind spot in CMake, where nothing says a `-D`
   was on this command line. Measured: `-DPACE_SCHEDULER=`, typed to say OFF from a
   shell holding the variable, turned dispatch ON. And dispatch is baked into the launcher
-  in BOTH states and said beside it (`_fc_dispatch_state`), because the launcher used to
+  in BOTH states and said beside it (`_pace_dispatch_state`), because the launcher used to
   read it from whatever shell ran the build and 341 misses compiled locally in silence.
   `ctest -R compile-cache-dispatch` compares the printed line with every `LAUNCHER =` line,
   across reconfigures with and without a `-D` and across ninja's own regeneration. **Its
@@ -4279,7 +4279,7 @@ PDB is a second artefact no hit can reproduce).
   there. That is the fix, not a workaround: install it and run a daemon, or
   configure with `-DUSE_COMPILER_CACHE=OFF`.
 
-  A launcher's caveat is a **row in the candidate table** (`_fc_cache_<id>_caveat`),
+  A launcher's caveat is a **row in the candidate table** (`_pace_cache_<id>_caveat`),
   not an `if` on its name, and `ctest -R compile-cache-caveat` asserts both halves —
   that sccache warns, and that the launchers without a hazard stay silent. A warning
   that fired for every launcher would be one nobody reads.
@@ -4299,7 +4299,7 @@ PDB is a second artefact no hit can reproduce).
   **reachability, not acceptance** — it accepts a `HIT`/`MISS` and a refusal is
   neither, so the row was skipped at `STATUS` among a hundred other status lines.
 
-  - **The gate.** `_fc_cache_sccache_requires` is `${ALLOW_SCCACHE_FALLBACK}`,
+  - **The gate.** `_pace_cache_sccache_requires` is `${ALLOW_SCCACHE_FALLBACK}`,
     default OFF — a value in a column that already existed, not a branch. Opted
     into, sccache keeps its rank above ccache, because asking for it is asking for
     it. The alternative remedy — have CI set `CMAKE_C/CXX_COMPILER_LAUNCHER`
@@ -4324,7 +4324,7 @@ PDB is a second artefact no hit can reproduce).
     was silent by construction. Three replacements, three wordings, one warning:
     safe, hazardous, and none at all. The last is the loudest, because the build then
     compiles uncached, and it is the one that used to emit nothing at all: the loop
-    lived inside `if(_fc_cache_chosen)`.
+    lived inside `if(_pace_cache_chosen)`.
   - **A `message(WARNING)`, never `SEND_ERROR`.** The module may not fail a
     configure (its own header, and `check-compile-cache-caveat`'s "a caveat must
     never fail a configure" row), and a daemon out of step with a launcher is the
@@ -4335,10 +4335,10 @@ PDB is a second artefact no hit can reproduce).
     *your daemon is older than your launcher* — and it cannot be fixed where it is
     written, because the sentence comes from the **daemon**
     (`CompileCacheHandler.cpp`), so an old daemon goes on sending the old wording
-    forever. It is read at `_fc_cache_pace_cc_predicts_detail` instead.
+    forever. It is read at `_pace_cache_pace_cc_predicts_detail` instead.
   - **A launcher installed and not used is announced too.** A row skipped because
     its `requires` is falsy used to print nothing, which would have rebuilt #815's
-    shape one row over the moment sccache became opt-in. `_fc_cache_<id>_requires_note`
+    shape one row over the moment sccache became opt-in. `_pace_cache_<id>_requires_note`
     is the column; a row whose absence explains itself carries none, which is why
     `pace_cc` has none — an emptied `PACE_ADDR` is a documented opt-out
     (#372).

@@ -49,7 +49,7 @@ class ScriptedDiscovery: public IMarkerDiscovery
     int _calls { 0 };
 };
 
-constexpr std::string_view ProbeHeader = R"(C:\Users\dev\AppData\Local\Temp\pace-cc-marker-1\fc-marker-probe.h)";
+constexpr std::string_view ProbeHeader = R"(C:\Users\dev\AppData\Local\Temp\pace-cc-marker-1\pace-marker-probe.h)";
 } // namespace
 
 TEST_CASE("A note's prefix is read back out of the probe's own output")
@@ -138,7 +138,7 @@ TEST_CASE("A path the driver spelled differently is still recognised")
     // differ from what the launcher handed it. More permissive than a byte compare, and
     // justified only because this probe runs on the MSVC family -- where those two
     // spellings genuinely name one file.
-    std::string const echoed = R"(c:/users/dev/appdata/local/temp/pace-cc-marker-1/FC-MARKER-PROBE.H)";
+    std::string const echoed = R"(c:/users/dev/appdata/local/temp/pace-cc-marker-1/PACE-MARKER-PROBE.H)";
     std::string const output = "Note: including file: " + echoed + "\n";
     auto const learned = MarkerFromProbeOutput(output, ProbeHeader);
     REQUIRE(learned.has_value());

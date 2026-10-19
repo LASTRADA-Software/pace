@@ -33,7 +33,7 @@ set(cases 0)
 # @param target the target name
 # @param config the configuration the rule is for
 # @param flags the LINK_FLAGS value, or `<none>` for no binding
-function(fc_edge outVar kind target config flags)
+function(pace_edge outVar kind target config flags)
     set(text "build target\\${target}.out: CXX_${kind}_LINKER__${target}_${config} src\\CMakeFiles\\${target}.dir\\a.cpp.obj || x\n")
     string(APPEND text "  CONFIG = ${config}\n")
     if(NOT flags STREQUAL "<none>")
@@ -47,7 +47,7 @@ endfunction()
 # @param name the tree's directory name under the scratch root
 # @param ninja the build.ninja body, or `<none>` for no file
 # @param outVar receives the tree's path
-function(fc_stage name ninja outVar)
+function(pace_stage name ninja outVar)
     set(tree "${PACE_SCRATCH_DIR}/${name}")
     file(MAKE_DIRECTORY "${tree}")
     if(NOT ninja STREQUAL "<none>")
@@ -63,7 +63,7 @@ endfunction()
 # @param msvcStyle the toolchain answer
 # @param want `pass`, `refuse` or `skip`
 # @param phrase text the output must carry
-function(fc_case label tree config msvcStyle want phrase)
+function(pace_case label tree config msvcStyle want phrase)
     math(EXPR count "${cases} + 1")
     set(cases ${count} PARENT_SCOPE)
     execute_process(
@@ -89,76 +89,76 @@ function(fc_case label tree config msvcStyle want phrase)
     endif()
 endfunction()
 
-fc_edge(anchor EXECUTABLE PaceTest Debug "/machine:x64 /debug /INCREMENTAL:NO /subsystem:console")
-fc_edge(shared SHARED_LIBRARY plugin Debug "/machine:x64 /debug /INCREMENTAL:NO")
+pace_edge(anchor EXECUTABLE PaceTest Debug "/machine:x64 /debug /INCREMENTAL:NO /subsystem:console")
+pace_edge(shared SHARED_LIBRARY plugin Debug "/machine:x64 /debug /INCREMENTAL:NO")
 # A static library carries flags of its own and no switch; it must neither be judged nor
 # lend its binding to the edge above it.
-fc_edge(archive STATIC_LIBRARY Pace Debug "/machine:x64")
+pace_edge(archive STATIC_LIBRARY Pace Debug "/machine:x64")
 # Another configuration's edge is not this build's, whatever it says.
-fc_edge(otherConfig EXECUTABLE PaceTest Release "/machine:x64 /debug /INCREMENTAL")
+pace_edge(otherConfig EXECUTABLE PaceTest Release "/machine:x64 /debug /INCREMENTAL")
 
 # ---- the passing direction --------------------------------------------------------------
 
-fc_stage(clean "${anchor}${archive}${shared}${otherConfig}" tree)
-fc_case("every judged edge says /INCREMENTAL:NO; a static library and another configuration are not judged"
+pace_stage(clean "${anchor}${archive}${shared}${otherConfig}" tree)
+pace_case("every judged edge says /INCREMENTAL:NO; a static library and another configuration are not judged"
     "${tree}" Debug ON pass "2 link edge(s) for 'Debug' read, 0 problem(s)")
 
-fc_edge(lower EXECUTABLE lowercase Debug "/machine:x64 -debug -incremental:no")
-fc_stage(case-insensitive "${anchor}${lower}" tree)
-fc_case("the switch is matched in either introducer and any case, as link.exe reads it"
+pace_edge(lower EXECUTABLE lowercase Debug "/machine:x64 -debug -incremental:no")
+pace_stage(case-insensitive "${anchor}${lower}" tree)
+pace_case("the switch is matched in either introducer and any case, as link.exe reads it"
     "${tree}" Debug ON pass "2 link edge(s) for 'Debug' read, 0 problem(s)")
 
-fc_edge(relAnchor EXECUTABLE PaceTest RelWithDebInfo "/machine:x64 /debug /INCREMENTAL:NO")
-fc_stage(relwithdebinfo "${relAnchor}" tree)
-fc_case("RelWithDebInfo is judged too" "${tree}" RelWithDebInfo ON pass "1 link edge(s) for 'RelWithDebInfo' read")
+pace_edge(relAnchor EXECUTABLE PaceTest RelWithDebInfo "/machine:x64 /debug /INCREMENTAL:NO")
+pace_stage(relwithdebinfo "${relAnchor}" tree)
+pace_case("RelWithDebInfo is judged too" "${tree}" RelWithDebInfo ON pass "1 link edge(s) for 'RelWithDebInfo' read")
 
 # ---- the refusing direction -------------------------------------------------------------
 
-fc_edge(bare EXECUTABLE bare-switch Debug "/machine:x64 /debug /INCREMENTAL /subsystem:console")
-fc_stage(bare "${anchor}${bare}" tree)
-fc_case("CMake's own default, /INCREMENTAL, is refused by target" "${tree}" Debug ON refuse
+pace_edge(bare EXECUTABLE bare-switch Debug "/machine:x64 /debug /INCREMENTAL /subsystem:console")
+pace_stage(bare "${anchor}${bare}" tree)
+pace_case("CMake's own default, /INCREMENTAL, is refused by target" "${tree}" Debug ON refuse
     "bare-switch links with /INCREMENTAL in 'Debug'")
 
-fc_edge(both EXECUTABLE both-spellings Debug "/machine:x64 /debug /INCREMENTAL /INCREMENTAL:NO")
-fc_stage(both "${anchor}${both}" tree)
-fc_case("two spellings are refused rather than left to the linker's last-one-wins" "${tree}" Debug ON refuse
+pace_edge(both EXECUTABLE both-spellings Debug "/machine:x64 /debug /INCREMENTAL /INCREMENTAL:NO")
+pace_stage(both "${anchor}${both}" tree)
+pace_case("two spellings are refused rather than left to the linker's last-one-wins" "${tree}" Debug ON refuse
     "both-spellings links with /INCREMENTAL in 'Debug'")
 
-fc_edge(absent EXECUTABLE debug-only Debug "/machine:x64 /debug /subsystem:console")
-fc_stage(absent "${anchor}${absent}" tree)
-fc_case("/debug with no switch at all links incrementally, so absence is refused" "${tree}" Debug ON refuse
+pace_edge(absent EXECUTABLE debug-only Debug "/machine:x64 /debug /subsystem:console")
+pace_stage(absent "${anchor}${absent}" tree)
+pace_case("/debug with no switch at all links incrementally, so absence is refused" "${tree}" Debug ON refuse
     "debug-only links with no /INCREMENTAL:NO in 'Debug'")
 
-fc_edge(unbound EXECUTABLE no-binding Debug "<none>")
-fc_stage(unbound "${anchor}${unbound}${archive}" tree)
-fc_case("an edge with no LINK_FLAGS is refused, and the static library below lends it nothing" "${tree}" Debug ON refuse
+pace_edge(unbound EXECUTABLE no-binding Debug "<none>")
+pace_stage(unbound "${anchor}${unbound}${archive}" tree)
+pace_case("an edge with no LINK_FLAGS is refused, and the static library below lends it nothing" "${tree}" Debug ON refuse
     "no-binding links with no /INCREMENTAL:NO in 'Debug'")
 
 # The shape `catch_discover_tests` gives a test executable: implicit outputs, one of them an
 # absolute path whose drive colon Ninja escapes as `$:`. Found by its rule, not its first colon.
 set(driveEdge "build target\\drive.exe src\\drive_tests.cmake | D$:/b/src/drive_tests.cmake: CXX_EXECUTABLE_LINKER__drive_Debug a.obj\n  LINK_FLAGS = /machine:x64 /debug /INCREMENTAL\n\n")
-fc_stage(drive-colon "${anchor}${driveEdge}" tree)
-fc_case("an edge whose outputs carry an escaped drive colon is still found, and judged" "${tree}" Debug ON refuse
+pace_stage(drive-colon "${anchor}${driveEdge}" tree)
+pace_case("an edge whose outputs carry an escaped drive colon is still found, and judged" "${tree}" Debug ON refuse
     "drive links with /INCREMENTAL in 'Debug'")
 
-fc_stage(no-anchor "${shared}" tree)
-fc_case("the anchor must be found and pass" "${tree}" Debug ON refuse "the anchor 'PaceTest' was not found")
+pace_stage(no-anchor "${shared}" tree)
+pace_case("the anchor must be found and pass" "${tree}" Debug ON refuse "the anchor 'PaceTest' was not found")
 
-fc_edge(badAnchor EXECUTABLE PaceTest Debug "/machine:x64 /debug /INCREMENTAL")
-fc_stage(bad-anchor "${badAnchor}" tree)
-fc_case("a refused anchor is not a proven one" "${tree}" Debug ON refuse "the anchor 'PaceTest' was not found")
+pace_edge(badAnchor EXECUTABLE PaceTest Debug "/machine:x64 /debug /INCREMENTAL")
+pace_stage(bad-anchor "${badAnchor}" tree)
+pace_case("a refused anchor is not a proven one" "${tree}" Debug ON refuse "the anchor 'PaceTest' was not found")
 
-fc_stage(vacuous "${archive}${otherConfig}" tree)
-fc_case("no judged edge is a refusal, never a pass" "${tree}" Debug ON refuse "a pass would be vacuous")
+pace_stage(vacuous "${archive}${otherConfig}" tree)
+pace_case("no judged edge is a refusal, never a pass" "${tree}" Debug ON refuse "a pass would be vacuous")
 
 # ---- the skipping direction -------------------------------------------------------------
 
-fc_stage(skip-toolchain "${bare}" tree)
-fc_case("a toolchain that is not MSVC-style is skipped, whatever its file says" "${tree}" Debug OFF skip
+pace_stage(skip-toolchain "${bare}" tree)
+pace_case("a toolchain that is not MSVC-style is skipped, whatever its file says" "${tree}" Debug OFF skip
     "not an MSVC-style toolchain")
-fc_case("Release is skipped, whatever its file says" "${tree}" Release ON skip "'Release' is not a debug-info configuration")
-fc_stage(no-ninja "<none>" tree)
-fc_case("no build.ninja is skipped by name" "${tree}" Debug ON skip "has no build.ninja")
+pace_case("Release is skipped, whatever its file says" "${tree}" Release ON skip "'Release' is not a debug-info configuration")
+pace_stage(no-ninja "<none>" tree)
+pace_case("no build.ninja is skipped by name" "${tree}" Debug ON skip "has no build.ninja")
 
 message("incremental-link-selftest: ${cases} case(s) run")
 if(NOT failures STREQUAL "")

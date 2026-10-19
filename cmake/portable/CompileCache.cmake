@@ -63,7 +63,7 @@
 # @param sourceDir        The source tree.
 # @param outRules         Set to the `<from>=<to>` rules, build tree first.
 # @param outSourceMapped  Set to ON/OFF: was the source root mapped at all.
-function(_fc_debug_prefix_map_rules binaryDir sourceDir outRules outSourceMapped)
+function(_pace_debug_prefix_map_rules binaryDir sourceDir outRules outSourceMapped)
     # A root with a SPACE in it is not mapped at all, and that is a refusal rather
     # than a nicety. These rules are spliced into `CMAKE_<LANG>_FLAGS`, which is a
     # space-separated string, so a rule naming `/Users/john doe/proj` reaches the
@@ -137,12 +137,12 @@ endfunction()
 # dependency cache to the literal `deps/`, which names no machine. The dependency rule goes
 # LAST, because GCC and Clang honour the last matching rule and a cache kept inside the
 # checkout must still name its dependencies by the machine-independent spelling. A root with
-# a SPACE contributes no rule, for `_fc_debug_prefix_map_rules`' reason.
+# a SPACE contributes no rule, for `_pace_debug_prefix_map_rules`' reason.
 #
 # @param sourceDir The source tree.
 # @param depsDir   The dependency source cache, or empty.
 # @param outRules  Set to the `<from>=<to>` rules, in the order they are passed.
-function(_fc_source_prefix_map_rules sourceDir depsDir outRules)
+function(_pace_source_prefix_map_rules sourceDir depsDir outRules)
     set(rules "")
     if(NOT sourceDir MATCHES " ")
         list(APPEND rules "${sourceDir}/=")
@@ -173,7 +173,7 @@ endfunction()
 # `DEFINED ENV{...}`; nothing but this predicate was in the way.
 #
 # **The resolved address is the whole answer**: it is what the environment SEEDS
-# into a build tree with no entry (`_fc_hold_setting`), and what a held entry is
+# into a build tree with no entry (`_pace_hold_setting`), and what a held entry is
 # compared with when a later environment presents one.
 #
 # Pure: it reads no environment and touches no cache, so
@@ -183,7 +183,7 @@ endfunction()
 # @param present  TRUE when the environment defines the name at all.
 # @param value    Its value; meaningful only when @p present.
 # @param outWanted  The address this module wants; empty means opt out.
-function(_fc_resolve_addr present value outWanted)
+function(_pace_resolve_addr present value outWanted)
     if(present)
         # Whatever they set, empty INCLUDED. An empty one reaches
         # `if(NOT PACE_ADDR)` below and opts out by name.
@@ -220,7 +220,7 @@ endfunction()
 # @param outValue      The value to hold.
 # @param outSeeded     TRUE when this configure took the value from @p envValue.
 # @param outUnapplied  TRUE when the environment presents a value other than the held one.
-function(_fc_hold_setting cached cacheValue envPresent envValue outValue outSeeded outUnapplied)
+function(_pace_hold_setting cached cacheValue envPresent envValue outValue outSeeded outUnapplied)
     set(${outUnapplied} FALSE PARENT_SCOPE)
     if(NOT cached)
         set(${outValue} "${envValue}" PARENT_SCOPE)
@@ -240,7 +240,7 @@ endfunction()
 # @param held      What the build tree holds.
 # @param envValue  What the environment presents.
 # @param outLine   The status line.
-function(_fc_unapplied_note name held envValue outLine)
+function(_pace_unapplied_note name held envValue outLine)
     set(heldText "'${held}'")
     if("${held}" STREQUAL "")
         set(heldText "it empty")
@@ -266,7 +266,7 @@ endfunction()
 # refuses elsewhere, so configure decides, SAYS what it decided, and the generated LAUNCHER line
 # carries exactly that.
 #
-# **And the decision is HELD in the cache (`_fc_hold_setting`), not re-read from the environment
+# **And the decision is HELD in the cache (`_pace_hold_setting`), not re-read from the environment
 # at every configure.** A configure is not always one somebody ran: ninja re-runs CMake by itself
 # whenever a CMakeLists.txt changes, from whatever shell started the build. Measured on the same
 # machine, a first version that re-read the environment turned dispatch OFF at exactly such a
@@ -286,13 +286,13 @@ endfunction()
 # cannot turn on a dispatch configure said was off, any more than it can retarget one it said was
 # on. That is what keeps the printed line true of the build.
 #
-# @param endpoint    What `_fc_hold_setting` holds: where misses go, empty for off.
+# @param endpoint    What `_pace_hold_setting` holds: where misses go, empty for off.
 # @param seeded      TRUE when this configure seeded it from the environment.
 # @param unapplied   TRUE when the environment presents a scheduler the tree does not hold.
 # @param envValue    That scheduler; meaningful only when @p unapplied.
 # @param outLine     The status line.
 # @param outEnvEntry The `NAME=VALUE` the launcher runs with.
-function(_fc_dispatch_state endpoint seeded unapplied envValue outLine outEnvEntry)
+function(_pace_dispatch_state endpoint seeded unapplied envValue outLine outEnvEntry)
     set(${outEnvEntry} "PACE_SCHEDULER=${endpoint}" PARENT_SCOPE)
     set(turnOn "<host:port>")
     set(unappliedClause "")
@@ -367,7 +367,7 @@ endfunction()
 # @param caveat     the winner's caveat; empty when it carries none.
 # @param detail     what to say about fixing the rejected one.
 # @param outVar     the warning text, or empty when this is not that situation.
-function(_fc_cache_rejection_warning reason predicts rejected winner caveat detail outVar)
+function(_pace_cache_rejection_warning reason predicts rejected winner caveat detail outVar)
     set(${outVar} "" PARENT_SCOPE)
 
     # Nothing rejected, or this row's rejection predicts nothing.
@@ -476,30 +476,30 @@ endif()
 # spelling: `-DPACE_ADDR=` on this configure, or a set-but-empty
 # `PACE_ADDR` in the environment, which is what the operator documentation
 # promises and what #372 made true here.
-# `DEFINED ENV{}` rather than an emptiness test: see `_fc_resolve_addr`, and #372.
-set(_fc_addr_env_present FALSE)
+# `DEFINED ENV{}` rather than an emptiness test: see `_pace_resolve_addr`, and #372.
+set(_pace_addr_env_present FALSE)
 if(DEFINED ENV{PACE_ADDR})
-    set(_fc_addr_env_present TRUE)
+    set(_pace_addr_env_present TRUE)
 endif()
-_fc_resolve_addr("${_fc_addr_env_present}" "$ENV{PACE_ADDR}" _fc_addr_wanted)
+_pace_resolve_addr("${_pace_addr_env_present}" "$ENV{PACE_ADDR}" _pace_addr_wanted)
 
 # Held, not re-read: the environment seeds a tree with no entry, and after that only a -D moves
-# the address -- see `_fc_hold_setting` for the reconfigure that silently undid a -D. A later
+# the address -- see `_pace_hold_setting` for the reconfigure that silently undid a -D. A later
 # environment presenting another address is reported here rather than beside the launcher line,
 # because the address decides whether pace-cc is tried at all: a tree holding the empty
 # opt-out never reaches the row that would print anything else.
-set(_fc_addr_cached FALSE)
+set(_pace_addr_cached FALSE)
 if(DEFINED CACHE{PACE_ADDR})
-    set(_fc_addr_cached TRUE)
+    set(_pace_addr_cached TRUE)
 endif()
-_fc_hold_setting("${_fc_addr_cached}" "${PACE_ADDR}" "${_fc_addr_env_present}" "${_fc_addr_wanted}"
-                 _fc_addr _fc_addr_seeded _fc_addr_unapplied)
-set(PACE_ADDR "${_fc_addr}" CACHE STRING
+_pace_hold_setting("${_pace_addr_cached}" "${PACE_ADDR}" "${_pace_addr_env_present}" "${_pace_addr_wanted}"
+                   _pace_addr _pace_addr_seeded _pace_addr_unapplied)
+set(PACE_ADDR "${_pace_addr}" CACHE STRING
     "host:port of the pace-kv compile-cache daemon, 127.0.0.1:6674 by default (empty disables the pace-cc launcher)"
     FORCE)
-if(_fc_addr_unapplied)
-    _fc_unapplied_note(PACE_ADDR "${_fc_addr}" "${_fc_addr_wanted}" _fc_addr_note)
-    message(STATUS "${_fc_addr_note}")
+if(_pace_addr_unapplied)
+    _pace_unapplied_note(PACE_ADDR "${_pace_addr}" "${_pace_addr_wanted}" _pace_addr_note)
+    message(STATUS "${_pace_addr_note}")
 endif()
 
 # How the CACHE exchange is configured, in one place: the probe below must test the very cache
@@ -512,28 +512,28 @@ endif()
 # users never shared an object. Asked of CPM's own variable, cache entry first and then the
 # environment, the order CPM reads them in; an explicit PACE_DEPS_DIR outranks both, and
 # none of them set names no root, which is how the launcher behaved before it had one.
-set(_fc_deps_dir "")
+set(_pace_deps_dir "")
 if(DEFINED PACE_DEPS_DIR)
-    set(_fc_deps_dir "${PACE_DEPS_DIR}")
+    set(_pace_deps_dir "${PACE_DEPS_DIR}")
 elseif(DEFINED ENV{PACE_DEPS_DIR})
-    set(_fc_deps_dir "$ENV{PACE_DEPS_DIR}")
+    set(_pace_deps_dir "$ENV{PACE_DEPS_DIR}")
 elseif(CPM_SOURCE_CACHE)
-    set(_fc_deps_dir "${CPM_SOURCE_CACHE}")
+    set(_pace_deps_dir "${CPM_SOURCE_CACHE}")
 elseif(DEFINED ENV{CPM_SOURCE_CACHE})
-    set(_fc_deps_dir "$ENV{CPM_SOURCE_CACHE}")
+    set(_pace_deps_dir "$ENV{CPM_SOURCE_CACHE}")
 endif()
-if(NOT _fc_deps_dir STREQUAL "")
-    file(TO_CMAKE_PATH "${_fc_deps_dir}" _fc_deps_dir)
-    string(REGEX REPLACE "/$" "" _fc_deps_dir "${_fc_deps_dir}")
+if(NOT _pace_deps_dir STREQUAL "")
+    file(TO_CMAKE_PATH "${_pace_deps_dir}" _pace_deps_dir)
+    string(REGEX REPLACE "/$" "" _pace_deps_dir "${_pace_deps_dir}")
 endif()
 
-set(_fc_pace_env
+set(_pace_launcher_env
     "PACE_ADDR=${PACE_ADDR}"
     "PACE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
     "PACE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-    "PACE_DEPS_DIR=${_fc_deps_dir}")
+    "PACE_DEPS_DIR=${_pace_deps_dir}")
 
-# Where a miss is dispatched, decided once: see `_fc_dispatch_state` for why configure decides it
+# Where a miss is dispatched, decided once: see `_pace_dispatch_state` for why configure decides it
 # and the build's environment does not. Joined to the LAUNCHER's environment only, never the
 # probe's -- the probe asks whether the CACHE answers, and a dispatch it could make to a scheduler
 # that is slow or gone would bound that answer by a compile node's latency and drop pace-cc
@@ -541,22 +541,22 @@ set(_fc_pace_env
 # configure environment cannot reach it either. Whether the environment presents a scheduler the
 # tree does not hold is said on the dispatch line itself, which is printed only when pace-cc
 # is the launcher -- the one launcher a scheduler means anything to.
-set(_fc_scheduler_cached FALSE)
+set(_pace_scheduler_cached FALSE)
 if(DEFINED CACHE{PACE_SCHEDULER})
-    set(_fc_scheduler_cached TRUE)
+    set(_pace_scheduler_cached TRUE)
 endif()
-set(_fc_scheduler_env_present FALSE)
+set(_pace_scheduler_env_present FALSE)
 if(NOT "$ENV{PACE_SCHEDULER}" STREQUAL "")
-    set(_fc_scheduler_env_present TRUE)
+    set(_pace_scheduler_env_present TRUE)
 endif()
-_fc_hold_setting("${_fc_scheduler_cached}" "${PACE_SCHEDULER}"
-                 "${_fc_scheduler_env_present}" "$ENV{PACE_SCHEDULER}"
-                 _fc_scheduler _fc_scheduler_seeded _fc_scheduler_unapplied)
-set(PACE_SCHEDULER "${_fc_scheduler}" CACHE STRING
+_pace_hold_setting("${_pace_scheduler_cached}" "${PACE_SCHEDULER}"
+                   "${_pace_scheduler_env_present}" "$ENV{PACE_SCHEDULER}"
+                   _pace_scheduler _pace_scheduler_seeded _pace_scheduler_unapplied)
+set(PACE_SCHEDULER "${_pace_scheduler}" CACHE STRING
     "host:port of the compile-fleet scheduler pace-cc dispatches misses to, baked into the launcher (empty: every miss compiles locally)"
     FORCE)
-_fc_dispatch_state("${_fc_scheduler}" "${_fc_scheduler_seeded}" "${_fc_scheduler_unapplied}"
-                   "$ENV{PACE_SCHEDULER}" _fc_dispatch_line _fc_dispatch_env)
+_pace_dispatch_state("${_pace_scheduler}" "${_pace_scheduler_seeded}" "${_pace_scheduler_unapplied}"
+                     "$ENV{PACE_SCHEDULER}" _pace_dispatch_line _pace_dispatch_env)
 
 # Optional auto-install of pace-cc from this project's GitHub Releases.
 #
@@ -638,22 +638,22 @@ option(PACE_AUTO_START
 # where a cache cleaner may take it.
 if(NOT DEFINED PACE_AUTO_INSTALL_DIR)
     if(DEFINED ENV{PACE_CACHE_DIR} AND NOT "$ENV{PACE_CACHE_DIR}" STREQUAL "")
-        set(_fc_auto_dir_default "$ENV{PACE_CACHE_DIR}")
+        set(_pace_auto_dir_default "$ENV{PACE_CACHE_DIR}")
     elseif(CMAKE_HOST_WIN32 AND NOT "$ENV{LOCALAPPDATA}" STREQUAL "")
-        set(_fc_auto_dir_default "$ENV{LOCALAPPDATA}/pace-cc")
+        set(_pace_auto_dir_default "$ENV{LOCALAPPDATA}/pace-cc")
     elseif(CMAKE_HOST_APPLE AND NOT "$ENV{HOME}" STREQUAL "")
-        set(_fc_auto_dir_default "$ENV{HOME}/Library/Caches/pace-cc")
+        set(_pace_auto_dir_default "$ENV{HOME}/Library/Caches/pace-cc")
     elseif(NOT "$ENV{XDG_CACHE_HOME}" STREQUAL "")
-        set(_fc_auto_dir_default "$ENV{XDG_CACHE_HOME}/pace-cc")
+        set(_pace_auto_dir_default "$ENV{XDG_CACHE_HOME}/pace-cc")
     elseif(NOT "$ENV{HOME}" STREQUAL "")
-        set(_fc_auto_dir_default "$ENV{HOME}/.cache/pace-cc")
+        set(_pace_auto_dir_default "$ENV{HOME}/.cache/pace-cc")
     else()
         # No home to speak of (a bare container, a service account). Fall back to
         # the build tree: it still works, it just cannot be shared.
-        set(_fc_auto_dir_default "${CMAKE_BINARY_DIR}/CMakeFiles/pace-cc")
+        set(_pace_auto_dir_default "${CMAKE_BINARY_DIR}/CMakeFiles/pace-cc")
     endif()
-    get_filename_component(_fc_auto_dir_default "${_fc_auto_dir_default}" ABSOLUTE)
-    set(PACE_AUTO_INSTALL_DIR "${_fc_auto_dir_default}" CACHE PATH
+    get_filename_component(_pace_auto_dir_default "${_pace_auto_dir_default}" ABSOLUTE)
+    set(PACE_AUTO_INSTALL_DIR "${_pace_auto_dir_default}" CACHE PATH
         "directory prebuilt pace-cc binaries are staged in, shared across repositories and build trees")
 endif()
 
@@ -672,52 +672,52 @@ endif()
 # falls back, which is what every platform does today. Publishing a new platform
 # is a new row here and nothing below changes.
 #
-#   _fc_asset_<id>_system        CMAKE_HOST_SYSTEM_NAME this row serves
-#   _fc_asset_<id>_arch          host processor spellings mapping to this row
-#   _fc_asset_<id>_platform      asset-name infix, after "pace-<version>-"
-#   _fc_asset_<id>_ext           archive extension
-#   _fc_asset_<id>_member        path to the launcher inside the archive's
+#   _pace_asset_<id>_system      CMAKE_HOST_SYSTEM_NAME this row serves
+#   _pace_asset_<id>_arch        host processor spellings mapping to this row
+#   _pace_asset_<id>_platform    asset-name infix, after "pace-<version>-"
+#   _pace_asset_<id>_ext         archive extension
+#   _pace_asset_<id>_member      path to the launcher inside the archive's
 #                                top-level directory, which differs per
 #                                platform because the packages install to
 #                                different prefixes
-#   _fc_asset_<id>_exe           staged launcher's filename
-#   _fc_asset_<id>_daemon_member path to the daemon inside the same archive,
+#   _pace_asset_<id>_exe         staged launcher's filename
+#   _pace_asset_<id>_daemon_member path to the daemon inside the same archive,
 #                                staged only when PACE_AUTO_START asks
-#                                for it — see _fc_auto_start_pace_kv below
-#   _fc_asset_<id>_daemon_exe    staged daemon's filename
-set(_fc_asset_rows linux_x86_64 darwin_arm64 windows_amd64)
+#                                for it — see _pace_auto_start_pace_kv below
+#   _pace_asset_<id>_daemon_exe  staged daemon's filename
+set(_pace_asset_rows linux_x86_64 darwin_arm64 windows_amd64)
 
-set(_fc_asset_linux_x86_64_system "Linux")
-set(_fc_asset_linux_x86_64_arch x86_64 amd64 AMD64)
-set(_fc_asset_linux_x86_64_platform "Linux-x86_64")
-set(_fc_asset_linux_x86_64_ext "tar.gz")
-set(_fc_asset_linux_x86_64_member "usr/bin/pace-cc")
-set(_fc_asset_linux_x86_64_exe "pace-cc")
-set(_fc_asset_linux_x86_64_daemon_member "usr/bin/pace-kv")
-set(_fc_asset_linux_x86_64_daemon_exe "pace-kv")
+set(_pace_asset_linux_x86_64_system "Linux")
+set(_pace_asset_linux_x86_64_arch x86_64 amd64 AMD64)
+set(_pace_asset_linux_x86_64_platform "Linux-x86_64")
+set(_pace_asset_linux_x86_64_ext "tar.gz")
+set(_pace_asset_linux_x86_64_member "usr/bin/pace-cc")
+set(_pace_asset_linux_x86_64_exe "pace-cc")
+set(_pace_asset_linux_x86_64_daemon_member "usr/bin/pace-kv")
+set(_pace_asset_linux_x86_64_daemon_exe "pace-kv")
 
-set(_fc_asset_darwin_arm64_system "Darwin")
-set(_fc_asset_darwin_arm64_arch arm64 aarch64)
-set(_fc_asset_darwin_arm64_platform "Darwin-arm64")
-set(_fc_asset_darwin_arm64_ext "tar.gz")
-set(_fc_asset_darwin_arm64_member "opt/pace/bin/pace-cc")
-set(_fc_asset_darwin_arm64_exe "pace-cc")
-set(_fc_asset_darwin_arm64_daemon_member "opt/pace/bin/pace-kv")
-set(_fc_asset_darwin_arm64_daemon_exe "pace-kv")
+set(_pace_asset_darwin_arm64_system "Darwin")
+set(_pace_asset_darwin_arm64_arch arm64 aarch64)
+set(_pace_asset_darwin_arm64_platform "Darwin-arm64")
+set(_pace_asset_darwin_arm64_ext "tar.gz")
+set(_pace_asset_darwin_arm64_member "opt/pace/bin/pace-cc")
+set(_pace_asset_darwin_arm64_exe "pace-cc")
+set(_pace_asset_darwin_arm64_daemon_member "opt/pace/bin/pace-kv")
+set(_pace_asset_darwin_arm64_daemon_exe "pace-kv")
 
 # The Windows archive is a plain ZIP rather than the MSI beside it: an installer
 # is not something this can open, and the launcher is one self-contained file
 # with no VC++ redistributable behind it. Its interior differs from the two
 # above because the Windows package is the only one not rooted at /, so its
 # binaries sit at the conventional bin/ rather than usr/bin or opt/pace.
-set(_fc_asset_windows_amd64_system "Windows")
-set(_fc_asset_windows_amd64_arch AMD64 x86_64 x64)
-set(_fc_asset_windows_amd64_platform "Windows-AMD64")
-set(_fc_asset_windows_amd64_ext "zip")
-set(_fc_asset_windows_amd64_member "bin/pace-cc.exe")
-set(_fc_asset_windows_amd64_exe "pace-cc.exe")
-set(_fc_asset_windows_amd64_daemon_member "bin/pace-kv.exe")
-set(_fc_asset_windows_amd64_daemon_exe "pace-kv.exe")
+set(_pace_asset_windows_amd64_system "Windows")
+set(_pace_asset_windows_amd64_arch AMD64 x86_64 x64)
+set(_pace_asset_windows_amd64_platform "Windows-AMD64")
+set(_pace_asset_windows_amd64_ext "zip")
+set(_pace_asset_windows_amd64_member "bin/pace-cc.exe")
+set(_pace_asset_windows_amd64_exe "pace-cc.exe")
+set(_pace_asset_windows_amd64_daemon_member "bin/pace-kv.exe")
+set(_pace_asset_windows_amd64_daemon_exe "pace-kv.exe")
 
 # The host the table above is asked about: this machine, unless
 # PACE_AUTO_INSTALL_HOST_SYSTEM / _HOST_PROCESSOR state another.
@@ -733,7 +733,7 @@ set(_fc_asset_windows_amd64_daemon_exe "pace-kv.exe")
 #
 # @param systemVar Receives the host system name.
 # @param processorVar Receives the host processor.
-function(_fc_auto_install_host systemVar processorVar)
+function(_pace_auto_install_host systemVar processorVar)
     set(_system "${CMAKE_HOST_SYSTEM_NAME}")
     set(_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
     if(NOT "${PACE_AUTO_INSTALL_HOST_SYSTEM}" STREQUAL "")
@@ -748,16 +748,16 @@ endfunction()
 
 # Pick the row serving this host.
 # @param outVar Receives the row id, or empty when no binary is published for it.
-function(_fc_auto_install_select_row outVar)
+function(_pace_auto_install_select_row outVar)
     set(${outVar} "" PARENT_SCOPE)
-    _fc_auto_install_host(_system _processor)
-    foreach(_id IN LISTS _fc_asset_rows)
-        if(NOT _system STREQUAL "${_fc_asset_${_id}_system}")
+    _pace_auto_install_host(_system _processor)
+    foreach(_id IN LISTS _pace_asset_rows)
+        if(NOT _system STREQUAL "${_pace_asset_${_id}_system}")
             continue()
         endif()
         # Architecture spellings vary by OS and by how CMake was told about the
         # host, so a row lists every name that means it rather than one.
-        foreach(_arch IN LISTS _fc_asset_${_id}_arch)
+        foreach(_arch IN LISTS _pace_asset_${_id}_arch)
             if(_processor STREQUAL "${_arch}")
                 set(${outVar} "${_id}" PARENT_SCOPE)
                 return()
@@ -778,7 +778,7 @@ endfunction()
 #
 # @param outVar Receives the release JSON.
 # @param reasonVar Receives a short diagnostic when outVar is empty.
-function(_fc_auto_install_release_json outVar reasonVar)
+function(_pace_auto_install_release_json outVar reasonVar)
     set(${outVar} "" PARENT_SCOPE)
 
     # One cache file per repository: the staging directory is shared, and two
@@ -841,9 +841,9 @@ function(_fc_auto_install_release_json outVar reasonVar)
 endfunction()
 
 # Resolve which release row, version and (when not pinned) release-metadata
-# JSON an auto-install should use — the part of _fc_auto_install_pace_cc
+# JSON an auto-install should use — the part of _pace_auto_install_pace_cc
 # that has nothing to do with the launcher specifically. Split out so
-# _fc_auto_start_fastached (below) resolves to the *same* release the launcher
+# _pace_auto_start_pace_kv (below) resolves to the *same* release the launcher
 # did rather than asking the GitHub API a second time and risking a different
 # "latest" answering the two calls of one configure.
 #
@@ -852,14 +852,14 @@ endfunction()
 # @param jsonVar Set to the release metadata, or empty when the version was
 #                pinned.
 # @param reasonVar Set to a short diagnostic when resolution fails.
-function(_fc_auto_install_resolve_release rowVar versionVar jsonVar reasonVar)
+function(_pace_auto_install_resolve_release rowVar versionVar jsonVar reasonVar)
     set(${rowVar} "" PARENT_SCOPE)
     set(${versionVar} "" PARENT_SCOPE)
     set(${jsonVar} "" PARENT_SCOPE)
 
-    _fc_auto_install_select_row(_row)
+    _pace_auto_install_select_row(_row)
     if(NOT _row)
-        _fc_auto_install_host(_system _processor)
+        _pace_auto_install_host(_system _processor)
         set(${reasonVar} "no prebuilt binary is published for ${_system}-${_processor}" PARENT_SCOPE)
         return()
     endif()
@@ -870,7 +870,7 @@ function(_fc_auto_install_resolve_release rowVar versionVar jsonVar reasonVar)
     if(PACE_AUTO_INSTALL_VERSION)
         set(_version "${PACE_AUTO_INSTALL_VERSION}")
     else()
-        _fc_auto_install_release_json(_json _why)
+        _pace_auto_install_release_json(_json _why)
         if(NOT _json)
             set(${reasonVar} "${_why}" PARENT_SCOPE)
             return()
@@ -899,7 +899,7 @@ endfunction()
 # Download and stage a prebuilt pace-cc for this host.
 # @param outVar Set to the staged executable's path, or empty on any failure.
 # @param reasonVar Set to a short diagnostic when outVar is empty.
-function(_fc_auto_install_pace_cc outVar reasonVar)
+function(_pace_auto_install_pace_cc outVar reasonVar)
     set(${outVar} "" PARENT_SCOPE)
 
     # An empty address is the documented way to opt out of pace-cc, so
@@ -911,7 +911,7 @@ function(_fc_auto_install_pace_cc outVar reasonVar)
         return()
     endif()
 
-    _fc_auto_install_resolve_release(_row _version _json _why)
+    _pace_auto_install_resolve_release(_row _version _json _why)
     if(NOT _row)
         set(${reasonVar} "${_why}" PARENT_SCOPE)
         return()
@@ -927,11 +927,11 @@ function(_fc_auto_install_pace_cc outVar reasonVar)
     # to one machine — a shared or synchronised $HOME is normal — and two hosts of
     # different architectures reaching the same staging directory must not be
     # handed each other's binary.
-    set(_stagedDir "${PACE_AUTO_INSTALL_DIR}/${_version}/${_fc_asset_${_row}_platform}")
-    set(_staged "${_stagedDir}/${_fc_asset_${_row}_exe}")
+    set(_stagedDir "${PACE_AUTO_INSTALL_DIR}/${_version}/${_pace_asset_${_row}_platform}")
+    set(_staged "${_stagedDir}/${_pace_asset_${_row}_exe}")
 
     if(NOT EXISTS "${_staged}")
-        _fc_auto_install_download("${_row}" "${_version}" "${_json}" "${_stagedDir}" _why)
+        _pace_auto_install_download("${_row}" "${_version}" "${_json}" "${_stagedDir}" _why)
         if(_why)
             set(${reasonVar} "${_why}" PARENT_SCOPE)
             return()
@@ -961,7 +961,7 @@ endfunction()
 
 # Fetch one published archive into the shared per-build-tree download cache and
 # unpack it, without staging anything out of it yet. Split out of
-# _fc_auto_install_download (below) so that staging the launcher and staging
+# _pace_auto_install_download (below) so that staging the launcher and staging
 # the daemon from the *same* release — the ordinary case, since both binaries
 # live in one archive — costs one download and one unpack rather than two:
 # fetching a several-megabyte archive twice in one configure for two files it
@@ -973,15 +973,15 @@ endfunction()
 # @param unpackDirVar Set to the directory the archive was unpacked into
 #                      (its "${_stem}/..." layout preserved), on success.
 # @param reasonVar Set to a short diagnostic on failure, empty on success.
-function(_fc_auto_install_fetch_archive row version json unpackDirVar reasonVar)
+function(_pace_auto_install_fetch_archive row version json unpackDirVar reasonVar)
     set(${reasonVar} "" PARENT_SCOPE)
     set(${unpackDirVar} "" PARENT_SCOPE)
     set(_row "${row}")
     set(_version "${version}")
     set(_json "${json}")
 
-    set(_stem "pace-${_version}-${_fc_asset_${_row}_platform}")
-    set(_assetName "${_stem}.${_fc_asset_${_row}_ext}")
+    set(_stem "pace-${_version}-${_pace_asset_${_row}_platform}")
+    set(_assetName "${_stem}.${_pace_asset_${_row}_ext}")
     set(_url "")
     set(_digest "")
 
@@ -1021,7 +1021,7 @@ function(_fc_auto_install_fetch_archive row version json unpackDirVar reasonVar)
         set(_url "${PACE_AUTO_INSTALL_DOWNLOAD_BASE}/${PACE_AUTO_INSTALL_REPO}/releases/download/v${_version}/${_assetName}")
     endif()
 
-    message(STATUS "[cache] Fetching the pace-kv ${_version} release archive for ${_fc_asset_${_row}_platform}")
+    message(STATUS "[cache] Fetching the pace-kv ${_version} release archive for ${_pace_asset_${_row}_platform}")
 
     set(_work "${CMAKE_BINARY_DIR}/CMakeFiles/pace-download")
     set(_archive "${_work}/${_assetName}")
@@ -1062,12 +1062,12 @@ endfunction()
 # each placed with the same race-safe move-into-place sequence, without
 # duplicating it.
 #
-# @param unpackDir Directory _fc_auto_install_fetch_archive unpacked into.
+# @param unpackDir Directory _pace_auto_install_fetch_archive unpacked into.
 # @param member Path to the executable inside unpackDir.
 # @param exe Filename to give the staged copy.
 # @param stagedDir Directory the executable is placed in.
 # @param reasonVar Set to a short diagnostic on failure, empty on success.
-function(_fc_auto_install_stage_member unpackDir member exe stagedDir reasonVar)
+function(_pace_auto_install_stage_member unpackDir member exe stagedDir reasonVar)
     set(${reasonVar} "" PARENT_SCOPE)
 
     set(_member "${unpackDir}/${member}")
@@ -1109,17 +1109,17 @@ endfunction()
 # @param json Release metadata, or empty when the version was pinned.
 # @param stagedDir Directory the launcher is placed in.
 # @param reasonVar Set to a short diagnostic on failure, empty on success.
-function(_fc_auto_install_download row version json stagedDir reasonVar)
+function(_pace_auto_install_download row version json stagedDir reasonVar)
     set(${reasonVar} "" PARENT_SCOPE)
 
-    _fc_auto_install_fetch_archive("${row}" "${version}" "${json}" _unpackDir _why)
+    _pace_auto_install_fetch_archive("${row}" "${version}" "${json}" _unpackDir _why)
     if(_why)
         set(${reasonVar} "${_why}" PARENT_SCOPE)
         return()
     endif()
 
-    _fc_auto_install_stage_member(
-        "${_unpackDir}" "${_fc_asset_${row}_member}" "${_fc_asset_${row}_exe}"
+    _pace_auto_install_stage_member(
+        "${_unpackDir}" "${_pace_asset_${row}_member}" "${_pace_asset_${row}_exe}"
         "${stagedDir}" _why)
     if(_why)
         set(${reasonVar} "${_why}" PARENT_SCOPE)
@@ -1135,7 +1135,7 @@ endfunction()
 # @param addr host:port to parse (PACE_ADDR's own shape).
 # @param hostVar Set to the host part.
 # @param portVar Set to the port part.
-function(_fc_split_host_port addr hostVar portVar)
+function(_pace_split_host_port addr hostVar portVar)
     # IPv6 in brackets ("[::1]:6674") is the one shape a naive last-colon split
     # gets wrong, so the bracket form is matched first.
     if(addr MATCHES "^\\[(.+)\\]:([0-9]+)$")
@@ -1160,7 +1160,7 @@ endfunction()
 #
 # @param text The captured stream.
 # @param outVar Set to its first non-blank line, stripped, or to the empty string.
-function(_fc_first_line text outVar)
+function(_pace_first_line text outVar)
     # Deliberately NOT a split-into-a-list-and-walk-it. That form has to escape and
     # restore semicolons, because a CMake list is semicolon-separated and a loader
     # message naming a search path is full of them -- and it only ever wants the first
@@ -1196,14 +1196,14 @@ function(_fc_first_line text outVar)
 endfunction()
 
 # Is anything at all answering at PACE_ADDR? Deliberately cheaper and
-# less discerning than _fc_probe_pace_cc: that probe needs a real
+# less discerning than _pace_probe_pace_cc: that probe needs a real
 # compiler invocation and answers "does the CACHE work", which is not the
 # question here. This only answers "would starting a daemon collide with one
 # already running" — ours from an earlier configure, or someone else's — so
 # two configures racing on the same port must not both attempt a bind. Losing
 # this race is deliberately not a failure case: whichever configure's spawn
 # loses treats the winner's daemon as its own, which is exactly what
-# _fc_probe_pace_cc then evaluates.
+# _pace_probe_pace_cc then evaluates.
 #
 # CMake has no raw-socket primitive, so this shells out to the daemon binary
 # itself with --version against the address — the one operation every
@@ -1213,9 +1213,9 @@ endfunction()
 # there" ping; until then this costs one short-lived process.
 #
 # @param outVar Set to TRUE when something answers, FALSE otherwise.
-function(_fc_daemon_answering addr outVar)
+function(_pace_daemon_answering addr outVar)
     set(${outVar} FALSE PARENT_SCOPE)
-    _fc_split_host_port("${addr}" _host _port)
+    _pace_split_host_port("${addr}" _host _port)
     if(NOT _port)
         return()
     endif()
@@ -1260,11 +1260,11 @@ endfunction()
 # Stage and start a pace-kv daemon in the background when PACE_ADDR is
 # otherwise unreachable, so PACE_AUTO_INSTALL's launcher has something to
 # talk to on a genuinely clean machine (issue #90). Nothing here may fail a
-# configure, exactly like _fc_auto_install_pace_cc: every failure is one
+# configure, exactly like _pace_auto_install_pace_cc: every failure is one
 # status line and a fall-through to the probe finding no daemon, which is the
 # behaviour without PACE_AUTO_START at all.
-function(_fc_auto_start_pace_kv)
-    _fc_daemon_answering("${PACE_ADDR}" _answering)
+function(_pace_auto_start_pace_kv)
+    _pace_daemon_answering("${PACE_ADDR}" _answering)
     if(_answering)
         # Ours from an earlier configure, or a pre-existing daemon started by
         # hand — either way there is nothing to start, and starting a second
@@ -1272,7 +1272,7 @@ function(_fc_auto_start_pace_kv)
         return()
     endif()
 
-    _fc_split_host_port("${PACE_ADDR}" _bindHost _bindPort)
+    _pace_split_host_port("${PACE_ADDR}" _bindHost _bindPort)
     if(NOT _bindPort)
         message(STATUS "[cache] Not starting a daemon: PACE_ADDR '${PACE_ADDR}' has no port")
         return()
@@ -1289,29 +1289,29 @@ function(_fc_auto_start_pace_kv)
         set(_version "${_PACE_RESOLVED_VERSION}")
         set(_json "${_PACE_RESOLVED_JSON}")
     else()
-        _fc_auto_install_resolve_release(_row _version _json _why)
+        _pace_auto_install_resolve_release(_row _version _json _why)
         if(NOT _row)
             message(STATUS "[cache] Not starting a daemon: ${_why}")
             return()
         endif()
     endif()
 
-    if(NOT _fc_asset_${_row}_daemon_member)
-        message(STATUS "[cache] Not starting a daemon: no pace-kv binary is published for ${_fc_asset_${_row}_platform}")
+    if(NOT _pace_asset_${_row}_daemon_member)
+        message(STATUS "[cache] Not starting a daemon: no pace-kv binary is published for ${_pace_asset_${_row}_platform}")
         return()
     endif()
 
-    set(_stagedDir "${PACE_AUTO_INSTALL_DIR}/${_version}/${_fc_asset_${_row}_platform}")
-    set(_staged "${_stagedDir}/${_fc_asset_${_row}_daemon_exe}")
+    set(_stagedDir "${PACE_AUTO_INSTALL_DIR}/${_version}/${_pace_asset_${_row}_platform}")
+    set(_staged "${_stagedDir}/${_pace_asset_${_row}_daemon_exe}")
 
     if(NOT EXISTS "${_staged}")
-        _fc_auto_install_fetch_archive("${_row}" "${_version}" "${_json}" _unpackDir _why)
+        _pace_auto_install_fetch_archive("${_row}" "${_version}" "${_json}" _unpackDir _why)
         if(NOT _unpackDir)
             message(STATUS "[cache] Not starting a daemon: ${_why}")
             return()
         endif()
-        _fc_auto_install_stage_member(
-            "${_unpackDir}" "${_fc_asset_${_row}_daemon_member}" "${_fc_asset_${_row}_daemon_exe}"
+        _pace_auto_install_stage_member(
+            "${_unpackDir}" "${_pace_asset_${_row}_daemon_member}" "${_pace_asset_${_row}_daemon_exe}"
             "${_stagedDir}" _why)
         if(_why)
             message(STATUS "[cache] Not starting a daemon: ${_why}")
@@ -1388,9 +1388,9 @@ function(_fc_auto_start_pace_kv)
         # `OUTPUT_QUIET ERROR_QUIET` here threw away the one sentence that explains
         # the number. An empty capture degrades to the number alone, which is what
         # this said before.
-        _fc_first_line("${_startErr}" _startWhy)
+        _pace_first_line("${_startErr}" _startWhy)
         if(NOT _startWhy)
-            _fc_first_line("${_startOut}" _startWhy)
+            _pace_first_line("${_startOut}" _startWhy)
         endif()
         if(_startWhy)
             message(STATUS "[cache] Not starting a daemon: pace-kv exited immediately (${_rc}): ${_startWhy}")
@@ -1404,13 +1404,13 @@ function(_fc_auto_start_pace_kv)
     # yet, so give it a short, bounded window to come up rather than letting
     # the very next thing that runs (the probe) be the first and only check —
     # a poll loop rather than a fixed sleep, since a fast machine should not
-    # pay a worst-case wait. _fc_daemon_answering itself costs ~10ms once the
+    # pay a worst-case wait. _pace_daemon_answering itself costs ~10ms once the
     # daemon is up, so ten attempts is a bounded ~1s beyond whatever the
     # daemon itself needed to bind.
     set(_upAttempt 0)
     set(_up FALSE)
     while(_upAttempt LESS 10 AND NOT _up)
-        _fc_daemon_answering("${PACE_ADDR}" _up)
+        _pace_daemon_answering("${PACE_ADDR}" _up)
         if(NOT _up)
             execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.1)
         endif()
@@ -1429,9 +1429,9 @@ endfunction()
 # not a decision anybody made about this build -- and reading it as one would leave
 # a machine that explicitly asked for auto-install with no cache at all, which is
 # the opposite of what the flag is for.
-set(_fc_sccache_selectable OFF)
+set(_pace_sccache_selectable OFF)
 if(SCCACHE AND ALLOW_SCCACHE_FALLBACK)
-    set(_fc_sccache_selectable ON)
+    set(_pace_sccache_selectable ON)
 endif()
 
 # Only when there is nothing else to use. A launcher the user installed is a
@@ -1440,27 +1440,27 @@ endif()
 if(USE_COMPILER_CACHE
    AND PACE_AUTO_INSTALL
    AND NOT PACE_CC
-   AND NOT _fc_sccache_selectable
+   AND NOT _pace_sccache_selectable
    AND NOT CCACHE)
-    _fc_auto_install_pace_cc(_fc_auto_installed _fc_auto_why_not)
-    if(_fc_auto_installed)
-        message(STATUS "[cache] Auto-installed pace-cc (${_fc_auto_installed})")
-        set(PACE_CC "${_fc_auto_installed}" CACHE FILEPATH
+    _pace_auto_install_pace_cc(_pace_auto_installed _pace_auto_why_not)
+    if(_pace_auto_installed)
+        message(STATUS "[cache] Auto-installed pace-cc (${_pace_auto_installed})")
+        set(PACE_CC "${_pace_auto_installed}" CACHE FILEPATH
             "pace-cc tool path; needs a pace-kv daemon to be used" FORCE)
     else()
-        message(STATUS "[cache] Not auto-installing pace-cc: ${_fc_auto_why_not}")
+        message(STATUS "[cache] Not auto-installing pace-cc: ${_pace_auto_why_not}")
     endif()
 endif()
 
 # Belongs after auto-install rather than inside it: starting a daemon is
 # useful whether pace-cc came from PATH or was just staged above, and
-# either way PACE_CC has to be a real path before _fc_daemon_answering
+# either way PACE_CC has to be a real path before _pace_daemon_answering
 # can shell out to it to test the port.
 if(USE_COMPILER_CACHE
    AND PACE_AUTO_START
    AND PACE_CC
    AND PACE_ADDR)
-    _fc_auto_start_pace_kv()
+    _pace_auto_start_pace_kv()
 endif()
 
 # Ask pace-cc itself whether the cache works, by compiling one tiny
@@ -1476,7 +1476,7 @@ endif()
 #
 # @param outVar Set to TRUE when the cache served the probe, FALSE otherwise.
 # @param reasonVar Set to a short diagnostic when outVar is FALSE.
-function(_fc_probe_pace_cc outVar reasonVar)
+function(_pace_probe_pace_cc outVar reasonVar)
     set(${outVar} FALSE PARENT_SCOPE)
 
     set(_dir "${CMAKE_BINARY_DIR}/CMakeFiles/pace-probe")
@@ -1506,7 +1506,7 @@ function(_fc_probe_pace_cc outVar reasonVar)
     # the connection and then stalls; builds keep the launcher's own default.
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
-                ${_fc_pace_env}
+                ${_pace_launcher_env}
                 "PACE_SCHEDULER="
                 "PACE_VERBOSE=1"
                 "PACE_NO_STATS=1"
@@ -1536,55 +1536,55 @@ function(_fc_probe_pace_cc outVar reasonVar)
 endfunction()
 
 # Candidate table, most-preferred first. Each row <id> is described by:
-#   _fc_cache_<id>_label     human-readable name for the status message
-#   _fc_cache_<id>_program   the found program (empty when not installed)
-#   _fc_cache_<id>_requires  extra condition; the row is skipped when falsy
-#   _fc_cache_<id>_requires_note  what to say when `requires` is falsy while the
+#   _pace_cache_<id>_label   human-readable name for the status message
+#   _pace_cache_<id>_program the found program (empty when not installed)
+#   _pace_cache_<id>_requires  extra condition; the row is skipped when falsy
+#   _pace_cache_<id>_requires_note  what to say when `requires` is falsy while the
 #                            program IS installed -- a launcher sitting right
 #                            there and not being used is the silence #815 is
 #                            about. Empty for a row whose absence explains
 #                            itself, which is why pace-cc has none: an
 #                            emptied PACE_ADDR is a documented opt-out (#372)
-#   _fc_cache_<id>_env       NAME=VALUE pairs to inject around the invocation
-#   _fc_cache_<id>_check     function deciding usability at configure time
+#   _pace_cache_<id>_env     NAME=VALUE pairs to inject around the invocation
+#   _pace_cache_<id>_check   function deciding usability at configure time
 #                            (empty when being installed is enough); called as
 #                            <fn>(<outVar> <reasonVar>) and only for a row that
 #                            already passed program and requires
-#   _fc_cache_<id>_detail    extra words for the status message (empty for none)
-#   _fc_cache_<id>_caveat    a correctness hazard this launcher carries, warned
+#   _pace_cache_<id>_detail  extra words for the status message (empty for none)
+#   _pace_cache_<id>_caveat  a correctness hazard this launcher carries, warned
 #                            about when it is the row that WINS (empty for none)
-#   _fc_cache_<id>_predicts  a regex over THIS row's rejection reason; when it
+#   _pace_cache_<id>_predicts  a regex over THIS row's rejection reason; when it
 #                            matches, the rejection is warned about rather than
 #                            merely reported, and the winner's caveat -- if it has
 #                            one -- is folded into the same message (empty when no
 #                            reason predicts anything) -- see
-#                            `_fc_cache_rejection_warning` (#658, #815)
-#   _fc_cache_<id>_predicts_detail  what to tell the operator about fixing this
+#                            `_pace_cache_rejection_warning` (#658, #815)
+#   _pace_cache_<id>_predicts_detail  what to tell the operator about fixing this
 #                            row, printed with that warning
 # Supporting a fourth launcher is adding an id here plus its ten variables.
-set(_fc_cache_candidates pace_cc sccache ccache)
+set(_pace_cache_candidates pace_cc sccache ccache)
 
 # Render "<label>[ <detail>]" for a row, so a launcher and where it points are
 # named the same way whether it won or was passed over. Diagnosing a daemon that
 # did not answer starts with knowing which address was tried.
-# @param id Row id from _fc_cache_candidates.
+# @param id Row id from _pace_cache_candidates.
 # @param outVar Receives the rendered text.
-function(_fc_cache_describe id outVar)
-    set(_text "${_fc_cache_${id}_label}")
-    if(_fc_cache_${id}_detail)
-        string(APPEND _text " ${_fc_cache_${id}_detail}")
+function(_pace_cache_describe id outVar)
+    set(_text "${_pace_cache_${id}_label}")
+    if(_pace_cache_${id}_detail)
+        string(APPEND _text " ${_pace_cache_${id}_detail}")
     endif()
     set(${outVar} "${_text}" PARENT_SCOPE)
 endfunction()
 
-set(_fc_cache_pace_cc_label "pace-cc")
-set(_fc_cache_pace_cc_program "${PACE_CC}")
-set(_fc_cache_pace_cc_requires "${PACE_ADDR}")
+set(_pace_cache_pace_cc_label "pace-cc")
+set(_pace_cache_pace_cc_program "${PACE_CC}")
+set(_pace_cache_pace_cc_requires "${PACE_ADDR}")
 # No note: an empty PACE_ADDR is the documented way to opt out of this row
 # (#372), so a machine that took it does not need telling what it just asked for.
-set(_fc_cache_pace_cc_requires_note "")
-set(_fc_cache_pace_cc_env ${_fc_pace_env} "${_fc_dispatch_env}")
-set(_fc_cache_pace_cc_check _fc_probe_pace_cc)
+set(_pace_cache_pace_cc_requires_note "")
+set(_pace_cache_pace_cc_env ${_pace_launcher_env} "${_pace_dispatch_env}")
+set(_pace_cache_pace_cc_check _pace_probe_pace_cc)
 # A WIRE VERSION mismatch, and only that. "not installed", "no answer" and "the
 # probe was uncacheable" predict nothing about the replacement, and warning on
 # them is how a warning becomes one people learn to skip.
@@ -1593,31 +1593,31 @@ set(_fc_cache_pace_cc_check _fc_probe_pace_cc)
 # in `Protocol/CompileCacheWire.hpp`. Nothing connects the two, so a rename there
 # disarms this silently -- narrower than the display-sentence parsing it replaced,
 # and recorded rather than hidden.
-set(_fc_cache_pace_cc_predicts "unsupported-version")
+set(_pace_cache_pace_cc_predicts "unsupported-version")
 # Names the remedy, and names the DIRECTION, which is the step #815's acceptance
 # clause 2 says the refusal stops short of. `unsupported wire version 3; this
 # server speaks 1..1` is accurate and leaves the reader to work out which end is
 # behind -- and the sentence is written by the DAEMON, so an old daemon will go on
 # sending the old wording forever and cannot be fixed there. It is read here.
-set(_fc_cache_pace_cc_predicts_detail
+set(_pace_cache_pace_cc_predicts_detail
     "A daemon IS answering at ${PACE_ADDR} and it is one you installed; it is simply out of step with this pace-cc, so this build is not using the cache you think it is. Read the refusal above as `unsupported wire version <N>; this server speaks <lo>..<hi>`: <N> is what this launcher speaks and <lo>..<hi> is what the daemon accepts, so an <hi> below <N> means the DAEMON is the older of the two and is the one to replace. Compare `pace-cc --version` against the daemon's, and check which binary the service actually starts -- a packaged daemon on PATH ahead of a hand-built launcher is how #815 was found. This is a normal state during a rollout, which is why it is a warning and not a refusal to configure.")
-set(_fc_cache_pace_cc_detail "at ${PACE_ADDR}")
-set(_fc_cache_pace_cc_caveat "")
+set(_pace_cache_pace_cc_detail "at ${PACE_ADDR}")
+set(_pace_cache_pace_cc_caveat "")
 
-set(_fc_cache_sccache_label "sccache")
-set(_fc_cache_sccache_program "${SCCACHE}")
+set(_pace_cache_sccache_label "sccache")
+set(_pace_cache_sccache_program "${SCCACHE}")
 # Opt-in, never automatic (#815). The column already existed, so this is a value
 # and not a branch: the row is skipped exactly as any other unsatisfied row is,
 # and opting in restores it in its original position -- above ccache, because
 # asking for sccache is asking for sccache.
-set(_fc_cache_sccache_requires "${ALLOW_SCCACHE_FALLBACK}")
-set(_fc_cache_sccache_requires_note
+set(_pace_cache_sccache_requires "${ALLOW_SCCACHE_FALLBACK}")
+set(_pace_cache_sccache_requires_note
     "not selected automatically; sccache is opt-in here, so pass -DALLOW_SCCACHE_FALLBACK=ON to use it (#815)")
-set(_fc_cache_sccache_env "")
-set(_fc_cache_sccache_check "")
-set(_fc_cache_sccache_predicts "")
-set(_fc_cache_sccache_predicts_detail "")
-set(_fc_cache_sccache_detail "")
+set(_pace_cache_sccache_env "")
+set(_pace_cache_sccache_check "")
+set(_pace_cache_sccache_predicts "")
+set(_pace_cache_sccache_predicts_detail "")
+set(_pace_cache_sccache_detail "")
 # Not a `check`, because the row stays usable: this is a hazard a developer has to
 # be able to weigh, not a condition this module can evaluate. Nothing here can
 # tell whether the cache about to be used is shared with another checkout.
@@ -1647,132 +1647,132 @@ set(_fc_cache_sccache_detail "")
 # sccache with no word about it.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"
    OR CMAKE_C_COMPILER_ID STREQUAL "MSVC" OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
-    set(_fc_cache_sccache_caveat
+    set(_pace_cache_sccache_caveat
         "Under MSVC and clang-cl, sccache replays a cache hit's /showIncludes stream verbatim -- the ABSOLUTE paths spelled by the build that STORED it -- while the text it hashes to find that hit carries no paths at all, because it preprocesses with /EP and /EP emits no line markers. Two checkouts therefore share entries and then record each other's headers as their dependencies. Editing a header in the checkout you are building rebuilds nothing: the build stays green and the objects are stale.
 
 It bites an INCREMENTAL build across two checkouts sharing one sccache cache. A clean build has no dependency graph to corrupt, and checkouts that all sit at the same absolute path replay paths that are correct -- CI is normally both, and unaffected. GCC and Clang are unaffected everywhere: their preprocessed output carries the paths, so the two checkouts do not share entries in the first place.
 
 To avoid it: drop -DALLOW_SCCACHE_FALLBACK, which is the only reason sccache was selected here at all -- it is opt-in since #815 and this build asked for it; or install pace-cc and run a pace-kv daemon, which rewrites a hit's paths into the consuming checkout and so does not have this failure mode; or pass -DSCCACHE= to fall through to ccache, which is unaffected; or configure with -DUSE_COMPILER_CACHE=OFF.")
 else()
-    set(_fc_cache_sccache_caveat "")
+    set(_pace_cache_sccache_caveat "")
 endif()
 
-set(_fc_cache_ccache_label "ccache")
-set(_fc_cache_ccache_program "${CCACHE}")
-set(_fc_cache_ccache_requires ON)
-set(_fc_cache_ccache_requires_note "")
-set(_fc_cache_ccache_env "")
-set(_fc_cache_ccache_check "")
-set(_fc_cache_ccache_predicts "")
-set(_fc_cache_ccache_predicts_detail "")
-set(_fc_cache_ccache_detail "")
+set(_pace_cache_ccache_label "ccache")
+set(_pace_cache_ccache_program "${CCACHE}")
+set(_pace_cache_ccache_requires ON)
+set(_pace_cache_ccache_requires_note "")
+set(_pace_cache_ccache_env "")
+set(_pace_cache_ccache_check "")
+set(_pace_cache_ccache_predicts "")
+set(_pace_cache_ccache_predicts_detail "")
+set(_pace_cache_ccache_detail "")
 # ccache's default `base_dir` is empty, which is documented to mean it does not
 # rewrite absolute paths and so does not share entries between checkouts -- the
 # precondition the sccache hazard above needs. Setting `base_dir` deliberately
 # opts into that sharing, which is a choice its own documentation covers.
-set(_fc_cache_ccache_caveat "")
+set(_pace_cache_ccache_caveat "")
 
-set(_fc_cache_chosen "")
-set(_fc_cache_rejected "")
+set(_pace_cache_chosen "")
+set(_pace_cache_rejected "")
 if(USE_COMPILER_CACHE)
-    foreach(_id IN LISTS _fc_cache_candidates)
-        if(NOT _fc_cache_${_id}_program)
+    foreach(_id IN LISTS _pace_cache_candidates)
+        if(NOT _pace_cache_${_id}_program)
             continue()
         endif()
         # A row whose `requires` is falsy while its PROGRAM is right there is a
         # launcher present and not used, and saying nothing about it would rebuild
         # #815's shape one row over. Rows whose absence explains itself carry no
         # note and stay silent.
-        if(NOT _fc_cache_${_id}_requires)
-            if(_fc_cache_${_id}_requires_note)
-                _fc_cache_describe("${_id}" _fc_cache_desc)
-                list(APPEND _fc_cache_rejected "${_fc_cache_desc}: ${_fc_cache_${_id}_requires_note}")
+        if(NOT _pace_cache_${_id}_requires)
+            if(_pace_cache_${_id}_requires_note)
+                _pace_cache_describe("${_id}" _pace_cache_desc)
+                list(APPEND _pace_cache_rejected "${_pace_cache_desc}: ${_pace_cache_${_id}_requires_note}")
             endif()
             continue()
         endif()
-        if(_fc_cache_${_id}_check)
-            cmake_language(CALL ${_fc_cache_${_id}_check} _fc_cache_usable _fc_cache_why_not)
-            if(NOT _fc_cache_usable)
+        if(_pace_cache_${_id}_check)
+            cmake_language(CALL ${_pace_cache_${_id}_check} _pace_cache_usable _pace_cache_why_not)
+            if(NOT _pace_cache_usable)
                 # Remember why, so a fall-through to a slower launcher explains
                 # itself rather than looking like the faster one was never there.
-                _fc_cache_describe("${_id}" _fc_cache_desc)
-                list(APPEND _fc_cache_rejected "${_fc_cache_desc}: ${_fc_cache_why_not}")
+                _pace_cache_describe("${_id}" _pace_cache_desc)
+                list(APPEND _pace_cache_rejected "${_pace_cache_desc}: ${_pace_cache_why_not}")
                 # Kept per row rather than only inside the joined sentence: the
                 # warning below has to ask what the REASON was, and parsing it back
                 # out of display text is how a message rewording silently disables a
                 # warning (#658).
-                set(_fc_cache_${_id}_rejected_why "${_fc_cache_why_not}")
+                set(_pace_cache_${_id}_rejected_why "${_pace_cache_why_not}")
                 continue()
             endif()
         endif()
-        set(_fc_cache_chosen "${_id}")
+        set(_pace_cache_chosen "${_id}")
         break()
     endforeach()
 endif()
 
 # Say why a preferred launcher was passed over, whatever the outcome: falling
 # through in silence looks exactly like it never being installed.
-foreach(_rejection IN LISTS _fc_cache_rejected)
+foreach(_rejection IN LISTS _pace_cache_rejected)
     message(STATUS "[cache] Not using ${_rejection}")
 endforeach()
 
 # ...and WARN about the ones whose reason says a warning is warranted.
 #
-# **Outside `if(_fc_cache_chosen)`, and that placement is the #815 half.** This
+# **Outside `if(_pace_cache_chosen)`, and that placement is the #815 half.** This
 # loop used to live inside it, so the case where NOTHING replaced the rejected
 # launcher -- the build compiles uncached, which is the loudest of the three --
 # produced no message at all. The winner is now an INPUT to the decision rather
-# than a precondition for reaching it: see `_fc_cache_rejection_warning`.
+# than a precondition for reaching it: see `_pace_cache_rejection_warning`.
 #
 # Over the CANDIDATES rather than one named row, so a launcher that gains a
 # `predicts` column is covered without editing this.
-if(_fc_cache_chosen)
-    _fc_cache_describe("${_fc_cache_chosen}" _fc_cache_winner_desc)
-    set(_fc_cache_winner_caveat "${_fc_cache_${_fc_cache_chosen}_caveat}")
+if(_pace_cache_chosen)
+    _pace_cache_describe("${_pace_cache_chosen}" _pace_cache_winner_desc)
+    set(_pace_cache_winner_caveat "${_pace_cache_${_pace_cache_chosen}_caveat}")
 else()
-    set(_fc_cache_winner_desc "")
-    set(_fc_cache_winner_caveat "")
+    set(_pace_cache_winner_desc "")
+    set(_pace_cache_winner_caveat "")
 endif()
-foreach(_id IN LISTS _fc_cache_candidates)
-    if(NOT DEFINED _fc_cache_${_id}_rejected_why)
+foreach(_id IN LISTS _pace_cache_candidates)
+    if(NOT DEFINED _pace_cache_${_id}_rejected_why)
         continue()
     endif()
-    _fc_cache_describe("${_id}" _fc_cache_rejected_desc)
-    _fc_cache_rejection_warning(
-        "${_fc_cache_${_id}_rejected_why}"
-        "${_fc_cache_${_id}_predicts}"
-        "${_fc_cache_rejected_desc}"
-        "${_fc_cache_winner_desc}"
-        "${_fc_cache_winner_caveat}"
-        "${_fc_cache_${_id}_predicts_detail}"
-        _fc_cache_rejection_text)
-    if(_fc_cache_rejection_text)
-        message(WARNING "${_fc_cache_rejection_text}")
+    _pace_cache_describe("${_id}" _pace_cache_rejected_desc)
+    _pace_cache_rejection_warning(
+        "${_pace_cache_${_id}_rejected_why}"
+        "${_pace_cache_${_id}_predicts}"
+        "${_pace_cache_rejected_desc}"
+        "${_pace_cache_winner_desc}"
+        "${_pace_cache_winner_caveat}"
+        "${_pace_cache_${_id}_predicts_detail}"
+        _pace_cache_rejection_text)
+    if(_pace_cache_rejection_text)
+        message(WARNING "${_pace_cache_rejection_text}")
     endif()
 endforeach()
 
-if(_fc_cache_chosen)
-    set(_fc_cache_program "${_fc_cache_${_fc_cache_chosen}_program}")
+if(_pace_cache_chosen)
+    set(_pace_cache_program "${_pace_cache_${_pace_cache_chosen}_program}")
 
     # `cmake -E env NAME=VALUE ... <program>` is the only way to attach
     # environment to a compiler launcher; rows without env invoke the program
     # directly so they pay no extra process.
-    if(_fc_cache_${_fc_cache_chosen}_env)
-        set(_fc_cache_launcher
+    if(_pace_cache_${_pace_cache_chosen}_env)
+        set(_pace_cache_launcher
             "${CMAKE_COMMAND}" -E env
-            ${_fc_cache_${_fc_cache_chosen}_env}
-            "${_fc_cache_program}")
+            ${_pace_cache_${_pace_cache_chosen}_env}
+            "${_pace_cache_program}")
     else()
-        set(_fc_cache_launcher "${_fc_cache_program}")
+        set(_pace_cache_launcher "${_pace_cache_program}")
     endif()
 
-    _fc_cache_describe("${_fc_cache_chosen}" _fc_cache_desc)
-    message(STATUS "[cache] Enabling ${_fc_cache_desc} (${_fc_cache_program}) for C/C++ compilation")
+    _pace_cache_describe("${_pace_cache_chosen}" _pace_cache_desc)
+    message(STATUS "[cache] Enabling ${_pace_cache_desc} (${_pace_cache_program}) for C/C++ compilation")
     # Whether a miss leaves this machine, said beside the launcher that decides it: "pace-cc
     # is the launcher" read as "the fleet is building", and it was not. Only for the row that can
-    # dispatch at all, and in the words `_fc_dispatch_state` derived from the value it baked.
-    if(_fc_cache_chosen STREQUAL "pace_cc")
-        message(STATUS "${_fc_dispatch_line}")
+    # dispatch at all, and in the words `_pace_dispatch_state` derived from the value it baked.
+    if(_pace_cache_chosen STREQUAL "pace_cc")
+        message(STATUS "${_pace_dispatch_line}")
     endif()
 
     # A launcher that can silently produce a WRONG build says so, at the moment a
@@ -1789,12 +1789,12 @@ if(_fc_cache_chosen)
     # already said why the safe launcher is not being used, and this says what the
     # replacement costs. Two messages eighty lines apart were #658's defect and
     # that ordering is what fixed it.
-    if(_fc_cache_${_fc_cache_chosen}_caveat)
-        message(WARNING "[cache] ${_fc_cache_${_fc_cache_chosen}_caveat}")
+    if(_pace_cache_${_pace_cache_chosen}_caveat)
+        message(WARNING "[cache] ${_pace_cache_${_pace_cache_chosen}_caveat}")
     endif()
 
-    set(CMAKE_C_COMPILER_LAUNCHER ${_fc_cache_launcher})
-    set(CMAKE_CXX_COMPILER_LAUNCHER ${_fc_cache_launcher})
+    set(CMAKE_C_COMPILER_LAUNCHER ${_pace_cache_launcher})
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${_pace_cache_launcher})
 
     # None of the launchers reproduces anything but the object file on a cache
     # hit, so a precompiled header (a second, separately produced artefact)
@@ -1932,23 +1932,23 @@ if(_fc_cache_chosen)
     # Per LANGUAGE throughout, because the C and C++ compilers need not be the
     # same product -- which the previous shape asserted in a comment while asking
     # `CMAKE_CXX_COMPILER_ID` once and applying the answer to both.
-    _fc_debug_prefix_map_rules("${CMAKE_BINARY_DIR}" "${CMAKE_SOURCE_DIR}"
-                               _fc_prefix_maps _fc_source_mapped)
-    list(TRANSFORM _fc_prefix_maps PREPEND "-fdebug-prefix-map=" OUTPUT_VARIABLE _fc_prefix_map_flags)
-    list(JOIN _fc_prefix_map_flags " " _fc_prefix_map_flags)
+    _pace_debug_prefix_map_rules("${CMAKE_BINARY_DIR}" "${CMAKE_SOURCE_DIR}"
+                                 _pace_prefix_maps _pace_source_mapped)
+    list(TRANSFORM _pace_prefix_maps PREPEND "-fdebug-prefix-map=" OUTPUT_VARIABLE _pace_prefix_map_flags)
+    list(JOIN _pace_prefix_map_flags " " _pace_prefix_map_flags)
 
     # And `__FILE__` / `__builtin_FILE`, for `pace-cc` ALONE: it is the launcher that keys
     # these rules portably and that otherwise stores an object naming its checkout per
     # checkout, so mapping is what lets every Catch2 test object share across folders and
     # machines. Under ccache or sccache the rule's root would sit in their key and buy nothing,
     # and changing the program's own `__FILE__` for no gain is not this module's to do.
-    set(_fc_source_map_flags "")
-    if(_fc_cache_chosen STREQUAL "pace_cc")
-        _fc_source_prefix_map_rules("${CMAKE_SOURCE_DIR}" "${_fc_deps_dir}" _fc_source_maps)
-        list(TRANSFORM _fc_source_maps PREPEND "-fmacro-prefix-map=" OUTPUT_VARIABLE _fc_source_map_flags)
-        list(JOIN _fc_source_map_flags " " _fc_source_map_flags)
+    set(_pace_source_map_flags "")
+    if(_pace_cache_chosen STREQUAL "pace_cc")
+        _pace_source_prefix_map_rules("${CMAKE_SOURCE_DIR}" "${_pace_deps_dir}" _pace_source_maps)
+        list(TRANSFORM _pace_source_maps PREPEND "-fmacro-prefix-map=" OUTPUT_VARIABLE _pace_source_map_flags)
+        list(JOIN _pace_source_map_flags " " _pace_source_map_flags)
     endif()
-    set(_fc_source_map_langs "")
+    set(_pace_source_map_langs "")
 
     # A language this project has not ENABLED is asked nothing: `check_compiler_flag`
     # is a hard `CMake Error` ("C: needs to be enabled before use") otherwise, which
@@ -1957,12 +1957,12 @@ if(_fc_cache_chosen)
     # is added, and the first run of the check ended the configure outright. A
     # language nobody enabled also has no compile lines to put a flag on, so skipping
     # it is right rather than merely safe.
-    get_property(_fc_enabled_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
-    set(_fc_prefix_map_langs "")
-    set(_fc_prefix_map_skipped "")
+    get_property(_pace_enabled_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+    set(_pace_prefix_map_langs "")
+    set(_pace_prefix_map_skipped "")
     include(CheckCompilerFlag)
     foreach(_lang IN ITEMS C CXX)
-        if(NOT "${_lang}" IN_LIST _fc_enabled_languages)
+        if(NOT "${_lang}" IN_LIST _pace_enabled_languages)
             continue()
         endif()
 
@@ -1974,7 +1974,7 @@ if(_fc_cache_chosen)
         # which is what the 23-byte measurement above is about.
         if(NOT CMAKE_${_lang}_COMPILER_ID MATCHES "GNU|Clang"
            OR CMAKE_${_lang}_SIMULATE_ID STREQUAL "MSVC")
-            list(APPEND _fc_prefix_map_skipped "${_lang} (no path-map switch on this driver)")
+            list(APPEND _pace_prefix_map_skipped "${_lang} (no path-map switch on this driver)")
             continue()
         endif()
 
@@ -1982,27 +1982,27 @@ if(_fc_cache_chosen)
         # `PACE_<LANG>_HAS_DEBUG_PREFIX_MAP`, so a reconfigure pays nothing.
         check_compiler_flag(${_lang} "-fdebug-prefix-map=/a=/b" PACE_${_lang}_HAS_DEBUG_PREFIX_MAP)
         if(PACE_${_lang}_HAS_DEBUG_PREFIX_MAP)
-            string(APPEND CMAKE_${_lang}_FLAGS " ${_fc_prefix_map_flags}")
-            list(APPEND _fc_prefix_map_langs ${_lang})
+            string(APPEND CMAKE_${_lang}_FLAGS " ${_pace_prefix_map_flags}")
+            list(APPEND _pace_prefix_map_langs ${_lang})
         else()
-            list(APPEND _fc_prefix_map_skipped "${_lang} (driver rejected the flag)")
+            list(APPEND _pace_prefix_map_skipped "${_lang} (driver rejected the flag)")
         endif()
 
-        if(NOT _fc_source_map_flags STREQUAL "")
+        if(NOT _pace_source_map_flags STREQUAL "")
             check_compiler_flag(${_lang} "-fmacro-prefix-map=/a=/b" PACE_${_lang}_HAS_MACRO_PREFIX_MAP)
             if(PACE_${_lang}_HAS_MACRO_PREFIX_MAP)
-                string(APPEND CMAKE_${_lang}_FLAGS " ${_fc_source_map_flags}")
-                list(APPEND _fc_source_map_langs ${_lang})
+                string(APPEND CMAKE_${_lang}_FLAGS " ${_pace_source_map_flags}")
+                list(APPEND _pace_source_map_langs ${_lang})
             else()
-                list(APPEND _fc_prefix_map_skipped "${_lang} (driver rejected -fmacro-prefix-map)")
+                list(APPEND _pace_prefix_map_skipped "${_lang} (driver rejected -fmacro-prefix-map)")
             endif()
         endif()
     endforeach()
 
-    if(_fc_source_map_langs)
-        list(JOIN _fc_source_map_langs "/" _fc_source_map_langs)
-        message(STATUS "[cache] Mapping __FILE__ for ${_fc_source_map_langs} so test and dependency objects "
-                       "share across checkouts and machines: ${_fc_source_map_flags}")
+    if(_pace_source_map_langs)
+        list(JOIN _pace_source_map_langs "/" _pace_source_map_langs)
+        message(STATUS "[cache] Mapping __FILE__ for ${_pace_source_map_langs} so test and dependency objects "
+                       "share across checkouts and machines: ${_pace_source_map_flags}")
     endif()
 
     # Say which languages got it AND which did not, rather than only the happy
@@ -2010,11 +2010,11 @@ if(_fc_cache_chosen)
     # still replays objects naming another checkout. Applied, rejected, no such
     # switch, and not enabled are four different situations, and a line reporting
     # only the first reads identically in all of them.
-    if(_fc_prefix_map_langs)
-        list(JOIN _fc_prefix_map_langs "/" _fc_prefix_map_langs)
-        message(STATUS "[cache] Mapping debug paths for ${_fc_prefix_map_langs} so replayed objects "
-                       "name no checkout: ${_fc_prefix_map_flags}")
-        if(NOT _fc_source_mapped)
+    if(_pace_prefix_map_langs)
+        list(JOIN _pace_prefix_map_langs "/" _pace_prefix_map_langs)
+        message(STATUS "[cache] Mapping debug paths for ${_pace_prefix_map_langs} so replayed objects "
+                       "name no checkout: ${_pace_prefix_map_flags}")
+        if(NOT _pace_source_mapped)
             message(STATUS "[cache] The source root is NOT mapped: the build tree lies outside it, so the "
                            "relative path back would carry the checkout's own path")
         endif()
@@ -2031,16 +2031,16 @@ if(_fc_cache_chosen)
         # STATUS rather than WARNING: nothing is wrong. A build directory that never
         # shares with another checkout loses nothing by leaving it unset, and this file
         # may not fail a configure in any case.
-        if(_fc_cache_chosen STREQUAL "ccache" AND NOT DEFINED ENV{CCACHE_BASEDIR})
+        if(_pace_cache_chosen STREQUAL "ccache" AND NOT DEFINED ENV{CCACHE_BASEDIR})
             message(STATUS "[cache] ccache will not reuse these objects across checkouts: the roots above are "
                            "in its key. Set CCACHE_BASEDIR to a directory containing your worktrees to "
                            "recover that (measured on ccache 4.9.1); it is a client setting, so a compile "
                            "line cannot set it here")
         endif()
     endif()
-    if(_fc_prefix_map_skipped)
-        list(JOIN _fc_prefix_map_skipped ", " _fc_prefix_map_skipped)
-        message(STATUS "[cache] Debug paths NOT mapped for ${_fc_prefix_map_skipped}; replayed objects "
+    if(_pace_prefix_map_skipped)
+        list(JOIN _pace_prefix_map_skipped ", " _pace_prefix_map_skipped)
+        message(STATUS "[cache] Debug paths NOT mapped for ${_pace_prefix_map_skipped}; replayed objects "
                        "will carry the producing checkout's paths in their debug info")
     endif()
 else()
@@ -2054,7 +2054,7 @@ else()
 
     if(NOT USE_COMPILER_CACHE)
         message(STATUS "[cache] Compiler caching disabled by USE_COMPILER_CACHE=OFF")
-    elseif(_fc_cache_rejected)
+    elseif(_pace_cache_rejected)
         # Something WAS found and passed over, and the `Not using` line(s) above
         # have already named which and why -- so this must not claim nothing was
         # found. It used to name sccache and ccache outright, which stopped being

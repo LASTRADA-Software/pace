@@ -3,7 +3,7 @@
 [Tracy](https://github.com/wolfpld/tracy) instrumentation is **opt-in and
 zero-cost when off**: it is gated behind the `TRACY_ENABLE` CMake option
 (default `OFF`). When off, no Tracy header is included, nothing is linked, and
-every profiling macro in `Pace/Core/Profiling.hpp` collapses to
+every profiling macro in core-cpp's `<core/Profiling.hpp>` collapses to
 `(void) 0` — the default `clang-debug`/`clang-release` binaries are unchanged
 and link zero Tracy symbols.
 
@@ -24,25 +24,25 @@ capturing.
 Instrument code through the wrapper macros, never Tracy directly:
 
 ```cpp
-#include <Pace/Core/Profiling.hpp>
+#include <core/Profiling.hpp>
 
-FC_ZONE_SCOPED;                         // zone named by source location
-FC_ZONE_SCOPED_N("CacheEngine::Get");   // zone with a compile-time literal name
-FC_FRAME_MARK;                          // one logical request/frame boundary
-FC_THREAD_NAME("fc-worker-0");          // name the calling OS thread
-FC_PLOT("lru.bytesUsed", value);        // scalar timeline (value is numeric)
+CORE_ZONE_SCOPED;                        // zone named by source location
+CORE_ZONE_SCOPED_N("CacheEngine::Get");  // zone with a compile-time literal name
+CORE_FRAME_MARK;                         // one logical request/frame boundary
+CORE_THREAD_NAME("pace-worker-0");       // name the calling OS thread
+CORE_PLOT("lru.bytesUsed", value);       // scalar timeline (value is numeric)
 ```
 
-**Coroutine constraint (must be observed):** `FC_ZONE_SCOPED*` declares a
+**Coroutine constraint (must be observed):** `CORE_ZONE_SCOPED*` declares a
 thread-local stack-RAII guard and **must not straddle a `co_await`** — under the
 reactor model the await resumes on a later frame and the guard's destructor
 would corrupt Tracy's per-thread zone stack. Place zones only in synchronous
-leaf functions or in `{ }` blocks containing no `co_await`. `FC_FRAME_MARK` is a
+leaf functions or in `{ }` blocks containing no `co_await`. `CORE_FRAME_MARK` is a
 stackless timeline event and is safe anywhere, including inside coroutine loops.
 Macro arguments must be free of side-effects the program relies on (when Tracy
-is off they are discarded unevaluated). `FC_ZONE_SCOPED_N` requires a
+is off they are discarded unevaluated). `CORE_ZONE_SCOPED_N` requires a
 compile-time string literal; for a runtime label, annotate the current zone with
-`FC_ZONE_NAME(ptr, len)` / `FC_ZONE_TEXT(ptr, len)` instead.
+`CORE_ZONE_NAME(ptr, len)` / `CORE_ZONE_TEXT(ptr, len)` instead.
 
 ### Analyzing a capture
 
@@ -72,7 +72,7 @@ Workflow — the client listens on TCP **8086**:
    `printf 'set foo 0 0 3\r\nbar\r\nget foo\r\nquit\r\n' | nc 127.0.0.1 6674`.
 
 What the instrumentation surfaces: thread rows named `pace-main` /
-`fc-worker-N` / `fc-reactor`; one frame per request; the nested zone breakdown
+`pace-worker-N` / `pace-reactor`; one frame per request; the nested zone breakdown
 `socket.read → LineReader.TryExtractLine → memcached.Handle*.dispatch →
 CacheEngine::* → ShardedStorage::* → LruStorage::* / EvictToFit → socket.write`;
 and the `lru.bytesUsed` plot for memory pressure. Use the **Statistics** window

@@ -749,7 +749,7 @@ looks exactly like a port nobody is talking to.
   which the node's generic frame listener included for two symbols; with them in
   `Protocol/SurfaceRefusal.hpp` coverage is a property of the TYPE rather than of
   somebody's memory. Header-only, because `Refuse` reaches only `CompileCacheWire.hpp`
-  and `IMetricsSink.hpp` — so it costs `_fc_cc_core` no row, and `CompileCacheWire.hpp`
+  and `IMetricsSink.hpp` — so it costs `_pace_cc_core` no row, and `CompileCacheWire.hpp`
   stays dependency-free.
 - **"Deliberately uncounted" and "forgot to count" must not be the same text**, and
   they were. The considered decisions below — the byte budget, the framing arms, the

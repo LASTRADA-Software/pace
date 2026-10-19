@@ -59,7 +59,7 @@ set(problems 0)
 # Report one refusal on the output the registration reads, and count it. A FUNCTION, not a
 # macro: a macro substitutes its arguments textually and CMake re-parses them.
 # @param ARGV the sentence, in pieces that are joined with nothing between them
-function(fc_refuse)
+function(pace_refuse)
     list(JOIN ARGV "" text)
     message("CMake Error: incremental-link: ${text}")
     math(EXPR count "${problems} + 1")
@@ -83,7 +83,7 @@ set(edgeFlags "")
 set(edgeJudged FALSE)
 
 # Judge the edge collected so far, if it is one this check judges.
-function(fc_judge_edge)
+function(pace_judge_edge)
     if(NOT edgeJudged)
         return()
     endif()
@@ -103,7 +103,7 @@ function(fc_judge_edge)
     endforeach()
     if(bad)
         list(JOIN bad " " shown)
-        fc_refuse("${edgeTarget} links with ${shown} in '${CONFIG}' (LINK_FLAGS = ${edgeFlags}). "
+        pace_refuse("${edgeTarget} links with ${shown} in '${CONFIG}' (LINK_FLAGS = ${edgeFlags}). "
                   "cmake/IncrementalLink.cmake removes every spelling of the switch from CMake's "
                   "linker-flag defaults, so either that rewrite never reached this target -- the "
                   "module is not included, or is included after the directory that defines it -- or "
@@ -111,7 +111,7 @@ function(fc_judge_edge)
                   "the variable again. Fix whichever it is; do not add /INCREMENTAL:NO beside it, since "
                   "which of two spellings wins is the linker's choice")
     elseif(NOT sawNo)
-        fc_refuse("${edgeTarget} links with no /INCREMENTAL:NO in '${CONFIG}' (LINK_FLAGS = ${edgeFlags}), "
+        pace_refuse("${edgeTarget} links with no /INCREMENTAL:NO in '${CONFIG}' (LINK_FLAGS = ${edgeFlags}), "
                   "and /debug alone links incrementally. The rewrite in cmake/IncrementalLink.cmake did "
                   "not reach it: it must be included before the directory that defines this target")
     elseif(edgeTarget STREQUAL ANCHOR)
@@ -122,7 +122,7 @@ endfunction()
 
 foreach(line IN LISTS lines)
     if(line MATCHES "^build .*: [A-Za-z0-9_]+_(EXECUTABLE|SHARED_LIBRARY|MODULE_LIBRARY|STATIC_LIBRARY)_LINKER__([^ ]+)_([A-Za-z0-9]+)( |$)")
-        fc_judge_edge()
+        pace_judge_edge()
         set(kind "${CMAKE_MATCH_1}")
         set(edgeTarget "${CMAKE_MATCH_2}")
         set(edgeFlags "")
@@ -134,13 +134,13 @@ foreach(line IN LISTS lines)
         set(edgeFlags "${CMAKE_MATCH_1}")
     endif()
 endforeach()
-fc_judge_edge()
+pace_judge_edge()
 
 if(judged EQUAL 0)
-    fc_refuse("no executable, shared or module link edge for '${CONFIG}' was found in ${ninjaFile}, "
+    pace_refuse("no executable, shared or module link edge for '${CONFIG}' was found in ${ninjaFile}, "
               "so nothing was shown to link non-incrementally and a pass would be vacuous")
 elseif(NOT anchorProven)
-    fc_refuse("the anchor '${ANCHOR}' was not found linking with /INCREMENTAL:NO, so the reading "
+    pace_refuse("the anchor '${ANCHOR}' was not found linking with /INCREMENTAL:NO, so the reading "
               "cannot show it reaches even the one executable certain to be here")
 endif()
 

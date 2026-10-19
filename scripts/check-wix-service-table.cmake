@@ -455,7 +455,7 @@ file(READ "${_file}" _text)
 
 # Entities are decoded per extracted piece, never over the whole file: a decoded
 # `&quot;` would end the attribute value the walk below is delimiting.
-function(_fc_decode _in _out)
+function(_pace_decode _in _out)
     string(REPLACE "&quot;" "\"" _s "${_in}")
     string(REPLACE "&gt;" ">" _s "${_s}")
     string(REPLACE "&lt;" "<" _s "${_s}")
@@ -516,7 +516,7 @@ while(_tableCursor LESS _tableLength)
         continue()
     endif()
     string(SUBSTRING "${_fromOpener}" 0 ${_end} _element)
-    _fc_decode("${_element}" _element)
+    _pace_decode("${_element}" _element)
 
     if(_required MATCHES "^!")
         string(SUBSTRING "${_required}" 1 -1 _forbidden)
@@ -551,7 +551,7 @@ while(_cursor LESS _length)
         break()
     endif()
     string(SUBSTRING "${_valueTail}" 0 ${_valueEnd} _condition)
-    _fc_decode("${_condition}" _condition)
+    _pace_decode("${_condition}" _condition)
     math(EXPR _conditions "${_conditions} + 1")
 
     foreach(_property IN LISTS _flagProperties)

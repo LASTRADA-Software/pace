@@ -13,7 +13,7 @@
 // gate builds at all, so the same cases beside `ToolchainProbe_test.cpp` would be
 // unsanitized while looking exactly as covered.
 //
-// `ToolchainProbe.cpp` is compiled into this target through `_fc_node_shared`
+// `ToolchainProbe.cpp` is compiled into this target through `_pace_node_shared`
 // (`CMakeLists.txt`), and the node is also the process that actually pays the
 // cold walk in production -- so the coverage lands on the binary that runs it.
 //
@@ -65,7 +65,7 @@ TEST_CASE("A concurrent walk yields the same fingerprint as a serial one", "[too
     // The property that makes parallelising this safe at all: `ToolchainFileScan`
     // is documented "unsorted (the digest sorts)", so the value cannot depend on
     // the order slices finish in. If it ever does, this is where it shows.
-    Testing::ScratchDirectory scratch { "fc-walk-concurrency" };
+    Testing::ScratchDirectory scratch { "pace-walk-concurrency" };
     auto const root = scratch.Path() / "include";
     PopulateRoot(root, 240);
 
@@ -92,7 +92,7 @@ TEST_CASE("Repeating a concurrent walk is stable", "[toolchain][concurrency]")
     // result would not reliably fail an equality check, which is exactly why this
     // case exists inside the binary ThreadSanitizer runs rather than as a
     // statistical assertion here.
-    Testing::ScratchDirectory scratch { "fc-walk-concurrency-stable" };
+    Testing::ScratchDirectory scratch { "pace-walk-concurrency-stable" };
     auto const root = scratch.Path() / "include";
     PopulateRoot(root, 180);
 
@@ -139,7 +139,7 @@ TEST_CASE("A slice that does not finish clears complete", "[toolchain][concurren
         }
     };
 
-    Testing::ScratchDirectory scratch { "fc-walk-incomplete" };
+    Testing::ScratchDirectory scratch { "pace-walk-incomplete" };
     auto const root = scratch.Path() / "include";
     PopulateRoot(root, 20);
 

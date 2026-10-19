@@ -59,7 +59,7 @@
 /// file is compiled into `pace-cc`, which deliberately does **not link**
 /// `Pace`. Being header-only over `Core/Ed25519`, `Core/Base64` and the
 /// header-only `Core/WireFields` is what lets the launcher's build reach this
-/// with dependency-free rows in `_fc_cc_core` -- and the vendored Monocypher, which
+/// with dependency-free rows in `_pace_cc_core` -- and the vendored Monocypher, which
 /// depends on nothing -- rather than a link against the library: the same rule
 /// `Protocol/CompileCacheWire.hpp` states about itself, and for the same reason.
 ///
@@ -892,7 +892,7 @@ class KnownSchedulerTerm
 ///
 /// Header-only and beside `KnownSchedulerTerm` for that class's reason: both binaries
 /// compile `WorkerProtocol.cpp` and only one links `Pace`, so a seam with a `.cpp`
-/// would need a new `_fc_cc_core` row and this needs none.
+/// would need a new `_pace_cc_core` row and this needs none.
 class SpentLeases
 {
   public:
@@ -997,7 +997,7 @@ class SpentLeases
 ///
 /// Header-only and beside `KnownSchedulerTerm` for that class's reason: both binaries
 /// compile `WorkerProtocol.cpp` and only one links `Pace`, so a seam with a `.cpp`
-/// would need a new `_fc_cc_core` row and this needs none. It takes a SINK rather than
+/// would need a new `_pace_cc_core` row and this needs none. It takes a SINK rather than
 /// an `ILogger` for the same reason -- and it is the shape `Cc::CredentialNotice`
 /// already uses to say a thing once.
 class SchedulerTermRegressionNotice

@@ -48,7 +48,7 @@ That second case is in the code but nobody has reproduced it.
 
 ## Components
 
-All of it lives in the launcher's own `_fc_cc_sources`, so it is in `pace-cc-tests`.
+All of it lives in the launcher's own `_pace_cc_sources`, so it is in `pace-cc-tests`.
 `main.cpp` is in no test target (#909).
 
 ### `InputFiles.hpp` / `InputFiles.cpp`, and `InputWitness.hpp` / `InputWitness.cpp`

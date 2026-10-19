@@ -881,7 +881,7 @@ struct AcceptorThreadFixture
         announcer.AcceptorsAllSpawned();
         auto thread = Pace::Detail::StartAcceptorThread(
             Pace::Detail::AcceptorThreadOptions { .surface = std::string { AcceptorSurface },
-                                                  .threadName = "fc-acceptor-0",
+                                                  .threadName = "pace-acceptor-0",
                                                   .acceptor = std::make_unique<ScriptedRawAcceptor>(script),
                                                   .logger = logger,
                                                   .acceptLoops = acceptLoops,

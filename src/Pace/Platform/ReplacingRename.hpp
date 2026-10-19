@@ -12,7 +12,7 @@
 /// is SAID, never decided in silence.
 ///
 /// **Dependency-free, and that is load-bearing**: `pace-cc` does not link `Pace`, so it
-/// compiles this TU in (`_fc_cc_core`), as it does `Environment.cpp`. The node's durable writer
+/// compiles this TU in (`_pace_cc_core`), as it does `Environment.cpp`. The node's durable writer
 /// (`Consensus/DurableFile`) and the launcher's atomic write (`Cc::WriteFileAtomically`) are two
 /// POLICIES over this one rename -- one with fsync and a state file's access, one without -- and
 /// were two copies of it until a fix landing in one could miss the other.

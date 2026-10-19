@@ -505,8 +505,8 @@ function New-PragmaTree([string]$root, [string]$tag) {
     $src = Join-Path $root "src"
     New-Item -ItemType Directory -Force -Path (Join-Path $src "inc"), (Join-Path $root "build") | Out-Null
     Set-Content -Path (Join-Path $src "inc/probe.h") -Value (
-        "#pragma once`n#define FC_STR2(x) #x`n#define FC_STR1(x) FC_STR2(x)`n" +
-        "#pragma message(__FILE__ `"(`" FC_STR1(__LINE__) `") : warning: TODO fix this`")`n" +
+        "#pragma once`n#define PACE_STR2(x) #x`n#define PACE_STR1(x) PACE_STR2(x)`n" +
+        "#pragma message(__FILE__ `"(`" PACE_STR1(__LINE__) `") : warning: TODO fix this`")`n" +
         "inline int one() { return 1; }`n")
     Set-Content -Path (Join-Path $src "u.cpp") `
                 -Value "#include `"inc/probe.h`"`nchar const* tag(){return `"$tag`";}`nint g() { return one(); }`n"
@@ -1522,7 +1522,7 @@ try {
             New-Item -ItemType Directory -Force $msStubDir | Out-Null
             $msStub = Join-Path $msStubDir "$cc.exe"
             Copy-Item -LiteralPath $EditStub -Destination $msStub -Force
-            $env:FC_EDIT_STUB_REAL = (Get-Command $cc).Source
+            $env:PACE_EDIT_STUB_REAL = (Get-Command $cc).Source
             try {
                 foreach ($leg in 'tu', 'header') {
                     $msRoot = Join-Path $msCase $leg
@@ -1538,8 +1538,8 @@ try {
                     $trigger = Join-Path $msCase "$leg.trigger"
                     New-Item -ItemType File -Force $trigger | Out-Null
                     $rRaced = Invoke-LauncherThroughStub $msStub $msRoot @{
-                        FC_EDIT_STUB_AT = "after-compile"; FC_EDIT_STUB_TRIGGER = $trigger
-                        FC_EDIT_STUB_FROM = $from; FC_EDIT_STUB_TO = $to
+                        PACE_EDIT_STUB_AT = "after-compile"; PACE_EDIT_STUB_TRIGGER = $trigger
+                        PACE_EDIT_STUB_FROM = $from; PACE_EDIT_STUB_TO = $to
                     }
                     $msLogs.Add("--- $leg, the raced compile ---`n$($rRaced.stderr)")
                     $logged = Get-E2ELauncherLogField (Get-Content -LiteralPath $launcherState.Log -Tail 1) 'outcome'
@@ -1591,8 +1591,8 @@ try {
                 $trigger = Join-Path $msCase "keyed.trigger"
                 New-Item -ItemType File -Force $trigger | Out-Null
                 $rKeyed = Invoke-LauncherThroughStub $msStub $msKeyed @{
-                    FC_EDIT_STUB_AT = "after-compile"; FC_EDIT_STUB_TRIGGER = $trigger
-                    FC_EDIT_STUB_FROM = (Join-Path $msKeyedV2 "src\m.cpp"); FC_EDIT_STUB_TO = (Join-Path $msKeyed "src\m.cpp")
+                    PACE_EDIT_STUB_AT = "after-compile"; PACE_EDIT_STUB_TRIGGER = $trigger
+                    PACE_EDIT_STUB_FROM = (Join-Path $msKeyedV2 "src\m.cpp"); PACE_EDIT_STUB_TO = (Join-Path $msKeyed "src\m.cpp")
                 }
                 $msLogs.Add("--- keyed manifest, the raced compile ---`n$($rKeyed.stderr)")
                 $keyedKey = [regex]::Match($rKeyed.stderr, 'pace-cc: MISS key=(\S+)').Groups[1].Value
@@ -1633,7 +1633,7 @@ try {
                 if (-not $rTwin.stderr.Contains("direct mode: the manifest validated")) { $msFail.Add("control: cross-checkout sharing did not survive the witness") }
                 if (-not (Test-ObjectNames $rTwin.obj "MESSAGE_CONTROL")) { $msFail.Add("control: the twin checkout's object does not say MESSAGE_CONTROL") }
             } finally {
-                Remove-Item Env:\FC_EDIT_STUB_REAL -ErrorAction SilentlyContinue
+                Remove-Item Env:\PACE_EDIT_STUB_REAL -ErrorAction SilentlyContinue
             }
             if ($msFail.Count -eq 0) {
                 Write-Host "  tu and header saved mid-compile: nothing stored, INPUTS-MOVED, the saved content a MISS that stores, here and in another checkout; the manifest names the keyed content; quiet compiles store, direct-hit and share: OK ($cc)" -ForegroundColor Green
@@ -1733,7 +1733,7 @@ try {
         if (-not (Get-Command $cc -ErrorAction SilentlyContinue)) { continue }
         Write-Host "=== an 8.3 alias of the build tree ($cc) ==="
         foreach ($direct in 'on', 'off') {
-            $case = Join-Path ([System.IO.Path]::GetTempPath()) ("fc-cc-83-" + [guid]::NewGuid().ToString('N').Substring(0, 12))
+            $case = Join-Path ([System.IO.Path]::GetTempPath()) ("pace-cc-83-" + [guid]::NewGuid().ToString('N').Substring(0, 12))
             try {
                 $checkout = Join-Path $case "checkoutwithalongname"
                 $tag = "alias83-$cc-$direct"
@@ -1841,7 +1841,7 @@ try {
             # Always an array: an `if` yielding nothing is $null, which would reach cl as "".
             $extra = @(if ($shape -eq 'dotdotfc') { '/FC' })
             foreach ($direct in 'on', 'off') {
-                $case = Join-Path ([System.IO.Path]::GetTempPath()) ("fc-cc-jx-" + [guid]::NewGuid().ToString('N').Substring(0, 12))
+                $case = Join-Path ([System.IO.Path]::GetTempPath()) ("pace-cc-jx-" + [guid]::NewGuid().ToString('N').Substring(0, 12))
                 $links = [System.Collections.Generic.List[string]]::new()
                 try {
                     $checkout = Join-Path $case "ck"

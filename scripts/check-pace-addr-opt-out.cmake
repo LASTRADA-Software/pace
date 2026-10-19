@@ -23,7 +23,7 @@
 # `docs/tools/pace-cc.md` and is the reason this check drives the DECISION
 # rather than the acquisition.
 #
-# So `_fc_resolve_addr` takes presence as a parameter and reads nothing, and the
+# So `_pace_resolve_addr` takes presence as a parameter and reads nothing, and the
 # rows below state presence explicitly. The module's own single line of
 # acquisition — `if(DEFINED ENV{PACE_ADDR})` — is what this cannot cover, and
 # that is stated rather than implied.
@@ -44,9 +44,9 @@ endif()
 # in the function without the launcher probing, the download and the daemon start.
 include("${PACE_SOURCE_DIR}/cmake/portable/CompileCache.cmake")
 
-if(NOT COMMAND _fc_resolve_addr)
+if(NOT COMMAND _pace_resolve_addr)
     message(FATAL_ERROR
-        "_fc_resolve_addr is not defined. Either the define-only guard in "
+        "_pace_resolve_addr is not defined. Either the define-only guard in "
         "cmake/portable/CompileCache.cmake returned before the function, or the function was "
         "renamed and this check now proves nothing.")
 endif()
@@ -77,7 +77,7 @@ set(_defaults 0)
 foreach(_row IN LISTS _rows)
     pace_row_fields("${_row}" _present _value _expectWanted _about)
 
-    _fc_resolve_addr("${_present}" "${_value}" _gotWanted)
+    _pace_resolve_addr("${_present}" "${_value}" _gotWanted)
     math(EXPR _checked "${_checked} + 1")
 
     if(NOT _gotWanted STREQUAL "${_expectWanted}")

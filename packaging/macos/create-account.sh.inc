@@ -14,8 +14,8 @@
 #   tests them rather than assuming, because a postinstall must exit 0 whatever
 #   happens and an unset id would otherwise chown the wrong thing.
 pace_create_account() {
-    _fc_account="$1"
-    _fc_realname="$2"
+    _pace_account="$1"
+    _pace_realname="$2"
 
     PACE_ACCOUNT_UID=""
     PACE_ACCOUNT_GID=""
@@ -29,7 +29,7 @@ pace_create_account() {
     # and gid 200), so a uid-only scan can hand the new group a gid another group
     # already holds -- which would give that group's members read access to
     # whatever the account is later given.
-    if ! /usr/bin/dscl . -read "/Users/${_fc_account}" >/dev/null 2>&1; then
+    if ! /usr/bin/dscl . -read "/Users/${_pace_account}" >/dev/null 2>&1; then
         # The first id in the band that no user and no group already holds, rather
         # than max+1. max+1 produced exactly the collision it was meant to avoid:
         # the scan excluded 400, so a highest-in-band of 399 (com.apple.access_ssh
@@ -38,11 +38,11 @@ pace_create_account() {
         # not exist never spawns.
         #
         # $NF, not $2: a record name may contain spaces, and the id is always last.
-        _fc_next_id=$({ /usr/bin/dscl . -list /Users UniqueID; /usr/bin/dscl . -list /Groups PrimaryGroupID; } \
+        _pace_next_id=$({ /usr/bin/dscl . -list /Users UniqueID; /usr/bin/dscl . -list /Groups PrimaryGroupID; } \
             | /usr/bin/awk '{ used[$NF] = 1 }
                             END { for (id = 200; id <= 400; id++) if (!(id in used)) { print id; exit } }')
-        if [ -z "${_fc_next_id:-}" ]; then
-            echo "pace-kv: no free id in 200..400 for the '${_fc_account}' account" >&2
+        if [ -z "${_pace_next_id:-}" ]; then
+            echo "pace-kv: no free id in 200..400 for the '${_pace_account}' account" >&2
             return 0
         fi
 
@@ -52,20 +52,20 @@ pace_create_account() {
         # writes one, though a group assembled attribute-by-attribute is not always
         # resolvable by name. Whichever lands first wins, and nothing below depends
         # on the outcome -- the ids used for chown come from the *user* record.
-        /usr/sbin/dseditgroup -q -o create -r "$_fc_realname" -i "$_fc_next_id" "$_fc_account" || true
-        if ! /usr/bin/dscl . -read "/Groups/${_fc_account}" PrimaryGroupID >/dev/null 2>&1; then
-            /usr/bin/dscl . -create "/Groups/${_fc_account}" PrimaryGroupID "$_fc_next_id" || true
+        /usr/sbin/dseditgroup -q -o create -r "$_pace_realname" -i "$_pace_next_id" "$_pace_account" || true
+        if ! /usr/bin/dscl . -read "/Groups/${_pace_account}" PrimaryGroupID >/dev/null 2>&1; then
+            /usr/bin/dscl . -create "/Groups/${_pace_account}" PrimaryGroupID "$_pace_next_id" || true
         fi
-        /usr/bin/dscl . -create "/Users/${_fc_account}" UniqueID "$_fc_next_id" || true
-        /usr/bin/dscl . -create "/Users/${_fc_account}" PrimaryGroupID "$_fc_next_id" || true
-        /usr/bin/dscl . -create "/Users/${_fc_account}" UserShell /usr/bin/false || true
-        /usr/bin/dscl . -create "/Users/${_fc_account}" NFSHomeDirectory /var/empty || true
-        /usr/bin/dscl . -create "/Users/${_fc_account}" RealName "$_fc_realname" || true
+        /usr/bin/dscl . -create "/Users/${_pace_account}" UniqueID "$_pace_next_id" || true
+        /usr/bin/dscl . -create "/Users/${_pace_account}" PrimaryGroupID "$_pace_next_id" || true
+        /usr/bin/dscl . -create "/Users/${_pace_account}" UserShell /usr/bin/false || true
+        /usr/bin/dscl . -create "/Users/${_pace_account}" NFSHomeDirectory /var/empty || true
+        /usr/bin/dscl . -create "/Users/${_pace_account}" RealName "$_pace_realname" || true
         # Without IsHidden the account appears in the login window's user list.
         # It is what hides the account, not the name: this project's accounts are
         # spelled the same on macOS as in the Linux units so that one name reaches
         # the supervisor, the packaging and the binary, rather than three.
-        /usr/bin/dscl . -create "/Users/${_fc_account}" IsHidden 1 || true
+        /usr/bin/dscl . -create "/Users/${_pace_account}" IsHidden 1 || true
     fi
 
     # dscl returns before the record is resolvable through getpwnam(3), which is
@@ -83,10 +83,10 @@ pace_create_account() {
     # chowns use numeric ids, so group-name resolution is launchd's problem alone,
     # and blocking the install on it buys nothing.
     /usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true
-    _fc_attempt=0
-    while [ "$_fc_attempt" -lt 50 ] && ! /usr/bin/id -u "$_fc_account" >/dev/null 2>&1; do
+    _pace_attempt=0
+    while [ "$_pace_attempt" -lt 50 ] && ! /usr/bin/id -u "$_pace_account" >/dev/null 2>&1; do
         /bin/sleep 0.1
-        _fc_attempt=$((_fc_attempt + 1))
+        _pace_attempt=$((_pace_attempt + 1))
     done
     # Reported, NOT returned on. Timing out here says the DirectoryService cache
     # is still behind, which is exactly the thing the id read below steps around
@@ -94,8 +94,8 @@ pace_create_account() {
     # would have worked, and a postinstall does not run again. The caller is left
     # with a service whose state directory and config it does not own, which is
     # the state --install-service refuses; the ids are the better bet.
-    /usr/bin/id -u "$_fc_account" >/dev/null 2>&1 \
-        || echo "pace-kv: '${_fc_account}' is not resolvable via getpwnam after account creation" >&2
+    /usr/bin/id -u "$_pace_account" >/dev/null 2>&1 \
+        || echo "pace-kv: '${_pace_account}' is not resolvable via getpwnam after account creation" >&2
 
     # Numeric ids, read straight from the records just written. Name lookups go
     # through the DirectoryService cache, which lags dscl -- and a chown that names
@@ -109,10 +109,10 @@ pace_create_account() {
     # from /Groups instead made the whole thing hostage to a group record that
     # turned out not to exist: the id came back empty, every chown was skipped, and
     # the config was left in a state the install then refused.
-    PACE_ACCOUNT_UID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" UniqueID 2>/dev/null | /usr/bin/awk '{print $2}')
-    PACE_ACCOUNT_GID=$(/usr/bin/dscl . -read "/Users/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}')
+    PACE_ACCOUNT_UID=$(/usr/bin/dscl . -read "/Users/${_pace_account}" UniqueID 2>/dev/null | /usr/bin/awk '{print $2}')
+    PACE_ACCOUNT_GID=$(/usr/bin/dscl . -read "/Users/${_pace_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}')
 
     # Recorded because two runs were lost to guessing at this from the outside.
-    echo "pace-kv: account ${_fc_account} uid=${PACE_ACCOUNT_UID:-<none>} gid=${PACE_ACCOUNT_GID:-<none>}" \
-        "group-record=$(/usr/bin/dscl . -read "/Groups/${_fc_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}' || true)" >&2
+    echo "pace-kv: account ${_pace_account} uid=${PACE_ACCOUNT_UID:-<none>} gid=${PACE_ACCOUNT_GID:-<none>}" \
+        "group-record=$(/usr/bin/dscl . -read "/Groups/${_pace_account}" PrimaryGroupID 2>/dev/null | /usr/bin/awk '{print $2}' || true)" >&2
 }

@@ -109,7 +109,7 @@ TEST_CASE("A change time is on the seam's own clock, in its own unit", "[input-f
 {
     // Catches a wrong epoch (1601 vs 1970) or a wrong scale (100 ns vs 1 ns), both of which
     // would put every change time decades away from Now() and make the T0 rule vacuous.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-clock" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-clock" };
     scratch.Write("a.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const identity = files->Identify((scratch / "a.hpp").string());
@@ -121,7 +121,7 @@ TEST_CASE("A change time is on the seam's own clock, in its own unit", "[input-f
 
 TEST_CASE("A file written after an instant has a change time at or after it", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-after" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-after" };
     scratch.Write("a.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const before = files->Now();
@@ -148,7 +148,7 @@ TEST_CASE("A fence orders a change made just before it below it and one made aft
     // strictly above a fine-clock instant read before it at every tick phase", and the stamping
     // half is scripted by "A fence passes a fine stamp the coarse clock's next tick still lags".
     constexpr auto Iterations = 60;
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-fence" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-fence" };
     auto const path = (scratch / "a.hpp").string();
     auto const files = MakeDiskInputFiles();
 
@@ -303,7 +303,7 @@ TEST_CASE("CopyFileW over a file changes its identity while carrying the source'
     // replaced. Nor does it assert the copied value equals the source's, which may differ between
     // Windows builds. What catches the copy is the IDENTITY, not the clock: it differs from the one
     // taken before the copy, which is the comparison the witness makes after T1'.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-copy" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-copy" };
     scratch.Write("new.hpp", "MESSAGE_V2_NEW\n");
     auto const oldPath = scratch / "old.hpp";
     auto const newPath = scratch / "new.hpp";
@@ -330,7 +330,7 @@ TEST_CASE("Setting a file's last-write time back still moves its NTFS change tim
 {
     // The Windows twin of the utimensat case: what the seam reads is `ChangeTime`, which a backdated
     // `LastWriteTime` does not hide. A seam reading `LastWriteTime` instead would fail the last check.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-backdate" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-backdate" };
     scratch.Write("a.hpp", "MESSAGE_V1_OLD\n");
     auto const path = scratch / "a.hpp";
     auto const files = MakeDiskInputFiles();
@@ -350,7 +350,7 @@ TEST_CASE("Setting a file's last-write time back still moves its NTFS change tim
 #else
 TEST_CASE("Setting a file's modification time back still moves its change time", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-utimens" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-utimens" };
     scratch.Write("a.hpp", "MESSAGE_V1_OLD\n");
     auto const path = (scratch / "a.hpp").string();
     auto const files = MakeDiskInputFiles();
@@ -366,7 +366,7 @@ TEST_CASE("Setting a file's modification time back still moves its change time",
 
 TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-symlink" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-symlink" };
     scratch.Write("a.hpp", "same\n");
     scratch.Write("b.hpp", "same\n");
     auto const link = scratch / "h.hpp";
@@ -389,7 +389,7 @@ TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-
 
 TEST_CASE("A rename over a file changes its identity, same bytes and size", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-rename" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-rename" };
     scratch.Write("h.hpp", "same\n");
     scratch.Write("h.tmp", "same\n");
     auto const files = MakeDiskInputFiles();
@@ -408,7 +408,7 @@ TEST_CASE("A rename over a file after a fence is stamped at or after it", "[inpu
     // #1650: a header replaced by a rename during the key's preprocess is caught by the T0 clock
     // rule only if the RENAME moves the change time read through the path -- the replacing file's
     // content was written BEFORE the fence, so only the rename itself happens after it.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-rename-fence" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-rename-fence" };
     scratch.Write("h.hpp", "old\n");
     scratch.Write("h.tmp", "new\n");
     auto const files = MakeDiskInputFiles();
@@ -421,7 +421,7 @@ TEST_CASE("A rename over a file after a fence is stamped at or after it", "[inpu
 
 TEST_CASE("A missing file has no identity and no hash", "[input-files]")
 {
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-missing" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-missing" };
     auto const files = MakeDiskInputFiles();
     auto const absent = (scratch / "absent.hpp").string();
     CHECK_FALSE(files->Identify(absent).has_value());
@@ -432,7 +432,7 @@ TEST_CASE("A non-ASCII path is identified", "[input-files]")
 {
     // Review focus 1: a path the seam could not open would make every TU under it Unwitnessed,
     // which silently stops caching it.
-    Pace::Testing::ScratchDirectory const scratch { "fc-input-files-utf8" };
+    Pace::Testing::ScratchDirectory const scratch { "pace-input-files-utf8" };
     scratch.Write("header-\xC3\xBC.hpp", "one\n");
     auto const files = MakeDiskInputFiles();
     auto const path = (scratch.Path().string() + "/header-\xC3\xBC.hpp");

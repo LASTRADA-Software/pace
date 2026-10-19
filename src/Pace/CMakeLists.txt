@@ -156,7 +156,7 @@ target_link_libraries(Pace PRIVATE $<$<PLATFORM_ID:Windows>:dnsapi> $<$<PLATFORM
 #
 # PUBLIC so ServiceControl_test.cpp asserts against the same value.
 if(APPLE)
-    target_compile_definitions(Pace PUBLIC FC_MACOS_PREFIX="/${PACE_MACOS_PREFIX}")
+    target_compile_definitions(Pace PUBLIC PACE_MACOS_PREFIX_PATH="/${PACE_MACOS_PREFIX}")
 endif()
 
 # The machine-wide config directory the daemon probes when no --config is given,
@@ -168,51 +168,51 @@ endif()
 #
 # PUBLIC so DefaultConfigPath_test.cpp asserts against the same value.
 if(APPLE)
-    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${PACE_MACOS_PREFIX}/etc")
+    target_compile_definitions(Pace PUBLIC PACE_SYSCONF_PATH="/${PACE_MACOS_PREFIX}/etc")
 elseif(UNIX)
-    target_compile_definitions(Pace PUBLIC FC_SYSCONF_DIR="/${PACE_SYSCONF_DIR}")
+    target_compile_definitions(Pace PUBLIC PACE_SYSCONF_PATH="/${PACE_SYSCONF_DIR}")
 endif()
 
 # Optional TLS support: compiled and linked only when PACE_ENABLE_TLS is
 # on, so the default build pulls in no OpenSSL header and links no OpenSSL
-# symbol. FC_TLS_ENABLED is PUBLIC so dependents (the test binary) can guard
+# symbol. PACE_TLS_ENABLED is PUBLIC so dependents (the test binary) can guard
 # TLS-only tests behind the same macro.
 if(PACE_ENABLE_TLS)
     # The TLS socket is core-cpp's `core::net_tls` (#1596), configured with CORE_CPP_WITH_TLS by
     # the top-level CMakeLists.txt; it links OpenSSL privately, and no OpenSSL type crosses its header.
     target_link_libraries(Pace PUBLIC core::net_tls)
-    target_compile_definitions(Pace PUBLIC FC_TLS_ENABLED=1)
+    target_compile_definitions(Pace PUBLIC PACE_TLS_ENABLED=1)
 endif()
 
 # Optional on-disk value compression (zstd + lz4). ON by default. The exact
 # target names differ between a CPM source build and a system find_package, so
 # resolve whichever target each library actually exports before linking.
-# FC_COMPRESSION_ENABLED is PUBLIC so the test binary compiles the same codec
+# PACE_COMPRESSION_ENABLED is PUBLIC so the test binary compiles the same codec
 # table (and the codec-selection tests) as the library.
 if(PACE_ENABLE_COMPRESSION)
     if(TARGET libzstd_static)
-        set(_fc_zstd_target libzstd_static)
+        set(_pace_zstd_target libzstd_static)
     elseif(TARGET zstd::libzstd_static)
-        set(_fc_zstd_target zstd::libzstd_static)
+        set(_pace_zstd_target zstd::libzstd_static)
     elseif(TARGET zstd::libzstd_shared)
-        set(_fc_zstd_target zstd::libzstd_shared)
+        set(_pace_zstd_target zstd::libzstd_shared)
     else()
         message(FATAL_ERROR "PACE_ENABLE_COMPRESSION is ON but no zstd target was found")
     endif()
 
     if(TARGET lz4_static)
-        set(_fc_lz4_target lz4_static)
+        set(_pace_lz4_target lz4_static)
     elseif(TARGET LZ4::lz4_static)
-        set(_fc_lz4_target LZ4::lz4_static)
+        set(_pace_lz4_target LZ4::lz4_static)
     elseif(TARGET lz4::lz4)
-        set(_fc_lz4_target lz4::lz4)
+        set(_pace_lz4_target lz4::lz4)
     else()
         message(FATAL_ERROR "PACE_ENABLE_COMPRESSION is ON but no lz4 target was found")
     endif()
 
     target_sources(Pace PRIVATE Core/Compression.cpp)
-    target_link_libraries(Pace PUBLIC ${_fc_zstd_target} ${_fc_lz4_target})
-    target_compile_definitions(Pace PUBLIC FC_COMPRESSION_ENABLED=1)
+    target_link_libraries(Pace PUBLIC ${_pace_zstd_target} ${_pace_lz4_target})
+    target_compile_definitions(Pace PUBLIC PACE_COMPRESSION_ENABLED=1)
 else()
     # Identity-only build: the codec utility still compiles (no zstd/lz4 header).
     target_sources(Pace PRIVATE Core/Compression.cpp)

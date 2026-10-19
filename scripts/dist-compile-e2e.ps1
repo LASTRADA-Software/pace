@@ -1407,7 +1407,7 @@ try {
         New-Item -ItemType Directory -Force -Path $movedStubDir | Out-Null
         $movedStub = Join-Path $movedStubDir "$cc.exe"
         Copy-Item -LiteralPath $EditStub -Destination $movedStub -Force
-        $env:FC_EDIT_STUB_REAL = $ccPath
+        $env:PACE_EDIT_STUB_REAL = $ccPath
         try {
             # The worker serves only a matching toolchain fingerprint. A stub that changed it
             # could be dispatched nowhere, and every assertion below would then be about a
@@ -1461,14 +1461,14 @@ try {
             Copy-Item -LiteralPath $v1Src -Destination $msrc -Force
             $trigger = Join-Path $moved "trigger"
             New-Item -ItemType File -Force -Path $trigger | Out-Null
-            $env:FC_EDIT_STUB_AT      = "before-dispatch-preprocess"
-            $env:FC_EDIT_STUB_TRIGGER = $trigger
-            $env:FC_EDIT_STUB_FROM    = $v2Src
-            $env:FC_EDIT_STUB_TO      = $msrc
+            $env:PACE_EDIT_STUB_AT      = "before-dispatch-preprocess"
+            $env:PACE_EDIT_STUB_TRIGGER = $trigger
+            $env:PACE_EDIT_STUB_FROM    = $v2Src
+            $env:PACE_EDIT_STUB_TO      = $msrc
             try {
                 $r = Invoke-Dispatching $movedStub $mroot $mobj "127.0.0.1:$dispatchPort" $cachePort
             } finally {
-                foreach ($name in "FC_EDIT_STUB_AT", "FC_EDIT_STUB_TRIGGER", "FC_EDIT_STUB_FROM", "FC_EDIT_STUB_TO") {
+                foreach ($name in "PACE_EDIT_STUB_AT", "PACE_EDIT_STUB_TRIGGER", "PACE_EDIT_STUB_FROM", "PACE_EDIT_STUB_TO") {
                     Remove-Item -Path "env:$name" -ErrorAction SilentlyContinue
                 }
             }
@@ -1520,7 +1520,7 @@ try {
                 throw "case 2b: the rebuild's object is not the original content's"
             }
         } finally {
-            Remove-Item -Path "env:FC_EDIT_STUB_REAL" -ErrorAction SilentlyContinue
+            Remove-Item -Path "env:PACE_EDIT_STUB_REAL" -ErrorAction SilentlyContinue
         }
         Write-Host "   the saved content stored nothing, and the original content is a MISS that builds it"
 

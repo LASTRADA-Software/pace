@@ -209,36 +209,36 @@ TEST_CASE("FileOptions: a presence flag is a boolean, and only true applies it",
 
 TEST_CASE("FileOptions: a path row expands environment references from a file, and only from a file", "[config][file]")
 {
-    Testing::ScopedEnv const env { "FC_FILEOPTIONS_ROOT", "/srv/one" };
+    Testing::ScopedEnv const env { "PACE_FILEOPTIONS_ROOT", "/srv/one" };
 
     SECTION("the file's text is expanded before the applier sees it")
     {
         Sample result;
-        REQUIRE(
-            ApplyFileSettings(SampleOptions(),
-                              { Scalar("place", "${FC_FILEOPTIONS_ROOT}/cache"), Scalar("name", "$FC_FILEOPTIONS_ROOT") },
-                              std::filesystem::path { "c.yaml" },
-                              result)
-                .has_value());
+        REQUIRE(ApplyFileSettings(
+                    SampleOptions(),
+                    { Scalar("place", "${PACE_FILEOPTIONS_ROOT}/cache"), Scalar("name", "$PACE_FILEOPTIONS_ROOT") },
+                    std::filesystem::path { "c.yaml" },
+                    result)
+                    .has_value());
         CHECK(result.place == "/srv/one/cache");
         // A `Literal` row beside it is left as written: the column decides, not the
         // presence of a dollar.
-        CHECK(result.name == "$FC_FILEOPTIONS_ROOT");
+        CHECK(result.name == "$PACE_FILEOPTIONS_ROOT");
     }
 
     SECTION("the command line is not expanded, because a shell already was")
     {
         Sample result;
-        auto const args = std::to_array<char const*>({ "--place=${FC_FILEOPTIONS_ROOT}/cache" });
+        auto const args = std::to_array<char const*>({ "--place=${PACE_FILEOPTIONS_ROOT}/cache" });
         REQUIRE(ParseOptionsInto(SampleOptions(), std::span<char const* const> { args }, result).has_value());
-        CHECK(result.place == "${FC_FILEOPTIONS_ROOT}/cache");
+        CHECK(result.place == "${PACE_FILEOPTIONS_ROOT}/cache");
     }
 
     SECTION("an unset variable is refused, attributed to the file's key and line")
     {
         Sample result;
         auto const applied = ApplyFileSettings(SampleOptions(),
-                                               { Scalar("place", "${FC_FILEOPTIONS_NEVER_SET}/cache", 4) },
+                                               { Scalar("place", "${PACE_FILEOPTIONS_NEVER_SET}/cache", 4) },
                                                std::filesystem::path { "c.yaml" },
                                                result);
         REQUIRE(!applied.has_value());

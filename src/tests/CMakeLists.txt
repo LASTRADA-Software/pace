@@ -4486,10 +4486,10 @@ set_tests_properties("compile-cache-autoinstall" PROPERTIES
 # clang-cl's, so the module carries the caveat on exactly that condition and the
 # check has to expect the noise there and the silence everywhere else. Resolved
 # here rather than re-derived in the script, so the two cannot drift.
-set(_fc_caveat_msvc_like OFF)
+set(_pace_caveat_msvc_like OFF)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"
    OR CMAKE_C_COMPILER_ID STREQUAL "MSVC" OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
-    set(_fc_caveat_msvc_like ON)
+    set(_pace_caveat_msvc_like ON)
 endif()
 
 add_test(
@@ -4500,7 +4500,7 @@ add_test(
         "-DPACE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
         "-DPACE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
         "-DPACE_GENERATOR=${CMAKE_GENERATOR}"
-        "-DPACE_MSVC_LIKE=${_fc_caveat_msvc_like}"
+        "-DPACE_MSVC_LIKE=${_pace_caveat_msvc_like}"
         -P "${CMAKE_SOURCE_DIR}/scripts/check-compile-cache-caveat.cmake"
 )
 # A shell that is not a Developer shell has a cl.exe that exists and cannot
@@ -4628,7 +4628,7 @@ set_tests_properties("compile-cache-daemon-staging" PROPERTIES
 #
 # The staging test above is green whether or not that is explained: its stand-in exits 3
 # with nothing on either stream, so it reaches this very branch and asserts only that a
-# daemon was MENTIONED. `_fc_auto_start_pace_kv` spawned under `OUTPUT_QUIET
+# daemon was MENTIONED. `_pace_auto_start_pace_kv` spawned under `OUTPUT_QUIET
 # ERROR_QUIET` and reported `(127)` -- a number that reads as *not found* for a binary
 # the module has just staged and knows the path of, while the sentence that explains it
 # sat on the child's stderr.
@@ -4994,11 +4994,11 @@ if(TARGET pace-cc)
 endif()
 # Passed whenever it was built, and a fixture that is not handed it FAILS rather than skips:
 # the stub is built exactly when the launcher is, so its absence is a broken registration.
-set(_fc_e2e_edit_stub_posix "")
-set(_fc_e2e_edit_stub_windows "")
+set(_pace_e2e_edit_stub_posix "")
+set(_pace_e2e_edit_stub_windows "")
 if(TARGET mid-compile-edit-stub)
-    set(_fc_e2e_edit_stub_posix --edit-stub "$<TARGET_FILE:mid-compile-edit-stub>")
-    set(_fc_e2e_edit_stub_windows -EditStub "$<TARGET_FILE:mid-compile-edit-stub>")
+    set(_pace_e2e_edit_stub_posix --edit-stub "$<TARGET_FILE:mid-compile-edit-stub>")
+    set(_pace_e2e_edit_stub_windows -EditStub "$<TARGET_FILE:mid-compile-edit-stub>")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -5038,16 +5038,16 @@ elseif(WIN32)
         COMMAND pwsh -NoProfile -File "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/run-launcher-e2e.ps1"
             -PaceKv "$<TARGET_FILE:pace-kv>"
             -Launcher "$<TARGET_FILE:pace-cc>"
-            ${_fc_e2e_edit_stub_windows}
+            ${_pace_e2e_edit_stub_windows}
     )
 else()
     # Passed when it was built, and the fixture says out loud which of the two it
     # is running as -- PACE_BUILD_TESTCLIENT is off by default and on for
     # the linux and clang-tidy jobs, so a reader of a local run and a reader of a
     # CI log are looking at different tests and must be told so.
-    set(_fc_e2e_testclient "")
+    set(_pace_e2e_testclient "")
     if(TARGET compile-cache-testclient)
-        set(_fc_e2e_testclient --testclient "$<TARGET_FILE:compile-cache-testclient>")
+        set(_pace_e2e_testclient --testclient "$<TARGET_FILE:compile-cache-testclient>")
     endif()
     add_test(
         NAME "compile-cache-e2e"
@@ -5055,8 +5055,8 @@ else()
             --pace-kv "$<TARGET_FILE:pace-kv>"
             --launcher "$<TARGET_FILE:pace-cc>"
             --compiler "${CMAKE_CXX_COMPILER}"
-            ${_fc_e2e_testclient}
-            ${_fc_e2e_edit_stub_posix}
+            ${_pace_e2e_testclient}
+            ${_pace_e2e_edit_stub_posix}
     )
 endif()
 if(TARGET pace-kv AND TARGET pace-cc)
@@ -5143,9 +5143,9 @@ else()
         # host saturated by other work requires. Optional, and guarded rather than
         # required: without it that reading is absent, and absent confirms nothing,
         # so a withdrawal stays a failure rather than the test disappearing.
-        set(_fc_dist_e2e_cli)
+        set(_pace_dist_e2e_cli)
         if(TARGET pacectl)
-            set(_fc_dist_e2e_cli -Cli "$<TARGET_FILE:pacectl>")
+            set(_pace_dist_e2e_cli -Cli "$<TARGET_FILE:pacectl>")
         endif()
         add_test(
             NAME "dist-compile-e2e"
@@ -5153,15 +5153,15 @@ else()
                 -PaceKv "$<TARGET_FILE:pace-kv>"
                 -Node "$<TARGET_FILE:pace-node>"
                 -Launcher "$<TARGET_FILE:pace-cc>"
-                ${_fc_dist_e2e_cli}
-                ${_fc_e2e_edit_stub_windows}
+                ${_pace_dist_e2e_cli}
+                ${_pace_e2e_edit_stub_windows}
         )
     else()
         # The client reads the scheduler's record of a worker whose lease came back
         # `withdrawn`, for the reason the Windows registration above gives.
-        set(_fc_dist_e2e_cli)
+        set(_pace_dist_e2e_cli)
         if(TARGET pacectl)
-            set(_fc_dist_e2e_cli --cli "$<TARGET_FILE:pacectl>")
+            set(_pace_dist_e2e_cli --cli "$<TARGET_FILE:pacectl>")
         endif()
         add_test(
             NAME "dist-compile-e2e"
@@ -5170,8 +5170,8 @@ else()
                 --node "$<TARGET_FILE:pace-node>"
                 --launcher "$<TARGET_FILE:pace-cc>"
                 --compiler "${CMAKE_CXX_COMPILER}"
-                ${_fc_dist_e2e_cli}
-                ${_fc_e2e_edit_stub_posix}
+                ${_pace_dist_e2e_cli}
+                ${_pace_e2e_edit_stub_posix}
                 --case suite
         )
     endif()
@@ -5272,7 +5272,7 @@ endif()
 # PACE_AUTO_START spawn+probe (issue #90), the real-binary counterpart to
 # compile-cache-daemon-staging above. That test proves the staging plumbing
 # with fake --version-only stand-ins; a fake has no socket to accept on, so it
-# cannot prove _fc_auto_start_pace_kv actually starts something that
+# cannot prove _pace_auto_start_pace_kv actually starts something that
 # answers a real connection. This drives the real, freshly built pace-kv
 # and pace-cc instead: a configure with no daemon reachable spawns one, a
 # real translation unit compiled through the configured launcher reports a
@@ -5471,9 +5471,9 @@ else()
     # frame it can see. A generator expression asks it at a moment nothing can scan,
     # so a reference wearing one is indistinguishable from an unguarded one -- which
     # is #390's failure shape, where a guard that was never a guard read as compliance.
-    set(_fc_cli_e2e_node "")
+    set(_pace_cli_e2e_node "")
     if(TARGET pace-node)
-        set(_fc_cli_e2e_node "$<TARGET_FILE:pace-node>")
+        set(_pace_cli_e2e_node "$<TARGET_FILE:pace-node>")
     endif()
     add_test(
         NAME "pacectl-e2e"
@@ -5482,7 +5482,7 @@ else()
             --cli "$<TARGET_FILE:pacectl>"
             # Empty when the node is not built, which the script reads as *skip cases
             # 11-13 and SAY SO*.
-            --node "${_fc_cli_e2e_node}"
+            --node "${_pace_cli_e2e_node}"
     )
     # Starts real daemons on drawn ports, so it must not race the other
     # server-starting smoke tests.

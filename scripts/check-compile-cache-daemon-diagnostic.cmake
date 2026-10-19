@@ -5,7 +5,7 @@
 #
 # ## What went wrong
 #
-# `_fc_auto_start_pace_kv` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
+# `_pace_auto_start_pace_kv` spawned the staged daemon under `OUTPUT_QUIET ERROR_QUIET`
 # and reported `pace-kv exited immediately (${_rc})`. The commonest failure there is a
 # dynamic loader that cannot resolve a library, which answers **127** — a number that
 # reads as *not found* for a binary CMake has just staged and knows the path of. The one
@@ -14,7 +14,7 @@
 #
 # ## Why an end-to-end configure and not a unit test of the helper
 #
-# `_fc_first_line` is a pure function and its parse is worth nothing on its own: what
+# `_pace_first_line` is a pure function and its parse is worth nothing on its own: what
 # failed here was the ACQUISITION — two `execute_process` calls that threw the stream
 # away. A test over the helper would have passed on the broken tree. So this drives the
 # module's real path, through the same file:// mirror
@@ -118,7 +118,7 @@ file(MAKE_DIRECTORY "${PACE_SCRATCH_DIR}")
 # @param daemonBody The shell body the fake pace-kv runs when it is NOT asked
 #                   --version; it must exit non-zero, which is what puts the module on
 #                   the branch under test.
-# @param addrPort A port nothing on this host listens on, so `_fc_daemon_answering`
+# @param addrPort A port nothing on this host listens on, so `_pace_daemon_answering`
 #                 finds nothing and the module proceeds to stage and spawn. PASSED
 #                 rather than derived: a first draft computed it from the length of
 #                 `case`, and both case names are six characters long -- so the two

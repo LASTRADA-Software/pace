@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string>
 
-#if defined(FC_COMPRESSION_ENABLED)
+#if defined(PACE_COMPRESSION_ENABLED)
     #include <limits>
 
     #include <lz4.h>
@@ -42,7 +42,7 @@ namespace
         return CopyBytes(input);
     }
 
-#if defined(FC_COMPRESSION_ENABLED)
+#if defined(PACE_COMPRESSION_ENABLED)
 
     // --- zstd -------------------------------------------------------------
 
@@ -116,7 +116,7 @@ namespace
         return out;
     }
 
-#endif // FC_COMPRESSION_ENABLED
+#endif // PACE_COMPRESSION_ENABLED
 
     /// One row of the codec dispatch table. Keeping the id/name/availability
     /// and the two function pointers together makes adding a codec a one-row
@@ -141,7 +141,7 @@ namespace
                               .available = true,
                               .compress = [](std::span<std::byte const> in, int) { return CopyBytes(in); },
                               .decompress = &IdentityDecompress },
-#if defined(FC_COMPRESSION_ENABLED)
+#if defined(PACE_COMPRESSION_ENABLED)
             CodecDescriptor { .codec = CompressionCodec::Lz4,
                               .name = "lz4",
                               .available = true,

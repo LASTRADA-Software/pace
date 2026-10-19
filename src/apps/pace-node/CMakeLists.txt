@@ -20,7 +20,7 @@
 # a digest, and it MUST derive it through the identical code its clients use. A
 # second implementation would register cleanly, heartbeat happily, and never be
 # matched -- with nothing anywhere reporting why.
-set(_fc_node_shared
+set(_pace_node_shared
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/AtomicFile.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/CacheProtocol.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/CmdLine.cpp"
@@ -111,7 +111,7 @@ add_executable(pace-node
     SharedCacheSession.cpp
     SharedCacheUpstream.cpp
     InProcessSharedUpstream.cpp
-    ${_fc_node_shared}
+    ${_pace_node_shared}
 )
 target_include_directories(pace-node PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
@@ -292,7 +292,7 @@ if(PACE_BUILD_TESTS)
         InProcessSharedUpstream.cpp
         InProcessSharedUpstream_test.cpp
         DocumentedCommandLines_test.cpp
-        ${_fc_node_shared}
+        ${_pace_node_shared}
         # The CLI's reading of a `NodeMetrics` body and of a `/metrics` one, compiled in for the
         # reason the launcher's sources are: one case holds the two doors a node's figures leave by
         # against each other, through the code each client reads them with (#1406).

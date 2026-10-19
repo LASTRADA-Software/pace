@@ -160,7 +160,7 @@ inline constexpr std::string_view FleetScheduler = "127.0.0.1:6675";
 /// all of it outliving any tier a case starts.
 struct WorkerTierFixture
 {
-    Pace::Testing::ScratchDirectory scratch { "fc-worker-tier" };
+    Pace::Testing::ScratchDirectory scratch { "pace-worker-tier" };
     /// Capturing rather than `NullLogger`, so a case that needs to read what the tier logged
     /// -- a withheld toolchain label's Warn among them -- has a record to read.
     CapturingLogger logger;

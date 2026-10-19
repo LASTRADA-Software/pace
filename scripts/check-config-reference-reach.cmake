@@ -119,7 +119,7 @@ foreach(_name IN LISTS _references)
     # has one -- is torn in two and its tail no longer starts with `#`. Measured on
     # the first run: 18 "lines in force" in a file with none, all of them fragments.
     # Same family as the `file(STRINGS)` bracket hazard (#495), one separator over.
-    string(REPLACE ";" "@FC_SEMI@" _text "${_text}")
+    string(REPLACE ";" "@PACE_SEMI@" _text "${_text}")
     # ONE backslash each, which is the house form and not a typo waiting to be
     # "fixed": CMake's argument parser turns `\r` and `\n` into the real characters,
     # and its regex engine has no `\r`/`\n` escapes of its own -- it reads `\\r` as a
@@ -135,7 +135,7 @@ foreach(_name IN LISTS _references)
     endforeach()
     if(_live)
         list(GET _live 0 _first)
-        string(REPLACE "@FC_SEMI@" ";" _first "${_first}")
+        string(REPLACE "@PACE_SEMI@" ";" _first "${_first}")
         list(LENGTH _live _liveCount)
         message(FATAL_ERROR
             "check-config-reference-reach: ${_name} has ${_liveCount} line(s) in force, starting with: ${_first}. "

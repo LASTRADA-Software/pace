@@ -31,7 +31,7 @@ set(cases 0)
 # @param name the executable's target name
 # @param config the configuration the rule is for
 # @param inputs what the edge links, space-separated
-function(fc_edge outVar name config inputs)
+function(pace_edge outVar name config inputs)
     set(${outVar} "build target/${name}: CXX_EXECUTABLE_LINKER__${name}_${config} ${inputs} || cmake_object_order_depends_target_${name}\n" PARENT_SCOPE)
 endfunction()
 
@@ -40,7 +40,7 @@ endfunction()
 # @param ninja the build.ninja body, or `<none>` for no file
 # @param wantPass TRUE when the check must accept the tree
 # @param phrase a phrase the output must carry
-function(fc_case label ninja wantPass phrase)
+function(pace_case label ninja wantPass phrase)
     math(EXPR next "${cases} + 1")
     set(cases ${next} PARENT_SCOPE)
     set(tree "${PACE_SCRATCH_DIR}/case-${next}")
@@ -82,58 +82,58 @@ set(catch2 "_deps/catch2-build/src/libCatch2d.a")
 
 # 1. The ordinary tree: the anchor links Catch2 and carries the guard, and a product binary
 #    that links no Catch2 is not asked about at all.
-fc_edge(anchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${catch2}")
-fc_edge(product pace-kv Debug "src/apps/pace-kv/CMakeFiles/pace-kv.dir/main.cpp.o | libPace.a")
-fc_case("covered anchor, product binary ignored" "${anchor}${product}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_edge(anchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${catch2}")
+pace_edge(product pace-kv Debug "src/apps/pace-kv/CMakeFiles/pace-kv.dir/main.cpp.o | libPace.a")
+pace_case("covered anchor, product binary ignored" "${anchor}${product}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 2. A second test binary links Catch2 and lacks the guard: refused, by name.
-fc_edge(bare node-tests Debug "src/apps/node/CMakeFiles/node-tests.dir/b.cpp.o | ${catch2}")
-fc_case("uncovered Catch2 executable" "${anchor}${bare}" FALSE "node-tests links Catch2 and its 'Debug' link line carries no OffThreadAssertionGuard")
+pace_edge(bare node-tests Debug "src/apps/node/CMakeFiles/node-tests.dir/b.cpp.o | ${catch2}")
+pace_case("uncovered Catch2 executable" "${anchor}${bare}" FALSE "node-tests links Catch2 and its 'Debug' link line carries no OffThreadAssertionGuard")
 
 # 3. Nothing links Catch2 at all: a derivation that found nothing is refused, never green.
-fc_case("no Catch2 edge" "${product}" FALSE "links Catch2, so this derivation found nothing to check")
+pace_case("no Catch2 edge" "${product}" FALSE "links Catch2, so this derivation found nothing to check")
 
 # 4. The anchor is absent while another binary is covered.
-fc_edge(other cli-tests Debug "src/apps/cli/CMakeFiles/cli-tests.dir/OffThreadAssertionGuard.cpp.o | ${catch2}")
-fc_case("anchor not proven" "${other}" FALSE "PaceTest, the one test executable certain to exist")
+pace_edge(other cli-tests Debug "src/apps/cli/CMakeFiles/cli-tests.dir/OffThreadAssertionGuard.cpp.o | ${catch2}")
+pace_case("anchor not proven" "${other}" FALSE "PaceTest, the one test executable certain to exist")
 
 # 5. Windows spellings: backslashes, `.obj`, `Catch2d.lib`.
 set(windows "build target\\PaceTest.exe: CXX_EXECUTABLE_LINKER__PaceTest_Debug src\\tests\\CMakeFiles\\PaceTest.dir\\__\\tests\\OffThreadAssertionGuard.cpp.obj | _deps\\catch2-build\\src\\Catch2d.lib\n")
-fc_case("Windows spellings" "${windows}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_case("Windows spellings" "${windows}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 6. `libCatch2Maind.a` alone is not Catch2: a boundary, not a substring.
-fc_edge(mainOnly main-only Debug "x.cpp.o | _deps/catch2-build/src/libCatch2Maind.a")
-fc_case("Catch2Main is not Catch2" "${anchor}${mainOnly}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_edge(mainOnly main-only Debug "x.cpp.o | _deps/catch2-build/src/libCatch2Maind.a")
+pace_case("Catch2Main is not Catch2" "${anchor}${mainOnly}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 7. Another configuration's edge is not this configuration's question.
-fc_edge(release node-tests Release "b.cpp.o | ${catch2}")
-fc_case("other configuration ignored" "${anchor}${release}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_edge(release node-tests Release "b.cpp.o | ${catch2}")
+pace_case("other configuration ignored" "${anchor}${release}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 8. An edge this reader cannot split is refused rather than guessed at.
-fc_edge(bracket odd-tests Debug "odd[1].cpp.o ${guard} | ${catch2}")
-fc_case("bracket in an edge" "${anchor}${bracket}" FALSE "which this reader cannot split safely")
+pace_edge(bracket odd-tests Debug "odd[1].cpp.o ${guard} | ${catch2}")
+pace_case("bracket in an edge" "${anchor}${bracket}" FALSE "which this reader cannot split safely")
 
 # 9. No build.ninja: a SKIP naming why, never a pass.
-fc_case("no build.ninja" "<none>" TRUE "SKIP: off-thread-assertion-guard")
+pace_case("no build.ninja" "<none>" TRUE "SKIP: off-thread-assertion-guard")
 
 # 10. A distribution's Catch2, linked by its VERSIONED shared-library name. An uncovered binary
 #     on that spelling must be refused by name -- the case that separates "recognised" from
 #     "skipped", since a reader blind to the spelling passes it silently beside a covered anchor.
 set(systemCatch2 "/usr/lib64/libCatch2.so.3.13.0")
-fc_edge(systemBare node-tests Debug "src/apps/node/CMakeFiles/node-tests.dir/b.cpp.o | ${systemCatch2}")
-fc_case("versioned .so, uncovered" "${anchor}${systemBare}" FALSE "node-tests links Catch2 and its 'Debug' link line carries no OffThreadAssertionGuard")
+pace_edge(systemBare node-tests Debug "src/apps/node/CMakeFiles/node-tests.dir/b.cpp.o | ${systemCatch2}")
+pace_case("versioned .so, uncovered" "${anchor}${systemBare}" FALSE "node-tests links Catch2 and its 'Debug' link line carries no OffThreadAssertionGuard")
 
 # 11. ...and a tree that reaches Catch2 ONLY that way is checked rather than refused as empty.
-fc_edge(systemAnchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${systemCatch2}")
-fc_case("versioned .so only" "${systemAnchor}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_edge(systemAnchor PaceTest Debug "src/tests/CMakeFiles/PaceTest.dir/a.cpp.o ${guard} | ${systemCatch2}")
+pace_case("versioned .so only" "${systemAnchor}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 12. The macOS spelling puts the version BEFORE the suffix.
-fc_edge(dylibAnchor PaceTest Debug "a.cpp.o ${guard} | /opt/homebrew/lib/libCatch2.3.16.1.dylib")
-fc_case("versioned .dylib" "${dylibAnchor}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_edge(dylibAnchor PaceTest Debug "a.cpp.o ${guard} | /opt/homebrew/lib/libCatch2.3.16.1.dylib")
+pace_case("versioned .dylib" "${dylibAnchor}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 # 13. A versioned `libCatch2Main` is still not Catch2: the boundary holds through a version.
-fc_edge(mainVersioned main-only Debug "x.cpp.o | /usr/lib64/libCatch2Main.so.3.13.0")
-fc_case("versioned Catch2Main is not Catch2" "${anchor}${mainVersioned}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
+pace_edge(mainVersioned main-only Debug "x.cpp.o | /usr/lib64/libCatch2Main.so.3.13.0")
+pace_case("versioned Catch2Main is not Catch2" "${anchor}${mainVersioned}" TRUE "1 of 1 executable(s) linking Catch2 carry the guard")
 
 if(NOT failures STREQUAL "")
     foreach(failure IN LISTS failures)

@@ -68,7 +68,7 @@ src/apps/
   pace-kv/            the daemon (PACE_BUILD_DAEMON, default ON)
   pace-cc/             the compiler launcher (PACE_BUILD_LAUNCHER, ON) — an
                             sccache-style launcher keying on preprocess + relativized
-                            args; does NOT link the Pace library (`_fc_cc_core`)
+                            args; does NOT link the Pace library (`_pace_cc_core`)
   pace-node/   the compile worker AND the peer service
                             (PACE_BUILD_NODE, ON); may also be the scheduler, hold
                             a cache tier and run consensus — four surfaces, each off
@@ -111,7 +111,7 @@ connection pinned to one reactor for its lifetime.
 `main.cpp` wraps the storage in a `ShardedStorage`, whose per-shard mutex serialises access,
 **whenever more than one thread can reach the storage** — four conditions say so: a persistent
 backend (so the disk backend is always wrapped), an explicit multi-shard layout, the reactor
-running on more than one thread, and the metrics endpoint, whose `fc-admin` thread calls
+running on more than one thread, and the metrics endpoint, whose `pace-admin` thread calls
 `engine.Snapshot()` concurrently with the reactor. **That third one is the DEFAULT rather than an
 opt-in**: `--threads` unset means `hardware_concurrency()`, so on any multi-core host the wrapper
 is on without anybody asking for it, and reading it as "`--threads` above one" describes a
@@ -1630,6 +1630,6 @@ are in [`.agent/rules/packaging-and-release.md`](.agent/rules/packaging-and-rele
 ## Profiling
 
 Tracy instrumentation is opt-in (`TRACY_ENABLE`, default OFF) and collapses to `(void) 0` when off.
-Instrument through the `FC_*` macros in `Pace/Core/Profiling.hpp`, never Tracy directly — and
-never let `FC_ZONE_SCOPED*` straddle a `co_await`. Building the profiling daemon, adding zones and
+Instrument through core-cpp's `CORE_*` macros (`<core/Profiling.hpp>`), never Tracy directly — and
+never let `CORE_ZONE_SCOPED*` straddle a `co_await`. Building the profiling daemon, adding zones and
 analysing a capture: [`.agent/guides/profiling-tracy.md`](.agent/guides/profiling-tracy.md).

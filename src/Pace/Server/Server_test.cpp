@@ -14,7 +14,7 @@
 #include <core/platform/Clock.hpp>
 #include <tests/CheckoutPaths.hpp>
 #include <tests/HalfClose.hpp>
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
     #include <core/net/Tls.hpp>
 #endif
 #include <Pace/Server/Connection.hpp>
@@ -603,7 +603,7 @@ TEST_CASE("Server admits + tracks ConnectionsTotal", "[server][admission]")
     REQUIRE(metrics.Read(Pace::IMetricsSink::Counter::ConnectionsAdmissionRejectedTls) == 0);
 }
 
-#if defined(FC_TLS_ENABLED)
+#if defined(PACE_TLS_ENABLED)
 TEST_CASE("Server: ConnectionsTotalTls / ConnectionsAdmissionRejectedTls bumped on a TLS bind", "[server][admission][tls]")
 {
     // Finding #14: per-bind metrics labels. The IMetricsSink interface

@@ -108,7 +108,7 @@ TEST_CASE("A scratch root is claimed exclusively, and a second claimant gets ano
     // claimants here are two objects rather than two processes, which is the harder
     // case -- `flock` is per open file DESCRIPTION, so this also pins that the guard
     // is not an `fcntl` lock, which is per PROCESS and would let both succeed.
-    ScratchDirectory base { "fc-scratchclaim" };
+    ScratchDirectory base { "pace-scratchclaim" };
     auto const first = MakeLockFileScratchClaimant();
     auto const second = MakeLockFileScratchClaimant();
 
@@ -126,7 +126,7 @@ TEST_CASE("Releasing a claim frees the root for the next claimant", "[node][scra
 {
     // The claim lives exactly as long as the object. This is what makes a restarted
     // node reuse its own root rather than marching up the numbers forever.
-    ScratchDirectory base { "fc-scratchclaim-release" };
+    ScratchDirectory base { "pace-scratchclaim-release" };
     auto const claimant = MakeLockFileScratchClaimant();
 
     std::filesystem::path taken;
@@ -148,7 +148,7 @@ TEST_CASE("A root left behind by a dead owner is reclaimed, not refused", "[node
     // on disk. Its LOCK, though, is released by the OS however it died. So a root
     // whose lock is free and whose contents are not is reclaimable by definition,
     // and no staleness has to be inferred from a pid or a timestamp.
-    ScratchDirectory base { "fc-scratchclaim-dead" };
+    ScratchDirectory base { "pace-scratchclaim-dead" };
     Litter(base.Path() / "node-0", "job-1-leftovers.o");
 
     auto const claimant = MakeLockFileScratchClaimant();
@@ -164,7 +164,7 @@ TEST_CASE("A root left behind by a dead owner is reclaimed, not refused", "[node
 TEST_CASE("A fresh root is not reported as reclaimed", "[node][scratch-claim]")
 {
     // Otherwise the counter would rise on every first start and mean nothing.
-    ScratchDirectory base { "fc-scratchclaim-fresh" };
+    ScratchDirectory base { "pace-scratchclaim-fresh" };
     auto const claimant = MakeLockFileScratchClaimant();
     auto held = claimant->Claim(base.Path(), DefaultMaxScratchRoots);
     REQUIRE(held.has_value());
@@ -178,7 +178,7 @@ TEST_CASE("The claim file lives BESIDE the root, so emptying the root cannot des
     // lock file inside would be destroyed by normal operation. Worse on POSIX --
     // deleting an `flock`'d file is legal, and a second process may then create a
     // fresh file at the same path and lock THAT, giving two live owners of one root.
-    ScratchDirectory base { "fc-scratchclaim-beside" };
+    ScratchDirectory base { "pace-scratchclaim-beside" };
     auto const claimant = MakeLockFileScratchClaimant();
     auto held = claimant->Claim(base.Path(), DefaultMaxScratchRoots);
     REQUIRE(held.has_value());
@@ -199,7 +199,7 @@ TEST_CASE("Every root being held is refused by name, and differently from being 
     // Two refusals rather than one "no scratch", because they send an operator to
     // different places: every root held is a machine running more nodes than it has
     // roots for, while being unable to create one is a disk or a permission.
-    ScratchDirectory base { "fc-scratchclaim-exhausted" };
+    ScratchDirectory base { "pace-scratchclaim-exhausted" };
     auto const holder = MakeLockFileScratchClaimant();
 
     // Hold the only candidate, then ask for one with the same ceiling.
@@ -221,7 +221,7 @@ TEST_CASE("Every root being held is refused by name, and differently from being 
 TEST_CASE("A claimant walks past roots that are held", "[node][scratch-claim]")
 {
     // Three nodes on one machine is unusual but legal, and each must get its own.
-    ScratchDirectory base { "fc-scratchclaim-walk" };
+    ScratchDirectory base { "pace-scratchclaim-walk" };
     constexpr std::size_t Nodes = 3;
 
     // The claims are held for the whole case, because a released one is immediately
@@ -247,7 +247,7 @@ TEST_CASE("The seam lets a caller rehearse a live owner and a dead one", "[node]
 {
     // What the injected interface is FOR: neither of these is reachable against the
     // real filesystem without a second process, and both are the interesting cases.
-    ScratchDirectory base { "fc-scratchclaim-scripted" };
+    ScratchDirectory base { "pace-scratchclaim-scripted" };
 
     SECTION("a foreign live owner is a named refusal")
     {
@@ -347,7 +347,7 @@ TEST_CASE("Two nodes compiling at once, each on its own claimed root, keep their
     // roots were the same directory and this collided every time -- deterministically,
     // because there is no lost update to lose. It is the claim, not the numbering,
     // that separates them.
-    ScratchDirectory base { "fc-scratchclaim-compile" };
+    ScratchDirectory base { "pace-scratchclaim-compile" };
 
     auto const claimantA = MakeLockFileScratchClaimant();
     auto const claimantB = MakeLockFileScratchClaimant();

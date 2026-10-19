@@ -121,7 +121,7 @@ class UpstreamReachability
 /// The shared `pace-kv`, reached over the `0xFC` wire.
 ///
 /// Built on the launcher's own `CacheFetch`/`CacheStore` rather than a second
-/// client, for the reason `_fc_node_shared` exists at all: these are the two ends
+/// client, for the reason `_pace_node_shared` exists at all: these are the two ends
 /// of one protocol, and a second implementation of either is how they drift apart.
 ///
 /// ## Every failure is a miss, and that is the contract rather than laziness

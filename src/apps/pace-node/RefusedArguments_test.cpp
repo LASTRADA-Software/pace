@@ -332,7 +332,7 @@ TEST_CASE("A worker refusing an argument on the wire raises the row that names i
     CapturingLogger logger;
     AtomicMetricsSink metrics;
     UnreachedRunner runner;
-    Pace::Testing::ScratchDirectory scratch { "fc-refused-args" };
+    Pace::Testing::ScratchDirectory scratch { "pace-refused-args" };
     Cc::CompileJobRunner jobs {
         runner, scratch.Path(), { { "msvc", R"(C:\MSVC\bin\Hostx64\x64\cl.exe)" } }, Cc::ToolchainSurvey::Completed()
     };

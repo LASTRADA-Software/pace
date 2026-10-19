@@ -19,7 +19,7 @@ namespace Pace
 ///
 /// `src/apps/pace-cc` is included in "every caller" despite not linking
 /// this library: it compiles this file straight into the binary through the
-/// `_fc_cc_core` list, which is how the launcher stays free of vcpkg
+/// `_pace_cc_core` list, which is how the launcher stays free of vcpkg
 /// dependencies and CRT-static while still sharing the one implementation.
 ///
 /// Anything with a decision to test reaches the environment through an injected

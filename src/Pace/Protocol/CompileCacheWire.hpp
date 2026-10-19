@@ -36,7 +36,7 @@
 /// `Net/`, `Cache/`, `Async/` or `Config/` here breaks the launcher's **link**,
 /// not merely its build. This is the same constraint `Cli/UsageDoc` carries, and
 /// for the same reason. Being header-only is also what keeps it free: it costs no
-/// row in `_fc_cc_core`.
+/// row in `_pace_cc_core`.
 ///
 /// **The module performs no I/O and holds no state.** Every function here is a
 /// pure transform between bytes and structs. That is a deliberate exception to

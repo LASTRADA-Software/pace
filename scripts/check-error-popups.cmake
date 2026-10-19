@@ -60,7 +60,7 @@ set(problems 0)
 # Report one refusal on the output the registration reads, and count it. A FUNCTION, not a
 # macro: a macro substitutes its arguments textually and CMake re-parses them.
 # @param ARGV the sentence, in pieces that are joined with nothing between them
-function(fc_refuse)
+function(pace_refuse)
     list(JOIN ARGV "" text)
     message("CMake Error: error-popups: ${text}")
     math(EXPR count "${problems} + 1")
@@ -108,7 +108,7 @@ while(pending)
     endforeach()
 endwhile()
 if(NOT ctestFiles)
-    fc_refuse("${BUILD_DIR}/CTestTestfile.cmake does not exist, so nothing ctest would run can be read")
+    pace_refuse("${BUILD_DIR}/CTestTestfile.cmake does not exist, so nothing ctest would run can be read")
 endif()
 string(REGEX MATCHALL "[^/\"]+-[0-9a-f]+_include\\.cmake" catchIncludes "${registrations}")
 
@@ -116,7 +116,7 @@ file(STRINGS "${ninjaFile}" linkEdges REGEX "_EXECUTABLE_LINKER__")
 
 # Whether PATH occurs in TEXT followed by a boundary, rather than as a prefix of a longer
 # name. Sets OUT to TRUE or FALSE.
-function(fc_mentions_path text path out)
+function(pace_mentions_path text path out)
     string(LENGTH "${path}" pathLength)
     set(rest "${text}")
     while(TRUE)
@@ -147,13 +147,13 @@ foreach(row IN LISTS rows)
     endif()
     math(EXPR total "${total} + 1")
     if(row MATCHES "[;\\[]")
-        fc_refuse("a manifest row carries a semicolon or an opening bracket, which this reader cannot split safely: ${row}")
+        pace_refuse("a manifest row carries a semicolon or an opening bracket, which this reader cannot split safely: ${row}")
         continue()
     endif()
     string(REPLACE "|" ";" fields "${row}")
     list(LENGTH fields fieldCount)
     if(NOT fieldCount EQUAL 4)
-        fc_refuse("a manifest row does not have four `|` fields, so a reason carries a `|` or the walk changed shape: ${row}")
+        pace_refuse("a manifest row does not have four `|` fields, so a reason carries a `|` or the walk changed shape: ${row}")
         continue()
     endif()
     list(GET fields 0 name)
@@ -161,7 +161,7 @@ foreach(row IN LISTS rows)
     list(GET fields 2 policy)
     list(GET fields 3 reason)
 
-    fc_mentions_path("${registrations}" "${file}" isLaunched)
+    pace_mentions_path("${registrations}" "${file}" isLaunched)
     foreach(include IN LISTS catchIncludes)
         if(include MATCHES "^(.+)-[0-9a-f]+_include\\.cmake$" AND CMAKE_MATCH_1 STREQUAL name)
             set(isLaunched TRUE)
@@ -191,7 +191,7 @@ foreach(row IN LISTS rows)
         math(EXPR exempt "${exempt} + 1")
         message("exempt: ${name} -- ${reason}")
     else()
-        fc_refuse("${name} is launched by a test and its '${CONFIG}' link line carries no "
+        pace_refuse("${name} is launched by a test and its '${CONFIG}' link line carries no "
                   "${object}, so on Windows an assert in it opens a dialog and hangs the run "
                   "instead of failing it. cmake/ErrorPopups.cmake attaches that object to every "
                   "executable it walks: a target defined after that call, or outside the roots it "
@@ -212,17 +212,17 @@ string(REGEX MATCHALL "include\\(\"([^\"]+-[0-9a-f]+_include\\.cmake)\"\\)" incl
 foreach(call IN LISTS includeCalls)
     string(REGEX REPLACE "^include\\(\"(.*)\"\\)$" "\\1" includeFile "${call}")
     if(NOT EXISTS "${includeFile}")
-        fc_refuse("${includeFile} is named by a registration and does not exist, so the tests it adds cannot be read")
+        pace_refuse("${includeFile} is named by a registration and does not exist, so the tests it adds cannot be read")
         continue()
     endif()
     file(READ "${includeFile}" includeText)
     if(NOT includeText MATCHES "include\\(\"([^\"]+_tests\\.cmake)\"\\)")
-        fc_refuse("${includeFile} names no _tests.cmake, so this reader no longer understands catch_discover_tests' output")
+        pace_refuse("${includeFile} names no _tests.cmake, so this reader no longer understands catch_discover_tests' output")
         continue()
     endif()
     set(testsFile "${CMAKE_MATCH_1}")
     if(NOT EXISTS "${testsFile}")
-        fc_refuse("${testsFile} was never generated -- its binary is not built -- so whether its tests set ${VARIABLE} cannot be read. Build it, then run this check")
+        pace_refuse("${testsFile} was never generated -- its binary is not built -- so whether its tests set ${VARIABLE} cannot be read. Build it, then run this check")
         continue()
     endif()
     list(APPEND registrationFiles "${testsFile}")
@@ -273,7 +273,7 @@ foreach(registrationFile IN LISTS registrationFiles)
         if(name STREQUAL "")
             string(REPLACE "${lb}" "[" shown "${line}")
             string(REPLACE "${rb}" "]" shown "${shown}")
-            fc_refuse("${registrationFile}: a test registration this reader cannot name, so whether it sets ${VARIABLE} is unknown: ${shown}")
+            pace_refuse("${registrationFile}: a test registration this reader cannot name, so whether it sets ${VARIABLE} is unknown: ${shown}")
         elseif(kind STREQUAL "add_test")
             list(APPEND added "${name}")
         else()
@@ -298,9 +298,9 @@ foreach(registrationFile IN LISTS registrationFiles)
 endforeach()
 
 if(testCount EQUAL 0)
-    fc_refuse("no registered test was found under ${BUILD_DIR}, so no test was shown to set ${VARIABLE} and a pass would be vacuous")
+    pace_refuse("no registered test was found under ${BUILD_DIR}, so no test was shown to set ${VARIABLE} and a pass would be vacuous")
 elseif(unsetCount GREATER 0)
-    fc_refuse("${unsetCount} of ${testCount} registered test(s) do not set ${VARIABLE}, so a product binary "
+    pace_refuse("${unsetCount} of ${testCount} registered test(s) do not set ${VARIABLE}, so a product binary "
               "any of them spawns still opens an assert dialog. cmake/ErrorPopups.cmake sets it on every "
               "add_test by a deferred walk, and a catch_discover_tests call must name "
               "ENVIRONMENT_MODIFICATION \"\${PACE_ERROR_DIALOG_ENVIRONMENT}\" itself. The first of them:${unset}")
@@ -308,10 +308,10 @@ endif()
 message("error-popups: ${testCount} registered test(s) read, ${unsetCount} without ${VARIABLE}")
 
 if(total EQUAL 0)
-    fc_refuse("the manifest ${manifestFile} names no executable, so there was nothing to check "
+    pace_refuse("the manifest ${manifestFile} names no executable, so there was nothing to check "
               "and a pass would be vacuous")
 elseif(NOT anchorProven)
-    fc_refuse("the anchor '${ANCHOR}' was not found launched AND covered, so the derivation "
+    pace_refuse("the anchor '${ANCHOR}' was not found launched AND covered, so the derivation "
               "cannot show it reaches even the one executable certain to be here")
 endif()
 
