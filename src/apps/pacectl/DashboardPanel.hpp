@@ -5,6 +5,8 @@
 #include "DashboardGlyphs.hpp"
 #include "DashboardLoop.hpp"
 #include "DashboardRung.hpp"
+#include "FleetChartModel.hpp"
+#include "FleetFocus.hpp"
 #include "HistoryChart.hpp"
 #include "SixelEncoder.hpp"
 #include "StatsSource.hpp"
@@ -625,6 +627,24 @@ struct PanelContext
 [[nodiscard]] std::optional<Distributed::FleetSection> SectionForKey(Distributed::FleetSection active,
                                                                      std::string_view keys);
 
+/// The machine @p focus names: the lane's subject, or the focused matched row's cell in
+/// @p section's machine column; nullopt when it names none.
+///
+/// None for an inactive focus, a focus past the lanes or rows it is given, a section whose rows are not
+/// per machine (`MachineColumnOf`), a document without that section or column, and an absent cell --
+/// a row nobody named a machine for names none, rather than one called `-`.
+/// @param focus The focus.
+/// @param lanes The lanes drawn, top to bottom.
+/// @param document The document the table is drawn from, or null before one was read.
+/// @param section The section the table draws.
+/// @param matchedRows The indices, into @p section's rows, of the rows the filter kept, in drawing order.
+/// @return The machine's key, as the document names it.
+[[nodiscard]] std::optional<std::string> FocusedMachine(FleetFocus const& focus,
+                                                        std::span<ChartBand const> lanes,
+                                                        FleetDocument const* document,
+                                                        Distributed::FleetSection section,
+                                                        std::span<std::size_t const> matchedRows);
+
 /// Draws any `PanelSpec` on the rung it was given, laid out for the model's current size.
 ///
 /// **Responsive to `columns x rows`** (#134 decision 5), which arrive as `Resize` events: no line is
@@ -648,7 +668,10 @@ class PanelView final: public IDashboardView
     /// filter. `PgDn` and `PgUp` scroll it by the rows the last frame showed, `Home` goes back to the top.
     /// `/` starts typing a filter: while typed, printable text is appended, `Backspace` takes the last
     /// character, `Enter` keeps the filter and `Esc` clears it. A row is drawn when any of its written
-    /// cells contains the filter, ignoring ASCII case. A panel without a document block acts on no key.
+    /// cells contains the filter, ignoring ASCII case. `Up` and `Down` move the highlight through the
+    /// chart's lanes and then the table's rows (`StepFocus`), over the counts the last frame drew, and
+    /// scroll the table to keep a focused row shown; a section switch or a filter edit puts a row focus
+    /// back on the first row. A panel without a document block acts on no key.
     /// @param keys The bytes the keystroke delivered.
     /// @return Whether the next frame differs.
     [[nodiscard]] bool Key(std::string_view keys) override;
@@ -679,6 +702,18 @@ class PanelView final: public IDashboardView
 
     /// The content width `_besideReserve` was measured at.
     std::size_t _reserveColumns { 0 };
+
+    /// How many chart lanes the last frame drew: what `Up` and `Down` walk before the rows.
+    std::size_t _lanes { 0 };
+
+    /// How many table rows matched the filter in the last frame: what `Up` and `Down` walk after the lanes.
+    std::size_t _rows { 0 };
+
+    /// Where the highlight is; inactive until the first `Up` or `Down`.
+    FleetFocus _focus {};
+
+    /// The machine the highlight names in the last frame drawn; empty for none.
+    std::string _focusedMachine {};
 
     /// Whether the filter is being typed; last, so it pads nothing between 8-aligned members.
     bool _typingFilter { false };

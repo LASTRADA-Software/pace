@@ -87,6 +87,16 @@ TEST_CASE("a focus past the end is clamped when rows or lanes go away", "[cli][d
           == FleetFocus { .zone = FocusZone::Rows, .index = 2, .active = true });
 }
 
+TEST_CASE("a step from a focus whose counts shrank starts from the clamped focus", "[cli][dashboard][fleet][focus]")
+{
+    // WHAT DISTINGUISHES: StepFocus clamps BEFORE it steps. Stepping the stale index would land Up on
+    // row 4 (past the two rows left), and Down from a row of an emptied zone would claim a row nobody has.
+    CHECK(StepFocus({ .zone = FocusZone::Rows, .index = 5, .active = true }, FocusStep::Up, 3, 2)
+          == FleetFocus { .zone = FocusZone::Rows, .index = 0, .active = true });
+    CHECK(StepFocus({ .zone = FocusZone::Rows, .index = 0, .active = true }, FocusStep::Down, 3, 0)
+          == FleetFocus { .zone = FocusZone::Lanes, .index = 2, .active = true });
+}
+
 TEST_CASE("every section says which column names its machine", "[cli][dashboard][fleet][focus]")
 {
     CHECK(MachineColumnOf(FleetSection::Machines) == std::string_view { "endpoint" });

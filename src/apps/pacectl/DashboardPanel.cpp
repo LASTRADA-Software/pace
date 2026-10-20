@@ -2136,12 +2136,16 @@ namespace
         return { LineOf(*kept, {}, spec.stripPriority) };
     }
 
-    /// What the operator has done to a document panel's table: how far it is scrolled and what filters it.
+    /// What the operator has done to a document panel's table: how far it is scrolled, what filters it and
+    /// which row and machine the highlight names.
     struct TableState
     {
-        std::string_view filter {}; ///< The text a row must contain; empty for none.
-        std::size_t scroll { 0 };   ///< The matching rows skipped at the top.
-        bool typing { false };      ///< Whether the filter is being typed.
+        std::string_view filter {};               ///< The text a row must contain; empty for none.
+        std::size_t scroll { 0 };                 ///< The matching rows skipped at the top.
+        std::optional<std::size_t> focusedRow {}; ///< The focused row, among the matching rows; none for none.
+        std::string_view machine {};              ///< The machine the highlight names; empty for none.
+        std::string_view machineColumn {};        ///< The column naming a row's machine; empty for none.
+        bool typing { false };                    ///< Whether the filter is being typed.
     };
 
     /// A section's table as a frame draws it, with what the filter and the scroll made of it.
@@ -2204,6 +2208,62 @@ namespace
         return FrameToneOf(tone);
     }
 
+    /// A section's rows the filter kept, each cell written for a person.
+    struct WrittenRows
+    {
+        std::vector<std::size_t> matched {};            ///< Each kept row's index into the table's rows.
+        std::vector<std::vector<std::string>> cells {}; ///< Each kept row's cells, written.
+    };
+
+    /// The rows of @p table, in @p section, that @p filter keeps, every cell written for a person.
+    ///
+    /// **The one place a row is matched**, so the frame that draws the table and the highlight that walks
+    /// its rows count the same rows. Each cell is written by the scale its column has in the leader's own
+    /// tables, so the filter matches what the operator reads.
+    /// @param in The frame's inputs.
+    /// @param section The section.
+    /// @param table The section's table.
+    /// @param filter The text a row must contain; empty for none.
+    /// @return The kept rows.
+    [[nodiscard]] WrittenRows WriteMatchingRows(FrameInputs const& in,
+                                                FleetSection section,
+                                                Value const& table,
+                                                std::string_view filter)
+    {
+        auto const formats = ColumnFormats(section, table.columns);
+        auto rows = WrittenRows {};
+        for (auto const rowIndex: std::views::iota(std::size_t { 0 }, table.rows.size()))
+        {
+            auto const& row = table.rows[rowIndex];
+            auto written = std::vector<std::string> {};
+            written.reserve(row.size());
+            for (auto const index: std::views::iota(std::size_t { 0 }, row.size()))
+                written.push_back(HumanCellText(in, row[index], formats[index]));
+            if (!std::ranges::any_of(written,
+                                     [filter](std::string const& cell) { return ContainsIgnoringAsciiCase(cell, filter); }))
+                continue;
+            rows.matched.push_back(rowIndex);
+            rows.cells.push_back(std::move(written));
+        }
+        return rows;
+    }
+
+    /// The indices of the rows of @p section's table that @p filter keeps, in drawing order.
+    /// @param in The frame's inputs.
+    /// @param section The section.
+    /// @param filter The text a row must contain; empty for none.
+    /// @return The indices; empty where no document, or no such section, was read.
+    [[nodiscard]] std::vector<std::size_t> MatchedRowsOf(FrameInputs const& in,
+                                                         FleetSection section,
+                                                         std::string_view filter)
+    {
+        auto const* document = in.model->latestDocument.get();
+        auto const* table = document == nullptr ? nullptr : document->Section(section);
+        if (table == nullptr || table->columns.empty())
+            return {};
+        return WriteMatchingRows(in, section, *table, filter).matched;
+    }
+
     /// The active section's table, walked from the header line the leader sent.
     ///
     /// Every column's priority is its rank in the leader's tables (`FleetColumnKeep`), through
@@ -2236,25 +2296,11 @@ namespace
             return SectionTable { .items = { Item { .lines = { std::move(line) }, .priority = spec.tablePriority } } };
         }
 
-        // Every cell written for a person FIRST, by the scale its column has in the leader's own tables,
-        // so the widths below are the widths drawn, the drop for width sees the real figures, and the
-        // filter matches what the operator reads.
-        auto const formats = ColumnFormats(section, table->columns);
-        auto matched = std::vector<std::size_t> {};
-        auto cells = std::vector<std::vector<std::string>> {};
-        for (auto const rowIndex: std::views::iota(std::size_t { 0 }, table->rows.size()))
-        {
-            auto const& row = table->rows[rowIndex];
-            auto written = std::vector<std::string> {};
-            written.reserve(row.size());
-            for (auto const index: std::views::iota(std::size_t { 0 }, row.size()))
-                written.push_back(HumanCellText(in, row[index], formats[index]));
-            if (!std::ranges::any_of(
-                    written, [&state](std::string const& cell) { return ContainsIgnoringAsciiCase(cell, state.filter); }))
-                continue;
-            matched.push_back(rowIndex);
-            cells.push_back(std::move(written));
-        }
+        // Every cell written for a person FIRST, so the widths below are the widths drawn and the drop for
+        // width sees the real figures.
+        auto const written = WriteMatchingRows(in, section, *table, state.filter);
+        auto const& matched = written.matched;
+        auto const& cells = written.cells;
         auto const scroll = matched.empty() ? 0 : std::min(state.scroll, matched.size() - 1);
 
         // Each column as wide as its widest matching cell, heading included, so no cell is ever cut.
@@ -2303,21 +2349,37 @@ namespace
                            .priority = spec.tablePriority,
                            .shrinkAt = spec.tableShrinkPriority,
                            .table = true };
+        // The highlight: the focused row, and every row of the machine it names, dressed at its first cell.
+        auto const machineAt =
+            state.machineColumn.empty() || state.machine.empty()
+                ? table->columns.size()
+                : static_cast<std::size_t>(std::ranges::find(table->columns, state.machineColumn) - table->columns.begin());
+        auto const isSelected = [&](std::size_t shown) {
+            if (state.focusedRow == shown)
+                return true;
+            if (machineAt >= table->columns.size())
+                return false;
+            auto const& cell = table->rows[matched[shown]][machineAt];
+            return cell.kind != CellKind::Absent && cell.lexical == state.machine;
+        };
         for (auto const shown: std::views::iota(scroll, cells.size()))
         {
             auto line = std::string {};
+            auto const selected = isSelected(shown);
             for (auto const& piece: *kept)
             {
                 line += prefixOf(piece.slot);
                 auto const aligned = alignedOf(piece.slot, cells[shown][piece.slot]);
                 auto const& raw = table->rows[matched[shown]][piece.slot];
-                if (auto const tone = CellFrameTone(section, table->columns[piece.slot], raw); tone.has_value())
-                {
-                    auto const text = cells[shown][piece.slot];
-                    auto const start = piece.slot == 0 ? 0 : aligned.size() - text.size();
+                auto const& text = cells[shown][piece.slot];
+                auto const start = piece.slot == 0 ? 0 : aligned.size() - text.size();
+                // The selection outranks the cell's own tone, rather than two runs over the same bytes.
+                auto const tone = selected && &piece == &kept->front()
+                                      ? std::optional<FrameTone> { FrameTone::Selected }
+                                      : CellFrameTone(section, table->columns[piece.slot], raw);
+                if (tone.has_value() && !text.empty())
                     item.spans.push_back(LineSpan {
                         .line = item.lines.size(), .byte = line.size() + start, .length = text.size(), .tone = *tone });
-                }
                 line += aligned;
             }
             item.lines.push_back(std::move(line));
@@ -2392,14 +2454,23 @@ namespace
     }
 
     /// The machines the fleet chart could band: those with a reading of its figure in the span it counts them over --
-    /// the image's fixed step, or as much history as text could draw.
+    /// the image's fixed step, or as much history as text could draw -- in key order.
+    /// @param in The frame's inputs.
+    /// @param context The session facts.
+    /// @return The bands.
+    [[nodiscard]] std::vector<ChartBand> FleetChartLanes(FrameInputs const& in, PanelContext const& context)
+    {
+        auto const window = ChartIsPixels(in, context) ? ChartWindowFor(in.model->history.size()) : HistoryCapacity;
+        return FleetChartBands(in.model->history, FleetChartMetrics.front(), window);
+    }
+
+    /// How many machines the fleet chart could band (`FleetChartLanes`).
     /// @param in The frame's inputs.
     /// @param context The session facts.
     /// @return How many machines.
     [[nodiscard]] std::size_t FleetChartMachines(FrameInputs const& in, PanelContext const& context)
     {
-        auto const window = ChartIsPixels(in, context) ? ChartWindowFor(in.model->history.size()) : HistoryCapacity;
-        return FleetChartBands(in.model->history, FleetChartMetrics.front(), window).size();
+        return FleetChartLanes(in, context).size();
     }
 
     /// A span of @p samples readings, written for the title and the axis.
@@ -2475,6 +2546,8 @@ namespace
         std::size_t available { 0 }; ///< Every band the chart could draw; the shape draws the first of them.
         /// The first @p count bands over the newest @p window samples, their latest figures and tops written.
         std::function<std::vector<ChartTrack>(std::size_t count, std::size_t window)> tracks {};
+        /// The label of the band the highlight names, dressed as selected; empty for none.
+        std::string_view selected {};
     };
 
     /// @p source laid out in @p shape: a title, a row per band, a time axis and a legend, as one item that goes whole.
@@ -2578,8 +2651,10 @@ namespace
             // Every band after the first starts after its spacer rows.
             if (item.lines.size() > item.imageFirst)
                 item.lines.resize(item.lines.size() + block.shape.spacerCells);
+            auto const selected = !source.selected.empty() && track.label == source.selected;
             auto row = std::vector<Piece> {
-                Piece { .text = std::string { Indent } + FitRight(track.label, nameCells, in.cellWidth) },
+                Piece { .text = std::string { Indent } + FitRight(track.label, nameCells, in.cellWidth),
+                        .tone = selected ? std::optional<FrameTone> { FrameTone::Selected } : std::nullopt },
                 Piece { .text = std::string { ColumnGap } + AlignRight(track.latest, figureCells, in.cellWidth),
                         .tone = FrameTone::Figure },
             };
@@ -2751,9 +2826,14 @@ namespace
     /// @param context The session facts: the rung, the encoder and the interval.
     /// @param budget The content width.
     /// @param shape How many bands, and rows of cells each.
+    /// @param machine The machine the highlight names, whose band's label is dressed as selected; empty for none.
     /// @return The chart, or nullopt where it is not drawn: a rung with no chart marks, or too narrow.
-    [[nodiscard]] std::optional<ChartBlock> FleetChartOf(
-        FrameInputs const& in, DocumentSpec const& spec, PanelContext const& context, std::size_t budget, ChartShape shape)
+    [[nodiscard]] std::optional<ChartBlock> FleetChartOf(FrameInputs const& in,
+                                                         DocumentSpec const& spec,
+                                                         PanelContext const& context,
+                                                         std::size_t budget,
+                                                         ChartShape shape,
+                                                         std::string_view machine)
     {
         auto const pixels = ChartIsPixels(in, context);
         if (!pixels && in.glyphs->chartLevels.size() < 2)
@@ -2799,6 +2879,7 @@ namespace
                         tracks[index].latest = ChartFigureText(in, *chartMetric, bands[index].latest);
                     return tracks;
                 },
+            .selected = machine,
         };
         return LayoutChart(in, source, context, budget, shape, Priority::Low, spec.chartGrowth.minimumCells, pixels);
     }
@@ -3318,7 +3399,75 @@ namespace
         if (!text.empty())
             text.pop_back();
     }
+
+    /// A keystroke that moves the fleet view's highlight, as the bytes `KeyBytes` delivers it.
+    struct FocusStepKey
+    {
+        std::string_view keys; ///< The keystroke's bytes.
+        FocusStep step;        ///< Which way it moves.
+    };
+
+    /// Every key that moves the highlight.
+    constexpr auto FocusStepKeys = std::to_array<FocusStepKey>({
+        { .keys = "\x1b[A", .step = FocusStep::Up },
+        { .keys = "\x1b[B", .step = FocusStep::Down },
+    });
+
+    /// The scroll that shows @p focus's row, from @p scroll with @p page rows shown.
+    ///
+    /// Moves only as far as it must: a row above the top becomes the top, one below the bottom the bottom.
+    /// @param focus The focus; a lane focus, or none, leaves the scroll alone.
+    /// @param scroll The matching rows skipped at the top now.
+    /// @param page How many rows the last frame showed; at least one.
+    /// @return The scroll.
+    [[nodiscard]] std::size_t ScrollShowing(FleetFocus const& focus, std::size_t scroll, std::size_t page) noexcept
+    {
+        if (!focus.active || focus.zone != FocusZone::Rows)
+            return scroll;
+        if (focus.index < scroll)
+            return focus.index;
+        if (focus.index >= scroll + page)
+            return focus.index + 1 - page;
+        return scroll;
+    }
+
+    /// @p focus as a new table starts it: a row focus back on the first row, a lane focus kept.
+    ///
+    /// A section switch or a filter edit makes a different list of rows, so the index a row focus held
+    /// names some other row in it.
+    /// @param focus The focus.
+    /// @return The focus.
+    [[nodiscard]] FleetFocus RowFocusRestarted(FleetFocus focus) noexcept
+    {
+        if (focus.zone == FocusZone::Rows)
+            focus.index = 0;
+        return focus;
+    }
 } // namespace
+
+std::optional<std::string> FocusedMachine(FleetFocus const& focus,
+                                          std::span<ChartBand const> lanes,
+                                          FleetDocument const* document,
+                                          FleetSection section,
+                                          std::span<std::size_t const> matchedRows)
+{
+    if (!focus.active)
+        return std::nullopt;
+    if (focus.zone == FocusZone::Lanes)
+        return focus.index < lanes.size() ? std::optional<std::string> { lanes[focus.index].subject } : std::nullopt;
+    auto const column = MachineColumnOf(section);
+    auto const* table = document == nullptr ? nullptr : document->Section(section);
+    if (!column.has_value() || table == nullptr || focus.index >= matchedRows.size())
+        return std::nullopt;
+    auto const at = std::ranges::find(table->columns, *column);
+    auto const row = matchedRows[focus.index];
+    if (at == table->columns.end() || row >= table->rows.size())
+        return std::nullopt;
+    auto const& cell = table->rows[row][static_cast<std::size_t>(at - table->columns.begin())];
+    if (cell.kind == CellKind::Absent)
+        return std::nullopt;
+    return cell.lexical;
+}
 
 std::optional<FleetSection> SectionForKey(FleetSection active, std::string_view keys)
 {
@@ -3378,12 +3527,14 @@ bool PanelView::Key(std::string_view keys)
                     _typingFilter = false;
                     _filter.clear();
                     _scroll = 0;
+                    _focus = RowFocusRestarted(_focus);
                     return true;
                 case FilterEdit::Backspace:
                     if (_filter.empty())
                         return false;
                     PopCharacter(_filter);
                     _scroll = 0;
+                    _focus = RowFocusRestarted(_focus);
                     return true;
             }
         }
@@ -3391,6 +3542,7 @@ bool PanelView::Key(std::string_view keys)
             return false;
         _filter += keys;
         _scroll = 0;
+        _focus = RowFocusRestarted(_focus);
         return true;
     }
 
@@ -3419,6 +3571,16 @@ bool PanelView::Key(std::string_view keys)
         return _scroll != before;
     }
 
+    if (auto const* focusKey =
+            core::findIfOrNull(FocusStepKeys, [keys](FocusStepKey const& row) { return row.keys == keys; }))
+    {
+        // Over what the last frame drew: the lanes and the rows the operator is looking at.
+        auto const before = _focus;
+        _focus = StepFocus(_focus, focusKey->step, _lanes, _rows);
+        _scroll = ScrollShowing(_focus, _scroll, _page);
+        return _focus != before;
+    }
+
     auto const section = SectionForKey(_context.section, keys);
     if (!section.has_value() || *section == _context.section)
         return false;
@@ -3426,6 +3588,7 @@ bool PanelView::Key(std::string_view keys)
     _context.section = *section;
     _scroll = 0;
     _filter.clear();
+    _focus = RowFocusRestarted(_focus);
     return true;
 }
 
@@ -3467,8 +3630,33 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     auto rates = RateItems(in, _spec->rates, budget, _besideReserve);
     auto levels = LevelItems(in, _spec->levels, budget);
     auto tiers = TierItems(in, *_spec, budget);
-    auto document = DocumentItems(
-        in, *_spec, _context, TableState { .filter = _filter, .scroll = _scroll, .typing = _typingFilter }, budget);
+    // The highlight first, clamped to what this frame has -- rows a sample or a filter took away, lanes gone --
+    // so the machine it names, and every row and band dressed for it, is one this frame draws.
+    auto lanes = _spec->document.has_value() ? FleetChartLanes(in, _context) : std::vector<ChartBand> {};
+    // The keys walked the lanes the last frame drew; a band the chart had no room for is no lane.
+    lanes.resize(std::min(lanes.size(), _lanes));
+    auto const matched =
+        _spec->document.has_value() ? MatchedRowsOf(in, _context.section, _filter) : std::vector<std::size_t> {};
+    if (auto const clamped = ClampFocus(_focus, lanes.size(), matched.size()); clamped != _focus)
+    {
+        _focus = clamped;
+        _scroll = ScrollShowing(_focus, _scroll, _page);
+    }
+    _rows = matched.size();
+    _focusedMachine =
+        FocusedMachine(_focus, lanes, in.model->latestDocument.get(), _context.section, matched).value_or(std::string {});
+    auto const focusedRow =
+        _focus.active && _focus.zone == FocusZone::Rows ? std::optional<std::size_t> { _focus.index } : std::nullopt;
+    auto document = DocumentItems(in,
+                                  *_spec,
+                                  _context,
+                                  TableState { .filter = _filter,
+                                               .scroll = _scroll,
+                                               .focusedRow = focusedRow,
+                                               .machine = _focusedMachine,
+                                               .machineColumn = MachineColumnOf(_context.section).value_or(""),
+                                               .typing = _typingFilter },
+                                  budget);
     auto below = FactGroups(in, *_spec, FactPlace::BelowRates, budget);
     for (auto const* block: { &rates, &levels, &tiers })
         if (!block->has_value())
@@ -3528,7 +3716,7 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
             _spec->document->chartGrowth,
             std::max<std::size_t>(1, FleetChartMachines(in, _context)),
             !ChartIsPixels(in, _context),
-            [&](ChartShape shape) { return FleetChartOf(in, *_spec->document, _context, budget, shape); },
+            [&](ChartShape shape) { return FleetChartOf(in, *_spec->document, _context, budget, shape, _focusedMachine); },
             compose,
             items,
             *fitted);
@@ -3553,6 +3741,8 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     }
     if (fitted->tableShown.has_value())
         _page = std::max<std::size_t>(1, *fitted->tableShown);
+    // The lanes the next Up or Down walks: the bands this frame drew, none where it drew no chart.
+    _lanes = chart.has_value() ? chart->tracks.size() : 0;
 
     auto const title = TitleFor(in, *_spec, _context, columns);
     auto frame =

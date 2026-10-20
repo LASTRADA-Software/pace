@@ -1344,13 +1344,12 @@ constexpr auto FleetMachines = std::size_t { 12 };
     return std::nullopt;
 }
 
-/// A leader's `/fleet.txt` for @p machines machines, rendered by the leader's own renderer.
+/// A leader's snapshot of @p machines machines, as `LeaderFleetText` renders it.
 ///
-/// Rendered rather than written, so every column a real leader sends is there under its real name, with
-/// widths a real fleet has: a build string, a heartbeat past its threshold on the second machine.
+/// A build string, a heartbeat past its threshold on the second machine, and no cluster.
 /// @param machines How many machines.
-/// @return The document.
-[[nodiscard]] std::string LeaderFleetText(std::size_t machines)
+/// @return The snapshot.
+[[nodiscard]] Distributed::FleetSnapshot LeaderSnapshot(std::size_t machines)
 {
     auto snapshot = Distributed::FleetSnapshot {};
     snapshot.role = Distributed::SchedulerRole::Leader;
@@ -1370,7 +1369,18 @@ constexpr auto FleetMachines = std::size_t { 12 };
         snapshot.nodes.push_back(std::move(machine));
     }
     snapshot.liveLeases = 47;
-    return RenderFleetText(snapshot, Distributed::FleetHistoryView {}, std::nullopt);
+    return snapshot;
+}
+
+/// A leader's `/fleet.txt` for @p machines machines, rendered by the leader's own renderer.
+///
+/// Rendered rather than written, so every column a real leader sends is there under its real name, with
+/// widths a real fleet has: a build string, a heartbeat past its threshold on the second machine.
+/// @param machines How many machines.
+/// @return The document.
+[[nodiscard]] std::string LeaderFleetText(std::size_t machines)
+{
+    return RenderFleetText(LeaderSnapshot(machines), Distributed::FleetHistoryView {}, std::nullopt);
 }
 
 /// Whether @p heading names the column @p name as a whole word.
@@ -2312,6 +2322,192 @@ TEST_CASE("the active section's tab is dressed as selected, and a letter from th
                 selected.push_back(SpanText(run.frames[index], span));
         CHECK(selected == std::vector<std::string> { std::string { tab } });
     }
+}
+
+namespace
+{
+
+/// The Up key, as the bytes `KeyBytes` delivers it.
+constexpr std::string_view UpKey = "\x1b[A";
+
+/// The Down key, as the bytes `KeyBytes` delivers it.
+constexpr std::string_view DownKey = "\x1b[B";
+
+/// One frame's Selected spans, split by where they sit against the section strip.
+struct SelectedRuns
+{
+    std::vector<std::string> lanes {}; ///< Above the strip: the chart's band labels.
+    std::vector<std::string> strip {}; ///< On the strip: the active tab.
+    std::vector<std::string> rows {};  ///< Below the strip: the table's cells.
+};
+
+/// The Selected spans of @p run's frame @p index, split by the strip's row.
+///
+/// The strip is the row of the Selected span that is a bracketed tab; every frame of a fleet panel with a
+/// document draws one, so a frame without it fails here rather than reading as nothing selected.
+/// @param run What was drawn.
+/// @param index Which frame.
+/// @return The spans' texts, top to bottom within each part.
+[[nodiscard]] SelectedRuns SelectedIn(FleetRun const& run, std::size_t index)
+{
+    auto selected = std::vector<std::pair<std::size_t, std::string>> {};
+    for (auto const& span: run.spans.at(index))
+        if (span.tone == FrameTone::Selected)
+            selected.emplace_back(span.row, SpanText(run.frames.at(index), span));
+    auto const* tab = core::findIfOrNull(selected, [](std::pair<std::size_t, std::string> const& entry) {
+        return entry.second.starts_with("[") && entry.second.ends_with("]");
+    });
+    REQUIRE(tab != nullptr);
+    auto const stripRow = tab->first;
+    auto runs = SelectedRuns {};
+    for (auto const& [row, text]: selected)
+    {
+        if (row < stripRow)
+            runs.lanes.push_back(text);
+        else if (row == stripRow)
+            runs.strip.push_back(text);
+        else
+            runs.rows.push_back(text);
+    }
+    return runs;
+}
+
+/// A fleet of @p machines machines whose cluster has revoked one key, under the id `old-07`.
+/// @param machines How many machines.
+/// @return The document, rendered by the leader's own renderer.
+[[nodiscard]] std::string LeaderFleetTextRevokingOne(std::size_t machines)
+{
+    auto snapshot = LeaderSnapshot(machines);
+    snapshot.cluster = Cluster::ClusterState {};
+    snapshot.cluster->revokedKeys.push_back(Cluster::RevokedKey { .id = "old-07", .publicKey = {} });
+    return RenderFleetText(snapshot, Distributed::FleetHistoryView {}, std::nullopt);
+}
+
+/// A three-machine fleet's first frame, then @p downs Down keys.
+/// @param document The leader's document.
+/// @param downs How many Downs.
+/// @return The script.
+[[nodiscard]] std::vector<DashboardEvent> DownsAfterFirstFrame(std::string document, int downs)
+{
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, std::move(document)), Tick };
+    for ([[maybe_unused]] auto const step: std::views::iota(0, downs))
+        script.push_back(KeyOf(DownKey));
+    return script;
+}
+
+} // namespace
+
+TEST_CASE("down highlights the first lane and marks that machine's rows below", "[cli][dashboard][panel][fleet][focus]")
+{
+    // WHAT DISTINGUISHES: before a key nothing is dressed but the tab; after Down the FIRST band by key
+    // order is, and the table row of that same machine with it -- and no other machine anywhere.
+    auto const run = RunFleet(DownsAfterFirstFrame(LeaderFleetText(3), 1), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 2);
+    INFO(run.frames[1]);
+
+    auto const before = SelectedIn(run, 0);
+    CHECK(before.lanes.empty());
+    CHECK(before.rows.empty());
+
+    auto const after = SelectedIn(run, 1);
+    CHECK(after.lanes == std::vector<std::string> { "build-01:7070" });
+    CHECK(after.strip == std::vector<std::string> { "[machines]" });
+    CHECK(after.rows == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("down past the last lane focuses the first row and the lanes follow the row's machine",
+          "[cli][dashboard][panel][fleet][focus]")
+{
+    // Three lanes, so the fourth Down is the first row. WHAT DISTINGUISHES: the lane dressed is the one the
+    // ROW names, which on the last lane was the third.
+    auto const run = RunFleet(DownsAfterFirstFrame(LeaderFleetText(3), 4), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 5);
+    INFO(run.frames.back());
+
+    auto const onLastLane = SelectedIn(run, 3);
+    CHECK(onLastLane.lanes == std::vector<std::string> { "build-03:7070" });
+    CHECK(onLastLane.rows == std::vector<std::string> { "build-03:7070" });
+
+    auto const onFirstRow = SelectedIn(run, 4);
+    CHECK(onFirstRow.rows == std::vector<std::string> { "build-01:7070" });
+    CHECK(onFirstRow.lanes == std::vector<std::string> { "build-01:7070" });
+
+    // And Up from the first row is the last lane again.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 4);
+    script.push_back(KeyOf(UpKey));
+    auto const back = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(back.frames.size() == 6);
+    CHECK(SelectedIn(back, 5).lanes == std::vector<std::string> { "build-03:7070" });
+}
+
+TEST_CASE("the section strip keeps exactly one selected tab while a machine is focused",
+          "[cli][dashboard][panel][fleet][focus]")
+{
+    // A focused machine adds Selected spans to the lanes and the rows; the strip's one tab must stay the only
+    // one ON THE STRIP, and follow the section.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 1);
+    script.push_back(KeyOf("w"));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 3);
+    INFO(run.frames[2]);
+    auto const selected = SelectedIn(run, 2);
+    CHECK(selected.strip == std::vector<std::string> { "[workers]" });
+    // The lane focus survives the switch.
+    CHECK(selected.lanes == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("a filter that drops the focused row clamps the focus", "[cli][dashboard][panel][fleet][focus]")
+{
+    // Focus the third row (three lanes, then three rows), then filter to one machine. WHAT DISTINGUISHES: the
+    // frame still draws, and the one row left is the focused one.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 6);
+    script.push_back(KeyOf("/"));
+    script.push_back(KeyOf("build-01"));
+    script.push_back(KeyOf("\r"));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 10);
+    CHECK(SelectedIn(run, 6).rows == std::vector<std::string> { "build-03:7070" });
+
+    auto const& last = run.frames.back();
+    INFO(last);
+    CHECK(last.contains("filter  /build-01"));
+    auto const selected = SelectedIn(run, run.frames.size() - 1);
+    CHECK(selected.rows == std::vector<std::string> { "build-01:7070" });
+    CHECK(selected.lanes == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("rows that vanish between samples clamp the focus", "[cli][dashboard][panel][fleet][focus]")
+{
+    // The last of three rows focused, then a sample with one machine. WHAT DISTINGUISHES: the focus lands on
+    // the one row left rather than on nothing, or on a row index the table no longer has.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 6);
+    script.push_back(FleetSampleOf(2, LeaderFleetText(1)));
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 8);
+    CHECK(SelectedIn(run, 6).rows == std::vector<std::string> { "build-03:7070" });
+
+    INFO(run.frames.back());
+    CHECK(SelectedIn(run, 7).rows == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("a section with no machine column focuses rows but names no machine", "[cli][dashboard][panel][fleet][focus]")
+{
+    // `revoked` names a key, not a machine. WHAT DISTINGUISHES: the focused row is dressed, and no lane is --
+    // a band dressed here would claim the revoked key belongs to a machine on the chart.
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, LeaderFleetTextRevokingOne(3)), Tick, KeyOf("r") };
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 4))
+        script.push_back(KeyOf(DownKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 6);
+    INFO(run.frames.back());
+
+    // Three Downs still walk the lanes: the focus is there, and it names a machine.
+    CHECK(SelectedIn(run, 4).lanes == std::vector<std::string> { "build-03:7070" });
+    auto const selected = SelectedIn(run, 5);
+    CHECK(selected.strip == std::vector<std::string> { "[revoked]" });
+    CHECK(selected.rows == std::vector<std::string> { "old-07" });
+    CHECK(selected.lanes.empty());
 }
 
 namespace
