@@ -3639,6 +3639,55 @@ namespace
             focus.index = 0;
         return focus;
     }
+    /// What the fleet view's highlight walks, as the last frame left it.
+    struct FocusWalk
+    {
+        FleetFocus focus {};          ///< Where the highlight is.
+        std::size_t scroll { 0 };     ///< The table's rows skipped at the top.
+        std::size_t page { 1 };       ///< How many of the table's rows the last frame showed.
+        std::size_t lanes { 0 };      ///< How many chart lanes the last frame drew.
+        std::size_t laneWindow { 0 }; ///< The samples the last frame's chart took its bands over.
+    };
+
+    /// The highlight as one frame draws it: clamped to what the frame has, and the machine it names.
+    struct FramedFocus
+    {
+        FleetFocus focus {};      ///< The focus, clamped to the lanes and rows this frame has.
+        std::size_t scroll { 0 }; ///< The scroll, moved to show a row focus the clamp moved.
+        std::size_t rows { 0 };   ///< How many table rows match the filter in this frame.
+        std::string machine {};   ///< The machine the focus names; empty for none.
+    };
+
+    /// @p walk's focus clamped to what this frame has -- rows a sample or a filter took away, lanes gone -- so the
+    /// machine it names, and every row and band dressed for it, is one this frame draws.
+    ///
+    /// The keys walked the lanes the last frame drew, so they are read over the span it drew them over: a machine
+    /// that fell silent before that span is in the whole history and in no band. A band the chart had no room for
+    /// is no lane either.
+    /// @param in The frame's inputs.
+    /// @param section The section the table draws.
+    /// @param filter The text a row must contain; empty for none.
+    /// @param walk The highlight as the last frame left it.
+    /// @return The highlight for this frame.
+    [[nodiscard]] FramedFocus FocusForFrame(FrameInputs const& in,
+                                            FleetSection section,
+                                            std::string_view filter,
+                                            FocusWalk const& walk)
+    {
+        auto lanes = walk.laneWindow > 0 ? FleetChartBands(in.model->history, FleetChartMetrics.front(), walk.laneWindow)
+                                         : std::vector<ChartBand> {};
+        lanes.resize(std::min(lanes.size(), walk.lanes));
+        auto const matched = MatchedRowsOf(in, section, filter);
+        auto framed = FramedFocus { .focus = ClampFocus(walk.focus, lanes.size(), matched.size()),
+                                    .scroll = walk.scroll,
+                                    .rows = matched.size(),
+                                    .machine = {} };
+        if (framed.focus != walk.focus)
+            framed.scroll = ScrollShowing(framed.focus, walk.scroll, walk.page);
+        framed.machine =
+            FocusedMachine(framed.focus, lanes, in.model->latestDocument.get(), section, matched).value_or(std::string {});
+        return framed;
+    }
 } // namespace
 
 std::optional<std::string> FocusedMachine(FleetFocus const& focus,
@@ -3850,30 +3899,22 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     auto rates = RateItems(in, _spec->rates, budget, _besideReserve);
     auto levels = LevelItems(in, _spec->levels, budget);
     auto tiers = TierItems(in, *_spec, budget);
-    // The highlight first, clamped to what this frame has -- rows a sample or a filter took away, lanes gone --
-    // so the machine it names, and every row and band dressed for it, is one this frame draws.
-    // The keys walked the lanes the last frame drew, so they are read over the span it drew them over: a machine
-    // that fell silent before that span is in the whole history and in no band. A band the chart had no room for
-    // is no lane either.
-    // A machine's detail draws in place of the fleet block and leaves the highlight as it was, so closing it comes
-    // back to the lanes and rows the operator left: nothing below reads or moves the focus while it is open.
+    // The highlight first, clamped to what this frame has (`FocusForFrame`). A machine's detail draws in place of
+    // the fleet block and leaves the highlight as it was, so closing it comes back to the lanes and rows the
+    // operator left: nothing below reads or moves the focus while it is open. A panel without a document block is
+    // never focused, so its focus, rows and machine stay as constructed.
     auto const detail = _spec->document.has_value() && !_detailMachine.empty();
-    if (!detail)
+    if (_spec->document.has_value() && !detail)
     {
-        auto lanes = _spec->document.has_value() && _laneWindow > 0
-                         ? FleetChartBands(model.history, FleetChartMetrics.front(), _laneWindow)
-                         : std::vector<ChartBand> {};
-        lanes.resize(std::min(lanes.size(), _lanes));
-        auto const matched =
-            _spec->document.has_value() ? MatchedRowsOf(in, _context.section, _filter) : std::vector<std::size_t> {};
-        if (auto const clamped = ClampFocus(_focus, lanes.size(), matched.size()); clamped != _focus)
-        {
-            _focus = clamped;
-            _scroll = ScrollShowing(_focus, _scroll, _page);
-        }
-        _rows = matched.size();
-        _focusedMachine = FocusedMachine(_focus, lanes, in.model->latestDocument.get(), _context.section, matched)
-                              .value_or(std::string {});
+        auto framed = FocusForFrame(
+            in,
+            _context.section,
+            _filter,
+            FocusWalk { .focus = _focus, .scroll = _scroll, .page = _page, .lanes = _lanes, .laneWindow = _laneWindow });
+        _focus = framed.focus;
+        _scroll = framed.scroll;
+        _rows = framed.rows;
+        _focusedMachine = std::move(framed.machine);
     }
     auto const focusedRow =
         _focus.active && _focus.zone == FocusZone::Rows ? std::optional<std::size_t> { _focus.index } : std::nullopt;

@@ -1468,12 +1468,14 @@ namespace
 {
 
 /// A view that claims Esc or does not, and writes down every key it is offered.
+///
+/// Every member public, as this file's other recording fakes keep what a case reads.
 class EscapeClaimingView final: public IDashboardView
 {
   public:
-    /// @param claims What `ClaimsEscape` answers.
-    explicit EscapeClaimingView(bool claims):
-        _claims { claims }
+    /// @param claimsEscape What `ClaimsEscape` answers.
+    explicit EscapeClaimingView(bool claimsEscape):
+        claims { claimsEscape }
     {
     }
 
@@ -1491,13 +1493,11 @@ class EscapeClaimingView final: public IDashboardView
 
     [[nodiscard]] bool ClaimsEscape() const noexcept override
     {
-        return _claims;
+        return claims;
     }
 
-    std::vector<std::string> offered {};
-
-  private:
-    bool _claims;
+    bool claims;                         ///< What `ClaimsEscape` answers.
+    std::vector<std::string> offered {}; ///< Every key offered, in order.
 };
 
 /// Drive @p view through Esc, then `x`, then `q`, then `y`.
