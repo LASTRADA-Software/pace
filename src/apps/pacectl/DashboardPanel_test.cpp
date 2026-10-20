@@ -2491,6 +2491,33 @@ TEST_CASE("rows that vanish between samples clamp the focus", "[cli][dashboard][
     CHECK(SelectedIn(run, 7).rows == std::vector<std::string> { "build-01:7070" });
 }
 
+TEST_CASE("the lanes the keys walk are the bands the chart drew over its own span", "[cli][dashboard][panel][fleet][focus]")
+{
+    // `build-01` reports only in the first sample, then falls silent for more samples than the text chart is
+    // wide -- a dead node, which is what an operator investigates -- while staying inside the whole history. The
+    // chart draws build-02..04. WHAT DISTINGUISHES: the lanes are taken over the span the chart DREW; over the
+    // whole history build-01 would be lane 0, the first Down would dress no band, and build-04 would be out of
+    // reach.
+    constexpr auto SilentSamples = 150;
+    static_assert(SilentSamples < static_cast<int>(HistoryCapacity), "build-01 must stay inside the history");
+    auto withoutFirst = LeaderSnapshot(4);
+    withoutFirst.nodes.erase(withoutFirst.nodes.begin());
+    auto const later = RenderFleetText(withoutFirst, Distributed::FleetHistoryView {}, std::nullopt);
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, LeaderFleetText(4)) };
+    for (auto const second: std::views::iota(2, SilentSamples + 2))
+        script.push_back(FleetSampleOf(second, later));
+    script.push_back(Tick);
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 3))
+        script.push_back(KeyOf(DownKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    INFO(run.frames[0]);
+    REQUIRE(LineIndexHolding(run.frames[0], "build-01") == Lines(run.frames[0]).size());
+
+    CHECK(SelectedIn(run, 1).lanes == std::vector<std::string> { "build-02:7070" });
+    CHECK(SelectedIn(run, 3).lanes == std::vector<std::string> { "build-04:7070" });
+}
+
 TEST_CASE("a section with no machine column focuses rows but names no machine", "[cli][dashboard][panel][fleet][focus]")
 {
     // `revoked` names a key, not a machine. WHAT DISTINGUISHES: the focused row is dressed, and no lane is --

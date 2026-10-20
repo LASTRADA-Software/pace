@@ -706,6 +706,9 @@ class PanelView final: public IDashboardView
     /// How many chart lanes the last frame drew: what `Up` and `Down` walk before the rows.
     std::size_t _lanes { 0 };
 
+    /// The samples the last frame's chart took its bands over: the span the lanes are read in.
+    std::size_t _laneWindow { 0 };
+
     /// How many table rows matched the filter in the last frame: what `Up` and `Down` walk after the lanes.
     std::size_t _rows { 0 };
 

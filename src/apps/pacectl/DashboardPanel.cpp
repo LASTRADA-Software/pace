@@ -3632,8 +3632,12 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     auto tiers = TierItems(in, *_spec, budget);
     // The highlight first, clamped to what this frame has -- rows a sample or a filter took away, lanes gone --
     // so the machine it names, and every row and band dressed for it, is one this frame draws.
-    auto lanes = _spec->document.has_value() ? FleetChartLanes(in, _context) : std::vector<ChartBand> {};
-    // The keys walked the lanes the last frame drew; a band the chart had no room for is no lane.
+    // The keys walked the lanes the last frame drew, so they are read over the span it drew them over: a machine
+    // that fell silent before that span is in the whole history and in no band. A band the chart had no room for
+    // is no lane either.
+    auto lanes = _spec->document.has_value() && _laneWindow > 0
+                     ? FleetChartBands(model.history, FleetChartMetrics.front(), _laneWindow)
+                     : std::vector<ChartBand> {};
     lanes.resize(std::min(lanes.size(), _lanes));
     auto const matched =
         _spec->document.has_value() ? MatchedRowsOf(in, _context.section, _filter) : std::vector<std::size_t> {};
@@ -3743,6 +3747,7 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
         _page = std::max<std::size_t>(1, *fitted->tableShown);
     // The lanes the next Up or Down walks: the bands this frame drew, none where it drew no chart.
     _lanes = chart.has_value() ? chart->tracks.size() : 0;
+    _laneWindow = chart.has_value() ? chart->window : 0;
 
     auto const title = TitleFor(in, *_spec, _context, columns);
     auto frame =
