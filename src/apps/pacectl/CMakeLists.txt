@@ -26,6 +26,7 @@ set(_pace_cli_sources
     DashboardLoop.cpp
     DashboardSampler.cpp
     FleetChartModel.cpp
+    FleetFocus.cpp
     FleetDocument.cpp
     HistoryChart.cpp
     LiveEventSource.cpp
@@ -111,6 +112,7 @@ if(PACE_BUILD_TESTS)
         DashboardLoop_test.cpp
         DashboardSampler_test.cpp
         FleetChartModel_test.cpp
+        FleetFocus_test.cpp
         FleetDocument_test.cpp
         HistoryChart_test.cpp
         LiveEventSource_test.cpp
