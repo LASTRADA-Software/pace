@@ -2677,6 +2677,102 @@ TEST_CASE("esc while typing a filter clears the filter and keeps the session", "
     CHECK_FALSE(run.frames[3].contains("filter"));
 }
 
+TEST_CASE("a failed sample does not tell a detail its machine left", "[cli][dashboard][panel][fleet][detail]")
+{
+    // A refused sample is a gap in what was read, not a fleet without the machine. WHAT DISTINGUISHES: the heading
+    // after the failure carries the absent marker -- nothing was read -- and never `not in the latest sample`,
+    // which the case where a sample really lacks the machine still says.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    script.push_back(DashboardEvent { .kind = DashboardEventKind::SampleFailed,
+                                      .at = core::platform::SteadyTimePoint { 2s },
+                                      .outcome = Outcome::Refused,
+                                      .note = "not the leader" });
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    auto const& failed = run.frames[3];
+    INFO(failed);
+    CHECK_FALSE(failed.contains("not in the latest sample"));
+    auto const heading = LineIndexHolding(failed, "machine build-01:7070");
+    REQUIRE(heading < Lines(failed).size());
+    CHECK(Lines(failed)[heading].contains(Absent));
+}
+
+TEST_CASE("a detail on a short terminal drops whole sections rather than refusing the frame",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: a detail whose every section were essential needs about twenty lines and draws the
+    // minimum-size line on a terminal the fleet view fits; one whose sections give way keeps its heading, its
+    // first section and the key that goes back.
+    for (auto const rows: { 20, 16 })
+    {
+        INFO("rows " << rows);
+        auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+        script.push_back(KeyOf(EnterKey));
+        auto const run = RunFleet(std::move(script), 132, rows, UnicodeContext());
+        REQUIRE(run.frames.size() == 3);
+        auto const& detail = run.frames[2];
+        INFO(detail);
+        CHECK_FALSE(detail.contains("needs"));
+        CHECK(detail.contains("machine build-01:7070"));
+        CHECK(LineStarting(detail, "machines").has_value());
+        CHECK(detail.contains("Esc back"));
+        CHECK(Lines(detail).size() == static_cast<std::size_t>(rows));
+    }
+}
+
+TEST_CASE("a detail's tables dress no row as selected", "[cli][dashboard][panel][fleet][detail]")
+{
+    // Every row of a detail is the machine's, so dressing the ones that name it dresses all of them and says
+    // nothing. WHAT DISTINGUISHES: no Selected span anywhere in the detail frame.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 3);
+    INFO(run.frames[2]);
+    CHECK(run.frames[2].contains("w-01-gcc"));
+    auto selected = std::vector<std::string> {};
+    for (auto const& span: run.spans[2])
+        if (span.tone == FrameTone::Selected)
+            selected.push_back(SpanText(run.frames[2], span));
+    CHECK(selected.empty());
+}
+
+TEST_CASE("while a detail is open no other key draws and a second esc after closing it quits",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: the frame count and how the run ends. Up, Down, a section key and PgDn act on what the
+    // detail hides, so none draws; the first Esc closes the detail and draws the fleet view; the second Esc is
+    // the loop's again and quits, so the closing Tick draws nothing.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    for (auto const keys: { UpKey, DownKey, std::string_view { "w" }, std::string_view { "\x1b[6~" } })
+        script.push_back(KeyOf(keys));
+    script.push_back(KeyOf("\x1b"));
+    script.push_back(KeyOf("\x1b"));
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    CHECK(run.stop == DashboardStop::Quit);
+    INFO(run.frames[3]);
+    CHECK(run.frames[3].contains("[machines]"));
+}
+
+TEST_CASE("a focused row past the table's page is scrolled into view", "[cli][dashboard][panel][fleet][focus]")
+{
+    // Thirty machines on a short terminal: the table shows a few rows, and forty Downs walk past the lanes to the
+    // last row, `build-30`. WHAT DISTINGUISHES: that row is drawn and dressed -- a focus that did not scroll the
+    // table would name a row below the page, and the frame would dress no row at all.
+    constexpr auto Machines = std::size_t { 30 };
+    auto const run = RunFleet(DownsAfterFirstFrame(LeaderFleetText(Machines), 40), 132, 24, UnicodeContext());
+    // A Down that moves nothing draws nothing, so the frames stop once the last row is focused.
+    REQUIRE(run.frames.size() > 1);
+    INFO(run.frames.back());
+    REQUIRE(LineIndexHolding(run.frames[0], "build-30:7070") == Lines(run.frames[0]).size());
+    CHECK(SelectedIn(run, run.frames.size() - 1).rows == std::vector<std::string> { "build-30:7070" });
+}
+
 TEST_CASE("the strip's hint names the keys that select and open a machine where the width allows",
           "[cli][dashboard][panel][fleet][detail]")
 {

@@ -572,6 +572,7 @@ namespace
         std::size_t rowsKept { 0 };             ///< The rows a table keeps when it shrinks at `shrinkAt`.
         std::size_t imageFirst { 0 };           ///< For an image item, the first of its lines the image covers.
         std::size_t imageRows { 0 };            ///< For an image item, how many of its lines the image covers.
+        std::size_t heading { 1 };              ///< How many of a table's first lines stand above its rows.
         Priority priority { Priority::Normal }; ///< When it goes.
         std::optional<Priority> shrinkAt {};    ///< The level a table gives up rows at, when that is not `priority`.
         bool table { false };                   ///< Whether it shrinks to its overflow line before it goes.
@@ -607,8 +608,8 @@ namespace
     {
         if (!item.table)
             return item.lines.size();
-        auto const rows = item.lines.size() - 1;
-        return 1 + (rows - item.hidden) + (HasOverflowLine(item) ? 1 : 0);
+        auto const rows = item.lines.size() - item.heading;
+        return item.heading + (rows - item.hidden) + (HasOverflowLine(item) ? 1 : 0);
     }
 
     /// How many rows @p item hides after one more cut that leaves at least @p floor shown, if a cut can.
@@ -621,7 +622,7 @@ namespace
     /// @return The rows hidden after the cut, or nullopt when no cut makes it shorter.
     [[nodiscard]] std::optional<std::size_t> AfterCut(Item const& item, std::size_t floor) noexcept
     {
-        auto const shown = (item.lines.size() - 1) - item.hidden;
+        auto const shown = (item.lines.size() - item.heading) - item.hidden;
         if (!HasOverflowLine(item))
             return shown >= floor + 2 ? std::optional<std::size_t> { 2 } : std::nullopt;
         return shown > floor ? std::optional<std::size_t> { item.hidden + 1 } : std::nullopt;
@@ -722,7 +723,8 @@ namespace
         for (auto& item: items)
         {
             auto const first = fitted.lines.size();
-            auto const kept = item.table ? 1 + ((item.lines.size() - 1) - item.hidden) : item.lines.size();
+            auto const kept =
+                item.table ? item.heading + ((item.lines.size() - item.heading) - item.hidden) : item.lines.size();
             for (auto const& span: item.spans)
                 if (span.line < kept)
                     fitted.spans.push_back(
@@ -733,7 +735,7 @@ namespace
                 fitted.imageRows = item.imageRows;
             }
             if (item.table && !item.noun.empty())
-                fitted.tableShown = kept - 1;
+                fitted.tableShown = kept - item.heading;
             std::ranges::move(item.lines | std::views::take(kept), std::back_inserter(fitted.lines));
             if (item.table && HasOverflowLine(item))
             {
@@ -2146,8 +2148,15 @@ namespace
         return { LineOf(*kept, {}, spec.stripPriority) };
     }
 
-    /// What the operator has done to a document panel's table: how far it is scrolled, what filters it and
-    /// which row and machine the highlight names.
+    /// The machine a row must name to be kept, and the column that names it.
+    struct RowMachine
+    {
+        std::string_view machine; ///< The machine's key, as the document names it.
+        std::string_view column;  ///< The column naming a row's machine.
+    };
+
+    /// What the operator has done to a document panel's table: how far it is scrolled, what filters it,
+    /// which row and machine the highlight names, and which machine's rows alone it draws.
     struct TableState
     {
         std::string_view filter {};               ///< The text a row must contain; empty for none.
@@ -2155,8 +2164,10 @@ namespace
         std::optional<std::size_t> focusedRow {}; ///< The focused row, among the matching rows; none for none.
         std::string_view machine {};              ///< The machine the highlight names; empty for none.
         std::string_view machineColumn {};        ///< The column naming a row's machine; empty for none.
-        bool typing { false };                    ///< Whether the filter is being typed.
-        bool restrictToMachine { false };         ///< Whether only the rows `machine` names are drawn.
+        /// The machine every drawn row must name; none to draw every machine's. Not a highlight: the rows it keeps
+        /// are all that machine's, so none of them is dressed for it.
+        std::optional<RowMachine> only {};
+        bool typing { false }; ///< Whether the filter is being typed.
     };
 
     /// A section's table as a frame draws it, with what the filter and the scroll made of it.
@@ -2224,13 +2235,6 @@ namespace
     {
         std::vector<std::size_t> matched {};            ///< Each kept row's index into the table's rows.
         std::vector<std::vector<std::string>> cells {}; ///< Each kept row's cells, written.
-    };
-
-    /// The machine a row must name to be kept, and the column that names it.
-    struct RowMachine
-    {
-        std::string_view machine; ///< The machine's key, as the document names it.
-        std::string_view column;  ///< The column naming a row's machine.
     };
 
     /// Whether @p row of @p table names @p only's machine in @p only's column.
@@ -2332,15 +2336,14 @@ namespace
 
         // Every cell written for a person FIRST, so the widths below are the widths drawn and the drop for
         // width sees the real figures.
-        auto const written = WriteMatchingRows(
-            in,
-            section,
-            *table,
-            state.filter,
-            state.restrictToMachine
-                ? std::optional<RowMachine> { RowMachine { .machine = state.machine, .column = state.machineColumn } }
-                : std::nullopt);
+        auto const written = WriteMatchingRows(in, section, *table, state.filter, state.only);
         auto const& matched = written.matched;
+        // A table restricted to one machine that holds none of its rows is the marker, never a heading of columns
+        // over nothing -- and a heading too wide for the terminal is no reason to refuse a frame that draws none.
+        if (state.only.has_value() && matched.empty())
+            return SectionTable { .items = { Item { .lines = { std::string { Indent } + std::string { in.absent } },
+                                                    .priority = spec.tablePriority } },
+                                  .rows = table->rows.size() };
         auto const& cells = written.cells;
         auto const scroll = matched.empty() ? 0 : std::min(state.scroll, matched.size() - 1);
 
@@ -3017,10 +3020,12 @@ namespace
     constexpr std::string_view DetailBackHint = "Esc back";
 
     /// The heading of @p machine's detail: `machine <endpoint>`, then its name from the latest machines section --
-    /// or, where that section lists no such machine, `not in the latest sample`.
+    /// or, where that section was read and lists no such machine, `not in the latest sample`, and where no machines
+    /// section was read at all, the absent marker.
     ///
     /// **A machine that left says so**: a detail whose every section is empty would otherwise read as a machine
-    /// that is there and doing nothing.
+    /// that is there and doing nothing. **And a sample that failed does not**: a refused or dropped sample read no
+    /// machines section, which says nothing about this machine, so saying it left would be a confident wrong signal.
     /// @param in The frame's inputs.
     /// @param spec The document block.
     /// @param machine The machine's key.
@@ -3044,7 +3049,9 @@ namespace
             Piece { .text = std::format("{}machine", Indent), .priority = Priority::Essential, .tone = FrameTone::Label },
             Piece { .text = std::format(" {}", machine), .priority = Priority::Essential },
         };
-        if (row == nullptr)
+        if (machines == nullptr)
+            pieces.push_back(Piece { .text = std::format("{}{}", ColumnGap, in.absent), .priority = Priority::Essential });
+        else if (row == nullptr)
             pieces.push_back(Piece { .text = std::format("{}{}", ColumnGap, NotInSampleNote),
                                      .priority = Priority::Essential,
                                      .tone = FrameTone::Label });
@@ -3057,6 +3064,12 @@ namespace
             return std::unexpected(kept.error());
         return LineOf(*kept, {}, spec.tablePriority);
     }
+
+    /// When a machine's detail gives up a section for height: after its blanks, before its heading and its back key.
+    ///
+    /// Below `Essential`, unlike the fleet view's one table: six essential sections need about twenty lines, and a
+    /// terminal shorter than that would get the minimum-size line where the fleet view fits.
+    constexpr auto DetailSectionPriority = Priority::Normal;
 
     /// One labelled line: @p text, indented and dressed as a label.
     /// @param text The words.
@@ -3075,6 +3088,10 @@ namespace
     ///
     /// A section with none of its rows writes the absent marker under its name, never an empty table, which would
     /// claim it was read and holds nothing for the machine where the section may not have been sent at all.
+    ///
+    /// Each section is ONE item, its name a heading line above its columns, so a short terminal shrinks the tables
+    /// to `tableRowsKept` rows and then drops whole sections from the bottom -- never a name without its table, nor
+    /// a table without its name.
     /// @param in The frame's inputs.
     /// @param spec The document block.
     /// @param machine The machine's key, as the document names it.
@@ -3094,26 +3111,28 @@ namespace
             auto const column = MachineColumnOf(row.section);
             if (!row.tabular || !column.has_value())
                 continue;
-            auto table = SectionItems(in,
-                                      row.section,
-                                      spec,
-                                      TableState { .machine = machine, .machineColumn = *column, .restrictToMachine = true },
-                                      budget);
+            auto table = SectionItems(
+                in, row.section, spec, TableState { .only = RowMachine { .machine = machine, .column = *column } }, budget);
             if (!table.has_value())
                 return std::unexpected(table.error());
             items.push_back(Blank());
-            items.push_back(LabelLine(row.key, spec.tablePriority));
-            if (table->matched == 0)
+            for (auto& part: table->items)
             {
-                items.push_back(
-                    Item { .lines = { std::format("{}{}", Indent, in.absent) }, .priority = spec.tablePriority });
-                continue;
-            }
-            for (auto& item: table->items)
-            {
-                // No overflow line names a key to scroll by: a detail's tables do not scroll.
-                item.noun = {};
-                items.push_back(std::move(item));
+                // The section's name above what it drew: the marker, or the columns and their rows.
+                auto section = LabelLine(row.key, DetailSectionPriority);
+                for (auto span: part.spans)
+                {
+                    span.line += 1;
+                    section.spans.push_back(span);
+                }
+                std::ranges::move(part.lines, std::back_inserter(section.lines));
+                section.table = true;
+                section.heading = part.table ? 2 : section.lines.size();
+                section.above = part.above;
+                section.rowsKept = part.rowsKept;
+                section.shrinkAt = part.table ? part.shrinkAt : std::nullopt;
+                // No overflow line names a key to scroll by, so no noun: a detail's tables do not scroll.
+                items.push_back(std::move(section));
             }
         }
         items.push_back(Blank());
@@ -3529,7 +3548,7 @@ namespace
     /// Every editing key; any other printable text is typed into the filter.
     constexpr auto FilterEditKeys = std::to_array<FilterEditKey>({
         { .keys = "\r", .edit = FilterEdit::Keep },
-        { .keys = "\x1b", .edit = FilterEdit::Clear },
+        { .keys = EscapeKey, .edit = FilterEdit::Clear },
         { .keys = "\x7f", .edit = FilterEdit::Backspace },
         { .keys = "\b", .edit = FilterEdit::Backspace },
     });

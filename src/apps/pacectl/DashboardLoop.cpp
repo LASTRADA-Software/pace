@@ -18,13 +18,15 @@ namespace
     /// `Ctrl+C`: the quit key that stays one while a view `CapturesText`, so a session is always leavable.
     constexpr std::string_view InterruptKey = "\x03";
 
-    /// The keystrokes that mean *leave*.
+    /// The keystrokes that mean *leave*, unless the view takes them first.
     ///
     /// A table rather than an `if` ladder, so a fourth spelling is a row. `ESC` is here
     /// because an operator reaches for it and a dashboard that ignores it feels stuck;
     /// it is safe only because this view sends no query whose reply begins with `ESC`
     /// -- the DA1 exchange is over before the loop starts, which is stage 2's one-shot
-    /// probe, not a thing that can arrive mid-run.
+    /// probe, not a thing that can arrive mid-run. A key here still reaches the view, rather
+    /// than ending the run, while the view `CapturesText` (every key but `Ctrl+C`) and, for
+    /// `ESC` alone, while it `ClaimsEscape` -- a machine's detail is open, and `ESC` goes back.
     constexpr auto QuitKeys = std::to_array<std::string_view>({ "q", "Q", InterruptKey, EscapeKey });
 
     /// Whether a reading continues the run the reading before it belongs to.

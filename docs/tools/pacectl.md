@@ -881,6 +881,8 @@ A machine's detail replaces the tiles, the chart, the strip and the table until 
 closes it, and the highlight is where it was. A machine the latest sample no longer
 lists says `not in the latest sample` rather than drawing empty sections. `Enter`
 on a row of a section that names no machine, such as revoked keys, opens nothing.
+The detail's tables do not scroll: a long one shows its first rows and `+N more`, and
+on a short terminal whole sections give way from the bottom.
 
 ### How it draws: Sixel, Unicode, ASCII
 
