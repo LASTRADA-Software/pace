@@ -35,6 +35,14 @@ validation:
 not_in_nav: |
   snippets/*
 
+# The design and plan files the agent workflow writes under `docs/superpowers/`
+# are local working documents: untracked (.gitignore) and never published. They
+# still sit in a developer's docs/ tree, so `exclude_docs` keeps a local
+# `mkdocs build --strict` from refusing them as pages missing from `nav:`;
+# `not_in_nav` would only hide them from the menu and publish every one of them.
+exclude_docs: |
+  /superpowers/
+
 site_name: Pace
 site_description: A memcached- and Redis-compatible cache daemon, and a portable compile cache
 site_author: Pace contributors

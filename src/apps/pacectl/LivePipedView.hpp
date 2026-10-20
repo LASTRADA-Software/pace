@@ -91,6 +91,12 @@ using FigureProjection = Value (*)(DashboardModel const& model);
 class PipedRecordView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     /// @param format How each record is written.
     /// @param absentOverride From `--absent`: what an absent cell renders as; ignored by `json`.
     /// @param project What a row reports.

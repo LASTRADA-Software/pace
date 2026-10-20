@@ -399,6 +399,12 @@ class SpokenTerminal final: public IDashboardEventSource
 class CountView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         return DashboardFrame { .text = std::to_string(model.samples), .placements = {} };

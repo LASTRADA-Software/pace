@@ -240,6 +240,12 @@ class ScriptedInstaller final: public IStopSignalInstaller
 class GeometryView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     /// @param geometry Where each frame's columns and rows go; outlives the view.
     explicit GeometryView(std::vector<std::pair<int, int>>* geometry) noexcept:
         _geometry { geometry }
@@ -260,6 +266,12 @@ class GeometryView final: public IDashboardView
 class ThrowingView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& /*model*/) override
     {
         throw std::runtime_error { "the view could not draw" };
@@ -1020,6 +1032,12 @@ namespace
 class StatusView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     /// @param versions Where each frame's version goes; outlives the view.
     explicit StatusView(std::vector<std::string>* versions) noexcept:
         _versions { versions }

@@ -40,8 +40,9 @@ namespace
     /// The named keys that have a byte spelling, as a table so another key is a row.
     ///
     /// The spellings are the ordinary xterm ones. They only have to be RIGHT for the keys the
-    /// dashboard acts on, and `ESC` is the one of those here; the rest are spelled so that a
-    /// consumer comparing bytes sees what an operator pressed rather than nothing.
+    /// dashboard acts on -- `ESC`, `Enter`, `Tab`, `Backspace`, the four arrows, `Home`, `PageUp` and
+    /// `PageDown` -- and the rest are spelled so that a consumer comparing bytes sees what an operator
+    /// pressed rather than nothing.
     constexpr auto NamedKeys = std::to_array<NamedKeyRow>({
         { .key = core::tui::KeyCode::Escape, .bytes = "\x1b" },
         { .key = core::tui::KeyCode::Enter, .bytes = "\r" },

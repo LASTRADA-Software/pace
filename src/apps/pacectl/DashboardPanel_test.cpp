@@ -1344,13 +1344,12 @@ constexpr auto FleetMachines = std::size_t { 12 };
     return std::nullopt;
 }
 
-/// A leader's `/fleet.txt` for @p machines machines, rendered by the leader's own renderer.
+/// A leader's snapshot of @p machines machines, as `LeaderFleetText` renders it.
 ///
-/// Rendered rather than written, so every column a real leader sends is there under its real name, with
-/// widths a real fleet has: a build string, a heartbeat past its threshold on the second machine.
+/// A build string, a heartbeat past its threshold on the second machine, and no cluster.
 /// @param machines How many machines.
-/// @return The document.
-[[nodiscard]] std::string LeaderFleetText(std::size_t machines)
+/// @return The snapshot.
+[[nodiscard]] Distributed::FleetSnapshot LeaderSnapshot(std::size_t machines)
 {
     auto snapshot = Distributed::FleetSnapshot {};
     snapshot.role = Distributed::SchedulerRole::Leader;
@@ -1370,7 +1369,18 @@ constexpr auto FleetMachines = std::size_t { 12 };
         snapshot.nodes.push_back(std::move(machine));
     }
     snapshot.liveLeases = 47;
-    return RenderFleetText(snapshot, Distributed::FleetHistoryView {}, std::nullopt);
+    return snapshot;
+}
+
+/// A leader's `/fleet.txt` for @p machines machines, rendered by the leader's own renderer.
+///
+/// Rendered rather than written, so every column a real leader sends is there under its real name, with
+/// widths a real fleet has: a build string, a heartbeat past its threshold on the second machine.
+/// @param machines How many machines.
+/// @return The document.
+[[nodiscard]] std::string LeaderFleetText(std::size_t machines)
+{
+    return RenderFleetText(LeaderSnapshot(machines), Distributed::FleetHistoryView {}, std::nullopt);
 }
 
 /// Whether @p heading names the column @p name as a whole word.
@@ -1855,6 +1865,12 @@ std::size_t fleetParses = 0;
 class EveryFleetDrawer final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         auto frame = panel.PlacedFrame(model);
@@ -2312,6 +2328,468 @@ TEST_CASE("the active section's tab is dressed as selected, and a letter from th
                 selected.push_back(SpanText(run.frames[index], span));
         CHECK(selected == std::vector<std::string> { std::string { tab } });
     }
+}
+
+namespace
+{
+
+/// The Up key, as the bytes `KeyBytes` delivers it.
+constexpr std::string_view UpKey = "\x1b[A";
+
+/// The Down key, as the bytes `KeyBytes` delivers it.
+constexpr std::string_view DownKey = "\x1b[B";
+
+/// One frame's Selected spans, split by where they sit against the section strip.
+struct SelectedRuns
+{
+    std::vector<std::string> lanes {}; ///< Above the strip: the chart's band labels.
+    std::vector<std::string> strip {}; ///< On the strip: the active tab.
+    std::vector<std::string> rows {};  ///< Below the strip: the table's cells.
+};
+
+/// The Selected spans of @p run's frame @p index, split by the strip's row.
+///
+/// The strip is the row of the Selected span that is a bracketed tab; every frame of a fleet panel with a
+/// document draws one, so a frame without it fails here rather than reading as nothing selected.
+/// @param run What was drawn.
+/// @param index Which frame.
+/// @return The spans' texts, top to bottom within each part.
+[[nodiscard]] SelectedRuns SelectedIn(FleetRun const& run, std::size_t index)
+{
+    auto selected = std::vector<std::pair<std::size_t, std::string>> {};
+    for (auto const& span: run.spans.at(index))
+        if (span.tone == FrameTone::Selected)
+            selected.emplace_back(span.row, SpanText(run.frames.at(index), span));
+    auto const* tab = core::findIfOrNull(selected, [](std::pair<std::size_t, std::string> const& entry) {
+        return entry.second.starts_with("[") && entry.second.ends_with("]");
+    });
+    REQUIRE(tab != nullptr);
+    auto const stripRow = tab->first;
+    auto runs = SelectedRuns {};
+    for (auto const& [row, text]: selected)
+    {
+        if (row < stripRow)
+            runs.lanes.push_back(text);
+        else if (row == stripRow)
+            runs.strip.push_back(text);
+        else
+            runs.rows.push_back(text);
+    }
+    return runs;
+}
+
+/// A fleet of @p machines machines whose cluster has revoked one key, under the id `old-07`.
+/// @param machines How many machines.
+/// @return The document, rendered by the leader's own renderer.
+[[nodiscard]] std::string LeaderFleetTextRevokingOne(std::size_t machines)
+{
+    auto snapshot = LeaderSnapshot(machines);
+    snapshot.cluster = Cluster::ClusterState {};
+    snapshot.cluster->revokedKeys.push_back(Cluster::RevokedKey { .id = "old-07", .publicKey = {} });
+    return RenderFleetText(snapshot, Distributed::FleetHistoryView {}, std::nullopt);
+}
+
+/// A three-machine fleet's first frame, then @p downs Down keys.
+/// @param document The leader's document.
+/// @param downs How many Downs.
+/// @return The script.
+[[nodiscard]] std::vector<DashboardEvent> DownsAfterFirstFrame(std::string document, int downs)
+{
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, std::move(document)), Tick };
+    for ([[maybe_unused]] auto const step: std::views::iota(0, downs))
+        script.push_back(KeyOf(DownKey));
+    return script;
+}
+
+} // namespace
+
+TEST_CASE("down highlights the first lane and marks that machine's rows below", "[cli][dashboard][panel][fleet][focus]")
+{
+    // WHAT DISTINGUISHES: before a key nothing is dressed but the tab; after Down the FIRST band by key
+    // order is, and the table row of that same machine with it -- and no other machine anywhere.
+    auto const run = RunFleet(DownsAfterFirstFrame(LeaderFleetText(3), 1), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 2);
+    INFO(run.frames[1]);
+
+    auto const before = SelectedIn(run, 0);
+    CHECK(before.lanes.empty());
+    CHECK(before.rows.empty());
+
+    auto const after = SelectedIn(run, 1);
+    CHECK(after.lanes == std::vector<std::string> { "build-01:7070" });
+    CHECK(after.strip == std::vector<std::string> { "[machines]" });
+    CHECK(after.rows == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("down past the last lane focuses the first row and the lanes follow the row's machine",
+          "[cli][dashboard][panel][fleet][focus]")
+{
+    // Three lanes, so the fourth Down is the first row. WHAT DISTINGUISHES: the lane dressed is the one the
+    // ROW names, which on the last lane was the third.
+    auto const run = RunFleet(DownsAfterFirstFrame(LeaderFleetText(3), 4), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 5);
+    INFO(run.frames.back());
+
+    auto const onLastLane = SelectedIn(run, 3);
+    CHECK(onLastLane.lanes == std::vector<std::string> { "build-03:7070" });
+    CHECK(onLastLane.rows == std::vector<std::string> { "build-03:7070" });
+
+    auto const onFirstRow = SelectedIn(run, 4);
+    CHECK(onFirstRow.rows == std::vector<std::string> { "build-01:7070" });
+    CHECK(onFirstRow.lanes == std::vector<std::string> { "build-01:7070" });
+
+    // And Up from the first row is the last lane again.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 4);
+    script.push_back(KeyOf(UpKey));
+    auto const back = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(back.frames.size() == 6);
+    CHECK(SelectedIn(back, 5).lanes == std::vector<std::string> { "build-03:7070" });
+}
+
+TEST_CASE("the section strip keeps exactly one selected tab while a machine is focused",
+          "[cli][dashboard][panel][fleet][focus]")
+{
+    // A focused machine adds Selected spans to the lanes and the rows; the strip's one tab must stay the only
+    // one ON THE STRIP, and follow the section.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 1);
+    script.push_back(KeyOf("w"));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 3);
+    INFO(run.frames[2]);
+    auto const selected = SelectedIn(run, 2);
+    CHECK(selected.strip == std::vector<std::string> { "[workers]" });
+    // The lane focus survives the switch.
+    CHECK(selected.lanes == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("a filter that drops the focused row clamps the focus", "[cli][dashboard][panel][fleet][focus]")
+{
+    // Focus the third row (three lanes, then three rows), then filter to one machine. WHAT DISTINGUISHES: the
+    // frame still draws, and the one row left is the focused one.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 6);
+    script.push_back(KeyOf("/"));
+    script.push_back(KeyOf("build-01"));
+    script.push_back(KeyOf("\r"));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 10);
+    CHECK(SelectedIn(run, 6).rows == std::vector<std::string> { "build-03:7070" });
+
+    auto const& last = run.frames.back();
+    INFO(last);
+    CHECK(last.contains("filter  /build-01"));
+    auto const selected = SelectedIn(run, run.frames.size() - 1);
+    CHECK(selected.rows == std::vector<std::string> { "build-01:7070" });
+    CHECK(selected.lanes == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("rows that vanish between samples clamp the focus", "[cli][dashboard][panel][fleet][focus]")
+{
+    // The last of three rows focused, then a sample with one machine. WHAT DISTINGUISHES: the focus lands on
+    // the one row left rather than on nothing, or on a row index the table no longer has.
+    auto script = DownsAfterFirstFrame(LeaderFleetText(3), 6);
+    script.push_back(FleetSampleOf(2, LeaderFleetText(1)));
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 8);
+    CHECK(SelectedIn(run, 6).rows == std::vector<std::string> { "build-03:7070" });
+
+    INFO(run.frames.back());
+    CHECK(SelectedIn(run, 7).rows == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("the lanes the keys walk are the bands the chart drew over its own span", "[cli][dashboard][panel][fleet][focus]")
+{
+    // `build-01` reports only in the first sample, then falls silent for more samples than the text chart is
+    // wide -- a dead node, which is what an operator investigates -- while staying inside the whole history. The
+    // chart draws build-02..04. WHAT DISTINGUISHES: the lanes are taken over the span the chart DREW; over the
+    // whole history build-01 would be lane 0, the first Down would dress no band, and build-04 would be out of
+    // reach.
+    constexpr auto SilentSamples = 150;
+    static_assert(SilentSamples < static_cast<int>(HistoryCapacity), "build-01 must stay inside the history");
+    auto withoutFirst = LeaderSnapshot(4);
+    withoutFirst.nodes.erase(withoutFirst.nodes.begin());
+    auto const later = RenderFleetText(withoutFirst, Distributed::FleetHistoryView {}, std::nullopt);
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, LeaderFleetText(4)) };
+    for (auto const second: std::views::iota(2, SilentSamples + 2))
+        script.push_back(FleetSampleOf(second, later));
+    script.push_back(Tick);
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 3))
+        script.push_back(KeyOf(DownKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    INFO(run.frames[0]);
+    REQUIRE(LineIndexHolding(run.frames[0], "build-01") == Lines(run.frames[0]).size());
+
+    CHECK(SelectedIn(run, 1).lanes == std::vector<std::string> { "build-02:7070" });
+    CHECK(SelectedIn(run, 3).lanes == std::vector<std::string> { "build-04:7070" });
+}
+
+TEST_CASE("a section with no machine column focuses rows but names no machine", "[cli][dashboard][panel][fleet][focus]")
+{
+    // `revoked` names a key, not a machine. WHAT DISTINGUISHES: the focused row is dressed, and no lane is --
+    // a band dressed here would claim the revoked key belongs to a machine on the chart.
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, LeaderFleetTextRevokingOne(3)), Tick, KeyOf("r") };
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 4))
+        script.push_back(KeyOf(DownKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 6);
+    INFO(run.frames.back());
+
+    // Three Downs still walk the lanes: the focus is there, and it names a machine.
+    CHECK(SelectedIn(run, 4).lanes == std::vector<std::string> { "build-03:7070" });
+    auto const selected = SelectedIn(run, 5);
+    CHECK(selected.strip == std::vector<std::string> { "[revoked]" });
+    CHECK(selected.rows == std::vector<std::string> { "old-07" });
+    CHECK(selected.lanes.empty());
+}
+
+namespace
+{
+
+/// The Enter key, as the bytes `KeyBytes` delivers it.
+constexpr std::string_view EnterKey = "\r";
+
+/// A fleet of @p machines machines, each serving two toolchains and holding one outstanding lease.
+///
+/// A worker's id and a lease's key name their machine's number (`w-01-gcc`, `obj-01.o`), so a frame that
+/// holds another machine's rows says so by a string no other cell spells.
+/// @param machines How many machines.
+/// @return The document, rendered by the leader's own renderer.
+[[nodiscard]] std::string LeaderFleetTextWithWork(std::size_t machines)
+{
+    auto snapshot = LeaderSnapshot(machines);
+    for (auto const index: std::views::iota(std::size_t { 1 }, machines + 1))
+    {
+        auto const endpoint = std::format("build-{:02}:7070", index);
+        for (auto const toolchain: { std::string_view { "gcc" }, std::string_view { "clang" } })
+        {
+            auto worker = Distributed::WorkerReport {};
+            worker.info.id = std::format("w-{:02}-{}", index, toolchain);
+            worker.info.fingerprint = std::format("{}-fingerprint", toolchain);
+            worker.info.endpoint = endpoint;
+            worker.info.slots = 8;
+            snapshot.workers.push_back(std::move(worker));
+        }
+        snapshot.outstandingLeases.push_back(Distributed::LeaseHolding { .key = std::format("obj-{:02}.o", index),
+                                                                         .workerId = std::format("w-{:02}-gcc", index),
+                                                                         .workerEndpoint = endpoint,
+                                                                         .age = std::chrono::milliseconds { 1200 } });
+    }
+    return RenderFleetText(snapshot, Distributed::FleetHistoryView {}, std::nullopt);
+}
+
+} // namespace
+
+TEST_CASE("enter on a focused machine draws its detail: its row in every section that names machines",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // Down focuses the first lane, `build-01`. WHAT DISTINGUISHES: the frame Enter draws names that machine and
+    // its own name, holds ITS workers and lease, holds no other machine anywhere, and the fleet's strip is gone --
+    // a detail drawn under the fleet view, or one that did not restrict its tables, keeps one of those.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 3);
+    auto const& detail = run.frames[2];
+    INFO(detail);
+
+    CHECK(detail.contains("machine build-01:7070"));
+    CHECK(detail.contains("ci-01"));
+    CHECK(detail.contains("w-01-gcc"));
+    CHECK(detail.contains("w-01-clang"));
+    CHECK(detail.contains("obj-01.o"));
+    for (auto const* other: { "build-02", "build-03", "ci-02", "w-02-gcc", "obj-03.o" })
+    {
+        INFO("other " << other);
+        CHECK_FALSE(detail.contains(other));
+    }
+    CHECK_FALSE(detail.contains("[machines]"));
+    CHECK(detail.contains("Esc back"));
+}
+
+TEST_CASE("esc closes the detail and the fleet view comes back with the same machine focused",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: Esc is the view's, not the loop's -- the run goes on and draws a fourth frame -- and
+    // that frame is the fleet view again with the lane the detail was opened from still dressed.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    script.push_back(KeyOf("\x1b"));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    CHECK(run.stop == DashboardStop::SourceDetached);
+    INFO(run.frames[3]);
+    CHECK(run.frames[3].contains("[machines]"));
+    CHECK(SelectedIn(run, 3).lanes == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("enter with nothing focused or on a section with no machine column opens nothing",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: the frame count. An Enter that opened a detail draws a frame; one that has no machine
+    // to open draws none, whether nothing is focused or the focused row names a key rather than a machine.
+    auto const fresh =
+        RunFleet({ FleetSampleOf(1, LeaderFleetTextWithWork(3)), Tick, KeyOf(EnterKey) }, 132, 40, UnicodeContext());
+    CHECK(fresh.frames.size() == 1);
+
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, LeaderFleetTextRevokingOne(3)), Tick, KeyOf("r") };
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 4))
+        script.push_back(KeyOf(DownKey));
+    script.push_back(KeyOf(EnterKey));
+    auto const revoked = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(revoked.frames.size() == 6);
+    CHECK(SelectedIn(revoked, 5).rows == std::vector<std::string> { "old-07" });
+}
+
+TEST_CASE("a detail whose machine left the sample says so rather than going blank", "[cli][dashboard][panel][fleet][detail]")
+{
+    // The detail opened on the third lane, `build-03`, and the next sample has two machines. WHAT DISTINGUISHES:
+    // the heading says the machine is not in the latest sample, and the sections under it hold no other machine's
+    // rows -- a detail that dropped its restriction when the machine left would draw the whole fleet.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 3);
+    script.push_back(KeyOf(EnterKey));
+    script.push_back(FleetSampleOf(2, LeaderFleetTextWithWork(2)));
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 6);
+    CHECK(run.frames[4].contains("w-03-gcc"));
+    auto const& gone = run.frames[5];
+    INFO(gone);
+    CHECK(gone.contains("machine build-03:7070"));
+    CHECK(gone.contains("not in the latest sample"));
+    for (auto const* other: { "build-01", "build-02", "w-01-gcc", "w-02-gcc" })
+    {
+        INFO("other " << other);
+        CHECK_FALSE(gone.contains(other));
+    }
+}
+
+TEST_CASE("esc while typing a filter clears the filter and keeps the session", "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: the run does not quit on Esc, and the frame Esc draws has no filter line left.
+    auto const run = RunFleet({ FleetSampleOf(1, LeaderFleetTextWithWork(3)), Tick, KeyOf("/"), KeyOf("x"), KeyOf("\x1b") },
+                              132,
+                              40,
+                              UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    CHECK(run.stop == DashboardStop::SourceDetached);
+    CHECK(run.frames[2].contains("filter  /x_"));
+    CHECK_FALSE(run.frames[3].contains("filter"));
+}
+
+TEST_CASE("a failed sample does not tell a detail its machine left", "[cli][dashboard][panel][fleet][detail]")
+{
+    // A refused sample is a gap in what was read, not a fleet without the machine. WHAT DISTINGUISHES: the heading
+    // after the failure carries the absent marker -- nothing was read -- and never `not in the latest sample`,
+    // which the case where a sample really lacks the machine still says.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    script.push_back(DashboardEvent { .kind = DashboardEventKind::SampleFailed,
+                                      .at = core::platform::SteadyTimePoint { 2s },
+                                      .outcome = Outcome::Refused,
+                                      .note = "not the leader" });
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    auto const& failed = run.frames[3];
+    INFO(failed);
+    CHECK_FALSE(failed.contains("not in the latest sample"));
+    auto const heading = LineIndexHolding(failed, "machine build-01:7070");
+    REQUIRE(heading < Lines(failed).size());
+    CHECK(Lines(failed)[heading].contains(Absent));
+}
+
+TEST_CASE("a detail on a short terminal drops whole sections rather than refusing the frame",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: a detail whose every section were essential needs about twenty lines and draws the
+    // minimum-size line on a terminal the fleet view fits; one whose sections give way keeps its heading, its
+    // first section and the key that goes back.
+    for (auto const rows: { 20, 16 })
+    {
+        INFO("rows " << rows);
+        auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+        script.push_back(KeyOf(EnterKey));
+        auto const run = RunFleet(std::move(script), 132, rows, UnicodeContext());
+        REQUIRE(run.frames.size() == 3);
+        auto const& detail = run.frames[2];
+        INFO(detail);
+        CHECK_FALSE(detail.contains("needs"));
+        CHECK(detail.contains("machine build-01:7070"));
+        CHECK(LineStarting(detail, "machines").has_value());
+        CHECK(detail.contains("Esc back"));
+        CHECK(Lines(detail).size() == static_cast<std::size_t>(rows));
+    }
+}
+
+TEST_CASE("a detail's tables dress no row as selected", "[cli][dashboard][panel][fleet][detail]")
+{
+    // Every row of a detail is the machine's, so dressing the ones that name it dresses all of them and says
+    // nothing. WHAT DISTINGUISHES: no Selected span anywhere in the detail frame.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 3);
+    INFO(run.frames[2]);
+    CHECK(run.frames[2].contains("w-01-gcc"));
+    auto selected = std::vector<std::string> {};
+    for (auto const& span: run.spans[2])
+        if (span.tone == FrameTone::Selected)
+            selected.push_back(SpanText(run.frames[2], span));
+    CHECK(selected.empty());
+}
+
+TEST_CASE("while a detail is open no other key draws and a second esc after closing it quits",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: the frame count and how the run ends. Up, Down, a section key and PgDn act on what the
+    // detail hides, so none draws; the first Esc closes the detail and draws the fleet view; the second Esc is
+    // the loop's again and quits, so the closing Tick draws nothing.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    for (auto const keys: { UpKey, DownKey, std::string_view { "w" }, std::string_view { "\x1b[6~" } })
+        script.push_back(KeyOf(keys));
+    script.push_back(KeyOf("\x1b"));
+    script.push_back(KeyOf("\x1b"));
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    CHECK(run.stop == DashboardStop::Quit);
+    INFO(run.frames[3]);
+    CHECK(run.frames[3].contains("[machines]"));
+}
+
+TEST_CASE("a focused row past the table's page is scrolled into view", "[cli][dashboard][panel][fleet][focus]")
+{
+    // Thirty machines on a short terminal: the table shows a few rows, and forty Downs walk past the lanes to the
+    // last row, `build-30`. WHAT DISTINGUISHES: that row is drawn and dressed -- a focus that did not scroll the
+    // table would name a row below the page, and the frame would dress no row at all.
+    constexpr auto Machines = std::size_t { 30 };
+    auto const run = RunFleet(DownsAfterFirstFrame(LeaderFleetText(Machines), 40), 132, 24, UnicodeContext());
+    // A Down that moves nothing draws nothing, so the frames stop once the last row is focused.
+    REQUIRE(run.frames.size() > 1);
+    INFO(run.frames.back());
+    REQUIRE(LineIndexHolding(run.frames[0], "build-30:7070") == Lines(run.frames[0]).size());
+    CHECK(SelectedIn(run, run.frames.size() - 1).rows == std::vector<std::string> { "build-30:7070" });
+}
+
+TEST_CASE("the strip's hint names the keys that select and open a machine where the width allows",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // At 100 columns the section letters fit and the selection hint does not: it yields first, being the strip's
+    // rightmost piece. Wider, both are drawn.
+    auto const wide = RunFleet({ FleetSampleOf(1, LeaderFleetText(3)), Tick }, 160, 40, UnicodeContext());
+    REQUIRE(wide.frames.size() == 1);
+    auto const strip = LineIndexHolding(wide.frames[0], "[machines]");
+    REQUIRE(strip < Lines(wide.frames[0]).size());
+    INFO(Lines(wide.frames[0])[strip]);
+    CHECK(Lines(wide.frames[0])[strip].ends_with(
+        "keys  m w l c r ! t  \xe2\x86\x91\xe2\x86\x93 select  Enter detail \xe2\x94\x82"));
+
+    auto const narrower = RunFleet({ FleetSampleOf(1, LeaderFleetText(3)), Tick }, 100, 40, UnicodeContext());
+    REQUIRE(narrower.frames.size() == 1);
+    CHECK_FALSE(narrower.frames[0].contains("Enter detail"));
+    CHECK(narrower.frames[0].contains("keys  m w l c r ! t"));
 }
 
 namespace

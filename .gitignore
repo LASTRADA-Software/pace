@@ -60,3 +60,8 @@ perf.data*
 # lane looks next -- confusingly, since it is named like the file it is not.
 # Anchored to the root: this pattern is only ever created there.
 /.clang-format-neutered.*
+
+# The design and plan documents the agent workflow (superpowers brainstorming /
+# writing-plans) writes are local working files and are never tracked. Anchored
+# to the repository root's docs/ directory, like the rules above.
+/docs/superpowers/

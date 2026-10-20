@@ -79,6 +79,9 @@ struct RungGlyphs
     /// with `Δ` (`DeltaMark`) and drawn through this column, one cell either way, so the layout is the same on
     /// every rung and no UTF-8 byte reaches an ASCII terminal.
     std::string_view delta;
+
+    /// The Up and Down keys as a hint names them: `↑↓`, and `Up/Dn` where the terminal is ASCII.
+    std::string_view upDown;
 };
 
 /// The mark a note is written with for a change over an interval, and drawn as its rung's `RungGlyphs::delta`.
@@ -106,7 +109,8 @@ inline constexpr EnumTable<RenderRung, RungGlyphs> RungGlyphTable { {
       .gaugeHeld = "▒",
       .gaugeEmpty = "░",
       .gaugeClose = "",
-      .delta = DeltaMark },
+      .delta = DeltaMark,
+      .upDown = "↑↓" },
     { .rung = RenderRung::Unicode,
       .sparkLevels = BlockLevels,
       .chartLevels = BlockLevels,
@@ -122,7 +126,8 @@ inline constexpr EnumTable<RenderRung, RungGlyphs> RungGlyphTable { {
       .gaugeHeld = "▒",
       .gaugeEmpty = "░",
       .gaugeClose = "",
-      .delta = DeltaMark },
+      .delta = DeltaMark,
+      .upDown = "↑↓" },
     { .rung = RenderRung::Ascii,
       .sparkLevels = {},
       .chartLevels = AsciiChartLevels,
@@ -138,7 +143,8 @@ inline constexpr EnumTable<RenderRung, RungGlyphs> RungGlyphTable { {
       .gaugeHeld = "=",
       .gaugeEmpty = ".",
       .gaugeClose = "]",
-      .delta = "d" },
+      .delta = "d",
+      .upDown = "Up/Dn" },
     { .rung = RenderRung::Piped,
       .sparkLevels = {},
       .chartLevels = {},
@@ -154,7 +160,8 @@ inline constexpr EnumTable<RenderRung, RungGlyphs> RungGlyphTable { {
       .gaugeHeld = "=",
       .gaugeEmpty = ".",
       .gaugeClose = "]",
-      .delta = "d" },
+      .delta = "d",
+      .upDown = "Up/Dn" },
 } };
 
 static_assert(RowsInEnumeratorOrder(RungGlyphTable, &RungGlyphs::rung),
