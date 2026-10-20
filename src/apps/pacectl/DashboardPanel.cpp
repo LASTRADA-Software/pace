@@ -2120,19 +2120,29 @@ namespace
                 letters += (letters.empty() ? "" : " ") + std::string { hotkey };
         }
         if (!letters.empty())
+        {
             pieces.push_back(Piece { .text = std::format("{}keys  {}", ColumnGap, letters),
                                      .priority = spec.keysHintPriority,
                                      .slot = HintSlot,
                                      .tone = FrameTone::Label });
+            // The keys that select and open a machine, after the letters: the rightmost piece, so it yields first.
+            pieces.push_back(Piece { .text = std::format("{}{} select  Enter detail", ColumnGap, in.glyphs->upDown),
+                                     .priority = spec.keysHintPriority,
+                                     .slot = HintSlot,
+                                     .tone = FrameTone::Label });
+        }
         auto kept = FitPieces(std::move(pieces), budget, 0, in.cellWidth);
         if (!kept.has_value())
             return {};
 
-        // The hint right-aligned: the spare cells go in front of it once the pieces that fit are known.
+        // The hint right-aligned: the spare cells go in front of its first piece once the pieces that fit are known.
         auto const spare = budget - std::min(budget, TextWidth(*kept, in.cellWidth));
         for (auto& piece: *kept)
             if (piece.slot == HintSlot)
+            {
                 piece.text.insert(0, spare, ' ');
+                break;
+            }
         return { LineOf(*kept, {}, spec.stripPriority) };
     }
 
@@ -2146,6 +2156,7 @@ namespace
         std::string_view machine {};              ///< The machine the highlight names; empty for none.
         std::string_view machineColumn {};        ///< The column naming a row's machine; empty for none.
         bool typing { false };                    ///< Whether the filter is being typed.
+        bool restrictToMachine { false };         ///< Whether only the rows `machine` names are drawn.
     };
 
     /// A section's table as a frame draws it, with what the filter and the scroll made of it.
@@ -2215,26 +2226,53 @@ namespace
         std::vector<std::vector<std::string>> cells {}; ///< Each kept row's cells, written.
     };
 
+    /// The machine a row must name to be kept, and the column that names it.
+    struct RowMachine
+    {
+        std::string_view machine; ///< The machine's key, as the document names it.
+        std::string_view column;  ///< The column naming a row's machine.
+    };
+
+    /// Whether @p row of @p table names @p only's machine in @p only's column.
+    ///
+    /// An absent cell names no machine, and a table without the column names none in any row.
+    /// @param table The section's table.
+    /// @param row The row.
+    /// @param only The machine and its column.
+    /// @return True when the row is that machine's.
+    [[nodiscard]] bool RowNamesMachine(Value const& table, std::vector<Cell> const& row, RowMachine const& only)
+    {
+        auto const at = ColumnNamed(table, only.column);
+        if (!at.has_value())
+            return false;
+        auto const& cell = row[*at];
+        return cell.kind != CellKind::Absent && cell.lexical == only.machine;
+    }
+
     /// The rows of @p table, in @p section, that @p filter keeps, every cell written for a person.
     ///
     /// **The one place a row is matched**, so the frame that draws the table and the highlight that walks
-    /// its rows count the same rows. Each cell is written by the scale its column has in the leader's own
-    /// tables, so the filter matches what the operator reads.
+    /// its rows count the same rows -- and a machine's detail keeps its rows here too. Each cell is written by
+    /// the scale its column has in the leader's own tables, so the filter matches what the operator reads.
     /// @param in The frame's inputs.
     /// @param section The section.
     /// @param table The section's table.
     /// @param filter The text a row must contain; empty for none.
+    /// @param only The machine a row must name, or nullopt to keep every machine's rows.
     /// @return The kept rows.
     [[nodiscard]] WrittenRows WriteMatchingRows(FrameInputs const& in,
                                                 FleetSection section,
                                                 Value const& table,
-                                                std::string_view filter)
+                                                std::string_view filter,
+                                                std::optional<RowMachine> const& only = std::nullopt)
     {
         auto const formats = ColumnFormats(section, table.columns);
         auto rows = WrittenRows {};
         for (auto const rowIndex: std::views::iota(std::size_t { 0 }, table.rows.size()))
         {
             auto const& row = table.rows[rowIndex];
+            if (only.has_value() && !RowNamesMachine(table, row, *only))
+                continue;
             auto written = std::vector<std::string> {};
             written.reserve(row.size());
             for (auto const index: std::views::iota(std::size_t { 0 }, row.size()))
@@ -2271,19 +2309,15 @@ namespace
     /// header with no `Identity` column -- a section vocabulary this build does not know -- keeps its first column instead,
     /// so a line still says which row it is.
     /// @param in The frame's inputs.
-    /// @param context The session facts: the section.
+    /// @param section The section the table draws.
     /// @param spec The document block.
     /// @param state The filter and the scroll.
     /// @param budget The content width.
     /// @return The table -- or the absent marker where no document, or no such section, was read --
     ///         or the cells its essential columns needed when those do not fit.
-    [[nodiscard]] std::expected<SectionTable, std::size_t> SectionItems(FrameInputs const& in,
-                                                                        PanelContext const& context,
-                                                                        DocumentSpec const& spec,
-                                                                        TableState const& state,
-                                                                        std::size_t budget)
+    [[nodiscard]] std::expected<SectionTable, std::size_t> SectionItems(
+        FrameInputs const& in, FleetSection section, DocumentSpec const& spec, TableState const& state, std::size_t budget)
     {
-        auto const section = context.section;
         auto const* document = in.model->latestDocument.get();
         auto const* table = document == nullptr ? nullptr : document->Section(section);
         if (table == nullptr || table->columns.empty())
@@ -2298,7 +2332,14 @@ namespace
 
         // Every cell written for a person FIRST, so the widths below are the widths drawn and the drop for
         // width sees the real figures.
-        auto const written = WriteMatchingRows(in, section, *table, state.filter);
+        auto const written = WriteMatchingRows(
+            in,
+            section,
+            *table,
+            state.filter,
+            state.restrictToMachine
+                ? std::optional<RowMachine> { RowMachine { .machine = state.machine, .column = state.machineColumn } }
+                : std::nullopt);
         auto const& matched = written.matched;
         auto const& cells = written.cells;
         auto const scroll = matched.empty() ? 0 : std::min(state.scroll, matched.size() - 1);
@@ -2954,7 +2995,7 @@ namespace
         auto block = DocumentBlock {};
         if (!spec.document.has_value())
             return block;
-        auto table = SectionItems(in, context, *spec.document, state, budget);
+        auto table = SectionItems(in, context.section, *spec.document, state, budget);
         if (!table.has_value())
             return std::unexpected(table.error());
         block.tiles = TileItems(in, *spec.document, budget);
@@ -2964,6 +3005,120 @@ namespace
         std::ranges::move(filter, std::back_inserter(block.body));
         block.scroll = table->scroll;
         return block;
+    }
+
+    /// The machines section's column that names a machine for a person.
+    constexpr std::string_view MachineNameColumn = "name";
+
+    /// What a machine's detail heading says when the latest document lists no such machine.
+    constexpr std::string_view NotInSampleNote = "not in the latest sample";
+
+    /// What a machine's detail tells the operator to press to go back to the fleet.
+    constexpr std::string_view DetailBackHint = "Esc back";
+
+    /// The heading of @p machine's detail: `machine <endpoint>`, then its name from the latest machines section --
+    /// or, where that section lists no such machine, `not in the latest sample`.
+    ///
+    /// **A machine that left says so**: a detail whose every section is empty would otherwise read as a machine
+    /// that is there and doing nothing.
+    /// @param in The frame's inputs.
+    /// @param spec The document block.
+    /// @param machine The machine's key.
+    /// @param budget The content width.
+    /// @return The heading, or the cells it needed when it does not fit.
+    [[nodiscard]] std::expected<Item, std::size_t> DetailHeading(FrameInputs const& in,
+                                                                 DocumentSpec const& spec,
+                                                                 std::string_view machine,
+                                                                 std::size_t budget)
+    {
+        auto const* document = in.model->latestDocument.get();
+        auto const* machines = document == nullptr ? nullptr : document->Section(FleetSection::Machines);
+        auto const column = MachineColumnOf(FleetSection::Machines);
+        auto const* row =
+            machines == nullptr || !column.has_value()
+                ? nullptr
+                : core::findIfOrNull(machines->rows, [&](std::vector<Cell> const& cells) {
+                      return RowNamesMachine(*machines, cells, RowMachine { .machine = machine, .column = *column });
+                  });
+        auto pieces = std::vector<Piece> {
+            Piece { .text = std::format("{}machine", Indent), .priority = Priority::Essential, .tone = FrameTone::Label },
+            Piece { .text = std::format(" {}", machine), .priority = Priority::Essential },
+        };
+        if (row == nullptr)
+            pieces.push_back(Piece { .text = std::format("{}{}", ColumnGap, NotInSampleNote),
+                                     .priority = Priority::Essential,
+                                     .tone = FrameTone::Label });
+        else if (auto const nameAt = ColumnNamed(*machines, MachineNameColumn);
+                 nameAt.has_value() && (*row)[*nameAt].kind != CellKind::Absent)
+            pieces.push_back(
+                Piece { .text = std::format("{}{}", ColumnGap, (*row)[*nameAt].lexical), .priority = Priority::High });
+        auto kept = FitPieces(std::move(pieces), budget, 0, in.cellWidth);
+        if (!kept.has_value())
+            return std::unexpected(kept.error());
+        return LineOf(*kept, {}, spec.tablePriority);
+    }
+
+    /// One labelled line: @p text, indented and dressed as a label.
+    /// @param text The words.
+    /// @param priority When the line goes.
+    /// @return The item.
+    [[nodiscard]] Item LabelLine(std::string_view text, Priority priority)
+    {
+        auto const piece =
+            Piece { .text = std::format("{}{}", Indent, text), .priority = priority, .tone = FrameTone::Label };
+        return LineOf(std::span { &piece, 1 }, {}, priority);
+    }
+
+    /// @p machine's detail, drawn in place of the fleet block: its heading, then every tabular section whose rows
+    /// name a machine, in `FleetSectionTable` order, under its name and restricted to that machine's rows, then the
+    /// key that goes back.
+    ///
+    /// A section with none of its rows writes the absent marker under its name, never an empty table, which would
+    /// claim it was read and holds nothing for the machine where the section may not have been sent at all.
+    /// @param in The frame's inputs.
+    /// @param spec The document block.
+    /// @param machine The machine's key, as the document names it.
+    /// @param budget The content width.
+    /// @return The items, or the cells a heading or an essential column needed when it does not fit.
+    [[nodiscard]] std::expected<std::vector<Item>, std::size_t> DetailItems(FrameInputs const& in,
+                                                                            DocumentSpec const& spec,
+                                                                            std::string_view machine,
+                                                                            std::size_t budget)
+    {
+        auto heading = DetailHeading(in, spec, machine, budget);
+        if (!heading.has_value())
+            return std::unexpected(heading.error());
+        auto items = std::vector<Item> { std::move(*heading) };
+        for (auto const& row: Distributed::FleetSectionTable)
+        {
+            auto const column = MachineColumnOf(row.section);
+            if (!row.tabular || !column.has_value())
+                continue;
+            auto table = SectionItems(in,
+                                      row.section,
+                                      spec,
+                                      TableState { .machine = machine, .machineColumn = *column, .restrictToMachine = true },
+                                      budget);
+            if (!table.has_value())
+                return std::unexpected(table.error());
+            items.push_back(Blank());
+            items.push_back(LabelLine(row.key, spec.tablePriority));
+            if (table->matched == 0)
+            {
+                items.push_back(
+                    Item { .lines = { std::format("{}{}", Indent, in.absent) }, .priority = spec.tablePriority });
+                continue;
+            }
+            for (auto& item: table->items)
+            {
+                // No overflow line names a key to scroll by: a detail's tables do not scroll.
+                item.noun = {};
+                items.push_back(std::move(item));
+            }
+        }
+        items.push_back(Blank());
+        items.push_back(LabelLine(DetailBackHint, Priority::High));
+        return items;
     }
 
     /// How much of where a source line says the source answered.
@@ -3413,6 +3568,28 @@ namespace
         { .keys = "\x1b[B", .step = FocusStep::Down },
     });
 
+    /// What a key does to a machine's detail.
+    ///
+    /// TRANSMITTED/PERSISTED: no. Private; enumerators may be inserted.
+    enum class DetailAction : std::uint8_t
+    {
+        Open,  ///< Open the detail of the machine the highlight names.
+        Close, ///< Close the detail, back to the fleet view.
+    };
+
+    /// A keystroke that opens or closes a machine's detail, as the bytes `KeyBytes` delivers it.
+    struct DetailKey
+    {
+        std::string_view keys; ///< The keystroke's bytes.
+        DetailAction action;   ///< What it does.
+    };
+
+    /// Every key that opens or closes a machine's detail.
+    constexpr auto DetailKeys = std::to_array<DetailKey>({
+        { .keys = "\r", .action = DetailAction::Open },
+        { .keys = EscapeKey, .action = DetailAction::Close },
+    });
+
     /// The scroll that shows @p focus's row, from @p scroll with @p page rows shown.
     ///
     /// Moves only as far as it must: a row above the top becomes the top, one below the bottom the bottom.
@@ -3546,6 +3723,25 @@ bool PanelView::Key(std::string_view keys)
         return true;
     }
 
+    // While a detail is open it is the whole view: Esc closes it, and no other key acts on what it hides.
+    auto const* detail = core::findIfOrNull(DetailKeys, [keys](DetailKey const& row) { return row.keys == keys; });
+    if (!_detailMachine.empty())
+    {
+        if (detail == nullptr || detail->action != DetailAction::Close)
+            return false;
+        _detailMachine.clear();
+        return true;
+    }
+    if (detail != nullptr && detail->action == DetailAction::Open)
+    {
+        // The machine the last frame's highlight named: none, or a row of a section that names no machine, opens
+        // nothing.
+        if (_focusedMachine.empty())
+            return false;
+        _detailMachine = _focusedMachine;
+        return true;
+    }
+
     if (keys == FilterStartKey)
     {
         _typingFilter = true;
@@ -3597,6 +3793,11 @@ bool PanelView::CapturesText() const noexcept
     return _typingFilter;
 }
 
+bool PanelView::ClaimsEscape() const noexcept
+{
+    return !_detailMachine.empty();
+}
+
 DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
 {
     auto const in =
@@ -3635,32 +3836,42 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     // The keys walked the lanes the last frame drew, so they are read over the span it drew them over: a machine
     // that fell silent before that span is in the whole history and in no band. A band the chart had no room for
     // is no lane either.
-    auto lanes = _spec->document.has_value() && _laneWindow > 0
-                     ? FleetChartBands(model.history, FleetChartMetrics.front(), _laneWindow)
-                     : std::vector<ChartBand> {};
-    lanes.resize(std::min(lanes.size(), _lanes));
-    auto const matched =
-        _spec->document.has_value() ? MatchedRowsOf(in, _context.section, _filter) : std::vector<std::size_t> {};
-    if (auto const clamped = ClampFocus(_focus, lanes.size(), matched.size()); clamped != _focus)
+    // A machine's detail draws in place of the fleet block and leaves the highlight as it was, so closing it comes
+    // back to the lanes and rows the operator left: nothing below reads or moves the focus while it is open.
+    auto const detail = _spec->document.has_value() && !_detailMachine.empty();
+    if (!detail)
     {
-        _focus = clamped;
-        _scroll = ScrollShowing(_focus, _scroll, _page);
+        auto lanes = _spec->document.has_value() && _laneWindow > 0
+                         ? FleetChartBands(model.history, FleetChartMetrics.front(), _laneWindow)
+                         : std::vector<ChartBand> {};
+        lanes.resize(std::min(lanes.size(), _lanes));
+        auto const matched =
+            _spec->document.has_value() ? MatchedRowsOf(in, _context.section, _filter) : std::vector<std::size_t> {};
+        if (auto const clamped = ClampFocus(_focus, lanes.size(), matched.size()); clamped != _focus)
+        {
+            _focus = clamped;
+            _scroll = ScrollShowing(_focus, _scroll, _page);
+        }
+        _rows = matched.size();
+        _focusedMachine = FocusedMachine(_focus, lanes, in.model->latestDocument.get(), _context.section, matched)
+                              .value_or(std::string {});
     }
-    _rows = matched.size();
-    _focusedMachine =
-        FocusedMachine(_focus, lanes, in.model->latestDocument.get(), _context.section, matched).value_or(std::string {});
     auto const focusedRow =
         _focus.active && _focus.zone == FocusZone::Rows ? std::optional<std::size_t> { _focus.index } : std::nullopt;
-    auto document = DocumentItems(in,
-                                  *_spec,
-                                  _context,
-                                  TableState { .filter = _filter,
-                                               .scroll = _scroll,
-                                               .focusedRow = focusedRow,
-                                               .machine = _focusedMachine,
-                                               .machineColumn = MachineColumnOf(_context.section).value_or(""),
-                                               .typing = _typingFilter },
-                                  budget);
+    auto document =
+        detail ? DetailItems(in, *_spec->document, _detailMachine, budget).transform([this](std::vector<Item> items) {
+            return DocumentBlock { .tiles = {}, .body = std::move(items), .scroll = _scroll };
+        })
+               : DocumentItems(in,
+                               *_spec,
+                               _context,
+                               TableState { .filter = _filter,
+                                            .scroll = _scroll,
+                                            .focusedRow = focusedRow,
+                                            .machine = _focusedMachine,
+                                            .machineColumn = MachineColumnOf(_context.section).value_or(""),
+                                            .typing = _typingFilter },
+                               budget);
     auto below = FactGroups(in, *_spec, FactPlace::BelowRates, budget);
     for (auto const* block: { &rates, &levels, &tiers })
         if (!block->has_value())
@@ -3712,7 +3923,8 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
     if (!fitted.has_value())
         return tooSmall(0);
     auto chart = std::optional<ChartBlock> {};
-    if (available.has_value() && _spec->document.has_value())
+    // A detail draws no chart: the history is the fleet's, and the detail is one machine's rows.
+    if (available.has_value() && _spec->document.has_value() && !detail)
     {
         // Before any machine reported the figure, one band's worth of rows holds the line saying so.
         chart = GrowChart(
@@ -3725,7 +3937,7 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
             items,
             *fitted);
     }
-    else if (available.has_value() && !_spec->charts.empty())
+    else if (available.has_value() && !_spec->document.has_value() && !_spec->charts.empty())
         chart = GrowChart(
             *available,
             _spec->chartGrowth,
@@ -3743,11 +3955,15 @@ DashboardFrame PanelView::PlacedFrame(DashboardModel const& model)
                             : fitted->lines.size();
         fitted->lines.insert(fitted->lines.begin() + static_cast<std::ptrdiff_t>(at), pad, std::string {});
     }
-    if (fitted->tableShown.has_value())
-        _page = std::max<std::size_t>(1, *fitted->tableShown);
-    // The lanes the next Up or Down walks: the bands this frame drew, none where it drew no chart.
-    _lanes = chart.has_value() ? chart->tracks.size() : 0;
-    _laneWindow = chart.has_value() ? chart->window : 0;
+    // The page and the lanes the fleet view's keys walk, kept as the fleet view last drew them while a detail is open.
+    if (!detail)
+    {
+        if (fitted->tableShown.has_value())
+            _page = std::max<std::size_t>(1, *fitted->tableShown);
+        // The lanes the next Up or Down walks: the bands this frame drew, none where it drew no chart.
+        _lanes = chart.has_value() ? chart->tracks.size() : 0;
+        _laneWindow = chart.has_value() ? chart->window : 0;
+    }
 
     auto const title = TitleFor(in, *_spec, _context, columns);
     auto frame =

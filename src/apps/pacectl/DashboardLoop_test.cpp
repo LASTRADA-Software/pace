@@ -41,6 +41,12 @@ namespace
 class RecordingView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         ++calls;
@@ -1186,6 +1192,12 @@ namespace
 class DocumentWatchingView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         seen.emplace_back(model.latestDocument);
@@ -1233,6 +1245,12 @@ namespace
 class PlacingView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         cellPixelsSeen.push_back(model.cellPixels);
@@ -1315,6 +1333,12 @@ namespace
 class OneKeyView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         (void) model;
@@ -1374,6 +1398,12 @@ namespace
 class TypingView final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         (void) model;
@@ -1432,4 +1462,72 @@ TEST_CASE("a view typing text is offered the quit keys as text, and Ctrl+C still
                                 doneSink);
     CHECK(doneExit.stop == DashboardStop::Quit);
     CHECK(done.offered == std::vector<std::string> { "\r" });
+}
+
+namespace
+{
+
+/// A view that claims Esc or does not, and writes down every key it is offered.
+class EscapeClaimingView final: public IDashboardView
+{
+  public:
+    /// @param claims What `ClaimsEscape` answers.
+    explicit EscapeClaimingView(bool claims):
+        _claims { claims }
+    {
+    }
+
+    [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
+    {
+        (void) model;
+        return DashboardFrame { .text = std::format("offered {}", offered.size()), .placements = {} };
+    }
+
+    [[nodiscard]] bool Key(std::string_view keys) override
+    {
+        offered.emplace_back(keys);
+        return true;
+    }
+
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return _claims;
+    }
+
+    std::vector<std::string> offered {};
+
+  private:
+    bool _claims;
+};
+
+/// Drive @p view through Esc, then `x`, then `q`, then `y`.
+/// @param view The view.
+/// @return How the run ended.
+[[nodiscard]] DashboardExit EscThenQuit(EscapeClaimingView& view)
+{
+    auto sink = CollectingSink {};
+    return Drive({ DashboardEvent { .kind = DashboardEventKind::Key, .keys = std::string { EscapeKey } },
+                   DashboardEvent { .kind = DashboardEventKind::Key, .keys = "x" },
+                   DashboardEvent { .kind = DashboardEventKind::Key, .keys = "q" },
+                   DashboardEvent { .kind = DashboardEventKind::Key, .keys = "y" } },
+                 DashboardLimits {},
+                 view,
+                 sink);
+}
+
+} // namespace
+
+TEST_CASE("esc quits a view that claims nothing and is handed to a view that claims it", "[cli][dashboard][loop]")
+{
+    // WHAT DISTINGUISHES: who is offered Esc. A view that claims it is handed Esc and the run goes on to `x`,
+    // ending at `q`; a view that claims nothing is offered nothing, since Esc ends the run as it always did.
+    auto claiming = EscapeClaimingView { true };
+    auto const claimed = EscThenQuit(claiming);
+    CHECK(claimed.stop == DashboardStop::Quit);
+    CHECK(claiming.offered == std::vector<std::string> { std::string { EscapeKey }, "x" });
+
+    auto plain = EscapeClaimingView { false };
+    auto const quit = EscThenQuit(plain);
+    CHECK(quit.stop == DashboardStop::Quit);
+    CHECK(plain.offered.empty());
 }

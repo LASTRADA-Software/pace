@@ -863,17 +863,24 @@ A terminal smaller than a panel's minimum gets one line, `needs <columns>x<rows>
 
 | Key | What it does |
 |---|---|
-| `q`, `Q`, `Esc`, `Ctrl-C` | quit, restoring the terminal |
+| `q`, `Q`, `Esc`, `Ctrl-C` | quit, restoring the terminal; `Esc` closes a machine's detail instead while one is open |
 | `Tab`, `→` / `←` | the fleet's next / previous section |
 | `1` … `9` | the fleet's sections by position |
 | `m` `w` `l` `c` `r` `!` `t` | the fleet's sections by name: machines, workers, leases, members (`c`, for cluster: `m` is taken), revoked keys, conditions (`!`: `c` is taken) and tiers |
 | `PgDn` / `PgUp`, `Home` | scroll the fleet's table a page, or back to its top |
 | `/` | filter the fleet's table: type, `Enter` keeps the filter, `Esc` clears it, `Backspace` edits it |
+| `↑` / `↓` | highlight the fleet chart's lanes, then the table's rows, and the machine they name everywhere it appears |
+| `Enter` | open the highlighted machine's detail: its rows in every section that names machines; `Esc` goes back |
 
 A section starts at its top with no filter. The filter keeps the rows with a cell
 containing the typed text, ignoring ASCII case, and the table says how many rows of
 how many it kept. While a filter is being typed, every key is text except
 `Ctrl-C`, so a `q` in a machine's name does not end the session.
+
+A machine's detail replaces the tiles, the chart, the strip and the table until `Esc`
+closes it, and the highlight is where it was. A machine the latest sample no longer
+lists says `not in the latest sample` rather than drawing empty sections. `Enter`
+on a row of a section that names no machine, such as revoked keys, opens nothing.
 
 ### How it draws: Sixel, Unicode, ASCII
 

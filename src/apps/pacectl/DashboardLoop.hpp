@@ -542,7 +542,7 @@ class IDashboardView
     }
 
     /// Act on a keystroke that is not a quit key -- or on any keystroke but `Ctrl+C` while the view
-    /// `CapturesText`.
+    /// `CapturesText`, and on `EscapeKey` while it `ClaimsEscape`.
     ///
     /// **What a view is showing is the view's state, not the model's**: the model is what was READ,
     /// and a key reads nothing. So a key the view acts on changes the view, and the loop draws the
@@ -567,6 +567,14 @@ class IDashboardView
     {
         return false;
     }
+
+    /// Whether Esc closes something this view has open, rather than quitting the session.
+    ///
+    /// **Pure, unlike `CapturesText`**: a view that opens something Esc should close and answered through a
+    /// default would quit the session on the key meant to go back, and nothing would say so. Asked only for
+    /// `EscapeKey`; every other quit key quits whatever the view has open.
+    /// @return True while Esc is the view's to act on.
+    [[nodiscard]] virtual bool ClaimsEscape() const noexcept = 0;
 };
 
 /// What bounds the run.
@@ -596,6 +604,9 @@ struct DashboardLimits
 /// @return How it ended, and what it knew when it did.
 [[nodiscard]] core::async::Task<DashboardExit> RunDashboard(
     IDashboardEventSource* events, SampleReader reader, IDashboardView* view, IFrameSink* sink, DashboardLimits limits);
+
+/// `Esc`, as a keystroke delivers it: a quit key unless the view `ClaimsEscape`, and what closes what it has open.
+inline constexpr std::string_view EscapeKey = "\x1b";
 
 /// Whether @p keys asks the dashboard to quit.
 ///

@@ -671,13 +671,18 @@ class PanelView final: public IDashboardView
     /// cells contains the filter, ignoring ASCII case. `Up` and `Down` move the highlight through the
     /// chart's lanes and then the table's rows (`StepFocus`), over the counts the last frame drew, and
     /// scroll the table to keep a focused row shown; a section switch or a filter edit puts a row focus
-    /// back on the first row. A panel without a document block acts on no key.
+    /// back on the first row. `Enter` on a highlight that names a machine opens that machine's detail, drawn
+    /// in place of the fleet block, and `Esc` closes it; while it is open no other key acts. A panel without a
+    /// document block acts on no key.
     /// @param keys The bytes the keystroke delivered.
     /// @return Whether the next frame differs.
     [[nodiscard]] bool Key(std::string_view keys) override;
 
     /// @return True while a filter is being typed.
     [[nodiscard]] bool CapturesText() const noexcept override;
+
+    /// @return True while a machine's detail is open, which Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override;
 
   private:
     PanelSpec const* _spec;
@@ -717,6 +722,9 @@ class PanelView final: public IDashboardView
 
     /// The machine the highlight names in the last frame drawn; empty for none.
     std::string _focusedMachine {};
+
+    /// The machine whose detail is drawn instead of the fleet block; empty for none.
+    std::string _detailMachine {};
 
     /// Whether the filter is being typed; last, so it pads nothing between 8-aligned members.
     bool _typingFilter { false };

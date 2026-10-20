@@ -1865,6 +1865,12 @@ std::size_t fleetParses = 0;
 class EveryFleetDrawer final: public IDashboardView
 {
   public:
+    /// @return False: this view opens nothing Esc closes.
+    [[nodiscard]] bool ClaimsEscape() const noexcept override
+    {
+        return false;
+    }
+
     [[nodiscard]] DashboardFrame PlacedFrame(DashboardModel const& model) override
     {
         auto frame = panel.PlacedFrame(model);
@@ -2535,6 +2541,159 @@ TEST_CASE("a section with no machine column focuses rows but names no machine", 
     CHECK(selected.strip == std::vector<std::string> { "[revoked]" });
     CHECK(selected.rows == std::vector<std::string> { "old-07" });
     CHECK(selected.lanes.empty());
+}
+
+namespace
+{
+
+/// The Enter key, as the bytes `KeyBytes` delivers it.
+constexpr std::string_view EnterKey = "\r";
+
+/// A fleet of @p machines machines, each serving two toolchains and holding one outstanding lease.
+///
+/// A worker's id and a lease's key name their machine's number (`w-01-gcc`, `obj-01.o`), so a frame that
+/// holds another machine's rows says so by a string no other cell spells.
+/// @param machines How many machines.
+/// @return The document, rendered by the leader's own renderer.
+[[nodiscard]] std::string LeaderFleetTextWithWork(std::size_t machines)
+{
+    auto snapshot = LeaderSnapshot(machines);
+    for (auto const index: std::views::iota(std::size_t { 1 }, machines + 1))
+    {
+        auto const endpoint = std::format("build-{:02}:7070", index);
+        for (auto const toolchain: { std::string_view { "gcc" }, std::string_view { "clang" } })
+        {
+            auto worker = Distributed::WorkerReport {};
+            worker.info.id = std::format("w-{:02}-{}", index, toolchain);
+            worker.info.fingerprint = std::format("{}-fingerprint", toolchain);
+            worker.info.endpoint = endpoint;
+            worker.info.slots = 8;
+            snapshot.workers.push_back(std::move(worker));
+        }
+        snapshot.outstandingLeases.push_back(Distributed::LeaseHolding { .key = std::format("obj-{:02}.o", index),
+                                                                         .workerId = std::format("w-{:02}-gcc", index),
+                                                                         .workerEndpoint = endpoint,
+                                                                         .age = std::chrono::milliseconds { 1200 } });
+    }
+    return RenderFleetText(snapshot, Distributed::FleetHistoryView {}, std::nullopt);
+}
+
+} // namespace
+
+TEST_CASE("enter on a focused machine draws its detail: its row in every section that names machines",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // Down focuses the first lane, `build-01`. WHAT DISTINGUISHES: the frame Enter draws names that machine and
+    // its own name, holds ITS workers and lease, holds no other machine anywhere, and the fleet's strip is gone --
+    // a detail drawn under the fleet view, or one that did not restrict its tables, keeps one of those.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 3);
+    auto const& detail = run.frames[2];
+    INFO(detail);
+
+    CHECK(detail.contains("machine build-01:7070"));
+    CHECK(detail.contains("ci-01"));
+    CHECK(detail.contains("w-01-gcc"));
+    CHECK(detail.contains("w-01-clang"));
+    CHECK(detail.contains("obj-01.o"));
+    for (auto const* other: { "build-02", "build-03", "ci-02", "w-02-gcc", "obj-03.o" })
+    {
+        INFO("other " << other);
+        CHECK_FALSE(detail.contains(other));
+    }
+    CHECK_FALSE(detail.contains("[machines]"));
+    CHECK(detail.contains("Esc back"));
+}
+
+TEST_CASE("esc closes the detail and the fleet view comes back with the same machine focused",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: Esc is the view's, not the loop's -- the run goes on and draws a fourth frame -- and
+    // that frame is the fleet view again with the lane the detail was opened from still dressed.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 1);
+    script.push_back(KeyOf(EnterKey));
+    script.push_back(KeyOf("\x1b"));
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    CHECK(run.stop == DashboardStop::SourceDetached);
+    INFO(run.frames[3]);
+    CHECK(run.frames[3].contains("[machines]"));
+    CHECK(SelectedIn(run, 3).lanes == std::vector<std::string> { "build-01:7070" });
+}
+
+TEST_CASE("enter with nothing focused or on a section with no machine column opens nothing",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: the frame count. An Enter that opened a detail draws a frame; one that has no machine
+    // to open draws none, whether nothing is focused or the focused row names a key rather than a machine.
+    auto const fresh =
+        RunFleet({ FleetSampleOf(1, LeaderFleetTextWithWork(3)), Tick, KeyOf(EnterKey) }, 132, 40, UnicodeContext());
+    CHECK(fresh.frames.size() == 1);
+
+    auto script = std::vector<DashboardEvent> { FleetSampleOf(1, LeaderFleetTextRevokingOne(3)), Tick, KeyOf("r") };
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 4))
+        script.push_back(KeyOf(DownKey));
+    script.push_back(KeyOf(EnterKey));
+    auto const revoked = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(revoked.frames.size() == 6);
+    CHECK(SelectedIn(revoked, 5).rows == std::vector<std::string> { "old-07" });
+}
+
+TEST_CASE("a detail whose machine left the sample says so rather than going blank", "[cli][dashboard][panel][fleet][detail]")
+{
+    // The detail opened on the third lane, `build-03`, and the next sample has two machines. WHAT DISTINGUISHES:
+    // the heading says the machine is not in the latest sample, and the sections under it hold no other machine's
+    // rows -- a detail that dropped its restriction when the machine left would draw the whole fleet.
+    auto script = DownsAfterFirstFrame(LeaderFleetTextWithWork(3), 3);
+    script.push_back(KeyOf(EnterKey));
+    script.push_back(FleetSampleOf(2, LeaderFleetTextWithWork(2)));
+    script.push_back(Tick);
+    auto const run = RunFleet(std::move(script), 132, 40, UnicodeContext());
+    REQUIRE(run.frames.size() == 6);
+    CHECK(run.frames[4].contains("w-03-gcc"));
+    auto const& gone = run.frames[5];
+    INFO(gone);
+    CHECK(gone.contains("machine build-03:7070"));
+    CHECK(gone.contains("not in the latest sample"));
+    for (auto const* other: { "build-01", "build-02", "w-01-gcc", "w-02-gcc" })
+    {
+        INFO("other " << other);
+        CHECK_FALSE(gone.contains(other));
+    }
+}
+
+TEST_CASE("esc while typing a filter clears the filter and keeps the session", "[cli][dashboard][panel][fleet][detail]")
+{
+    // WHAT DISTINGUISHES: the run does not quit on Esc, and the frame Esc draws has no filter line left.
+    auto const run = RunFleet({ FleetSampleOf(1, LeaderFleetTextWithWork(3)), Tick, KeyOf("/"), KeyOf("x"), KeyOf("\x1b") },
+                              132,
+                              40,
+                              UnicodeContext());
+    REQUIRE(run.frames.size() == 4);
+    CHECK(run.stop == DashboardStop::SourceDetached);
+    CHECK(run.frames[2].contains("filter  /x_"));
+    CHECK_FALSE(run.frames[3].contains("filter"));
+}
+
+TEST_CASE("the strip's hint names the keys that select and open a machine where the width allows",
+          "[cli][dashboard][panel][fleet][detail]")
+{
+    // At 100 columns the section letters fit and the selection hint does not: it yields first, being the strip's
+    // rightmost piece. Wider, both are drawn.
+    auto const wide = RunFleet({ FleetSampleOf(1, LeaderFleetText(3)), Tick }, 160, 40, UnicodeContext());
+    REQUIRE(wide.frames.size() == 1);
+    auto const strip = LineIndexHolding(wide.frames[0], "[machines]");
+    REQUIRE(strip < Lines(wide.frames[0]).size());
+    INFO(Lines(wide.frames[0])[strip]);
+    CHECK(Lines(wide.frames[0])[strip].ends_with(
+        "keys  m w l c r ! t  \xe2\x86\x91\xe2\x86\x93 select  Enter detail \xe2\x94\x82"));
+
+    auto const narrower = RunFleet({ FleetSampleOf(1, LeaderFleetText(3)), Tick }, 100, 40, UnicodeContext());
+    REQUIRE(narrower.frames.size() == 1);
+    CHECK_FALSE(narrower.frames[0].contains("Enter detail"));
+    CHECK(narrower.frames[0].contains("keys  m w l c r ! t"));
 }
 
 namespace
