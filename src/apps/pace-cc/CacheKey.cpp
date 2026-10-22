@@ -343,7 +343,15 @@ std::string ComputeKey(KeyInputs const& inputs)
     // `dependency-root`. Bumped so the two generations never exchange an entry rather than
     // relying on their keys differing, which they do only for units that read a
     // dependency. `manifest-v9` moves with it, in the lock-step ComputeManifestKey records.
-    KeyDigest digest { "objkey-v8" };
+    //
+    // v9 retires every object a clang WORKER compiled under a `-fmacro-prefix-map`. Its driver
+    // discards that flag on preprocessed input, so `__builtin_FILE()` and every
+    // `std::source_location` in such an object name the client's ABSOLUTE path, filed under the
+    // key a mapped compile uses (`DriverSpec::preprocessedSourceMapCarrier`). The bytes are wrong
+    // rather than merely old and nothing in a value says which ones are -- v6's argument. This
+    // construction is unchanged and the golden vector moved for the tag alone; `manifest-v10`
+    // moves with it, in the lock-step ComputeManifestKey records.
+    KeyDigest digest { "objkey-v9" };
     digest.Field(inputs.compilerId);
     digest.Field(inputs.preprocessed);
     for (auto const& arg: inputs.relativizedArgs)

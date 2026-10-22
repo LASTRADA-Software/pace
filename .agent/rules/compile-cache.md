@@ -362,7 +362,7 @@ same on both — the same defect with no MSVC anywhere near it.
   older launcher keeps resolving to an older object; direct mode is on by default and
   short-circuits before the preprocessed path,
   so without the second bump the re-key never happens where it matters most. The coupling is
-  ONE-WAY, though, and the tags read `objkey-v8` and `manifest-v9`: an `objkey` bump must drag the manifest
+  ONE-WAY, though, and the tags read `objkey-v9` and `manifest-v10`: an `objkey` bump must drag the manifest
   tag with it, while the reverse is free — and free is the direction `v5` itself moved in
   (issue #111), the manifest half forced and the object half taken only to keep the two from
   sitting numerically apart.

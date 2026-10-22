@@ -1019,7 +1019,10 @@ std::string ComputeManifestKey(std::string_view canonicalSource,
     //
     // v9 is the lock-step half of `objkey-v8` (the dependency root): a v8 manifest stores
     // an object key of the generation before it.
-    KeyDigest digest { "manifest-v9" };
+    //
+    // v10 is the lock-step half of `objkey-v9` (a clang worker's dropped macro map): a v9
+    // manifest stores an object key of the generation before it.
+    KeyDigest digest { "manifest-v10" };
     digest.Field(toolchainStamp);
     digest.Field(canonicalSource);
     for (auto const& arg: relativizedArgs)
