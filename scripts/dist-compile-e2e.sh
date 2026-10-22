@@ -68,6 +68,11 @@
 #                            so the object names the client's checkout and no key sees
 #                            it; the launcher scans a dispatched object as it scans a
 #                            local one. The Windows fixture's case 3b is its twin.
+#  7c. Macro map            — the client's `-fmacro-prefix-map` reaches the worker's
+#                            compiler, so a dispatched `__builtin_FILE()` is the local
+#                            compile's, byte for byte. clang's driver discards the plain
+#                            spelling on preprocessed input; the worker is handed it as
+#                            `-Xclang=`. A gcc leg is the control.
 #   8. Graceful stop        — a worker asked to stop does, promptly, rather than
 #                            waiting for a supervisor to escalate.
 #  12. Cache independence   — a cache the launcher cannot reach does not stop the
@@ -112,7 +117,7 @@ cli=""
 # FAILS without it: the ctest registration passes it whenever the stub is built.
 edit_stub=""
 
-# Which body of assertions to run: `suite` is all sixteen cases (1 to 14, with 2b and 7b;
+# Which body of assertions to run: `suite` is all seventeen cases (1 to 14, with 2b, 7b and 7c;
 # 14 runs only where a DWARF reader is found), and `self-test`
 # drives the pure verdict decisions below with no binary built.
 mode="suite"
@@ -1403,6 +1408,37 @@ if [[ -n "$bound_why" ]]; then
     fail "case 7b: a dispatched root-bound object was not kept with its checkout${bound_why}"
 fi
 echo "   a dispatched object naming its checkout was kept with it, and served back to it"
+
+# --- 7c: the client's macro map reaches the worker's compiler -------------------
+echo "== case 7c: a dispatched compile applies the client's -fmacro-prefix-map"
+# The worker compiles preprocessed text, and clang's DRIVER drops `-fmacro-prefix-map` on
+# such input: it warns `argument unused during compilation` and never hands the rule to
+# `-cc1`. `__FILE__` survived that, being expanded on the client; `__builtin_FILE()` and
+# every `std::source_location` did not, so the worker wrote the client's ABSOLUTE path
+# into an object stored under the mapped key. gcc honours the plain spelling and is this
+# case's control on a gcc leg; on a clang leg it is the regression.
+cat > "${proj}/sevenc.cpp" <<'EOF'
+// unique: casesevenc
+char const* casesevenc_where() { return __builtin_FILE(); }
+EOF
+"$compiler" "-fmacro-prefix-map=${proj}/=" -O1 -c "${proj}/sevenc.cpp" -o "${proj}/build/sevenc-ref.o" \
+    || fail "the case 7c reference compile failed"
+run_launcher "${workdir}/case7c.log" "-fmacro-prefix-map=${proj}/=" -O1 -c "${proj}/sevenc.cpp" -o "${proj}/build/sevenc.o" \
+    || { cat "${workdir}/case7c.log" >&2; fail "case 7c: the mapped compile failed"; }
+sevenc_why=""
+# The control: the local compile DOES embed the mapped name and no checkout path, so a
+# match below is about the mapping rather than about a source that names nothing.
+LC_ALL=C grep -qaF "sevenc.cpp" "${proj}/build/sevenc-ref.o" || sevenc_why+="; the reference object names no source (the case exercises nothing)"
+if LC_ALL=C grep -qaF "$proj" "${proj}/build/sevenc-ref.o"; then sevenc_why+="; the reference object names the checkout (this driver ignores the map)"; fi
+grep -q "DISPATCHED to " "${workdir}/case7c.log" || sevenc_why+="; the compile was not dispatched"
+if grep -qF "argument unused during compilation" "${workdir}/case7c.log"; then sevenc_why+="; the worker's compiler discarded the map"; fi
+if LC_ALL=C grep -qaF "$proj" "${proj}/build/sevenc.o" 2>/dev/null; then sevenc_why+="; the dispatched object names the checkout"; fi
+cmp -s "${proj}/build/sevenc-ref.o" "${proj}/build/sevenc.o" || sevenc_why+="; the dispatched object differs from the local one"
+if [[ -n "$sevenc_why" ]]; then
+    cat "${workdir}/case7c.log" >&2
+    fail "case 7c: the client's macro prefix map did not reach the worker${sevenc_why}"
+fi
+echo "   a dispatched object maps __builtin_FILE() exactly as the local compile does"
 
 # --- 8: a worker stops when it is asked to --------------------------------------
 echo "== case 8: a worker exits on SIGTERM"

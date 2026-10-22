@@ -273,6 +273,60 @@ TEST_CASE("A source prefix map stays on the preprocess line; the macro map trave
     }
 }
 
+TEST_CASE("A clang worker is handed the macro map through -Xclang= since its driver drops it on preprocessed input")
+{
+    // clang's DRIVER discards `-fmacro-prefix-map` when its input is preprocessed text -- it
+    // warns `argument unused during compilation` and never hands it to `-cc1` -- so a worker
+    // compiling the client's `#line`-marked text embedded `__builtin_FILE()` and every
+    // `std::source_location` UNMAPPED, under the key the client's mapped compile uses.
+    // Measured on clang 22.1.8; `-Xclang=` reaches `-cc1` on that input and maps the name.
+    auto const lineFor = [](std::string driver) {
+        return std::vector<std::string> {
+            std::move(driver), "-fmacro-prefix-map=/home/ci/src/=", "-O2", "-c", "/home/ci/src/tu.cpp", "-o", "tu.o",
+        };
+    };
+
+    auto const clangLine = lineFor("clang++");
+    auto const clang = RemoteCompileArgs(Parse(clangLine), clangLine, {});
+    INFO("refused: " << clang.error_or(""));
+    REQUIRE(clang.has_value());
+    CHECK(std::ranges::contains(*clang, "-Xclang=-fmacro-prefix-map=/home/ci/src/="));
+    CHECK_FALSE(std::ranges::contains(*clang, "-fmacro-prefix-map=/home/ci/src/="));
+
+    // The control: gcc applies the driver spelling to preprocessed input, and has no `-Xclang`.
+    auto const gccLine = lineFor("g++");
+    auto const gcc = RemoteCompileArgs(Parse(gccLine), gccLine, {});
+    REQUIRE(gcc.has_value());
+    CHECK(std::ranges::contains(*gcc, "-fmacro-prefix-map=/home/ci/src/="));
+    CHECK_FALSE(std::ranges::any_of(*gcc, [](std::string const& arg) { return arg.starts_with("-Xclang"); }));
+
+    // The client's preprocess line is the driver's, so it keeps the plain spelling on both.
+    CHECK(std::ranges::contains(PreprocessCommand(Parse(clangLine), clangLine), "-fmacro-prefix-map=/home/ci/src/="));
+}
+
+TEST_CASE("Only a source prefix map is carried and only on the driver that carries it")
+{
+    auto const& clang = DriverOf(Flavor::Clang);
+    CHECK(CarriedSourcePrefixMap("-Xclang=-fmacro-prefix-map=/a/=", clang)
+          == std::optional<std::string_view> { "-fmacro-prefix-map=/a/=" });
+    // Anything else `-Xclang=` could hand `-cc1` is not carried, which leaves it denied.
+    CHECK_FALSE(CarriedSourcePrefixMap("-Xclang=-load", clang).has_value());
+    CHECK_FALSE(CarriedSourcePrefixMap("-Xclang=-fmacro-prefix-map", clang).has_value());
+    CHECK_FALSE(CarriedSourcePrefixMap("-Xclang=-ffile-prefix-map=/a/=", clang).has_value());
+    CHECK_FALSE(CarriedSourcePrefixMap("-Xclang=-fdebug-prefix-map=/a/=", clang).has_value());
+    // A value that is no rule is no map, as the worker's allowlist says of the plain spelling.
+    CHECK_FALSE(CarriedSourcePrefixMap("-Xclang=-fmacro-prefix-map=/a", clang).has_value());
+    // The two-argument form names the payload in an argument the predicate never sees.
+    CHECK_FALSE(CarriedSourcePrefixMap("-Xclang", clang).has_value());
+    CHECK_FALSE(CarriedSourcePrefixMap("-fmacro-prefix-map=/a/=", clang).has_value());
+    // No other driver carries one: gcc needs no carrier, and `cl` has no such map.
+    for (auto const flavor: { Flavor::Gcc, Flavor::Cl, Flavor::ClangCl, Flavor::Unknown })
+    {
+        INFO("flavor " << static_cast<int>(flavor));
+        CHECK_FALSE(CarriedSourcePrefixMap("-Xclang=-fmacro-prefix-map=/a/=", DriverOf(flavor)).has_value());
+    }
+}
+
 TEST_CASE("The end-of-options marker stays with the source, which never travels")
 {
     // CMake's clang-cl rule ends `-c -- $in`. The launcher dropped the source and forwarded

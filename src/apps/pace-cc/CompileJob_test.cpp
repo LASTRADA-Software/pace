@@ -848,6 +848,28 @@ TEST_CASE("A worker applies the client's macro prefix map, and refuses one that 
     CHECK_FALSE(IsAcceptableJobArgument("-fmacro-prefix-map=C:/w/=", DriverOf(Flavor::Cl)));
 }
 
+TEST_CASE("A clang worker admits the macro map carried by -Xclang= and nothing else -Xclang carries", "[compile-job]")
+{
+    // The spelling `RemoteCompileArgs` writes for clang, whose driver drops the plain one on
+    // preprocessed input. Refused, every clang client mapping `__FILE__` compiles locally.
+    CHECK(IsAcceptableJobArgument("-Xclang=-fmacro-prefix-map=/home/alice/work/fc/=", DriverOf(Flavor::Clang)));
+
+    // The carve-out is that one inner argument. `-Xclang` still hands `-cc1` anything, so every
+    // other payload stays refused by its row -- and no operator entry can buy one back.
+    std::vector<std::string> const operatorAllowed { "-Xclang=-add-plugin=x", "-Xclang=-load=x.so" };
+    for (auto const* arg: { "-Xclang=-load=x.so", "-Xclang=-add-plugin=x", "-Xclang=-O2", "-Xclang" })
+    {
+        INFO("argument " << arg);
+        CHECK_FALSE(IsAcceptableJobArgument(arg, DriverOf(Flavor::Clang), operatorAllowed));
+    }
+    // A carried value that is no rule, and the debug-reaching sibling, stay refused as their plain
+    // spellings are.
+    CHECK_FALSE(IsAcceptableJobArgument("-Xclang=-fmacro-prefix-map=/home/alice", DriverOf(Flavor::Clang)));
+    CHECK_FALSE(IsAcceptableJobArgument("-Xclang=-ffile-prefix-map=/home/alice/=", DriverOf(Flavor::Clang)));
+    // Only the driver that needs the carrier is handed it: gcc has no `-Xclang`.
+    CHECK_FALSE(IsAcceptableJobArgument("-Xclang=-fmacro-prefix-map=/home/alice/work/fc/=", DriverOf(Flavor::Gcc)));
+}
+
 TEST_CASE("IsAcceptableJobArgument refuses everything the allowlist does not name", "[compile-job]")
 {
     // The default is refusal. A path-shaped argument is refused as before, but so is
