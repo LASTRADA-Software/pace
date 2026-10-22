@@ -199,6 +199,13 @@ static_assert(std::ranges::none_of(DeniedArguments, [](DeniedArgument const& row
     if (auto const passed = MatchPassThrough(arg, family); passed.has_value())
         return FindDeniedArgument(passed->inner, DriverOf(passed->into).family);
 
+    // The one `-Xclang=` a client writes itself -- the macro map clang's driver would drop on
+    // preprocessed input -- and only that one (`CarriedSourcePrefixMap`). Asked HERE, inside the
+    // refusal both ends read, so the launcher's pre-lease check and the worker cannot disagree;
+    // which DRIVER may be handed it is the worker's allowlist's question.
+    if (CarriedSourcePrefixMap(arg, family).has_value())
+        return nullptr;
+
     auto const introducers = IntroducersOf(family);
     if (arg.empty() || introducers.empty() || !introducers.contains(arg.front()))
         return nullptr;

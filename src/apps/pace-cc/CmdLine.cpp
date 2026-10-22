@@ -315,7 +315,8 @@ namespace
           // `--version` even here. An unrecognised driver is not cached, so this
           // value reaches nothing but a diagnostic -- and asking the one option
           // almost every tool answers beats asking nothing.
-          .versionFlags = VersionProbe },
+          .versionFlags = VersionProbe,
+          .preprocessedSourceMapCarrier = {} },
         { .flavor = Flavor::Cl,
           .family = DriverFamily::Msvc,
           .preprocessFlags = MsvcPreprocess,
@@ -345,7 +346,8 @@ namespace
           // invocation, so it needs no option to be asked -- and it has none, so
           // asking `--version` made it exit 2 and identify as the string `cl` on
           // every MSVC toolset alike. See `DriverSpec::versionFlags`.
-          .versionFlags = {} },
+          .versionFlags = {},
+          .preprocessedSourceMapCarrier = {} },
         { .flavor = Flavor::ClangCl,
           .family = DriverFamily::Msvc,
           .preprocessFlags = MsvcPreprocess,
@@ -370,7 +372,8 @@ namespace
           .fingerprintTree = FingerprintTree::DiscoveredRoots,
           .includeProbeFlags = {},
           .targetProbeFlags = MsvcTargetProbe,
-          .versionFlags = VersionProbe },
+          .versionFlags = VersionProbe,
+          .preprocessedSourceMapCarrier = {} },
         { .flavor = Flavor::Gcc,
           .family = DriverFamily::Gnu,
           .preprocessFlags = GnuPreprocess,
@@ -395,7 +398,8 @@ namespace
           .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
           .includeProbeFlags = GnuIncludeProbe,
           .targetProbeFlags = GnuTargetProbe,
-          .versionFlags = VersionProbe },
+          .versionFlags = VersionProbe,
+          .preprocessedSourceMapCarrier = {} },
         { .flavor = Flavor::Clang,
           .family = DriverFamily::Gnu,
           .preprocessFlags = GnuPreprocess,
@@ -414,7 +418,12 @@ namespace
           .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
           .includeProbeFlags = GnuIncludeProbe,
           .targetProbeFlags = GnuTargetProbe,
-          .versionFlags = VersionProbe },
+          .versionFlags = VersionProbe,
+          // The driver discards the plain spelling on preprocessed input, so the worker's
+          // frontend never sees it. Measured on clang 20.1 and 22.1. A clang too old to
+          // know the fused `-Xclang=` fails the remote compile, which is retried locally:
+          // a lost dispatch, never a wrong object.
+          .preprocessedSourceMapCarrier = "-Xclang=" },
     } };
 
     // --- path-valued flags --------------------------------------------------
@@ -1300,6 +1309,34 @@ std::optional<PassThroughMatch> MatchPassThrough(std::string_view arg, DriverFam
     return std::nullopt;
 }
 
+std::optional<std::string_view> CarriedSourcePrefixMap(std::string_view arg, DriverSpec const& driver)
+{
+    auto const carrier = driver.preprocessedSourceMapCarrier;
+    if (carrier.empty() || !arg.starts_with(carrier))
+        return std::nullopt;
+
+    // Exactly what `RemoteCompileArgs` writes and nothing else `-Xclang` could hand `-cc1`:
+    // a FORWARDED row, its value fused, and a rule rather than a bare path. A bare spelling
+    // would take its value from the next argument, which nothing carries, and a value with
+    // no tail maps nothing -- the worker's allowlist refuses both in their plain spelling.
+    auto const inner = arg.substr(carrier.size());
+    auto const match = MatchPathValueFlag(inner, IntroducersOf(driver.family), driver.family);
+    if (!match.has_value() || match->flag.remote != RemoteLine::Forwarded || match->value.empty()
+        || match->valueTail.empty())
+        return std::nullopt;
+    return inner;
+}
+
+std::optional<std::string_view> CarriedSourcePrefixMap(std::string_view arg, DriverFamily family)
+{
+    // A loop rather than a named `find_if` iterator, for the reason `FindDeniedArgument` gives.
+    for (DriverSpec const& driver: Drivers)
+        if (Overlaps(driver.family, family))
+            if (auto const carried = CarriedSourcePrefixMap(arg, driver); carried.has_value())
+                return carried;
+    return std::nullopt;
+}
+
 bool ProducesSideArtefact(std::string_view arg, DriverSpec const& driver)
 {
     // Judged as what a pass-through carries, by the driver it is handed to (#1680): clang-cl
@@ -1735,8 +1772,18 @@ std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCom
             // rewrites debug records the worker maps by its own rules.
             if (match->flag.remote == RemoteLine::Forwarded)
             {
+                // Prefixed with the driver's carrier, where it has one: clang's driver drops
+                // the plain spelling on the preprocessed input a worker compiles, and with it
+                // the `source_location` names (`DriverSpec::preprocessedSourceMapCarrier`).
+                // The carrier is fused to ONE argument, so a rule in the next one cannot ride it.
+                auto const carrier = driver.preprocessedSourceMapCarrier;
+                if (!carrier.empty() && match->value.empty())
+                    return std::unexpected(
+                        std::format("{} names its rule in a separate argument, which this driver cannot be handed "
+                                    "with preprocessed input",
+                                    a));
                 // A separated value travels with its flag, as the build wrote both.
-                out.emplace_back(a);
+                out.emplace_back(std::format("{}{}", carrier, a));
                 if (match->value.empty() && i + 1 < argv.size())
                 {
                     out.emplace_back(argv[i + 1]);

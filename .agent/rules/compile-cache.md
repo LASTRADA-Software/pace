@@ -1731,10 +1731,21 @@ stops being one — the same confound that cost #493 a re-run.
   - **On a dispatched line the two spellings part** (`PathValueFlag::remote`, a COLUMN):
     a worker compiles text whose `#line` markers name the client's paths, so without the
     client's rule it would embed `source_location` names unmapped, under the key a mapped
-    one uses. `-fmacro-prefix-map` is FORWARDED verbatim and the worker's allowlist admits
+    one uses. `-fmacro-prefix-map` is FORWARDED and the worker's allowlist admits
     it (`ArgValue::PrefixMapRule`: its halves are paths and it opens neither);
     `-ffile-prefix-map` is REFUSED by name, because it also rewrites debug records the
     worker maps by its own `-fdebug-prefix-map` rules.
+  - **Forwarded is not RECEIVED: clang's driver drops the plain spelling on preprocessed
+    input**, warning `argument unused during compilation` and handing `-cc1` nothing, so
+    every clang worker embedded `__builtin_FILE()` UNMAPPED under the mapped key until
+    `objkey-v9` retired those objects. gcc applies it there. So the spelling a driver needs
+    is a `DriverSpec` column, `preprocessedSourceMapCarrier` (`-Xclang=` for clang, FUSED so
+    the worker still judges one argument at a time), and `CarriedSourcePrefixMap` is the ONE
+    carve-out from the `-Xclang` denial: asked inside `FindDeniedArgument` so both ends
+    agree, admitted by the worker only for the driver whose carrier it is, and exact —
+    `-Xclang=` with anything else stays denied by row. A clang too old for `-Xclang=` fails
+    the remote compile, which is retried locally. `dist-compile-e2e` case 7c compares the
+    dispatched object with a local one; a gcc leg is its control.
   - **The module maps `__FILE__` for the checkout (`<src>/=`) and the dependency cache
     (`<cache>/=deps/`, LAST)** — `_pace_source_prefix_map_rules`, checked by
     `ctest -R debug-prefix-map-rules` — and only when `pace-cc` is the launcher, the

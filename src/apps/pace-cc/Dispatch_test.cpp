@@ -873,6 +873,16 @@ TEST_CASE("An argument no worker runs is refused before a lease is asked for", "
     auto const asked = Dispatch(asking, Request(unlisted));
     CHECK(asked.status == DispatchStatus::Declined);
     CHECK_FALSE(asking.Dialled().empty());
+
+    // And the one `-Xclang=` a clang client writes itself is not this refusal either: it is
+    // how the macro map reaches `-cc1` on preprocessed input, and the worker admits it.
+    ScriptedFleet carried;
+    carried.Serve(std::string { Scheduler }, GrantReply());
+    carried.Serve(std::string { Worker }, Wire::EncodeErrorReply(Wire::ErrorCode::WorkerRejectedArgument, {}));
+    std::vector<std::string> const mapped { "-O2", "-Xclang=-fmacro-prefix-map=/home/ci/src/=" };
+    auto const sent = Dispatch(carried, Request(mapped));
+    CHECK(sent.status != DispatchStatus::DeniedHere);
+    CHECK_FALSE(carried.Dialled().empty());
 }
 
 TEST_CASE("The launcher refuses exactly what the worker refuses by row", "[dispatch][denied]")

@@ -562,7 +562,8 @@ namespace
         // The client's own `__FILE__` / `source_location` rewrite: the worker compiles text
         // whose `#line` markers name the client's paths, and applying the client's rule to
         // them is what makes its object the one the client's compile would have written.
-        // GNU-only, as the launcher's row is; `-ffile-prefix-map` is not here because it also
+        // A clang client sends it behind `-Xclang=` (`CarriedSourcePrefixMap`), and this row
+        // then judges what that carries. GNU-only, as the launcher's row is; `-ffile-prefix-map` is not here because it also
         // rewrites debug records, which a worker maps by rules of its own.
         AllowedArg { .spelling = "fmacro-prefix-map=", .families = DriverFamily::Gnu, .value = ArgValue::PrefixMapRule },
         AllowedArg { .spelling = "fvect-cost-model=", .families = DriverFamily::Any, .value = ArgValue::NoPathSeparator },
@@ -756,6 +757,15 @@ namespace
         // lease that no worker will run this argument.
         if (FindDeniedArgument(arg, driver.family) != nullptr)
             return BuiltInVerdict::Refused;
+
+        // The carried macro map, the one `-Xclang=` the denial above lets through: judged as the
+        // map it carries, and only by the driver whose carrier it is. Any other driver of the
+        // family is refused it here, by rule rather than left to an operator's list.
+        if (CarriedSourcePrefixMap(arg, driver.family).has_value())
+        {
+            auto const carried = CarriedSourcePrefixMap(arg, driver);
+            return carried.has_value() ? JudgeBuiltIn(*carried, driver) : BuiltInVerdict::Refused;
+        }
 
         // A pass-through is judged by what it passes, under the grammar that will parse
         // it -- and by the WHOLE of this function, refusals included, so an inner argument

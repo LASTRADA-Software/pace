@@ -315,8 +315,10 @@ enum class RemoteLine : std::uint8_t
     /// Left off: the value names something on THIS machine the worker has no use for --
     /// headers already inlined, an object and a depfile the client writes itself.
     Dropped,
-    /// Sent verbatim: a rewrite the worker's compiler must apply to the client's paths in
-    /// the text it is handed, opening none of them (`-fmacro-prefix-map`). Asked AHEAD of the
+    /// Sent: a rewrite the worker's compiler must apply to the client's paths in the text it
+    /// is handed, opening none of them (`-fmacro-prefix-map`) -- behind the driver's
+    /// `preprocessedSourceMapCarrier`, since clang drops the plain spelling on that text and
+    /// gcc does not. Asked AHEAD of the
     /// role's `UndispatchableBecause`, which is what lets one row of a refused role travel:
     /// `-ffile-prefix-map`, which also rewrites debug records a worker maps by its own rules,
     /// stays refused by the role.
@@ -702,6 +704,20 @@ struct DriverSpec
     /// stdin, writes no file, and exits 0. The gate stays as it was; the probe is
     /// what was wrong.
     std::span<std::string_view const> versionFlags;
+    /// What a `RemoteLine::Forwarded` source prefix map is prefixed with on a dispatched
+    /// line, so this driver applies it to PREPROCESSED input; empty when the driver
+    /// applies the plain spelling there itself.
+    ///
+    /// clang's driver discards `-fmacro-prefix-map` when its input is preprocessed text:
+    /// it warns `argument unused during compilation` and never hands the rule to `-cc1`.
+    /// `__FILE__` was expanded on the client and survives that; `__builtin_FILE()` and
+    /// every `std::source_location` are resolved by the worker's frontend, which then
+    /// embedded the client's ABSOLUTE path in an object stored under the mapped key.
+    /// Measured on clang 22.1.8: `-Xclang=` reaches `-cc1` on that input and maps the
+    /// name, and gcc maps it from the plain spelling. FUSED (`-Xclang=<arg>`) because a
+    /// worker judges each argument alone, and the two-argument `-Xclang <arg>` would ask
+    /// it to admit a bare `-Xclang`. See `CarriedSourcePrefixMap`.
+    std::string_view preprocessedSourceMapCarrier;
 };
 
 /// One argument a pass-through hands to a different driver grammar: what it carries, and
@@ -727,6 +743,26 @@ struct PassThroughMatch
 /// @param family The family of the driver that receives @p arg.
 /// @return What it carries, or nullopt when it is no pass-through for that family.
 [[nodiscard]] std::optional<PassThroughMatch> MatchPassThrough(std::string_view arg, DriverFamily family) noexcept;
+
+/// Whether @p arg is a source prefix map in the spelling @p driver's dispatched line
+/// carries it in (`DriverSpec::preprocessedSourceMapCarrier`), and the map it carries.
+///
+/// **The one carve-out from the `-Xclang` denial, and deliberately exact**: the carrier
+/// fused to a `RemoteLine::Forwarded` row with a fused `<from>=<to>` value, and nothing
+/// else `-Xclang` could hand `-cc1`. Read by BOTH ends -- `FindDeniedArgument` asks it
+/// inside itself, so the launcher's pre-lease check and the worker's refusal agree, and
+/// the worker's allowlist admits the carried map only for the driver whose carrier it is.
+/// @param arg    The argument as it appears on a dispatched line.
+/// @param driver The driver that receives @p arg.
+/// @return The carried argument, or nullopt when @p arg is not one.
+[[nodiscard]] std::optional<std::string_view> CarriedSourcePrefixMap(std::string_view arg, DriverSpec const& driver);
+
+/// Whether @p arg is a carried source prefix map for ANY driver of @p family, which is
+/// all the launcher's pre-lease check knows of the driver.
+/// @param arg    The argument as it appears on a dispatched line.
+/// @param family The family of the driver that receives @p arg.
+/// @return The carried argument, or nullopt when @p arg is not one.
+[[nodiscard]] std::optional<std::string_view> CarriedSourcePrefixMap(std::string_view arg, DriverFamily family);
 
 /// Whether `arg` makes a compile write something BESIDES its object file.
 ///
