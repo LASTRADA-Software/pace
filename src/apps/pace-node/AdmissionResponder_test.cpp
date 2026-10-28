@@ -176,12 +176,16 @@ class Client
         return core::async::syncRun(ReadReply(_socket.get()));
     }
 
-    /// Read frames until one is not a pulse.
+    /// Read frames until one is not a pulse, for at most ten seconds.
+    ///
+    /// Bounded as a whole and not only per read: a request parked forever is pulsed forever, so a
+    /// per-read deadline never fires and a broken build would hang the case instead of failing it.
     /// @param pulses Counts the pulses read on the way.
-    /// @return That frame.
+    /// @return That frame, or nothing when the peer closed or only pulsed until the bound.
     [[nodiscard]] std::optional<Reply> ReadAnswer(std::size_t* pulses = nullptr)
     {
-        for (;;)
+        auto const until = std::chrono::steady_clock::now() + 10s;
+        while (std::chrono::steady_clock::now() < until)
         {
             auto reply = Read();
             if (!reply.has_value() || reply->status != Wire::Status::Progress)
@@ -189,6 +193,7 @@ class Client
             if (pulses != nullptr)
                 ++*pulses;
         }
+        return std::nullopt;
     }
 
     /// Hang up now.

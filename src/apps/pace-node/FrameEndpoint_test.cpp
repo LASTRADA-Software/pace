@@ -5886,7 +5886,8 @@ TEST_CASE("A retired watch is silent only for the cancellation its retirement pr
 {
     using Outcome = FrameServer::WatchOutcome;
     auto const failed = [](core::net::NetErrorCode code) {
-        return core::net::IoResult { std::unexpected { core::net::NetError { .code = code } } };
+        return core::net::IoResult { std::unexpected {
+            core::net::NetError { .code = code, .systemCode = 0, .context = {} } } };
     };
 
     // The retirement's own `Cancelled` is nobody leaving.
