@@ -183,6 +183,7 @@ struct Harness
                     }
                     return compileExit;
                 },
+            .failedOpen = {},
         };
     }
 
