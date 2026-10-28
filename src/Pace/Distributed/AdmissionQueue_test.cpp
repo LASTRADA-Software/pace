@@ -609,3 +609,78 @@ TEST_CASE("AdmissionQueue.leadership-loss", "[distributed][admission]")
     f.Local(3 * GiB);
     CHECK(f.queue.Pump().size() == 1);
 }
+
+TEST_CASE("AdmissionQueue.requeued-waiter-stays-behind-refused-front", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    f.queue.ReportMachine("w", Report(4 * GiB, 4));
+    f.queue.ReportMachine("c", Report(4 * GiB, 4, 4, 4 * GiB)); // the caller is full
+    auto const owner = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 4 * GiB);
+    auto const older = f.Local(4 * GiB, "m");
+    auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 4 * GiB);
+    auto const younger = f.Local(4 * GiB, "m");
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { owner });
+    auto const refused = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp"); // a higher ticket than all of them
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { refused });
+
+    f.queue.Settle(refused, Settlement { SettleOutcome::WorkerRefused, std::nullopt }); // queue: refused, older, younger
+    f.queue.Settle(owner, Settlement { SettleOutcome::NotStored, std::nullopt });       // the waiter rejoins
+    f.queue.ReportMachine("w", Report(4 * GiB, 4));
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { refused, older }); // the refused ticket is still first
+
+    f.queue.Settle(older, Done);
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { waiter }); // between `older` and `younger`
+    f.queue.Settle(waiter, Done);
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { younger });
+}
+
+TEST_CASE("AdmissionQueue.refused-machine-admits-no-local-request-until-reported", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.queue.ReportMachine("w", Report(8 * GiB, 4));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB));
+    auto const job = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { job });
+    auto const local = f.Local(1 * GiB, "w"); // its caller is the machine about to refuse
+
+    f.queue.Settle(job, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+    CHECK(f.queue.Pump().empty());
+
+    f.queue.ReportMachine("w", Report(8 * GiB, 4));
+    auto const granted = Tickets(f.queue.Pump());
+    CHECK(std::ranges::find(granted, local) != granted.end());
+}
+
+TEST_CASE("AdmissionQueue.woken-waiter-is-parked-by-leadership-loss", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const owner = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { owner });
+    f.queue.Settle(owner, Settlement { SettleOutcome::Stored, std::nullopt });
+
+    CHECK(f.queue.LoseLeadership() == std::vector<Ticket> { waiter });
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    CHECK(f.queue.Pump().empty()); // nothing is delivered after the loss
+}
+
+TEST_CASE("AdmissionQueue.woken-waiter-abandoned-before-pump-is-not-delivered", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const owner = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const other = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { owner });
+    f.queue.Settle(owner, Settlement { SettleOutcome::Stored, std::nullopt });
+
+    f.queue.Abandon(waiter);
+    auto const delivered = f.queue.Pump();
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].ticket == other);
+    CHECK(delivered[0].kind == GrantKind::Stored);
+}

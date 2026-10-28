@@ -162,6 +162,7 @@ class AdmissionQueue
         QueueRequest request;
         std::uint64_t chargedBytes {}; ///< The estimate taken at enqueue.
         std::uint32_t refusals {};     ///< Worker refusals so far.
+        std::int64_t order {};         ///< Queue position key: the ticket, or below every key for a refused one.
     };
 
     /// What this ledger has charged a machine, beside its own report.
@@ -217,6 +218,10 @@ class AdmissionQueue
     /// Puts entries back in the queue at their original FIFO place.
     void Requeue(std::vector<Entry> entries);
 
+    /// Forgets an in-flight owner.
+    /// @return The requests that were waiting on it.
+    [[nodiscard]] std::vector<Entry> TakeInflight(Ticket owner);
+
     PeakEstimates& _estimates;
     SharesCache _sharesCache;
     IPlacementSource const& _placement;
@@ -224,9 +229,11 @@ class AdmissionQueue
     std::vector<Entry> _queue;
     std::unordered_map<MachineId, Ledger> _ledgers;
     std::unordered_map<Ticket, Charge> _charges;
-    std::unordered_map<Ticket, Inflight> _inflight; ///< Keyed by the owner's ticket.
-    std::vector<Decision> _stored;                  ///< Waiters woken by a store, answered by the next pump.
-    std::unordered_set<Ticket> _headTickets;        ///< Entries that were a blocked head in the last pump.
+    std::unordered_map<Ticket, Inflight> _inflight;              ///< Keyed by the owner's ticket.
+    std::unordered_multimap<std::string, Ticket> _inflightByKey; ///< cacheKey -> the owners running it.
+    std::int64_t _frontOrder {};             ///< Last key handed to a refused ticket; counts down from zero.
+    std::vector<Decision> _stored;           ///< Waiters woken by a store, answered by the next pump.
+    std::unordered_set<Ticket> _headTickets; ///< Entries that were a blocked head in the last pump.
 };
 
 } // namespace Pace::Distributed

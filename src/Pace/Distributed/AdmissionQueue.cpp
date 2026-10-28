@@ -31,7 +31,11 @@ Ticket AdmissionQueue::Enqueue(QueueRequest request)
 {
     auto const ticket = _nextTicket++;
     auto const charged = _estimates.Estimate(request.estimate);
-    _queue.push_back(Entry { .ticket = ticket, .request = std::move(request), .chargedBytes = charged });
+    _queue.push_back(Entry { .ticket = ticket,
+                             .request = std::move(request),
+                             .chargedBytes = charged,
+                             .refusals = 0,
+                             .order = static_cast<std::int64_t>(ticket) });
     return ticket;
 }
 
@@ -60,11 +64,23 @@ std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
     return charge;
 }
 
+std::vector<AdmissionQueue::Entry> AdmissionQueue::TakeInflight(Ticket owner)
+{
+    auto const found = _inflight.find(owner);
+    if (found == _inflight.end())
+        return {};
+    auto waiters = std::move(found->second.waiters);
+    auto const range = _inflightByKey.equal_range(found->second.cacheKey);
+    _inflightByKey.erase(std::ranges::find(range.first, range.second, owner, &decltype(_inflightByKey)::value_type::second));
+    _inflight.erase(found);
+    return waiters;
+}
+
 void AdmissionQueue::Requeue(std::vector<Entry> entries)
 {
     for (auto& entry: entries)
     {
-        auto const place = std::ranges::find_if(_queue, [&](Entry const& queued) { return queued.ticket > entry.ticket; });
+        auto const place = std::ranges::find_if(_queue, [&](Entry const& queued) { return queued.order > entry.order; });
         _queue.insert(place, std::move(entry));
     }
 }
@@ -74,18 +90,14 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
     auto charge = Free(ticket);
     if (!charge)
         return;
-    auto waiters = std::vector<Entry> {};
-    if (auto const owned = _inflight.find(ticket); owned != _inflight.end())
-    {
-        waiters = std::move(owned->second.waiters);
-        _inflight.erase(owned);
-    }
+    auto waiters = TakeInflight(ticket);
 
     if (settlement.outcome == SettleOutcome::WorkerRefused)
     {
         auto& entry = charge->entry;
         ++entry.refusals;
         _ledgers[charge->machine].refused = true;
+        entry.order = --_frontOrder; // below every key in the queue, the older refusals' included
         _queue.insert(_queue.begin(), std::move(entry));
         Requeue(std::move(waiters));
         return;
@@ -122,12 +134,7 @@ void AdmissionQueue::Abandon(Ticket ticket)
     if (!charge)
         return;
     _estimates.RecordKilled(charge->entry.request.estimate);
-    if (auto const owned = _inflight.find(ticket); owned != _inflight.end())
-    {
-        auto waiters = std::move(owned->second.waiters);
-        _inflight.erase(owned);
-        Requeue(std::move(waiters));
-    }
+    Requeue(TakeInflight(ticket));
 }
 
 std::vector<Ticket> AdmissionQueue::LoseLeadership()
@@ -145,6 +152,7 @@ std::vector<Ticket> AdmissionQueue::LoseLeadership()
     _queue.clear();
     _stored.clear();
     _inflight.clear();
+    _inflightByKey.clear();
     _headTickets.clear();
     for (auto& [machine, ledger]: _ledgers)
         ledger.report.reset();
@@ -192,13 +200,13 @@ std::vector<Decision> AdmissionQueue::Pump()
         // Another compile of this key is running where this one's cache is: wait for its store.
         if (request.storable && !request.estimate.cacheKey.empty())
         {
-            auto const owner = std::ranges::find_if(_inflight, [&](auto const& item) {
-                return item.second.cacheKey == request.estimate.cacheKey
-                       && _sharesCache(item.second.machine, request.caller);
+            auto const [first, last] = _inflightByKey.equal_range(request.estimate.cacheKey);
+            auto const owner = std::ranges::find_if(first, last, [&](auto const& item) {
+                return _sharesCache(_inflight.at(item.second).machine, request.caller);
             });
-            if (owner != _inflight.end())
+            if (owner != last)
             {
-                owner->second.waiters.push_back(std::move(entry));
+                _inflight.at(owner->second).waiters.push_back(std::move(entry));
                 continue;
             }
         }
@@ -230,8 +238,11 @@ std::vector<Decision> AdmissionQueue::Pump()
             auto const ticket = entry.ticket;
             auto const chargedBytes = entry.chargedBytes;
             if (request.storable && !request.estimate.cacheKey.empty())
+            {
                 _inflight.emplace(
                     ticket, Inflight { .cacheKey = request.estimate.cacheKey, .machine = request.caller, .waiters = {} });
+                _inflightByKey.emplace(request.estimate.cacheKey, ticket);
+            }
             _charges.emplace(ticket,
                              Charge { .machine = granted->machine, .bytes = chargedBytes, .entry = std::move(entry) });
             decisions.push_back(Decision {
