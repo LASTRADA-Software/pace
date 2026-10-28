@@ -2661,11 +2661,15 @@ namespace
         // added between the `catch` and this line has to preserve that or take the
         // guard instead.
         //
+        // The connection ended: whatever a reply left held on it is given back, once, here -- and
+        // BEFORE the connection stops counting as open. `Shutdown()` returns once nothing is open, and
+        // what a hold gives back (an admission's charge, to the node's `HeldChargeRegistry`) belongs to
+        // objects `main` destroys right after the endpoint: released after the count dropped, the
+        // release could reach a registry that is already gone (#1728).
+        scope->End();
         // Deregistered before the socket is destroyed, or the sweeper would hold a
         // pointer into a freed object.
         state->Untrack(socket.get());
-        // The connection ended: whatever a reply left held on it is given back, once, here.
-        scope->End();
         // Answered before the close, and sealed like every frame after a proof: the peer is told
         // what an unsealed one would be -- the surface is busy -- by the surface that owns the verb.
         co_await AnswerSealedOverBudget(state, socket.get(), sealing);
