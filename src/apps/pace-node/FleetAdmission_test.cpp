@@ -399,9 +399,11 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
     auto const endpoint = EndpointOf(port);
 
     // Forty keys whose measured peaks are 1..5 GiB, and one more that is larger than the machine.
-    auto const keys = std::views::iota(std::size_t { 0 }, Compiles)
-                      | std::views::transform([](std::size_t index) { return std::format("object-{}", index); })
-                      | std::ranges::to<std::vector>();
+    // Collected by hand: clang over libstdc++ 14 cannot pipe into `std::ranges::to` (see `ReachabilityMemo.cpp`).
+    std::vector<std::string> keys;
+    keys.reserve(Compiles);
+    for (auto const index: std::views::iota(std::size_t { 0 }, Compiles))
+        keys.push_back(std::format("object-{}", index));
     auto const peakOf = [](std::size_t index) -> std::uint64_t {
         return index == 17 ? 11 * GiB : (1 + (index * 7) % 5) * GiB;
     };
