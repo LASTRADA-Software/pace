@@ -204,10 +204,10 @@ core::async::Task<void> SlowButAlive(Peer peer)
 {
     if (!(co_await ReadRequest(peer)))
         co_return;
-    for ([[maybe_unused]] auto const pulse: std::views::iota(0, 8))
+    for ([[maybe_unused]] auto const pulse: std::views::iota(0, 12))
     {
         co_await Send(peer, Wire::EncodeProgressReply());
-        std::this_thread::sleep_for(60ms);
+        std::this_thread::sleep_for(100ms);
     }
     co_await Send(peer, GrantFrame("worker-slow:1"));
     co_await ReadRequest(peer);
@@ -489,9 +489,10 @@ TEST_CASE("AdmitSession.silence-fails-open")
 
 TEST_CASE("AdmitSession.progress-keeps-a-slow-queue-alive")
 {
-    // Eight pulses 60 ms apart is well over the 200 ms bound, which a fixed bound would end.
+    // Twelve pulses 100 ms apart outlast the 1 s bound, which a fixed bound would end. Each gap leaves
+    // 900 ms of margin, since a loaded macOS runner oversleeps a short sleep by far more than 140 ms.
     FakeNode node { &SlowButAlive };
-    auto session = OpenAt(node.HostPort(), 200ms);
+    auto session = OpenAt(node.HostPort(), 1s);
     auto const ticket = session->Await();
     REQUIRE(ticket.has_value());
     CHECK(ticket->endpoint == "worker-slow:1");
