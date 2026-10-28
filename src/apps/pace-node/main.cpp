@@ -1481,9 +1481,6 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // counters a scrape reads present are the ones a relay can move. Its own `0xFC` endpoint is never
     // dialled (`announced`). Declared after the redirect and the queue and before the surface that routes
     // to it, so it is destroyed after that surface closes its connections.
-    // The door a launcher on this machine uses to reach the fleet's compile queue (#1728). Its own `0xFC`
-    // endpoint is never dialled (`announced`). Declared after the redirect and the queue and before the
-    // surface that routes to it, so it is destroyed after that surface closes its connections.
     AdmissionRelay admissionRelay;
     StartAdmissionRelay(admissionRelay,
                         AdmissionRelayParts { .cfg = cfg,

@@ -118,8 +118,6 @@ namespace
             dst.append(buf.data(), n);
     }
 
-    /// A `CreateProcess` attribute list carrying the handles a child may inherit.
-    ///
     /// A job object the spawned compile is assigned to, so the peak memory of the process and of
     /// everything it starts can be read back after it exits.
     ///
@@ -158,7 +156,9 @@ namespace
             return _job != nullptr && AssignProcessToJobObject(_job, process) != FALSE;
         }
 
-        /// The largest working set any process of the job reached.
+        /// The peak commit charge of any ONE process of the job (`PeakProcessMemoryUsed`): the most
+        /// private memory a single process had committed at once. Not a working set, and not the job's
+        /// total: a driver that runs its compiler as a child reports the larger of the two processes.
         /// @return Bytes, or nullopt when the system would not say.
         [[nodiscard]] std::optional<std::uint64_t> PeakProcessMemory() const noexcept
         {
@@ -173,6 +173,8 @@ namespace
         HANDLE _job;
     };
 
+    /// A `CreateProcess` attribute list carrying the handles a child may inherit.
+    ///
     /// `CreateProcess` with `bInheritHandles = TRUE` hands the child EVERY inheritable
     /// handle the process owns -- not the ones this call set up. That is a
     /// process-wide fact, so it only became visible once a worker ran several

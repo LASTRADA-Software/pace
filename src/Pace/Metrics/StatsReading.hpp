@@ -499,8 +499,9 @@ enum class MetricsSurface : std::uint8_t
     SchedulerAdmission,
 
     /// Admission forwarding (#1728): `apps/pace-node/AdmitForwarder.cpp`, which relays a launcher's queue
-    /// exchanges to the leader from a node that does not lead. Served only where the node redirects
-    /// scheduling verbs (a learner), as `SchedulerAdmission` is where it schedules.
+    /// exchanges to the leader from a node that does not lead. Served on every node that answers the
+    /// scheduling verbs at all (`ForwardsAdmission`, Ruling 10): a learner always, and a voter, which
+    /// relays while another voter leads -- so the leader serves it too, reading zero until it is demoted.
     AdmissionForwarding,
 
     /// Enumerator count. Not a surface.

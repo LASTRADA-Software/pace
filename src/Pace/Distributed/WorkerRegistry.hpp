@@ -510,13 +510,6 @@ class WorkerRegistry
     [[nodiscard]] std::expected<WorkerInfo, PickError> Pick(std::string_view fingerprint,
                                                             std::span<std::string_view const> excluded = {});
 
-    /// Note that a job has been dispatched to a worker.
-    ///
-    /// Moves every entry sharing that worker's endpoint, because a job occupies the
-    /// **machine** and not one of its toolchains — see `NodeReport`. Counting it
-    /// against the leased entry alone let the scheduler offer a host's other
-    /// toolchain a full complement of slots it was already using.
-    /// @param workerId The worker.
     /// The workers that could take a job of @p fingerprint right now, best first: live, an exact
     /// toolchain match, not excluded, and a slot free by the same `FreeSlots` test `Pick` applies.
     ///
@@ -533,6 +526,13 @@ class WorkerRegistry
     /// @return That worker's entry when it is registered and live, else nothing.
     [[nodiscard]] std::optional<WorkerInfo> Find(std::string_view workerId) const;
 
+    /// Note that a job has been dispatched to a worker.
+    ///
+    /// Moves every entry sharing that worker's endpoint, because a job occupies the
+    /// **machine** and not one of its toolchains — see `NodeReport`. Counting it
+    /// against the leased entry alone let the scheduler offer a host's other
+    /// toolchain a full complement of slots it was already using.
+    /// @param workerId The worker.
     void JobStarted(std::string_view workerId);
 
     /// Note that a job on a worker has finished, however it finished.
