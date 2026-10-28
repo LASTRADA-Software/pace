@@ -5,6 +5,8 @@
 
 #include "IProcessRunner.hpp"
 
+#include <Pace/Platform/Environment.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -263,17 +265,21 @@ TEST_CASE("A spawn with no additions inherits what it would have inherited anywa
 
 namespace
 {
-/// The `cmake` this build was configured with, as a program every host can run.
-constexpr std::string_view CmakeCommand = PACE_TEST_CMAKE_COMMAND;
-
-/// The helper that allocates and touches `argv[1]` MiB, built beside the tests.
-constexpr std::string_view PeakMemoryChild = PACE_TEST_PEAK_MEMORY_CHILD;
+/// A path the build hands the test through its environment (see the app CMakeLists), or
+/// nothing when it did not: the case then SKIPs with the reason rather than failing.
+[[nodiscard]] std::string RequiredPath(char const* variable)
+{
+    auto const value = Pace::ReadEnvironmentVariable(variable);
+    if (!value || value->empty())
+        SKIP(std::string { variable } + " is not set; run through ctest so the build can name it");
+    return *value;
+}
 } // namespace
 
 TEST_CASE("ProcessRunner.peak-memory-is-measured", "[pace-cc][process]")
 {
     auto const runner = MakeProcessRunner();
-    auto const run = runner->RunCaptureSplit({ { std::string { CmakeCommand }, "-E", "echo", "x" } });
+    auto const run = runner->RunCaptureSplit({ { RequiredPath("PACE_TEST_PEAK_MEMORY_CHILD"), "1" } });
 
     REQUIRE(run.exitCode == 0);
     REQUIRE(run.peakMemoryBytes.has_value());
@@ -285,7 +291,7 @@ TEST_CASE("ProcessRunner.peak-covers-child-process", "[pace-cc][process]")
     // The parent is a shell and stays small; the 256 MiB lives in its CHILD, so only a
     // measurement that covers descendants can see it.
     auto const runner = MakeProcessRunner();
-    auto child = std::string { PeakMemoryChild };
+    auto child = RequiredPath("PACE_TEST_PEAK_MEMORY_CHILD");
 #if defined(_WIN32)
     // cmd.exe does not take a forward-slashed program path.
     std::ranges::replace(child, '/', '\\');
