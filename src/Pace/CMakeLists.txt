@@ -70,6 +70,7 @@ target_sources(Pace
         Cluster/SeedSources.cpp
         Core/Logger.cpp
         Distributed/LeaseTable.cpp
+        Distributed/PeakEstimates.cpp
         Distributed/WorkerRegistry.cpp
         Distributed/UnservedToolchains.cpp
         Distributed/FleetVersions.cpp
