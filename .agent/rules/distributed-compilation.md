@@ -2178,7 +2178,8 @@ symptom was that they were slow.
     and a learner granted none, so only a broken client sends one there.
   - **A node running NO consensus follows no leader**, and answers as the `pace-kv` daemon
     does: the capacity verbs (`Register`, `Heartbeat`, `Withdraw`, `Lease`, `Release`,
-    `NodeAnnounce`, and the admission verbs `Admit`, `Settle`, `MachineBudget`) `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
+    `NodeAnnounce`, and the admission verbs `Admit`, `Settle`, `MachineBudget`)
+    `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
     `NodeAnnounce`'s code through `RefusalFor`'s fallback. The codes agree on every scheduling
     verb, and `NodeFrameSurface_test` pins that agreement on the wire; the words are each
     binary's own.
@@ -3781,10 +3782,11 @@ cluster's pre-shared key instead; #178 PR 6 made it prove WHICH machine it is, b
 its own identity key, and sealed every frame after the proof. Each rule below is what some
 plausible simpler design gets wrong.
 
-**No address admits another machine, and the verbs a machine JOINS with need a proof.** They -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` -- decide where the fleet's work
-is sent, and `MachineBudget` decides how much work a machine is ADMITTED (the memory budget the leader
-charges it against, #1728); all five are `IdentityRequirement::ProvenNodeOnly`, a COLUMN of `OpTable` pinned by
-`JoiningVerbsNeedAnIdentity`, refused `NodeIdentityRequired` and counted
+**No address admits another machine, and the verbs a machine JOINS with need a proof.** They --
+`Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` -- decide where the fleet's work is sent, and
+`MachineBudget` decides how much work a machine is ADMITTED (the memory budget the leader charges
+it against, #1728); all five are `IdentityRequirement::ProvenNodeOnly`, a COLUMN of `OpTable`
+pinned by `JoiningVerbsNeedAnIdentity`, refused `NodeIdentityRequired` and counted
 (`SchedulerRequestsRefusedNodeIdentityRequired`). Loopback is NOT exempt: a process on the
 scheduler's own host could otherwise register an endpoint of its choosing and be leased the
 fleet's jobs. Every node naming `--scheduler` therefore needs a key to prove -- and every node
@@ -4080,12 +4082,47 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
 - **Every non-leader forwards `Admit`/`Settle` inline to the leader, never to itself**: a voting
   follower as well as a learner. A voter that answered `NotLeader` would leave a launcher with no
   queue on every node but one. The relay holds one upstream connection per client connection.
-- **The grant says what it granted**: `workerKey` and `lifetime` as `LeaseGrant` does, and a
-  `reason` on a Local grant of a dispatchable request, so a fleet that never distributes still says
-  why (`DeclineDispatch`) instead of reading green.
-- **A launcher fails OPEN.** An unreachable, refusing or unreadable node costs the build nothing,
-  and a launcher whose FETCH already found the node unreachable does not dial it again for the
-  passthrough: on Windows a refused loopback connect can take the whole connect budget.
+- **The grant says what it granted**: `workerKey`, `lifetime` and `dialHint` as `LeaseGrant` does
+  -- the hint from the same `DialHintFor`, so a worker reachable only where it was last seen is
+  dialled there whichever path granted it -- and a `reason` on a Local grant of a dispatchable
+  request, so a fleet that never distributes still says why (`DeclineDispatch`) instead of reading
+  green.
+- **An admission's worker lease is filed under its TICKET, never under the cache key** (Ruling 17).
+  Deduplication is the QUEUE's, and only where a waiter can fetch the result; a lease table keyed by
+  the cache key refused the second of two machines that missed one key `AlreadyInFlight`, which its
+  launcher read as "compile here" -- an uncharged compile, the load the queue exists to bound. The
+  token still signs the OBJECT key, as a `Lease` grant's does: the table's key is bookkeeping the
+  worker never sees.
+- **A launcher asks the queue at its OWN node, `PACE_ADDR`, whatever `PACE_SCHEDULER` names** (Ruling
+  16, `Cc::AdmissionEndpointOf`). The leader charges a compile to the machine that ASKED, and names
+  it only by a key the connection PROVED or by loopback: the launcher's node proves its machine's key
+  when it relays, while a launcher dialling a remote scheduler directly proves nothing and would be
+  charged to no machine. `PACE_SCHEDULER` keeps one meaning, where a `LEASE` goes when no queue
+  answers, and a plan is refused for a remembered-unreachable endpoint only when EVERY place it could
+  be spent was unreached (`Cc::PlanUnreachableAt`).
+- **A launcher fails OPEN only where no queue ANSWERED.** An unreachable, refusing or unreadable
+  node costs the build nothing, and a launcher whose FETCH already found the node unreachable does
+  not dial it again: on Windows a refused loopback connect can take the whole connect budget. The
+  one compile with no such evidence is a passthrough whose command line did not parse -- it makes
+  no FETCH -- so with the node stopped and the reachability memo empty it pays one connect, up to a
+  second on Windows, and records it; a stopped node costs a build at most one such connect per
+  fifteen-second memo window, never one per compile. Where the queue DID answer and the launcher
+  gives up on it anyway -- `MaxWorkerRefusals` worker refusals in a row -- the compile is asked for
+  again `LocalOnly`, excluding that worker, and runs HERE charged, never in the open.
+- **A held admission DIAL carries TCP keepalive** (Ruling 18): the launcher's dial of its node
+  (`Cc::DefaultAdmitBudget`) and the node's relay to the leader (`Node::ForwardDialBudget`), per
+  dial as `wire-and-protocol.md` requires. The intervals are core-cpp's `KeepAliveSettings {}`, which
+  every `KeepAlive::Yes` dial applies -- a dial takes none of its own -- pinned by a `static_assert`
+  beside the budget (`Cc::AdmitKeepAliveProbe`): a peer whose host vanished is noticed in
+  `idle + count * interval` = **16 s** on Linux and macOS and **30 s** on Windows, where the OS fixes
+  the count at 10. What that bounds: the relay noticing a vanished LEADER (and failing its launcher
+  open, giving back its own held charge), and a launcher noticing a vanished node.
+  **What it does not bound yet is the leader's side.** The connection the leader HOLDS is an
+  ACCEPTED socket, and core-cpp arms keepalive on a dial only -- its accept paths apply
+  `KeepAlive::No` and `ISocket` offers no way to arm it afterwards -- so a caller host that vanished
+  without a FIN keeps its charge until the held connection's idle window, `MaxCompileLeaseLifetime`
+  (one hour), sweeps it. Closing that needs a core-cpp API that arms keepalive on an accepted
+  socket, re-pinned here; it is never worked around in `Transport/`.
 
 ## Open work
 
