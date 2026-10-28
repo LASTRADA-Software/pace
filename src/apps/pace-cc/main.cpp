@@ -3045,7 +3045,11 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
             return nullptr;
     }
     auto const presented = Tickets(cfg, record.verbose).Present(std::string { endpoint });
-    return Cc::OpenAdmitSession(endpoint, presented.credential, request, Cc::DefaultAdmitBudget());
+    return Cc::OpenAdmitSession(endpoint,
+                                presented.credential,
+                                request,
+                                Cc::DefaultAdmitBudget(),
+                                [verbose = record.verbose](std::string_view line) { Note(verbose, line); });
 }
 
 /// An admission failed open: say so, and remember a node nothing reached.

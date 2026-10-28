@@ -4,11 +4,9 @@
 #include "ExchangeIdleWindow.hpp"
 
 #include <condition_variable>
-#include <cstdio>
 #include <format>
 #include <mutex>
 #include <optional>
-#include <print>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -78,11 +76,16 @@ namespace
     class Session final: public IAdmitSession
     {
       public:
-        Session(std::string hostPort, Credential credential, std::vector<std::byte> admitFrame, ExchangeBudget budget):
+        Session(std::string hostPort,
+                Credential credential,
+                std::vector<std::byte> admitFrame,
+                ExchangeBudget budget,
+                AdmitNote note):
             _hostPort { std::move(hostPort) },
             _credential { std::move(credential) },
             _admitFrame { std::move(admitFrame) },
-            _budget { budget }
+            _budget { budget },
+            _note { std::move(note) }
         {
             _budget.total = std::chrono::milliseconds { 0 }; // The queue's wait is bounded by silence alone.
             _thread = std::thread { [this] { Body(); } };
@@ -368,8 +371,10 @@ namespace
         static core::async::DetachedTask RunSettle(Session* self, Wire::SettleRequest settle)
         {
             auto const outcome = co_await RoundTrip(self, Wire::EncodeSettle(settle), Credential {}, SettleBound);
-            if (!outcome.IsHit())
-                std::println(stderr, "pace-cc: settling the admission failed: {}", ReasonOf(outcome));
+            // Said where the launcher decides it is worth saying: after a failover every compile of a build
+            // can fail its settle, and the leader reads the connection's end as a release anyway.
+            if (!outcome.IsHit() && self->_note)
+                self->_note(std::format("settling the admission failed: {}", ReasonOf(outcome)));
             self->DropSocket();
             self->_finished = true;
             self->EndOfTask();
@@ -379,6 +384,7 @@ namespace
         Credential _credential;
         std::vector<std::byte> _admitFrame;
         ExchangeBudget _budget;
+        AdmitNote _note;
         CredentialNotice _notice { CredentialNotice::Silent() };
 
         std::thread _thread;
@@ -402,9 +408,11 @@ namespace
 std::unique_ptr<IAdmitSession> OpenAdmitSession(std::string_view hostPort,
                                                 Credential credential,
                                                 Wire::AdmitRequest const& request,
-                                                ExchangeBudget budget)
+                                                ExchangeBudget budget,
+                                                AdmitNote note)
 {
-    return std::make_unique<Session>(std::string { hostPort }, std::move(credential), Wire::EncodeAdmit(request), budget);
+    return std::make_unique<Session>(
+        std::string { hostPort }, std::move(credential), Wire::EncodeAdmit(request), budget, std::move(note));
 }
 
 std::string AdmitUnreachedReason()

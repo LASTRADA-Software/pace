@@ -393,7 +393,9 @@ constexpr auto Op = [](Wire::Op op) {
     return budget;
 }
 
-[[nodiscard]] std::unique_ptr<Cc::IAdmitSession> OpenAt(std::string const& hostPort, std::chrono::milliseconds idle = 5s)
+[[nodiscard]] std::unique_ptr<Cc::IAdmitSession> OpenAt(std::string const& hostPort,
+                                                        std::chrono::milliseconds idle = 5s,
+                                                        Cc::AdmitNote note = {})
 {
     return Cc::OpenAdmitSession(hostPort,
                                 Cc::Credential {},
@@ -406,7 +408,8 @@ constexpr auto Op = [](Wire::Op op) {
                                                      .acceptedCodecs = { 1 },
                                                      .excluded = {},
                                                      .toolchainLabel = {} },
-                                BudgetWithIdle(idle));
+                                BudgetWithIdle(idle),
+                                std::move(note));
 }
 
 [[nodiscard]] bool SeenOps(FakeNode& node, std::size_t count)
@@ -600,12 +603,24 @@ TEST_CASE("AdmitSession.settle-has-its-own-short-bound")
     // The node reads the SETTLE and never answers. The idle bound here is 5 s, which is what a SETTLE used to
     // wait under; it must now give up at `SettleBound`.
     FakeNode node { &GrantThenIgnoreSettle };
-    auto session = OpenAt(node.HostPort(), 5s);
+    std::mutex noted;
+    std::vector<std::string> lines;
+    auto session = OpenAt(node.HostPort(), 5s, [&](std::string_view line) {
+        auto const guard = std::scoped_lock { noted };
+        lines.emplace_back(line);
+    });
     REQUIRE(session->Await().has_value());
 
     auto const started = std::chrono::steady_clock::now();
     session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Stored, .peakBytes = std::nullopt });
     auto const waited = std::chrono::steady_clock::now() - started;
+
+    // The failed settle is said where the launcher chose -- once -- and never straight to stderr.
+    {
+        auto const guard = std::scoped_lock { noted };
+        REQUIRE(lines.size() == 1);
+        CHECK(lines.front().starts_with("settling the admission failed: "));
+    }
 
     CHECK(waited < Cc::SettleBound + 1s);
     CHECK(waited >= Cc::SettleBound - 500ms); // It waited the bound out rather than failing at once.

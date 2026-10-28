@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -80,8 +81,8 @@ class IAdmitSession
     /// @return The next grant, or the reason this session fails open.
     [[nodiscard]] virtual std::expected<AdmitTicket, std::string> Requeue() = 0;
 
-    /// Send `SETTLE` on the held connection and close it. Best effort: a failure is reported on
-    /// stderr and never fatal, and a session that never held a grant does nothing.
+    /// Send `SETTLE` on the held connection and close it. Best effort: a failure is reported to the
+    /// session's `AdmitNote` and never fatal, and a session that never held a grant does nothing.
     /// @param settle How the compile ended.
     virtual void Settle(CompileCacheWire::SettleRequest const& settle) = 0;
 };
@@ -135,6 +136,14 @@ static_assert(AdmitKeepAliveProbe.idle == std::chrono::seconds { 10 }
                             .keepAlive = core::net::KeepAlive::Yes };
 }
 
+/// Where a session's diagnostics go: a line for an operator, with no `pace-cc:` prefix. Empty says
+/// nothing.
+///
+/// A sink rather than `stderr`, because whether a line is worth printing is the LAUNCHER's call
+/// (`PACE_VERBOSE`), and a session cannot see it: a settle that fails on every compile of a build
+/// after a leader failover printed one line per compile, unasked.
+using AdmitNote = std::function<void(std::string_view line)>;
+
 /// Open an admission session and send the ADMIT. Returns at once; `Await` is where it blocks.
 ///
 /// A `NotLeader` answer is retried ONCE against the same @p hostPort (the local node forwards);
@@ -143,10 +152,13 @@ static_assert(AdmitKeepAliveProbe.idle == std::chrono::seconds { 10 }
 /// @param credential Presented with the first frame.
 /// @param request What to admit.
 /// @param budget Its deadlines; `total` is ignored, the session has no total bound.
+/// @param note Where a best-effort step that failed is reported -- a settle nobody answered. Required
+///        rather than defaulted, so a caller that has nowhere to say it says so.
 /// @return The session; never null.
 [[nodiscard]] std::unique_ptr<IAdmitSession> OpenAdmitSession(std::string_view hostPort,
                                                               Credential credential,
                                                               CompileCacheWire::AdmitRequest const& request,
-                                                              ExchangeBudget budget);
+                                                              ExchangeBudget budget,
+                                                              AdmitNote note);
 
 } // namespace Pace::Cc

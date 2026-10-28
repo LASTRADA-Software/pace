@@ -239,7 +239,7 @@ struct Plan
     std::uint64_t held = 0;
     auto const seams = Cc::MissSeams {
         .open = [&](std::optional<std::string_view>) -> std::unique_ptr<Cc::IAdmitSession> {
-            return Cc::OpenAdmitSession(endpoint, Cc::Credential {}, request, Cc::DefaultAdmitBudget());
+            return Cc::OpenAdmitSession(endpoint, Cc::Credential {}, request, Cc::DefaultAdmitBudget(), Cc::AdmitNote {});
         },
         .serveStored =
             [&] {
@@ -406,7 +406,8 @@ struct BigCompiles
                                                   .acceptedCodecs = {},
                                                   .excluded = {},
                                                   .toolchainLabel = {} };
-        return Cc::OpenAdmitSession(EndpointOf(port), Cc::Credential {}, request, Cc::DefaultAdmitBudget());
+        return Cc::OpenAdmitSession(
+            EndpointOf(port), Cc::Credential {}, request, Cc::DefaultAdmitBudget(), Cc::AdmitNote {});
     }
 
     /// Ask for the whole budget on a plain connection, read bounded.
