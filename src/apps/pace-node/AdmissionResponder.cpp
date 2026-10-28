@@ -430,7 +430,7 @@ namespace
     {
         // The peer leaving is a second reason to wake: it requests the very stop a decision does.
         core::async::StopCallback const onGone { scope->PeerGone(), [raw = waiter.get()] { raw->wake.request_stop(); } };
-        for (;;)
+        while (true)
         {
             {
                 auto const guard = std::scoped_lock { core->mutex };

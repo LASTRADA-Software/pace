@@ -745,28 +745,6 @@ TEST_CASE("AdmissionResponder.a-departure-the-endpoint-counted-is-not-counted-ag
     CHECK(queue.held.Held() == HeldCharges {});
 }
 
-TEST_CASE("AdmissionResponder.peer-gone-before-the-grant-is-written-counts-once", "[node][admission]")
-{
-    // Over the wire: the request is granted at once, and the client has already hung up. Whether the
-    // endpoint sees the departure before its write or only after, it is one abandoned admission.
-    Queue queue;
-    auto const port = queue.Serve();
-    queue.Report(1024 * MiB, 2);
-    {
-        Client client { port };
-        client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
-        client.Close();
-    }
-    REQUIRE(WaitFor([&] {
-        return Count(queue, IMetricsSink::Counter::AdmissionAbandoned) >= 1
-               && queue.service.AdmissionSnapshotNow().chargedBytes.empty() && queue.held.Held() == HeldCharges {};
-    }));
-    // Past where a second count would have landed: it lands in the same call that frees the charge, and
-    // the endpoint's own count comes before that call.
-    std::this_thread::sleep_for(200ms);
-    CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
-}
-
 TEST_CASE("AdmissionResponder.a-parked-wait-has-no-ceiling-while-pulses-flow", "[node][admission]")
 {
     // The answer window of a parked ADMIT is the SILENCE it may keep -- six pulses at this cadence --

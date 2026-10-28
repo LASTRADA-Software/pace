@@ -163,7 +163,8 @@ std::vector<AdmissionVerdict> SchedulerService::PumpAdmission()
 
     std::vector<AdmissionVerdict> verdicts;
     auto const guard = std::scoped_lock { _admissionMutex };
-    for (auto freed = true; freed;)
+    auto freed = true;
+    while (freed)
     {
         freed = false;
         for (auto const& decision: _queue.Pump())
