@@ -93,7 +93,7 @@ void SchedulerService::ReleaseAdmissionLease(AdmissionTicket& held)
     held.lease.reset();
 }
 
-AdmissionVerdict SchedulerService::GrantFor(Decision const& decision, AdmissionTicket& held)
+std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decision, AdmissionTicket& held)
 {
     auto verdict =
         AdmissionVerdict { .ticket = decision.ticket,
@@ -118,11 +118,10 @@ AdmissionVerdict SchedulerService::GrantFor(Decision const& decision, AdmissionT
         case Wire::GrantKind::Worker: {
             auto const worker = decision.placement.has_value() ? _workers.Find(decision.placement->workerId) : std::nullopt;
             if (!worker.has_value())
-            {
-                // Dropped between the pump deciding and the grant: nothing was charged to a lease yet.
-                verdict.refusal = Refuse(Wire::ErrorCode::NoWorker);
-                return verdict;
-            }
+                // Dropped between the pump placing it and this grant: nothing was charged to a lease
+                // yet, and nobody refused it. The caller puts it back at the front; a `NoWorker` here
+                // would send a request the queue still had room for to a client told to give up.
+                return std::nullopt;
             auto const lease = _leases.Acquire(held.cacheKey, worker->id, AgreedLeaseLifetime());
             if (!lease.has_value())
             {
@@ -177,7 +176,17 @@ std::vector<AdmissionVerdict> SchedulerService::PumpAdmission()
                 freed = true;
                 continue;
             }
-            auto verdict = GrantFor(decision, held->second);
+            auto granted = GrantFor(decision, held->second);
+            if (!granted.has_value())
+            {
+                // Its worker left between placement and grant: back at the front, uncounted. The freed
+                // charge may fit it elsewhere, so the pump asks again -- and cannot place it on the
+                // same worker, which the registry no longer offers.
+                _queue.ReturnToFront(decision.ticket);
+                freed = true;
+                continue;
+            }
+            auto verdict = std::move(*granted);
             // A refusal holds nothing, so the charge the queue took goes back at once -- which frees
             // room, so the pump asks again.
             if (verdict.refusal.has_value())
@@ -198,17 +207,17 @@ std::vector<AdmissionVerdict> SchedulerService::PumpAdmission()
 void SchedulerService::SettleAdmission(Ticket ticket, Settlement const& settlement)
 {
     auto const guard = std::scoped_lock { _admissionMutex };
+    // A worker that refused the job puts the SAME ticket back at the front of the queue, its refusal
+    // counted against the request's bound and its machine's ledger marked refused until it reports
+    // (R7) -- the queue does both. The record stays, so the connection's next `ADMIT` waits on this
+    // ticket rather than starting a new one at the back.
     _queue.Settle(ticket, settlement);
-    // A worker that refused the job asks for it back in the queue, and the queue would park it at the
-    // head for a connection nobody holds any more: the launcher asks again with a fresh ADMIT. So the
-    // re-queued entry leaves at once -- the refusal still stands on the machine's ledger, which is what
-    // keeps a refusing machine from being granted again before it reports (R7).
-    if (settlement.outcome == Wire::SettleOutcome::WorkerRefused)
-        _queue.Abandon(ticket);
     if (auto const held = _admissionTickets.find(ticket); held != _admissionTickets.end())
     {
+        // The worker the grant named is not running it, whatever the outcome: its lease goes back.
         ReleaseAdmissionLease(held->second);
-        _admissionTickets.erase(held);
+        if (settlement.outcome != Wire::SettleOutcome::WorkerRefused)
+            _admissionTickets.erase(held);
     }
 }
 

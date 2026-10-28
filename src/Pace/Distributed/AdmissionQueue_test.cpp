@@ -584,6 +584,44 @@ TEST_CASE("AdmissionQueue.worker-refusals-bounded", "[distributed][admission]")
     CHECK_FALSE(last[0].placement.has_value());
 }
 
+TEST_CASE("AdmissionQueue.returned-grant-goes-to-the-front-uncounted", "[distributed][admission]")
+{
+    // A grant whose worker left before it could be handed over: back at the front, its charge freed,
+    // and NOT a refusal -- the machine is not marked refused and the request keeps its whole bound.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.queue.ReportMachine("w", Report(8 * GiB, 1));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller is full
+    auto const ticket = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    REQUIRE(f.queue.Pump().size() == 1);
+    auto const younger = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    REQUIRE(f.queue.Pump().empty()); // the one slot is taken
+
+    f.queue.ReturnToFront(ticket);
+    CHECK(f.queue.Depth() == 2);
+    CHECK(f.queue.ChargedByMachine().empty());
+
+    // No report in between: a refusal would have kept `w` shut until one. And ahead of the younger one.
+    auto const again = f.queue.Pump();
+    REQUIRE(again.size() == 1);
+    CHECK(again[0].ticket == ticket);
+    CHECK(again[0].kind == GrantKind::Worker);
+
+    // The bound is whole: two refusals later it still goes to a worker, which a counted return would not.
+    for ([[maybe_unused]] auto const round: std::views::iota(1U, AdmissionQueue::MaxWorkerRefusals))
+    {
+        f.queue.Settle(ticket, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+        f.queue.ReportMachine("w", Report(8 * GiB, 1));
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == ticket);
+        CHECK(granted[0].kind == GrantKind::Worker);
+    }
+    CHECK(f.queue.Depth() == 1);
+    CHECK(Tickets(f.queue.Pump()).empty());
+    (void) younger;
+}
+
 TEST_CASE("AdmissionQueue.leadership-loss", "[distributed][admission]")
 {
     Fixture f;

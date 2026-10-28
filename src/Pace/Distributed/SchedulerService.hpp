@@ -829,6 +829,11 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     [[nodiscard]] std::vector<AdmissionVerdict> PumpAdmission();
 
     /// A granted ticket finished: free its charge and lease, learn its peak, wake its waiters.
+    ///
+    /// `WorkerRefused` is the one outcome that does not end the ticket: the worker's lease is given
+    /// back, and the SAME ticket goes back to the front of the queue with the refusal counted (R7), to
+    /// be decided by a later pump for the connection that is still waiting on it. After
+    /// `AdmissionQueue::MaxWorkerRefusals` it is placed on its caller.
     /// @param ticket The ticket a verdict granted.
     /// @param settlement How it ended.
     void SettleAdmission(Ticket ticket, Settlement const& settlement);
@@ -1336,8 +1341,9 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// Caller holds `_admissionMutex`.
     /// @param decision What the queue admitted.
     /// @param held The ticket record.
-    /// @return The verdict.
-    [[nodiscard]] AdmissionVerdict GrantFor(Decision const& decision, AdmissionTicket& held);
+    /// @return The verdict; nothing when the worker it was placed on has left since, which the caller
+    ///         answers by putting the ticket back at the front (`AdmissionQueue::ReturnToFront`).
+    [[nodiscard]] std::optional<AdmissionVerdict> GrantFor(Decision const& decision, AdmissionTicket& held);
 
     core::platform::IClock& _clock;
     core::platform::WallClockRef _wallClock;

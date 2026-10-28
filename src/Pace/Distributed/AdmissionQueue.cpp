@@ -126,6 +126,18 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
         Requeue(std::move(waiters));
 }
 
+void AdmissionQueue::ReturnToFront(Ticket ticket)
+{
+    auto charge = Free(ticket);
+    if (!charge)
+        return;
+    auto waiters = TakeInflight(ticket);
+    auto& entry = charge->entry;
+    entry.order = --_frontOrder; // the place a refused ticket takes, without the refusal
+    _queue.insert(_queue.begin(), std::move(entry));
+    Requeue(std::move(waiters));
+}
+
 void AdmissionQueue::Abandon(Ticket ticket)
 {
     if (auto const queued = std::ranges::find(_queue, ticket, &Entry::ticket); queued != _queue.end())

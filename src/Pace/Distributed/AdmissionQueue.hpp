@@ -143,6 +143,14 @@ class AdmissionQueue
     /// @param settlement How it ended.
     void Settle(Ticket ticket, Settlement const& settlement);
 
+    /// A grant `Pump()` made could not be handed over -- the worker it placed on left between the
+    /// placement and the lease. Frees its charge and puts it back at the FRONT, ahead of every queued
+    /// request, WITHOUT counting a refusal: nobody refused it, and a vanished worker must not spend the
+    /// request's refusal bound or mark its machine refused. Whatever waited on it rejoins the queue at
+    /// its own place. A ticket holding no charge is ignored.
+    /// @param ticket A ticket the last `Pump()` granted.
+    void ReturnToFront(Ticket ticket);
+
     /// The ticket's connection closed, at any stage. A granted ticket frees its charge and teaches
     /// the estimator it was killed; a queued or waiting one simply leaves. An unknown ticket is ignored.
     /// @param ticket Any ticket.
