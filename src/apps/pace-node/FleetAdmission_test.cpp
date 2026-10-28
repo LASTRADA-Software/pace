@@ -12,6 +12,11 @@
 // that only exists between a launcher and a node: that the SEQUENCE the two halves implement is the one
 // the rules say.
 //
+// The learner's relay is dialled plainly, as `AdmitForwarder_test.cpp` dials a loopback leader. The PROVEN leg
+// -- the same relay presenting its machine's key to a leader that admits nobody for being loopback, and the
+// leader charging the forwarding machine -- is `AdmitForwarder.a-proven-relay-charges-the-forwarding-machine`
+// there; it needs a leader behind the node-proof surface, which these cases do not stand up.
+//
 // `FleetHarness` is not used: it replays a request into a scheduler's protocol object through a
 // scripted socket, which cannot hold a connection open for the length of a compile, and holding it IS
 // the property here (R5).
@@ -31,6 +36,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <functional>
 #include <latch>
 #include <memory>
 #include <mutex>
@@ -86,19 +92,49 @@ struct World
     }
 
     /// A grant arrived: the compile it names is about to run.
+    ///
+    /// Judged twice, because each reading can miss what the other sees: this side's own tally of the grants
+    /// its launchers hold, and -- when `leaderView` is set -- the LEADER's ledger as it stands now, which is
+    /// what admission actually decided against. A leader that overcommits shows in the second even if the
+    /// launchers' tally happens to be late.
     /// @param charged What the queue charged for it.
     void Granted(std::uint64_t charged)
     {
+        // The leader is read before this side's lock is taken: it has a lock of its own.
+        std::uint64_t leaderCharged = 0;
+        std::size_t depth = 0;
+        auto const read = static_cast<bool>(leaderView);
+        if (read)
+        {
+            auto const view = leaderView();
+            depth = view.depth;
+            for (auto const& [machine, bytes]: view.chargedBytes)
+                leaderCharged += bytes;
+        }
         auto const guard = std::scoped_lock { _mutex };
         ++grants;
+        auto const alone = charged > budget;
         // A request estimated above the whole budget runs ALONE: the one grant allowed to overshoot, and
         // only when nothing else is running beside it.
-        if (charged > budget ? _inUse != 0 : _inUse + charged > budget)
+        if (alone ? _inUse != 0 : _inUse + charged > budget)
             ++violations;
+        if (read)
+        {
+            maxDepth = std::max(maxDepth, depth);
+            // Alone means the leader charges exactly this; anything else is over budget with more than one grant held.
+            if (alone ? leaderCharged != charged : (leaderCharged > budget && !_aloneHeld))
+                ++leaderViolations;
+        }
         _inUse += charged;
-        peakInUse = std::max(peakInUse, _inUse);
-        if (charged > budget)
+        if (alone)
+        {
             ++ranAlone;
+            _aloneHeld = true;
+        }
+        else if (!_aloneHeld)
+            // What the compiles that share the machine held at once. The run-alone grant is left out: it is
+            // bigger than any figure this is asked to exceed, and would satisfy it by itself.
+            peakShared = std::max(peakShared, _inUse);
     }
 
     /// A compile and its STORE are done; the charge goes back at the next SETTLE.
@@ -107,12 +143,18 @@ struct World
     {
         auto const guard = std::scoped_lock { _mutex };
         _inUse -= charged;
+        if (charged > budget)
+            _aloneHeld = false;
     }
 
     std::uint64_t const budget;
+    /// The leader's own view of its queue; unset when a case has no leader to ask.
+    std::function<Distributed::AdmissionSnapshot()> leaderView;
     std::atomic<int> spawns { 0 };
     // Written under the lock, read after every launcher has been joined.
-    std::uint64_t peakInUse {};
+    std::uint64_t peakShared {};
+    std::size_t maxDepth {};
+    std::size_t leaderViolations {};
     std::size_t grants {};
     std::size_t violations {};
     std::size_t ranAlone {};
@@ -121,6 +163,7 @@ struct World
     mutable std::mutex _mutex;
     std::set<std::string> _objects;
     std::uint64_t _inUse {};
+    bool _aloneHeld {};
 };
 
 /// What one launcher did, read on the case's thread after it is joined.
@@ -130,9 +173,6 @@ struct Launch
     std::optional<int> code;
     std::optional<std::uint64_t> queuedMs;
     std::vector<std::string> failedOpen; ///< Why each admission failed open, in order.
-    /// How long this launcher waited for its first grant, on ITS OWN steady clock: the leader's queue runs on a
-    /// manual clock here, so its `queuedMs` is always zero and says nothing about whether a request waited.
-    std::chrono::milliseconds waited { 0 };
 };
 
 /// How a scripted compile behaves.
@@ -152,7 +192,6 @@ struct Plan
 [[nodiscard]] Launch Invoke(World& world, std::string const& endpoint, std::string const& key, Plan plan = {})
 {
     Launch out;
-    auto const began = std::chrono::steady_clock::now();
     if (world.Has(key))
     {
         out.servedFromCache = true;
@@ -184,9 +223,6 @@ struct Plan
             [&](Cc::AdmitTicket const& ticket) {
                 if (ticket.kind == Wire::GrantKind::Stored)
                     return;
-                if (out.waited == 0ms)
-                    out.waited =
-                        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - began);
                 held = ticket.chargedBytes;
                 world.Granted(held);
             },
@@ -312,63 +348,87 @@ TEST_CASE("FleetAdmission.learner-is-queued-through-its-own-node", "[node][admis
     CHECK(WaitFor([&] { return leader.held.Held() == HeldCharges {}; }));
 }
 
+namespace
+{
+/// A machine with an 8 GiB budget and a queue that has been taught what two compile sizes cost: one needing
+/// most of the machine, and requests needing all of it.
+struct BigCompiles
+{
+    /// @param first The key taught as 6 GiB, which a case takes a grant for.
+    /// @param whole The key taught as 8 GiB, which fits only on an idle machine.
+    BigCompiles(std::string_view first, std::string_view whole):
+        port { queue.Serve() }
+    {
+        queue.Report(8 * GiB, 8);
+        Teach(port, first, 6 * GiB);
+        Teach(port, whole, 8 * GiB);
+    }
+
+    /// @param key The object key.
+    /// @return A session asking for it, as a launcher does.
+    [[nodiscard]] std::unique_ptr<Cc::IAdmitSession> Open(std::string_view key) const
+    {
+        auto const request = Wire::AdmitRequest { .kind = Wire::AdmitKind::LocalOnly,
+                                                  .fingerprint = {},
+                                                  .cacheKey = key,
+                                                  .sourcePath = "src/a.cpp",
+                                                  .treeLabel = "tree",
+                                                  .storable = false,
+                                                  .acceptedCodecs = {},
+                                                  .excluded = {},
+                                                  .toolchainLabel = {} };
+        return Cc::OpenAdmitSession(EndpointOf(port), Cc::Credential {}, request, Cc::DefaultAdmitBudget());
+    }
+
+    /// Ask for the whole budget on a plain connection, read bounded.
+    /// @param key The key taught as 8 GiB.
+    /// @return The grant.
+    [[nodiscard]] Wire::AdmitGrantFields AskForAll(std::string_view key) const
+    {
+        Client whole { port };
+        whole.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, key));
+        return GrantOf(Unwrap(whole.ReadAnswer()));
+    }
+
+    Queue queue;
+    std::uint16_t port;
+};
+} // namespace
+
+TEST_CASE("FleetAdmission.a-client-that-settles-gives-the-budget-back", "[node][admission][fleet]")
+{
+    // The control for the case below: the same sequence with a SETTLE, which must pass whatever is done to
+    // the release a dead client relies on.
+    BigCompiles machine { "big-settled", "whole-1" };
+
+    auto session = machine.Open("big-settled");
+    auto const ticket = Unwrap(session->Await());
+    REQUIRE(ticket.chargedBytes == 6 * GiB);
+    session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = 6 * GiB });
+    REQUIRE(WaitFor([&] { return machine.queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
+
+    auto const grant = machine.AskForAll("whole-1");
+    CHECK(grant.kind == Wire::GrantKind::Local);
+    CHECK(grant.chargedBytes == 8 * GiB);
+}
+
 TEST_CASE("FleetAdmission.killed-client-does-not-shrink-budget", "[node][admission][fleet]")
 {
-    Queue queue;
-    auto const port = queue.Serve();
-    queue.Report(8 * GiB, 8);
-    auto const endpoint = EndpointOf(port);
-    // A compile that needs most of the machine, and requests that need all of it.
-    Teach(port, "big-settled", 6 * GiB);
-    Teach(port, "big-killed", 6 * GiB);
-    Teach(port, "whole-1", 8 * GiB);
-    Teach(port, "whole-2", 8 * GiB);
+    BigCompiles machine { "big-killed", "whole-2" };
 
-    auto const request = [](std::string_view key) {
-        return Wire::AdmitRequest { .kind = Wire::AdmitKind::LocalOnly,
-                                    .fingerprint = {},
-                                    .cacheKey = key,
-                                    .sourcePath = "src/a.cpp",
-                                    .treeLabel = "tree",
-                                    .storable = false,
-                                    .acceptedCodecs = {},
-                                    .excluded = {},
-                                    .toolchainLabel = {} };
-    };
+    auto session = machine.Open("big-killed");
+    auto const ticket = Unwrap(session->Await());
+    REQUIRE(ticket.chargedBytes == 6 * GiB);
+    REQUIRE(machine.queue.service.AdmissionSnapshotNow().chargedBytes.size() == 1);
+    // `kill -9`: the connection ends, and no SETTLE was ever sent.
+    session.reset();
 
-    SECTION("control: a client that settles gives the budget back")
-    {
-        auto session = Cc::OpenAdmitSession(endpoint, Cc::Credential {}, request("big-settled"), Cc::DefaultAdmitBudget());
-        auto const ticket = Unwrap(session->Await());
-        REQUIRE(ticket.chargedBytes == 6 * GiB);
-        session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = 6 * GiB });
-        REQUIRE(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
-
-        Client whole { port };
-        whole.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "whole-1"));
-        auto const grant = GrantOf(Unwrap(whole.ReadAnswer()));
-        CHECK(grant.kind == Wire::GrantKind::Local);
-        CHECK(grant.chargedBytes == 8 * GiB);
-    }
-
-    SECTION("a client killed holding a grant gives the budget back")
-    {
-        auto session = Cc::OpenAdmitSession(endpoint, Cc::Credential {}, request("big-killed"), Cc::DefaultAdmitBudget());
-        auto const ticket = Unwrap(session->Await());
-        REQUIRE(ticket.chargedBytes == 6 * GiB);
-        REQUIRE(queue.service.AdmissionSnapshotNow().chargedBytes.size() == 1);
-        // `kill -9`: the connection ends, and no SETTLE was ever sent.
-        session.reset();
-
-        // A request that needs the whole budget fits only once that charge is gone; read bounded, so a
-        // release that never happened is a red case and not a hung one.
-        Client whole { port };
-        whole.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "whole-2"));
-        auto const grant = GrantOf(Unwrap(whole.ReadAnswer()));
-        CHECK(grant.kind == Wire::GrantKind::Local);
-        CHECK(grant.chargedBytes == 8 * GiB);
-        CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
-    }
+    // A request that needs the whole budget fits only once that charge is gone; read bounded, so a
+    // release that never happened is a red case and not a hung one.
+    auto const grant = machine.AskForAll("whole-2");
+    CHECK(grant.kind == Wire::GrantKind::Local);
+    CHECK(grant.chargedBytes == 8 * GiB);
+    CHECK(Count(machine.queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
 }
 
 TEST_CASE("FleetAdmission.node-stopped-behaves-as-today", "[node][admission][fleet]")
@@ -396,6 +456,9 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
     auto const port = queue.Serve();
     queue.Report(Budget, 64);
     World world { Budget };
+    world.leaderView = [&] {
+        return queue.service.AdmissionSnapshotNow();
+    };
     auto const endpoint = EndpointOf(port);
 
     // Forty keys whose measured peaks are 1..5 GiB, and one more that is larger than the machine.
@@ -417,14 +480,17 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
     CHECK(world.grants == Compiles);
     CHECK(world.spawns.load() == static_cast<int>(Compiles));
     CHECK(std::ranges::all_of(results, [](Launch const& one) { return one.code == 0 && one.failedOpen.empty(); }));
-    // The invariant: at every grant, what the grants held added up to no more than the budget, bar one
-    // that is estimated above the whole of it and so runs alone.
+    // The invariant, read two ways at every grant: what the launchers hold adds up to no more than the budget,
+    // and so does what the LEADER has charged -- bar the one grant estimated above the whole budget, which
+    // runs alone and which the leader must be charging by itself.
     CHECK(world.violations == 0);
+    CHECK(world.leaderViolations == 0);
     CHECK(world.ranAlone == 1);
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionRanAlone) == 1);
-    // The figures are not vacuous: the machine was loaded to a real fraction of its budget, and most of
-    // the forty had to wait their turn for it.
-    CHECK(world.peakInUse >= 5 * GiB);
-    CHECK(std::ranges::count_if(results, [](Launch const& one) { return one.waited >= 15ms; }) >= 10);
+    // Not vacuous. No single compile is above 5 GiB, so sharing the machine up to 6 GiB or more means at
+    // least two ran at once -- and the run-alone grant is not counted towards it. And the leader had
+    // requests waiting behind the ones it granted.
+    CHECK(world.peakShared >= 6 * GiB);
+    CHECK(world.maxDepth > 0);
     CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
 }
