@@ -561,13 +561,20 @@ class ThreadNotingDialer final: public IEndpointDialer
 class AnsweringDialer final: public IEndpointDialer
 {
   public:
+    /// @param replies What dial N is answered with; every dial past the list is answered `Ok`.
+    explicit AnsweringDialer(std::vector<std::vector<std::byte>> replies = {}):
+        _replies { std::move(replies) }
+    {
+    }
+
     /// @copydoc IEndpointDialer::Dial
     [[nodiscard]] std::unique_ptr<core::net::ISocket> Dial(std::string_view /*endpoint*/,
                                                            core::net::DialOptions /*options*/) override
     {
         std::scoped_lock const lock { _mutex };
-        _sockets.push_back(
-            std::make_unique<Testing::ScriptedSocket>(Wire::EncodeReply(Wire::Status::Ok, std::vector<std::byte> {})));
+        _sockets.push_back(std::make_unique<Testing::ScriptedSocket>(
+            _sockets.size() < _replies.size() ? _replies[_sockets.size()]
+                                              : Wire::EncodeReply(Wire::Status::Ok, std::vector<std::byte> {})));
         return std::make_unique<core::net::testing::SocketDecorator>(*_sockets.back());
     }
 
@@ -589,6 +596,7 @@ class AnsweringDialer final: public IEndpointDialer
 
   private:
     mutable std::mutex _mutex;
+    std::vector<std::vector<std::byte>> _replies;
     std::vector<std::unique_ptr<Testing::ScriptedSocket>> _sockets;
 };
 
@@ -740,4 +748,55 @@ TEST_CASE("A presence round reports the machine's compile budget, from a node ru
     // And the peak the worker measured rode it.
     REQUIRE(report.peaks.size() == 1);
     CHECK(report.peaks.front().second == (5ULL << 30));
+}
+
+TEST_CASE("A node with no advertised endpoint still reports its compile budget", "[node][presence][machinebudget]")
+{
+    // R6. An empty endpoint is a node that advertises nothing (a withheld name with a remote scheduler,
+    // on a non-worker): there is no presence row to file, so no presence dial -- and no failure to be
+    // told by, so nothing to skip the budget over. Exactly one dial, and it is the budget.
+    PresenceFixture fix;
+    fix.cfg.slots = 0;
+    Testing::ScriptedHostEvents events;
+    AnsweringDialer dialer;
+    Distributed::NodeCapacity const capacity { .logicalCores = 6, .totalMemoryBytes = 32ULL << 30 };
+    AnnouncedEndpoint const announced { "" };
+    REQUIRE(announced.Current().empty());
+    {
+        auto const presence = NodePresence::Start(PartsOver(fix, capacity, announced, dialer, events));
+        REQUIRE(presence != nullptr);
+        REQUIRE(Testing::WaitUntil(
+            "the budget dial",
+            [&dialer] { return dialer.Dials() >= 1; },
+            [&dialer] { return std::format("{} dial(s)", dialer.Dials()); }));
+    }
+    REQUIRE(dialer.Dials() == 1);
+    auto const frames = FramesIn(dialer.SentOn(0));
+    REQUIRE(frames.size() == 1);
+    CHECK(frames.front().first == static_cast<std::uint8_t>(Wire::Op::MachineBudget));
+}
+
+TEST_CASE("A presence the scheduler refuses does not keep the compile budget from it", "[node][presence][machinebudget]")
+{
+    // A refusal is an answer: the scheduler was REACHED, and the budget is its own question. Only a dial
+    // that found nobody -- the host-event case beside this one -- skips it.
+    PresenceFixture fix;
+    Testing::ScriptedHostEvents events;
+    AnsweringDialer dialer { { Wire::EncodeErrorReply(Wire::ErrorCode::NotAMember, "") } };
+    Distributed::NodeCapacity const capacity { .logicalCores = 6, .totalMemoryBytes = 32ULL << 30 };
+    AnnouncedEndpoint const announced { ThisMachine };
+    {
+        auto const presence = NodePresence::Start(PartsOver(fix, capacity, announced, dialer, events));
+        REQUIRE(presence != nullptr);
+        REQUIRE(Testing::WaitUntil(
+            "the presence dial and the budget dial",
+            [&dialer] { return dialer.Dials() >= 2; },
+            [&dialer] { return std::format("{} dial(s)", dialer.Dials()); }));
+    }
+    auto const first = FramesIn(dialer.SentOn(0));
+    REQUIRE(first.size() == 1);
+    CHECK(first.front().first == static_cast<std::uint8_t>(Wire::Op::NodeAnnounce));
+    auto const second = FramesIn(dialer.SentOn(1));
+    REQUIRE(second.size() == 1);
+    CHECK(second.front().first == static_cast<std::uint8_t>(Wire::Op::MachineBudget));
 }

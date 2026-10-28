@@ -46,6 +46,8 @@ namespace
 
         [[nodiscard]] AnnounceOutcome Attempt(core::net::ISocket& client, std::string_view endpoint) override
         {
+            // Reached: the dial connected and the proof held, so a scheduler is there to be asked.
+            _reached = true;
             auto sent = Cc::AnnounceNodePresence(client, _endpoint, _capacity, _load, _joinMemos);
             if (sent.has_value())
             {
@@ -85,6 +87,12 @@ namespace
             return AnnounceOutcome { .accepted = 0, .leader = sent.error().leader };
         }
 
+        /// @return Whether a scheduler was reached at all, whatever it answered.
+        [[nodiscard]] bool Reached() const noexcept
+        {
+            return _reached;
+        }
+
         /// @return Whether some scheduler recorded this machine, which is what says the history
         ///         batch was delivered.
         [[nodiscard]] bool Accepted() const noexcept
@@ -100,6 +108,7 @@ namespace
         ILogger& _logger;
         SchedulerReachability& _reachability;
         bool _accepted = false;
+        bool _reached = false;
     };
 } // namespace
 
@@ -141,6 +150,7 @@ bool AnnounceMachineOnce(PresenceRound const& round, SchedulerLink& link, IEndpo
             .prover = round.prover,
             .reachability = round.reachability,
             .joinMemos = memos,
+            .reachedScheduler = round.reachedScheduler,
         },
         link,
         dialer);
@@ -156,6 +166,8 @@ bool AnnouncePresence(PresenceMessage const& message, SchedulerLink& link, IEndp
                                         message.joinMemos, message.logger,   message.reachability };
     (void) DialAndAnnounce(
         link, message.reachability, dialer, message.logger, announcement, AnnounceProof { .prover = message.prover });
+    if (message.reachedScheduler != nullptr)
+        *message.reachedScheduler = announcement.Reached();
     return announcement.Accepted();
 }
 
@@ -227,28 +239,32 @@ void NodePresence::Loop(std::stop_token const& stop)
         // that for a worker; for a node running none it is legal and simply means there is no
         // address to file a row under, so the round is skipped rather than sent. Silent,
         // because it is a configuration this node started with rather than an event.
-        auto announced = false;
+        // True unless the presence dial ran and found nobody: an empty endpoint dials nothing, so there
+        // is no failure to be told by, and the budget still goes (R6).
+        auto reached = true;
         if (auto const endpoint = _announced.Current(); !endpoint.empty())
-            announced = AnnounceMachineOnce(PresenceRound { .loadSampler = *_loadSampler,
-                                                            .cacheTier = _cacheTier,
-                                                            .metrics = _metrics,
-                                                            .sampler = _sampler,
-                                                            .capacity = _capacityWire,
-                                                            .endpoint = endpoint,
-                                                            .logger = _logger,
-                                                            .conditions = _conditions,
-                                                            .prover = _prover,
-                                                            .reachability = _reachability,
-                                                            .askedJoins = _askedJoins },
-                                            _link,
-                                            _dialer);
+            (void) AnnounceMachineOnce(PresenceRound { .loadSampler = *_loadSampler,
+                                                       .cacheTier = _cacheTier,
+                                                       .metrics = _metrics,
+                                                       .sampler = _sampler,
+                                                       .capacity = _capacityWire,
+                                                       .endpoint = endpoint,
+                                                       .logger = _logger,
+                                                       .conditions = _conditions,
+                                                       .prover = _prover,
+                                                       .reachability = _reachability,
+                                                       .askedJoins = _askedJoins,
+                                                       .reachedScheduler = &reached },
+                                       _link,
+                                       _dialer);
 
         // The machine's compile budget, whether or not this node runs a worker (R6): this loop is the
-        // one that runs everywhere. Only in a round whose presence announcement reached a scheduler: a
-        // second dial at a scheduler that did not answer the first would only fail the same way, and the
-        // machine is not known to the leader until that announcement lands. Dialled on its own, so a
-        // refusal of one never costs the other.
-        if (announced)
+        // one that runs everywhere. Skipped ONLY when the presence dial failed to REACH a scheduler -- a
+        // transport or proof failure, which a second dial would meet the same way. A scheduler that
+        // refused the presence was reached, and the budget is its own question; and a node with no
+        // endpoint to announce has no failure to be told by. Dialled on its own, so a refusal of one
+        // never costs the other.
+        if (reached)
             (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
                                                               .capacity = _capacity,
                                                               .held = _held,

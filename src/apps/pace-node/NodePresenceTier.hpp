@@ -97,6 +97,9 @@ struct PresenceRound
     /// How loudly a scheduler that does not answer, or refuses, is said; the process's one.
     SchedulerReachability& reachability;
     Cluster::IAskedJoinsSource const* askedJoins; ///< The fleets it once asked; null where none are kept.
+    /// Set to whether the round REACHED a scheduler -- dialled, proved and was answered, a refusal
+    /// included -- rather than whether one recorded this machine. Null where the caller does not ask.
+    bool* reachedScheduler {};
 };
 
 /// Announce this machine once, and hand over the history it owes.
@@ -122,6 +125,8 @@ struct PresenceMessage
     /// How loudly a scheduler that does not answer, or refuses, is said; the process's one.
     SchedulerReachability& reachability;
     std::span<CompileCacheWire::JoinMemoFields const> joinMemos; ///< The fleets it once asked, as the wire carries them.
+    /// As `PresenceRound::reachedScheduler`.
+    bool* reachedScheduler {};
 };
 
 /// Make one presence announcement: dial, follow a redirect, and fall back.
