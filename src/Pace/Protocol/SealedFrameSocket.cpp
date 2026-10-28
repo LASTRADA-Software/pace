@@ -407,6 +407,11 @@ void SealedFrameSocket::setReceiveDeadline(std::chrono::milliseconds deadline) n
     _raw->setReceiveDeadline(deadline);
 }
 
+std::expected<void, core::net::NetError> SealedFrameSocket::armKeepAlive(core::net::KeepAliveSettings const& settings)
+{
+    return _raw->armKeepAlive(settings);
+}
+
 bool SealedFrameSocket::isClosed() const noexcept
 {
     return _raw->isClosed();

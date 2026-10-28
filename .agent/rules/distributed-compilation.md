@@ -4109,22 +4109,28 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   fifteen-second memo window, never one per compile. Where the queue DID answer and the launcher
   gives up on it anyway -- `MaxWorkerRefusals` worker refusals in a row -- the compile is asked for
   again `LocalOnly`, excluding that worker, and runs HERE charged, never in the open.
-- **A held admission DIAL carries TCP keepalive** (Ruling 18): the launcher's dial of its node
-  (`Cc::DefaultAdmitBudget`) and the node's relay to the leader (`Node::ForwardDialBudget`), per
-  dial as `wire-and-protocol.md` requires. The intervals are core-cpp's `KeepAliveSettings {}`, which
-  every `KeepAlive::Yes` dial applies -- a dial takes none of its own -- pinned by a `static_assert`
-  beside the budget (`Cc::AdmitKeepAliveProbe`): a peer whose host vanished is noticed in
-  `idle + count * interval` = **16 s** on Linux and macOS and **30 s** on Windows, where the OS fixes
-  the count at 10. What that bounds: the relay noticing a vanished LEADER (and failing its launcher
-  open, giving back its own held charge), and a launcher noticing a vanished node.
-  **What it does not bound yet is the leader's side.** The connection the leader HOLDS is an
-  ACCEPTED socket, and core-cpp arms keepalive on a dial only -- its accept paths apply
-  `KeepAlive::No` and `ISocket` offers no way to arm it afterwards -- so a caller host that vanished
-  without a FIN keeps its charge until the held connection's idle window, `MaxCompileLeaseLifetime`
-  (one hour), sweeps it. Closing that needs a core-cpp API that arms keepalive on an accepted
-  socket, re-pinned here; it is never worked around in `Transport/`. Tracked as
-  [#1736](https://github.com/LASTRADA-Software/pace/issues/1736), which waits on
-  contour-terminal/core-cpp#81.
+- **A held admission connection carries TCP keepalive at BOTH ends** (Ruling 18, #1736): the
+  launcher's dial of its node (`Cc::DefaultAdmitBudget`) and the node's relay to the leader
+  (`Node::ForwardDialBudget`) arm it per dial, as `wire-and-protocol.md` requires, and the leader arms
+  it on the ACCEPTED connection once that connection holds a grant, through core-cpp's
+  `ISocket::armKeepAlive` (v0.11.0). The intervals are core-cpp's `KeepAliveSettings {}`, which every
+  `KeepAlive::Yes` dial applies -- a dial takes none of its own -- and ONE constant names them for all
+  three, `Pace::AdmitKeepAliveProbe` (`Pace/Protocol/AdmitKeepAlive.hpp`), pinned by a `static_assert`:
+  a peer whose host vanished is noticed in `idle + count * interval` = **16 s** on Linux and macOS and
+  **30 s** on Windows, where the OS fixes the count at 10. That bounds the relay noticing a vanished
+  LEADER (failing its launcher open, giving back its own held charge), a launcher noticing a vanished
+  node, and the leader noticing a vanished caller -- whose Worker grant would otherwise hold another
+  machine's budget until `MaxCompileLeaseLifetime` (one hour) sweeps it, which stays as the backstop.
+  - **What arms is a COLUMN of what is held**, `IConnectionHold::KeepAlive()`, pure so a new hold
+    answers rather than inherits a silence; `FrameServer::ArmHeldKeepAlive` asks it on the loop thread
+    (which `armKeepAlive` requires) once a reply that left a hold is WRITTEN, and a queued request
+    that holds nothing is not armed. Once per CONNECTION (`ConnectionScope::NoteKeepAliveArmed`), so a
+    requeue on the same socket is not a second request. A failure to arm is a `Warn`, never a
+    refusal: the sweep is still there.
+  - **Every pace socket that wraps an `ISocket` forwards `armKeepAlive`** (`SealedFrameSocket`,
+    `TotalDeadlineSocket`, and the test fake `RelabelledPeerSocket`), or the call lands on the
+    interface default, `Unsupported` -- `SetReceiveDeadline`'s defect class, one rule higher. Each
+    has a case asserting the request reaches the socket under it.
 
 ## Open work
 
@@ -4174,10 +4180,6 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   it can be spawned and once for its banner, and the first is in a serial loop in
   front of the pool built to hide exactly that. `CompilerBanner` knows both facts
   and reports neither, so two callers reconstruct what it discarded.
-- **[#1736](https://github.com/LASTRADA-Software/pace/issues/1736)** — the leader does not arm TCP
-  keepalive on the admission connections it HOLDS (accepted sockets), which needs
-  contour-terminal/core-cpp#81; until then a vanished caller's Worker grant holds another
-  machine's budget for up to `MaxCompileLeaseLifetime` (one hour).
 - **[#1730](https://github.com/LASTRADA-Software/pace/issues/1730)** — one cache key is not
   deduplicated across machines that share a cache, so the same compile can be admitted twice.
 - **[#1731](https://github.com/LASTRADA-Software/pace/issues/1731)** — admission test gaps

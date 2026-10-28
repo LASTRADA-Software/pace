@@ -43,7 +43,10 @@
 #include <core/async/Task.hpp>
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/BlockingSocket.hpp>
+#include <core/net/IListener.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/KeepAlive.hpp>
+#include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/LeaseRosterFakes.hpp>
@@ -210,6 +213,97 @@ class Client
 
 inline constexpr std::uint64_t MiB = 1024ULL * 1024ULL;
 
+/// Every keepalive request the connections a leader accepted made of their sockets, in order.
+///
+/// Written on the reactor thread, read on the case's, so it is locked. The sockets forward the request
+/// to the real one beneath, which is what a node's own listener hands the endpoint.
+struct KeepAliveLedger
+{
+    /// @param settings One request that reached an accepted socket.
+    void Note(core::net::KeepAliveSettings const& settings)
+    {
+        auto const guard = std::scoped_lock { mutex };
+        requests.push_back(settings);
+    }
+
+    /// @return A copy of every request so far.
+    [[nodiscard]] std::vector<core::net::KeepAliveSettings> Requests() const
+    {
+        auto const guard = std::scoped_lock { mutex };
+        return requests;
+    }
+
+    mutable std::mutex mutex;
+    std::vector<core::net::KeepAliveSettings> requests;
+};
+
+/// Owns the socket a `core::net::testing::SocketDecorator` borrows, so the decorator below can be the
+/// object an accepting listener hands out. A base, so the socket exists before the decorator binds it.
+struct OwnedAcceptedSocket
+{
+    std::unique_ptr<core::net::ISocket> accepted; ///< The real accepted socket.
+};
+
+/// An accepted socket that notes each `armKeepAlive` it is asked for in a ledger, then forwards it.
+class KeepAliveNotingSocket final: private OwnedAcceptedSocket, public core::net::testing::SocketDecorator
+{
+  public:
+    /// @param inner The accepted socket (owned).
+    /// @param ledger Where requests are noted; must outlive this.
+    KeepAliveNotingSocket(std::unique_ptr<core::net::ISocket> inner, KeepAliveLedger& ledger):
+        OwnedAcceptedSocket { std::move(inner) },
+        SocketDecorator { *accepted },
+        _ledger { ledger }
+    {
+    }
+
+    [[nodiscard]] std::expected<void, core::net::NetError> armKeepAlive(
+        core::net::KeepAliveSettings const& settings) override
+    {
+        _ledger.Note(settings);
+        return SocketDecorator::armKeepAlive(settings);
+    }
+
+  private:
+    KeepAliveLedger& _ledger;
+};
+
+/// A listener whose accepted sockets note their keepalive requests (`KeepAliveNotingSocket`).
+class KeepAliveNotingListener final: public core::net::IListener
+{
+  public:
+    /// @param inner The bound listener (owned).
+    /// @param ledger Where requests are noted; must outlive this.
+    KeepAliveNotingListener(std::unique_ptr<core::net::IListener> inner, KeepAliveLedger& ledger):
+        _inner { std::move(inner) },
+        _ledger { ledger }
+    {
+    }
+
+    [[nodiscard]] core::async::Task<core::net::AcceptResult> accept() override
+    {
+        auto accepted = co_await _inner->accept();
+        if (!accepted.has_value())
+            co_return accepted;
+        co_return core::net::AcceptResult { std::make_unique<KeepAliveNotingSocket>(std::move(*accepted), _ledger) };
+    }
+
+    [[nodiscard]] std::uint16_t boundPort() const noexcept override
+    {
+        return _inner->boundPort();
+    }
+
+  protected:
+    void doClose() noexcept override
+    {
+        _inner->close();
+    }
+
+  private:
+    std::unique_ptr<core::net::IListener> _inner;
+    KeepAliveLedger& _ledger;
+};
+
 /// The leader, its queue, a loopback listener serving it, and the machine budget the cases report.
 struct Queue
 {
@@ -224,12 +318,14 @@ struct Queue
     /// Start serving on a fresh port.
     [[nodiscard]] std::uint16_t Serve()
     {
-        auto const port = FreePort();
-        NodeConfig cfg;
-        cfg.*RowFor(NodeSurface::Node).spec = std::format("127.0.0.1:{}", port);
-        auto started = FrameEndpoint::Start(*io, NodeSurface::Node, cfg, responder, metrics, logger);
-        REQUIRE(started.has_value());
-        endpoint = std::move(*started);
+        auto listened = core::net::listen(io->Reactor(), core::net::ListenOptions { .host = "127.0.0.1", .port = 0 });
+        REQUIRE(listened.has_value());
+        auto const port = (*listened)->boundPort();
+        auto listener = std::make_unique<KeepAliveNotingListener>(
+            std::unique_ptr<core::net::IListener> { std::move(*listened) }, keepAlives);
+        endpoint = FrameEndpoint::StartWithListener(
+            *io, NodeSurface::Node, std::move(listener), std::format("127.0.0.1:{}", port), responder, metrics, logger);
+        REQUIRE(endpoint != nullptr);
         io->Start();
         return port;
     }
@@ -305,6 +401,8 @@ struct Queue
     };
     SchedulerResponder responder { protocol, fold.admitted, metrics };
     HeldChargeRegistry held;
+    /// What the connections this leader accepted asked of their sockets, keepalive included (#1736).
+    KeepAliveLedger keepAlives;
     std::optional<AdmissionResponder> admission;
 
     /// Declared LAST so it is destroyed FIRST: the reactor goes before the responders its parked frames

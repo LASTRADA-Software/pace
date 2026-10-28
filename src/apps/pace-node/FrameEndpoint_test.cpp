@@ -5858,6 +5858,11 @@ class WindowedHold final: public IConnectionHold
         return _window;
     }
 
+    [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
+    {
+        return std::nullopt;
+    }
+
   private:
     std::chrono::milliseconds _window;
 };

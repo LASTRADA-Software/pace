@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <expected>
 #include <memory>
 #include <span>
 #include <string>
@@ -109,6 +110,16 @@ class TotalDeadlineSocket final: public core::net::ISocket
     void cancelRead() noexcept override
     {
         _inner->cancelRead();
+    }
+
+    /// Forwarded: a decorator that kept the interface default would answer `Unsupported` for a
+    /// socket that has a TCP connection under it.
+    /// @param settings The probe intervals.
+    /// @return What the inner socket answers.
+    [[nodiscard]] std::expected<void, core::net::NetError> armKeepAlive(
+        core::net::KeepAliveSettings const& settings) override
+    {
+        return _inner->armKeepAlive(settings);
     }
 
     [[nodiscard]] core::net::ResultAwaitable<void> shutdownWrite() override

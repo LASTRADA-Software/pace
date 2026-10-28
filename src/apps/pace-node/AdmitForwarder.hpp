@@ -108,7 +108,7 @@ struct ForwardDialBudget
     /// the relay holds that connection for as long as the launcher's compile runs, and a leader whose
     /// host vanished would otherwise hold this machine's launcher -- and this node's own held charge
     /// -- until the idle bound. A per-dial option, as the rulebook requires; the intervals are
-    /// core-cpp's (`Cc::AdmitKeepAliveProbe`).
+    /// core-cpp's (`Pace::AdmitKeepAliveProbe`).
     core::net::KeepAlive keepAlive { core::net::KeepAlive::Yes };
 };
 

@@ -5,6 +5,7 @@
 
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/AdmitKeepAlive.hpp>
 #include <Pace/Protocol/ConnectionScope.hpp>
 #include <Pace/Protocol/SealedFrameSocket.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
@@ -147,6 +148,15 @@ namespace
         [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
         {
             return HeldForTable[static_cast<std::size_t>(_held)].idleWindow;
+        }
+
+        /// @copydoc IConnectionHold::KeepAlive
+        ///
+        /// The same code path as the leader's own: the launcher's connection to THIS node is as long-lived,
+        /// and a launcher host that vanished would hold the leader's charge through this relay just the same.
+        [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
+        {
+            return AdmitKeepAliveProbe;
         }
 
         /// @return The connection to the leader.

@@ -32,6 +32,7 @@
 
 #include <core/async/Task.hpp>
 #include <core/net/IListener.hpp>
+#include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
 
 namespace Pace::Node
@@ -1190,6 +1191,32 @@ class FrameServer
     [[nodiscard]] static std::chrono::milliseconds IdleWindowFor(ConnectionScope const& scope) noexcept
     {
         return scope.HeldIdleWindow().value_or(HeaderTimeout);
+    }
+
+    /// Arm the kernel's keepalive on a connection that now HOLDS something, once (#1736).
+    ///
+    /// A held connection is the lease, and a peer whose host vanished never closes it -- the hour-long
+    /// `MaxCompileLeaseLifetime` sweep would be the only thing to notice. What a hold asks for is its own
+    /// (`IConnectionHold::KeepAlive`); once per CONNECTION, because a requeue replaces the hold on the same
+    /// socket. **A failure is not a refusal**: the request was answered and the sweep is still the
+    /// backstop, so it is said once at `Warn` and the connection is served on. Runs on the connection's own
+    /// loop thread, which `ISocket::armKeepAlive` requires.
+    /// @param scope The connection's scope.
+    /// @param socket The connection's socket.
+    /// @param logger Where a failure to arm is said.
+    /// @param what The surface's name, for that line.
+    static void ArmHeldKeepAlive(ConnectionScope& scope, core::net::ISocket& socket, ILogger& logger, std::string_view what)
+    {
+        auto const owed = scope.KeepAliveOwed();
+        if (!owed.has_value())
+            return;
+        scope.NoteKeepAliveArmed();
+        if (auto const armed = socket.armKeepAlive(*owed); !armed.has_value())
+            logger.Logf(LogLevel::Warn,
+                        "{}: could not arm keepalive on a held connection from {}: {}",
+                        what,
+                        socket.peerAddress(),
+                        armed.error().toString());
     }
 
     /// What one peer watch's single `WaitReadable` answered, read against whether the connection

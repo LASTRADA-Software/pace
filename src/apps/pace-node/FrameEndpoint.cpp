@@ -2620,6 +2620,10 @@ namespace
                 // itself busy after its last object has left.
                 reply.hold.reset();
 
+                // The reply is delivered; if it left the connection HOLDING something, the kernel
+                // now probes it (#1736), so a peer whose host vanishes is noticed in seconds.
+                FrameServer::ArmHeldKeepAlive(*scope, *socket, state->logger, state->what);
+
                 // **The watch is settled AFTER the reply, never before it**, and that
                 // ordering is the whole of it: `WriteAll` suspends -- an object is
                 // megabytes and a receive window is not -- so a peer can pipeline its

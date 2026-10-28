@@ -14,6 +14,7 @@
 #include <Pace/Distributed/SchedulerProtocol.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/AdmitKeepAlive.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/ConnectionScope.hpp>
 #include <Pace/Transport/NativeListen.hpp>
@@ -566,4 +567,69 @@ TEST_CASE("AdmissionResponder.worker-refused-after-demotion-answers-not-leader",
     client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
     CHECK(Pace::Testing::ErrorOf(Unwrap(client.ReadAnswer()).bytes) == Wire::ErrorCode::NotLeader);
     CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+}
+
+TEST_CASE("AdmissionResponder.a-granted-connection-is-armed-with-the-shared-keepalive", "[node][admission][keepalive]")
+{
+    // #1736: the connection is the lease, and a launcher whose host vanished never closes it. Once the
+    // connection HOLDS a grant the leader asks the kernel to probe it -- with the intervals the dials use.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.Report(1024 * MiB, 2);
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+
+    REQUIRE(WaitFor([&] { return queue.keepAlives.Requests().size() == 1; }));
+    auto const requests = queue.keepAlives.Requests();
+    CHECK(requests.front().idle == AdmitKeepAliveProbe.idle);
+    CHECK(requests.front().interval == AdmitKeepAliveProbe.interval);
+    CHECK(requests.front().count == AdmitKeepAliveProbe.count);
+}
+
+TEST_CASE("AdmissionResponder.a-queued-connection-is-not-armed-until-it-is-granted", "[node][admission][keepalive]")
+{
+    // A parked request holds nothing and is already bounded by the pulse; arming it would add probes to
+    // connections that may end first. No budget has been reported, so the request waits.
+    Queue queue;
+    auto const port = queue.Serve();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
+    REQUIRE(Count(queue, IMetricsSink::Counter::AdmissionQueued) == 1);
+    CHECK(queue.keepAlives.Requests().empty());
+
+    // The control: the same connection, once the machine can take it, IS armed.
+    queue.Report(1024 * MiB, 2);
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+    CHECK(WaitFor([&] { return queue.keepAlives.Requests().size() == 1; }));
+}
+
+TEST_CASE("AdmissionResponder.a-requeued-ticket-does-not-arm-keepalive-twice", "[node][admission][keepalive]")
+{
+    // Ruling 9: a worker's refusal puts the ticket back and the SAME connection waits on it again. The
+    // socket is armed once, at the first grant, and a second grant on it is not a second request.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.RegisterWorker(1);
+    queue.ReportWorker(1024 * MiB, 1);
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "ka"));
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+    REQUIRE(WaitFor([&] { return queue.keepAlives.Requests().size() == 1; }));
+
+    client.Send(SettleFrame(Wire::SettleOutcome::WorkerRefused));
+    REQUIRE(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+    client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "ka"));
+    queue.ReportWorker(1024 * MiB, 1);
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+
+    // The connection serves one frame at a time and arms right after a grant's reply is written, so a
+    // settle answered on it means any second arm would already be in the ledger.
+    client.Send(SettleFrame(Wire::SettleOutcome::Stored));
+    REQUIRE(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+    CHECK(queue.keepAlives.Requests().size() == 1);
 }

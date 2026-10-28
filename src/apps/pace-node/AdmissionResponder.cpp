@@ -2,6 +2,7 @@
 #include "AdmissionResponder.hpp"
 
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Protocol/AdmitKeepAlive.hpp>
 #include <Pace/Protocol/ConnectionScope.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
 
@@ -283,6 +284,13 @@ namespace
             return Wire::MaxCompileLeaseLifetime;
         }
 
+        /// @copydoc IConnectionHold::KeepAlive
+        /// The one probe every held admission connection carries, at either end of it.
+        [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
+        {
+            return AdmitKeepAliveProbe;
+        }
+
         /// @return The ticket this holds.
         [[nodiscard]] Distributed::Ticket Ticket() const noexcept
         {
@@ -350,6 +358,13 @@ namespace
         [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
         {
             return FrameServer::HeaderTimeout;
+        }
+
+        /// @copydoc IConnectionHold::KeepAlive
+        /// The one probe every held admission connection carries, at either end of it.
+        [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
+        {
+            return AdmitKeepAliveProbe;
         }
 
         /// @return The ticket this holds.

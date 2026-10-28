@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <core/async/StopToken.hpp>
+#include <core/net/KeepAlive.hpp>
 
 namespace Pace
 {
@@ -42,6 +43,14 @@ class IConnectionHold
     /// once and must not keep its place at the head for an hour behind a client that went quiet.
     /// @return The sweeper's window for the gap before the next request.
     [[nodiscard]] virtual std::chrono::milliseconds IdleWindow() const noexcept = 0;
+
+    /// The TCP keepalive the connection carries while this is held (#1736), as a COLUMN of what is held
+    /// rather than a rule of the endpoint: a connection that holds a charge for as long as a compiler
+    /// runs is one a vanished peer would otherwise hold until the sweep's hour, because nothing ever
+    /// arrives on it to say the host is gone. Pure, so a new hold answers it rather than inheriting a
+    /// silence.
+    /// @return The probe to arm; none for a hold whose connection is short or already bounded by its own pulse.
+    [[nodiscard]] virtual std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept = 0;
 };
 
 /// What one connection owns beyond its bytes: whether its peer has gone, and a hold a reply left on it.
@@ -159,6 +168,22 @@ class ConnectionScope
             _hold.reset();
     }
 
+    /// @return The probe the held connection is owed and has not yet been armed with: none without a
+    ///         hold, for a hold that asks for none, or once `NoteKeepAliveArmed` ran. Reactor thread only.
+    [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAliveOwed() const noexcept
+    {
+        if (_hold == nullptr || _keepAliveArmed)
+            return std::nullopt;
+        return _hold->KeepAlive();
+    }
+
+    /// Record that the connection was armed (or that arming was attempted and is not to be retried),
+    /// so a requeue that replaces the hold on the same connection does not arm a second time.
+    void NoteKeepAliveArmed() noexcept
+    {
+        _keepAliveArmed = true;
+    }
+
     /// The connection ended: release the hold.
     void End() noexcept
     {
@@ -169,6 +194,7 @@ class ConnectionScope
     core::async::StopSource _peerGone {};
     std::unique_ptr<IConnectionHold> _hold;
     bool _departureCounted { false }; ///< Reactor thread only, like the hold.
+    bool _keepAliveArmed { false };   ///< Reactor thread only: arming is once per CONNECTION, not per grant.
     bool _judgedByPulse { false };    ///< Reactor thread only: set by the responder, read by the pulse.
 };
 

@@ -650,6 +650,6 @@ TEST_CASE("AdmitSession.the-admission-dial-carries-keepalive", "[launcher][admis
     // it, so the dial asks the kernel to probe -- with core-cpp's intervals, pinned beside the budget.
     CHECK(Cc::DefaultAdmitBudget().keepAlive == core::net::KeepAlive::Yes);
     CHECK(Cc::DefaultAdmitBudget().total == std::chrono::milliseconds { 0 });
-    STATIC_CHECK(Cc::AdmitKeepAliveProbe.idle + Cc::AdmitKeepAliveProbe.interval * Cc::AdmitKeepAliveProbe.count
+    STATIC_CHECK(AdmitKeepAliveProbe.idle + AdmitKeepAliveProbe.interval * AdmitKeepAliveProbe.count
                  == std::chrono::seconds { 16 });
 }

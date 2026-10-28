@@ -480,3 +480,19 @@ TEST_CASE("A sealed end that goes away mid-frame gives back what it held", "[pro
     }
     CHECK(budget.held == 0);
 }
+
+TEST_CASE("A sealing layer forwards the keepalive request to the socket under it", "[protocol][seal][net]")
+{
+    // The interface default answers Unsupported, which a server reads as "this transport has no TCP
+    // connection": a layer that forgot to forward would turn every arm on a sealed surface into one.
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    auto const* const raw = pair.server.get();
+    SealedFrameSocket server { std::move(pair.server), SealedFrameEnd::Server, MaxPayload, nullptr };
+
+    auto const settings = core::net::KeepAliveSettings {};
+    REQUIRE(server.armKeepAlive(settings).has_value());
+    REQUIRE(raw->keepAliveRequests().size() == 1);
+    CHECK(raw->keepAliveRequests().front().idle == settings.idle);
+    CHECK(raw->keepAliveRequests().front().interval == settings.interval);
+    CHECK(raw->keepAliveRequests().front().count == settings.count);
+}
