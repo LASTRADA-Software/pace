@@ -449,6 +449,10 @@ struct InvocationRecord
     /// a claim about one. `TryRemoteCompile` overwrites it on every path out.
     Cc::DispatchOutcome dispatch = Cc::DispatchOutcome::Unknown;
 
+    /// How this invocation's FETCH ended; disengaged when it made none. What a later admission asks
+    /// before dialling the node the FETCH just learned is not there.
+    std::optional<Cc::CacheOutcomeKind> fetched;
+
     /// Fall-back reason. Empty on a hit; usually empty on a miss, but see
     /// `ReportCrossedReply` for the one miss that carries one.
     std::string outcomeDetail;
@@ -1137,23 +1141,30 @@ void ReplayStreams(std::string_view out, std::string_view err)
     ReplayVerbatim(err, stderr);
 }
 
-/// Run the real compiler with the given argv, streaming its combined output to
-/// our stdout, and return its exit code. Used for both fallback and miss when
-/// we do NOT need to capture (fallback) — the miss path uses RunCapture.
+/// Replay a plain compile's streams on this process's own and return its exit code.
 ///
-/// The notes are collapsed here too, and that is not belt-and-braces: the second caller is a
-/// fully PARSED compile that `RunCached` declined (a `__TIME__`, a drive-relative path, an
-/// over-size value, a dead daemon), which emits exactly the notes the cached path would have
-/// and fails the build the same way if one of them is over Ninja's limit.
+/// The notes are collapsed here too, and that is not belt-and-braces: one caller is a fully PARSED
+/// compile that `RunCached` declined (a `__TIME__`, a drive-relative path, an over-size value, a dead
+/// daemon), which emits exactly the notes the cached path would have and fails the build the same
+/// way if one of them is over Ninja's limit.
 ///
-/// @param argv    The compiler command line.
+/// @param run     The compile.
 /// @param grammar The grammar this driver's captured text carries.
 /// @param marker  The prefix this build's `/showIncludes` notes carry.
-[[nodiscard]] int RunPassthrough(std::span<std::string const> argv, PathCanon::Grammar grammar, std::string_view marker)
+/// @return The exit code, a spawn failure normalized to 1.
+[[nodiscard]] int ReplayPlainCompile(Cc::CompileRun const& run, PathCanon::Grammar grammar, std::string_view marker)
 {
-    auto const run = RunCaptureSplit(argv);
     ReplayStreams(Cc::CollapseNotePaths(run.out, grammar, marker), Cc::CollapseNotePaths(run.err, grammar, marker));
     return run.exitCode == Cc::NotSpawned ? 1 : run.exitCode;
+}
+
+/// Add one admission's wait to what the invocation has already recorded.
+/// @param total What is recorded; disengaged when no queue held this compile yet.
+/// @param more Another admission's wait; disengaged when none held it.
+void AddQueued(std::optional<std::uint64_t>& total, std::optional<std::uint64_t> more) noexcept
+{
+    if (more.has_value())
+        total = total.value_or(0) + *more;
 }
 
 /// Compile the translation unit again and compare it against the object a hit put
@@ -2498,6 +2509,15 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
     return served;
 }
 
+/// Where the fleet queue is asked: the scheduler when one is configured, else the cache's own node
+/// (whose merged `0xFC` surface forwards to the leader).
+/// @param cfg Launcher config.
+/// @return The `host:port`; empty when there is nothing to ask.
+[[nodiscard]] std::string_view AdmissionEndpoint(Config const& cfg) noexcept
+{
+    return cfg.schedulerAddr.empty() ? std::string_view { cfg.addr } : std::string_view { cfg.schedulerAddr };
+}
+
 /// What a dispatch settles before anybody is asked where it runs.
 ///
 /// Everything here is a fact about the command line and the toolchain, so it is decided ONCE and
@@ -2560,11 +2580,14 @@ struct DispatchPlan
     Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *memoFiles };
     core::platform::SystemWallClock const wallClock;
     auto memo = Cc::ReachabilityMemo::Load(memoStore);
-    if (memo.Remembers(Cc::MemoKind::SchedulerUnreached, cfg.schedulerAddr, wallClock.now()))
+    // The endpoint the QUEUE is asked at, which places the compile: the scheduler when one is named,
+    // else the cache's own node (Ruling 12).
+    auto const queueEndpoint = AdmissionEndpoint(cfg);
+    if (memo.Remembers(Cc::MemoKind::SchedulerUnreached, queueEndpoint, wallClock.now()))
         return DeclineDispatch(
             record,
             Cc::RememberedUnreachableRecording(),
-            std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, cfg.schedulerAddr));
+            std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, queueEndpoint));
 
     // The DISPATCH identity, which is not the cache key's -- and it is built on the
     // BANNER ALONE, deliberately, where the key also folds the target.
@@ -2954,15 +2977,6 @@ struct DispatchPlan
     return Cc::AdmittedDispatch { .run = std::move(run), .workerRefused = false };
 }
 
-/// Where the fleet queue is asked: the scheduler when one is configured, else the cache's own node
-/// (whose merged `0xFC` surface forwards to the leader).
-/// @param cfg Launcher config.
-/// @return The `host:port`; empty when there is nothing to ask.
-[[nodiscard]] std::string_view AdmissionEndpoint(Config const& cfg) noexcept
-{
-    return cfg.schedulerAddr.empty() ? std::string_view { cfg.addr } : std::string_view { cfg.schedulerAddr };
-}
-
 /// Open an admission for one compile, or decline to ask.
 ///
 /// **Declines before dialling whenever this invocation already learned the node is not there**, because
@@ -2985,10 +2999,7 @@ struct DispatchPlan
 {
     auto const endpoint = AdmissionEndpoint(cfg);
     core::platform::SystemWallClock const wallClock;
-    switch (Cc::DecideAsk(endpoint,
-                          cfg.addr,
-                          fetched,
-                          !endpoint.empty() && memo.Remembers(Cc::MemoKind::SchedulerUnreached, endpoint, wallClock.now())))
+    switch (Cc::DecideAskFrom(endpoint, cfg.addr, fetched, memo, wallClock.now()))
     {
         case Cc::AskVerdict::Ask:
             break;
@@ -3026,21 +3037,25 @@ void NoteAdmissionFailedOpen(InvocationRecord const& record,
     memo.SaveIfChanged(store);
 }
 
-/// Run one compile the cache will not hold -- a BMI, a precompiled header, `cl`'s shared PDB, a `/Yu`
-/// compile -- under the queue, so it takes a slot and its memory like every other compile on this host.
+/// Run one compile the cache will not hold under the queue, so it takes a slot and its memory like
+/// every other compile on this host: one that writes a second artefact (a BMI, a precompiled header,
+/// `cl`'s shared PDB, a `/Yu` compile) or is no compile at all, and one `RunCached` declined into a
+/// plain compile with NO STORE (Ruling 14).
 ///
 /// Admitted `LocalOnly` and not `storable` (nothing is stored, so nothing may be answered `Stored` or
-/// shared with a waiter), and it asks no cache: there was no FETCH to learn a node from, so a node
-/// nothing reached is remembered from the admission itself.
+/// shared with a waiter). It asks the node only what this invocation does not already know: a FETCH
+/// this invocation made (`InvocationRecord::fetched`) that the node did not serve, or a memo entry a
+/// FETCH a moment ago left (`Cc::RememberUnreachedFetch`), means no dial -- and a node nothing reached
+/// is remembered from the admission itself.
 /// @param record The invocation record.
 /// @param cfg Launcher config.
 /// @param cmd The parsed compile command.
 /// @param args The full invocation.
 /// @return The exit code.
-[[nodiscard]] int RunAdmittedPassthrough(InvocationRecord& record,
-                                         Config const& cfg,
-                                         Cc::ParsedCommand const& cmd,
-                                         std::span<std::string const> args)
+[[nodiscard]] int RunPassthrough(InvocationRecord& record,
+                                 Config const& cfg,
+                                 Cc::ParsedCommand const& cmd,
+                                 std::span<std::string const> args)
 {
     auto const files = Cc::MakeDiskFiles();
     Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *files };
@@ -3058,24 +3073,26 @@ void NoteAdmissionFailedOpen(InvocationRecord const& record,
                                      .acceptedCodecs = acceptedCodecs,
                                      .excluded = {} };
     Cc::MissSeams const seams {
-        .open = [&]() { return OpenAdmission(record, cfg, std::nullopt, admit, memo); },
-        .serveStored = []() -> std::optional<int> { return std::nullopt; },
+        // Whatever the flow asks -- a worker cannot have failed a compile no worker was granted -- the
+        // request stays the local-only one above.
+        .open = [&](std::optional<std::string_view>) { return OpenAdmission(record, cfg, record.fetched, admit, memo); },
+        // Nothing is stored, so nothing is ever answered `Stored`; a miss is what one would read as.
+        .serveStored = []() { return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 }; },
+        // Local-only: nothing a fleet refused.
+        .grantedLocal = [](Cc::AdmitTicket const&) {},
         .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
         .dispatchUnadmitted = []() -> std::optional<Cc::CompileRun> { return std::nullopt; },
         .compileLocal = [&]() { return RunCaptureSplit(args); },
-        .finish =
-            [&](Cc::CompileRun& run, bool&) {
-                auto const grammar = Cc::StreamGrammar(cmd.flavor);
-                ReplayStreams(Cc::CollapseNotePaths(run.out, grammar, cfg.showIncludesMarker),
-                              Cc::CollapseNotePaths(run.err, grammar, cfg.showIncludesMarker));
-                return run.exitCode == Cc::NotSpawned ? 1 : run.exitCode;
-            },
+        .finish = [&](Cc::CompileRun& run,
+                      bool&) { return ReplayPlainCompile(run, Cc::StreamGrammar(cmd.flavor), cfg.showIncludesMarker); },
         .failedOpen = [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, memo, memoStore, reason); },
     };
     auto const report = Cc::RunMiss(seams);
-    record.queuedMs = report.queuedMs;
+    // Added to what a cached path that declined into this one already recorded: one invocation, one sum.
+    AddQueued(record.queuedMs, report.queuedMs);
     record.peakMemoryBytes = report.peakMemoryBytes;
-    return report.code;
+    // A plain compile always ends in a code: nothing it asks can settle it as anything else.
+    return report.code.value_or(1);
 }
 
 /// How the FETCH step ended.
@@ -3272,7 +3289,10 @@ struct FetchStep
     // consumer that no longer existed. The paths it cannot re-derive: a worker sees
     // no `#include` at all, so the client writes the dependency record.
     std::vector<std::string> dispatchDependencies;
-    bool const dispatchConfigured = DispatchConfigured(cfg);
+    // Planned whenever there is a queue to ask, not only when a scheduler is named: the queue at the
+    // cache's own node places compiles on workers too (Ruling 12). Only today's LEASE path, which a
+    // launcher falls back to when no queue answers, still needs `PACE_SCHEDULER`.
+    bool const dispatchConfigured = !AdmissionEndpoint(cfg).empty();
 
     // What the probe learned about this compile's dependencies, carried past the
     // block the probe itself dies in.
@@ -3454,6 +3474,19 @@ struct FetchStep
         auto const outcome =
             CacheExchange(record, "fetch", cfg.addr, Wire::EncodeFetch(key), presented.credential, BudgetOf(cfg));
         fetchKind = outcome.kind;
+        record.fetched = fetchKind;
+        // A node nothing reached is told to the launchers after this one, whose compiles may make no
+        // FETCH to learn it from and would otherwise each dial the queue to be told the same thing.
+        if (outcome.kind == Cc::CacheOutcomeKind::Transport && Cc::MarksUnreachable(outcome.transportFailure))
+        {
+            auto const memoFiles = Cc::MakeDiskFiles();
+            Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *memoFiles };
+            core::platform::SystemWallClock const wallClock;
+            auto memo = Cc::ReachabilityMemo::Load(memoStore);
+            if (Cc::RememberUnreachedFetch(
+                    memo, AdmissionEndpoint(cfg), cfg.addr, outcome.kind, outcome.transportFailure, wallClock.now()))
+                memo.SaveIfChanged(memoStore);
+        }
         if (!Cc::CacheIsServing(fetchKind))
         {
             // Told apart, because an operator fixes them in different places. A
@@ -3852,18 +3885,45 @@ struct FetchStep
                                      .excluded = excludedWorkers };
 
     Cc::MissSeams const seams {
-        .open = [&]() { return OpenAdmission(record, cfg, fetchKind, admit, admitMemo); },
-        .serveStored = [&]() -> std::optional<int> {
-            auto const step = fetchStep();
-            return step.decided ? step.result : std::nullopt;
-        },
+        .open =
+            [&](std::optional<std::string_view> failedWorker) {
+                if (!failedWorker.has_value())
+                    return OpenAdmission(record, cfg, fetchKind, admit, admitMemo);
+                // A worker failed this compile: it runs HERE now, so it is asked for as a local compile, and
+                // the worker that failed it is excluded along with the ones the memo already names.
+                auto excludedAgain = excludedWorkers;
+                excludedAgain.push_back(*failedWorker);
+                auto here = admit;
+                here.kind = Wire::AdmitKind::LocalOnly;
+                here.excluded = excludedAgain;
+                return OpenAdmission(record, cfg, fetchKind, here, admitMemo);
+            },
+        .serveStored =
+            [&]() {
+                auto const step = fetchStep();
+                if (!step.decided)
+                    return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 };
+                return step.result.has_value()
+                           ? Cc::StoredFetch { .kind = Cc::StoredFetchKind::Served, .code = *step.result }
+                           : Cc::StoredFetch { .kind = Cc::StoredFetchKind::Declined, .code = 0 };
+            },
+        // A dispatchable request the fleet placed nowhere is recorded as the refusal the LEASE path
+        // records for the same fleet, in its words (Ruling 11).
+        .grantedLocal =
+            [&](Cc::AdmitTicket const& ticket) {
+                if (!plan.has_value())
+                    return;
+                if (auto const note = Cc::ExplainLocalGrant(ticket.localReason, plan->toolchainLabel); note.has_value())
+                    (void) DeclineDispatch(record, note->recording, note->line);
+            },
         .dispatchAdmitted = [&](Cc::AdmitTicket const& ticket) -> Cc::AdmittedDispatch {
             if (!plan.has_value())
                 return {};
             return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
         },
+        // Today's path when no queue answers: a LEASE, which needs a scheduler named.
         .dispatchUnadmitted = [&]() -> std::optional<Cc::CompileRun> {
-            if (!plan.has_value())
+            if (!plan.has_value() || !DispatchConfigured(cfg))
                 return std::nullopt;
             return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}).run;
         },
@@ -3875,6 +3935,8 @@ struct FetchStep
     auto const report = Cc::RunMiss(seams);
     record.queuedMs = report.queuedMs;
     record.peakMemoryBytes = report.peakMemoryBytes;
+    // Disengaged: the cache, asked again after a `Stored` grant, settled this as a plain compile with no
+    // STORE -- the same answer the first FETCH gives as `Warn`'s `nullopt`.
     return report.code;
 }
 
@@ -4090,15 +4152,14 @@ int main(int argc, char** argv)
                  "a clang-cl pass-through dependency flag (-clang:-MF) carries its value in a separate "
                  "argument, which the launcher cannot read; spell it fused (-clang:-MF<path>) to cache this compile");
         // A compile the cache will not hold is still a compile this host runs, so it queues like one.
-        return RunAdmittedPassthrough(record, cfg, cmd, std::span<std::string const> { args });
+        return RunPassthrough(record, cfg, cmd, std::span<std::string const> { args });
     }
 
     auto const started = std::chrono::steady_clock::now();
     auto const handled = RunCached(record, cfg, cmd, std::span<std::string const> { args });
+    // A compile the cache declined is a compile this host runs all the same, so it queues like one too.
     int const code =
-        handled.has_value()
-            ? *handled
-            : RunPassthrough(std::span<std::string const> { args }, Cc::StreamGrammar(cmd.flavor), cfg.showIncludesMarker);
+        handled.has_value() ? *handled : RunPassthrough(record, cfg, cmd, std::span<std::string const> { args });
 
     if (cfg.stats)
     {

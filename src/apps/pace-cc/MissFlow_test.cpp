@@ -101,7 +101,9 @@ class FakeSession final: public IAdmitSession
     std::string _name;
 };
 
-[[nodiscard]] AdmitTicket Grant(Wire::GrantKind kind, std::uint64_t queuedMs = 0)
+[[nodiscard]] AdmitTicket Grant(Wire::GrantKind kind,
+                                std::uint64_t queuedMs = 0,
+                                Wire::LocalGrantReason reason = Wire::LocalGrantReason::Asked)
 {
     return AdmitTicket { .kind = kind,
                          .endpoint = kind == Wire::GrantKind::Worker ? "worker:1" : "",
@@ -109,6 +111,9 @@ class FakeSession final: public IAdmitSession
                          .workerCodecs = {},
                          .chargedBytes = 1'000,
                          .queuedMs = queuedMs,
+                         .lifetime = {},
+                         .workerKey = {},
+                         .localReason = reason,
                          .receivedAt = {} };
 }
 
@@ -119,8 +124,13 @@ struct Harness
     /// One script per opening; an opening past the scripts yields no session.
     std::deque<std::deque<std::expected<AdmitTicket, std::string>>> openings;
     std::vector<FakeSession*> sessions; ///< The sessions handed out, while they live.
-    std::optional<int> storedFetch;     ///< What `serveStored` answers.
-    std::deque<bool> workerRefuses;     ///< Per admitted dispatch: whether the worker refuses.
+    /// What each `open` was asked about: the failed worker, or nothing for the request as described.
+    std::vector<std::optional<std::string>> asked;
+    /// What `serveStored` answers.
+    StoredFetch storedFetch { .kind = StoredFetchKind::Missed, .code = 0 };
+    /// The reason of every `Local` grant the launcher was told of, in order.
+    std::vector<Wire::LocalGrantReason> grantedLocal;
+    std::deque<bool> workerRefuses; ///< Per admitted dispatch: whether the worker refuses.
     std::optional<std::uint64_t> peak { 4'096 };
     bool stores { true };             ///< Whether the object reaches the cache.
     int compileExit { 0 };            ///< What the compiler said.
@@ -130,8 +140,9 @@ struct Harness
     [[nodiscard]] MissSeams Seams()
     {
         return MissSeams {
-            .open = [this]() -> std::unique_ptr<IAdmitSession> {
+            .open = [this](std::optional<std::string_view> failedWorker) -> std::unique_ptr<IAdmitSession> {
                 events.log.push_back("open");
+                asked.push_back(failedWorker.has_value() ? std::optional<std::string> { *failedWorker } : std::nullopt);
                 if (openings.empty())
                     return nullptr;
                 auto script = std::move(openings.front());
@@ -145,6 +156,11 @@ struct Harness
                 [this]() {
                     events.log.push_back("fetch");
                     return storedFetch;
+                },
+            .grantedLocal =
+                [this](AdmitTicket const& ticket) {
+                    events.log.push_back("granted-local");
+                    grantedLocal.push_back(ticket.localReason);
                 },
             .dispatchAdmitted =
                 [this](AdmitTicket const&) {
@@ -247,7 +263,7 @@ TEST_CASE("Launcher.local-grant-compiles-then-stores-then-settles", "[launcher][
     // The order is the assertion: the STORE is visible before the queue wakes the compiles waiting on
     // this key (R1), and the connection is held across the whole compile (the connection is the lease).
     CHECK(harness.events.log
-          == std::vector<std::string> { "open", "s0:await", "compile", "store", "s0:settle", "s0:closed" });
+          == std::vector<std::string> { "open", "s0:await", "granted-local", "compile", "store", "s0:settle", "s0:closed" });
 }
 
 TEST_CASE("Launcher.settle-carries-how-the-compile-ended-and-its-peak", "[launcher][admission]")
@@ -297,7 +313,7 @@ TEST_CASE("Launcher.stored-grant-fetches-and-skips-compile", "[launcher][admissi
 {
     Harness harness;
     harness.Open({ Grant(Wire::GrantKind::Stored, 300) });
-    harness.storedFetch = 0;
+    harness.storedFetch = StoredFetch { .kind = StoredFetchKind::Served, .code = 0 };
 
     auto const report = RunMiss(harness.Seams());
 
@@ -328,6 +344,56 @@ TEST_CASE("Launcher.stored-grant-miss-requeues-once", "[launcher][admission]")
     CHECK(harness.events.At("s0:closed") < harness.events.At("s1:await"));
     CHECK(harness.events.Saw("s1:settle"));
     CHECK_FALSE(harness.events.Saw("s0:settle"));
+}
+
+TEST_CASE("Launcher.queued-time-sums-every-admission-of-the-invocation", "[launcher][admission]")
+{
+    Harness harness;
+    std::optional<std::uint64_t> expected;
+
+    SECTION("a stored miss and the opening after it")
+    {
+        harness.Open({ Grant(Wire::GrantKind::Stored, 300) });
+        harness.Open({ Grant(Wire::GrantKind::Local, 750) });
+        expected = 1'050;
+    }
+    SECTION("a requeue on one connection is the leader's one measurement, never counted twice")
+    {
+        // The leader measures a requeued request from its first enqueue, so the later grant already
+        // holds the wait before it.
+        harness.Open({ Grant(Wire::GrantKind::Worker, 100), Grant(Wire::GrantKind::Worker, 400) });
+        harness.workerRefuses = { true, false };
+        expected = 400;
+    }
+    SECTION("a stored miss that then fails open keeps the wait it had")
+    {
+        harness.Open({ Grant(Wire::GrantKind::Stored, 300) });
+        harness.Open({ std::unexpected { std::string { "no leader" } } });
+        expected = 300;
+    }
+
+    auto const report = RunMiss(harness.Seams());
+
+    CHECK(report.queuedMs == expected);
+}
+
+TEST_CASE("Launcher.a-refetch-the-cache-settles-as-a-plain-compile-takes-that-path", "[launcher][admission]")
+{
+    // The FETCH after a `Stored` grant met a hit this machine cannot write: the cache decided, with no
+    // STORE. That is not a miss, so it is never asked about again; the caller takes today's plain path.
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Stored, 300) });
+    harness.Open({ Grant(Wire::GrantKind::Local) });
+    harness.storedFetch = StoredFetch { .kind = StoredFetchKind::Declined, .code = 0 };
+
+    auto const report = RunMiss(harness.Seams());
+
+    CHECK_FALSE(report.code.has_value());
+    CHECK(report.queuedMs == std::optional<std::uint64_t> { 300 });
+    CHECK(harness.events.Count("open") == 1);
+    CHECK(harness.events.Count("compile") == 0);
+    CHECK(harness.events.Count("dispatch-unadmitted") == 0);
+    CHECK(harness.events.Count("store") == 0);
 }
 
 TEST_CASE("Launcher.a-second-stored-miss-fails-open", "[launcher][admission]")
@@ -363,20 +429,111 @@ TEST_CASE("Launcher.worker-grant-dispatches-then-stores-then-settles", "[launche
     CHECK_FALSE(report.peakMemoryBytes.has_value());
 }
 
-TEST_CASE("Launcher.worker-grant-the-worker-did-not-run-compiles-here-holding-the-grant", "[launcher][admission]")
+TEST_CASE("Launcher.a-worker-that-failed-the-compile-gives-its-grant-back-and-asks-local-only", "[launcher][admission]")
 {
-    // An unreachable worker, a refused argument, a crossed reply: nothing a queue answers, so the
-    // compile runs here, as it always has -- and the grant is still held until it is stored.
+    // An unreachable worker, a failed dispatch preprocess, a discarded result: nothing a queue answers.
+    // The worker grant charged THAT machine, which is not running the compile, so the session closes --
+    // the leader abandons it -- and a local-only admission excluding that worker holds the compile here.
     Harness harness;
     harness.Open({ Grant(Wire::GrantKind::Worker) });
+    harness.Open({ Grant(Wire::GrantKind::Local) });
     harness.admittedDispatchDeclines = true;
 
     auto const report = RunMiss(harness.Seams());
 
     CHECK(report.code == 0);
     CHECK(harness.events.log
-          == std::vector<std::string> {
-              "open", "s0:await", "dispatch-admitted", "compile", "store", "s0:settle", "s0:closed" });
+          == std::vector<std::string> { "open",
+                                        "s0:await",
+                                        "dispatch-admitted",
+                                        "s0:closed",
+                                        "open",
+                                        "s1:await",
+                                        "compile",
+                                        "store",
+                                        "s1:settle",
+                                        "s1:closed" });
+    // The worker's grant is never settled: its end is the abandonment.
+    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    REQUIRE(harness.asked.size() == 2);
+    CHECK_FALSE(harness.asked[0].has_value());
+    CHECK(harness.asked[1] == std::optional<std::string> { "worker:1" });
+    // The second grant asked to run here, so it has no refusal to record.
+    CHECK(harness.grantedLocal.empty());
+}
+
+TEST_CASE("Launcher.a-worker-failure-with-no-local-grant-to-be-had-compiles-here-unadmitted", "[launcher][admission]")
+{
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Worker) });
+    harness.admittedDispatchDeclines = true;
+    std::size_t expectedOpens = 2;
+
+    SECTION("nothing to ask")
+    {
+        // No second script: the second opening yields no session.
+    }
+    SECTION("the second admission fails open")
+    {
+        harness.Open({ std::unexpected { std::string { "connection lost" } } });
+    }
+    SECTION("the second admission is answered stored and the object is not there")
+    {
+        harness.Open({ Grant(Wire::GrantKind::Stored) });
+    }
+
+    auto const report = RunMiss(harness.Seams());
+
+    CHECK(report.code == 0);
+    CHECK(harness.events.Count("open") == expectedOpens);
+    CHECK(harness.events.Count("compile") == 1);
+    // Never the fleet a second way: the worker's failure was this compile's dispatch.
+    CHECK(harness.events.Count("dispatch-unadmitted") == 0);
+    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    CHECK_FALSE(harness.events.Saw("s1:settle"));
+    // Every session ended before the compile ran outside it.
+    CHECK(harness.events.At("s0:closed") < harness.events.At("compile"));
+    if (harness.events.Saw("s1:closed"))
+        CHECK(harness.events.At("s1:closed") < harness.events.At("compile"));
+}
+
+TEST_CASE("Launcher.a-local-grant-is-told-to-the-launcher-before-the-compile", "[launcher][admission]")
+{
+    // Ruling 11: a dispatchable request the fleet placed nowhere is recorded as the fleet's refusal.
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Local, 0, Wire::LocalGrantReason::NoWorker) });
+
+    (void) RunMiss(harness.Seams());
+
+    CHECK(harness.grantedLocal == std::vector<Wire::LocalGrantReason> { Wire::LocalGrantReason::NoWorker });
+    CHECK(harness.events.At("granted-local") < harness.events.At("compile"));
+}
+
+TEST_CASE("Launcher.a-local-grant-reads-as-the-refusal-the-lease-path-records", "[launcher][admission]")
+{
+    // The wording `dist-compile-e2e` asserts, and the tally the lease path moves for the same fleet.
+    auto const noWorker = ExplainLocalGrant(Wire::LocalGrantReason::NoWorker, "gcc 14.2.0");
+    REQUIRE(noWorker.has_value());
+    CHECK(noWorker->line.starts_with("not dispatched (rejected (no-worker): no worker serves this toolchain (gcc 14.2.0)"));
+    CHECK(noWorker->line.ends_with("; compiling locally"));
+    CHECK(noWorker->recording.outcome == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).outcome);
+    CHECK(noWorker->recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).reason);
+
+    auto const excluded = ExplainLocalGrant(Wire::LocalGrantReason::AllExcluded, {});
+    REQUIRE(excluded.has_value());
+    CHECK(excluded->line.starts_with("not dispatched (rejected (no-worker): every worker serving this toolchain is"));
+    CHECK(excluded->recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).reason);
+
+    auto const busy = ExplainLocalGrant(Wire::LocalGrantReason::NoRoom, "clang 19");
+    REQUIRE(busy.has_value());
+    CHECK(busy->line.starts_with("not dispatched (rejected (no-capacity):"));
+    CHECK(busy->recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoCapacity).reason);
+    // Two different tallies: a fleet that is too small is not a fleet with nobody on the toolchain.
+    CHECK(busy->recording.reason != noWorker->recording.reason);
+
+    // A request that asked to run here was refused nothing.
+    CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::Asked, "gcc").has_value());
+    CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::Last, "gcc").has_value());
 }
 
 TEST_CASE("Launcher.worker-refusal-settles-and-requeues", "[launcher][admission]")
@@ -398,7 +555,7 @@ TEST_CASE("Launcher.worker-refusal-settles-and-requeues", "[launcher][admission]
     CHECK(harness.events.At("s0:requeue") < harness.events.At("store"));
 }
 
-TEST_CASE("Launcher.a-queue-that_never-converges-fails-open-after-a-bound", "[launcher][admission]")
+TEST_CASE("Launcher.a-queue-that-never-converges-fails-open-after-a-bound", "[launcher][admission]")
 {
     Harness harness;
     std::deque<std::expected<AdmitTicket, std::string>> grants;
@@ -481,6 +638,85 @@ TEST_CASE("Launcher.a-stopped-node-adds-no-admit-dial-after-a-failed-fetch", "[l
     CHECK(DecideAsk({}, node, CacheOutcomeKind::Miss, false) == AskVerdict::NoEndpoint);
 }
 
+namespace
+{
+/// A memo store kept in memory: what one launcher process writes, the next one reads.
+class MemoryMemoStore final: public IMemoStore
+{
+  public:
+    [[nodiscard]] std::optional<std::string> Read() const override
+    {
+        return _text;
+    }
+    bool Write(std::string_view text) override
+    {
+        _text = std::string { text };
+        return true;
+    }
+
+  private:
+    std::optional<std::string> _text;
+};
+} // namespace
+
+TEST_CASE("Launcher.a-passthrough-after-an-unreached-fetch-adds-no-admit-dial", "[launcher][admission]")
+{
+    // A stopped node must cost an uncacheable compile what it did before a queue existed. Such a
+    // compile makes no FETCH of its own, so what it knows is what the build's last FETCH left behind.
+    constexpr std::string_view node = "127.0.0.1:6674";
+    auto const now = std::chrono::system_clock::time_point { std::chrono::hours { 500'000 } };
+    MemoryMemoStore store;
+
+    // One launcher: its FETCH reached nothing at the node the queue is asked at.
+    auto fetching = ReachabilityMemo::Load(store);
+    auto noted = RememberUnreachedFetch(fetching, node, node, CacheOutcomeKind::Transport, TransportFailure::Unreached, now);
+    fetching.SaveIfChanged(store);
+
+    // The next one -- a fresh process -- runs a passthrough: no FETCH, only the memo.
+    auto const passthrough = ReachabilityMemo::Load(store);
+    std::size_t dials = 0;
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Local) });
+    auto seams = harness.Seams();
+    auto const dial = seams.open;
+    seams.open = [&](std::optional<std::string_view> failedWorker) -> std::unique_ptr<IAdmitSession> {
+        if (DecideAskFrom(node, node, std::nullopt, passthrough, now + std::chrono::seconds { 1 }) != AskVerdict::Ask)
+            return nullptr;
+        ++dials;
+        return dial(failedWorker);
+    };
+
+    auto const report = RunMiss(seams);
+
+    CHECK(noted);
+    CHECK(dials == 0);
+    CHECK(report.code == 0);
+    CHECK(harness.events.Count("compile") == 1);
+    CHECK_FALSE(report.queuedMs.has_value());
+}
+
+TEST_CASE("Launcher.only-a-fetch-that-reached-nothing-at-the-queue-endpoint-is-remembered", "[launcher][admission]")
+{
+    constexpr std::string_view node = "127.0.0.1:6674";
+    auto const now = std::chrono::system_clock::time_point { std::chrono::hours { 500'000 } };
+    auto const remembers = [&](std::string_view endpoint, CacheOutcomeKind kind, TransportFailure failure) {
+        auto memo = ReachabilityMemo::Parse({});
+        auto const noted = RememberUnreachedFetch(memo, endpoint, node, kind, failure, now);
+        CHECK(noted == memo.Remembers(MemoKind::SchedulerUnreached, endpoint, now));
+        return noted;
+    };
+
+    CHECK(remembers(node, CacheOutcomeKind::Transport, TransportFailure::Unreached));
+    // A peer that was reached is up, whatever then went wrong: the memo errs narrow.
+    CHECK_FALSE(remembers(node, CacheOutcomeKind::Transport, TransportFailure::PeerLost));
+    CHECK_FALSE(remembers(node, CacheOutcomeKind::Transport, TransportFailure::Expired));
+    CHECK_FALSE(remembers(node, CacheOutcomeKind::Rejected, TransportFailure::None));
+    CHECK_FALSE(remembers(node, CacheOutcomeKind::Miss, TransportFailure::None));
+    // A queue asked elsewhere learns nothing from this FETCH.
+    CHECK_FALSE(remembers("sched:6675", CacheOutcomeKind::Transport, TransportFailure::Unreached));
+    CHECK_FALSE(remembers({}, CacheOutcomeKind::Transport, TransportFailure::Unreached));
+}
+
 TEST_CASE("Launcher.tree-label-is-the-working-directory-under-the-source-root", "[launcher][admission]")
 {
     CHECK(TreeLabelOf("/work/src/build/debug", "/work/src") == "build/debug");
@@ -498,7 +734,8 @@ TEST_CASE("Launcher.tree-label-never-refuses-a-compile", "[launcher][admission]"
 {
     // R14: display only. Text the leader would refuse is replaced, never sent, truncated or repaired.
     CHECK(TreeLabelOf("/work/src/\xC3\x28", "/work/src") == UnnamedTreeLabel);
-    CHECK(TreeLabelOf("/work/src/build", "/work/\xFF") == UnnamedTreeLabel);
+    // A root that is not text names nothing to be relative to; the directory still names the tree.
+    CHECK(TreeLabelOf("/work/src/build", "/work/\xFF") == "/work/src/build");
     CHECK(TreeLabelOf("", "/work/src") == UnnamedTreeLabel);
     auto const tooLong = "/work/src/" + std::string(Wire::MaxAdmitTreeLabelBytes + 1, 'x');
     CHECK(TreeLabelOf(tooLong, "/work/src") == UnnamedTreeLabel);

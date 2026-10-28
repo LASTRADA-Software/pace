@@ -3,10 +3,15 @@
 
 #include "AdmitSession.hpp"
 #include "CacheProtocol.hpp"
+#include "Dispatch.hpp"
 #include "IProcessRunner.hpp"
+#include "ReachabilityMemo.hpp"
+#include "Stats.hpp"
 
+#include <Pace/Core/EnumTable.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -28,19 +33,42 @@ struct AdmittedDispatch
     bool workerRefused {};
 };
 
+/// How the FETCH a `Stored` grant sends again ended. Private: never stored or sent. `Last` is the count.
+enum class StoredFetchKind : std::uint8_t
+{
+    Served,   ///< The other compile's object was there, and was served: no compile.
+    Declined, ///< The cache settled the invocation as a plain compile with no STORE (`Warn`'s answer).
+    Missed,   ///< Not there after all: ask the queue again.
+    Last
+};
+
+/// What the FETCH a `Stored` grant sends again answered.
+struct StoredFetch
+{
+    StoredFetchKind kind {}; ///< How it ended.
+    int code {};             ///< The exit code of a `Served` hit; meaningless otherwise.
+};
+
 /// What `RunMiss` runs. Each member is one step of the miss path as `main.cpp` performs it, behind
 /// a callable so the whole sequence can be exercised against fakes -- `main.cpp` is in no test
 /// target, and this is the logic that decides where a compile runs and when the queue is told.
 ///
-/// Every member is required.
+/// Every member is required, except `failedOpen`, which says it is optional.
 struct MissSeams
 {
     /// Open an admission on the endpoint the queue is asked at. Null means none is to be asked:
     /// nothing is configured to ask, or this invocation already learned the node does not answer.
-    std::function<std::unique_ptr<IAdmitSession>()> open;
+    /// @param failedWorker Disengaged for the request as the compile was first described. Engaged
+    ///        after the worker a grant named FAILED the compile in a way no queue answers: the request
+    ///        is then `LocalOnly`, with that worker added to its exclusions, so the compile this machine
+    ///        now runs is charged here rather than to a worker that is not running it.
+    std::function<std::unique_ptr<IAdmitSession>(std::optional<std::string_view> failedWorker)> open;
     /// FETCH the key again after a `Stored` grant, and serve the hit if there is one.
-    /// @return The exit code when a hit was served; disengaged on a miss.
-    std::function<std::optional<int>()> serveStored;
+    /// @return How the FETCH ended.
+    std::function<StoredFetch()> serveStored;
+    /// Told of a `Local` grant before the compile runs under it, so a dispatchable request the fleet
+    /// placed nowhere is recorded as the fleet's refusal (`AdmitTicket::localReason`, Ruling 11).
+    std::function<void(AdmitTicket const& ticket)> grantedLocal;
     /// Dispatch to the worker an admission granted.
     std::function<AdmittedDispatch(AdmitTicket const&)> dispatchAdmitted;
     /// Today's dispatch with no admission: a `LEASE` at the scheduler, when one is configured.
@@ -61,8 +89,12 @@ struct MissSeams
 /// What `RunMiss` leaves for the statistics.
 struct MissReport
 {
-    int code {};                                  ///< The exit code.
-    std::optional<std::uint64_t> queuedMs;        ///< How long the queue held this compile; empty when none did.
+    /// The exit code; disengaged when the cache, asked again after a `Stored` grant, settled the
+    /// invocation as a plain compile with no STORE -- the caller then takes exactly that path.
+    std::optional<int> code;
+    /// How long the queue held this compile, every admission of this invocation summed; empty when
+    /// none did.
+    std::optional<std::uint64_t> queuedMs;
     std::optional<std::uint64_t> peakMemoryBytes; ///< What the compile measured, when it did.
 };
 
@@ -120,6 +152,97 @@ enum class AskVerdict : std::uint8_t
     return AskVerdict::Ask;
 }
 
+/// The `DecideAsk` a launcher puts to its own evidence: its FETCH, when it made one, and what the
+/// reachability memo says about @p endpoint now.
+/// @param endpoint Where the queue would be asked; empty when nowhere.
+/// @param cacheAddress Where the cache is, which the FETCH went to.
+/// @param fetched How this invocation's FETCH ended; disengaged when it made none.
+/// @param memo What recent launchers learned.
+/// @param now The current wall-clock time.
+/// @return Whether to ask, else the reason not to.
+[[nodiscard]] AskVerdict DecideAskFrom(std::string_view endpoint,
+                                       std::string_view cacheAddress,
+                                       std::optional<CacheOutcomeKind> fetched,
+                                       ReachabilityMemo const& memo,
+                                       std::chrono::system_clock::time_point now);
+
+/// Remember, for the launchers after this one, that this invocation's FETCH found no node at the
+/// endpoint the queue is asked at.
+///
+/// **What keeps a stopped node costing each later invocation of a build nothing**: an uncacheable
+/// compile makes no FETCH, so it has only the memo to ask, and without this entry it dials the queue
+/// -- a whole connect budget on Windows -- to learn what a FETCH a moment ago already learned. Narrow
+/// in exactly the memo's way: only `TransportFailure::Unreached`, a dial that made no connection, and
+/// only when the FETCH went to the endpoint the queue would be asked at.
+/// @param memo The memo to note it in.
+/// @param admissionEndpoint Where the queue is asked; empty when nowhere.
+/// @param cacheAddress Where the FETCH went.
+/// @param fetched How it ended.
+/// @param failure Which way, when it was a transport failure.
+/// @param now The current wall-clock time.
+/// @return Whether anything was noted.
+bool RememberUnreachedFetch(ReachabilityMemo& memo,
+                            std::string_view admissionEndpoint,
+                            std::string_view cacheAddress,
+                            CacheOutcomeKind fetched,
+                            TransportFailure failure,
+                            std::chrono::system_clock::time_point now);
+
+/// How a `Local` grant's reason reads on the dispatch axis: what the LEASE path records for the
+/// refusal the same fleet would have answered (Ruling 11), so `dist-compile-e2e`'s wording and the
+/// `--show-stats` tally are one fact whether or not a queue placed the compile.
+struct LocalGrantRow
+{
+    CompileCacheWire::LocalGrantReason reason; ///< The reason this row describes.
+    /// Whether there is anything to record: false only for `Asked`, which no refusal stands for.
+    bool records;
+    DeclineCause cause;               ///< The decline the lease path records for the same refusal.
+    CompileCacheWire::ErrorCode code; ///< The refusal it reads as, named in the line.
+    std::string_view sentence;        ///< What the line says, `{}` standing for the toolchain.
+};
+
+/// One row per `LocalGrantReason`.
+inline constexpr EnumTable<CompileCacheWire::LocalGrantReason, LocalGrantRow> LocalGrantTable { {
+    { .reason = CompileCacheWire::LocalGrantReason::Asked,
+      .records = false,
+      .cause = DeclineCause::NoToolchain,
+      .code = CompileCacheWire::ErrorCode::NoWorker,
+      .sentence = {} },
+    { .reason = CompileCacheWire::LocalGrantReason::NoWorker,
+      .records = true,
+      .cause = DeclineCause::NoToolchain,
+      .code = CompileCacheWire::ErrorCode::NoWorker,
+      .sentence = "no worker serves {}" },
+    // The lease path's `Excluded` row: the same code as `NoWorker`, its own sentence.
+    { .reason = CompileCacheWire::LocalGrantReason::AllExcluded,
+      .records = true,
+      .cause = DeclineCause::NoToolchain,
+      .code = CompileCacheWire::ErrorCode::NoWorker,
+      .sentence = "every worker serving {} is on this client's exclusion list" },
+    { .reason = CompileCacheWire::LocalGrantReason::NoRoom,
+      .records = true,
+      .cause = DeclineCause::NoCapacity,
+      .code = CompileCacheWire::ErrorCode::NoCapacity,
+      .sentence = "no worker serving {} had room for it, so the queue ran it here" },
+} };
+
+static_assert(RowsInEnumeratorOrder(LocalGrantTable, &LocalGrantRow::reason),
+              "LocalGrantTable must hold one row per LocalGrantReason, in enumerator order");
+
+/// What to record for a `Local` grant, and the line to say.
+struct LocalGrantNote
+{
+    DispatchRecording recording; ///< The dispatch axis's state and fixed tally reason.
+    std::string line;            ///< `not dispatched (rejected (<code>): ...); compiling locally`.
+};
+
+/// Explain a `Local` grant on the dispatch axis.
+/// @param reason Why the leader kept it here.
+/// @param toolchainLabel What a person calls the compiler; may be empty.
+/// @return What to record, or nothing for a request that asked to run here or a reason past the table.
+[[nodiscard]] std::optional<LocalGrantNote> ExplainLocalGrant(CompileCacheWire::LocalGrantReason reason,
+                                                              std::string_view toolchainLabel);
+
 /// What a tree is called when its name cannot be sent: not text the leader would accept.
 inline constexpr std::string_view UnnamedTreeLabel = "(unnamed tree)";
 
@@ -129,7 +252,8 @@ inline constexpr std::string_view UnnamedTreeLabel = "(unnamed tree)";
 /// Display only, so it can never cost a compile: a working directory that is not UTF-8 -- text a peer
 /// chose, which the leader refuses where it enters -- or that does not fit the wire's bound is named
 /// `UnnamedTreeLabel` rather than refused, truncated or repaired. A directory outside the source root is
-/// spelled whole.
+/// spelled whole, and so is one whose source root is not text: that root names nothing to be relative
+/// to, while the directory is still a name a person can read.
 /// @param workingDirectory Where the compile runs.
 /// @param sourceRoot The source root; may be empty.
 /// @return The label; never empty.
@@ -143,7 +267,12 @@ inline constexpr std::string_view UnnamedTreeLabel = "(unnamed tree)";
 ///   nobody;
 /// - on `Local` compiles here, on `Worker` dispatches to the granted worker (a refusal is
 ///   `Requeue`d on the SAME connection), and on `Stored` fetches: a hit is served, one miss opens the
-///   admission once more, and a second fails open;
+///   admission once more, a second fails open, and a FETCH the cache settles as a plain compile ends
+///   with no code, for the caller to take exactly that path;
+/// - when the granted worker fails the compile in a way no queue answers (unreachable, a failed
+///   dispatch preprocess, a result discarded), closes that admission -- the leader abandons it and the
+///   worker's charge is freed -- and asks again `LocalOnly` with that worker excluded, so the compile
+///   runs here under a grant of its own; only when none can be had does it compile here unadmitted;
 /// - holds the admission connection from the grant until the compile AND its STORE are done -- the
 ///   connection is the lease -- and then sends `SETTLE`, so the STORE is always visible before the
 ///   queue wakes the compiles waiting on it (R1).
