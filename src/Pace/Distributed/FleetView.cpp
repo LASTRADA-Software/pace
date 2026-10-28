@@ -1571,7 +1571,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += ':';
     if (snapshot.admission.has_value())
     {
-        out += std::format("{{\"depth\":{},\"clients\":", snapshot.admission->depth);
+        out += std::format(R"({{"depth":{},"clients":)", snapshot.admission->depth);
         AppendJsonRows(out, ClientColumns, snapshot.admission->clients);
         out += ",\"machines\":";
         AppendJsonRows(out, BudgetColumns, snapshot.admission->machines);

@@ -101,7 +101,7 @@ struct MachineBudgetRound
     IHeldCharges const& held;                  ///< What compiles on it hold: the sum of every holder.
     MeasuredPeaks& peaks;                      ///< Drained into the report; put back if nobody recorded it.
     ILogger& logger;                           ///< Where a refusal is named.
-    NodeProofClient const* prover;             ///< How this machine proves itself; null where nothing proves.
+    NodeProofClient const* prover = nullptr;   ///< How this machine proves itself; null where nothing proves.
     /// How loudly a scheduler that does not answer, or refuses, is said; the process's one.
     SchedulerReachability& reachability;
 };

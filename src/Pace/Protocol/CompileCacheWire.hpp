@@ -9551,7 +9551,7 @@ enum class AdmitKind : std::uint8_t
     Dispatchable = 0,
     /// Must run on the machine that asked.
     LocalOnly = 1,
-    Last
+    Last = 2
 };
 
 /// Where an admitted compile was granted. Explicit values: transmitted. `Last` is the count.
@@ -9563,7 +9563,7 @@ enum class GrantKind : std::uint8_t
     Local = 1,
     /// Another compile of the same key already stored the object.
     Stored = 2,
-    Last
+    Last = 3
 };
 
 /// Why a DISPATCHABLE request was granted `Local`: the fleet's answer to "why did this not go to a
@@ -9582,7 +9582,7 @@ enum class LocalGrantReason : std::uint8_t
     /// Workers serve it and none had room for it when the queue reached it -- full, unreported, or
     /// refused it as often as the queue allows.
     NoRoom = 3,
-    Last
+    Last = 4
 };
 
 /// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.
@@ -9597,7 +9597,7 @@ enum class SettleOutcome : std::uint8_t
     Failed = 2,
     /// The worker declined the job: the request is parked again at the head of the queue.
     WorkerRefused = 3,
-    Last
+    Last = 4
 };
 
 // --- admission: ADMIT, SETTLE and MACHINE-BUDGET (#1728) ---------------------
@@ -9624,7 +9624,7 @@ inline constexpr std::size_t MaxMachineBudgetPeaks = 64;
 inline constexpr std::size_t MaxMachineBudgetPeakBytes = MaxLeaseKeyBytes + MaxAdmitPathBytes + MaxToolchainFingerprintBytes
                                                          + (4 * WireFields::FieldPrefixSize) + sizeof(std::uint64_t);
 
-static_assert(MaxMachineBudgetPeaks * MaxMachineBudgetPeakBytes + 1024 <= MaxControlPayload,
+static_assert((MaxMachineBudgetPeaks * MaxMachineBudgetPeakBytes) + 1024 <= MaxControlPayload,
               "a full MACHINE-BUDGET report must fit the control payload ceiling its verb declares");
 
 /// One compile asking the leader to admit it, as the CLIENT builds it. May borrow.
@@ -9919,7 +9919,7 @@ inline constexpr std::size_t AdmitGrantFieldCount = 9;
     auto const peak = DecodeU64Field((*fields)[1]);
     if (!peak.has_value())
         return std::nullopt;
-    return SettleRequest { .outcome = *outcome, .peakBytes = *peak };
+    return SettleRequest { .outcome = *outcome, .peakBytes = peak };
 }
 
 /// Frame a MACHINE-BUDGET report.

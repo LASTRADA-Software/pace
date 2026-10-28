@@ -52,6 +52,11 @@ struct Placement
 class IPlacementSource
 {
   public:
+    IPlacementSource() = default;
+    IPlacementSource(IPlacementSource const&) = delete;
+    IPlacementSource& operator=(IPlacementSource const&) = delete;
+    IPlacementSource(IPlacementSource&&) = delete;
+    IPlacementSource& operator=(IPlacementSource&&) = delete;
     virtual ~IPlacementSource() = default;
 
     /// @param fingerprint The toolchain to run.
@@ -255,6 +260,11 @@ class AdmissionQueue
     /// @param ledger The machine's ledger.
     /// @return Bytes in use.
     [[nodiscard]] static std::uint64_t InUseBytes(Ledger const& ledger) noexcept;
+
+    /// The memory a machine states it may be charged.
+    /// @param ledger The machine's ledger.
+    /// @return Its reported budget, or zero while it has reported none.
+    [[nodiscard]] static std::uint64_t BudgetOf(Ledger const& ledger) noexcept;
 
     /// @param machine A machine that has reported.
     /// @param hold What earlier entries of this pump reserved there.

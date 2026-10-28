@@ -166,7 +166,7 @@ class ConnectionScope
     }
 
   private:
-    core::async::StopSource _peerGone;
+    core::async::StopSource _peerGone {};
     std::unique_ptr<IConnectionHold> _hold;
     bool _departureCounted { false }; ///< Reactor thread only, like the hold.
     bool _judgedByPulse { false };    ///< Reactor thread only: set by the responder, read by the pulse.

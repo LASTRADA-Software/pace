@@ -194,6 +194,7 @@ void AdmissionQueue::Abandon(Ticket ticket)
 std::vector<Ticket> AdmissionQueue::LoseLeadership()
 {
     std::vector<Ticket> parked;
+    parked.reserve(_queue.size() + _stored.size());
     for (auto const& entry: _queue)
         parked.push_back(entry.ticket);
     for (auto const& decision: _stored)
@@ -218,9 +219,16 @@ std::uint64_t AdmissionQueue::InUseBytes(Ledger const& ledger) noexcept
     return std::max(ledger.chargedBytes, ledger.report.has_value() ? ledger.report->heldBytes : std::uint64_t {});
 }
 
+std::uint64_t AdmissionQueue::BudgetOf(Ledger const& ledger) noexcept
+{
+    return ledger.report.has_value() ? ledger.report->memoryBudgetBytes : std::uint64_t {};
+}
+
 AdmissionQueue::Room AdmissionQueue::RoomOn(MachineId const& machine, Reserved const& hold) const
 {
     auto const& ledger = _ledgers.at(machine);
+    if (!ledger.report.has_value())
+        return Room {}; // unreported: nothing may be placed here
     auto const& report = *ledger.report;
     Room room;
     room.usedBytes = InUseBytes(ledger);
@@ -309,7 +317,7 @@ std::vector<Decision> AdmissionQueue::Pump()
                 .kind = granted->placement.has_value() ? GrantKind::Worker : GrantKind::Local,
                 .placement = granted->placement,
                 .chargedBytes = chargedBytes,
-                .ranAlone = chargedBytes > ledger.report->memoryBudgetBytes,
+                .ranAlone = chargedBytes > BudgetOf(ledger),
             });
             continue;
         }
@@ -326,9 +334,9 @@ std::vector<Decision> AdmissionQueue::Pump()
                 continue;
             auto& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
-            auto const budget = _ledgers.at(target.machine).report->memoryBudgetBytes;
+            auto const budget = BudgetOf(_ledgers.at(target.machine));
             auto const alone = entry.chargedBytes > budget;
-            hold.bytes += std::min(std::min(entry.chargedBytes, budget), room.freeBytes);
+            hold.bytes += std::min({ entry.chargedBytes, budget, room.freeBytes });
             hold.slots += alone ? room.freeSlots : std::min<std::uint32_t>(1, room.freeSlots);
         }
         remaining.push_back(std::move(entry));
