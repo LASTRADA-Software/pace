@@ -517,8 +517,10 @@ reason it refuses `LEASE`, and a node that runs no consensus the same.
 ```
 ADMIT           [0xFC][ver][0x22][u32 len]  payload: [kind][fingerprint][cacheKey][sourcePath]
                                                     [treeLabel][storable][codecs][exclusions]
+                                                    [toolchainLabel]
   reply Ok:                                         [kind][endpoint][leaseToken][codecs]
                                                     [u64 chargedBytes][u64 queuedMs]
+                                                    [u32 lifetime][workerKey][reason][dialHint]
 SETTLE          [0xFC][ver][0x23][u32 len]  payload: [outcome][peakBytes]
   reply Ok:                                         empty
 MACHINE-BUDGET  [0xFC][ver][0x24][u32 len]  payload: [u64 memoryBudget][u32 slots][u32 heldSlots]
@@ -534,12 +536,30 @@ idle bound. `kind` is one byte, `0` dispatchable or `1` local-only (it must run 
 that asked); `storable` is `0` or `1`; `codecs` and `exclusions` are the lists `LEASE` carries.
 `cacheKey` is at most 64 bytes, `fingerprint` at most 64, `sourcePath` (root-relative) at most 512
 and `treeLabel` at most 256; a field over its cap is refused `malformed-frame`, never truncated.
+`toolchainLabel` is what a person calls the toolchain (`cl 19.44.35207`), as `LEASE` carries it:
+display only, empty when the client did not say, and -- like `treeLabel` -- refused unless it is
+UTF-8, because the leader keeps it and the fleet page renders it.
 
-The grant's `kind` is `0` a worker (`endpoint` and `leaseToken` name it), `1` the machine that
-asked, or `2` stored -- another compile of the same key finished and stored the object, so the
-client fetches it. `chargedBytes` is the memory estimate charged for the admission and `queuedMs`
-how long it waited. Every byte is pinned: an `AdmitKind`, `GrantKind` or `SettleOutcome` past its
-last value is refused.
+The grant is exactly ten fields. Its `kind` is `0` a worker (`endpoint` and `leaseToken` name
+it), `1` the machine that asked, or `2` stored -- another compile of the same key finished and
+stored the object, so the client fetches it. `chargedBytes` is the memory estimate charged for the
+admission and `queuedMs` how long the request waited since it was enqueued. The last four are a
+worker grant's, empty or zero otherwise, and are what a `LEASE` grant carries for the same reasons:
+`lifetime` is how long the token lives from when the client receives it, in milliseconds;
+`workerKey` the named worker's identity key (empty, or exactly a key's width), which the compile
+reply must be sealed under; and `dialHint` where the worker was last seen, at most as long as an
+endpoint, dialled before `endpoint` and never signed -- the token signs `endpoint`, so a stale hint
+is refused `lease-endpoint-mismatch` by whatever answers there. `reason` is one byte saying why a
+dispatchable request was granted the machine that asked: `0` it asked to (every other grant
+says this), `1` no worker serves its toolchain, `2` every worker that does was excluded, `3` none
+had room. Every byte is pinned: an `AdmitKind`, `GrantKind`, `LocalGrantReason` or `SettleOutcome`
+past its last value is refused.
+
+Two machines that missed the same key are each granted a worker: the leader files a worker
+grant's lease under the admission, never under the cache key, so no admission is refused
+`already-in-flight`. A second request for a key already being compiled waits for that compile only
+where its result can be fetched -- a storable compile asked for by the same machine -- and is then
+answered `2` stored.
 
 `SETTLE` tells the leader how an admitted compile ended, **on the connection that admitted it** --
 the charge is scoped to the connection, so it carries no lease token, and the leader releases

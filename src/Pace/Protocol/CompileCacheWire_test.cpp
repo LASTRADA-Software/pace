@@ -6083,7 +6083,8 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
                                    .queuedMs = 0x0000'0000'0000'1F40ULL,
                                    .lifetime = std::chrono::milliseconds { 0x0001'D4C0 },
                                    .workerKey = workerKey,
-                                   .reason = LocalGrantReason::Asked };
+                                   .reason = LocalGrantReason::Asked,
+                                   .dialHint = "192.168.4.7:6676" };
     // The encoder and the decoder share one arity.
     CHECK(Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent))).size() == AdmitGrantFieldCount);
     auto const back = DecodeAdmitGrant(EncodeAdmitGrant(sent));
@@ -6097,7 +6098,8 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
                                 .queuedMs = 0x0000'0000'0000'1F40ULL,
                                 .lifetime = std::chrono::milliseconds { 0x0001'D4C0 },
                                 .workerKey = workerKey,
-                                .reason = LocalGrantReason::Asked });
+                                .reason = LocalGrantReason::Asked,
+                                .dialHint = "192.168.4.7:6676" });
 
     SECTION("a local and a stored grant carry no endpoint")
     {
@@ -6111,11 +6113,13 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
                                                                              .queuedMs = 6,
                                                                              .lifetime = {},
                                                                              .workerKey = {},
-                                                                             .reason = LocalGrantReason::Asked }));
+                                                                             .reason = LocalGrantReason::Asked,
+                                                                             .dialHint = {} }));
             REQUIRE(bare.has_value());
             CHECK(Unwrap(bare).kind == kind);
             CHECK(Unwrap(bare).endpoint.empty());
             CHECK(Unwrap(bare).workerKey.empty());
+            CHECK(Unwrap(bare).dialHint.empty());
         }
     }
     SECTION("a local grant says why a dispatchable request did not go to a worker")
@@ -6130,17 +6134,33 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
                                                                               .queuedMs = 6,
                                                                               .lifetime = {},
                                                                               .workerKey = {},
-                                                                              .reason = reason }));
+                                                                              .reason = reason,
+                                                                              .dialHint = {} }));
             REQUIRE(local.has_value());
             CHECK(Unwrap(local).reason == reason);
         }
     }
     SECTION("a reason past the last enumerator is refused")
     {
-        auto payload = EncodeAdmitGrant(sent);
-        // The reason is the last field, `[u32 length=1][reason]`, so it is the final byte.
-        payload.back() = static_cast<std::byte>(LocalGrantReason::Last);
-        CHECK_FALSE(DecodeAdmitGrant(payload).has_value());
+        auto const encoded = EncodeAdmitGrant(sent);
+        auto const fields = Unwrap(WireFields::SplitAll(encoded));
+        std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
+        auto const past = std::array { static_cast<std::byte>(LocalGrantReason::Last) };
+        parts[8] = past;
+        CHECK_FALSE(DecodeAdmitGrant(WireFields::Encode(WireFields::FieldList { parts })).has_value());
+    }
+    SECTION("a dial hint longer than an endpoint may be is refused")
+    {
+        // The client DIALS it, so it is held to the endpoint's own cap.
+        auto const encoded = EncodeAdmitGrant(sent);
+        auto const fields = Unwrap(WireFields::SplitAll(encoded));
+        std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
+        auto const atCap = std::vector<std::byte>(MaxEndpointBytes, std::byte { 'h' });
+        parts[9] = atCap;
+        CHECK(DecodeAdmitGrant(WireFields::Encode(WireFields::FieldList { parts })).has_value());
+        auto const over = std::vector<std::byte>(MaxEndpointBytes + 1, std::byte { 'h' });
+        parts[9] = over;
+        CHECK_FALSE(DecodeAdmitGrant(WireFields::Encode(WireFields::FieldList { parts })).has_value());
     }
     SECTION("a worker key of any width but a key's is refused")
     {
@@ -6309,7 +6329,8 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
                                                                .queuedMs = 2,
                                                                .lifetime = std::chrono::milliseconds { 3 },
                                                                .workerKey = {},
-                                                               .reason = LocalGrantReason::Asked }));
+                                                               .reason = LocalGrantReason::Asked,
+                                                               .dialHint = "a-dial-hint-over-the-sso-buffer.test:6676" }));
         auto report =
             MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} };
         report.peaks.emplace_back(EstimateKeyFields { .cacheKey = std::string { LongKey },
@@ -6328,6 +6349,7 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
     CHECK(Unwrap(admit).cacheKey == LongKey);
     CHECK(Unwrap(admit).excluded == std::vector<std::string> { "a-worker-endpoint.example.test:6676" });
     CHECK(Unwrap(grant).leaseToken == "a-lease-token-over-the-sso-buffer");
+    CHECK(Unwrap(grant).dialHint == "a-dial-hint-over-the-sso-buffer.test:6676");
     CHECK(Unwrap(budget).peaks.at(0).first.sourcePath == LongPath);
     CHECK(Unwrap(budget).peaks.at(0).first.cacheKey == LongKey);
 }

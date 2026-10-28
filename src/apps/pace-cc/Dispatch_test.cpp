@@ -2583,10 +2583,12 @@ namespace
 /// @param receivedAt When this side received it.
 /// @param workerKey What the grant relays as its worker's key; the test worker's by default.
 /// @param lifetime What the grant relays as the lease's lifetime.
+/// @param dialHint Where the grant says the worker was last seen; empty for none.
 /// @return The ticket.
 [[nodiscard]] AdmitTicket AdmittedTo(core::platform::SteadyTimePoint receivedAt,
                                      std::span<std::byte const> workerKey = Testing::TestWorkerPublicKey(),
-                                     std::chrono::milliseconds lifetime = Wire::DefaultCompileLeaseTimeout)
+                                     std::chrono::milliseconds lifetime = Wire::DefaultCompileLeaseTimeout,
+                                     std::string_view dialHint = {})
 {
     static auto const signer = Testing::TestLeaseSigner("scheduler");
     auto const token = Distributed::MintLeaseToken(
@@ -2609,6 +2611,7 @@ namespace
                          .lifetime = lifetime,
                          .workerKey = { workerKey.begin(), workerKey.end() },
                          .localReason = Wire::LocalGrantReason::Asked,
+                         .dialHint = std::string { dialHint },
                          .receivedAt = receivedAt };
 }
 
@@ -2643,6 +2646,34 @@ TEST_CASE("Dispatch.worker-grant-dispatches-without-lease-leg", "[dispatch][admi
     auto const ops = OpsTo(fleet, Worker);
     REQUIRE(ops.size() == 1);
     CHECK(ops[0] == Wire::Op::Compile);
+}
+
+TEST_CASE("Dispatch.worker-grant-dials-the-hint-the-queue-relayed", "[dispatch][admission][dialhint]")
+{
+    // A worker reachable ONLY where it was last seen -- its advertised name answers nothing, as a
+    // laptop's corporate DNS name does off the VPN -- compiles an admitted job exactly as it compiles a
+    // leased one: the admission grant carries the lease grant's hint, and the launcher dials it first.
+    std::vector<std::string> const args { "-O2" };
+    auto const request = Request(args);
+    core::platform::ManualClock clock;
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Hint }, CompileReply(request, "OBJECTBYTES"));
+
+    auto const result =
+        Dispatch(fleet,
+                 request,
+                 AdmittedTo(clock.now(), Testing::TestWorkerPublicKey(), Wire::DefaultCompileLeaseTimeout, Hint),
+                 {},
+                 {},
+                 {},
+                 &clock);
+
+    REQUIRE(result.Ran());
+    CHECK(result.dialledEndpoint == Hint);
+    CHECK(result.workerEndpoint == Worker); // WHICH worker, by the name the token signs
+    REQUIRE(fleet.Dialled().size() == 1);
+    CHECK(fleet.Dialled()[0] == Hint);
+    CHECK(fleet.Budgets()[0].connect == HintConnectBudget);
 }
 
 TEST_CASE("Dispatch.worker-grant-states-what-the-queue-charged-on-the-compile", "[dispatch][admission]")

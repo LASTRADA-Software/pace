@@ -842,7 +842,8 @@ TEST_CASE("AdmitForwarder.the-largest-grant-fits-the-relay-ceiling", "[node][adm
                                                   .queuedMs = ~std::uint64_t { 0 },
                                                   .lifetime = std::chrono::milliseconds { ~std::uint32_t { 0 } },
                                                   .workerKey = Wire::AsBytes(std::string_view { workerKeyBytes }),
-                                                  .reason = Wire::LocalGrantReason::Asked });
+                                                  .reason = Wire::LocalGrantReason::Asked,
+                                                  .dialHint = {} });
     CAPTURE(grant.size());
     // An eighth of the ceiling: room for every id to grow eightfold before the relay could refuse one.
     CHECK(grant.size() < MaxForwardReplyBytes / 8);

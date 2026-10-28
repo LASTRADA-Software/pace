@@ -120,6 +120,7 @@ class FakeSession final: public IAdmitSession
                          .lifetime = {},
                          .workerKey = {},
                          .localReason = reason,
+                         .dialHint = {},
                          .receivedAt = {} };
 }
 

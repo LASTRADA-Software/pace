@@ -4,12 +4,14 @@
 // Kept in its own translation unit because it is a feature beside the lease verbs and not a part of
 // them -- the lease path above this stays the one it was.
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/DialHint.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <string>
 #include <utility>
@@ -32,6 +34,18 @@ namespace
         for (auto const byte: key)
             out.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
         return out;
+    }
+
+    /// The name an admission's worker lease is filed under in the lease table (Ruling 17).
+    ///
+    /// One per TICKET, so two admissions never contend for one entry: deduplication is the queue's
+    /// decision, taken only where a waiter can fetch the result. Spelled with spaces, which no object
+    /// key holds, so it cannot collide with a `Lease` verb's entry for a real key.
+    /// @param ticket The admission.
+    /// @return The lease table's key for it.
+    [[nodiscard]] std::string AdmissionLeaseKey(Ticket ticket)
+    {
+        return std::format("admission ticket {}", ticket);
     }
 
     /// What a `Local` grant of a dispatchable request tells the LEADER's own operator, beside what it
@@ -177,15 +191,29 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                 // yet, and nobody refused it. The caller puts it back at the front; a `NoWorker` here
                 // would send a request the queue still had room for to a client told to give up.
                 return std::nullopt;
-            auto const lease = _leases.Acquire(held.cacheKey, worker->id, AgreedLeaseLifetime());
+            // Keyed by the TICKET, never by the cache key (Ruling 17). Deduplication is the QUEUE's, and
+            // only where a waiter can fetch the result (`SharesCache`); two machines that missed the same
+            // key without sharing a cache must BOTH compile, and a lease table keyed by the cache key
+            // refused the second `AlreadyInFlight` -- which its launcher read as "compile here", with
+            // nothing charged. A ticket is unique on this leader, so this `Acquire` cannot be refused.
+            auto const lease = _leases.Acquire(AdmissionLeaseKey(decision.ticket), worker->id, AgreedLeaseLifetime());
             if (!lease.has_value())
             {
-                verdict.refusal = Refuse(Wire::ErrorCode::AlreadyInFlight);
+                verdict.refusal = SchedulerReply::Malformed("an admission ticket was granted twice");
                 return verdict;
             }
             _workers.JobStarted(worker->id);
             held.lease = *lease;
-            auto const token = MintGrantToken(*lease, worker->endpoint, worker->fingerprint, worker->identityKey);
+            // The token signs the OBJECT key, as a `Lease` grant's does: the table's key is a bookkeeping
+            // name the worker never sees, and what a grant covers is the key the client missed.
+            auto signedLease = *lease;
+            signedLease.key = held.cacheKey;
+            auto const token = MintGrantToken(signedLease, worker->endpoint, worker->fingerprint, worker->identityKey);
+            // A hint BESIDE the name, from the predicate the `Lease` grant asks: the token signs the name,
+            // so a stale hint landing on another machine is refused there and the client falls back.
+            auto const hint = DialHintFor(DialHintInputs { .advertised = worker->endpoint,
+                                                           .observedHost = worker->observedHost,
+                                                           .interfaceAddresses = worker->interfaceAddresses });
             // The lifetime and the key beside the token exactly as `Lease` relays them, from the lease and
             // the worker the token was just minted from: the client bounds its compile by the one and
             // authenticates the reply against the other, and verifies no claims to learn either.
@@ -197,7 +225,8 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                                                                       .queuedMs = queuedMs,
                                                                       .lifetime = lease->lifetime,
                                                                       .workerKey = Wire::AsBytes(worker->identityKey),
-                                                                      .reason = Wire::LocalGrantReason::Asked });
+                                                                      .reason = Wire::LocalGrantReason::Asked,
+                                                                      .dialHint = hint });
             return verdict;
         }
         case Wire::GrantKind::Local:
@@ -223,7 +252,8 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                                                                       .queuedMs = queuedMs,
                                                                       .lifetime = {},
                                                                       .workerKey = {},
-                                                                      .reason = reason });
+                                                                      .reason = reason,
+                                                                      .dialHint = {} });
             return verdict;
         }
         case Wire::GrantKind::Last:

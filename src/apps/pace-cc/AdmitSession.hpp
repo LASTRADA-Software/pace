@@ -35,6 +35,9 @@ struct AdmitTicket
     std::vector<std::byte> workerKey;
     /// Why a dispatchable request was granted `Local`; `Asked` for every other grant.
     CompileCacheWire::LocalGrantReason localReason {};
+    /// Where a `Worker` grant's worker was last seen, dialled before `endpoint` -- `AdmitGrant::dialHint`,
+    /// the same hint a lease grant carries. Empty when the leader has none.
+    std::string dialHint;
     /// When THIS side received the grant, on a monotonic clock (R2).
     ///
     /// A grant's age is measured from here and never from when the launcher asked: a request that

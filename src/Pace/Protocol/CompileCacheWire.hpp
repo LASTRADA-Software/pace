@@ -9679,6 +9679,11 @@ struct AdmitGrant
     std::span<std::byte const> workerKey;
     /// Why a dispatchable request was granted `Local`; `Asked` for every other grant.
     LocalGrantReason reason;
+    /// Where a `Worker` grant's worker was last SEEN, when that differs from `endpoint` and the worker
+    /// reports the address as its own -- `LeaseGrant::dialHint`, minted by the same `DialHintFor`. The
+    /// client dials it first and falls back to `endpoint`, which is what the token signs, so a stale
+    /// hint landing on another machine is refused `LeaseEndpointMismatch` there. Empty otherwise.
+    std::string_view dialHint;
 };
 
 /// The same, as the client decodes it. OWNS its bytes.
@@ -9693,6 +9698,7 @@ struct AdmitGrantFields
     std::chrono::milliseconds lifetime {};
     std::vector<std::byte> workerKey;
     LocalGrantReason reason {};
+    std::string dialHint;
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(AdmitGrantFields const&) const = default;
@@ -9829,9 +9835,9 @@ namespace Detail
 }
 
 /// How many fields an ADMIT reply holds: kind, endpoint, lease token, codecs, charged, queued,
-/// lifetime, worker key, local reason. One number for `EncodeAdmitGrant` and `DecodeAdmitGrant`, so
-/// the two cannot drift.
-inline constexpr std::size_t AdmitGrantFieldCount = 9;
+/// lifetime, worker key, local reason, dial hint. One number for `EncodeAdmitGrant` and
+/// `DecodeAdmitGrant`, so the two cannot drift.
+inline constexpr std::size_t AdmitGrantFieldCount = 10;
 
 /// Frame the payload of a successful ADMIT reply.
 /// @param grant What the leader decided.
@@ -9852,14 +9858,16 @@ inline constexpr std::size_t AdmitGrantFieldCount = 9;
                                 std::span<std::byte const> { queued },
                                 std::span<std::byte const> { lifetime },
                                 grant.workerKey,
-                                std::span<std::byte const> { reason } });
+                                std::span<std::byte const> { reason },
+                                AsBytes(grant.dialHint) });
 }
 
 /// Split an ADMIT reply payload.
 ///
 /// Exactly `AdmitGrantFieldCount` fields: a reply is not stepped over the way a request is. The
-/// endpoint is held to `MaxEndpointBytes` because the client dials it; the worker key is empty or
-/// exactly a key's width, and the lifetime exactly four bytes, as a LEASE grant's are.
+/// endpoint and the dial hint are held to `MaxEndpointBytes` because the client dials them; the
+/// worker key is empty or exactly a key's width, and the lifetime exactly four bytes, as a LEASE
+/// grant's are.
 /// @param payload The reply body.
 /// @return The owned fields, or nullopt when malformed.
 [[nodiscard]] inline std::optional<AdmitGrantFields> DecodeAdmitGrant(std::span<std::byte const> payload)
@@ -9874,7 +9882,7 @@ inline constexpr std::size_t AdmitGrantFieldCount = 9;
     auto const& workerKey = (*fields)[7];
     auto const reason = Detail::DecodeEnumByte<LocalGrantReason>((*fields)[8]);
     if (!kind.has_value() || !charged.has_value() || !queued.has_value() || !lifetime.has_value() || !reason.has_value()
-        || !Detail::FitsCap((*fields)[1], MaxEndpointBytes)
+        || !Detail::FitsCap((*fields)[1], MaxEndpointBytes) || !Detail::FitsCap((*fields)[9], MaxEndpointBytes)
         || (!workerKey.empty() && workerKey.size() != IdentityPublicKeyBytes))
         return std::nullopt;
     return AdmitGrantFields { .kind = *kind,
@@ -9885,7 +9893,8 @@ inline constexpr std::size_t AdmitGrantFieldCount = 9;
                               .queuedMs = *queued,
                               .lifetime = std::chrono::milliseconds { *lifetime },
                               .workerKey = { workerKey.begin(), workerKey.end() },
-                              .reason = *reason };
+                              .reason = *reason,
+                              .dialHint = std::string { AsStringView((*fields)[9]) } };
 }
 
 /// Frame a SETTLE request.

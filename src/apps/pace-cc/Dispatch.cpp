@@ -496,6 +496,18 @@ namespace
         return std::nullopt;
     }
 
+    /// The dial hint a grant carries, if it is one: a hint that is not an address to dial -- or that IS
+    /// the name -- is no hint. The same predicate `RedirectTarget` and `DialEndpoint` ask, so "may this be
+    /// dialled" has one answer (`Core/HostPort.hpp`); and one function for both grants, a lease's and an
+    /// admission's, so the two cannot come to dial differently.
+    /// @param hint What the grant relayed beside the name.
+    /// @param endpoint The worker's advertised name, which the token signs.
+    /// @return The hint to dial first, or empty.
+    [[nodiscard]] std::string UsableDialHint(std::string_view hint, std::string_view endpoint)
+    {
+        return ParseDialEndpoint(hint).has_value() && hint != endpoint ? std::string { hint } : std::string {};
+    }
+
     /// What a grant, however it was made, tells the compile leg.
     struct GrantedJob
     {
@@ -699,11 +711,7 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
         ReleaseLease(exchange, lease.scheduler, request, token, credential, budgets.control);
         return refused;
     }
-    // A hint that is not an address to dial -- or that IS the name -- is no hint. The
-    // same predicate `RedirectTarget` and `DialEndpoint` ask, so "may this be dialled"
-    // has one answer (`Core/HostPort.hpp`).
-    auto const hintText = std::string { Wire::AsStringView(grant->dialHint) };
-    auto const hint = ParseDialEndpoint(hintText).has_value() && hintText != endpoint ? hintText : std::string {};
+    auto const hint = UsableDialHint(Wire::AsStringView(grant->dialHint), endpoint);
 
     // The lease conversation is over and its connection is already gone: an exchange
     // owns its socket for exactly one request/reply. Holding one for the length of a
@@ -767,7 +775,7 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
                              accepted,
                              GrantedJob { .endpoint = ticket.endpoint,
                                           .token = ticket.leaseToken,
-                                          .hint = {},
+                                          .hint = UsableDialHint(ticket.dialHint, ticket.endpoint),
                                           .workerCodecs = ticket.workerCodecs,
                                           .workerKey = ticket.workerKey,
                                           .lifetime = ticket.lifetime,

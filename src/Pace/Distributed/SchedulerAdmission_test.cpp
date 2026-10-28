@@ -94,12 +94,13 @@ struct Fleet
         REQUIRE(reply.status == Wire::Status::Ok);
     }
 
-    /// Queue one request from this node's own machine.
+    /// Queue one request, from this node's own machine unless @p machine names another.
     Ticket Admit(std::string key,
                  Wire::AdmitKind kind = Wire::AdmitKind::Dispatchable,
                  bool storable = false,
                  std::function<CallerContext()> regate = {},
-                 std::vector<std::string> excluded = {})
+                 std::vector<std::string> excluded = {},
+                 std::optional<MachineId> machine = std::nullopt)
     {
         if (!regate)
             regate = [] {
@@ -107,7 +108,7 @@ struct Fleet
             };
         auto const ticket = service.Admit(Insider,
                                           std::move(regate),
-                                          service.OwnMachineId(),
+                                          machine.value_or(service.OwnMachineId()),
                                           Wire::AdmitRequestFields { .kind = kind,
                                                                      .fingerprint = std::string { Toolchain },
                                                                      .cacheKey = std::move(key),
@@ -232,26 +233,107 @@ TEST_CASE("SchedulerAdmission.worker-refusal-keeps-the-ticket-and-frees-the-leas
     CHECK(fleet.Leases() == 1);
 }
 
-TEST_CASE("SchedulerAdmission.second-grant-of-a-leased-key-is-refused-already-in-flight",
-          "[distributed][admission][scheduler]")
+TEST_CASE("SchedulerAdmission.two-machines-missing-one-key-both-get-a-worker", "[distributed][admission][scheduler]")
 {
+    // Ruling 17. Two machines that do not share a cache missed the same key: each must compile, so
+    // each is granted a worker, and neither is refused `AlreadyInFlight` -- which its launcher would
+    // read as "compile here", with nothing charged anywhere.
     Fleet fleet;
     (void) fleet.RegisterWorker(/*slots=*/2);
     fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
-    auto const first = fleet.Admit("same");
-    auto const second = fleet.Admit("same"); // not storable, so the queue does not deduplicate it
+    auto const otherMachine = MachineOf(Testing::TestKeyPair("another-workstation").PublicKey());
+    auto const first = fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+    auto const second = fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true, {}, {}, otherMachine);
 
     auto const verdicts = fleet.service.PumpAdmission();
     REQUIRE(verdicts.size() == 2);
     CHECK(verdicts[0].ticket == first);
-    CHECK(GrantOf(verdicts[0]).kind == Wire::GrantKind::Worker);
     CHECK(verdicts[1].ticket == second);
-    REQUIRE(verdicts[1].refusal.has_value());
-    CHECK(Unwrap(verdicts[1].refusal).error == Wire::ErrorCode::AlreadyInFlight);
-    // The refused one holds nothing: one lease, one charge.
+    for (auto const& verdict: verdicts)
+    {
+        auto const grant = GrantOf(verdict);
+        CHECK(grant.kind == Wire::GrantKind::Worker);
+        // Each token still signs the OBJECT key the client missed, not the table's bookkeeping name.
+        auto const claims = AuthenticateLeaseToken(Testing::FixedLeaseRoster {}, grant.leaseToken);
+        REQUIRE(claims.has_value());
+        CHECK(claims->key == "same");
+    }
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesDuplicate) == 0);
+    CHECK(fleet.Leases() == 2);
+
+    // Each lease is its own: settling one frees one.
+    CHECK(fleet.service.SettleAdmission(first, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+          == SettleResult::Settled);
     CHECK(fleet.Leases() == 1);
-    CHECK(fleet.service.AdmissionSnapshotNow().depth == 0);
-    CHECK(fleet.service.AdmissionSnapshotNow().chargedBytes.size() == 1);
+}
+
+TEST_CASE("SchedulerAdmission.one-machine-missing-one-unstorable-key-twice-gets-two-workers",
+          "[distributed][admission][scheduler]")
+{
+    // The queue deduplicates only what a waiter could FETCH: an unstorable compile is run twice, and
+    // the second run is never turned away by the lease table.
+    Fleet fleet;
+    (void) fleet.RegisterWorker(/*slots=*/2);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    (void) fleet.Admit("same");
+    (void) fleet.Admit("same");
+
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 2);
+    CHECK(GrantOf(verdicts[0]).kind == Wire::GrantKind::Worker);
+    CHECK(GrantOf(verdicts[1]).kind == Wire::GrantKind::Worker);
+    CHECK(fleet.Leases() == 2);
+}
+
+TEST_CASE("SchedulerAdmission.one-machine-missing-one-storable-key-twice-waits-on-the-first",
+          "[distributed][admission][scheduler]")
+{
+    // The control for the two cases above: where a waiter CAN fetch the result, the queue (and only
+    // the queue) holds the second request until the first stores.
+    Fleet fleet;
+    (void) fleet.RegisterWorker(/*slots=*/2);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const first = fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+    auto const second = fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    CHECK(verdicts[0].ticket == first);
+    CHECK(fleet.Leases() == 1);
+
+    REQUIRE(fleet.service.SettleAdmission(first, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    auto const woken = fleet.service.PumpAdmission();
+    REQUIRE(woken.size() == 1);
+    CHECK(woken[0].ticket == second);
+    CHECK(GrantOf(woken[0]).kind == Wire::GrantKind::Stored);
+}
+
+TEST_CASE("SchedulerAdmission.worker-grant-hints-where-the-worker-was-seen", "[distributed][admission][scheduler][dialhint]")
+{
+    // The hint a `Lease` grant carries, minted by the same predicate: a worker that advertises a NAME
+    // and was seen at an address it reports as its own is dialled there first, while the token still
+    // signs the name.
+    Fleet fleet;
+    auto const reply = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration { .fingerprint = Toolchain, .endpoint = "build-7.corp:7100", .slots = 1, .codecs = {} });
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const id = Unwrap(Wire::DecodeRegisterReply(reply.payload)).workerId;
+    std::vector<std::string> const interfaces { "10.0.0.2" };
+    REQUIRE(fleet.service.Heartbeat(fleet.Worker(), id, NodeLoad {}, {}, interfaces).status == Wire::Status::Ok);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    (void) fleet.Admit("k1");
+
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    auto const grant = GrantOf(verdicts[0]);
+    CHECK(grant.kind == Wire::GrantKind::Worker);
+    CHECK(grant.endpoint == "build-7.corp:7100");
+    CHECK(grant.dialHint == "10.0.0.2:7100");
+    auto const claims = AuthenticateLeaseToken(Testing::FixedLeaseRoster {}, grant.leaseToken);
+    REQUIRE(claims.has_value());
+    CHECK(claims->endpoint == "build-7.corp:7100");
 }
 
 TEST_CASE("SchedulerAdmission.a-worker-that-proved-no-key-is-not-placed-on", "[distributed][admission][scheduler]")

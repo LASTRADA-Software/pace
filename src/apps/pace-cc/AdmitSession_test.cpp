@@ -157,7 +157,8 @@ inline std::vector<std::byte> const GrantWorkerKey(Wire::IdentityPublicKeyBytes,
                                                                        .queuedMs = queuedMs,
                                                                        .lifetime = std::chrono::milliseconds { 90'000 },
                                                                        .workerKey = GrantWorkerKey,
-                                                                       .reason = Wire::LocalGrantReason::Asked }));
+                                                                       .reason = Wire::LocalGrantReason::Asked,
+                                                                       .dialHint = "10.8.0.7:6676" }));
 }
 
 core::async::Task<void> Send(Peer peer, std::vector<std::byte> frame)
@@ -436,6 +437,7 @@ TEST_CASE("AdmitSession.granted-after-progress")
     // token rather than read out of it.
     CHECK(ticket->lifetime == std::chrono::milliseconds { 90'000 });
     CHECK(ticket->workerKey == GrantWorkerKey);
+    CHECK(ticket->dialHint == "10.8.0.7:6676");
     // R2: the grant's age starts at its receipt on this side, between the two readings.
     CHECK(ticket->receivedAt >= before);
     CHECK(ticket->receivedAt <= after);

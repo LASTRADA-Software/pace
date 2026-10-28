@@ -62,6 +62,7 @@ namespace
                              .lifetime = grant->lifetime,
                              .workerKey = grant->workerKey,
                              .localReason = grant->reason,
+                             .dialHint = grant->dialHint,
                              .receivedAt = received };
     }
 

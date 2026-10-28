@@ -1361,7 +1361,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     {
         std::function<CallerContext()> regate;      ///< The connection's context as it is NOW, for the grant's gate (R9).
         std::string fingerprint;                    ///< Toolchain the request named.
-        std::string cacheKey;                       ///< The lease key.
+        std::string cacheKey;                       ///< The object key the request missed; signed into a grant.
         CompileCacheWire::AdmitKind kind {};        ///< Whether a worker could have run it, for a local grant's reason.
         std::vector<std::string> excluded;          ///< Workers the client could not reach, for the same.
         std::string toolchainLabel;                 ///< What the client calls the toolchain, for `unserved-toolchain`.
