@@ -402,4 +402,9 @@ std::unique_ptr<IAdmitSession> OpenAdmitSession(std::string_view hostPort,
     return std::make_unique<Session>(std::string { hostPort }, std::move(credential), Wire::EncodeAdmit(request), budget);
 }
 
+std::string AdmitUnreachedReason()
+{
+    return std::format("admission {}", DescribeTransportFailure(TransportFailure::Unreached));
+}
+
 } // namespace Pace::Cc

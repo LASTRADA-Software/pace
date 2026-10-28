@@ -4,6 +4,7 @@
 
 #include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/Utf8.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Protocol/CompileReplySeal.hpp>
 
 #include <algorithm>
@@ -163,6 +164,13 @@ namespace
         /// The identity key the grant named for `worker`: what its reply must be signed under, so
         /// the object is used only when it came from that machine, whatever address answered (W-4).
         std::span<std::byte const> workerKey;
+        /// What the leader's queue charged this compile, echoed so the worker reports what it holds;
+        /// disengaged on a lease-path job, which no queue charged.
+        std::optional<std::uint64_t> chargedBytes {};
+        /// The object key the estimate was filed under, and the root-relative source that keys its
+        /// shape: what lets the worker file the peak it measures. Empty on a lease-path job.
+        std::string_view admissionCacheKey {};
+        std::string_view admissionSourcePath {};
     };
 
     /// How to name the machine a job went to, in a message an operator reads.
@@ -218,7 +226,10 @@ namespace
                                                        .compileDir = job.request.compileDir,
                                                        .compileDirReplacement = job.request.compileDirReplacement,
                                                        .sourceRoot = job.request.sourceRoot,
-                                                       .sourceRootReplacement = job.request.sourceRootReplacement });
+                                                       .sourceRootReplacement = job.request.sourceRootReplacement,
+                                                       .chargedBytes = job.chargedBytes,
+                                                       .admissionCacheKey = job.admissionCacheKey,
+                                                       .admissionSourcePath = job.admissionSourcePath });
         return exchange.Exchange(job.endpoint, std::move(compileFrame), job.credential, budget);
     }
 
@@ -464,6 +475,117 @@ namespace
         return attempt; // unreachable: the last turn of the loop always returns
     }
 
+    /// The refusal for a job carrying an argument no worker passes on, or nothing.
+    ///
+    /// The first such argument is named -- reduced the way the worker's own refusal reduces it, because
+    /// it is text a build wrote and it lands in a log. Shared by both ways of dispatching, so the
+    /// table is consulted in one place.
+    /// @param request The job.
+    /// @return The refused result, or nullopt when every argument may travel.
+    [[nodiscard]] std::optional<DispatchResult> DeniedHere(DispatchRequest const& request)
+    {
+        for (auto const& arg: request.args)
+            if (FindDeniedArgument(arg, request.family) != nullptr)
+            {
+                auto result = Refused(
+                    DispatchStatus::DeniedHere,
+                    std::format("argument {} is one no worker passes to a compiler, whatever it is configured to allow",
+                                PrintableArgument(arg)));
+                result.refusal = result.detail;
+                return result;
+            }
+        return std::nullopt;
+    }
+
+    /// What a grant, however it was made, tells the compile leg.
+    struct GrantedJob
+    {
+        std::string endpoint;                  ///< The worker by its advertised name.
+        std::string token;                     ///< What authorizes the job there.
+        std::string hint;                      ///< A dial hint, or empty.
+        Wire::CodecList workerCodecs;          ///< What the worker can decode.
+        std::span<std::byte const> workerKey;  ///< The key its reply must be sealed under.
+        std::chrono::milliseconds lifetime {}; ///< What the grant lives for; zero means it named none.
+        core::platform::SteadyTimePoint start; ///< Where the grant's age starts: a lease's ask, an admission's receipt.
+        std::optional<std::uint64_t> chargedBytes {}; ///< What the queue charged; empty on a lease.
+        std::string_view admissionCacheKey {};        ///< The key the peak is filed under; empty on a lease.
+        std::string_view admissionSourcePath {};      ///< The shape that peak is filed under; empty on a lease.
+    };
+
+    /// The compile leg of a dispatch: envelope the source against the worker's codecs, dial the hint
+    /// and then, only when nothing ran there, the name, and read the answer.
+    ///
+    /// Everything a lease dispatch does between "the worker is named" and "hand the lease back", and
+    /// everything an admission dispatch does once the queue named it -- one body, so the two cannot
+    /// come to compile differently.
+    /// @param exchange How to reach the worker.
+    /// @param request The job.
+    /// @param budgets The deadlines.
+    /// @param credential Presented to the worker.
+    /// @param accepted What this client reads back.
+    /// @param grant The grant.
+    /// @param now The clock the grant's age is read on.
+    /// @return What happened; `leaseEndpoint` is the caller's to set.
+    [[nodiscard]] DispatchResult CompileUnderGrant(IEndpointExchange& exchange,
+                                                   DispatchRequest const& request,
+                                                   DispatchBudgets const& budgets,
+                                                   Credential const& credential,
+                                                   Wire::CodecList const& accepted,
+                                                   GrantedJob const& grant,
+                                                   core::platform::IClock& now)
+    {
+        auto const available = AvailableCodecs();
+        // --- have the worker compile it -------------------------------------
+        // Compressed against the WORKER's codecs, which the grant relayed -- not against
+        // this client's. The two need not agree, and guessing wrong would only be
+        // discovered after the whole preprocessed payload had crossed the network. And with
+        // what this client can PRODUCE (`available`), never `accepted`: narrowing what this
+        // client can *read* must not narrow what it can *write*, because the client never
+        // decodes its own source -- the worker does. Folding the two together is the same
+        // conflation of two codec lists that #265 was.
+        //
+        // Enveloped ONCE: a dial at the name after one at the hint resends these bytes.
+        auto const sourceField = Envelope(Wire::AsBytes(request.preprocessed), grant.workerCodecs, available);
+        auto const jobAt = [&](std::string_view address) {
+            return LeasedJob { .endpoint = address,
+                               .worker = grant.endpoint,
+                               .leaseToken = grant.token,
+                               .accepted = accepted,
+                               .credential = credential,
+                               .request = request,
+                               .sourceField = sourceField,
+                               .maxObjectBytes = budgets.maxDecompressedBytes,
+                               .workerKey = grant.workerKey,
+                               .chargedBytes = grant.chargedBytes,
+                               .admissionCacheKey = grant.admissionCacheKey,
+                               .admissionSourcePath = grant.admissionSourcePath };
+        };
+        // What is LEFT of the grant's bound, not this process's and not the grant's whole
+        // lifetime -- `UnderGrantedLease` carries the argument for both halves. Measured
+        // again at EACH dial, because a dial at the name starts after the hint's has
+        // already spent some of the grant.
+        auto const leftOfGrant = [&] {
+            return UnderGrantedLease(budgets.compile,
+                                     grant.lifetime,
+                                     std::chrono::duration_cast<std::chrono::milliseconds>(now.now() - grant.start));
+        };
+
+        auto dialled = grant.hint.empty() ? grant.endpoint : grant.hint;
+        auto outcome =
+            ExchangeCompile(exchange, jobAt(dialled), grant.hint.empty() ? leftOfGrant() : AtDialHint(leftOfGrant()));
+        // At most ONE more dial, and only when nothing ran at the hint: a second dial after a
+        // machine was reached could compile the job twice.
+        if (!grant.hint.empty() && RetriesAtAdvertisedName(outcome))
+        {
+            dialled = grant.endpoint;
+            outcome = ExchangeCompile(exchange, jobAt(dialled), leftOfGrant());
+        }
+
+        auto result = InterpretCompile(outcome, jobAt(dialled));
+        result.dialledEndpoint = dialled;
+        return result;
+    }
+
 } // namespace
 
 std::optional<std::string> ToolchainLabelWithheldBecause(std::string_view label)
@@ -506,29 +628,15 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
     core::platform::SteadyClock ownClock;
     core::platform::IClock& now = clock != nullptr ? *clock : ownClock;
 
-    // Derived ONCE. `available` is what this build can produce; `accepted` is what
-    // this client will read back, which a caller may narrow and which therefore is
-    // not the same question -- see where the source is enveloped below.
+    // `accepted` is what this client will read back, which a caller may narrow and which therefore
+    // is not the same question as what it can produce -- see where the source is enveloped.
     auto const available = AvailableCodecs();
     auto const& accepted = acceptedCodecs.empty() ? available : acceptedCodecs;
 
     // --- refuse what no worker will run -------------------------------------
-    // Before the lease, and that is the whole point: an argument every worker refuses by
-    // a row of `DeniedArguments` cannot be bought with a lease, and asking cost one, a
-    // round trip, and the whole preprocessed translation unit on the wire for a refusal
-    // this client could read off the same table the worker reads. The first such
-    // argument is named -- reduced the way the worker's own refusal reduces it, because
-    // it is text a build wrote and it lands in a log.
-    for (auto const& arg: request.args)
-        if (FindDeniedArgument(arg, request.family) != nullptr)
-        {
-            auto result =
-                Refused(DispatchStatus::DeniedHere,
-                        std::format("argument {} is one no worker passes to a compiler, whatever it is configured to allow",
-                                    PrintableArgument(arg)));
-            result.refusal = result.detail;
-            return result;
-        }
+    // Before the lease: see `DeniedHere`.
+    if (auto denied = DeniedHere(request); denied.has_value())
+        return std::move(*denied);
 
     // --- ask the scheduler where to compile ---------------------------------
     // Following `NotLeader` rather than reading it as a refusal, and remembering who
@@ -602,50 +710,19 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
     // owns its socket for exactly one request/reply. Holding one for the length of a
     // compile would spend a slot of the scheduler's connection budget per parallel
     // launcher on nothing, and the scheduler would sweep it anyway.
-
-    // --- have the worker compile it -----------------------------------------
-    // Compressed against the WORKER's codecs, which the grant relayed -- not against
-    // this client's. The two need not agree, and guessing wrong would only be
-    // discovered after the whole preprocessed payload had crossed the network. And with
-    // what this client can PRODUCE (`available`), never `accepted`: narrowing what this
-    // client can *read* must not narrow what it can *write*, because the client never
-    // decodes its own source -- the worker does. Folding the two together is the same
-    // conflation of two codec lists that #265 was.
-    //
-    // Enveloped ONCE: a dial at the name after one at the hint resends these bytes.
-    auto const sourceField = Envelope(Wire::AsBytes(request.preprocessed), grant->workerCodecs, available);
-    auto const jobAt = [&](std::string_view address) {
-        return LeasedJob { .endpoint = address,
-                           .worker = endpoint,
-                           .leaseToken = token,
-                           .accepted = accepted,
-                           .credential = credential,
-                           .request = request,
-                           .sourceField = sourceField,
-                           .maxObjectBytes = budgets.maxDecompressedBytes,
-                           .workerKey = grant->workerKey };
-    };
-    // What is LEFT of the grant's bound, not this process's and not the grant's whole
-    // lifetime -- `UnderGrantedLease` carries the argument for both halves. Measured
-    // again at EACH dial, because a dial at the name starts after the hint's has
-    // already spent some of the grant.
-    auto const leftOfGrant = [&] {
-        return UnderGrantedLease(
-            budgets.compile, grant->lifetime, std::chrono::duration_cast<std::chrono::milliseconds>(now.now() - askedAt));
-    };
-
-    auto dialled = hint.empty() ? endpoint : hint;
-    auto outcome = ExchangeCompile(exchange, jobAt(dialled), hint.empty() ? leftOfGrant() : AtDialHint(leftOfGrant()));
-    // At most ONE more dial, and only when nothing ran at the hint: a second dial after a
-    // machine was reached could compile the job twice.
-    if (!hint.empty() && RetriesAtAdvertisedName(outcome))
-    {
-        dialled = endpoint;
-        outcome = ExchangeCompile(exchange, jobAt(dialled), leftOfGrant());
-    }
-
-    auto result = InterpretCompile(outcome, jobAt(dialled));
-    result.dialledEndpoint = dialled;
+    auto result = CompileUnderGrant(exchange,
+                                    request,
+                                    budgets,
+                                    credential,
+                                    accepted,
+                                    GrantedJob { .endpoint = endpoint,
+                                                 .token = token,
+                                                 .hint = hint,
+                                                 .workerCodecs = grant->workerCodecs,
+                                                 .workerKey = grant->workerKey,
+                                                 .lifetime = grant->lifetime,
+                                                 .start = askedAt },
+                                    now);
     // The lease leg completed, whatever the compile did: `leaseTransport` stays `None`.
     result.leaseEndpoint = lease.scheduler;
 
@@ -657,6 +734,57 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
     // hint and the name are one lease, issued once.
     ReleaseLease(exchange, lease.scheduler, request, token, credential, budgets.control);
     return result;
+}
+
+DispatchResult Dispatch(IEndpointExchange& exchange,
+                        DispatchRequest const& request,
+                        AdmitTicket const& ticket,
+                        DispatchBudgets const& budgets,
+                        Credential const& credential,
+                        Wire::CodecList const& acceptedCodecs,
+                        core::platform::IClock* clock)
+{
+    core::platform::SteadyClock ownClock;
+    core::platform::IClock& now = clock != nullptr ? *clock : ownClock;
+    auto const available = AvailableCodecs();
+    auto const& accepted = acceptedCodecs.empty() ? available : acceptedCodecs;
+
+    if (auto denied = DeniedHere(request); denied.has_value())
+        return std::move(*denied);
+
+    // The key the reply must be sealed under is the one the token names, and the grant carries no
+    // other: see `UnverifiedWorkerKey`. A token naming none, or not a token, names nobody this client
+    // could authenticate a reply from, so nothing is sent -- the same refusal a lease grant meets (W-4).
+    auto const workerKeyText = Distributed::UnverifiedWorkerKey(ticket.leaseToken);
+    if (!workerKeyText.has_value() || workerKeyText->size() != Wire::IdentityPublicKeyBytes)
+        return Refused(DispatchStatus::Unauthenticated,
+                       std::format("the grant for {} names no worker key, so no reply from it could be "
+                                   "authenticated; not dispatched",
+                                   ticket.endpoint));
+
+    return CompileUnderGrant(exchange,
+                             request,
+                             budgets,
+                             credential,
+                             accepted,
+                             GrantedJob { .endpoint = ticket.endpoint,
+                                          .token = ticket.leaseToken,
+                                          .hint = {},
+                                          .workerCodecs = ticket.workerCodecs,
+                                          .workerKey = Wire::AsBytes(*workerKeyText),
+                                          .lifetime = Wire::DefaultCompileLeaseTimeout,
+                                          .start = ticket.receivedAt,
+                                          .chargedBytes = ticket.chargedBytes,
+                                          .admissionCacheKey = request.objectKey,
+                                          .admissionSourcePath = request.admissionSourcePath },
+                             now);
+}
+
+bool IsWorkerCapacityRefusal(DispatchResult const& result) noexcept
+{
+    return result.status == DispatchStatus::Declined && result.declinedAt.has_value()
+           && result.declinedAt->opcode == std::to_underlying(Wire::Op::Compile)
+           && (result.decline == DeclineCause::NoCapacity || result.decline == DeclineCause::NodeBusy);
 }
 
 } // namespace Pace::Cc

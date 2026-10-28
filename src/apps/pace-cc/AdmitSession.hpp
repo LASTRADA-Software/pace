@@ -73,6 +73,14 @@ class IAdmitSession
     virtual void Settle(CompileCacheWire::SettleRequest const& settle) = 0;
 };
 
+/// The fail-open reason of an admission that could not reach its node at all (`TransportFailure::Unreached`).
+///
+/// One spelling, shared by the session that says it and the launcher that remembers it, so a node that
+/// is down is learned once and not dialled again by every launcher of a build for the next fifteen
+/// seconds -- a refused connect on Windows can take the whole connect budget.
+/// @return The reason text.
+[[nodiscard]] std::string AdmitUnreachedReason();
+
 /// The longest a SETTLE waits for its answer.
 ///
 /// **Its own bound, because a SETTLE cannot pulse**: the idle bound is sized for a queue that pulses

@@ -63,6 +63,7 @@
 #include "InputWitness.hpp"
 #include "LauncherCli.hpp"
 #include "MarkerDiscovery.hpp"
+#include "MissFlow.hpp"
 #include "NotePathCollapse.hpp"
 #include "ParallelFor.hpp"
 #include "PathResolve.hpp"
@@ -459,6 +460,12 @@ struct InvocationRecord
     std::string dispatchSpecifics;
     std::uint64_t valueBytes = 0; ///< Cached payload size; 0 when nothing moved.
 
+    /// How long the fleet queue held this compile, in milliseconds. Disengaged when no queue did: no
+    /// reading, which is not a wait of zero.
+    std::optional<std::uint64_t> queuedMs;
+    /// The peak memory the compile measured, children included. Disengaged when it was not measured.
+    std::optional<std::uint64_t> peakMemoryBytes;
+
     std::uint64_t preprocessMs = 0; ///< Deriving the key (preprocess + compiler id).
     std::uint64_t cacheMs = 0;      ///< Talking to the daemon (connect + transfer).
 
@@ -727,6 +734,27 @@ void ApplyDispatchRecording(InvocationRecord& record, Cc::DispatchRecording cons
     record.dispatchDetail = recording.reason;
 }
 
+/// What a refusal to dispatch answers, whatever the caller was asked for.
+///
+/// "Compile it where you are" is the same answer to every caller of `DeclineDispatch` -- no plan, no
+/// compile from a worker, no refusal to hand back to a queue -- so the one value converts to each of
+/// them rather than each caller spelling its own empty.
+struct Declined
+{
+    /// @return The empty optional of any type: nothing to continue with.
+    template <typename T>
+    [[nodiscard]] constexpr operator std::optional<T>() const noexcept
+    {
+        return std::nullopt;
+    }
+
+    /// @return An admitted dispatch that produced no compile and no refusal for the queue.
+    [[nodiscard]] constexpr operator Cc::AdmittedDispatch() const noexcept
+    {
+        return {};
+    }
+};
+
 /// Record that distribution did not serve this compile, and end the attempt.
 ///
 /// **The return value is the continuation, so a call site cannot record one thing
@@ -745,15 +773,15 @@ void ApplyDispatchRecording(InvocationRecord& record, Cc::DispatchRecording cons
 ///        worker's endpoint, an exit code — lives HERE and never in the tally
 ///        reason, which is what keeps the tally one row per cause rather than one
 ///        row per machine. The exact wordings are asserted by `dist-compile-e2e`.
-/// @return Always `std::nullopt` — "compile this translation unit locally".
-[[nodiscard]] std::optional<Cc::CompileRun> DeclineDispatch(InvocationRecord& record,
-                                                            Cc::DispatchRecording const& recording,
-                                                            std::optional<std::string> note)
+/// @return Always a `Declined` — "compile this translation unit locally".
+[[nodiscard]] Declined DeclineDispatch(InvocationRecord& record,
+                                       Cc::DispatchRecording const& recording,
+                                       std::optional<std::string> note)
 {
     ApplyDispatchRecording(record, recording);
     if (note.has_value())
         Note(record.verbose, *note);
-    return std::nullopt;
+    return {};
 }
 
 /// The dispatch recording for a refusal this LAUNCHER made, before the fleet was
@@ -2300,14 +2328,16 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
 /// @param encoded   The encoded compile value to store.
 /// @param checkout  This checkout's roots.
 /// @param metMarker The marker the fetch met at the portable key, if any.
-void StoreCompiledObject(Cc::StorePermit /*permit*/,
-                         InvocationRecord& record,
-                         Config const& cfg,
-                         std::string const& key,
-                         std::span<std::byte const> object,
-                         std::span<std::byte const> encoded,
-                         Cc::CheckoutRoots const& checkout,
-                         std::optional<Cc::CheckoutParts> const& metMarker)
+/// @return True when the daemon accepted the object. What the admission queue is told (R1): a waiter is
+///         woken to an object that is there only when this said so.
+[[nodiscard]] bool StoreCompiledObject(Cc::StorePermit /*permit*/,
+                                       InvocationRecord& record,
+                                       Config const& cfg,
+                                       std::string const& key,
+                                       std::span<std::byte const> object,
+                                       std::span<std::byte const> encoded,
+                                       Cc::CheckoutRoots const& checkout,
+                                       std::optional<Cc::CheckoutParts> const& metMarker)
 {
     // WHERE the object goes is read off the object, and this is the one place that can:
     // it holds both the fresh object -- compiled here or returned by a worker, which is
@@ -2362,6 +2392,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
                 "STORE key={} bytes={} {}", plan.objectKey, encoded.size(), Cc::RecordedReason(outcome, presented.missing)));
     else
         Note(record.verbose, std::format("STORE exchange failed key={}", plan.objectKey));
+    return outcome.IsHit();
 }
 
 /// DIRECT MODE. Preprocessing a translation unit to derive its key costs ~1.4 s
@@ -2467,55 +2498,36 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     return served;
 }
 
-/// Have a worker compile this translation unit, and leave the tree exactly as a
-/// local compile would have left it.
+/// What a dispatch settles before anybody is asked where it runs.
 ///
-/// Returns a `CompileRun` so the whole miss path below is unchanged and cannot tell
-/// a dispatched compile from a local one: the object is on disk at `cmd.objPath`,
-/// the dependency record is written, and the streams are in hand. One path to the
-/// STORE, the manifest and the statistics, rather than two that can diverge.
+/// Everything here is a fact about the command line and the toolchain, so it is decided ONCE and
+/// serves both what the queue is asked (`Dispatchable`, and the fingerprint to place it by) and the
+/// dispatch that follows a grant -- the second preprocess, which a compile granted a local slot
+/// never pays, is not part of it.
+struct DispatchPlan
+{
+    std::vector<std::string> args; ///< The arguments a worker is sent, already filtered.
+    std::string fingerprint;       ///< This client's toolchain identity for matching a worker.
+    std::string toolchainLabel;    ///< What a person calls the compiler; display only.
+};
+
+/// Decide whether this compile may be dispatched at all, and with what.
 ///
-/// ## The dependency record is written HERE, and that is not optional
-///
-/// A worker compiles preprocessed text, which has no `#include` left in it, so its
-/// compiler reports no dependencies -- there are none to report. The build system
-/// asked for them anyway, and an object with no dependency record makes Ninja stop
-/// rebuilding this translation unit when its headers change: a wrong build with a
-/// zero exit code that persists until someone cleans. It is the same defect the hit
-/// path guards against in as many words.
-///
-/// The client already has the answer -- its own preprocess probe opened every one
-/// of those headers to compute the key -- so it writes the record rather than the
-/// worker inventing one. See DependencyOutput.hpp.
-///
-/// ## A remote failure is retried locally
-///
-/// When the remote compiler exits non-zero this returns nullopt, so the caller runs
-/// the compile locally and reports THAT. A compile can fail because of the code, in
-/// which case both runs agree and the user sees the same diagnostics; or because of
-/// something about the worker, in which case the local run succeeds and the build
-/// is right. Reporting the remote failure directly would make a bad node fail
-/// builds that are fine, which is the failure mode that gets distribution turned
-/// off and never turned back on. The cost is one wasted remote attempt.
-///
+/// Refuses, and records the refusal, for every reason that needs no worker: a command line a worker
+/// would not take, a scheduler nothing reached a moment ago, a toolchain with no usable fingerprint.
 /// @param record The invocation record this updates.
-/// @param cfg Launcher config (scheduler endpoint, credential, timeout).
+/// @param cfg Launcher config.
 /// @param cmd The parsed compile command.
 /// @param argv The original full invocation.
-/// @param key The object key, for duplicate suppression at the scheduler.
-/// @param compilerBanner The compiler's version line ALONE -- the fingerprint's
-///        input, and deliberately not the cache key's, which also folds the target.
+/// @param compilerBanner The compiler's version line ALONE.
 /// @param targetTriple The target this client generates for, stated on the wire.
-/// @param dependencyPaths What the key's probe reported this TU depends on.
-/// @return A run to continue with, or nullopt to compile locally.
-[[nodiscard]] std::optional<Cc::CompileRun> TryRemoteCompile(InvocationRecord& record,
-                                                             Config const& cfg,
-                                                             Cc::ParsedCommand const& cmd,
-                                                             std::span<std::string const> argv,
-                                                             std::string_view key,
-                                                             std::string_view compilerBanner,
-                                                             std::string_view targetTriple,
-                                                             std::vector<std::string> const& dependencyPaths)
+/// @return The plan, or nullopt when this compile runs where it was asked and the reason is recorded.
+[[nodiscard]] std::optional<DispatchPlan> PlanDispatch(InvocationRecord& record,
+                                                       Config const& cfg,
+                                                       Cc::ParsedCommand const& cmd,
+                                                       std::span<std::string const> argv,
+                                                       std::string_view compilerBanner,
+                                                       std::string_view targetTriple)
 {
     // Refused before anything is sent when the command line carries something this
     // launcher cannot account for. See RemoteCompileArgs: refusing costs one local
@@ -2553,21 +2565,6 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
             record,
             Cc::RememberedUnreachableRecording(),
             std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, cfg.schedulerAddr));
-
-    // Preprocessed again, with `#line` markers this time. The key's text has them
-    // suppressed so no checkout path reaches the key; a worker needs them, because
-    // they are what marks system-header lines as system-header lines. Without that
-    // the remote compile re-reports every warning inside libc++ or the CRT, which
-    // under `-Werror` is a failed compile rather than noise.
-    auto const preprocessRun = RunCaptureSplit(Cc::DispatchPreprocessCommand(cmd, argv));
-    // The note says WHY (#1665): which exit and the first error line, because "failed"
-    // alone took a manual re-run to read as `/WX` meeting a pragma `cl /E` ignores. The
-    // stats reason stays one fixed string so the summary still counts these together.
-    if (preprocessRun.exitCode != 0)
-        return DeclineDispatch(record,
-                               RefusedHere("the dispatch preprocess failed"),
-                               std::format("dispatch preprocess failed ({}); compiling locally",
-                                           Cc::DescribeFailedPreprocess(preprocessRun.exitCode, preprocessRun.err)));
 
     // The DISPATCH identity, which is not the cache key's -- and it is built on the
     // BANNER ALONE, deliberately, where the key also folds the target.
@@ -2612,6 +2609,82 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
             record,
             RefusedHere("this toolchain has no usable fingerprint"),
             std::format("not dispatched ({}); compiling locally", Cc::ExplainDefect(identity.defect).reason));
+
+    return DispatchPlan { .args = *args, .fingerprint = identity.fingerprint, .toolchainLabel = toolchainLabel };
+}
+
+/// Have a worker compile this translation unit, and leave the tree exactly as a
+/// local compile would have left it.
+///
+/// Returns a `CompileRun` so the whole miss path below is unchanged and cannot tell
+/// a dispatched compile from a local one: the object is on disk at `cmd.objPath`,
+/// the dependency record is written, and the streams are in hand. One path to the
+/// STORE, the manifest and the statistics, rather than two that can diverge.
+///
+/// ## The dependency record is written HERE, and that is not optional
+///
+/// A worker compiles preprocessed text, which has no `#include` left in it, so its
+/// compiler reports no dependencies -- there are none to report. The build system
+/// asked for them anyway, and an object with no dependency record makes Ninja stop
+/// rebuilding this translation unit when its headers change: a wrong build with a
+/// zero exit code that persists until someone cleans. It is the same defect the hit
+/// path guards against in as many words.
+///
+/// The client already has the answer -- its own preprocess probe opened every one
+/// of those headers to compute the key -- so it writes the record rather than the
+/// worker inventing one. See DependencyOutput.hpp.
+///
+/// ## A remote failure is retried locally
+///
+/// When the remote compiler exits non-zero this returns nullopt, so the caller runs
+/// the compile locally and reports THAT. A compile can fail because of the code, in
+/// which case both runs agree and the user sees the same diagnostics; or because of
+/// something about the worker, in which case the local run succeeds and the build
+/// is right. Reporting the remote failure directly would make a bad node fail
+/// builds that are fine, which is the failure mode that gets distribution turned
+/// off and never turned back on. The cost is one wasted remote attempt.
+///
+/// @param record The invocation record this updates.
+/// @param cfg Launcher config (scheduler endpoint, credential, timeout).
+/// @param cmd The parsed compile command.
+/// @param argv The original full invocation.
+/// @param key The object key, for duplicate suppression at the scheduler.
+/// @param compilerBanner The compiler's version line ALONE -- the fingerprint's
+///        input, and deliberately not the cache key's, which also folds the target.
+/// @param targetTriple The target this client generates for, stated on the wire.
+/// @param dependencyPaths What the key's probe reported this TU depends on.
+/// @return A run to continue with, or nullopt to compile locally.
+[[nodiscard]] Cc::AdmittedDispatch TryRemoteCompile(InvocationRecord& record,
+                                                    Config const& cfg,
+                                                    Cc::ParsedCommand const& cmd,
+                                                    std::span<std::string const> argv,
+                                                    std::string_view key,
+                                                    DispatchPlan const& plan,
+                                                    std::vector<std::string> const& dependencyPaths,
+                                                    Cc::AdmitTicket const* granted,
+                                                    std::string_view admissionSource)
+{
+    // Read AGAIN here, for the worker exclusions and to be told what this dispatch learned: the plan
+    // asked it once, and a launcher that waited in a queue may be reading a newer one.
+    auto const memoFiles = Cc::MakeDiskFiles();
+    Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *memoFiles };
+    core::platform::SystemWallClock const wallClock;
+    auto memo = Cc::ReachabilityMemo::Load(memoStore);
+
+    // Preprocessed again, with `#line` markers this time. The key's text has them
+    // suppressed so no checkout path reaches the key; a worker needs them, because
+    // they are what marks system-header lines as system-header lines. Without that
+    // the remote compile re-reports every warning inside libc++ or the CRT, which
+    // under `-Werror` is a failed compile rather than noise.
+    auto const preprocessRun = RunCaptureSplit(Cc::DispatchPreprocessCommand(cmd, argv));
+    // The note says WHY (#1665): which exit and the first error line, because "failed"
+    // alone took a manual re-run to read as `/WX` meeting a pragma `cl /E` ignores. The
+    // stats reason stays one fixed string so the summary still counts these together.
+    if (preprocessRun.exitCode != 0)
+        return DeclineDispatch(record,
+                               RefusedHere("the dispatch preprocess failed"),
+                               std::format("dispatch preprocess failed ({}); compiling locally",
+                                           Cc::DescribeFailedPreprocess(preprocessRun.exitCode, preprocessRun.err)));
 
     // What THIS compile records as its compilation directory, and the directory itself,
     // so a worker can make its object record the same thing. It is the launcher's own
@@ -2710,22 +2783,25 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     auto const exchange = Cc::MakeTcpExchange(Notice(record.verbose));
     auto& tickets = Tickets(cfg, record.verbose);
     Cc::CredentialedExchange credentialed { *exchange, tickets };
-    auto const outcome = Cc::Dispatch(credentialed,
-                                      Cc::DispatchRequest { .schedulerEndpoint = cfg.schedulerAddr,
-                                                            .fingerprint = identity.fingerprint,
-                                                            .objectKey = key,
-                                                            .args = *args,
-                                                            .family = Cc::DriverOf(cmd.flavor).family,
-                                                            .preprocessed = preprocessRun.out,
-                                                            .sourceName = sourceName,
-                                                            .compileDir = compileDirPath,
-                                                            .compileDirReplacement = compileDirReplacement,
-                                                            .sourceRoot = sourceRoot,
-                                                            .sourceRootReplacement = sourceRootReplacement,
-                                                            .excludedWorkers = excludedWorkers,
-                                                            .toolchainLabel = toolchainLabel },
-                                      DispatchBudgetsOf(cfg),
-                                      Cc::Credential {});
+    auto const request = Cc::DispatchRequest { .schedulerEndpoint = cfg.schedulerAddr,
+                                               .fingerprint = plan.fingerprint,
+                                               .objectKey = key,
+                                               .args = plan.args,
+                                               .family = Cc::DriverOf(cmd.flavor).family,
+                                               .preprocessed = preprocessRun.out,
+                                               .sourceName = sourceName,
+                                               .compileDir = compileDirPath,
+                                               .compileDirReplacement = compileDirReplacement,
+                                               .sourceRoot = sourceRoot,
+                                               .sourceRootReplacement = sourceRootReplacement,
+                                               .excludedWorkers = excludedWorkers,
+                                               .toolchainLabel = plan.toolchainLabel,
+                                               .admissionSourcePath = admissionSource };
+    // An admission already placed this compile: the queue chose the worker and minted the token, so
+    // there is no LEASE to ask for and no RELEASE to send. The grant's age starts when it ARRIVED.
+    auto const outcome = granted != nullptr
+                             ? Cc::Dispatch(credentialed, request, *granted, DispatchBudgetsOf(cfg), Cc::Credential {})
+                             : Cc::Dispatch(credentialed, request, DispatchBudgetsOf(cfg), Cc::Credential {});
     // Every outcome is absorbed -- an Unreached scheduler is remembered, a completed lease
     // clears it -- and the file is written only when that changed anything.
     memo.Absorb(outcome, cfg.schedulerAddr, wallClock.now());
@@ -2748,11 +2824,25 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
         return DeclineDispatch(record, fleetAnswer, std::nullopt);
     }
     if (!outcome.Ran())
+    {
         // Declined and Unavailable are both ordinary and both end the same way, but
         // they are fixed in different places, which is why they are two states. The
         // reason is named because "distribution stopped working" is otherwise a
         // whole investigation, and the answer is one line.
+        //
+        // A worker that refused a job the QUEUE admitted for a reason a queue answers (full, cordoned,
+        // stopping, out of memory budget) is not a reason to compile here: the request goes back, and
+        // the caller does that. Nothing is recorded as a fall-back for it, because none happens.
+        if (granted != nullptr && Cc::IsWorkerCapacityRefusal(outcome))
+        {
+            Note(record.verbose,
+                 std::format("worker {} refused the admitted job ({}); asking the queue again",
+                             Cc::DescribeWorkerReached(outcome),
+                             outcome.detail));
+            return Cc::AdmittedDispatch { .run = std::nullopt, .workerRefused = true };
+        }
         return DeclineDispatch(record, fleetAnswer, std::format("not dispatched ({}); compiling locally", outcome.detail));
+    }
     if (outcome.exitCode != 0)
         // A worker RAN the compiler and this client is about to throw the result
         // away, which is `Discarded` -- see `Cc::DispatchOutcome`. It is the only
@@ -2861,8 +2951,139 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     // them -- an ordering nothing would enforce.
     ApplyDispatchRecording(record, fleetAnswer);
     Note(record.verbose, std::format("DISPATCHED to {} key={}", Cc::DescribeWorkerReached(outcome), key));
-    return run;
+    return Cc::AdmittedDispatch { .run = std::move(run), .workerRefused = false };
 }
+
+/// Where the fleet queue is asked: the scheduler when one is configured, else the cache's own node
+/// (whose merged `0xFC` surface forwards to the leader).
+/// @param cfg Launcher config.
+/// @return The `host:port`; empty when there is nothing to ask.
+[[nodiscard]] std::string_view AdmissionEndpoint(Config const& cfg) noexcept
+{
+    return cfg.schedulerAddr.empty() ? std::string_view { cfg.addr } : std::string_view { cfg.schedulerAddr };
+}
+
+/// Open an admission for one compile, or decline to ask.
+///
+/// **Declines before dialling whenever this invocation already learned the node is not there**, because
+/// asking would cost a connect budget to be told what is known -- a refused loopback connect on Windows
+/// can take the whole second, per translation unit of a build, against a node that is stopped. That is
+/// "a node stopped is exactly as before": two things are asked of the invocation's own evidence, never
+/// of a fresh dial -- whether its FETCH, to the same endpoint, was served, and whether a launcher a
+/// moment ago could not reach it (`ReachabilityMemo`).
+/// @param record The invocation record, for the verbose gate.
+/// @param cfg Launcher config.
+/// @param fetched How this invocation's FETCH ended; disengaged when it made none.
+/// @param request What to admit.
+/// @param memo What recent launchers learned about reachability.
+/// @return The session, or null when the queue is not to be asked.
+[[nodiscard]] std::unique_ptr<Cc::IAdmitSession> OpenAdmission(InvocationRecord const& record,
+                                                               Config const& cfg,
+                                                               std::optional<Cc::CacheOutcomeKind> fetched,
+                                                               Wire::AdmitRequest const& request,
+                                                               Cc::ReachabilityMemo const& memo)
+{
+    auto const endpoint = AdmissionEndpoint(cfg);
+    core::platform::SystemWallClock const wallClock;
+    switch (Cc::DecideAsk(endpoint,
+                          cfg.addr,
+                          fetched,
+                          !endpoint.empty() && memo.Remembers(Cc::MemoKind::SchedulerUnreached, endpoint, wallClock.now())))
+    {
+        case Cc::AskVerdict::Ask:
+            break;
+        case Cc::AskVerdict::FetchNotServed:
+            Note(record.verbose, "not asking the fleet queue: this node did not serve the fetch");
+            return nullptr;
+        case Cc::AskVerdict::RememberedDown:
+            Note(record.verbose, std::format("not asking the fleet queue: {} was not reached a moment ago", endpoint));
+            return nullptr;
+        case Cc::AskVerdict::NoEndpoint:
+        case Cc::AskVerdict::Last:
+            return nullptr;
+    }
+    auto const presented = Tickets(cfg, record.verbose).Present(std::string { endpoint });
+    return Cc::OpenAdmitSession(endpoint, presented.credential, request, Cc::DefaultAdmitBudget());
+}
+
+/// An admission failed open: say so, and remember a node nothing reached.
+/// @param record The invocation record, for the verbose gate.
+/// @param cfg Launcher config.
+/// @param memo The reachability memo this invocation holds; updated and saved when it learned something.
+/// @param store Where it is kept.
+/// @param reason The session's own words.
+void NoteAdmissionFailedOpen(InvocationRecord const& record,
+                             Config const& cfg,
+                             Cc::ReachabilityMemo& memo,
+                             Cc::IMemoStore& store,
+                             std::string const& reason)
+{
+    Note(record.verbose, std::format("not queued ({}); compiling as before", reason));
+    if (reason != Cc::AdmitUnreachedReason())
+        return;
+    core::platform::SystemWallClock const wallClock;
+    memo.Note(Cc::MemoKind::SchedulerUnreached, AdmissionEndpoint(cfg), wallClock.now());
+    memo.SaveIfChanged(store);
+}
+
+/// Run one compile the cache will not hold -- a BMI, a precompiled header, `cl`'s shared PDB, a `/Yu`
+/// compile -- under the queue, so it takes a slot and its memory like every other compile on this host.
+///
+/// Admitted `LocalOnly` and not `storable` (nothing is stored, so nothing may be answered `Stored` or
+/// shared with a waiter), and it asks no cache: there was no FETCH to learn a node from, so a node
+/// nothing reached is remembered from the admission itself.
+/// @param record The invocation record.
+/// @param cfg Launcher config.
+/// @param cmd The parsed compile command.
+/// @param args The full invocation.
+/// @return The exit code.
+[[nodiscard]] int RunAdmittedPassthrough(InvocationRecord& record,
+                                         Config const& cfg,
+                                         Cc::ParsedCommand const& cmd,
+                                         std::span<std::string const> args)
+{
+    auto const files = Cc::MakeDiskFiles();
+    Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *files };
+    auto memo = Cc::ReachabilityMemo::Load(memoStore);
+    std::error_code cwdError;
+    auto const workingDirectory = std::filesystem::current_path(cwdError).string();
+    auto const treeLabel = Cc::TreeLabelOf(cwdError ? std::string {} : workingDirectory, cfg.srcRoot);
+    auto const acceptedCodecs = Cc::AvailableCodecs();
+    Wire::AdmitRequest const admit { .kind = Wire::AdmitKind::LocalOnly,
+                                     .fingerprint = {},
+                                     .cacheKey = {},
+                                     .sourcePath = {},
+                                     .treeLabel = treeLabel,
+                                     .storable = false,
+                                     .acceptedCodecs = acceptedCodecs,
+                                     .excluded = {} };
+    Cc::MissSeams const seams {
+        .open = [&]() { return OpenAdmission(record, cfg, std::nullopt, admit, memo); },
+        .serveStored = []() -> std::optional<int> { return std::nullopt; },
+        .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
+        .dispatchUnadmitted = []() -> std::optional<Cc::CompileRun> { return std::nullopt; },
+        .compileLocal = [&]() { return RunCaptureSplit(args); },
+        .finish =
+            [&](Cc::CompileRun& run, bool&) {
+                auto const grammar = Cc::StreamGrammar(cmd.flavor);
+                ReplayStreams(Cc::CollapseNotePaths(run.out, grammar, cfg.showIncludesMarker),
+                              Cc::CollapseNotePaths(run.err, grammar, cfg.showIncludesMarker));
+                return run.exitCode == Cc::NotSpawned ? 1 : run.exitCode;
+            },
+        .failedOpen = [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, memo, memoStore, reason); },
+    };
+    auto const report = Cc::RunMiss(seams);
+    record.queuedMs = report.queuedMs;
+    record.peakMemoryBytes = report.peakMemoryBytes;
+    return report.code;
+}
+
+/// How the FETCH step ended.
+struct FetchStep
+{
+    bool decided {};           ///< The cache settled this invocation; `result` is what `RunCached` returns.
+    std::optional<int> result; ///< The exit code, or nullopt to compile with no STORE (`Warn`'s answer).
+};
 
 /// Try to serve `cmd` from the cache; returns the process exit code if handled
 /// (hit, or miss-then-compiled — locally or on a worker), or std::nullopt to
@@ -3224,8 +3445,11 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
     // would overwrite the marker for every checkout.
     std::optional<Cc::CheckoutParts> metMarker;
 
-    // FETCH.
-    {
+    // FETCH, as a step that can be taken AGAIN: a compile the queue answers `Stored` fetches once more
+    // for the object another launcher has just stored, and that is this same block, not a copy of it.
+    // Decided means the cache settled the invocation -- a hit served, or a decline that compiles with no
+    // STORE -- and `result` is what `RunCached` returns; undecided is a MISS.
+    auto const fetchStep = [&]() -> FetchStep {
         auto const presented = Tickets(cfg, record.verbose).Present(cfg.addr);
         auto const outcome =
             CacheExchange(record, "fetch", cfg.addr, Wire::EncodeFetch(key), presented.credential, BudgetOf(cfg));
@@ -3356,7 +3580,7 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
                     // is. Both paths, because a wrong object served through either is the
                     // same defect and a feature that covered one would be a feature an
                     // operator could not rely on (#423).
-                    return FinishServedHit(record, cfg, cmd, argv, key, fetched);
+                    return FetchStep { .decided = true, .result = FinishServedHit(record, cfg, cmd, argv, key, fetched) };
                 }
                 if (!Cc::StoresResult(action))
                 {
@@ -3368,7 +3592,9 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
                     // reaches `RunPassthrough` -- a plain compile with no store, which is
                     // correct HERE and catastrophic one branch up, where the value is merely
                     // of a generation this build cannot read.
-                    return Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable));
+                    return FetchStep { .decided = true,
+                                       .result =
+                                           Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable)) };
                 }
                 // Stale: the object is fine but the dependency record it carries is not
                 // true here -- or the depfile this build names could not be written, which
@@ -3383,7 +3609,10 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
         }
         // MISS — fall through to compile. A refused generation arrives here too,
         // which is what turns a bump into one cold cache rather than a dead one.
-    }
+        return FetchStep {};
+    };
+    if (auto const first = fetchStep(); first.decided)
+        return first.result;
     record.cacheMs = MsSince(cacheStarted);
     // Only a daemon that answered produces a MISS. A refusal and a transport
     // failure have already recorded themselves as fall-backs, and tracing a MISS
@@ -3405,189 +3634,248 @@ void StoreCompiledObject(Cc::StorePermit /*permit*/,
             record.outcomeDetail = Cc::BoundMissReason(*boundMiss);
     }
 
-    // MISS: try a worker first when one is configured, then the real compiler.
+    // MISS: ask the fleet queue where this compile runs, then run it there (#1728).
     //
     // A dispatched compile is shaped to look exactly like a local one -- object on
     // disk at cmd.objPath, dependency record written, streams in hand -- so
-    // everything below this point is unchanged and cannot tell the difference. That
+    // everything in `finishMiss` is unchanged and cannot tell the difference. That
     // is deliberate: the STORE, the manifest and the statistics all have one path,
     // and a second one would be a second place for them to diverge.
-    auto run = dispatchConfigured
-                   ? TryRemoteCompile(record, cfg, cmd, argv, key, compilerBanner, targetTriple, dispatchDependencies)
-                   : std::optional<Cc::CompileRun> {};
-    if (!run.has_value())
-        run = RunCaptureSplit(argv);
-    // Always surface the compiler's output on its true streams and its exit code.
     //
-    // These are COPIES, and deliberately so: the store below re-reads `run->out` and `run->err`
-    // untouched. What a build system reads has its note paths collapsed here; what the cache
-    // stores is collapsed by the SERVER, span by span, as it canonicalizes (generations 6 and 7,
-    // `CanonicalizeRegion`) -- one collapse, `PathCanon::CollapseRelativeSegments`, on both sides.
-    auto const textGrammar = Cc::StreamGrammar(cmd.flavor);
-    auto const replayOut = Cc::CollapseNotePaths(run->out, textGrammar, cfg.showIncludesMarker);
-    auto const replayErr = Cc::CollapseNotePaths(run->err, textGrammar, cfg.showIncludesMarker);
-    ReplayStreams(replayOut, replayErr);
-    // A spawn failure reports `NotSpawned`, which a POSIX exit status truncates to 255 —
-    // an arbitrary code no build system can interpret. Normalize it the same way
-    // the fall-back path does.
-    int const code = run->exitCode == Cc::NotSpawned ? 1 : run->exitCode;
-    if (code != 0)
-        return code; // do not cache a failed compile
+    // Whatever the queue answers -- or does not -- ends in the same `finishMiss`, and the queue is
+    // told AFTER it: the STORE must be visible before the compiles waiting on this key are woken.
+    auto const finishMiss = [&](Cc::CompileRun& run, bool& stored) -> int {
+        // Always surface the compiler's output on its true streams and its exit code.
+        //
+        // These are COPIES, and deliberately so: the store below re-reads `run.out` and `run.err`
+        // untouched. What a build system reads has its note paths collapsed here; what the cache
+        // stores is collapsed by the SERVER, span by span, as it canonicalizes (generations 6 and 7,
+        // `CanonicalizeRegion`) -- one collapse, `PathCanon::CollapseRelativeSegments`, on both sides.
+        auto const textGrammar = Cc::StreamGrammar(cmd.flavor);
+        auto const replayOut = Cc::CollapseNotePaths(run.out, textGrammar, cfg.showIncludesMarker);
+        auto const replayErr = Cc::CollapseNotePaths(run.err, textGrammar, cfg.showIncludesMarker);
+        ReplayStreams(replayOut, replayErr);
+        // A spawn failure reports `NotSpawned`, which a POSIX exit status truncates to 255 —
+        // an arbitrary code no build system can interpret. Normalize it the same way
+        // the fall-back path does.
+        int const code = run.exitCode == Cc::NotSpawned ? 1 : run.exitCode;
+        if (code != 0)
+            return code; // do not cache a failed compile
 
-    // Nothing more is offered to a daemon that refused this launcher, or that was
-    // never reached: the fetch above established it, and everything below exists
-    // only to store -- reading the object back, reconciling the captured regions,
-    // encoding the value and pushing it, megabytes per translation unit, spent to
-    // be told the same thing again.
-    //
-    // It is also what keeps the fall-through above from costing an extra connect
-    // per translation unit against a wrong address. The connect BUDGET, and why
-    // this is not a claim that one connect is all a dead cache costs, are in
-    // .agent/rules/distributed-compilation.md.
-    if (!Cc::CacheIsServing(fetchKind))
-    {
-        // Worded so it is true of BOTH kinds. A refusal *is* an answer -- the daemon
-        // spoke and declined -- and saying it "did not answer" would send an
-        // operator to look for an unreachable daemon that is in fact running and
-        // rejecting, which is the rule this tree records about reporting a refusal
-        // under the wrong reason. The fall-back reason above already names which.
-        Note(record.verbose, "the cache did not serve the fetch; not offering this object to it");
+        // Nothing more is offered to a daemon that refused this launcher, or that was
+        // never reached: the fetch above established it, and everything below exists
+        // only to store -- reading the object back, reconciling the captured regions,
+        // encoding the value and pushing it, megabytes per translation unit, spent to
+        // be told the same thing again.
+        //
+        // It is also what keeps the fall-through above from costing an extra connect
+        // per translation unit against a wrong address. The connect BUDGET, and why
+        // this is not a claim that one connect is all a dead cache costs, are in
+        // .agent/rules/distributed-compilation.md.
+        if (!Cc::CacheIsServing(fetchKind))
+        {
+            // Worded so it is true of BOTH kinds. A refusal *is* an answer -- the daemon
+            // spoke and declined -- and saying it "did not answer" would send an
+            // operator to look for an unreachable daemon that is in fact running and
+            // rejecting, which is the rule this tree records about reporting a refusal
+            // under the wrong reason. The fall-back reason above already names which.
+            Note(record.verbose, "the cache did not serve the fetch; not offering this object to it");
+            return code;
+        }
+
+        // T2 (#1650). The object belongs to the key only if nothing the key was taken from moved
+        // while the compile -- local or dispatched, whose second preprocess is inside this window --
+        // was reading it.
+        auto const moved = witness.AfterCompile(
+            Cc::ProjectDependencyPaths(ManifestDependencies(probed, cmd, reconciler), workingDirectoryText, layout),
+            *inputFiles);
+        auto permit = GuardStore(record, cfg, moved, recordManifest);
+        if (!permit)
+            return code;
+
+        auto const objectBytes = Cc::ReadFileBytes(cmd.objPath);
+        if (!objectBytes.has_value())
+        {
+            // The compile itself succeeded, so this stays a MISS: only the caching
+            // of it failed. Note() rather than Warn() keeps the recorded outcome.
+            Note(record.verbose, "object missing after compile; not caching");
+            return code;
+        }
+
+        CompileValue value;
+        value.objectBlob = *objectBytes;
+        // Two regions, one per stream, in a fixed order (0=stdout, 1=stderr) so the
+        // hit path replays each on its correct channel. Measured (#825): BOTH `cl` and
+        // `clang-cl` emit /showIncludes on stdout under `/c` and on stderr under
+        // `/EP` -- the channel follows the FLAG, not the driver.
+        // `.agent/rules/compile-cache.md` holds the table and is where it stays; this
+        // comment must not become a second home for it.
+        //
+        // Which is why nothing here depends on the answer, and the measurement says
+        // that was the right call rather than a lucky one: a stored value's notes are
+        // on stdout when a compile produced it and on stderr when a `/EP` run did, so
+        // there is no single stream to prefer. We tag BOTH regions with the
+        // ShowIncludes grammar, and a non-matching line in either is preserved
+        // verbatim.
+        //
+        // Both are reconciled first, and only the STORED copy is: ReplayStreams above
+        // has already passed the compiler's own bytes through untouched. The daemon
+        // canonicalizes a STORE against the roots this launcher sends, which are the
+        // AS-GIVEN ones — so a region still carrying a spelling the driver resolved
+        // some other way would match neither root and be stored with this machine's
+        // absolute paths in it. Reconciling here is what puts the two in one spelling;
+        // sending the resolved roots instead would be the other way to do it, and it
+        // is the way that breaks the replayed depfile (see RootReconciler).
+        //
+        // The MARKER is normalized before either of those, and it has to be first: the
+        // grammar finds a note by its prefix, so a region still carrying a localized one
+        // has no path spans as far as the reconciler or the daemon is concerned, and the
+        // value is stored with this machine's absolute paths in it -- #229 reached
+        // through a language pack rather than through a missing canonicalizer (#879).
+        // Normalizing here rather than on a server is forced: only this machine knows
+        // what language its own notes are in.
+        //
+        // `cfg.showIncludesMarker` is what this build believes its notes carry. On a
+        // dispatched compile that is a FACT -- the notes were synthesised with it a few
+        // hundred lines up -- and on a local one it is the operator's answer, or the
+        // English default when nobody said otherwise. The unset localized case is
+        // therefore still not canonicalized, and cannot be until the prefix is
+        // discovered from the compiler (#878); it is unchanged rather than worsened,
+        // because an unmatched marker rewrites nothing.
+        auto const storedOut = PathCanon::NormalizeIncludeNoteMarker(run.out, cfg.showIncludesMarker);
+        auto const storedErr = PathCanon::NormalizeIncludeNoteMarker(run.err, cfg.showIncludesMarker);
+        auto const includeTextOut = reconciler.Region(storedOut, textGrammar);
+        auto const includeTextErr = reconciler.Region(storedErr, textGrammar);
+        value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextOut });
+        value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextErr });
+
+        // Region 2, when present, is the GNU depfile the compile just wrote. It is
+        // tagged with the depfile grammar so the daemon canonicalizes the header
+        // paths inside it — a depfile full of this machine's absolute paths would be
+        // useless (and wrong) when replayed on another checkout.
+        if (auto const depText = ReadDepFile(cmd))
+            value.textRegions.push_back(
+                { .grammar = PathCanon::Grammar::GccDepfile,
+                  .bytes = reconciler.Region(*depText, PathCanon::Grammar::GccDepfile, Cc::ParseDepFileTargets(*depText)) });
+
+        // Asked AGAIN, after the regions above, and not only on the key path. Those
+        // calls run the reconciler over every path span the grammars find in the
+        // captured streams -- a wider set than the dependency list, and one the earlier
+        // ask therefore cannot have covered. A span this host could not read went into
+        // these regions untranslated, so the value would carry a spelling no consumer
+        // can canonicalize, localize or check.
+        if (reconciler.UnreadablePaths() != 0)
+        {
+            Note(record.verbose,
+                 "a captured region names a path that is not text this host can read; not caching "
+                 "-- try a UTF-8 console code page");
+            return code;
+        }
+
+        // The dependency root is tokenized HERE, and every other root by the server. A server
+        // canonicalizes with the two roots the STORE frame carries and knows no third; this
+        // machine's dependency cache would otherwise reach the value as an absolute path, and a
+        // hit on a machine whose cache sits in another home would replay a depfile naming headers
+        // that are not there -- refused as stale, so the shared key would buy nothing. The
+        // server leaves a `<DEPROOT>` span alone, and the hit localizes it against its own root.
+        if (!layout.dependencyRoot.empty())
+        {
+            PathCanon::Layout const dependencyOnly { .sourceRoot = {},
+                                                     .buildTree = {},
+                                                     .dependencyRoot = layout.dependencyRoot };
+            for (auto& region: value.textRegions)
+                region.bytes = PathCanon::CanonicalizeRegion(region.bytes, region.grammar, dependencyOnly);
+        }
+
+        auto const encoded = EncodeCompileValue(value);
+        if (!Cc::IsStorableSize(encoded.size(), cfg.maxStoreBytes))
+        {
+            // Still a MISS, and still a successful compile: the object on disk is
+            // the real one. Only the caching of it is declined, and declined here
+            // rather than by the daemon so the build does not spend the transfer to
+            // be refused on every rebuild of this translation unit.
+            Note(record.verbose,
+                 std::format("value {} bytes exceeds {}={}; not caching",
+                             encoded.size(),
+                             Cc::EnvName::MaxStoreBytes,
+                             cfg.maxStoreBytes));
+            return code;
+        }
+
+        stored = StoreCompiledObject(std::move(*permit), record, cfg, key, value.objectBlob, encoded, checkout, metMarker);
+
+        // Record the direct-mode manifest so the NEXT compile of this TU can reach the
+        // object without preprocessing. The include set comes from the /showIncludes
+        // output the compile just produced, so this costs no extra compiler run.
+        //
+        // The manifest holds a POINTER to the object's ordinary key, not a second copy
+        // of the object: the two keys answer different questions (one from preprocessed
+        // text, one from header hashes), but storing the bytes under both would double
+        // the cached volume, and because L1 keeps values uncompressed that doubling
+        // lands on RAM where compression cannot help. A direct hit therefore costs one
+        // extra fetch to follow the pointer — see DirectManifest::objectKey.
+        if (cfg.direct)
+            recordManifest();
         return code;
-    }
+    };
 
-    // T2 (#1650). The object belongs to the key only if nothing the key was taken from moved
-    // while the compile -- local or dispatched, whose second preprocess is inside this window --
-    // was reading it.
-    auto const moved = witness.AfterCompile(
-        Cc::ProjectDependencyPaths(ManifestDependencies(probed, cmd, reconciler), workingDirectoryText, layout),
-        *inputFiles);
-    auto permit = GuardStore(record, cfg, moved, recordManifest);
-    if (!permit)
-        return code;
-
-    auto const objectBytes = Cc::ReadFileBytes(cmd.objPath);
-    if (!objectBytes.has_value())
-    {
-        // The compile itself succeeded, so this stays a MISS: only the caching
-        // of it failed. Note() rather than Warn() keeps the recorded outcome.
-        Note(record.verbose, "object missing after compile; not caching");
-        return code;
-    }
-
-    CompileValue value;
-    value.objectBlob = *objectBytes;
-    // Two regions, one per stream, in a fixed order (0=stdout, 1=stderr) so the
-    // hit path replays each on its correct channel. Measured (#825): BOTH `cl` and
-    // `clang-cl` emit /showIncludes on stdout under `/c` and on stderr under
-    // `/EP` -- the channel follows the FLAG, not the driver.
-    // `.agent/rules/compile-cache.md` holds the table and is where it stays; this
-    // comment must not become a second home for it.
+    // The queue is asked where this compile runs. WHAT it answers is `Cc::RunMiss`'s to act on, in a
+    // file a test reaches; this is HOW each step is performed.
     //
-    // Which is why nothing here depends on the answer, and the measurement says
-    // that was the right call rather than a lucky one: a stored value's notes are
-    // on stdout when a compile produced it and on stderr when a `/EP` run did, so
-    // there is no single stream to prefer. We tag BOTH regions with the
-    // ShowIncludes grammar, and a non-matching line in either is preserved
-    // verbatim.
-    //
-    // Both are reconciled first, and only the STORED copy is: ReplayStreams above
-    // has already passed the compiler's own bytes through untouched. The daemon
-    // canonicalizes a STORE against the roots this launcher sends, which are the
-    // AS-GIVEN ones — so a region still carrying a spelling the driver resolved
-    // some other way would match neither root and be stored with this machine's
-    // absolute paths in it. Reconciling here is what puts the two in one spelling;
-    // sending the resolved roots instead would be the other way to do it, and it
-    // is the way that breaks the replayed depfile (see RootReconciler).
-    //
-    // The MARKER is normalized before either of those, and it has to be first: the
-    // grammar finds a note by its prefix, so a region still carrying a localized one
-    // has no path spans as far as the reconciler or the daemon is concerned, and the
-    // value is stored with this machine's absolute paths in it -- #229 reached
-    // through a language pack rather than through a missing canonicalizer (#879).
-    // Normalizing here rather than on a server is forced: only this machine knows
-    // what language its own notes are in.
-    //
-    // `cfg.showIncludesMarker` is what this build believes its notes carry. On a
-    // dispatched compile that is a FACT -- the notes were synthesised with it a few
-    // hundred lines up -- and on a local one it is the operator's answer, or the
-    // English default when nobody said otherwise. The unset localized case is
-    // therefore still not canonicalized, and cannot be until the prefix is
-    // discovered from the compiler (#878); it is unchanged rather than worsened,
-    // because an unmatched marker rewrites nothing.
-    auto const storedOut = PathCanon::NormalizeIncludeNoteMarker(run->out, cfg.showIncludesMarker);
-    auto const storedErr = PathCanon::NormalizeIncludeNoteMarker(run->err, cfg.showIncludesMarker);
-    auto const includeTextOut = reconciler.Region(storedOut, textGrammar);
-    auto const includeTextErr = reconciler.Region(storedErr, textGrammar);
-    value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextOut });
-    value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextErr });
+    // A plan, when there is one, is made BEFORE the queue is asked: a dispatchable request names its
+    // toolchain, and the leader places it by that. A command line a worker would not take, or a
+    // toolchain with no usable fingerprint, is `LocalOnly` -- it still takes a slot and its memory.
+    std::optional<DispatchPlan> const plan =
+        dispatchConfigured ? PlanDispatch(record, cfg, cmd, argv, compilerBanner, targetTriple) : std::nullopt;
 
-    // Region 2, when present, is the GNU depfile the compile just wrote. It is
-    // tagged with the depfile grammar so the daemon canonicalizes the header
-    // paths inside it — a depfile full of this machine's absolute paths would be
-    // useless (and wrong) when replayed on another checkout.
-    if (auto const depText = ReadDepFile(cmd))
-        value.textRegions.push_back(
-            { .grammar = PathCanon::Grammar::GccDepfile,
-              .bytes = reconciler.Region(*depText, PathCanon::Grammar::GccDepfile, Cc::ParseDepFileTargets(*depText)) });
+    // The `<SRCROOT>`-relative source, which keys the leader's shape estimate. Absent is not an error: the
+    // estimate then rests on the key alone.
+    auto const sourceToken = Cc::CanonicalSourceToken(cmd.source, layout, workingDirectoryText);
+    std::string const admissionSource = sourceToken.has_value() ? *sourceToken : std::string {};
 
-    // Asked AGAIN, after the regions above, and not only on the key path. Those
-    // calls run the reconciler over every path span the grammars find in the
-    // captured streams -- a wider set than the dependency list, and one the earlier
-    // ask therefore cannot have covered. A span this host could not read went into
-    // these regions untranslated, so the value would carry a spelling no consumer
-    // can canonicalize, localize or check.
-    if (reconciler.UnreadablePaths() != 0)
-    {
-        Note(record.verbose,
-             "a captured region names a path that is not text this host can read; not caching "
-             "-- try a UTF-8 console code page");
-        return code;
-    }
+    auto const admitFiles = Cc::MakeDiskFiles();
+    Cc::FileMemoStore admitMemoStore { Cc::ReachabilityMemoPath(), *admitFiles };
+    core::platform::SystemWallClock const admitClock;
+    auto admitMemo = Cc::ReachabilityMemo::Load(admitMemoStore);
+    auto const unreachedWorkers = admitMemo.Fresh(Cc::MemoKind::WorkerUnreached, admitClock.now());
+    std::vector<std::string_view> const excludedWorkers { unreachedWorkers.begin(), unreachedWorkers.end() };
+    auto const treeLabel = Cc::TreeLabelOf(workingDirectoryText, cfg.srcRoot);
+    auto const acceptedCodecs = Cc::AvailableCodecs();
+    Wire::AdmitRequest const admit { .kind = plan.has_value() ? Wire::AdmitKind::Dispatchable : Wire::AdmitKind::LocalOnly,
+                                     .fingerprint =
+                                         plan.has_value() ? std::string_view { plan->fingerprint } : std::string_view {},
+                                     .cacheKey = key,
+                                     .sourcePath = admissionSource,
+                                     .treeLabel = treeLabel,
+                                     .storable = true,
+                                     .acceptedCodecs = acceptedCodecs,
+                                     .excluded = excludedWorkers };
 
-    // The dependency root is tokenized HERE, and every other root by the server. A server
-    // canonicalizes with the two roots the STORE frame carries and knows no third; this
-    // machine's dependency cache would otherwise reach the value as an absolute path, and a
-    // hit on a machine whose cache sits in another home would replay a depfile naming headers
-    // that are not there -- refused as stale, so the shared key would buy nothing. The
-    // server leaves a `<DEPROOT>` span alone, and the hit localizes it against its own root.
-    if (!layout.dependencyRoot.empty())
-    {
-        PathCanon::Layout const dependencyOnly { .sourceRoot = {},
-                                                 .buildTree = {},
-                                                 .dependencyRoot = layout.dependencyRoot };
-        for (auto& region: value.textRegions)
-            region.bytes = PathCanon::CanonicalizeRegion(region.bytes, region.grammar, dependencyOnly);
-    }
-
-    auto const encoded = EncodeCompileValue(value);
-    if (!Cc::IsStorableSize(encoded.size(), cfg.maxStoreBytes))
-    {
-        // Still a MISS, and still a successful compile: the object on disk is
-        // the real one. Only the caching of it is declined, and declined here
-        // rather than by the daemon so the build does not spend the transfer to
-        // be refused on every rebuild of this translation unit.
-        Note(
-            record.verbose,
-            std::format(
-                "value {} bytes exceeds {}={}; not caching", encoded.size(), Cc::EnvName::MaxStoreBytes, cfg.maxStoreBytes));
-        return code;
-    }
-
-    StoreCompiledObject(std::move(*permit), record, cfg, key, value.objectBlob, encoded, checkout, metMarker);
-
-    // Record the direct-mode manifest so the NEXT compile of this TU can reach the
-    // object without preprocessing. The include set comes from the /showIncludes
-    // output the compile just produced, so this costs no extra compiler run.
-    //
-    // The manifest holds a POINTER to the object's ordinary key, not a second copy
-    // of the object: the two keys answer different questions (one from preprocessed
-    // text, one from header hashes), but storing the bytes under both would double
-    // the cached volume, and because L1 keeps values uncompressed that doubling
-    // lands on RAM where compression cannot help. A direct hit therefore costs one
-    // extra fetch to follow the pointer — see DirectManifest::objectKey.
-    if (cfg.direct)
-        recordManifest();
-    return code;
+    Cc::MissSeams const seams {
+        .open = [&]() { return OpenAdmission(record, cfg, fetchKind, admit, admitMemo); },
+        .serveStored = [&]() -> std::optional<int> {
+            auto const step = fetchStep();
+            return step.decided ? step.result : std::nullopt;
+        },
+        .dispatchAdmitted = [&](Cc::AdmitTicket const& ticket) -> Cc::AdmittedDispatch {
+            if (!plan.has_value())
+                return {};
+            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
+        },
+        .dispatchUnadmitted = [&]() -> std::optional<Cc::CompileRun> {
+            if (!plan.has_value())
+                return std::nullopt;
+            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}).run;
+        },
+        .compileLocal = [&]() { return RunCaptureSplit(argv); },
+        .finish = finishMiss,
+        .failedOpen =
+            [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, admitMemo, admitMemoStore, reason); },
+    };
+    auto const report = Cc::RunMiss(seams);
+    record.queuedMs = report.queuedMs;
+    record.peakMemoryBytes = report.peakMemoryBytes;
+    return report.code;
 }
 
 } // namespace
@@ -3801,7 +4089,8 @@ int main(int argc, char** argv)
             Note(record.verbose,
                  "a clang-cl pass-through dependency flag (-clang:-MF) carries its value in a separate "
                  "argument, which the launcher cannot read; spell it fused (-clang:-MF<path>) to cache this compile");
-        return RunPassthrough(std::span<std::string const> { args }, Cc::StreamGrammar(cmd.flavor), cfg.showIncludesMarker);
+        // A compile the cache will not hold is still a compile this host runs, so it queues like one.
+        return RunAdmittedPassthrough(record, cfg, cmd, std::span<std::string const> { args });
     }
 
     auto const started = std::chrono::steady_clock::now();
@@ -3834,6 +4123,8 @@ int main(int argc, char** argv)
             // for a cache breaking the build.
             .timestampUnixSeconds = Cc::RecordTimestamp(core::platform::defaultSystemWallClock()),
             .exitCode = code,
+            .queuedMs = record.queuedMs,
+            .peakMemoryBytes = record.peakMemoryBytes,
         });
     }
     return code;

@@ -161,6 +161,7 @@ set(_pace_cc_sources
     CacheKey.cpp
     CacheProtocol.cpp
     AdmitSession.cpp
+    MissFlow.cpp
     ReactorExchange.cpp
     Dispatch.cpp
     EndpointDial.cpp
@@ -309,6 +310,7 @@ if(PACE_BUILD_TESTS)
         ObjectSections_test.cpp
         CompileCorrelation_test.cpp
         AdmitSession_test.cpp
+        MissFlow_test.cpp
         ReactorExchange_test.cpp
         Dispatch_test.cpp
         EndpointDial_test.cpp
