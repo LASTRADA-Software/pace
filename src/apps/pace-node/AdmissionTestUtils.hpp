@@ -2,13 +2,17 @@
 #pragma once
 
 #include "AdmissionResponder.hpp"
+#include "AdmitForwarder.hpp"
 #include "FrameEndpoint.hpp"
 #include "HeldCharges.hpp"
 #include "NodeConfig.hpp"
 #include "NodeIoLoop.hpp"
+#include "NodeProofClient.hpp"
 #include "NodeSurfaces.hpp"
 #include "Responders.hpp"
+#include "SchedulingRedirect.hpp"
 
+#include <Pace/Core/ISecureRandom.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/LeaseSigner.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
@@ -27,13 +31,16 @@
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <EndpointDial.hpp>
 #include <core/async/SyncRun.hpp>
+#include <core/async/Task.hpp>
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/net/ISocket.hpp>
@@ -326,4 +333,145 @@ template <std::predicate Predicate>
 {
     return queue.metrics.Read(counter);
 }
+
+/// The follower-side pieces -- a node that relays its launchers' admissions to the leader -- shared by the
+/// forwarder's cases and the fleet's end-to-end ones.
+/// Dials the way production does -- from the loop, over a real socket -- minus the proof, which a
+/// loopback leader does not ask for, and records every endpoint it was asked to dial.
+class RecordingDialer final: public IUpstreamDialer
+{
+  public:
+    /// Where connections are made; set once the node's loop exists.
+    /// @param io The follower's loop.
+    void Attach(NodeIoLoop& io) noexcept
+    {
+        _io = &io;
+    }
+
+    /// @copydoc IUpstreamDialer::Open
+    [[nodiscard]] core::async::Task<UpstreamOpening> Open(std::string endpoint) override
+    {
+        {
+            auto const guard = std::scoped_lock { _mutex };
+            _dialled.push_back(endpoint);
+        }
+        auto socket =
+            co_await Cc::DialEndpoint(&_io->Connector(), endpoint, core::net::DialOptions { .connectTimeout = 1s });
+        if (socket == nullptr)
+            co_return UpstreamOpening { .socket = nullptr, .reason = "nothing answered" };
+        co_return UpstreamOpening { .socket = std::move(socket), .reason = {} };
+    }
+
+    /// @return Every endpoint dialled so far, in order.
+    [[nodiscard]] std::vector<std::string> Dialled() const
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        return _dialled;
+    }
+
+  private:
+    NodeIoLoop* _io { nullptr };
+    mutable std::mutex _mutex;
+    std::vector<std::string> _dialled;
+};
+
+/// The `0xFC` endpoint a node announces, as a case states it. Guarded: a case states it while the node's
+/// reactor may already read it.
+class StatedEndpoint final: public Cc::IAdvertisedEndpointSource
+{
+  public:
+    /// @param endpoint What this node announces from now on.
+    void Set(std::string endpoint)
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        _endpoint = std::move(endpoint);
+    }
+
+    /// @copydoc Cc::IAdvertisedEndpointSource::Current
+    [[nodiscard]] std::string Current() const override
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        return _endpoint;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::string _endpoint;
+};
+
+/// The cadence these cases run a node at: a pulse every 20 ms, and the wire's own bound on the leader.
+inline constexpr ForwardPolicy QuickPulse { .progressInterval = 20ms };
+
+/// The leader as every case's fixture names it, and the identity it proves.
+inline constexpr std::string_view LeaderMachine = "scheduler";
+
+/// A node that runs no scheduler -- a learner -- with the forwarder wired, serving on a loopback port.
+struct Follower
+{
+    /// @param leaderEndpoint What the node believes the leader's scheduling endpoint to be.
+    /// @param policy Its pulse and its bound on the leader's silence.
+    /// @param provingAs The machine it proves itself as, through the production dialer
+    ///        (`ProvenSchedulerDialer`); nothing to dial plainly and record what it dials.
+    explicit Follower(std::string_view leaderEndpoint,
+                      ForwardPolicy policy = QuickPulse,
+                      std::optional<std::string_view> provingAs = std::nullopt)
+    {
+        knownLeader.Publish(leaderEndpoint);
+        dialer.Attach(*io);
+        IUpstreamDialer* upstream = &dialer;
+        if (provingAs.has_value())
+        {
+            key.emplace(Testing::TestKeyPair(std::string { *provingAs }));
+            proof.emplace(std::string { *provingAs }, *key, leaderTrust, nullptr, nullptr, random);
+            provenDialer.emplace(*proof, io->Connector(), io->Reactor());
+            upstream = &*provenDialer;
+        }
+        forwarder.emplace(knownLeader, *upstream, io->Reactor(), metrics, &held, &self, policy);
+        redirect.ForwardAdmissionWith(*forwarder);
+    }
+
+    /// Start serving on a fresh port.
+    /// @return The port.
+    [[nodiscard]] std::uint16_t Serve()
+    {
+        auto const port = FreePort();
+        NodeConfig cfg;
+        cfg.*RowFor(NodeSurface::Node).spec = std::format("127.0.0.1:{}", port);
+        auto started = FrameEndpoint::Start(*io, NodeSurface::Node, cfg, redirect, metrics, logger);
+        REQUIRE(started.has_value());
+        endpoint = std::move(*started);
+        io->Start();
+        return port;
+    }
+
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Distributed::LoopbackMembership membership;
+    KnownSchedulingLeader knownLeader;
+    HeldChargeRegistry held;
+    StatedEndpoint self;
+    RecordingDialer dialer;
+    /// Whom the proving dialer proves to: exactly the leader, under its key -- production's own trust type.
+    NamedMachineTrust leaderTrust { std::string { LeaderMachine },
+                                    Testing::TestKeyPair(std::string { LeaderMachine }).PublicKey() };
+    SystemSecureRandom random;
+    std::optional<Ed25519KeyPair> key;
+    std::optional<NodeProofClient> proof;
+    std::optional<ProvenSchedulerDialer> provenDialer;
+    SchedulingRedirectResponder redirect { membership, knownLeader };
+    std::optional<AdmitForwarder> forwarder;
+
+    /// Declared LAST so it is destroyed FIRST, as the leader fixture's is: the reactor goes before the
+    /// responders its parked frames reach.
+    std::unique_ptr<NodeIoLoop> io = std::make_unique<NodeIoLoop>();
+    std::unique_ptr<FrameEndpoint> endpoint;
+};
+
+/// @param port A loopback port.
+/// @return The scheduling endpoint a leader serving there answers at.
+[[nodiscard]] inline std::string EndpointOf(std::uint16_t port)
+{
+    return std::format("127.0.0.1:{}", port);
+}
+
 } // namespace Pace::Node::AdmissionFixture
