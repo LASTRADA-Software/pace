@@ -44,7 +44,7 @@ void PeakEstimates::BoundedLru::Put(std::string const& key, std::uint64_t value)
     }
 }
 
-PeakEstimates::PeakEstimates(std::uint64_t defaultBytes, std::size_t capacity) noexcept:
+PeakEstimates::PeakEstimates(std::uint64_t defaultBytes, std::size_t capacity):
     _defaultBytes { defaultBytes }, _byKey { capacity }, _byShape { capacity }
 {
 }

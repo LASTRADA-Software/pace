@@ -88,13 +88,26 @@ TEST_CASE("PeakEstimates.killed-raises-to-default", "[distributed][estimates]")
 TEST_CASE("PeakEstimates.bounded", "[distributed][estimates]")
 {
     PeakEstimates estimates { Default, 2 };
-    estimates.Record(Key("k1"), 3 * GiB);
-    estimates.Record(Key("k2"), 1 * GiB);
-    estimates.Record(Key("k3"), 1 * GiB);
-    // k1 was evicted as an exact key; the path still remembers the maximum.
-    CHECK(estimates.Estimate(Key("k1")) == 3 * GiB);
-    CHECK(estimates.Estimate(Key("k2")) == 1 * GiB);
-    CHECK(estimates.Estimate(Key("k3")) == 1 * GiB);
+    estimates.Record(Key("k1"), 1 * GiB);
+    estimates.Record(Key("k2"), 4 * GiB);
+    estimates.Record(Key("k3"), 3 * GiB);
+    // k1 was evicted as an exact key and falls back to the shape's maximum; an unevicted k1 would say 1 GiB.
+    CHECK(estimates.Estimate(Key("k1")) == 4 * GiB);
+    CHECK(estimates.Estimate(Key("k2")) == 4 * GiB);
+    CHECK(estimates.Estimate(Key("k3")) == 3 * GiB);
+}
+
+TEST_CASE("PeakEstimates.bounded-evicts-least-recently-recorded", "[distributed][estimates]")
+{
+    PeakEstimates estimates { Default, 2 };
+    estimates.Record(Key("k1"), 1 * GiB);
+    estimates.Record(Key("k2"), 3 * GiB);
+    estimates.Record(Key("k1"), 1 * GiB); // k1 is now more recent than k2.
+    estimates.Record(Key("k3"), 4 * GiB);
+    CHECK(estimates.Estimate(Key("k1")) == 1 * GiB);
+    CHECK(estimates.Estimate(Key("k3")) == 4 * GiB);
+    // k2 was evicted: the shape's maximum answers, not its own 3 GiB.
+    CHECK(estimates.Estimate(Key("k2")) == 4 * GiB);
 }
 
 TEST_CASE("PeakEstimates.bounded-evicts-least-recent-shape", "[distributed][estimates]")

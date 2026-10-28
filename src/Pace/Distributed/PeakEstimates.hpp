@@ -32,7 +32,7 @@ class PeakEstimates
     ///                     compile is raised to.
     /// @param capacity Entries each of the two maps keeps before evicting the least recently
     ///                 recorded. Zero remembers nothing.
-    PeakEstimates(std::uint64_t defaultBytes, std::size_t capacity) noexcept;
+    PeakEstimates(std::uint64_t defaultBytes, std::size_t capacity);
 
     /// @param key The compile to estimate.
     /// @return The exact key's latest measurement, else the shape's maximum, else the default.
