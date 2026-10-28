@@ -9804,7 +9804,10 @@ namespace Detail
         return std::nullopt;
     if (!Detail::FitsCap((*fields)[1], MaxToolchainFingerprintBytes) || !Detail::FitsCap((*fields)[2], MaxLeaseKeyBytes)
         || !Detail::FitsCap((*fields)[3], MaxAdmitPathBytes) || !Detail::FitsCap((*fields)[4], MaxAdmitTreeLabelBytes)
-        || !Detail::FitsCap((*fields)[8], MaxToolchainLabelBytes) || !IsValidUtf8(AsStringView((*fields)[8])))
+        || !Detail::FitsCap((*fields)[8], MaxToolchainLabelBytes)
+        || !IsValidUtf8(AsStringView((*fields)[8]))
+        // Peer text the fleet page and `/fleet.json` render, so it is refused where it enters (#1728, R14).
+        || !IsValidUtf8(AsStringView((*fields)[4])))
         return std::nullopt;
     auto const excluded = DecodeExclusions((*fields)[7]);
     if (!excluded.has_value())

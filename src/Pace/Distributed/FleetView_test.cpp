@@ -2480,8 +2480,12 @@ namespace
         .clients = { AdmissionClientRow { .machine = "ws-92", .tree = "contour-wt3", .running = 4, .queued = 12 },
                      AdmissionClientRow { .machine = "ws-92", .tree = "pace-main", .running = 2, .queued = 0 },
                      AdmissionClientRow { .machine = "ws-17", .tree = "pace-main", .running = 0, .queued = 3 } },
-        .machines = { AdmissionMachineRow { .machine = "ws-92", .chargedBytes = 6ULL << 30, .budgetBytes = 16ULL << 30 },
-                      AdmissionMachineRow { .machine = "ws-17", .chargedBytes = 0, .budgetBytes = std::nullopt } }
+        .machines = { AdmissionMachineRow { .machine = "ws-92",
+                                            .chargedBytes = 6ULL << 30,
+                                            .inUseBytes = 6ULL << 30,
+                                            .budgetBytes = 16ULL << 30 },
+                      AdmissionMachineRow {
+                          .machine = "ws-17", .chargedBytes = 0, .inUseBytes = 0, .budgetBytes = std::nullopt } }
     };
     return snapshot;
 }
@@ -2495,9 +2499,9 @@ TEST_CASE("FleetView.admission-section-renders", "[distributed][fleetview][admis
     CHECK(json.contains(R"("admission":{"depth":12,"clients":[)"));
     CHECK(json.contains(R"({"machine":"ws-92","tree":"contour-wt3","running":4,"queued":12})"));
     CHECK(json.contains(R"({"machine":"ws-17","tree":"pace-main","running":0,"queued":3})"));
-    CHECK(json.contains(R"("machines":[{"machine":"ws-92","charged":6442450944,"budget":17179869184})"));
+    CHECK(json.contains(R"("machines":[{"machine":"ws-92","charged":6442450944,"in-use":6442450944,"budget":17179869184})"));
     // A machine that never stated a budget has none, rather than zero.
-    CHECK(json.contains(R"({"machine":"ws-17","charged":0,"budget":null})"));
+    CHECK(json.contains(R"({"machine":"ws-17","charged":0,"in-use":0,"budget":null})"));
 
     auto const clients = RenderFleetText(snapshot, NoHistory(), FleetSection::Clients);
     CHECK(clients.starts_with("machine\ttree\trunning\tqueued\n"));
@@ -2518,6 +2522,35 @@ TEST_CASE("FleetView.admission-tree-label-is-escaped-on-the-page", "[distributed
     auto const html = RenderFleetHtml(snapshot, NoHistory(), 0);
     CHECK_FALSE(html.contains("<script>x"));
     CHECK(html.contains("&lt;script&gt;x"));
+}
+
+TEST_CASE("FleetView.admission-tree-label-cannot-shift-a-text-row", "[distributed][fleetview][admission][security]")
+{
+    auto snapshot = QueueingSnapshot();
+    snapshot.admission->clients.front().tree = "a\tb\nc";
+    auto const text = RenderFleetText(snapshot, NoHistory(), FleetSection::Clients);
+    // Header plus the three rows, and every row still four fields: no tab or newline survived.
+    CHECK(std::ranges::count(text, '\n') == 4);
+    for (auto const line: std::views::split(std::string_view { text }.substr(0, text.size() - 1), '\n'))
+        CHECK(std::ranges::count(line, '\t') == 3);
+}
+
+TEST_CASE("FleetView.admission-ledger-reads-in-use-beside-charged", "[distributed][fleetview][admission]")
+{
+    auto snapshot = QueueingSnapshot();
+    snapshot.admission->machines.front().chargedBytes = 0;
+    snapshot.admission->machines.front().inUseBytes = 7ULL << 30;
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    CHECK(json.contains(R"({"machine":"ws-92","charged":0,"in-use":7516192768,"budget":17179869184})"));
+}
+
+TEST_CASE("FleetView.queue-tile-says-an-idle-leader-has-seen-nothing", "[distributed][fleetview][admission]")
+{
+    // The tile's sub-line lives on the page, which only a leader renders: a follower answers a 503 instead.
+    auto const leader = LeadingSnapshot();
+    auto const html = RenderFleetHtml(leader, NoHistory(), 0);
+    CHECK(html.contains("no queue activity yet"));
+    CHECK_FALSE(html.contains("no compile queue on this node"));
 }
 
 TEST_CASE("FleetView.admission-absent-when-no-queue", "[distributed][fleetview][admission]")

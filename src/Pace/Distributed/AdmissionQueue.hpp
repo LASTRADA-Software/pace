@@ -101,6 +101,7 @@ struct MachineLedgerView
 {
     MachineId machine;                        ///< The machine.
     std::uint64_t chargedBytes {};            ///< What this ledger has charged it.
+    std::uint64_t inUseBytes {};              ///< What the queue admits against: `max(charged, held by its report)`.
     std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
 };
 
@@ -247,6 +248,13 @@ class AdmissionQueue
         std::uint64_t freeBytes {};
         std::uint32_t freeSlots {};
     };
+
+    /// The memory in use on a machine, as admission counts it: `max(charged by this ledger, held by its
+    /// own report)`, so after a failover (empty ledger) the report alone counts. The ONE place this is
+    /// computed: `RoomOn` and `Snapshot` both ask it.
+    /// @param ledger The machine's ledger.
+    /// @return Bytes in use.
+    [[nodiscard]] static std::uint64_t InUseBytes(Ledger const& ledger) noexcept;
 
     /// @param machine A machine that has reported.
     /// @param hold What earlier entries of this pump reserved there.

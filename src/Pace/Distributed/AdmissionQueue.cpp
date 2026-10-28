@@ -83,6 +83,7 @@ QueueView AdmissionQueue::Snapshot() const
         view.machines.push_back(MachineLedgerView {
             .machine = machine,
             .chargedBytes = ledger.chargedBytes,
+            .inUseBytes = InUseBytes(ledger),
             .budgetBytes = ledger.report.has_value() ? std::optional { ledger.report->memoryBudgetBytes } : std::nullopt });
     }
     return view;
@@ -212,12 +213,17 @@ std::vector<Ticket> AdmissionQueue::LoseLeadership()
     return parked;
 }
 
+std::uint64_t AdmissionQueue::InUseBytes(Ledger const& ledger) noexcept
+{
+    return std::max(ledger.chargedBytes, ledger.report.has_value() ? ledger.report->heldBytes : std::uint64_t {});
+}
+
 AdmissionQueue::Room AdmissionQueue::RoomOn(MachineId const& machine, Reserved const& hold) const
 {
     auto const& ledger = _ledgers.at(machine);
     auto const& report = *ledger.report;
     Room room;
-    room.usedBytes = std::max(ledger.chargedBytes, report.heldBytes);
+    room.usedBytes = InUseBytes(ledger);
     room.usedSlots = std::max(ledger.chargedSlots, report.heldSlots);
     room.freeBytes = Saturating(Saturating(report.memoryBudgetBytes, room.usedBytes), hold.bytes);
     // A machine running an over-budget compile has nothing left for anybody.

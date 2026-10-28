@@ -428,8 +428,8 @@ TEST_CASE("SchedulerAdmission.fleet-collects-the-queue-with-machines-named",
     auto const workerMachine = MachineOf(fleet.workerKey.PublicKey());
     fleet.Report(workerMachine, 1024 * MiB, 1);
     // Only the worker machine has reported, so the one worker slot is all there is.
-    auto const running = fleet.Admit("k1");
-    auto const waiting = fleet.Admit("k2");
+    (void) fleet.Admit("k1");
+    (void) fleet.Admit("k2");
     REQUIRE(fleet.service.PumpAdmission().size() == 1); // one slot: the second waits
 
     auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
@@ -452,6 +452,4 @@ TEST_CASE("SchedulerAdmission.fleet-collects-the-queue-with-machines-named",
     // A node that stops leading has no queue to show.
     fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
     CHECK_FALSE(CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }).admission);
-    static_cast<void>(running);
-    static_cast<void>(waiting);
 }

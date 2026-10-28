@@ -131,6 +131,7 @@ struct AdmissionMachineRow
 {
     std::string machine;                      ///< As `AdmissionClientRow::machine`.
     std::uint64_t chargedBytes {};            ///< What the queue has charged it.
+    std::uint64_t inUseBytes {};              ///< What admission counts as used: `max(charged, held by its report)`.
     std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
 };
 

@@ -6027,6 +6027,12 @@ TEST_CASE("An ADMIT payload this build cannot read is refused, never clamped", "
     {
         CHECK_FALSE(DecodeAdmitPayload(withField(0, Bytes({ static_cast<int>(AdmitKind::Last) }))).has_value());
     }
+    SECTION("a tree label that is not UTF-8")
+    {
+        // Peer text the fleet page renders: refused where it enters (#1728, R14), like the toolchain label.
+        CHECK_FALSE(DecodeAdmitPayload(withField(4, Bytes({ 0x74, 0xC3, 0x28 }))).has_value());
+        CHECK(DecodeAdmitPayload(withField(4, Bytes({ 0x74, 0xC3, 0xA9 }))).has_value());
+    }
     SECTION("a kind field that is not one byte")
     {
         CHECK_FALSE(DecodeAdmitPayload(withField(0, Bytes({ 0, 0 }))).has_value());

@@ -806,3 +806,17 @@ TEST_CASE("AdmissionQueue.snapshot-is-empty-before-anything-happens", "[distribu
     CHECK(view.clients.empty());
     CHECK(view.machines.empty());
 }
+
+TEST_CASE("AdmissionQueue.snapshot-in-use-is-what-admission-counts-after-a-failover", "[distributed][admission]")
+{
+    Fixture f;
+    // A new leader: the ledger is empty, the machine says it holds 7 GiB of its 8.
+    f.queue.ReportMachine("m", Report(8 * GiB, 32, 2, 7 * GiB));
+    auto const view = f.queue.Snapshot();
+    REQUIRE(view.machines.size() == 1);
+    CHECK(view.machines[0].chargedBytes == 0);
+    CHECK(view.machines[0].inUseBytes == 7 * GiB);
+    // And it is the figure admission refuses on: 2 GiB does not fit in the 1 GiB left.
+    f.Local(2 * GiB);
+    CHECK(f.queue.Pump().empty());
+}

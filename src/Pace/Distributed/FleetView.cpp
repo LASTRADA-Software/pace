@@ -396,7 +396,7 @@ namespace
     };
 
     /// What a compile-queue ledger row shows (#1728).
-    constexpr std::array<FleetColumn<AdmissionMachineRow>, 3> BudgetColumns {
+    constexpr std::array<FleetColumn<AdmissionMachineRow>, 4> BudgetColumns {
         FleetColumn<AdmissionMachineRow> {
             .name = "machine",
             .help = "The machine, by its display name.",
@@ -405,10 +405,19 @@ namespace
             .project = [](AdmissionMachineRow const& row) { return FleetCell::Of(row.machine); } },
         FleetColumn<AdmissionMachineRow> {
             .name = "charged",
-            .help = "Memory the queue has charged this machine for compiles it granted.",
+            .help = "Memory this queue has charged the machine for compiles it granted. After a failover the "
+                    "ledger starts empty, so this can read 0 on a full machine: read in-use for what admission sees.",
             .format = CellFormat::Bytes,
             .keep = ColumnKeep::Vital,
             .project = [](AdmissionMachineRow const& row) { return FleetCell::Of(row.chargedBytes); } },
+        FleetColumn<AdmissionMachineRow> {
+            .name = "in-use",
+            .help = "Memory admission counts as used on the machine: the larger of what this queue charged and "
+                    "what the machine itself reports holding. A new request is admitted only if it fits what "
+                    "is left of the budget after this.",
+            .format = CellFormat::Bytes,
+            .keep = ColumnKeep::Vital,
+            .project = [](AdmissionMachineRow const& row) { return FleetCell::Of(row.inUseBytes); } },
         FleetColumn<AdmissionMachineRow> {
             .name = "budget",
             .help = "The memory budget the machine stated. Absent until it has reported one.",
@@ -1148,6 +1157,7 @@ namespace
         for (auto const& machine: view->machines)
             section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers),
                                                              .chargedBytes = machine.chargedBytes,
+                                                             .inUseBytes = machine.inUseBytes,
                                                              .budgetBytes = machine.budgetBytes });
         std::ranges::sort(section.clients, [](AdmissionClientRow const& a, AdmissionClientRow const& b) {
             return std::tie(a.machine, a.tree) < std::tie(b.machine, b.tree);
@@ -2496,7 +2506,8 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
                                 .of = FleetCell::Nothing(),
                                 .format = CellFormat::Count,
                                 .unit = {},
-                                .sub = "no compile queue on this node" };
+                                .sub = snapshot.role == SchedulerRole::Leader ? "no queue activity yet"
+                                                                              : "no compile queue on this node" };
         auto running = std::uint64_t { 0 };
         for (auto const& row: snapshot.admission->clients)
             running += row.running;
