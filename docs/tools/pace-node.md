@@ -3359,6 +3359,37 @@ learn from the machines that ran the compiles. A leader that cannot take the rep
 refuses it like any other verb; the node logs that once, when it starts, and again when
 it clears.
 
+#### The queue, and who answers it
+
+The queue lives at the fleet's **leader**, which is the one node that knows every machine's
+budget. A launcher asks its own node (`127.0.0.1:6674`); a node that does not lead **forwards**
+`ADMIT` and `SETTLE` inline to the leader, over its own proven identity, and relays the leader's
+pulses and answer back. This holds for every non-leader, a voting follower and a learner alike,
+and a node never forwards to itself. The relay keeps one upstream connection per launcher
+connection for as long as it lives, so a launcher that goes away releases its charge at the
+leader at once (`pace_admission_forward_abandoned_total`). A leader that cannot be reached is
+counted (`pace_admission_forward_failed_total`) and the launcher compiles without the queue.
+
+What the queue does, in the order it matters to an operator:
+
+- **A miss is queued, never refused for capacity.** Waiting is the product; the depth is
+  `pace_admission_queue_depth`.
+- **A compile larger than a whole machine's budget runs alone** on an idle machine
+  (`pace_admission_ran_alone_total`) rather than never.
+- **Duplicates wait for the object, not for each other.** Compiles of one cache key that share a
+  cache are answered *stored* when the first one STOREs, never when it merely finishes, and only
+  for compiles that can be stored.
+- **A worker that refuses an admitted compile keeps the request's place and count**; after three
+  refusals it runs on the machine that asked.
+- **A failover admits nothing on a machine until that machine's budget report arrives**, and the
+  new leader's ledger charges the larger of what it granted and what the machine says it holds,
+  so a leader change cannot over-commit a machine. Expect a short pause after one.
+- **A worker that fails a compile settles it as *not stored*,** which keeps a broken toolchain
+  from teaching the queue that every translation unit is small.
+
+`pacectl live-stats fleet` shows the queue's depth and, per client, the machine and build tree,
+how many compiles are running and how many are queued.
+
 The node's one `0xFC` listener holds its own pool of bytes for frames still being
 read, sized to the largest budget any of its components declares — so it follows the
 compile budget and never undercuts it. It is ONE pool: the cache and shared-cache

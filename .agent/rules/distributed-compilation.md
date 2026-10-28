@@ -4042,6 +4042,51 @@ here asserts first, with the addition beside it only to stop a change that satis
 half from passing. The in-process fleet asserts it from addresses nobody listed
 (`FleetTickets_test`, `FrameEndpoint_test`'s relabelled-peer cases).
 
+## The compile queue (#1728)
+
+<!-- agent-tripwire: A miss is ADMITTED (queued) at the fleet's leader -->
+
+A build with more compiler processes than the machine has memory for was killed by the kernel
+rather than slowed. The leader now holds a queue in front of every machine's compile budget.
+Each rule below is a shape a plausible simpler design gets wrong, and none of them fails a build.
+
+- **A miss is ADMITTED (queued) at the leader, never refused for capacity.** A refusal sends the
+  client to a local compile, which is exactly the load the queue exists to bound. Waiting is the
+  product; the leader pulses (`Status::Progress`, `Admit` being the second verb allowed it) so a
+  long queue reads as alive against the client's sliding idle bound. A request larger than a whole
+  machine's budget waits for an idle machine and runs ALONE; it is never starved and never refused.
+  A `NoRoom` Local grant is an ordinary queue decision, not a refusal, and is not counted as one.
+- **The connection is the lease.** A grant is charged to the connection that asked, carries no
+  token to expire, and is released by `SETTLE` on that connection or by its close. A close is an
+  abandonment, counted apart (`AdmissionAbandoned`); a `kill -9` of ninja must give the memory back
+  at once with no timer. The only frame a held connection may send next is its `SETTLE`, or, after
+  `Settle{WorkerRefused}`, a fresh `ADMIT` that binds to the SAME ticket (Ruling 9).
+- **A worker refusal keeps the ticket's place and count.** The leader re-parks the same ticket at
+  the FRONT; after `MaxWorkerRefusals` the grant is Local. Abandoning it instead would lose the
+  front position and let a flapping worker starve the head of the queue.
+- **A worker FAILURE settles `NotStored`, never abandon**: an
+  abandon raises the ESTIMATE of a translation unit that merely met a bad worker, and feeding that to the
+  estimator poisons every later admission of it.
+- **Deduplication is woken by STORE, never by a release.** Only a `storable` compile that shares a
+  cache with its peers waits on another's key, and it is answered `Stored` when the object is
+  STORED. A release wakes nobody: a compile that failed stored nothing, and the waiters must then
+  compile.
+- **Every node states its machine budget, `--slots=0` included, and that is not a worker
+  registration.** `MachineBudget` rides the presence loop's round, which runs everywhere; its flags
+  (`--machine-slots`, `--machine-memory-budget`) are deliberately not worker-column rows.
+- **A failover admits nothing on a machine before that machine's budget report arrives**, and the
+  ledger charges `max(charged, held)`: the new leader knows only what the machine says it holds,
+  and an admission before that report double-books memory a surviving compile still has.
+- **Every non-leader forwards `Admit`/`Settle` inline to the leader, never to itself**: a voting
+  follower as well as a learner. A voter that answered `NotLeader` would leave a launcher with no
+  queue on every node but one. The relay holds one upstream connection per client connection.
+- **The grant says what it granted**: `workerKey` and `lifetime` as `LeaseGrant` does, and a
+  `reason` on a Local grant of a dispatchable request, so a fleet that never distributes still says
+  why (`DeclineDispatch`) instead of reading green.
+- **A launcher fails OPEN.** An unreachable, refusing or unreadable node costs the build nothing,
+  and a launcher whose FETCH already found the node unreachable does not dial it again for the
+  passthrough: on Windows a refused loopback connect can take the whole connect budget.
+
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
