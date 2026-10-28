@@ -336,6 +336,33 @@ TEST_CASE("SchedulerAdmission.worker-grant-hints-where-the-worker-was-seen", "[d
     CHECK(claims->endpoint == "build-7.corp:7100");
 }
 
+TEST_CASE("SchedulerAdmission.wait-is-measured-from-the-last-park", "[distributed][admission][scheduler]")
+{
+    // The grant tells the client how long the whole request queued; the leader's wait metric adds,
+    // per grant, only the time since the request was last parked -- or a refused request's first wait
+    // is summed once per regrant.
+    Fleet fleet;
+    (void) fleet.RegisterWorker();
+    auto const workerMachine = MachineOf(fleet.workerKey.PublicKey());
+    auto const ticket = fleet.Admit("k1");
+    fleet.clock.advance(5s);
+    fleet.Report(workerMachine);
+    auto const first = fleet.service.PumpAdmission();
+    REQUIRE(first.size() == 1);
+    CHECK(first[0].queued == 5s);
+    CHECK(first[0].waited == 5s);
+
+    REQUIRE(
+        fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+        == SettleResult::Requeued);
+    fleet.clock.advance(2s);
+    fleet.Report(workerMachine);
+    auto const again = fleet.service.PumpAdmission();
+    REQUIRE(again.size() == 1);
+    CHECK(again[0].queued == 7s);
+    CHECK(again[0].waited == 2s);
+}
+
 TEST_CASE("SchedulerAdmission.a-worker-that-proved-no-key-is-not-placed-on", "[distributed][admission][scheduler]")
 {
     Fleet fleet;

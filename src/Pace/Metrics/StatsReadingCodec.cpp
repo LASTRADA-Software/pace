@@ -316,13 +316,20 @@ std::vector<std::byte> EncodeStatsReading(StatsReading const& reading)
 
     if (admission.has_value())
     {
-        auto const& [queueDepth, chargedBytes] = *admission;
+        auto const& [queueDepth, chargedBytes, budgets] = *admission;
         out.U64(queueDepth);
         out.U32(static_cast<std::uint32_t>(chargedBytes.size()));
         for (auto const& [machine, bytes]: chargedBytes)
         {
             out.Text(machine);
             out.U64(bytes);
+        }
+        out.U32(static_cast<std::uint32_t>(budgets.size()));
+        for (auto const& [machine, budgetBytes, inUseBytes]: budgets)
+        {
+            out.Text(machine);
+            out.U64(budgetBytes);
+            out.U64(inUseBytes);
         }
     }
 
@@ -443,6 +450,14 @@ std::expected<StatsReading, StatsReadingFault> DecodeStatsReading(std::span<std:
         {
             auto& [name, charged] = gauges.chargedBytes.emplace_back();
             if (!in.ReadField(name) || !in.ReadU64(charged))
+                return truncated;
+        }
+        if (!in.ReadCount(count, MinMemberBytes + (2 * sizeof(std::uint64_t))))
+            return truncated;
+        for ([[maybe_unused]] auto const machine: std::views::iota(std::uint32_t { 0 }, count))
+        {
+            auto& [name, budget, inUse] = gauges.budgets.emplace_back();
+            if (!in.ReadField(name) || !in.ReadU64(budget) || !in.ReadU64(inUse))
                 return truncated;
         }
     }

@@ -63,27 +63,31 @@ void GiveEveryCounterItsOwnValue(IMetricsSink& sink)
     };
     TieredStorageStats tiers {};
     tiers[0] = stats(1000);
-    return MetricsSnapshot { .storage = stats(100),
-                             .storageTiers = tiers,
-                             .host = HostCapacity { .logicalCores = 32,
-                                                    .configuredSlots = 30,
-                                                    .totalMemoryBytes = 68'719'476'736,
-                                                    .diskCapacityBytes = 2'000'398'934'016,
-                                                    .diskFreeBytes = 442'381'631'488,
-                                                    .busySlots = 7,
-                                                    .cordoned = 1 },
-                             .hostLoad = HostLoadReading { .cpu = CpuTicks { .busy = 7'700'001, .total = 9'100'003 },
-                                                           .availableMemoryBytes = 21'474'836'480 },
-                             .upstreamConfigured = false,
-                             .consensus = ConsensusStatus { .configuration = { .voters = { "node-a1", "node-b2", "" },
-                                                                               .learners = { "laptop-c3" } },
-                                                            .knownLeader = Consensus::NodeId { "node-b2" },
-                                                            .term = Consensus::Term { .value = 41 },
-                                                            .commitIndex = Consensus::LogIndex { .value = 918'273 },
-                                                            .role = Consensus::Role::PreCandidate },
-                             .admission =
-                                 AdmissionGauges { .queueDepth = 7, .chargedBytes = { { "0a1b", 4'096 }, { "", 0 } } },
-                             .uptime = Uptime { 864'017s } };
+    return MetricsSnapshot {
+        .storage = stats(100),
+        .storageTiers = tiers,
+        .host = HostCapacity { .logicalCores = 32,
+                               .configuredSlots = 30,
+                               .totalMemoryBytes = 68'719'476'736,
+                               .diskCapacityBytes = 2'000'398'934'016,
+                               .diskFreeBytes = 442'381'631'488,
+                               .busySlots = 7,
+                               .cordoned = 1 },
+        .hostLoad = HostLoadReading { .cpu = CpuTicks { .busy = 7'700'001, .total = 9'100'003 },
+                                      .availableMemoryBytes = 21'474'836'480 },
+        .upstreamConfigured = false,
+        .consensus =
+            ConsensusStatus { .configuration = { .voters = { "node-a1", "node-b2", "" }, .learners = { "laptop-c3" } },
+                              .knownLeader = Consensus::NodeId { "node-b2" },
+                              .term = Consensus::Term { .value = 41 },
+                              .commitIndex = Consensus::LogIndex { .value = 918'273 },
+                              .role = Consensus::Role::PreCandidate },
+        .admission = AdmissionGauges { .queueDepth = 7,
+                                       .chargedBytes = { { "0a1b", 4'096 }, { "", 0 } },
+                                       .budgets = { { .machine = "0a1b", .budgetBytes = 8'192, .inUseBytes = 4'097 },
+                                                    { .machine = "", .budgetBytes = 0, .inUseBytes = 0 } } },
+        .uptime = Uptime { 864'017s }
+    };
 }
 
 [[nodiscard]] StatsReading RichReading()
@@ -630,7 +634,11 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // the built test, never computed by hand.
     //
     // Moved again when admission forwarding (#1728) added three counters beside them.
-    CHECK(StatsReadingLayout == 0xcf1ddc4c1e927261ULL);
+    //
+    // Moved again when the admission wait became a `_sum`/`_count` pair (`admission_wait_count_total`
+    // after the sum) and the admission block carried each machine's budget (grammar 8, #1728). Read
+    // off the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x22d953d117d377a2ULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

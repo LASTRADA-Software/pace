@@ -655,7 +655,10 @@ is where they are explained one by one.
 | `pace_admission_ran_alone_total` | Admissions whose estimate exceeded a whole machine's budget, so the compile ran alone. |
 | `pace_admission_abandoned_total` | Queued or granted requests whose connection closed, or whose next frame was not a settle. |
 | `pace_admission_worker_refused_total` | Admitted compiles a worker declined; the same request goes back to the head of the queue, and runs locally after three refusals. |
-| `pace_admission_wait_milliseconds_total` | Milliseconds admitted requests spent queued: a `_sum`, whose count is granted_worker + granted_local + deduplicated. |
+| `pace_admission_wait_milliseconds_total` | Milliseconds admitted requests spent queued, each grant counting from its request's last park: a `_sum`, whose count is `pace_admission_wait_count_total`. |
+| `pace_admission_wait_count_total` | Grants the wait sum covers, one per grant: the `_count` of that pair. |
+| `pace_admission_budget_bytes{machine}` | A gauge: each reporting machine's memory budget for compiles. |
+| `pace_admission_in_use_bytes{machine}` | A gauge: what the leader counts in use against that budget, the larger of charged and reported held. |
 | `pace_admission_forwarded_total` | Queue requests this node, which does not lead, relayed to the leader for a launcher on this machine. |
 | `pace_admission_forward_failed_total` | Queue requests this node could not relay to the leader; the launcher compiled without the queue. |
 | `pace_admission_forward_abandoned_total` | Relayed queue requests whose launcher left before the leader answered. |

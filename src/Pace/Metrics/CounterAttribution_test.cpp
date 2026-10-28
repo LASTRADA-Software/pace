@@ -717,7 +717,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // was never taken under. Drift is a red build, which is what the previous "106 of 144" --
     // a sentence with nothing watching it -- did not get. Unaffected by the exemption above: none
     // of these five sets can contain a counter with no writer, exempt or not.
-    CHECK(incremented.size() == 67);
+    CHECK(incremented.size() == 68);
     CHECK(refusalRow.size() == 149);
     CHECK(outcomeRow.size() == 10);
     CHECK(returned.size() == 6);

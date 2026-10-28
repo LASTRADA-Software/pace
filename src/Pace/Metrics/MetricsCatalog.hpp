@@ -1518,8 +1518,14 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::AdmissionWaitMillisTotal,
       .prometheusName = "pace_admission_wait_milliseconds_total",
-      .help = "Milliseconds admitted requests spent queued. The sum of a pair: divide by granted_worker + granted_local + "
-              "deduplicated, which is its count.",
+      .help = "Milliseconds admitted requests spent queued, each grant counting from the request's last park (its "
+              "enqueue, or the worker refusal that put it back). The sum of a pair whose count is "
+              "pace_admission_wait_count_total.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionWaitCount,
+      .prometheusName = "pace_admission_wait_count_total",
+      .help = "Grants whose wait pace_admission_wait_milliseconds_total sums: one per grant, a worker refusal's regrant "
+              "included. The count of that pair; divide the sum by it for the mean wait.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::AdmissionForwarded,
       .prometheusName = "pace_admission_forwarded_total",

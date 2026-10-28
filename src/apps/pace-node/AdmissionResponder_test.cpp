@@ -110,6 +110,7 @@ TEST_CASE("AdmissionResponder.pulses-while-parked", "[node][admission]")
     CHECK(grant.kind == Wire::GrantKind::Local);
     CHECK(grant.queuedMs == 12'000);
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionWaitMillisTotal) == 12'000);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionWaitCount) == 1);
 }
 
 TEST_CASE("AdmissionResponder.close-while-parked-releases", "[node][admission]")

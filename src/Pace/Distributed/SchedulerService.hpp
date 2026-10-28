@@ -665,7 +665,12 @@ struct AdmissionVerdict
     std::vector<std::byte> grant;          ///< The encoded `AdmitGrant`, when `refusal` is not engaged.
     std::uint64_t chargedBytes {};         ///< What the grant charged; zero for `Stored`.
     bool ranAlone {};                      ///< Its estimate exceeded the whole budget.
-    std::chrono::milliseconds queued {};   ///< Enqueue to decision, on the service clock.
+    /// Enqueue to decision, on the service clock: what the GRANT tells the client, which sums one
+    /// opening by its last grant (`Cc::RunMiss`), so a requeued request still counts its first wait.
+    std::chrono::milliseconds queued {};
+    /// Its LAST park to decision: the enqueue, or the worker refusal that put it back (R7). What the
+    /// leader's wait metric adds once per grant, so a refused request's first wait is not summed twice.
+    std::chrono::milliseconds waited {};
 };
 
 /// What a settle did with its ticket.
@@ -681,6 +686,8 @@ struct AdmissionSnapshot
 {
     std::size_t depth {};                                          ///< Requests waiting.
     std::vector<std::pair<MachineId, std::uint64_t>> chargedBytes; ///< Bytes charged per machine, nonzero only.
+    /// Every machine that reported a budget: the budget, and what the queue counts in use against it.
+    std::vector<MachineLedgerView> budgets;
 };
 
 /// Who to tell when the queue changes under a waiting connection. Called from any thread the service
@@ -1366,6 +1373,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
         std::vector<std::string> excluded;          ///< Workers the client could not reach, for the same.
         std::string toolchainLabel;                 ///< What the client calls the toolchain, for `unserved-toolchain`.
         core::platform::SteadyTimePoint enqueuedAt; ///< For `queued`.
+        core::platform::SteadyTimePoint parkedAt;   ///< For `waited`: the enqueue, or the last requeue.
         std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
     };
 

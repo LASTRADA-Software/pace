@@ -194,7 +194,10 @@ namespace StatsReadingWire
     /// 6: a presence bit and a `u64` after the consensus block, for the roster's lapse (#178).
     /// 7: the admission block -- a presence bit, the queue depth and a counted list of (machine,
     ///    charged bytes) -- after the consensus block (#1728); bit 5, the lapse's, stays retired.
-    inline constexpr std::string_view Grammar = "stats-reading-grammar-7";
+    /// 8: the admission block gains a second counted list, (machine, budget bytes, in-use bytes), after
+    ///    the charged one: each reporting machine's budget beside what the queue counts in use (#1728,
+    ///    spec goal 9).
+    inline constexpr std::string_view Grammar = "stats-reading-grammar-8";
 
     /// 64-bit FNV-1a over @p text, continuing from @p hash.
     /// @param hash The running digest.

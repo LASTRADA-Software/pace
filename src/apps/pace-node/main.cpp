@@ -633,21 +633,31 @@ struct RouteParts
     Node::RouteHostCell& cell; ///< The last usable route host.
 };
 
-/// The leader's admission queue as the scrape reads it: its depth, and the bytes charged per machine,
-/// each machine rendered as its key in hex (what the roster and `pacectl` name it by).
+/// A machine as the scrape names it: its key in hex (what the roster and `pacectl` name it by).
+/// @param machine The machine's key bytes.
+/// @return Its hex spelling.
+[[nodiscard]] std::string MachineLabel(Distributed::MachineId const& machine)
+{
+    std::string hex;
+    for (auto const byte: machine)
+        hex += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(byte)));
+    return hex;
+}
+
+/// The leader's admission queue as the scrape reads it: its depth, the bytes charged per machine, and
+/// each reporting machine's budget beside what the queue counts in use against it.
 /// @param service The scheduler service whose queue is sampled.
 /// @return The gauges at this instant.
 [[nodiscard]] AdmissionGauges SampleAdmission(Distributed::SchedulerService const& service)
 {
     auto const snapshot = service.AdmissionSnapshotNow();
-    auto gauges = AdmissionGauges { .queueDepth = snapshot.depth, .chargedBytes = {} };
+    auto gauges = AdmissionGauges { .queueDepth = snapshot.depth, .chargedBytes = {}, .budgets = {} };
     for (auto const& [machine, bytes]: snapshot.chargedBytes)
-    {
-        std::string hex;
-        for (auto const byte: machine)
-            hex += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(byte)));
-        gauges.chargedBytes.emplace_back(std::move(hex), bytes);
-    }
+        gauges.chargedBytes.emplace_back(MachineLabel(machine), bytes);
+    for (auto const& machine: snapshot.budgets)
+        gauges.budgets.push_back(AdmissionGauges::MachineBudget { .machine = MachineLabel(machine.machine),
+                                                                  .budgetBytes = machine.budgetBytes.value_or(0),
+                                                                  .inUseBytes = machine.inUseBytes });
     return gauges;
 }
 

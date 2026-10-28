@@ -395,8 +395,11 @@ namespace
         }
         if (verdict.ranAlone)
             metrics.Increment(IMetricsSink::Counter::AdmissionRanAlone);
+        // A `_sum`/`_count` pair, moved together: the wait since this request was last parked, so a
+        // worker refusal's regrant does not add the wait before the refusal a second time.
         metrics.Increment(IMetricsSink::Counter::AdmissionWaitMillisTotal,
-                          static_cast<std::uint64_t>(std::max<std::int64_t>(0, verdict.queued.count())));
+                          static_cast<std::uint64_t>(std::max<std::int64_t>(0, verdict.waited.count())));
+        metrics.Increment(IMetricsSink::Counter::AdmissionWaitCount);
     }
 
     /// What a parked frame woke to find.

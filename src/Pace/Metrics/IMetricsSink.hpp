@@ -1577,6 +1577,7 @@ class IMetricsSink
         AdmissionAbandoned,
         AdmissionWorkerRefused,
         AdmissionWaitMillisTotal,
+        AdmissionWaitCount,
 
         /// Admission forwarding (#1728): what a node that does not lead did with the queue exchanges a
         /// launcher on its machine sent it. Written by the FORWARDING node's surface, never the leader's.

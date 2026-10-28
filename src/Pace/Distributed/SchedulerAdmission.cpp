@@ -147,6 +147,7 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                                                 .excluded = request.excluded,
                                                 .toolchainLabel = request.toolchainLabel,
                                                 .enqueuedAt = _clock.now(),
+                                                .parkedAt = _clock.now(),
                                                 .lease = std::nullopt });
     return ticket;
 }
@@ -171,7 +172,8 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                            .grant = {},
                            .chargedBytes = decision.chargedBytes,
                            .ranAlone = decision.ranAlone,
-                           .queued = std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - held.enqueuedAt) };
+                           .queued = std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - held.enqueuedAt),
+                           .waited = std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - held.parkedAt) };
 
     // R9: a request that waited is asked again. A forget, or a lost leadership, during a long wait ends
     // in a refusal and never in a grant.
@@ -339,6 +341,10 @@ SettleResult SchedulerService::SettleAdmission(Ticket ticket, Settlement const& 
         ReleaseAdmissionLease(held->second);
         if (!refused)
             _admissionTickets.erase(held);
+        else
+            // Parked again: its next grant's wait is measured from here, so the wait before the refusal
+            // is not summed a second time.
+            held->second.parkedAt = _clock.now();
     }
     return refused ? SettleResult::Requeued : SettleResult::Settled;
 }
@@ -377,7 +383,11 @@ SchedulerReply SchedulerService::ReportMachineBudget(CallerContext const& caller
 AdmissionSnapshot SchedulerService::AdmissionSnapshotNow() const
 {
     auto const guard = std::scoped_lock { _admissionMutex };
-    return AdmissionSnapshot { .depth = _queue.Depth(), .chargedBytes = _queue.ChargedByMachine() };
+    auto snapshot = AdmissionSnapshot { .depth = _queue.Depth(), .chargedBytes = _queue.ChargedByMachine(), .budgets = {} };
+    for (auto& machine: _queue.Snapshot().machines)
+        if (machine.budgetBytes.has_value())
+            snapshot.budgets.push_back(std::move(machine));
+    return snapshot;
 }
 
 std::optional<QueueView> SchedulerService::AdmissionDetailNow() const
