@@ -691,11 +691,14 @@ Writes use an atomic append (`FILE_APPEND_DATA` / `O_APPEND`) so the hundreds of
 concurrent compilers in one build interleave whole lines instead of shredding
 each other's. Recording failures are swallowed: statistics never break a build.
 
-A line is tab-separated and names its own format first: `v2`, then fifteen columns in
+A line is tab-separated and names its own format first: `v3`, then seventeen columns in
 this order — `outcome`, `prefetch-group`, `value-bytes`, `elapsed-ms`, `source`,
 `detail`, `preprocess-ms`, `cache-ms`, `direct-ms`, `direct-hit`, `timestamp` (seconds
-since the Unix epoch), `dispatch`, `dispatch-detail`, `dispatch-specifics` and
-`exit-code`, the code the compile exited with. A line with no version was written by
+since the Unix epoch), `dispatch`, `dispatch-detail`, `dispatch-specifics`,
+`exit-code` (the code the compile exited with), `queued-ms` (milliseconds waited for a
+compile slot) and `peak-memory-bytes`. An empty `exit-code`, `queued-ms` or
+`peak-memory-bytes` means no reading, never a zero. `pace-cc -s` prints the wait and the
+peak-memory lines only over records that carry them. A line with no version was written by
 an older launcher and is read by how many columns it has, as it always was; its exit
 code is *absent*, never a zero that would call every old compile a success. A line
 naming a version this launcher does not know — a newer launcher appending to the same

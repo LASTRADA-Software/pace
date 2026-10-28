@@ -530,8 +530,8 @@ namespace
         std::uint64_t compilesFailed {}; ///< Of those, a non-zero one.
         std::uint64_t queuedMsTotal {};  ///< Slot wait summed over the records that carry one.
         std::uint64_t queuedCount {};    ///< Records that carry a slot wait at all.
-        std::uint64_t peakMemoryMax {};  ///< Largest peak memory any record reported, in bytes.
-        bool hasPeakMemory {};           ///< Whether any record reported one.
+        /// Largest peak memory any record reported, in bytes; absent when none did.
+        std::optional<std::uint64_t> peakMemoryMax;
         /// Hits `PACE_VERIFY` rejected; see `Outcome::VerifyMismatch`.
         std::uint64_t verifyMismatches {};
         /// Compiles an input changed during; see `Outcome::InputsMoved`.
@@ -718,20 +718,12 @@ namespace
         void (*read)(std::string_view text, Record& record);    ///< Sets the record from it.
     };
 
-    /// Parse a signed exit code; nothing for text that is not one.
-    [[nodiscard]] std::optional<std::int32_t> ParseExitCode(std::string_view text)
+    /// Parse an integer reading (an exit code, a wait, a byte count); nothing for empty text or
+    /// text that is not one.
+    template <typename Integer>
+    [[nodiscard]] std::optional<Integer> ParseOptionalInteger(std::string_view text)
     {
-        std::int32_t value = 0;
-        auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-        if (text.empty() || error != std::errc {} || end != text.data() + text.size())
-            return std::nullopt;
-        return value;
-    }
-
-    /// Parse an unsigned reading; nothing for empty text or text that is not one.
-    [[nodiscard]] std::optional<std::uint64_t> ParseOptionalUnsigned(std::string_view text)
-    {
-        std::uint64_t value = 0;
+        Integer value {};
         auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
         if (text.empty() || error != std::errc {} || end != text.data() + text.size())
             return std::nullopt;
@@ -815,15 +807,15 @@ namespace
                   if (r.exitCode.has_value())
                       l += std::to_string(*r.exitCode);
               },
-          .read = [](std::string_view t, Record& r) { r.exitCode = ParseExitCode(t); } },
+          .read = [](std::string_view t, Record& r) { r.exitCode = ParseOptionalInteger<std::int32_t>(t); } },
         { .column = LogColumn::QueuedMs,
           .name = "queued-ms",
           .write = [](Record const& r, std::string& l) { WriteOptionalUnsigned(r.queuedMs, l); },
-          .read = [](std::string_view t, Record& r) { r.queuedMs = ParseOptionalUnsigned(t); } },
+          .read = [](std::string_view t, Record& r) { r.queuedMs = ParseOptionalInteger<std::uint64_t>(t); } },
         { .column = LogColumn::PeakMemoryBytes,
           .name = "peak-memory-bytes",
           .write = [](Record const& r, std::string& l) { WriteOptionalUnsigned(r.peakMemoryBytes, l); },
-          .read = [](std::string_view t, Record& r) { r.peakMemoryBytes = ParseOptionalUnsigned(t); } },
+          .read = [](std::string_view t, Record& r) { r.peakMemoryBytes = ParseOptionalInteger<std::uint64_t>(t); } },
     } };
     static_assert(RowsInEnumeratorOrder(LogColumnTable, &LogColumnRow::column),
                   "LogColumnTable must hold one row per LogColumn, in enumerator order -- which is the column order");
@@ -1163,9 +1155,9 @@ namespace
             out << "  waited " << FormatDecimal(static_cast<double>(tally.queuedMsTotal) / 1000.0)
                 << " s for a compile slot (" << tally.queuedCount
                 << (tally.queuedCount == 1 ? " compile)\n" : " compiles)\n");
-        if (tally.hasPeakMemory)
+        if (tally.peakMemoryMax.has_value())
             out << "  peak compile memory "
-                << FormatDecimal(static_cast<double>(tally.peakMemoryMax) / static_cast<double>(1ULL << 30)) << " GiB\n";
+                << FormatDecimal(static_cast<double>(*tally.peakMemoryMax) / static_cast<double>(1ULL << 30)) << " GiB\n";
 
         AppendDispatchLines(out, tally, palette);
 
@@ -1405,8 +1397,7 @@ namespace
                 }
                 if (record.peakMemoryBytes.has_value())
                 {
-                    tally->hasPeakMemory = true;
-                    tally->peakMemoryMax = std::max(tally->peakMemoryMax, *record.peakMemoryBytes);
+                    tally->peakMemoryMax = std::max(tally->peakMemoryMax.value_or(0), *record.peakMemoryBytes);
                 }
                 if (record.exitCode.has_value())
                 {
