@@ -227,6 +227,33 @@ namespace
             core::net::ThreadedAddressResolver resolver;
             auto const connector = core::net::makeConnector(loop, resolver);
             _connector = connector.get();
+
+            // Declared AFTER the loop, so it runs BEFORE the loop is destroyed on every exit path, an
+            // exception included: `_loop` is withdrawn under the mutex (nothing posts to a dead loop), the
+            // socket -- which belongs to this loop -- is dropped, and the resolver is stopped before the loop
+            // goes out of scope, for the reason `RunOneExchange` gives.
+            struct Retire
+            {
+                Session* self;
+                core::net::ThreadedAddressResolver* resolver;
+
+                Retire(Session* owner, core::net::ThreadedAddressResolver* pool) noexcept:
+                    self { owner },
+                    resolver { pool }
+                {
+                }
+
+                ~Retire()
+                {
+                    self->Detach();
+                    self->DropSocket();
+                    resolver->stop();
+                }
+
+                Retire(Retire const&) = delete;
+                Retire& operator=(Retire const&) = delete;
+            } const retire { this, &resolver };
+
             {
                 std::lock_guard lock { _mutex };
                 _loop = &loop;
@@ -234,22 +261,7 @@ namespace
             _cv.notify_all();
             _busy = true;
             std::ignore = RunOpening(this);
-            try
-            {
-                loop.run();
-            }
-            catch (...)
-            {
-                Detach();
-                DropSocket();
-                resolver.stop();
-                throw;
-            }
-            Detach();
-            // The socket belongs to this loop: it goes before the loop does, not with the session.
-            DropSocket();
-            // Stopped before the loop goes out of scope, for the reason `RunOneExchange` gives.
-            resolver.stop();
+            loop.run();
         }
 
         /// One request and its reply on the held socket, the idle bound armed for just that long.
@@ -327,6 +339,8 @@ namespace
         }
 
         /// A requeue: settle the refusal, then ask again on the same connection.
+        /// `SettleBound` applies to the SETTLE here too: a node too slow to answer it makes the requeue fail open
+        /// into a local compile, by design.
         static core::async::DetachedTask RunRequeue(Session* self)
         {
             auto const refused =
