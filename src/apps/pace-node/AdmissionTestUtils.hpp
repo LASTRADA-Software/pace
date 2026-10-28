@@ -188,7 +188,8 @@ class Client
                                                   .treeLabel = "tree",
                                                   .storable = storable,
                                                   .acceptedCodecs = {},
-                                                  .excluded = excluded });
+                                                  .excluded = excluded,
+                                                  .toolchainLabel = {} });
 }
 
 [[nodiscard]] inline std::vector<std::byte> SettleFrame(Wire::SettleOutcome outcome,

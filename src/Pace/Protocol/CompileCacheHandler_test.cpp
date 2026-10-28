@@ -2063,7 +2063,8 @@ TEST_CASE("The daemon refuses the admission verbs by name and sends them to a co
                                                .treeLabel = {},
                                                .storable = true,
                                                .acceptedCodecs = {},
-                                               .excluded = excluded }),
+                                               .excluded = excluded,
+                                               .toolchainLabel = {} }),
         Wire::EncodeSettle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Stored, .peakBytes = std::nullopt }),
         Wire::EncodeMachineBudget(
             Wire::MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} }),

@@ -1359,6 +1359,7 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
         std::string cacheKey;                       ///< The lease key.
         CompileCacheWire::AdmitKind kind {};        ///< Whether a worker could have run it, for a local grant's reason.
         std::vector<std::string> excluded;          ///< Workers the client could not reach, for the same.
+        std::string toolchainLabel;                 ///< What the client calls the toolchain, for `unserved-toolchain`.
         core::platform::SteadyTimePoint enqueuedAt; ///< For `queued`.
         std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
     };
@@ -1445,7 +1446,8 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
 
     WorkerRegistry _workers;
     LeaseTable _leases;
-    /// What `Lease` refused `no-worker`, by toolchain. See `UnservedToolchainsNow`.
+    /// What `Lease` refused `no-worker`, and what the queue granted `Local` for want of any worker
+    /// (`LocalGrantReason::NoWorker`), by toolchain. See `UnservedToolchainsNow`.
     UnservedToolchains _unserved;
 
     /// The admission queue and everything it reads (#1728), behind ONE mutex: the queue is not

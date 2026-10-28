@@ -3071,7 +3071,8 @@ void NoteAdmissionFailedOpen(InvocationRecord const& record,
                                      .treeLabel = treeLabel,
                                      .storable = false,
                                      .acceptedCodecs = acceptedCodecs,
-                                     .excluded = {} };
+                                     .excluded = {},
+                                     .toolchainLabel = {} };
     Cc::MissSeams const seams {
         // Whatever the flow asks -- a worker cannot have failed a compile no worker was granted -- the
         // request stays the local-only one above.
@@ -3882,7 +3883,11 @@ struct FetchStep
                                      .treeLabel = treeLabel,
                                      .storable = true,
                                      .acceptedCodecs = acceptedCodecs,
-                                     .excluded = excludedWorkers };
+                                     .excluded = excludedWorkers,
+                                     // What a leader with no worker for the fingerprint names it by; withheld when it
+                                     // is not text the leader would keep.
+                                     .toolchainLabel = plan.has_value() ? Cc::SendableToolchainLabel(plan->toolchainLabel)
+                                                                        : std::string_view {} };
 
     Cc::MissSeams const seams {
         .open =

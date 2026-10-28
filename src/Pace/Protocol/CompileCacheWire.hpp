@@ -2461,7 +2461,8 @@ inline constexpr std::array OpTable {
     // from a dead leader against its sliding idle bound. A queue is as long as the queue is.
     OpDescriptor { .code = Op::Admit,
                    .name = "admit",
-                   .fieldCount = 8, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs, exclusions
+                   .fieldCount = 9, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs, exclusions,
+                                    // toolchain label
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)
                                                               | StatusBit(Status::Progress)),
                    .preAuth = RequiresAuth,
@@ -9637,6 +9638,11 @@ struct AdmitRequest
     bool storable;                              ///< Whether the object will be stored, so waiters may be answered `Stored`.
     CodecList acceptedCodecs;                   ///< What the client can decode.
     std::span<std::string_view const> excluded; ///< Workers the client could not reach, by advertised endpoint.
+    /// What a person calls the toolchain, e.g. `cl 19.44.35207`; empty when the client did not say.
+    /// Display only -- `LeaseRequest::toolchainLabel`'s rule: the fingerprint decides, and this lets a
+    /// leader with no worker for it NAME what nobody serves (`unserved-toolchain`). UTF-8 and at most
+    /// `MaxToolchainLabelBytes`, or the whole request is refused where it enters.
+    std::string_view toolchainLabel;
 };
 
 /// The same, as the leader decodes it. OWNS its bytes.
@@ -9650,6 +9656,7 @@ struct AdmitRequestFields
     bool storable {};
     CodecList acceptedCodecs;
     std::vector<std::string> excluded;
+    std::string toolchainLabel;
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(AdmitRequestFields const&) const = default;
@@ -9775,13 +9782,15 @@ namespace Detail
                                    AsBytes(request.treeLabel),
                                    std::span<std::byte const> { storable },
                                    std::span<std::byte const> { codecs },
-                                   std::span<std::byte const> { excluded } });
+                                   std::span<std::byte const> { excluded },
+                                   AsBytes(request.toolchainLabel) });
 }
 
 /// Split an ADMIT payload.
 /// @param payload The bytes following the request header.
 /// @return The owned fields, or nullopt when malformed: a kind or storable byte this build does not
-///         know, a string over its cap, or an exclusion list `DecodeExclusions` refuses.
+///         know, a string over its cap, an exclusion list `DecodeExclusions` refuses, or a toolchain
+///         label that is not UTF-8 -- text a peer chose that the leader KEEPS, refused where it enters.
 [[nodiscard]] inline std::optional<AdmitRequestFields> DecodeAdmitPayload(std::span<std::byte const> payload)
 {
     auto const fields = SplitFields(payload, OpFieldCount(Op::Admit));
@@ -9794,7 +9803,8 @@ namespace Detail
     if (storable.size() != 1 || std::to_integer<std::uint8_t>(storable[0]) > 1)
         return std::nullopt;
     if (!Detail::FitsCap((*fields)[1], MaxToolchainFingerprintBytes) || !Detail::FitsCap((*fields)[2], MaxLeaseKeyBytes)
-        || !Detail::FitsCap((*fields)[3], MaxAdmitPathBytes) || !Detail::FitsCap((*fields)[4], MaxAdmitTreeLabelBytes))
+        || !Detail::FitsCap((*fields)[3], MaxAdmitPathBytes) || !Detail::FitsCap((*fields)[4], MaxAdmitTreeLabelBytes)
+        || !Detail::FitsCap((*fields)[8], MaxToolchainLabelBytes) || !IsValidUtf8(AsStringView((*fields)[8])))
         return std::nullopt;
     auto const excluded = DecodeExclusions((*fields)[7]);
     if (!excluded.has_value())
@@ -9811,6 +9821,7 @@ namespace Detail
     out.excluded.reserve(excluded->size());
     for (auto const endpoint: *excluded)
         out.excluded.emplace_back(AsStringView(endpoint));
+    out.toolchainLabel = std::string { AsStringView((*fields)[8]) };
     return out;
 }
 

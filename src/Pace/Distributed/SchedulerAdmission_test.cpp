@@ -39,6 +39,7 @@ namespace
 constexpr std::uint64_t MiB = 1024ULL * 1024ULL;
 constexpr std::string_view Toolchain = "gcc-14";
 constexpr std::string_view WorkerEndpoint = "10.0.0.2:7100";
+constexpr std::string_view ToolchainLabel = "gcc 14.2.0";
 
 /// A key as the registry and the queue spell a machine: the raw bytes, in a string.
 [[nodiscard]] MachineId MachineOf(Ed25519PublicKey const& key)
@@ -113,7 +114,8 @@ struct Fleet
                                                                      .treeLabel = "tree",
                                                                      .storable = storable,
                                                                      .acceptedCodecs = {},
-                                                                     .excluded = std::move(excluded) });
+                                                                     .excluded = std::move(excluded),
+                                                                     .toolchainLabel = std::string { ToolchainLabel } });
         REQUIRE(ticket.has_value());
         return *ticket;
     }
@@ -277,10 +279,17 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
     auto expected = Wire::LocalGrantReason::Asked;
     auto kind = Wire::AdmitKind::Dispatchable;
     std::vector<std::string> excluded;
+    // What the LEADER's own operator sees, beside what the launcher is told: the lease path's counters
+    // and its `unserved-toolchain` record, through `LocalGrantSignals`.
+    std::uint64_t noWorker = 0;
+    std::uint64_t allExcluded = 0;
+    bool unserved = false;
 
     SECTION("no worker serves the toolchain")
     {
         expected = Wire::LocalGrantReason::NoWorker;
+        noWorker = 1;
+        unserved = true;
     }
     SECTION("the only worker serving it is excluded")
     {
@@ -288,10 +297,12 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
         fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
         excluded.emplace_back(WorkerEndpoint);
         expected = Wire::LocalGrantReason::AllExcluded;
+        allExcluded = 1;
     }
     SECTION("a worker serves it and had no room")
     {
-        // Its machine reported nothing, so the queue may not charge it.
+        // Its machine reported nothing, so the queue may not charge it. Ruling 15: an ordinary queue
+        // decision, counted as no refusal at all.
         (void) fleet.RegisterWorker();
         expected = Wire::LocalGrantReason::NoRoom;
     }
@@ -309,6 +320,18 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
     CHECK(grant.reason == expected);
     CHECK(grant.workerKey.empty());
     CHECK(grant.lifetime == 0ms);
+
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesNoWorker) == noWorker);
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesAllExcluded) == allExcluded);
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesNoCapacity) == 0);
+    auto const named = fleet.service.UnservedToolchainsNow();
+    CHECK(named.empty() == !unserved);
+    if (unserved)
+    {
+        REQUIRE(named.size() == 1);
+        CHECK(named[0].fingerprint == Toolchain);
+        CHECK(named[0].label == ToolchainLabel);
+    }
 }
 
 TEST_CASE("SchedulerAdmission.local-grant-reason-reads-the-registry", "[distributed][admission][scheduler]")

@@ -1292,7 +1292,8 @@ TEST_CASE("The synchronous protocol refuses the admission verbs by name; the lea
                                                .treeLabel = {},
                                                .storable = false,
                                                .acceptedCodecs = {},
-                                               .excluded = excluded }),
+                                               .excluded = excluded,
+                                               .toolchainLabel = {} }),
         Wire::EncodeSettle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Failed, .peakBytes = std::nullopt }),
         Wire::EncodeMachineBudget(
             Wire::MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} }),

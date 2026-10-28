@@ -5943,7 +5943,8 @@ namespace
                           .treeLabel = "pace-1728-worktree",
                           .storable = true,
                           .acceptedCodecs = { 1, 2 },
-                          .excluded = excluded };
+                          .excluded = excluded,
+                          .toolchainLabel = "clang 20.1.8" };
 }
 
 /// The payload of a framed request: everything after the seven header bytes.
@@ -5985,7 +5986,8 @@ TEST_CASE("An ADMIT request round-trips every field", "[wire][admission]")
                                   .treeLabel = "pace-1728-worktree",
                                   .storable = true,
                                   .acceptedCodecs = { 1, 2 },
-                                  .excluded = { "10.0.0.7:6676", "pc-09:6676" } });
+                                  .excluded = { "10.0.0.7:6676", "pc-09:6676" },
+                                  .toolchainLabel = "clang 20.1.8" });
 }
 
 TEST_CASE("A LOCAL-ONLY, not-storable ADMIT with nothing to say round-trips empty fields", "[wire][admission]")
@@ -5997,7 +5999,8 @@ TEST_CASE("A LOCAL-ONLY, not-storable ADMIT with nothing to say round-trips empt
                                                   .treeLabel = {},
                                                   .storable = false,
                                                   .acceptedCodecs = {},
-                                                  .excluded = {} });
+                                                  .excluded = {},
+                                                  .toolchainLabel = {} });
     auto const back = DecodeAdmitPayload(PayloadOfFrame(frame));
     REQUIRE(back.has_value());
     CHECK(Unwrap(back).kind == AdmitKind::LocalOnly);
@@ -6042,6 +6045,19 @@ TEST_CASE("An ADMIT payload this build cannot read is refused, never clamped", "
     {
         auto const tooLong = std::vector<std::byte>(MaxAdmitPathBytes + 1, std::byte { 'p' });
         CHECK_FALSE(DecodeAdmitPayload(withField(3, tooLong)).has_value());
+    }
+    SECTION("a toolchain label over its cap")
+    {
+        auto const tooLong = std::vector<std::byte>(MaxToolchainLabelBytes + 1, std::byte { 't' });
+        CHECK_FALSE(DecodeAdmitPayload(withField(8, tooLong)).has_value());
+        // The control: at the cap, it travels.
+        auto const atCap = std::vector<std::byte>(MaxToolchainLabelBytes, std::byte { 't' });
+        CHECK(DecodeAdmitPayload(withField(8, atCap)).has_value());
+    }
+    SECTION("a toolchain label that is not UTF-8")
+    {
+        // Kept by the leader and rendered on the fleet page: refused where it enters, never repaired.
+        CHECK_FALSE(DecodeAdmitPayload(withField(8, Bytes({ 'c', 'l', 0xFF }))).has_value());
     }
     SECTION("a payload of the wrong arity")
     {
@@ -6237,7 +6253,8 @@ TEST_CASE("The largest admission requests fit the control payload ceiling", "[wi
                                                   .treeLabel = longLabel,
                                                   .storable = true,
                                                   .acceptedCodecs = {},
-                                                  .excluded = endpoints });
+                                                  .excluded = endpoints,
+                                                  .toolchainLabel = {} });
     CHECK(PayloadOfFrame(frame).size() <= MaxControlPayload);
     CHECK(DecodeAdmitPayload(PayloadOfFrame(frame)).has_value());
 
@@ -6273,7 +6290,8 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
                                                       .treeLabel = "a-tree-label-over-the-sso-buffer",
                                                       .storable = true,
                                                       .acceptedCodecs = { 1 },
-                                                      .excluded = excluded });
+                                                      .excluded = excluded,
+                                                      .toolchainLabel = {} });
         admit = DecodeAdmitPayload(PayloadOfFrame(frame));
         grant = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant { .kind = GrantKind::Worker,
                                                                .endpoint = "a-worker-endpoint.example.test:6676",

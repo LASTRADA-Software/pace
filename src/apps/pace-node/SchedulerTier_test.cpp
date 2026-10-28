@@ -292,6 +292,57 @@ TEST_CASE("A leading scheduler names the toolchain nobody serves, and clears it 
     CHECK(fix.conditions.StateOf(NodeCondition::UnservedToolchain) == Wire::ConditionState::Clear);
 }
 
+TEST_CASE("A leading scheduler names the toolchain an ADMITTED compile found nobody serving",
+          "[node][scheduler][conditions][admission]")
+{
+    // The queue now carries the dispatches the LEASE path used to, so a dispatchable request it grants
+    // `Local` for want of any worker must move what a `NoWorker` lease moved: the counter, and the
+    // condition naming the compiler -- or the leader's signal goes dark exactly where it matters.
+    TierFixture fix;
+    auto const cfg = ClusteredNode();
+    NodeMembership membership { cfg, membershipLog };
+    auto tier = SchedulerTier::Start(
+        cfg, membership.Oracle(), fix.clock, fix.wallClock, fix.metrics, fix.logger, fix.identity, fix.conditions, NoWatch);
+    REQUIRE(tier.has_value());
+    (*tier)->SetRole(Distributed::SchedulerRole::Leader, {}, 7);
+    fix.clock.advance(LongestFleetObservation());
+    auto& service = (*tier)->ServiceForSurfaces();
+
+    // This machine has room, so the queue grants the request here.
+    REQUIRE(service
+                .ReportMachineBudget(
+                    Insider,
+                    service.OwnMachineId(),
+                    Wire::MachineBudgetReport {
+                        .memoryBudgetBytes = 8ULL << 30, .slots = 4, .heldSlots = 0, .heldBytes = 0, .peaks = {} })
+                .status
+            == Wire::Status::Ok);
+    auto const ticket = service.Admit(
+        Insider,
+        [] { return Insider; },
+        service.OwnMachineId(),
+        Wire::AdmitRequestFields { .kind = Wire::AdmitKind::Dispatchable,
+                                   .fingerprint = "fp-cl",
+                                   .cacheKey = "k1",
+                                   .sourcePath = "src/a.cpp",
+                                   .treeLabel = "tree",
+                                   .storable = true,
+                                   .acceptedCodecs = {},
+                                   .excluded = {},
+                                   .toolchainLabel = "cl 19.44.35207" });
+    REQUIRE(ticket.has_value());
+    auto const verdicts = service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    REQUIRE_FALSE(verdicts[0].refusal.has_value());
+    CHECK(Pace::Testing::Unwrap(Wire::DecodeAdmitGrant(verdicts[0].grant)).reason == Wire::LocalGrantReason::NoWorker);
+
+    CHECK(fix.metrics.Read(IMetricsSink::Counter::DispatchLeasesNoWorker) == 1);
+    (*tier)->EvaluateConditions();
+    auto const raised = SentRow(fix.conditions, NodeCondition::UnservedToolchain);
+    CHECK(raised.state == "raised");
+    CHECK(raised.detail.contains("cl 19.44.35207"));
+}
+
 TEST_CASE("An unlabelled toolchain is still named, never dropped", "[node][scheduler][conditions]")
 {
     // An operator's pinned `<fingerprint>=<compiler>` has no banner, so its client sends no label.

@@ -371,7 +371,8 @@ constexpr auto Op = [](Wire::Op op) {
                                                      .treeLabel = "tree",
                                                      .storable = true,
                                                      .acceptedCodecs = { 1 },
-                                                     .excluded = {} },
+                                                     .excluded = {},
+                                                     .toolchainLabel = {} },
                                 BudgetWithIdle(idle));
 }
 

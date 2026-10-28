@@ -3,6 +3,7 @@
 // The admission half of `SchedulerService` (#1728): the queue, its estimates and the grants it mints.
 // Kept in its own translation unit because it is a feature beside the lease verbs and not a part of
 // them -- the lease path above this stays the one it was.
+#include <Pace/Core/EnumTable.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 
 #include <algorithm>
@@ -32,6 +33,38 @@ namespace
             out.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
         return out;
     }
+
+    /// What a `Local` grant of a dispatchable request tells the LEADER's own operator, beside what it
+    /// tells the launcher: the counter and the `unserved-toolchain` record the LEASE path moves for the
+    /// same fleet (`PickErrorTable`), so the leader's signals survive admission carrying the dispatches.
+    struct LocalGrantSignalRow
+    {
+        Wire::LocalGrantReason reason;                ///< The reason this row describes.
+        std::optional<IMetricsSink::Counter> counter; ///< What rises; nothing for a decision that is no refusal.
+        /// Whether the toolchain is remembered as one nobody serves: `NoWorker` alone, `PickErrorTable`'s rule.
+        bool unservedToolchain;
+    };
+
+    /// One row per `LocalGrantReason`.
+    constexpr EnumTable<Wire::LocalGrantReason, LocalGrantSignalRow> LocalGrantSignals { {
+        // Asked to run here: nothing was refused.
+        { .reason = Wire::LocalGrantReason::Asked, .counter = std::nullopt, .unservedToolchain = false },
+        { .reason = Wire::LocalGrantReason::NoWorker,
+          .counter = IMetricsSink::Counter::DispatchLeasesNoWorker,
+          .unservedToolchain = true },
+        // `PickError::Excluded`'s counter: the fleet serves the toolchain, the client could not reach it.
+        { .reason = Wire::LocalGrantReason::AllExcluded,
+          .counter = IMetricsSink::Counter::DispatchLeasesAllExcluded,
+          .unservedToolchain = false },
+        // Ruling 15: NOT counted. Workers serve the toolchain and none had room when the queue reached
+        // the request, so the queue ran it on the caller's own machine -- an ordinary queue decision to
+        // compile locally, which is what a queue is for, and not a refusal. Counted as `NoCapacity` it
+        // would read as "buy more machines" on every build that merely filled its fleet.
+        { .reason = Wire::LocalGrantReason::NoRoom, .counter = std::nullopt, .unservedToolchain = false },
+    } };
+
+    static_assert(RowsInEnumeratorOrder(LocalGrantSignals, &LocalGrantSignalRow::reason),
+                  "LocalGrantSignals must hold one row per LocalGrantReason, in enumerator order");
 } // namespace
 
 std::vector<Placement> SchedulerService::RegistryPlacement::Candidates(std::string_view fingerprint,
@@ -98,6 +131,7 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                                                 .cacheKey = request.cacheKey,
                                                 .kind = request.kind,
                                                 .excluded = request.excluded,
+                                                .toolchainLabel = request.toolchainLabel,
                                                 .enqueuedAt = _clock.now(),
                                                 .lease = std::nullopt });
     return ticket;
@@ -174,6 +208,13 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
             auto const reason = decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable
                                     ? LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded)
                                     : Wire::LocalGrantReason::Asked;
+            // Under `_admissionMutex`: the counter is an atomic, and `_unserved` takes only its own lock
+            // and calls nothing back, so nothing can take these two in the other order.
+            auto const& signal = LocalGrantSignals[static_cast<std::size_t>(reason)];
+            if (signal.counter.has_value())
+                _metrics.Increment(*signal.counter);
+            if (signal.unservedToolchain)
+                _unserved.Refused(held.fingerprint, held.toolchainLabel);
             verdict.grant = Wire::EncodeAdmitGrant(Wire::AdmitGrant { .kind = decision.kind,
                                                                       .endpoint = {},
                                                                       .leaseToken = {},
