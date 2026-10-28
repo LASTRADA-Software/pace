@@ -160,6 +160,7 @@ set(_pace_cc_sources
     LauncherCli.cpp
     CacheKey.cpp
     CacheProtocol.cpp
+    AdmitSession.cpp
     ReactorExchange.cpp
     Dispatch.cpp
     EndpointDial.cpp
@@ -307,6 +308,7 @@ if(PACE_BUILD_TESTS)
         ObjectEquivalence_test.cpp
         ObjectSections_test.cpp
         CompileCorrelation_test.cpp
+        AdmitSession_test.cpp
         ReactorExchange_test.cpp
         Dispatch_test.cpp
         EndpointDial_test.cpp
