@@ -3915,7 +3915,7 @@ lease, and answers every other scheduling verb `not-leader` naming the leader's 
 endpoint, once the caller is admitted, so a launcher pointed at its own machine's learner
 follows it to the leader; it names nobody once the leader has been silent past the
 consensus tier's election timeout. A node running no consensus at all refuses the capacity verbs
-(`REGISTER`, `HEARTBEAT`, `WITHDRAW`, `LEASE`, `RELEASE`, `NODE-ANNOUNCE`)
+(`REGISTER`, `HEARTBEAT`, `WITHDRAW`, `LEASE`, `RELEASE`, `NODE-ANNOUNCE`, `ADMIT`, `SETTLE`, `MACHINE-BUDGET`)
 `dispatch-not-permitted` and the cluster verbs `no-cluster`, the codes `pace-kv` gives
 for the same verbs. None of these is counted.
 
@@ -4556,7 +4556,7 @@ it on every heartbeat round, and a node running consensus verifies the proofs pr
 it against the cluster's roster.
 
 **The verbs a machine JOINS the fleet with require it.** `REGISTER`, `NODE-ANNOUNCE`,
-`HEARTBEAT` and `WITHDRAW` are refused `node-identity-required` on a connection that proved
+`HEARTBEAT`, `WITHDRAW` and `MACHINE-BUDGET` are refused `node-identity-required` on a connection that proved
 no identity the cluster holds -- from any address, loopback included. A **client** is
 admitted without a proof: on this machine by loopback, and from another machine by the
 machine ticket its own node mints ([a machine that only asks](#a-machine-that-only-asks-tickets)),

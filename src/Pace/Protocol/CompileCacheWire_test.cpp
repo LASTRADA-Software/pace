@@ -5972,6 +5972,8 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
                                    .workerCodecs = { 2, 1 },
                                    .chargedBytes = 0x0000'0001'2345'6789ULL,
                                    .queuedMs = 0x0000'0000'0000'1F40ULL };
+    // The encoder and the decoder share one arity.
+    CHECK(Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent))).size() == AdmitGrantFieldCount);
     auto const back = DecodeAdmitGrant(EncodeAdmitGrant(sent));
     REQUIRE(back.has_value());
     CHECK(Unwrap(back)
@@ -6107,8 +6109,13 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
 {
     // STORE, drop the source, churn the freed storage, THEN read: read inline nothing dangles at
     // any size. Every string is past the 15-char SSO buffer so the block is heap.
-    constexpr std::string_view LongPath = "<SRCROOT>/a/long/enough/path/to/live/on/the/heap/file.cpp";
-    static_assert(LongPath.size() > 15, "shorter than the SSO buffer and this case stops biting");
+    constexpr std::string_view LongPath =
+        "<SRCROOT>/src/Pace/Distributed/AdmissionQueue/DeeplyNested/Translation_Unit_0042.cpp";
+    constexpr std::string_view LongKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    // The largest inline capacity of the three standard libraries is libc++'s 22; past it the block is heap everywhere.
+    constexpr std::size_t SsoCapacity = 22;
+    static_assert(LongPath.size() > SsoCapacity && LongKey.size() > SsoCapacity,
+                  "within the SSO buffer and this case stops biting");
 
     auto admit = std::optional<AdmitRequestFields> {};
     auto grant = std::optional<AdmitGrantFields> {};
@@ -6118,7 +6125,7 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
         auto const excluded = std::vector<std::string_view> { "a-worker-endpoint.example.test:6676" };
         auto const frame = EncodeAdmit(AdmitRequest { .kind = AdmitKind::Dispatchable,
                                                       .fingerprint = "a-toolchain-fingerprint-over-sso",
-                                                      .cacheKey = "a-cache-key-over-the-sso-buffer",
+                                                      .cacheKey = LongKey,
                                                       .sourcePath = path,
                                                       .treeLabel = "a-tree-label-over-the-sso-buffer",
                                                       .storable = true,
@@ -6133,8 +6140,8 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
                                                                .queuedMs = 2 }));
         auto report =
             MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} };
-        report.peaks.emplace_back(
-            EstimateKeyFields { "a-cache-key-over-the-sso-buffer", path, "a-toolchain-fingerprint-over-sso" }, 9);
+        report.peaks.emplace_back(EstimateKeyFields { std::string { LongKey }, path, "a-toolchain-fingerprint-over-sso" },
+                                  9);
         budget = DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(report)));
     }
     auto const churn = std::vector<std::string>(64, std::string(128, 'x'));
@@ -6144,9 +6151,11 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
     REQUIRE(grant.has_value());
     REQUIRE(budget.has_value());
     CHECK(Unwrap(admit).sourcePath == LongPath);
+    CHECK(Unwrap(admit).cacheKey == LongKey);
     CHECK(Unwrap(admit).excluded == std::vector<std::string> { "a-worker-endpoint.example.test:6676" });
     CHECK(Unwrap(grant).leaseToken == "a-lease-token-over-the-sso-buffer");
     CHECK(Unwrap(budget).peaks.at(0).first.sourcePath == LongPath);
+    CHECK(Unwrap(budget).peaks.at(0).first.cacheKey == LongKey);
 }
 
 TEST_CASE("The admission verbs have their specified opcode bytes", "[wire][admission]")

@@ -1277,9 +1277,10 @@ TEST_CASE("The admission verbs are refused by name until the leader serves them"
           "[distributed][scheduler][protocol][admission]")
 {
     // #1728. The wire carries ADMIT, SETTLE and MACHINE-BUDGET before the leader answers them, and a
-    // scheduler that meets one in that window must REPLY: `DispatchNotPermitted`, the answer for a
-    // verb that exists and is served elsewhere, never `UnknownOpcode` (which tells a client this
-    // build is too old) and never a dropped frame (which reads as a dead host).
+    // scheduler that meets one in that window must REPLY: `DispatchNotPermitted`, never
+    // `UnknownOpcode` (which tells a client this build is too old) and never a dropped frame (which
+    // reads as a dead host). These verbs are not yet routed by the scheduler (Task 8 replaces this
+    // case with the real behaviour).
     Fixture fixture;
     auto const excluded = std::array<std::string_view, 0> {};
     std::vector<std::vector<std::byte>> const frames {

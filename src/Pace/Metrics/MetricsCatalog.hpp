@@ -1226,7 +1226,7 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::SchedulerRequestsRefusedNodeIdentityRequired,
       .prometheusName = "pace_scheduler_requests_refused_node_identity_required_total",
-      .help = "register, node-announce, heartbeat and withdraw requests refused because their connection proved no "
+      .help = "register, node-announce, heartbeat, withdraw and machine-budget requests refused because their connection proved no "
               "identity the cluster holds live. An address admits a client, never a machine joining the fleet. A "
               "rise from one host is a node not yet admitted, or one whose proof is being refused.",
       .type = MetricType::Counter },

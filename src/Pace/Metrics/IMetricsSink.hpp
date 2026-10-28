@@ -1394,7 +1394,7 @@ class IMetricsSink
         /// verb is what the seal exists to make worthless. (#178)
         NodeSealedFramesRefused,
         /// A verb only a machine that proved its identity may send -- REGISTER, NODE-ANNOUNCE,
-        /// HEARTBEAT, WITHDRAW -- refused on a connection that proved none that is live. (#178)
+        /// HEARTBEAT, WITHDRAW, MACHINE-BUDGET -- refused on a connection that proved none that is live. (#178)
         SchedulerRequestsRefusedNodeIdentityRequired,
         /// Enrollment requests the leader forgot because the machine stopped asking for
         /// `PendingRowLifetime` before anybody decided about it. A machine switched off or given up

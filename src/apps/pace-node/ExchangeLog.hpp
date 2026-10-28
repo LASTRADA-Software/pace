@@ -141,14 +141,14 @@ inline constexpr std::array ExchangeLogTable {
     // The admission queue (#1728). Admit is the scheduling decision now -- what `Lease` was -- so it
     // sits where `Lease` does, and its settle beside it for `Release`'s reason.
     VerbLogRow { .code = CompileCacheWire::Op::Admit,
-                 .level = LogLevel::Info,
-                 .rationale = "the scheduling decision itself, now taken in a queue: the line that says where a "
-                              "compile went and how long it waited is the one an operator reads to learn why a "
-                              "build was slow, and it is one per compile rather than one per poll" },
+                 .level = LogLevel::Debug,
+                 .rationale = "one per compile on every machine of the fleet, local ones included, on the one "
+                              "leader that serves them: `SharedStore`'s rate and its reason, so at Info a single "
+                              "office build buries that machine's journal" },
     VerbLogRow { .code = CompileCacheWire::Op::Settle,
-                 .level = LogLevel::Info,
-                 .rationale = "an admission's second half, logged with it so a compile's life reads as a pair "
-                              "rather than a start with no end, for `Release`'s reason" },
+                 .level = LogLevel::Debug,
+                 .rationale = "an admission's second half, so the same fleet-wide compile rate and the same "
+                              "reason as `Admit` and `SharedStore`" },
     VerbLogRow { .code = CompileCacheWire::Op::MachineBudget,
                  .level = LogLevel::Trace,
                  .rationale = "it arrives on every round from every node whatever it runs, so it grows an IDLE "

@@ -31,7 +31,7 @@ namespace Pace::Node
 ///
 /// ## Why before anything else
 ///
-/// The verbs a joining machine sends -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` --
+/// The verbs a joining machine sends -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw`, `MachineBudget` --
 /// require a proven identity (`CompileCacheWire::IdentityRequirement`), and what a proof
 /// establishes is connection state. So a round that dials proves once, and every verb on that
 /// connection is sent sealed, as the machine the cluster admitted.

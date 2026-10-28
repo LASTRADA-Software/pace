@@ -1310,7 +1310,7 @@ enum class ErrorCode : std::uint8_t
     /// A verb only a machine that PROVED its identity may send, sent on a connection that has not
     /// (#178).
     ///
-    /// `Register`, `NodeAnnounce`, `Heartbeat` and `Withdraw`: the verbs with which a machine
+    /// `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` and `MachineBudget`: the verbs with which a machine
     /// joins the fleet, and which decide where the fleet's work is sent. An address admits a
     /// CLIENT; it no longer admits a machine into the fleet, loopback included -- a process on the
     /// scheduler's own host could otherwise register an endpoint of its choosing and be leased the
@@ -9546,8 +9546,10 @@ enum class SettleOutcome : std::uint8_t
 /// longer than this is one no honest launcher produced, and the estimate it keys is not worth it.
 inline constexpr std::size_t MaxAdmitPathBytes = 512;
 
-/// The longest tree label an admission request carries, in bytes. Display only (R14): the leader
-/// root-relativizes or truncates it to valid UTF-8 where it enters.
+/// The longest tree label an admission request carries, in bytes. Display only (R14), but still
+/// text a peer chose: one that is not UTF-8 is REFUSED where it enters, never truncated or repaired.
+/// A launcher that cannot form a valid label sends a placeholder, so a bad working directory costs
+/// a label and never a compile.
 inline constexpr std::size_t MaxAdmitTreeLabelBytes = 256;
 
 /// The most peaks one MACHINE-BUDGET report carries. A node reports a bounded sample of the
@@ -9739,6 +9741,10 @@ namespace Detail
     return out;
 }
 
+/// How many fields an ADMIT reply holds: kind, endpoint, lease token, codecs, charged, queued.
+/// One number for `EncodeAdmitGrant` and `DecodeAdmitGrant`, so the two cannot drift.
+inline constexpr std::size_t AdmitGrantFieldCount = 6;
+
 /// Frame the payload of a successful ADMIT reply.
 /// @param grant What the leader decided.
 /// @return The reply payload (not a whole frame).
@@ -9764,7 +9770,7 @@ namespace Detail
 /// @return The owned fields, or nullopt when malformed.
 [[nodiscard]] inline std::optional<AdmitGrantFields> DecodeAdmitGrant(std::span<std::byte const> payload)
 {
-    auto const fields = SplitFields(payload, 6);
+    auto const fields = SplitFields(payload, AdmitGrantFieldCount);
     if (!fields.has_value())
         return std::nullopt;
     auto const kind = Detail::DecodeEnumByte<GrantKind>((*fields)[0]);
