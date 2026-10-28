@@ -4122,7 +4122,9 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   `KeepAlive::No` and `ISocket` offers no way to arm it afterwards -- so a caller host that vanished
   without a FIN keeps its charge until the held connection's idle window, `MaxCompileLeaseLifetime`
   (one hour), sweeps it. Closing that needs a core-cpp API that arms keepalive on an accepted
-  socket, re-pinned here; it is never worked around in `Transport/`.
+  socket, re-pinned here; it is never worked around in `Transport/`. Tracked as
+  [#1736](https://github.com/LASTRADA-Software/pace/issues/1736), which waits on
+  contour-terminal/core-cpp#81.
 
 ## Open work
 
@@ -4172,3 +4174,11 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   it can be spawned and once for its banner, and the first is in a serial loop in
   front of the pool built to hide exactly that. `CompilerBanner` knows both facts
   and reports neither, so two callers reconstruct what it discarded.
+- **[#1736](https://github.com/LASTRADA-Software/pace/issues/1736)** — the leader does not arm TCP
+  keepalive on the admission connections it HOLDS (accepted sockets), which needs
+  contour-terminal/core-cpp#81; until then a vanished caller's Worker grant holds another
+  machine's budget for up to `MaxCompileLeaseLifetime` (one hour).
+- **[#1730](https://github.com/LASTRADA-Software/pace/issues/1730)** — one cache key is not
+  deduplicated across machines that share a cache, so the same compile can be admitted twice.
+- **[#1731](https://github.com/LASTRADA-Software/pace/issues/1731)** — admission test gaps
+  deferred by the #1728 reviews.

@@ -3094,3 +3094,10 @@ passed.
   does not judge whether a phrase is the right tripwire. Marked `untriaged:` and not
   `none:`, and `ctest -R rulebook-tripwires` prints the count against this issue on
   every run.
+
+- **[#1735](https://github.com/LASTRADA-Software/pace/issues/1735)** — a test that uses a link must
+  verify a link can be followed here, and SKIP otherwise (Windows error 448).
+- **[#1733](https://github.com/LASTRADA-Software/pace/issues/1733)** — the FileTrust test hard-codes
+  the English LOCAL SERVICE account name.
+- **[#1734](https://github.com/LASTRADA-Software/pace/issues/1734)** — `python3` resolves to the
+  Windows Store stub on this host.
