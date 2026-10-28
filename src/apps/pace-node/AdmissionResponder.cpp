@@ -598,8 +598,10 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     auto const facts = peer;
     auto const caller = Distributed::CallerContextOf(*core->membership, std::move(peer));
 
-    // The machine a charge lands on: the key this connection PROVED, else the one its ticket named, else
-    // this node's own for a caller on this machine. Nothing a frame says.
+    // The machine a charge lands on: the key this connection PROVED, else this node's own for a caller on
+    // this machine. Nothing a frame says, and nothing a machine ticket says either: a launcher asks the
+    // queue only through its OWN node (Ruling 16), which proves its machine's key when it relays, so a
+    // caller that reached here any other way identified no machine and is refused below.
     auto const machine = [&]() -> std::optional<Distributed::MachineId> {
         if (caller.provenKey.has_value())
             return MachineIdOf(*caller.provenKey);

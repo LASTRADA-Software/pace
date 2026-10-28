@@ -2504,13 +2504,21 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
     return served;
 }
 
-/// Where the fleet queue is asked: the scheduler when one is configured, else the cache's own node
-/// (whose merged `0xFC` surface forwards to the leader).
+/// The endpoints @p cfg names, as `Cc::AdmissionEndpointOf` and `Cc::PlanUnreachableAt` read them.
+/// @param cfg Launcher config.
+/// @return Views into @p cfg.
+[[nodiscard]] Cc::LauncherEndpoints EndpointsOf(Config const& cfg) noexcept
+{
+    return Cc::LauncherEndpoints { .cache = cfg.addr, .scheduler = cfg.schedulerAddr };
+}
+
+/// Where the fleet queue is asked: always this machine's own node (`Cc::AdmissionEndpointOf`, Ruling 16),
+/// whose merged `0xFC` surface answers when it leads and forwards to the leader when it does not.
 /// @param cfg Launcher config.
 /// @return The `host:port`; empty when there is nothing to ask.
 [[nodiscard]] std::string_view AdmissionEndpoint(Config const& cfg) noexcept
 {
-    return cfg.schedulerAddr.empty() ? std::string_view { cfg.addr } : std::string_view { cfg.schedulerAddr };
+    return Cc::AdmissionEndpointOf(EndpointsOf(cfg));
 }
 
 /// What a dispatch settles before anybody is asked where it runs.
@@ -2598,14 +2606,15 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
     Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *memoFiles };
     core::platform::SystemWallClock const wallClock;
     auto memo = Cc::ReachabilityMemo::Load(memoStore);
-    // The endpoint the QUEUE is asked at, which places the compile: the scheduler when one is named,
-    // else the cache's own node (Ruling 12).
-    auto const queueEndpoint = AdmissionEndpoint(cfg);
-    if (memo.Remembers(Cc::MemoKind::SchedulerUnreached, queueEndpoint, wallClock.now()))
+    // Refused only when every place the plan could be spent -- the queue at this machine's node, then a
+    // named scheduler's `LEASE` -- was not reached a moment ago (`Cc::PlanUnreachableAt`).
+    auto const unreached = Cc::PlanUnreachableAt(EndpointsOf(cfg), [&](std::string_view endpoint) {
+        return memo.Remembers(Cc::MemoKind::SchedulerUnreached, endpoint, wallClock.now());
+    });
+    if (unreached.has_value())
         return std::unexpected { PlanRefusal {
             .recording = Cc::RememberedUnreachableRecording(),
-            .note =
-                std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, queueEndpoint),
+            .note = std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, *unreached),
             .specifics = {} } };
 
     // The DISPATCH identity, which is not the cache key's -- and it is built on the
@@ -3873,10 +3882,20 @@ std::optional<int> CachedCompile::AdmitAndCompile()
                 return {};
             return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
         },
-        // Today's path when no queue answers: a LEASE, which needs a scheduler named.
+        // Today's path when no queue answers: a LEASE, which needs a scheduler named -- and is not dialled
+        // at one a launcher a moment ago could not reach, exactly as before a queue existed.
         .dispatchUnadmitted = [&]() -> std::optional<Cc::CompileRun> {
             if (!plan.has_value() || !DispatchConfigured(cfg))
                 return std::nullopt;
+            if (admitMemo.Remembers(Cc::MemoKind::SchedulerUnreached, cfg.schedulerAddr, admitClock.now()))
+            {
+                (void) DeclineDispatch(record,
+                                       Cc::RememberedUnreachableRecording(),
+                                       std::format("not dispatched ({} at {}); compiling locally",
+                                                   Cc::RememberedUnreachableReason,
+                                                   cfg.schedulerAddr));
+                return std::nullopt;
+            }
             return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}).run;
         },
         .compileLocal = [&]() { return RunCaptureSplit(argv); },

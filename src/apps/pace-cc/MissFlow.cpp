@@ -271,6 +271,19 @@ namespace
     }
 } // namespace
 
+std::optional<std::string_view> PlanUnreachableAt(LauncherEndpoints const& endpoints,
+                                                  std::function<bool(std::string_view)> const& remembered)
+{
+    auto const queue = AdmissionEndpointOf(endpoints);
+    if (!remembered(queue))
+        return std::nullopt;
+    if (endpoints.scheduler.empty())
+        return queue;
+    if (!remembered(endpoints.scheduler))
+        return std::nullopt;
+    return endpoints.scheduler;
+}
+
 AskVerdict DecideAskFrom(std::string_view endpoint,
                          std::string_view cacheAddress,
                          std::optional<CacheOutcomeKind> fetched,

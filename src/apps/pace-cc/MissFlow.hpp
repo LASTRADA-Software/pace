@@ -130,6 +130,40 @@ enum class AskVerdict : std::uint8_t
     Last
 };
 
+/// The two endpoints a launcher is configured with.
+struct LauncherEndpoints
+{
+    std::string_view cache;     ///< `PACE_ADDR`: this machine's own node, which serves the cache.
+    std::string_view scheduler; ///< `PACE_SCHEDULER`: where a `LEASE` goes; empty when none is named.
+};
+
+/// Where the fleet queue is asked: ALWAYS the cache's own node, `PACE_ADDR` (Ruling 16).
+///
+/// Never `PACE_SCHEDULER`. The leader charges a compile to the machine that ASKED, and names that
+/// machine only by a key the asking connection proved or by loopback: a launcher's own node proves
+/// its machine's key when it relays, while a launcher dialling a remote scheduler directly proves
+/// nothing and would be charged to no machine at all. Taking both endpoints is what makes that a
+/// case rather than a comment: a scheduler named or not, the answer is the same.
+/// @param endpoints What the launcher is configured with.
+/// @return The `host:port` to ask; empty when there is nothing to ask.
+[[nodiscard]] constexpr std::string_view AdmissionEndpointOf(LauncherEndpoints const& endpoints) noexcept
+{
+    return endpoints.cache;
+}
+
+/// Where a dispatch plan could be spent that a launcher a moment ago could not reach -- or nothing,
+/// when somewhere it could be spent may still answer.
+///
+/// A plan is spent first at the QUEUE (`AdmissionEndpointOf`) and, when no queue answers, at a named
+/// scheduler's `LEASE`. So it is refused only when EVERY place it could be spent was not reached:
+/// a stopped local node with a live scheduler named still dispatches exactly as before a queue
+/// existed, and a dead scheduler behind a live local node still lets the queue place the compile.
+/// @param endpoints What the launcher is configured with.
+/// @param remembered Whether the reachability memo says an endpoint was not reached recently.
+/// @return The endpoint to name in the refusal, or nothing when the plan stands.
+[[nodiscard]] std::optional<std::string_view> PlanUnreachableAt(LauncherEndpoints const& endpoints,
+                                                                std::function<bool(std::string_view)> const& remembered);
+
 /// Decide whether to dial the queue, from what this invocation ALREADY knows.
 ///
 /// **A node that is stopped must cost exactly what it did before a queue existed**, and a refused

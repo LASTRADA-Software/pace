@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -834,4 +835,42 @@ TEST_CASE("Launcher.a-fail-open-is-reported-to-the-launcher", "[launcher][admiss
     (void) RunMiss(seams);
 
     CHECK(told == std::vector<std::string> { "admission unreached" });
+}
+
+TEST_CASE("Launcher.admission-asks-this-machines-node-whatever-scheduler-is-named", "[launcher][admission]")
+{
+    // Ruling 16. The leader names the machine a compile is charged to by a key the asking connection
+    // PROVED, and this machine's node proves it when it relays: a launcher asking a remote scheduler
+    // directly would be charged to no machine. So `PACE_SCHEDULER` never redirects the queue.
+    constexpr std::string_view node = "127.0.0.1:6674";
+    CHECK(AdmissionEndpointOf(LauncherEndpoints { .cache = node, .scheduler = "build-leader.corp:6674" }) == node);
+    // The control: with none named, the same answer -- what distinguishes the two cases is only that
+    // the first COULD have been redirected.
+    CHECK(AdmissionEndpointOf(LauncherEndpoints { .cache = node, .scheduler = {} }) == node);
+    CHECK(AdmissionEndpointOf(LauncherEndpoints { .cache = {}, .scheduler = "build-leader.corp:6674" }).empty());
+}
+
+TEST_CASE("Launcher.a-plan-is-refused-only-when-every-place-to-spend-it-was-unreached", "[launcher][admission]")
+{
+    constexpr std::string_view node = "127.0.0.1:6674";
+    constexpr std::string_view scheduler = "build-leader.corp:6674";
+    auto const remembering = [](std::initializer_list<std::string_view> down) {
+        return [down = std::vector<std::string_view>(down)](std::string_view endpoint) {
+            return std::ranges::contains(down, endpoint);
+        };
+    };
+    auto const withScheduler = LauncherEndpoints { .cache = node, .scheduler = scheduler };
+    auto const withoutScheduler = LauncherEndpoints { .cache = node, .scheduler = {} };
+
+    // Everything answers: the plan stands.
+    CHECK_FALSE(PlanUnreachableAt(withScheduler, remembering({})).has_value());
+    // A stopped local node with a live scheduler named still LEASEs there, exactly as before the queue.
+    CHECK_FALSE(PlanUnreachableAt(withScheduler, remembering({ node })).has_value());
+    // A dead scheduler behind a live local node: the queue still places the compile.
+    CHECK_FALSE(PlanUnreachableAt(withScheduler, remembering({ scheduler })).has_value());
+    // Both down: refused, naming where today's LEASE would have gone.
+    CHECK(PlanUnreachableAt(withScheduler, remembering({ node, scheduler })) == std::optional { scheduler });
+    // With no scheduler named the queue is the only place, so its node down refuses the plan.
+    CHECK(PlanUnreachableAt(withoutScheduler, remembering({ node })) == std::optional { node });
+    CHECK_FALSE(PlanUnreachableAt(withoutScheduler, remembering({ scheduler })).has_value());
 }
