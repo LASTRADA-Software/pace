@@ -4,6 +4,7 @@
 // the lease and the job each takes, and every way they are given back.
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -410,4 +411,47 @@ TEST_CASE("SchedulerAdmission.worker-refusal-after-demotion-abandons-the-ticket"
     CHECK(fleet.service.AdmissionSnapshotNow().chargedBytes.empty());
     CHECK(fleet.Leases() == 0);
     CHECK(fleet.Jobs(worker) == 0);
+}
+
+TEST_CASE("SchedulerAdmission.fleet-collects-the-queue-with-machines-named",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    // Nothing has reported a budget or queued a request yet: no admission data, which is not a queue of zero.
+    CHECK_FALSE(CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }).admission);
+
+    auto const reply = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration {
+            .fingerprint = Toolchain, .endpoint = WorkerEndpoint, .displayName = "build-7", .slots = 1, .codecs = {} });
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const workerMachine = MachineOf(fleet.workerKey.PublicKey());
+    fleet.Report(workerMachine, 1024 * MiB, 1);
+    // Only the worker machine has reported, so the one worker slot is all there is.
+    auto const running = fleet.Admit("k1");
+    auto const waiting = fleet.Admit("k2");
+    REQUIRE(fleet.service.PumpAdmission().size() == 1); // one slot: the second waits
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.admission.has_value());
+    CHECK(snapshot.admission->depth == 1);
+    // The queued request's caller is this node's own machine, which no worker named: its row carries
+    // the short form of its key, never an empty cell.
+    REQUIRE(snapshot.admission->clients.size() == 1);
+    auto const& client = snapshot.admission->clients.front();
+    CHECK_FALSE(client.machine.empty());
+    CHECK(client.tree == "tree");
+    CHECK(client.running + client.queued == 2);
+    CHECK(client.queued == 1);
+    // The worker's machine is named as it registered.
+    auto const named = std::ranges::find(snapshot.admission->machines, "build-7", &AdmissionMachineRow::machine);
+    REQUIRE(named != snapshot.admission->machines.end());
+    CHECK(named->budgetBytes == std::optional<std::uint64_t> { 1024 * MiB });
+    CHECK(named->chargedBytes == 64 * MiB);
+
+    // A node that stops leading has no queue to show.
+    fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
+    CHECK_FALSE(CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }).admission);
+    static_cast<void>(running);
+    static_cast<void>(waiting);
 }

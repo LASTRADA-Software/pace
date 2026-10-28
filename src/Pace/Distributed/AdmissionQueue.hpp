@@ -87,6 +87,31 @@ struct Settlement
     std::optional<std::uint64_t> peakBytes; ///< The compile's measured peak, when known.
 };
 
+/// One client's load on the queue: a machine and the build tree it compiles for.
+struct ClientLoad
+{
+    MachineId machine;        ///< The machine the compiles came from.
+    std::string tree;         ///< The build tree's label, as the client stated it; possibly empty.
+    std::uint32_t running {}; ///< Granted compiles not yet settled.
+    std::uint32_t queued {};  ///< Requests still waiting.
+};
+
+/// One machine's ledger, as a report reads it.
+struct MachineLedgerView
+{
+    MachineId machine;                        ///< The machine.
+    std::uint64_t chargedBytes {};            ///< What this ledger has charged it.
+    std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
+};
+
+/// Everything a fleet report shows of the queue, read at one moment.
+struct QueueView
+{
+    std::size_t depth {};                    ///< Requests waiting (`Depth()`).
+    std::vector<ClientLoad> clients;         ///< One per (machine, tree) with anything running or queued.
+    std::vector<MachineLedgerView> machines; ///< One per machine that reported a budget or holds a charge.
+};
+
 /// The leader's FIFO of compiles waiting for memory and slots, with a per-machine ledger.
 ///
 /// A request is admitted only onto a machine that has reported its budget. In-use memory and
@@ -167,6 +192,10 @@ class AdmissionQueue
     /// @return What this ledger has charged each machine, in bytes, machines in no particular order.
     ///         A machine with nothing charged is omitted.
     [[nodiscard]] std::vector<std::pair<MachineId, std::uint64_t>> ChargedByMachine() const;
+
+    /// @return The queue as a report reads it: depth, who is compiling or waiting, and each machine's
+    ///         charge against its budget. Order is unspecified; the caller names and sorts.
+    [[nodiscard]] QueueView Snapshot() const;
 
   private:
     struct Entry

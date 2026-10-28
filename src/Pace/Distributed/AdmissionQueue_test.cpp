@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <map>
 #include <ranges>
 
@@ -758,4 +759,50 @@ TEST_CASE("AdmissionQueue.not-stored-without-a-peak-teaches-the-estimator-nothin
     // Either way the charge went back.
     f.Local(8 * GiB);
     CHECK(f.queue.Pump().size() == 1);
+}
+
+TEST_CASE("AdmissionQueue.snapshot-names-who-runs-and-who-waits", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 32));
+    auto const enqueue = [&f](std::string caller, std::string tree, std::uint64_t bytes) {
+        auto key = EstimateKey { "key-" + caller + tree + std::to_string(bytes), "a.cpp", {} };
+        f.estimates.Record(key, bytes);
+        QueueRequest request;
+        request.kind = AdmitKind::LocalOnly;
+        request.caller = std::move(caller);
+        request.estimate = std::move(key);
+        request.treeLabel = std::move(tree);
+        request.storable = false; // Identical keys would otherwise wait on one another.
+        return f.queue.Enqueue(std::move(request));
+    };
+    enqueue("m", "wt7", 1 * GiB);
+    enqueue("m", "wt3", 3 * GiB);
+    enqueue("m", "wt3", 3 * GiB);
+    enqueue("m", "wt3", 3 * GiB); // 1 + 3 + 3 of 8 GiB are granted; this one does not fit.
+    REQUIRE(f.queue.Pump().size() == 3);
+
+    auto const view = f.queue.Snapshot();
+    CHECK(view.depth == 1);
+    auto const find = [&view](std::string const& tree) {
+        return std::ranges::find(view.clients, tree, &ClientLoad::tree);
+    };
+    REQUIRE(find("wt3") != view.clients.end());
+    CHECK(find("wt3")->running == 2);
+    CHECK(find("wt3")->queued == 1);
+    REQUIRE(find("wt7") != view.clients.end());
+    CHECK(find("wt7")->running == 1);
+    CHECK(find("wt7")->queued == 0);
+    REQUIRE(view.machines.size() == 1);
+    CHECK(view.machines[0].chargedBytes == 7 * GiB);
+    CHECK(view.machines[0].budgetBytes == std::optional<std::uint64_t> { 8 * GiB });
+}
+
+TEST_CASE("AdmissionQueue.snapshot-is-empty-before-anything-happens", "[distributed][admission]")
+{
+    Fixture f;
+    auto const view = f.queue.Snapshot();
+    CHECK(view.depth == 0);
+    CHECK(view.clients.empty());
+    CHECK(view.machines.empty());
 }

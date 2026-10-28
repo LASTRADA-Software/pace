@@ -30,6 +30,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -365,6 +366,72 @@ namespace
                                                    return FleetCell::Of(FormatEd25519PublicKey(revoked.publicKey));
                                                } },
     };
+
+    /// What a compile-queue client row shows (#1728): who is compiling, for which build tree, and how
+    /// much of it is running against waiting.
+    constexpr std::array<FleetColumn<AdmissionClientRow>, 4> ClientColumns {
+        FleetColumn<AdmissionClientRow> {
+            .name = "machine",
+            .help = "The machine the compiles came from, by its display name.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Identity,
+            .project = [](AdmissionClientRow const& row) { return FleetCell::Of(row.machine); } },
+        FleetColumn<AdmissionClientRow> { .name = "tree",
+                                          .help = "The build tree the client compiles for, as it labelled itself.",
+                                          .format = CellFormat::Text,
+                                          .keep = ColumnKeep::Vital,
+                                          .project = [](AdmissionClientRow const& row) { return FleetCell::Of(row.tree); } },
+        FleetColumn<AdmissionClientRow> {
+            .name = "running",
+            .help = "Compiles this client holds a grant for right now.",
+            .format = CellFormat::Count,
+            .keep = ColumnKeep::Vital,
+            .project = [](AdmissionClientRow const& row) { return FleetCell::Of(std::uint64_t { row.running }); } },
+        FleetColumn<AdmissionClientRow> {
+            .name = "queued",
+            .help = "Compiles of this client still waiting for memory or a slot.",
+            .format = CellFormat::Count,
+            .keep = ColumnKeep::Vital,
+            .project = [](AdmissionClientRow const& row) { return FleetCell::Of(std::uint64_t { row.queued }); } },
+    };
+
+    /// What a compile-queue ledger row shows (#1728).
+    constexpr std::array<FleetColumn<AdmissionMachineRow>, 3> BudgetColumns {
+        FleetColumn<AdmissionMachineRow> {
+            .name = "machine",
+            .help = "The machine, by its display name.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Identity,
+            .project = [](AdmissionMachineRow const& row) { return FleetCell::Of(row.machine); } },
+        FleetColumn<AdmissionMachineRow> {
+            .name = "charged",
+            .help = "Memory the queue has charged this machine for compiles it granted.",
+            .format = CellFormat::Bytes,
+            .keep = ColumnKeep::Vital,
+            .project = [](AdmissionMachineRow const& row) { return FleetCell::Of(row.chargedBytes); } },
+        FleetColumn<AdmissionMachineRow> {
+            .name = "budget",
+            .help = "The memory budget the machine stated. Absent until it has reported one.",
+            .format = CellFormat::Bytes,
+            .keep = ColumnKeep::Vital,
+            .project = [](AdmissionMachineRow const& row) { return FleetCell::Maybe(row.budgetBytes); } },
+    };
+
+    /// The rows of the queue's two tables, or none where this node leads no queue: the marker line of the
+    /// full document and the header carry that, as they do for `Members`.
+    /// @param snapshot What to read.
+    /// @return The client rows.
+    [[nodiscard]] std::vector<AdmissionClientRow> ClientRowsOf(FleetSnapshot const& snapshot)
+    {
+        return snapshot.admission.has_value() ? snapshot.admission->clients : std::vector<AdmissionClientRow> {};
+    }
+
+    /// @param snapshot What to read.
+    /// @return The ledger rows.
+    [[nodiscard]] std::vector<AdmissionMachineRow> BudgetRowsOf(FleetSnapshot const& snapshot)
+    {
+        return snapshot.admission.has_value() ? snapshot.admission->machines : std::vector<AdmissionMachineRow> {};
+    }
 
     /// One row of the conditions section: a machine, and one condition it reported (#1364).
     ///
@@ -1036,6 +1103,60 @@ std::optional<ToolchainPickCoverage> PickCoverageFor(FleetSnapshot const& snapsh
     return ToolchainPickCoverage { .toolchains = reached.size(), .neverPicked = static_cast<std::size_t>(never) };
 }
 
+namespace
+{
+    /// What to call a machine the queue knows only by its key: the first bytes in hex, so a row is
+    /// never nameless and two machines are still told apart.
+    /// @param key The machine's identity key, as raw bytes.
+    /// @return A short, printable form.
+    [[nodiscard]] std::string ShortMachineName(std::string_view key)
+    {
+        constexpr std::size_t ShownBytes = 4;
+        std::string out;
+        for (auto const byte: key.substr(0, ShownBytes))
+            out += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(byte)));
+        return out.empty() ? std::string { "unknown" } : out;
+    }
+
+    /// A machine's display name: the one its worker registered with, else the short form of its key.
+    /// @param key The machine's identity key.
+    /// @param workers The registry entries, which carry the key and the name.
+    /// @return The name; never empty.
+    [[nodiscard]] std::string MachineNameOf(std::string_view key, std::vector<WorkerReport> const& workers)
+    {
+        auto const named = std::ranges::find_if(workers, [key](WorkerReport const& worker) {
+            return worker.info.identityKey == key && !worker.info.displayName.empty();
+        });
+        return named != workers.end() ? named->info.displayName : ShortMachineName(key);
+    }
+
+    /// The queue's own view, with machines named for a person and the rows put in a stable order.
+    /// @param view The queue, or none when this node leads none.
+    /// @param workers Where the names come from.
+    /// @return The section, or none.
+    [[nodiscard]] std::optional<AdmissionSection> AdmissionSectionOf(std::optional<QueueView> const& view,
+                                                                     std::vector<WorkerReport> const& workers)
+    {
+        if (!view.has_value())
+            return std::nullopt;
+        AdmissionSection section { .depth = view->depth, .clients = {}, .machines = {} };
+        for (auto const& client: view->clients)
+            section.clients.push_back(AdmissionClientRow { .machine = MachineNameOf(client.machine, workers),
+                                                           .tree = client.tree,
+                                                           .running = client.running,
+                                                           .queued = client.queued });
+        for (auto const& machine: view->machines)
+            section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers),
+                                                             .chargedBytes = machine.chargedBytes,
+                                                             .budgetBytes = machine.budgetBytes });
+        std::ranges::sort(section.clients, [](AdmissionClientRow const& a, AdmissionClientRow const& b) {
+            return std::tie(a.machine, a.tree) < std::tie(b.machine, b.tree);
+        });
+        std::ranges::sort(section.machines, {}, &AdmissionMachineRow::machine);
+        return section;
+    }
+} // namespace
+
 FleetSnapshot CollectFleet(FleetSources const& sources)
 {
     FleetSnapshot snapshot;
@@ -1088,6 +1209,8 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
 
     for (auto const& tier: StorageTierTable)
         snapshot.tiersPresent[static_cast<std::size_t>(tier.tier)] = AnyNodeHasTier(snapshot.nodes, tier.tier);
+
+    snapshot.admission = AdmissionSectionOf(sources.scheduler->AdmissionDetailNow(), snapshot.workers);
 
     return snapshot;
 }
@@ -1432,6 +1555,21 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     else
         out += "null"; // Runs no cluster -- not "a cluster that has revoked nothing".
 
+    // The compile queue (#1728): `null` where this node leads none, never a queue of zero.
+    out += ',';
+    AppendJsonString(out, "admission");
+    out += ':';
+    if (snapshot.admission.has_value())
+    {
+        out += std::format("{{\"depth\":{},\"clients\":", snapshot.admission->depth);
+        AppendJsonRows(out, ClientColumns, snapshot.admission->clients);
+        out += ",\"machines\":";
+        AppendJsonRows(out, BudgetColumns, snapshot.admission->machines);
+        out += '}';
+    }
+    else
+        out += "null";
+
     out += ',';
     AppendJsonString(out, "nodes");
     out += ':';
@@ -1618,6 +1756,9 @@ namespace
             case FleetSection::Tiers:
                 AppendTierText(out, snapshot);
                 return;
+            case FleetSection::Clients:
+                AppendTextRows(out, ClientColumns, ClientRowsOf(snapshot));
+                return;
             case FleetSection::Series:
                 AppendSeriesText(out, history.buckets, history.range);
                 return;
@@ -1676,6 +1817,8 @@ std::vector<std::string> FleetColumnNames(FleetSection section, FleetSnapshot co
             }
             return names;
         }
+        case FleetSection::Clients:
+            return namesOf(ClientColumns);
         case FleetSection::Series:
             // The bucket arrays and the series, from the tables `AppendSeriesText` walks; not a
             // `FleetColumn` set, and `tabular` says so.
@@ -1751,6 +1894,8 @@ namespace
                                                  .decor = CellDecor::Plain,
                                                  .keep = ColumnKeep::Useful };
                 return std::nullopt;
+            case FleetSection::Clients:
+                return factsOf(ClientColumns);
             case FleetSection::Series:
                 // Raw per-bucket values: a rate is per minute, a share a fraction, a level a count, so no
                 // column of this section has one scale a human surface could apply.
@@ -2340,6 +2485,28 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
                             .sub = std::format("granted, {}", LeasesNote) };
     }
 
+    /// Compiles waiting in the leader's queue (#1728).
+    ///
+    /// Absent, never zero, on a node that leads no queue: `0` would read as every compile admitted at
+    /// once, said for a fleet that has not reported a budget.
+    KpiReadout KpiQueueDepth(FleetSnapshot const& snapshot, FleetHistoryView const& /*history*/)
+    {
+        if (!snapshot.admission.has_value())
+            return KpiReadout { .value = FleetCell::Nothing(),
+                                .of = FleetCell::Nothing(),
+                                .format = CellFormat::Count,
+                                .unit = {},
+                                .sub = "no compile queue on this node" };
+        auto running = std::uint64_t { 0 };
+        for (auto const& row: snapshot.admission->clients)
+            running += row.running;
+        return KpiReadout { .value = FleetCell::Of(std::uint64_t { snapshot.admission->depth }),
+                            .of = FleetCell::Nothing(),
+                            .format = CellFormat::Count,
+                            .unit = {},
+                            .sub = std::format("waiting; {} running", running) };
+    }
+
     KpiReadout KpiOldestHeartbeat(FleetSnapshot const& snapshot, FleetHistoryView const& /*history*/)
     {
         if (snapshot.nodes.empty())
@@ -2430,7 +2597,7 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
     /// and one added after them rather than among them: the mockup's order is what a
     /// reader of this page already knows, and an insertion would move six tiles to
     /// place one.
-    constexpr std::array<KpiRow, 7> KpiTable {
+    constexpr std::array<KpiRow, 8> KpiTable {
         KpiRow { .label = "Dispatched", .key = "dispatched", .project = KpiDispatched, .sparkline = true },
         KpiRow { .label = "Compiling now",
                  .key = "compiling-now",
@@ -2450,6 +2617,7 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
                  .project = KpiNeverPicked,
                  .ofNoun = ToolchainsNoun,
                  .sparkline = false },
+        KpiRow { .label = "Queued compiles", .key = "queue-depth", .project = KpiQueueDepth, .sparkline = false },
     };
 
     /// Every tile states a key, no two share one, and each is kebab-case.
@@ -3243,6 +3411,24 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
     }
     else
         out += R"(<p class="note">This node runs no cluster: it leads itself, and has no replicated state.</p>)";
+    out += "</section>";
+
+    // ---- compile queue --------------------------------------------------------
+    out += R"(<section><div class="sec-head"><h2>Compile queue</h2><span class="rule"></span>)"
+           R"(<span class="meta">the leader's admission queue</span></div>)";
+    // The tables are drawn whether or not there is a queue, exactly as Members is: a section that
+    // renders its columns only in some states is a coverage hole no test over the tables can see.
+    out += R"(<div class="panel wrap">)";
+    AppendHtmlRows(out, ClientColumns, ClientRowsOf(snapshot));
+    out += "</div>";
+    out += R"(<div class="panel wrap">)";
+    AppendHtmlRows(out, BudgetColumns, BudgetRowsOf(snapshot));
+    out += "</div>";
+    if (snapshot.admission.has_value())
+        out += std::format(R"(<p class="note">{} waiting.</p>)", snapshot.admission->depth);
+    else
+        out += R"(<p class="note">This node leads no compile queue, so there is nothing to show: )"
+               R"(not a queue of zero.</p>)";
     out += "</section>";
 
     out += R"(<footer>/metrics remains the source of truth for anything alertable)";

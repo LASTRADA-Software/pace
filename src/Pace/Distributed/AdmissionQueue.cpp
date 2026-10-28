@@ -60,6 +60,34 @@ std::vector<std::pair<MachineId, std::uint64_t>> AdmissionQueue::ChargedByMachin
     return out;
 }
 
+QueueView AdmissionQueue::Snapshot() const
+{
+    auto view = QueueView { .depth = _queue.size(), .clients = {}, .machines = {} };
+
+    auto const clientOf = [&view](MachineId const& machine, std::string const& tree) -> ClientLoad& {
+        auto const found = std::ranges::find_if(
+            view.clients, [&](ClientLoad const& load) { return load.machine == machine && load.tree == tree; });
+        if (found != view.clients.end())
+            return *found;
+        return view.clients.emplace_back(ClientLoad { .machine = machine, .tree = tree });
+    };
+    for (auto const& entry: _queue)
+        ++clientOf(entry.request.caller, entry.request.treeLabel).queued;
+    for (auto const& [ticket, charge]: _charges)
+        ++clientOf(charge.entry.request.caller, charge.entry.request.treeLabel).running;
+
+    for (auto const& [machine, ledger]: _ledgers)
+    {
+        if (!ledger.report.has_value() && ledger.chargedBytes == 0)
+            continue;
+        view.machines.push_back(MachineLedgerView {
+            .machine = machine,
+            .chargedBytes = ledger.chargedBytes,
+            .budgetBytes = ledger.report.has_value() ? std::optional { ledger.report->memoryBudgetBytes } : std::nullopt });
+    }
+    return view;
+}
+
 std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
 {
     auto const found = _charges.find(ticket);

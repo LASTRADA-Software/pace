@@ -176,6 +176,11 @@ TEST_CASE("Every fleet column reaches the page, the JSON and the text", "[distri
     // so on a snapshot running none it comes back holding its endpoint column alone and
     // this case would cover the section by asserting almost nothing about it.
     snapshot.tiersPresent[MemoryIndex] = true;
+    // The queue's two sections render from `admission`, which is absent on a node leading no queue.
+    snapshot.admission =
+        AdmissionSection { .depth = 1,
+                           .clients = { AdmissionClientRow { .machine = "ws-1", .tree = "wt", .running = 1, .queued = 1 } },
+                           .machines = { AdmissionMachineRow { .machine = "ws-1", .chargedBytes = 1, .budgetBytes = 2 } } };
 
     auto const html = RenderFleetHtml(snapshot, NoHistory(), 10);
     auto const json = RenderFleetJson(snapshot, NoHistory());
@@ -2461,4 +2466,68 @@ TEST_CASE("A row this leader has no word for is shown as the machine sent it, ne
     CHECK_FALSE(block.contains("pill--live"));
     CHECK(RenderFleetJson(snapshot, NoHistory())
               .contains(R"("condition":"future-condition","state":"smouldering","persistence":"sticky","severity":"dire")"));
+}
+
+namespace
+{
+
+/// A leader whose queue holds two clients of one machine and one of another.
+[[nodiscard]] FleetSnapshot QueueingSnapshot()
+{
+    auto snapshot = LeadingSnapshot();
+    snapshot.admission = AdmissionSection {
+        .depth = 12,
+        .clients = { AdmissionClientRow { .machine = "ws-92", .tree = "contour-wt3", .running = 4, .queued = 12 },
+                     AdmissionClientRow { .machine = "ws-92", .tree = "pace-main", .running = 2, .queued = 0 },
+                     AdmissionClientRow { .machine = "ws-17", .tree = "pace-main", .running = 0, .queued = 3 } },
+        .machines = { AdmissionMachineRow { .machine = "ws-92", .chargedBytes = 6ULL << 30, .budgetBytes = 16ULL << 30 },
+                      AdmissionMachineRow { .machine = "ws-17", .chargedBytes = 0, .budgetBytes = std::nullopt } }
+    };
+    return snapshot;
+}
+
+} // namespace
+
+TEST_CASE("FleetView.admission-section-renders", "[distributed][fleetview][admission]")
+{
+    auto const snapshot = QueueingSnapshot();
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    CHECK(json.contains(R"("admission":{"depth":12,"clients":[)"));
+    CHECK(json.contains(R"({"machine":"ws-92","tree":"contour-wt3","running":4,"queued":12})"));
+    CHECK(json.contains(R"({"machine":"ws-17","tree":"pace-main","running":0,"queued":3})"));
+    CHECK(json.contains(R"("machines":[{"machine":"ws-92","charged":6442450944,"budget":17179869184})"));
+    // A machine that never stated a budget has none, rather than zero.
+    CHECK(json.contains(R"({"machine":"ws-17","charged":0,"budget":null})"));
+
+    auto const clients = RenderFleetText(snapshot, NoHistory(), FleetSection::Clients);
+    CHECK(clients.starts_with("machine\ttree\trunning\tqueued\n"));
+    CHECK(clients.contains("ws-92\tcontour-wt3\t4\t12\n"));
+
+    auto const kpi = RenderFleetText(snapshot, NoHistory(), FleetSection::Kpi);
+    CHECK(kpi.contains("queue-depth\t12\t"));
+
+    auto const html = RenderFleetHtml(snapshot, NoHistory(), 0);
+    CHECK(html.contains("contour-wt3"));
+    CHECK(html.contains("Compile queue"));
+}
+
+TEST_CASE("FleetView.admission-tree-label-is-escaped-on-the-page", "[distributed][fleetview][admission][security]")
+{
+    auto snapshot = QueueingSnapshot();
+    snapshot.admission->clients.front().tree = "<script>x</script>";
+    auto const html = RenderFleetHtml(snapshot, NoHistory(), 0);
+    CHECK_FALSE(html.contains("<script>x"));
+    CHECK(html.contains("&lt;script&gt;x"));
+}
+
+TEST_CASE("FleetView.admission-absent-when-no-queue", "[distributed][fleetview][admission]")
+{
+    auto const snapshot = LeadingSnapshot();
+    REQUIRE_FALSE(snapshot.admission.has_value());
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    CHECK(json.contains(R"("admission":null)"));
+    // Header only, no rows; and the headline figure is absent, never zero.
+    CHECK(RenderFleetText(snapshot, NoHistory(), FleetSection::Clients) == "machine\ttree\trunning\tqueued\n");
+    CHECK(RenderFleetText(snapshot, NoHistory(), FleetSection::Kpi).contains("queue-depth\t-\t"));
+    CHECK(RenderFleetHtml(snapshot, NoHistory(), 0).contains("leads no compile queue"));
 }

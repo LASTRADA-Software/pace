@@ -77,6 +77,8 @@ inline constexpr EnumTable<Distributed::FleetSection, MachineColumnRow> MachineC
     { .section = Distributed::FleetSection::Revoked, .column = std::nullopt },
     { .section = Distributed::FleetSection::Conditions, .column = "endpoint" },
     { .section = Distributed::FleetSection::Tiers, .column = "endpoint" },
+    // Named by display name, not by where a machine answers: a row cannot resolve to a lane.
+    { .section = Distributed::FleetSection::Clients, .column = std::nullopt },
     { .section = Distributed::FleetSection::Series, .column = std::nullopt },
 } };
 

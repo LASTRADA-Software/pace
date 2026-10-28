@@ -350,6 +350,17 @@ AdmissionSnapshot SchedulerService::AdmissionSnapshotNow() const
     return AdmissionSnapshot { .depth = _queue.Depth(), .chargedBytes = _queue.ChargedByMachine() };
 }
 
+std::optional<QueueView> SchedulerService::AdmissionDetailNow() const
+{
+    auto const guard = std::scoped_lock { _admissionMutex };
+    if (!_admissionLeading)
+        return std::nullopt;
+    auto view = _queue.Snapshot();
+    if (view.depth == 0 && view.clients.empty() && view.machines.empty())
+        return std::nullopt;
+    return view;
+}
+
 void SchedulerService::ObserveAdmission(AdmissionObserver observer)
 {
     auto const guard = std::scoped_lock { _leaderMutex };

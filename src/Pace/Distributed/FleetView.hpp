@@ -117,6 +117,35 @@ struct LeaseHolding
 /// truncation is visible rather than silent.
 inline constexpr std::size_t OutstandingLeaseRows = 50;
 
+/// One client of the compile queue: a machine and the build tree it compiles for.
+struct AdmissionClientRow
+{
+    std::string machine;      ///< The machine's display name; never empty (a short form of its key when unnamed).
+    std::string tree;         ///< The build tree's label, as the client stated it; text a peer chose.
+    std::uint32_t running {}; ///< Compiles it holds a grant for.
+    std::uint32_t queued {};  ///< Compiles of it still waiting.
+};
+
+/// One machine's compile-queue ledger.
+struct AdmissionMachineRow
+{
+    std::string machine;                      ///< As `AdmissionClientRow::machine`.
+    std::uint64_t chargedBytes {};            ///< What the queue has charged it.
+    std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
+};
+
+/// What the leader's compile queue looks like right now.
+///
+/// **Absent as a whole on a node that leads no queue** (`FleetSnapshot::admission`), which is not a
+/// queue of zero: a fleet that never reported a budget has no admission data, and `0 queued` would
+/// say every compile was admitted instantly.
+struct AdmissionSection
+{
+    std::size_t depth {};                      ///< Requests waiting.
+    std::vector<AdmissionClientRow> clients;   ///< Sorted by machine, then tree.
+    std::vector<AdmissionMachineRow> machines; ///< Sorted by machine.
+};
+
 /// Everything a fleet report shows, gathered once.
 ///
 /// **Pure data.** Collecting it reads the scheduler and the cluster; rendering it
@@ -150,6 +179,8 @@ struct FleetSnapshot
     std::vector<LeaseHolding> outstandingLeases;
     /// Worker registrations accepted since this leader started counting.
     std::uint64_t registrations { 0 };
+    /// The leader's compile queue, or ABSENT when this node leads none (#1728).
+    std::optional<AdmissionSection> admission;
     /// Which cache tiers any member reports.
     ///
     /// A table cannot omit one cell the way a scrape omits a line, so this is how
@@ -308,6 +339,7 @@ enum class FleetSection : std::uint8_t
     Revoked,    ///< The keys the cluster will never admit again, and whose they were.
     Conditions, ///< What each machine says is wrong with it (#1364).
     Tiers,      ///< Per-tier cache figures, for the tiers some member runs.
+    Clients,    ///< The compile queue's clients: who is compiling and waiting, per build tree (#1728).
     Series,     ///< The fleet's history over a range: one row per bucket, one column per series.
     Last,       ///< Not a section, and has no row: the length of a table keyed by one.
 };
@@ -412,6 +444,14 @@ inline constexpr EnumTable<FleetSection, FleetSectionRow> FleetSectionTable {
                       .one = "tier",
                       .many = "tiers",
                       .summary = "per-tier cache figures, for the tiers some member runs",
+                      .tabular = true,
+                      .inWhole = true },
+    FleetSectionRow { .section = FleetSection::Clients,
+                      .key = "clients",
+                      .one = "client",
+                      .many = "clients",
+                      .summary = "who is compiling and who is queued, per machine and build tree; empty when this "
+                                 "node leads no queue",
                       .tabular = true,
                       .inWhole = true },
     FleetSectionRow { .section = FleetSection::Series,

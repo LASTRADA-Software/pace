@@ -885,6 +885,11 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return Queue depth and bytes charged per machine, as of now.
     [[nodiscard]] AdmissionSnapshot AdmissionSnapshotNow() const;
 
+    /// @return The queue's depth, clients and per-machine ledger, read under the admission lock, or
+    ///         ABSENT when this node does not lead or the queue has never seen a request or a budget:
+    ///         a fleet with no admission data says so rather than reporting a queue of zero.
+    [[nodiscard]] std::optional<QueueView> AdmissionDetailNow() const;
+
     /// Be told when capacity may have appeared and when leadership is lost. A wiring door, set once.
     /// @param observer What to call; empty members are skipped.
     void ObserveAdmission(AdmissionObserver observer);

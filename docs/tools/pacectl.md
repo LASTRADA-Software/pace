@@ -147,7 +147,7 @@ the help renders `Verbs()` grouped by `WireSpec::heading`, and
 ### The fleet verb
 
 Every fleet table — machines, workers, outstanding leases, members, revoked keys,
-conditions, cache tiers — used
+conditions, cache tiers, the compile queue's clients — used
 to be reachable from a browser and from nowhere else. `/fleet.json` is the only other
 door and it needs a JSON parser the operator supplies; `jq` is not on a Windows build
 box, and this tool has no JSON *parser* of its own — it only emits one.
@@ -837,7 +837,7 @@ $ pacectl live-stats node --format=tsv --samples=30 > node.tsv
 |---|---|---|
 | `cache` | a `pace-kv`, or a `pace-node` for its own cache tier | the hit rate, and operations, connections, evictions and expiries per second, each with its trend; connections, items and bytes in use against their limits, per storage tier |
 | `node` | a `pace-node` | compiles and refusals per minute, the mean compile and its trend; the slots in use against the slots available and the limit that bounds them; the cache tier's fill; the host's CPU and free memory; the node's identity, the conditions it has raised (each marked `latched` or `live`, `none raised` when there are none, the absent marker from a node too old to say), toolchains, registrars and the leader; on a consensus node, `dialled at` — the address its peers dial, the string `--cluster-admit`'s receipt asks you to compare |
-| `fleet` | the node that leads the fleet | the headline figures as tiles; one table per section (machines, workers, leases, members, revoked, conditions, tiers); each machine's CPU over time |
+| `fleet` | the node that leads the fleet | the headline figures as tiles; one table per section (machines, workers, leases, members, revoked, conditions, tiers, clients); the compile queue's depth tile (`Queued compiles`) and, per client, the machine and build tree compiling with how many compiles are running and queued; each machine's CPU over time |
 
 The subject may be left out, and then it is what `--addr` is: a `pace-kv` is
 watched as `cache`, and a compile node as `node`. **`fleet` is never inferred.** The
@@ -866,7 +866,7 @@ A terminal smaller than a panel's minimum gets one line, `needs <columns>x<rows>
 | `q`, `Q`, `Esc`, `Ctrl-C` | quit, restoring the terminal; `Esc` closes a machine's detail instead while one is open |
 | `Tab`, `→` / `←` | the fleet's next / previous section |
 | `1` … `9` | the fleet's sections by position |
-| `m` `w` `l` `c` `r` `!` `t` | the fleet's sections by name: machines, workers, leases, members (`c`, for cluster: `m` is taken), revoked keys, conditions (`!`: `c` is taken) and tiers |
+| `m` `w` `l` `c` `r` `!` `t` `u` | the fleet's sections by name: machines, workers, leases, members (`c`, for cluster: `m` is taken), revoked keys, conditions (`!`: `c` is taken), tiers, the compile queue's clients (`u`, for use: `q` quits) |
 | `PgDn` / `PgUp`, `Home` | scroll the fleet's table a page, or back to its top |
 | `/` | filter the fleet's table: type, `Enter` keeps the filter, `Esc` clears it, `Backspace` edits it |
 | `↑` / `↓` | highlight the fleet chart's lanes, then the table's rows, and the machine they name everywhere it appears |
