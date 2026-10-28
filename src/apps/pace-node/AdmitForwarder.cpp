@@ -278,7 +278,9 @@ ProvenSchedulerDialer::ProvenSchedulerDialer(NodeProofClient const& prover,
 core::async::Task<UpstreamOpening> ProvenSchedulerDialer::Open(std::string endpoint)
 {
     auto raw = co_await Cc::DialEndpoint(
-        &_connector, endpoint, core::net::DialOptions { .connectTimeout = _budget.connectTimeout });
+        &_connector,
+        endpoint,
+        core::net::DialOptions { .connectTimeout = _budget.connectTimeout, .keepAlive = _budget.keepAlive });
     if (raw == nullptr)
         co_return UpstreamOpening { .socket = nullptr, .reason = std::format("nothing answered at {}", endpoint) };
 

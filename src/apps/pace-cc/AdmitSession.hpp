@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include <core/net/KeepAlive.hpp>
 #include <core/platform/Clock.hpp>
 
 namespace Pace::Cc
@@ -102,15 +103,36 @@ class IAdmitSession
 /// include; a leader that has not answered by then has the connection's end to read as an abandonment.
 inline constexpr std::chrono::milliseconds SettleBound { 2'500 };
 
-/// The budget an admission runs under: a one second connect, NO total bound, and the compile
-/// idle bound -- the queue may take as long as it takes while the node says it is alive.
+/// The TCP keepalive probe every held admission DIAL carries (Ruling 18): this launcher's dial of its
+/// node, and the node's relay of it to the leader (`Node::ForwardDialBudget`).
+///
+/// **What it is for.** A held admission connection is the lease (R5): the charge it holds is given
+/// back when it closes, and a connection to a host that VANISHED -- powered off, cable pulled,
+/// suspended -- never closes on its own, because nothing ever arrives to say so. The pulse answers a
+/// node that is alive and silent; this answers one that is gone, which no pulse can.
+///
+/// **Its values are core-cpp's, never this file's.** `core::net::DialOptions` takes keepalive as
+/// `Yes` or `No` and arms `KeepAliveSettings {}` for `Yes`: a dial carries no intervals of its own.
+/// They are pinned here rather than restated because the bound the rulebook gives for a vanished
+/// peer -- `idle + count * interval`, 16 s on Linux and macOS, and 30 s on Windows, whose probe count
+/// is fixed at 10 by the OS -- is derived from them, and a core-cpp bump that moved them would
+/// otherwise move that bound in silence.
+inline constexpr core::net::KeepAliveSettings AdmitKeepAliveProbe {};
+static_assert(AdmitKeepAliveProbe.idle == std::chrono::seconds { 10 }
+                  && AdmitKeepAliveProbe.interval == std::chrono::seconds { 2 } && AdmitKeepAliveProbe.count == 3,
+              "core-cpp moved its keepalive intervals: re-derive the vanished-peer bound in "
+              ".agent/rules/distributed-compilation.md, then update this pin");
+
+/// The budget an admission runs under: a one second connect, NO total bound, the compile idle bound
+/// -- the queue may take as long as it takes while the node says it is alive -- and keepalive, so a
+/// node that vanished is noticed rather than waited on (`AdmitKeepAliveProbe`).
 /// @return The budget.
 [[nodiscard]] constexpr ExchangeBudget DefaultAdmitBudget() noexcept
 {
     return ExchangeBudget { .connect = std::chrono::milliseconds { 1'000 },
                             .total = std::chrono::milliseconds { 0 },
                             .idle = CompileCacheWire::DefaultCompileIdleTimeout,
-                            .keepAlive = core::net::KeepAlive::No };
+                            .keepAlive = core::net::KeepAlive::Yes };
 }
 
 /// Open an admission session and send the ADMIT. Returns at once; `Await` is where it blocks.

@@ -26,6 +26,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <iterator>
 #include <memory>
@@ -34,13 +35,17 @@
 #include <ranges>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <EndpointDial.hpp>
 #include <WorkerProtocol.hpp>
 #include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
+#include <core/net/IConnector.hpp>
 #include <core/net/IListener.hpp>
+#include <core/net/KeepAlive.hpp>
+#include <core/net/NetError.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/ConsensusStandingFakes.hpp>
 #include <tests/MembershipFakes.hpp>
@@ -848,4 +853,46 @@ TEST_CASE("AdmitForwarder.the-largest-grant-fits-the-relay-ceiling", "[node][adm
     // An eighth of the ceiling: room for every id to grow eightfold before the relay could refuse one.
     CHECK(grant.size() < MaxForwardReplyBytes / 8);
     CHECK(Wire::DecodeAdmitGrant(grant).has_value());
+}
+
+namespace
+{
+/// A connector that refuses every dial and records the options each was asked with.
+class OptionsRecordingConnector final: public core::net::IConnector
+{
+  public:
+    /// @copydoc IConnector::connect
+    [[nodiscard]] core::async::Task<core::net::SocketResult> connect(std::string host,
+                                                                     std::uint16_t port,
+                                                                     core::net::DialOptions options) override
+    {
+        std::ignore = port;
+        asked.push_back(options);
+        co_return std::unexpected { core::net::NetError {
+            .code = core::net::NetErrorCode::ConnRefused, .systemCode = 0, .context = std::move(host) } };
+    }
+
+    std::vector<core::net::DialOptions> asked; ///< Every dial's options, in order.
+};
+} // namespace
+
+TEST_CASE("AdmitForwarder.the-relay-to-the-leader-is-dialled-with-keepalive", "[node][admission][forwarder]")
+{
+    // Ruling 18. The relay holds its connection to the leader for as long as the launcher's compile runs;
+    // a leader whose host vanished sends nothing to say so, so the dial must ask the kernel to probe. The
+    // option is per DIAL (the rulebook's rule), so it is asserted on the dial the production dialer makes.
+    OptionsRecordingConnector connector;
+    auto const key = Testing::TestKeyPair("forwarding-node");
+    NamedMachineTrust trust { std::string { LeaderMachine },
+                              Testing::TestKeyPair(std::string { LeaderMachine }).PublicKey() };
+    SystemSecureRandom random;
+    NodeProofClient proof { "forwarding-node", key, trust, nullptr, nullptr, random };
+    auto io = std::make_unique<NodeIoLoop>();
+    ProvenSchedulerDialer dialer { proof, connector, io->Reactor() };
+
+    auto const opened = core::async::syncRun(dialer.Open("10.0.0.9:6674"));
+    CHECK(opened.socket == nullptr);
+    REQUIRE(connector.asked.size() == 1);
+    CHECK(connector.asked[0].keepAlive == core::net::KeepAlive::Yes);
+    CHECK(connector.asked[0].connectTimeout == ForwardDialBudget {}.connectTimeout);
 }

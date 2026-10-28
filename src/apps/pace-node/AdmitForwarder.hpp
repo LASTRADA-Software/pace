@@ -23,6 +23,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/KeepAlive.hpp>
 
 namespace Pace::Cc
 {
@@ -103,6 +104,12 @@ struct ForwardDialBudget
 {
     std::chrono::milliseconds connectTimeout { 1'000 };   ///< The TCP connect, name lookup included.
     std::chrono::milliseconds handshakeTimeout { 5'000 }; ///< The proof, both exchanges.
+    /// Whether the relay's connection to the leader probes a silent peer (Ruling 18). On by default:
+    /// the relay holds that connection for as long as the launcher's compile runs, and a leader whose
+    /// host vanished would otherwise hold this machine's launcher -- and this node's own held charge
+    /// -- until the idle bound. A per-dial option, as the rulebook requires; the intervals are
+    /// core-cpp's (`Cc::AdmitKeepAliveProbe`).
+    core::net::KeepAlive keepAlive { core::net::KeepAlive::Yes };
 };
 
 /// The dialer production uses: connect from the loop, prove THIS node's identity key to the leader,

@@ -627,3 +627,13 @@ TEST_CASE("AdmitSession.destroy-while-queued-is-prompt")
     CHECK(Testing::WaitUntil(
         "the node to see the connection end", [&] { return node.Observed().SawEof(); }, [] { return std::string {}; }));
 }
+
+TEST_CASE("AdmitSession.the-admission-dial-carries-keepalive", "[launcher][admission]")
+{
+    // Ruling 18. The held admission connection IS the lease: a node whose host vanished never closes
+    // it, so the dial asks the kernel to probe -- with core-cpp's intervals, pinned beside the budget.
+    CHECK(Cc::DefaultAdmitBudget().keepAlive == core::net::KeepAlive::Yes);
+    CHECK(Cc::DefaultAdmitBudget().total == std::chrono::milliseconds { 0 });
+    STATIC_CHECK(Cc::AdmitKeepAliveProbe.idle + Cc::AdmitKeepAliveProbe.interval * Cc::AdmitKeepAliveProbe.count
+                 == std::chrono::seconds { 16 });
+}
