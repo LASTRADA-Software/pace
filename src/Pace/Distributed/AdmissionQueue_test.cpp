@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <map>
+#include <ranges>
 
 using namespace Pace::Distributed;
 
@@ -49,6 +50,15 @@ struct Fixture
         return Add(AdmitKind::LocalOnly, std::move(caller), bytes);
     }
 
+    /// Enqueues `count` local-only requests of `bytes` each.
+    std::vector<Ticket> LocalMany(int count, std::uint64_t bytes, std::string caller = "m")
+    {
+        std::vector<Ticket> tickets;
+        for ([[maybe_unused]] auto const _: std::views::iota(0, count))
+            tickets.push_back(Local(bytes, caller));
+        return tickets;
+    }
+
   private:
     int _serial {};
 };
@@ -85,8 +95,7 @@ TEST_CASE("AdmissionQueue.memory-bounds-admission", "[distributed][admission]")
 {
     Fixture f;
     f.queue.ReportMachine("m", Report(8 * GiB, 32));
-    for (int i = 0; i < 4; ++i)
-        f.Local(3 * GiB);
+    f.LocalMany(4, 3 * GiB);
     CHECK(f.queue.Pump().size() == 2);
     CHECK(f.queue.Depth() == 2);
 }
@@ -95,8 +104,7 @@ TEST_CASE("AdmissionQueue.slots-bound-admission", "[distributed][admission]")
 {
     Fixture f;
     f.queue.ReportMachine("m", Report(64 * GiB, 2));
-    for (int i = 0; i < 3; ++i)
-        f.Local(3 * GiB);
+    f.LocalMany(3, 3 * GiB);
     CHECK(f.queue.Pump().size() == 2);
     CHECK(f.queue.Depth() == 1);
 }
@@ -142,7 +150,8 @@ TEST_CASE("AdmissionQueue.backfill-behind-large-head", "[distributed][admission]
     auto const c = f.Local(1 * GiB);
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { a, b, c });
     CHECK(f.queue.Depth() == 1);
-    static_cast<void>(head);
+    for (auto const ticket: Tickets(f.queue.Pump()))
+        CHECK(ticket != head);
 }
 
 TEST_CASE("AdmissionQueue.head-reservation-prevents-starvation", "[distributed][admission]")
@@ -152,9 +161,7 @@ TEST_CASE("AdmissionQueue.head-reservation-prevents-starvation", "[distributed][
     auto const holder = f.Local(4 * GiB);
     REQUIRE(f.queue.Pump().size() == 1);
     auto const head = f.Local(6 * GiB);
-    std::vector<Ticket> smalls;
-    for (int i = 0; i < 3; ++i)
-        smalls.push_back(f.Local(1 * GiB));
+    auto const smalls = f.LocalMany(3, 1 * GiB);
     REQUIRE(f.queue.Pump().size() == 3);
 
     REQUIRE(f.queue.Release(holder)); // 3 GiB in use, 5 free, head needs 6
@@ -182,6 +189,26 @@ TEST_CASE("AdmissionQueue.over-budget-runs-alone", "[distributed][admission]")
     f.Local(1 * GiB);
     CHECK(f.queue.Pump().empty()); // nothing else while it runs
     CHECK(f.queue.Depth() == 1);
+}
+
+TEST_CASE("AdmissionQueue.over-budget-head-is-not-starved-by-backfill", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4, 1, 2 * GiB));
+    auto const big = f.Local(12 * GiB);
+    REQUIRE(f.queue.Pump().empty()); // becomes head, the machine is busy
+
+    f.LocalMany(3, 1 * GiB);
+    f.queue.ReportMachine("m", Report(8 * GiB, 4, 1, 1 * GiB)); // memory is freed while it waits
+    CHECK(f.queue.Pump().empty());                              // ...and is the head's, not the small ones'
+    CHECK(f.queue.Depth() == 4);
+
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == big);
+    CHECK(granted[0].ranAlone);
+    CHECK(f.queue.Depth() == 3);
 }
 
 TEST_CASE("AdmissionQueue.fifo-among-equals", "[distributed][admission]")
@@ -216,9 +243,63 @@ TEST_CASE("AdmissionQueue.dispatchable-uses-placement", "[distributed][admission
     CHECK(granted[0].placement->machine == "w");
     CHECK(granted[0].placement->endpoint == worker.endpoint);
 
-    // Machine w is charged: a second 5 GiB request does not fit there.
+    // Machine w is charged: a second 5 GiB request does not fit there, and runs on the caller
+    // (which has room) rather than waiting; a third fits nowhere.
+    f.Add(AdmitKind::Dispatchable, "c", 5 * GiB, "fp");
+    auto const second = f.queue.Pump();
+    REQUIRE(second.size() == 1);
+    CHECK(second[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+    CHECK_FALSE(second[0].placement.has_value());
     f.Add(AdmitKind::Dispatchable, "c", 5 * GiB, "fp");
     CHECK(f.queue.Pump().empty());
+}
+
+TEST_CASE("AdmissionQueue.dispatchable-with-full-candidates-runs-on-caller-with-room", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.queue.ReportMachine("w", Report(8 * GiB, 4, 4, 8 * GiB));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4));
+    f.Add(AdmitKind::Dispatchable, "c", 5 * GiB, "fp");
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+}
+
+TEST_CASE("AdmissionQueue.dispatchable-head-reserves-across-changing-candidate-order", "[distributed][admission]")
+{
+    Fixture f;
+    Placement const w1 { "worker-1", "w1", "10.0.0.2:6680" };
+    Placement const w2 { "worker-2", "w2", "10.0.0.3:6680" };
+    f.placement.byFingerprint["fp"] = { w1, w2 };
+    f.queue.ReportMachine("w1", Report(8 * GiB, 32));
+    f.queue.ReportMachine("w2", Report(8 * GiB, 32));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller is full
+    // Each worker machine holds 4 GiB and 2 GiB: 6 GiB in use, so a 6 GiB head fits nowhere.
+    auto const big1 = f.Local(4 * GiB, "w1");
+    auto const big2 = f.Local(4 * GiB, "w2");
+    auto const small1 = f.Local(2 * GiB, "w1");
+    auto const small2 = f.Local(2 * GiB, "w2");
+    REQUIRE(f.queue.Pump().size() == 4);
+
+    auto const head = f.Add(AdmitKind::Dispatchable, "c", 6 * GiB, "fp");
+    REQUIRE(f.queue.Pump().empty()); // it becomes the head
+
+    // The candidate order flips and the 2 GiB holders finish: 4 GiB is free on both machines, and
+    // the head (needing 6) must keep it from the latecomers on BOTH, not only the first candidate.
+    f.placement.byFingerprint["fp"] = { w2, w1 };
+    REQUIRE(f.queue.Release(small1));
+    REQUIRE(f.queue.Release(small2));
+    f.Local(1 * GiB, "w1");
+    f.Local(1 * GiB, "w2");
+    CHECK(f.queue.Pump().empty());
+
+    REQUIRE(f.queue.Release(big1));
+    REQUIRE(f.queue.Release(big2));
+    auto const granted = f.queue.Pump();
+    REQUIRE_FALSE(granted.empty());
+    CHECK(granted.front().ticket == head);
+    CHECK(granted.front().kind == Pace::CompileCacheWire::GrantKind::Worker);
 }
 
 TEST_CASE("AdmissionQueue.dispatchable-without-candidate-runs-local", "[distributed][admission]")

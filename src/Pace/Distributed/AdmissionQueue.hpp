@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Pace::Distributed
@@ -84,10 +85,13 @@ struct Decision
 /// failover (ledger empty), the report alone counts.
 ///
 /// Admission is FIFO with backfill: a later request may be admitted past a blocked earlier one
-/// only from memory and slots that are neither in use nor reserved. The oldest blocked request
-/// per machine is that machine's head; once it has been head across a `Pump()` it reserves
-/// whatever is free (up to what it needs), so a stream of small requests cannot starve it. A
-/// request estimated above the whole budget runs alone: it waits for an idle machine.
+/// only from memory and slots that are neither in use nor reserved. A dispatchable request
+/// targets its reported candidates in placement order, then its caller; a local-only one its
+/// caller. The oldest blocked request on a machine is that machine's head; once a request has
+/// been head across a `Pump()` it reserves whatever is free (up to what it needs) on EVERY
+/// reported machine of its target set, so a stream of small requests cannot starve it however
+/// the candidate order changes. A request estimated above the whole budget runs alone: it
+/// waits for an idle machine and reserves all free memory and slots meanwhile.
 ///
 /// Not thread-safe: the owner locks.
 class AdmissionQueue
@@ -113,7 +117,7 @@ class AdmissionQueue
     /// Frees a granted ticket's charge.
     /// @param ticket A ticket `Pump()` granted.
     /// @return False when the ticket holds no charge.
-    bool Release(Ticket ticket);
+    [[nodiscard]] bool Release(Ticket ticket);
 
     /// @return How many requests are waiting.
     [[nodiscard]] std::size_t Depth() const noexcept;
@@ -168,7 +172,7 @@ class AdmissionQueue
     std::vector<Entry> _queue;
     std::unordered_map<MachineId, Ledger> _ledgers;
     std::unordered_map<Ticket, Charge> _charges;
-    std::unordered_map<MachineId, Ticket> _waitingHead; ///< Head per machine as of the last pump.
+    std::unordered_set<Ticket> _headTickets; ///< Entries that were a blocked head in the last pump.
 };
 
 } // namespace Pace::Distributed

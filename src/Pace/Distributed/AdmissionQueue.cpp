@@ -72,10 +72,18 @@ AdmissionQueue::Room AdmissionQueue::RoomOn(MachineId const& machine, Reserved c
 
 std::vector<Decision> AdmissionQueue::Pump()
 {
+    /// A machine an entry may run on; `placement` is engaged for a worker.
+    struct Target
+    {
+        MachineId machine;
+        std::optional<Placement> placement;
+    };
+
     std::vector<Decision> decisions;
     std::vector<Entry> remaining;
     std::unordered_map<MachineId, Reserved> reserved;
-    std::unordered_map<MachineId, Ticket> heads;
+    std::unordered_set<MachineId> claimed; // machines whose head was already found this pump
+    std::unordered_set<Ticket> heads;
 
     auto const reported = [this](MachineId const& machine) {
         auto const found = _ledgers.find(machine);
@@ -86,81 +94,63 @@ std::vector<Decision> AdmissionQueue::Pump()
     {
         auto const& request = entry.request;
 
-        // The machines this entry could run on, in preference order. With nobody to dispatch to
-        // (or a request that may only run where it was asked) it runs on the caller.
-        std::vector<Placement> candidates;
+        // Reported candidates in placement order, then the caller: the CPU never idles while the
+        // caller has room.
+        std::vector<Target> targets;
         if (request.kind == AdmitKind::Dispatchable)
-            candidates = _placement.Candidates(request.fingerprint, request.excluded);
-        auto const onCaller = candidates.empty();
-        if (onCaller)
-            candidates.push_back(Placement { .machine = request.caller });
+            for (auto& placement: _placement.Candidates(request.fingerprint, request.excluded))
+                if (reported(placement.machine))
+                    targets.push_back(Target { .machine = placement.machine, .placement = std::move(placement) });
+        if (reported(request.caller))
+            targets.push_back(Target { .machine = request.caller, .placement = std::nullopt });
 
-        std::optional<std::size_t> granted;
-        std::optional<std::size_t> blockedOn;
-        for (auto const index: std::views::iota(std::size_t { 0 }, candidates.size()))
+        auto const granted = std::ranges::find_if(targets, [&](Target const& target) {
+            auto const& report = *_ledgers.at(target.machine).report;
+            auto const& hold = reserved[target.machine];
+            auto const room = RoomOn(target.machine, hold);
+            if (entry.chargedBytes > report.memoryBudgetBytes)
+                return report.slots > 0 && room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
+            return room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1;
+        });
+
+        if (granted != targets.end())
         {
-            auto const& machine = candidates[index].machine;
-            if (!reported(machine))
-                continue;
-            auto const& report = *_ledgers.at(machine).report;
-            auto const& hold = reserved[machine];
-            auto const room = RoomOn(machine, hold);
-
-            auto const alone = entry.chargedBytes > report.memoryBudgetBytes;
-            auto const fits =
-                alone
-                    ? (report.slots > 0 && room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0)
-                    : (room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1);
-            if (fits)
-            {
-                granted = index;
-                break;
-            }
-            if (!blockedOn.has_value())
-                blockedOn = index;
-        }
-
-        if (granted.has_value())
-        {
-            auto const& placement = candidates[*granted];
-            auto& ledger = _ledgers.at(placement.machine);
+            auto& ledger = _ledgers.at(granted->machine);
             ledger.chargedBytes += entry.chargedBytes;
             ledger.chargedSlots += 1;
-            _charges.emplace(entry.ticket, Charge { .machine = placement.machine, .bytes = entry.chargedBytes });
-            auto const worker = request.kind == AdmitKind::Dispatchable && !onCaller;
+            _charges.emplace(entry.ticket, Charge { .machine = granted->machine, .bytes = entry.chargedBytes });
             decisions.push_back(Decision {
                 .ticket = entry.ticket,
-                .kind = worker ? GrantKind::Worker : GrantKind::Local,
-                .placement = worker ? std::optional<Placement> { placement } : std::nullopt,
+                .kind = granted->placement.has_value() ? GrantKind::Worker : GrantKind::Local,
+                .placement = granted->placement,
                 .chargedBytes = entry.chargedBytes,
                 .ranAlone = entry.chargedBytes > ledger.report->memoryBudgetBytes,
             });
             continue;
         }
 
-        if (blockedOn.has_value())
+        // Blocked everywhere. On each machine of its target set where nothing older is blocked it
+        // is the head; having been head across a pump already, it holds back everything free there.
+        auto const wasHead = _headTickets.contains(entry.ticket);
+        for (auto const& target: targets)
         {
-            auto const& machine = candidates[*blockedOn].machine;
-            // The oldest blocked entry per machine is its head. Having already waited as head across
-            // a pump, it holds back everything free, up to what it needs.
-            if (heads.emplace(machine, entry.ticket).second)
-            {
-                auto const previous = _waitingHead.find(machine);
-                if (previous != _waitingHead.end() && previous->second == entry.ticket)
-                {
-                    auto& hold = reserved[machine];
-                    auto const room = RoomOn(machine, hold);
-                    auto const need = std::min(entry.chargedBytes, _ledgers.at(machine).report->memoryBudgetBytes);
-                    hold.bytes += std::min(need, room.freeBytes);
-                    hold.slots += std::min<std::uint32_t>(1, room.freeSlots);
-                }
-            }
+            if (!claimed.insert(target.machine).second)
+                continue;
+            heads.insert(entry.ticket);
+            if (!wasHead)
+                continue;
+            auto& hold = reserved[target.machine];
+            auto const room = RoomOn(target.machine, hold);
+            auto const budget = _ledgers.at(target.machine).report->memoryBudgetBytes;
+            auto const alone = entry.chargedBytes > budget;
+            hold.bytes += std::min(std::min(entry.chargedBytes, budget), room.freeBytes);
+            hold.slots += alone ? room.freeSlots : std::min<std::uint32_t>(1, room.freeSlots);
         }
         remaining.push_back(std::move(entry));
     }
 
     _queue = std::move(remaining);
-    _waitingHead = std::move(heads);
+    _headTickets = std::move(heads);
     return decisions;
 }
 
