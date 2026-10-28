@@ -153,9 +153,17 @@ namespace
                     auto attempt = seams.dispatchAdmitted(*ticket);
                     if (attempt.workerRefused)
                     {
-                        // The launcher's own stop: the connection ends, which abandons the request.
+                        // The launcher's own stop. The queue DID answer, so the compile that now runs
+                        // here is asked for as a local one and charged here -- never run in the open,
+                        // which is the unbounded compile the queue exists to prevent. The grant is
+                        // settled `NotStored` first, as a failed worker's is: it frees that charge and
+                        // teaches the estimator nothing, where a bare close would read as a kill.
                         if (refusals == MaxWorkerRefusals)
-                            return Unplaced::FailOpen;
+                        {
+                            session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored,
+                                                                  .peakBytes = std::nullopt });
+                            return WorkerFailed { .endpoint = ticket->endpoint };
+                        }
                         // Back into the queue on the same connection, never a compile in the open:
                         // the leader admitted this against a ledger the worker disagreed with.
                         ticket = Read(seams, waits, session->Requeue());

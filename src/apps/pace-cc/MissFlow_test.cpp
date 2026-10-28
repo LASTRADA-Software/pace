@@ -621,8 +621,10 @@ TEST_CASE("Launcher.worker-refusal-settles-and-requeues", "[launcher][admission]
     CHECK(harness.events.At("s0:requeue") < harness.events.At("store"));
 }
 
-TEST_CASE("Launcher.a-queue-that-never-converges-fails-open-after-a-bound", "[launcher][admission]")
+TEST_CASE("Launcher.a-queue-that-never-converges-runs-here-charged-after-a-bound", "[launcher][admission]")
 {
+    // The launcher's own stop is not a fail-open: the queue answered every time, so the compile it now
+    // runs here is asked for local-only and charged here, never run in the open with nothing charged.
     Harness harness;
     std::deque<std::expected<AdmitTicket, std::string>> grants;
     for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, MaxWorkerRefusals + 2))
@@ -631,14 +633,23 @@ TEST_CASE("Launcher.a-queue-that-never-converges-fails-open-after-a-bound", "[la
         harness.workerRefuses.push_back(true);
     }
     harness.Open(std::move(grants));
+    harness.Open({ Grant(Wire::GrantKind::Local) });
 
     auto const report = RunMiss(harness.Seams());
 
     CHECK(report.code == 0);
     CHECK(harness.events.Count("dispatch-admitted") == MaxWorkerRefusals + 1);
     CHECK(harness.events.Count("s0:requeue") == MaxWorkerRefusals);
-    CHECK(harness.events.Count("compile") == 1); // the launcher's own stop, in the open
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    CHECK(harness.events.Count("compile") == 1);
+    CHECK(harness.events.Count("dispatch-unadmitted") == 0);
+    // The last worker grant is settled before its session ends, and the compile runs under the second.
+    REQUIRE(harness.events.Saw("s0:settle"));
+    CHECK(harness.events.At("s0:settle") < harness.events.At("s0:closed"));
+    CHECK(harness.events.settles.front().outcome == Wire::SettleOutcome::NotStored);
+    CHECK(harness.events.At("s1:await") < harness.events.At("compile"));
+    CHECK(harness.events.At("compile") < harness.events.At("s1:settle"));
+    REQUIRE(harness.asked.size() == 2);
+    CHECK(harness.asked[1] == std::optional<std::string> { "worker:1" });
 }
 
 TEST_CASE("Launcher.a-session-that-fails-while-requeueing-fails-open", "[launcher][admission]")

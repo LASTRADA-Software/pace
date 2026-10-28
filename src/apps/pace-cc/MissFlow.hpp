@@ -103,8 +103,9 @@ struct MissReport
 /// The most times one request goes back into the queue after workers refuse it.
 ///
 /// The LEADER bounds this too (R7: after N refusals it waits for the next capacity report); this is
-/// the launcher's own stop, so a leader that never converges costs one compile run in the open
-/// rather than a launcher that asks forever.
+/// the launcher's own stop, so a leader that never converges costs one compile run HERE -- asked for
+/// local-only, with the last refusing worker excluded, and charged here like any other -- rather than a
+/// launcher that asks forever.
 inline constexpr std::size_t MaxWorkerRefusals = 16;
 
 /// How a settled compile is told to the queue.
