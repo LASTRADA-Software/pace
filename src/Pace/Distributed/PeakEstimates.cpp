@@ -8,14 +8,15 @@ namespace Pace::Distributed
 
 namespace
 {
-/// The shape's map key. Length-prefixed, never joined, so no path/identity pair can collide with another.
-[[nodiscard]] std::string ShapeKey(EstimateKey const& key)
-{
-    return std::to_string(key.sourcePath.size()) + ':' + key.sourcePath + key.compilerIdentity;
-}
+    /// The shape's map key. Length-prefixed, never joined, so no path/identity pair can collide with another.
+    [[nodiscard]] std::string ShapeKey(EstimateKey const& key)
+    {
+        return std::to_string(key.sourcePath.size()) + ':' + key.sourcePath + key.compilerIdentity;
+    }
 } // namespace
 
-PeakEstimates::BoundedLru::BoundedLru(std::size_t capacity) noexcept: _capacity { capacity }
+PeakEstimates::BoundedLru::BoundedLru(std::size_t capacity) noexcept:
+    _capacity { capacity }
 {
 }
 
@@ -45,7 +46,9 @@ void PeakEstimates::BoundedLru::Put(std::string const& key, std::uint64_t value)
 }
 
 PeakEstimates::PeakEstimates(std::uint64_t defaultBytes, std::size_t capacity):
-    _defaultBytes { defaultBytes }, _byKey { capacity }, _byShape { capacity }
+    _defaultBytes { defaultBytes },
+    _byKey { capacity },
+    _byShape { capacity }
 {
 }
 
