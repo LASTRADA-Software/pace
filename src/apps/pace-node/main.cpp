@@ -704,6 +704,26 @@ void StartAdmissionRelay(AdmissionRelay& relay, AdmissionRelayParts const& parts
         parts.tier->ForwardAdmissionWith(*relay.forwarder);
 }
 
+/// Serve the leader's admission queue (#1728) from the scheduler tier, when this node runs one.
+/// @param responder Receives the queue's responder.
+/// @param tier The scheduler tier; null on a node that schedules nothing, which then has no queue.
+/// @param membership Folds a connection into the caller context the gate asks about.
+/// @param loop The reactor requests park on.
+/// @param metrics Where the admission counters are written.
+/// @param held Where a loopback-granted local lease is recorded for the machine's own report.
+void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
+                         Node::SchedulerTier* tier,
+                         Distributed::IMembershipOracle const& membership,
+                         core::net::EventLoop& loop,
+                         IMetricsSink& metrics,
+                         Node::HeldChargeRegistry& held)
+{
+    if (tier == nullptr)
+        return;
+    responder.emplace(tier->ServiceForSurfaces(), membership, loop, metrics, &held);
+    tier->ServeAdmissionWith(*responder);
+}
+
 /// Everything the node runs, under whichever host runs it.
 /// @param cfg The configuration the node started with.
 /// @param identityKey The machine's identity key, or nothing.
@@ -1128,12 +1148,8 @@ void StartAdmissionRelay(AdmissionRelay& relay, AdmissionRelayParts const& parts
     // its connection. Declared after the scheduler tier it serves and the ledger it records local leases
     // in, so it is destroyed before both.
     std::optional<Node::AdmissionResponder> admissionResponder;
-    if (schedulerTier != nullptr)
-    {
-        admissionResponder.emplace(
-            schedulerTier->ServiceForSurfaces(), membership.Oracle(), nodeIo.Reactor(), metrics, &leaseCharges);
-        schedulerTier->ServeAdmissionWith(*admissionResponder);
-    }
+    StartAdmissionQueue(
+        admissionResponder, schedulerTier.get(), membership.Oracle(), nodeIo.Reactor(), metrics, leaseCharges);
     auto workerOrRefusal = Node::WorkerTier::Start(Node::WorkerTierParts { .cfg = cfg,
                                                                            .reloader = reloader,
                                                                            .capacity = capacity,
