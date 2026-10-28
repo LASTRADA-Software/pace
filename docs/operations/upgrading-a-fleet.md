@@ -33,12 +33,16 @@ What makes it a *fleet* problem rather than a daemon problem is that a fleet has
 than one process. A cache daemon is upgraded, restarted, and done; twenty nodes cannot
 be.
 
-## This release: 0xFC version 15, discovery version 3, consensus version 5
+## This release: 0xFC version 16, discovery version 3, consensus version 5
 
 Every one of the three wires changed its grammar, so every node, every `pace-kv` serving
 `0xFC`, every `pace-cc` and every `pacectl` moves together (the supported procedure
 below).
 
+- **`0xFC` 16** (on top of 15's changes below):
+  - New verbs ADMIT, SETTLE and MACHINE-BUDGET put a queue in front of the fleet's capacity; ADMIT may
+    be answered with progress pulses, a reply status an older client cannot read.
+  - A version-15 peer is refused `unsupported-version`, naming the range.
 - **`0xFC` 15:**
   - AUTH carries a credential kind, so a launcher presents a machine ticket.
   - LEASE carries the workers the client could not reach (at most 16) and the client's

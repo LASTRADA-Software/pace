@@ -138,6 +138,22 @@ inline constexpr std::array ExchangeLogTable {
                  .level = LogLevel::Debug,
                  .rationale = "fetch's rate across the whole fleet -- every machine's every TU -- on the one machine "
                               "that serves it; the highest-rate verb that node answers" },
+    // The admission queue (#1728). Admit is the scheduling decision now -- what `Lease` was -- so it
+    // sits where `Lease` does, and its settle beside it for `Release`'s reason.
+    VerbLogRow { .code = CompileCacheWire::Op::Admit,
+                 .level = LogLevel::Info,
+                 .rationale = "the scheduling decision itself, now taken in a queue: the line that says where a "
+                              "compile went and how long it waited is the one an operator reads to learn why a "
+                              "build was slow, and it is one per compile rather than one per poll" },
+    VerbLogRow { .code = CompileCacheWire::Op::Settle,
+                 .level = LogLevel::Info,
+                 .rationale = "an admission's second half, logged with it so a compile's life reads as a pair "
+                              "rather than a start with no end, for `Release`'s reason" },
+    VerbLogRow { .code = CompileCacheWire::Op::MachineBudget,
+                 .level = LogLevel::Trace,
+                 .rationale = "it arrives on every round from every node whatever it runs, so it grows an IDLE "
+                              "journal exactly as the heartbeat does and belongs at the same level; what an operator "
+                              "wants from it is the ledger on the fleet page, which no line can carry" },
     VerbLogRow { .code = CompileCacheWire::Op::MintTicket,
                  .level = LogLevel::Debug,
                  .rationale = "one per launcher exchange; an Info line each would bury the log" },

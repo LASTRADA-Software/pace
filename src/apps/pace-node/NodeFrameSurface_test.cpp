@@ -1595,7 +1595,8 @@ TEST_CASE("A node running neither a scheduler nor consensus refuses each schedul
 
     // Stated here rather than read from the table under test: which verbs ask for capacity.
     constexpr auto CapacityVerbs = std::array { Wire::Op::Register, Wire::Op::Heartbeat, Wire::Op::Withdraw,
-                                                Wire::Op::Lease,    Wire::Op::Release,   Wire::Op::NodeAnnounce };
+                                                Wire::Op::Lease,    Wire::Op::Release,   Wire::Op::NodeAnnounce,
+                                                Wire::Op::Admit,    Wire::Op::Settle,    Wire::Op::MachineBudget };
     auto const verbs = Testing::OpsOfFamily(Wire::VerbFamily::Scheduler);
     // Both answers are in the sweep, or a sweep missing either half proves nothing about it.
     REQUIRE(std::ranges::contains(verbs, Wire::Op::Lease, &Wire::OpDescriptor::code));
@@ -2102,4 +2103,23 @@ TEST_CASE("A listener missing a component every built node serves is refused by 
         StartNodeSurfaceOrExplain(io, cfg, owners.Around(SurfaceComponents {}), std::nullopt, metrics, logger);
     REQUIRE(started.has_value());
     CHECK(*started != nullptr);
+}
+
+TEST_CASE("A node running no consensus refuses the admission verbs as capacity verbs, never as unknown",
+          "[node][merged-responder][scheduling-redirect][admission]")
+{
+    // #1728. They ask for capacity as LEASE does, so the node says what it says to LEASE --
+    // `DispatchNotPermitted` -- and the daemon says the same. `NoCluster` is the family's answer
+    // and the wrong one here; `UnimplementedVerb` would send an operator to upgrade a current build.
+    MergedResponder node { SurfaceComponents {} };
+    for (auto const op: { Wire::Op::Admit, Wire::Op::Settle, Wire::Op::MachineBudget })
+    {
+        auto const frame = HeaderFor(op);
+        INFO("op byte " << static_cast<unsigned>(op));
+        auto const nodeCode = ErrorOf(AnswerNow(node, frame));
+        REQUIRE(nodeCode.has_value());
+        CHECK(nodeCode == Wire::ErrorCode::DispatchNotPermitted);
+        CHECK(nodeCode != Wire::UnimplementedVerb);
+        CHECK(nodeCode == ErrorOf(AskDaemon(frame)));
+    }
 }

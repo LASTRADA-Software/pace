@@ -221,7 +221,14 @@ using WireVersion = std::uint8_t;
 /// refuse the new requests as malformed and read the new replies' extra fields as a peer speaking
 /// nonsense, and a version-15 reader of a version-14 grant would hold no worker key and trust an
 /// unsigned compile.
-inline constexpr WireVersion CurrentVersion = 15;
+///
+/// **16 puts a queue in front of the fleet's capacity** (#1728). ADMIT (0x22) asks the leader to
+/// admit one compile and is answered `Ok` with a grant -- or `Error` -- after any number of
+/// `Status::Progress` pulses, which makes it the SECOND verb a reply stream may follow; SETTLE
+/// (0x23) tells the leader how that compile ended; MACHINE-BUDGET (0x24) is a node's report of its
+/// own memory ledger. An older client cannot step over a pulse on a verb it does not know, which is
+/// the argument that moved the floor at version 3.
+inline constexpr WireVersion CurrentVersion = 16;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
 /// only one version exists; widen the range when a second one ships and this
@@ -382,7 +389,11 @@ inline constexpr WireVersion CurrentVersion = 15;
 /// served -- the very forgery a signed reply exists to refuse -- and a version-14 AUTH carries no
 /// credential kind, so a machine ticket and a password would be one field read two ways. Refused by
 /// number, the mismatch names the range before a byte of either is read.
-inline constexpr WireVersion MinSupportedVersion = 15;
+///
+/// Version 16 moves it for version 3's reason: ADMIT's reply may carry `Status::Progress`, and a
+/// REPLY has a status byte and no kind, so a version-15 client could only read a pulse as a
+/// transport failure. Its request is refused by number, naming the range, before a byte is sent.
+inline constexpr WireVersion MinSupportedVersion = 16;
 
 /// Size of the fixed request header: magic, version, op, payload length.
 inline constexpr std::size_t RequestHeaderSize = WireFrame::HeaderSize;
@@ -807,6 +818,27 @@ enum class Op : std::uint8_t
     SharedFetch = 0x20,
     /// Store a compile result in the fleet's shared cache: `Store`'s payload, `SharedFetch`'s policy.
     SharedStore = 0x21,
+
+    /// Ask the fleet's leader to admit one compile (#1728): wait for the memory it is estimated
+    /// to need, then be told where it runs.
+    ///
+    /// Answered `Ok` with an `AdmitGrant` after zero or more `Status::Progress` pulses -- a queued
+    /// request waits as long as the queue is long, which is why it is the second verb (after
+    /// `Compile`) a pulse may follow. The grant is spent, or the request abandoned, by closing
+    /// the connection or by `Settle`: the leader releases whatever the connection held when it ends.
+    Admit = 0x22,
+
+    /// Tell the leader how an admitted compile ended, on the connection that admitted it (#1728).
+    ///
+    /// Carries no lease token: the charge is scoped to the connection, so the connection names it.
+    /// `Ok` and empty, whether or not the outcome changed anything.
+    Settle = 0x23,
+
+    /// A node reporting its own memory ledger to the leader (#1728): the budget, the slots, what
+    /// is held now and the peaks it has measured.
+    ///
+    /// A machine speaking for itself, so it requires a proven identity as `Register` does.
+    MachineBudget = 0x24,
 };
 
 /// Reply status, the first byte of every reply.
@@ -829,6 +861,11 @@ enum class Status : std::uint8_t
     /// exception is bounded to exactly this: a progress frame is never the last frame
     /// of an exchange, so a reader that loops until it sees a terminal status still
     /// consumes precisely one answer per request and pipelining stays well defined.
+    ///
+    /// **Which verbs may be answered with it is a column of `OpTable`** -- `Compile`, whose work
+    /// is a compiler, and `Admit` (#1728), whose wait is a queue -- and `ProgressVerbsAre` holds
+    /// that set exact. An `Admit` pulse says nothing about the queue's position, for the reason a
+    /// compile's says nothing about the compile.
     ///
     /// **It says nothing about the compile, deliberately**
     /// ([#245](https://github.com/LASTRADA-Software/pace/issues/245)). A
@@ -2413,6 +2450,40 @@ inline constexpr std::array OpTable {
                    .maxReply = ReplyCarriesArtefact,
                    .family = VerbFamily::SharedCache,
                    .identity = IdentityRequirement::AddressAdmits },
+    // The fleet's admission queue (#1728). Scheduler family: the leader answers, a node that runs
+    // no scheduler refuses by the capacity-verb rows. None is pre-auth, for the reason the whole
+    // distributed block is not: it spends the fleet's memory.
+    //
+    // ADMIT is the one verb besides COMPILE that may pulse, so a client can tell a queued request
+    // from a dead leader against its sliding idle bound. A queue is as long as the queue is.
+    OpDescriptor { .code = Op::Admit,
+                   .name = "admit",
+                   .fieldCount = 8, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs, exclusions
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)
+                                                              | StatusBit(Status::Progress)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Scheduler,
+                   .identity = IdentityRequirement::AddressAdmits },
+    OpDescriptor { .code = Op::Settle,
+                   .name = "settle",
+                   .fieldCount = 2, // outcome, peak bytes (empty when none was measured)
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Scheduler,
+                   .identity = IdentityRequirement::AddressAdmits },
+    OpDescriptor { .code = Op::MachineBudget,
+                   .name = "machine-budget",
+                   .fieldCount = 5, // memory budget, slots, held slots, held bytes, peaks
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Scheduler,
+                   .identity = IdentityRequirement::ProvenNodeOnly },
     OpDescriptor { .code = Op::MintTicket,
                    .name = "mint-ticket",
                    .fieldCount = 1, // audience
@@ -2555,22 +2626,29 @@ inline constexpr std::array OpTable {
                    .identity = IdentityRequirement::AddressAdmits },
 };
 
-/// Whether `Status::Progress` is confined to the one verb that can be slow enough to
-/// need it.
+/// Whether `Status::Progress` is confined to exactly the verbs @p allowed.
 ///
 /// A `static_assert`ed invariant rather than a comment, the same shape as
 /// `PreAuthVerbsAreBounded` above and for the same kind of reason: a verb that
 /// acquires this status acquires a reply stream, and every client reading that verb
 /// then has to loop. That is a decision, not something to inherit by editing a mask.
-/// @return True when `Op::Compile` is the only row admitting `Progress`.
-[[nodiscard]] constexpr bool ProgressIsCompileOnly() noexcept
+/// Both directions, because each is a different mistake: a verb gaining a pulse nobody
+/// reads, and a long-waiting verb losing the pulse its client's idle bound depends on.
+/// @param allowed The verbs that pulse: `Compile`, whose work is a compiler, and `Admit`, whose
+///                wait is a queue.
+/// @return True when the rows admitting `Progress` are exactly @p allowed.
+template <std::size_t N>
+[[nodiscard]] constexpr bool ProgressVerbsAre(std::array<Op, N> const& allowed) noexcept
 {
-    return std::ranges::all_of(OpTable, [](OpDescriptor const& row) {
-        return row.code == Op::Compile || (row.legalStatuses & StatusBit(Status::Progress)) == 0;
+    return std::ranges::all_of(OpTable, [&allowed](OpDescriptor const& row) {
+        return (std::ranges::find(allowed, row.code) != allowed.end())
+               == ((row.legalStatuses & StatusBit(Status::Progress)) != 0);
     });
 }
 
-static_assert(ProgressIsCompileOnly(), "a progress pulse turns a reply into a stream; only COMPILE is long enough to");
+static_assert(ProgressVerbsAre(std::array { Op::Compile, Op::Admit }),
+              "a progress pulse turns a reply into a stream; only COMPILE (a compiler runs) and ADMIT (a queue waits) "
+              "are long enough to");
 
 /// Whether every verb reachable before authentication bounds its replies.
 ///
@@ -2622,7 +2700,7 @@ static_assert(BoundedRepliesHoldARefusal(), "every verb may be refused, so every
 
 /// Whether `Status::Push` is confined to the one verb whose answer is a stream.
 ///
-/// `ProgressIsCompileOnly`'s twin, for the second status that turns a reply into a stream: a
+/// `ProgressVerbsAre`'s twin, for the second status that turns a reply into a stream: a
 /// verb that acquires it acquires a reader that loops and a writer that outlives the request,
 /// and that is a decision rather than something to inherit by editing a mask.
 /// @return True when `Op::Subscribe` is the only row admitting `Push`.
@@ -2693,24 +2771,27 @@ static_assert(EveryOpcodeIsDistinct(), "two verbs claim one wire byte; the later
 /// Whether exactly the verbs a machine JOINS the fleet with require a proven identity (#178).
 ///
 /// `Register`, `NodeAnnounce`, `Heartbeat` and `Withdraw` decide where the fleet's work is sent and
-/// what it knows about each machine, so an address may not stand in for who is sending them. Every
-/// other verb is a CLIENT's, an operator's or a peer handshake's, and an address still admits those
+/// what it knows about each machine, so an address may not stand in for who is sending them.
+/// `MachineBudget` joins them: a machine stating how much memory it may be charged is a figure the
+/// leader places work by. Every other verb is a CLIENT's, an operator's or a peer handshake's, and an address still admits
+/// those
 /// -- which is owner decision 5 on #178 stated as a table rather than as a list at the gate.
 ///
 /// Both directions, because each is a different mistake: a joining verb left open is an endpoint
 /// anybody on an admitted host can register, and any other verb marked here refuses every launcher.
-/// @return True when the column names exactly those four.
+/// @return True when the column names exactly those five.
 [[nodiscard]] constexpr bool JoiningVerbsNeedAnIdentity() noexcept
 {
     return std::ranges::all_of(OpTable, [](OpDescriptor const& row) {
         auto const joining = row.code == Op::Register || row.code == Op::NodeAnnounce || row.code == Op::Heartbeat
-                             || row.code == Op::Withdraw;
+                             || row.code == Op::Withdraw || row.code == Op::MachineBudget;
         return joining == (row.identity == IdentityRequirement::ProvenNodeOnly);
     });
 }
 
 static_assert(JoiningVerbsNeedAnIdentity(),
-              "exactly Register, NodeAnnounce, Heartbeat and Withdraw require a proven identity -- see IdentityRequirement");
+              "exactly Register, NodeAnnounce, Heartbeat, Withdraw and MachineBudget require a proven identity -- see "
+              "IdentityRequirement");
 
 /// Whether exactly an operator's CONTROL verbs require an operator's standing.
 ///
@@ -9449,6 +9530,362 @@ enum class SettleOutcome : std::uint8_t
     WorkerRefused = 3,
     Last
 };
+
+// --- admission: ADMIT, SETTLE and MACHINE-BUDGET (#1728) ---------------------
+//
+// Each verb's top-level arity is exact and fixed forever, so a fact added later arrives as a nested
+// record. Each request has two shapes, and the split is the `*View` rule of `wire-and-protocol.md`:
+// the struct an ENCODER takes may borrow (the caller outlives the call), while what a DECODER
+// returns by value OWNS its bytes, because `Decode(Encode(x))` is a use-after-free the moment a
+// member is a view. A decoder refuses what it cannot read -- an enumerator past `Last`, a number
+// of another width, a string over its cap -- and never clamps.
+
+/// The longest source path an admission request or a reported peak carries, in bytes.
+///
+/// Root-relative (`<SRCROOT>/...`) by construction, so well under a filesystem's own limit; a path
+/// longer than this is one no honest launcher produced, and the estimate it keys is not worth it.
+inline constexpr std::size_t MaxAdmitPathBytes = 512;
+
+/// The longest tree label an admission request carries, in bytes. Display only (R14): the leader
+/// root-relativizes or truncates it to valid UTF-8 where it enters.
+inline constexpr std::size_t MaxAdmitTreeLabelBytes = 256;
+
+/// The most peaks one MACHINE-BUDGET report carries. A node reports a bounded sample of the
+/// estimates it holds, never the table; more than this is refused rather than truncated.
+inline constexpr std::size_t MaxMachineBudgetPeaks = 64;
+
+/// The most one reported peak occupies on the wire: its three strings at their caps, their
+/// length prefixes and the measured value.
+inline constexpr std::size_t MaxMachineBudgetPeakBytes = MaxLeaseKeyBytes + MaxAdmitPathBytes + MaxToolchainFingerprintBytes
+                                                         + (4 * WireFields::FieldPrefixSize) + sizeof(std::uint64_t);
+
+static_assert(MaxMachineBudgetPeaks * MaxMachineBudgetPeakBytes + 1024 <= MaxControlPayload,
+              "a full MACHINE-BUDGET report must fit the control payload ceiling its verb declares");
+
+/// One compile asking the leader to admit it, as the CLIENT builds it. May borrow.
+struct AdmitRequest
+{
+    AdmitKind kind;                             ///< Whether it may run on a worker or only where it was asked.
+    std::string_view fingerprint;               ///< The toolchain; empty for a local-only request that does not know it.
+    std::string_view cacheKey;                  ///< The object key; keys dedup and the exact estimate.
+    std::string_view sourcePath;                ///< Root-relative source path; keys the shape estimate. May be empty.
+    std::string_view treeLabel;                 ///< A person's name for the build tree. Display only.
+    bool storable;                              ///< Whether the object will be stored, so waiters may be answered `Stored`.
+    CodecList acceptedCodecs;                   ///< What the client can decode.
+    std::span<std::string_view const> excluded; ///< Workers the client could not reach, by advertised endpoint.
+};
+
+/// The same, as the leader decodes it. OWNS its bytes.
+struct AdmitRequestFields
+{
+    AdmitKind kind {};
+    std::string fingerprint;
+    std::string cacheKey;
+    std::string sourcePath;
+    std::string treeLabel;
+    bool storable {};
+    CodecList acceptedCodecs;
+    std::vector<std::string> excluded;
+
+    /// @return True when every field is equal.
+    [[nodiscard]] bool operator==(AdmitRequestFields const&) const = default;
+};
+
+/// What the leader answers an ADMIT with, as it builds it. May borrow.
+struct AdmitGrant
+{
+    GrantKind kind;              ///< Where the compile runs, or that another compile already stored it.
+    std::string_view endpoint;   ///< The worker to dial; empty unless `kind` is `Worker`.
+    std::string_view leaseToken; ///< Authorizes the job at that worker; empty unless `kind` is `Worker`.
+    CodecList workerCodecs;      ///< What that worker can decode.
+    std::uint64_t chargedBytes;  ///< The memory estimate charged for this admission.
+    std::uint64_t queuedMs;      ///< How long the request waited in the queue.
+};
+
+/// The same, as the client decodes it. OWNS its bytes.
+struct AdmitGrantFields
+{
+    GrantKind kind {};
+    std::string endpoint;
+    std::string leaseToken;
+    CodecList workerCodecs;
+    std::uint64_t chargedBytes {};
+    std::uint64_t queuedMs {};
+
+    /// @return True when every field is equal.
+    [[nodiscard]] bool operator==(AdmitGrantFields const&) const = default;
+};
+
+/// How an admitted compile ended. Owns what it holds, so it is its own decoded form.
+struct SettleRequest
+{
+    SettleOutcome outcome;                  ///< What became of the compile.
+    std::optional<std::uint64_t> peakBytes; ///< The measured peak, when there was one. Absent is not zero.
+};
+
+/// What a peak was measured for: the exact key, then the shape. OWNS its bytes.
+struct EstimateKeyFields
+{
+    std::string cacheKey;         ///< The object key; equal across worktrees.
+    std::string sourcePath;       ///< Root-relative source path, possibly empty.
+    std::string compilerIdentity; ///< The toolchain fingerprint.
+
+    /// @return True when every field is equal.
+    [[nodiscard]] bool operator==(EstimateKeyFields const&) const = default;
+};
+
+/// A node's own memory ledger, reported to the leader. OWNS its bytes, so it is its own decoded form.
+struct MachineBudgetReport
+{
+    std::uint64_t memoryBudgetBytes; ///< What the node will let compiles hold at once.
+    std::uint32_t slots;             ///< Compile slots the node offers.
+    std::uint32_t heldSlots;         ///< Slots held now.
+    std::uint64_t heldBytes;         ///< Memory charged now.
+    /// A bounded sample of measured peaks, newest meaning most useful to the leader's estimates.
+    std::vector<std::pair<EstimateKeyFields, std::uint64_t>> peaks;
+
+    /// @return True when every field is equal.
+    [[nodiscard]] bool operator==(MachineBudgetReport const&) const = default;
+};
+
+namespace Detail
+{
+    /// One byte holding an enumerator.
+    /// @tparam Enum A transmitted enum with a trailing `Last` count.
+    /// @param value The enumerator.
+    /// @return The one-byte field's contents.
+    template <typename Enum>
+    [[nodiscard]] std::array<std::byte, 1> EncodeEnumByte(Enum value) noexcept
+    {
+        return { static_cast<std::byte>(static_cast<std::uint8_t>(value)) };
+    }
+
+    /// Read an enumerator from a field that must be exactly one byte.
+    /// @tparam Enum A transmitted enum with a trailing `Last` count.
+    /// @param field The field.
+    /// @return The enumerator, or nullopt for another width or a value at or past `Last`.
+    template <typename Enum>
+    [[nodiscard]] std::optional<Enum> DecodeEnumByte(std::span<std::byte const> field) noexcept
+    {
+        if (field.size() != 1 || std::to_integer<std::uint8_t>(field[0]) >= static_cast<std::uint8_t>(Enum::Last))
+            return std::nullopt;
+        return static_cast<Enum>(std::to_integer<std::uint8_t>(field[0]));
+    }
+
+    /// @param field A text field.
+    /// @param cap Most bytes it may hold.
+    /// @return Whether it is within @p cap.
+    [[nodiscard]] constexpr bool FitsCap(std::span<std::byte const> field, std::size_t cap) noexcept
+    {
+        return field.size() <= cap;
+    }
+} // namespace Detail
+
+/// Frame an ADMIT request.
+/// @param request What to admit.
+/// @param version Version to advertise.
+/// @return The framed request.
+[[nodiscard]] inline std::vector<std::byte> EncodeAdmit(AdmitRequest const& request, WireVersion version = CurrentVersion)
+{
+    auto const kind = Detail::EncodeEnumByte(request.kind);
+    auto const storable = std::array<std::byte, 1> { static_cast<std::byte>(request.storable ? 1 : 0) };
+    auto const codecs = EncodeCodecList(request.acceptedCodecs);
+    auto const excluded = EncodeExclusions(request.excluded);
+    return Detail::EncodeRequest(version,
+                                 Op::Admit,
+                                 { std::span<std::byte const> { kind },
+                                   AsBytes(request.fingerprint),
+                                   AsBytes(request.cacheKey),
+                                   AsBytes(request.sourcePath),
+                                   AsBytes(request.treeLabel),
+                                   std::span<std::byte const> { storable },
+                                   std::span<std::byte const> { codecs },
+                                   std::span<std::byte const> { excluded } });
+}
+
+/// Split an ADMIT payload.
+/// @param payload The bytes following the request header.
+/// @return The owned fields, or nullopt when malformed: a kind or storable byte this build does not
+///         know, a string over its cap, or an exclusion list `DecodeExclusions` refuses.
+[[nodiscard]] inline std::optional<AdmitRequestFields> DecodeAdmitPayload(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, OpFieldCount(Op::Admit));
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const kind = Detail::DecodeEnumByte<AdmitKind>((*fields)[0]);
+    if (!kind.has_value())
+        return std::nullopt;
+    auto const& storable = (*fields)[5];
+    if (storable.size() != 1 || std::to_integer<std::uint8_t>(storable[0]) > 1)
+        return std::nullopt;
+    if (!Detail::FitsCap((*fields)[1], MaxToolchainFingerprintBytes) || !Detail::FitsCap((*fields)[2], MaxLeaseKeyBytes)
+        || !Detail::FitsCap((*fields)[3], MaxAdmitPathBytes) || !Detail::FitsCap((*fields)[4], MaxAdmitTreeLabelBytes))
+        return std::nullopt;
+    auto const excluded = DecodeExclusions((*fields)[7]);
+    if (!excluded.has_value())
+        return std::nullopt;
+
+    AdmitRequestFields out;
+    out.kind = *kind;
+    out.fingerprint = std::string { AsStringView((*fields)[1]) };
+    out.cacheKey = std::string { AsStringView((*fields)[2]) };
+    out.sourcePath = std::string { AsStringView((*fields)[3]) };
+    out.treeLabel = std::string { AsStringView((*fields)[4]) };
+    out.storable = std::to_integer<std::uint8_t>(storable[0]) == 1;
+    out.acceptedCodecs = DecodeCodecList((*fields)[6]);
+    out.excluded.reserve(excluded->size());
+    for (auto const endpoint: *excluded)
+        out.excluded.emplace_back(AsStringView(endpoint));
+    return out;
+}
+
+/// Frame the payload of a successful ADMIT reply.
+/// @param grant What the leader decided.
+/// @return The reply payload (not a whole frame).
+[[nodiscard]] inline std::vector<std::byte> EncodeAdmitGrant(AdmitGrant const& grant)
+{
+    auto const kind = Detail::EncodeEnumByte(grant.kind);
+    auto const codecs = EncodeCodecList(grant.workerCodecs);
+    auto const charged = EncodeU64Field(grant.chargedBytes);
+    auto const queued = EncodeU64Field(grant.queuedMs);
+    return WireFields::Encode({ std::span<std::byte const> { kind },
+                                AsBytes(grant.endpoint),
+                                AsBytes(grant.leaseToken),
+                                std::span<std::byte const> { codecs },
+                                std::span<std::byte const> { charged },
+                                std::span<std::byte const> { queued } });
+}
+
+/// Split an ADMIT reply payload.
+///
+/// Exactly six fields: a reply is not stepped over the way a request is. The endpoint is held to
+/// `MaxEndpointBytes` because the client dials it.
+/// @param payload The reply body.
+/// @return The owned fields, or nullopt when malformed.
+[[nodiscard]] inline std::optional<AdmitGrantFields> DecodeAdmitGrant(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, 6);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const kind = Detail::DecodeEnumByte<GrantKind>((*fields)[0]);
+    auto const charged = DecodeU64Field((*fields)[4]);
+    auto const queued = DecodeU64Field((*fields)[5]);
+    if (!kind.has_value() || !charged.has_value() || !queued.has_value() || !Detail::FitsCap((*fields)[1], MaxEndpointBytes))
+        return std::nullopt;
+    return AdmitGrantFields { .kind = *kind,
+                              .endpoint = std::string { AsStringView((*fields)[1]) },
+                              .leaseToken = std::string { AsStringView((*fields)[2]) },
+                              .workerCodecs = DecodeCodecList((*fields)[3]),
+                              .chargedBytes = *charged,
+                              .queuedMs = *queued };
+}
+
+/// Frame a SETTLE request.
+/// @param request How the compile ended.
+/// @param version Version to advertise.
+/// @return The framed request.
+[[nodiscard]] inline std::vector<std::byte> EncodeSettle(SettleRequest const& request, WireVersion version = CurrentVersion)
+{
+    auto const outcome = Detail::EncodeEnumByte(request.outcome);
+    // An EMPTY field is "no peak measured", which a peak of zero must not be mistaken for.
+    auto const peak = EncodeU64Field(request.peakBytes.value_or(0));
+    auto const peakField =
+        request.peakBytes.has_value() ? std::span<std::byte const> { peak } : std::span<std::byte const> {};
+    return Detail::EncodeRequest(version, Op::Settle, { std::span<std::byte const> { outcome }, peakField });
+}
+
+/// Split a SETTLE payload.
+/// @param payload The bytes following the request header.
+/// @return The request, or nullopt when the outcome is unknown or the peak is neither empty nor
+///         exactly eight bytes.
+[[nodiscard]] inline std::optional<SettleRequest> DecodeSettlePayload(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, OpFieldCount(Op::Settle));
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const outcome = Detail::DecodeEnumByte<SettleOutcome>((*fields)[0]);
+    if (!outcome.has_value())
+        return std::nullopt;
+    if ((*fields)[1].empty())
+        return SettleRequest { .outcome = *outcome, .peakBytes = std::nullopt };
+    auto const peak = DecodeU64Field((*fields)[1]);
+    if (!peak.has_value())
+        return std::nullopt;
+    return SettleRequest { .outcome = *outcome, .peakBytes = *peak };
+}
+
+/// Frame a MACHINE-BUDGET report.
+/// @param report The node's ledger. Peaks are sent as given; a report over `MaxMachineBudgetPeaks`
+///               is refused by its receiver, so the sender caps its own sample.
+/// @param version Version to advertise.
+/// @return The framed request.
+[[nodiscard]] inline std::vector<std::byte> EncodeMachineBudget(MachineBudgetReport const& report,
+                                                                WireVersion version = CurrentVersion)
+{
+    auto const budget = EncodeU64Field(report.memoryBudgetBytes);
+    auto const slots = EncodeU32Field(report.slots);
+    auto const heldSlots = EncodeU32Field(report.heldSlots);
+    auto const heldBytes = EncodeU64Field(report.heldBytes);
+
+    // The peaks, flattened to four fields each (key, path, identity, value) in one nested list.
+    std::vector<std::array<std::byte, sizeof(std::uint64_t)>> values;
+    values.reserve(report.peaks.size());
+    std::vector<std::span<std::byte const>> parts;
+    parts.reserve(report.peaks.size() * 4);
+    for (auto const& [key, peak]: report.peaks)
+    {
+        parts.push_back(AsBytes(key.cacheKey));
+        parts.push_back(AsBytes(key.sourcePath));
+        parts.push_back(AsBytes(key.compilerIdentity));
+        parts.emplace_back(values.emplace_back(EncodeU64Field(peak)));
+    }
+    auto const peaks = WireFields::Encode(WireFields::FieldList { parts });
+    return Detail::EncodeRequest(version,
+                                 Op::MachineBudget,
+                                 { std::span<std::byte const> { budget },
+                                   std::span<std::byte const> { slots },
+                                   std::span<std::byte const> { heldSlots },
+                                   std::span<std::byte const> { heldBytes },
+                                   std::span<std::byte const> { peaks } });
+}
+
+/// Split a MACHINE-BUDGET payload.
+/// @param payload The bytes following the request header.
+/// @return The owned report, or nullopt when malformed: a number of another width, more than
+///         `MaxMachineBudgetPeaks` peaks, a peak that is not four fields, or a string over its cap.
+[[nodiscard]] inline std::optional<MachineBudgetReport> DecodeMachineBudgetPayload(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, OpFieldCount(Op::MachineBudget));
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const budget = DecodeU64Field((*fields)[0]);
+    auto const slots = DecodeU32Field((*fields)[1]);
+    auto const heldSlots = DecodeU32Field((*fields)[2]);
+    auto const heldBytes = DecodeU64Field((*fields)[3]);
+    if (!budget.has_value() || !slots.has_value() || !heldSlots.has_value() || !heldBytes.has_value())
+        return std::nullopt;
+    auto const parts = WireFields::SplitAtMost((*fields)[4], MaxMachineBudgetPeaks * 4);
+    if (!parts.has_value() || parts->size() % 4 != 0)
+        return std::nullopt;
+
+    MachineBudgetReport out {
+        .memoryBudgetBytes = *budget, .slots = *slots, .heldSlots = *heldSlots, .heldBytes = *heldBytes, .peaks = {}
+    };
+    out.peaks.reserve(parts->size() / 4);
+    for (auto const index: std::views::iota(std::size_t { 0 }, parts->size() / 4))
+    {
+        auto const peak = std::span { *parts }.subspan(index * 4, 4);
+        auto const value = DecodeU64Field(peak[3]);
+        if (!value.has_value() || !Detail::FitsCap(peak[0], MaxLeaseKeyBytes) || !Detail::FitsCap(peak[1], MaxAdmitPathBytes)
+            || !Detail::FitsCap(peak[2], MaxToolchainFingerprintBytes))
+            return std::nullopt;
+        out.peaks.emplace_back(EstimateKeyFields { .cacheKey = std::string { AsStringView(peak[0]) },
+                                                   .sourcePath = std::string { AsStringView(peak[1]) },
+                                                   .compilerIdentity = std::string { AsStringView(peak[2]) } },
+                               *value);
+    }
+    return out;
+}
 
 /// What a `Status::Push` frame carries. Explicit values because these bytes are transmitted.
 enum class PushKind : std::uint8_t

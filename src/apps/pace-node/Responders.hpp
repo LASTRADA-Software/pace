@@ -1501,6 +1501,12 @@ class MergedResponder final: public IFrameResponder
         { .op = CompileCacheWire::Op::Lease, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
         { .op = CompileCacheWire::Op::Release, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
         { .op = CompileCacheWire::Op::NodeAnnounce, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
+        // The admission queue (#1728) asks for capacity as `Lease` does, and a node running no
+        // consensus has no queue to join -- `DispatchNotPermitted`, as the daemon's rows answer
+        // them, never the family's `NoCluster` and never `UnimplementedVerb`.
+        { .op = CompileCacheWire::Op::Admit, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
+        { .op = CompileCacheWire::Op::Settle, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
+        { .op = CompileCacheWire::Op::MachineBudget, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
     });
 
     // A verb row refines its family's answer, so it may only name a family that HAS one: a row for a
