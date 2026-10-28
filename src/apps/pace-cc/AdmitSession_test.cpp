@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <thread>
 #include <utility>
@@ -169,7 +170,7 @@ core::async::Task<void> SlowButAlive(Peer peer)
 {
     if (!(co_await ReadRequest(peer)))
         co_return;
-    for (int pulse = 0; pulse < 8; ++pulse)
+    for ([[maybe_unused]] auto const pulse: std::views::iota(0, 8))
     {
         co_await Send(peer, Wire::EncodeProgressReply());
         std::this_thread::sleep_for(60ms);
@@ -241,7 +242,7 @@ core::async::Task<void> PulseOnly(Peer peer)
 {
     if (!(co_await ReadRequest(peer)))
         co_return;
-    for (int pulse = 0; pulse < 200; ++pulse)
+    for ([[maybe_unused]] auto const pulse: std::views::iota(0, 200))
     {
         std::this_thread::sleep_for(50ms);
         auto const sent = co_await core::net::sendAll(peer.socket, Wire::EncodeProgressReply());
