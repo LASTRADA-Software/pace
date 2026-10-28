@@ -50,6 +50,23 @@ namespace
             reply.message);
     }
 
+    /// The `NotLeader` a parked request is answered when this node stops leading.
+    ///
+    /// Not `EncodeServiceReply`: that one says the service counted the refusal, and a demotion is
+    /// decided by no gate -- the queue forgot every waiter at once (`LoseLeadership`).
+    /// @param leader Where the new leader is, or empty.
+    /// @return The frame to write.
+    [[nodiscard]] std::vector<std::byte> RefuseDemoted(std::string_view leader)
+    {
+        return Cc::RefuseWithoutCounter(
+            { .code = Wire::ErrorCode::NotLeader,
+              .rationale = "a demotion is one event answered to every parked request at once, not a refusal of "
+                           "this caller: a row per waiter would count one leadership change once per queued "
+                           "compile, and the client follows the NotLeader to the new leader, where its request "
+                           "is queued and counted again" },
+            leader);
+    }
+
     /// A refusal this responder decides itself, before the service is asked.
     /// @param code What the client is told.
     /// @param detail Words for a person.
@@ -154,13 +171,16 @@ struct AdmissionCore
 
     /// Give a ticket back because its connection ended or its next frame was not a settle.
     /// @param ticket Any ticket.
-    void Abandon(Distributed::Ticket ticket)
+    /// @param counted Whether the endpoint has already filed this departure under `AdmissionAbandoned`
+    ///        (`ConnectionScope::DepartureCounted`): one departure is one count.
+    void Abandon(Distributed::Ticket ticket, bool counted = false)
     {
         auto* const svc = Service();
         if (svc == nullptr)
             return;
         svc->AbandonAdmission(ticket);
-        metrics->Increment(IMetricsSink::Counter::AdmissionAbandoned);
+        if (!counted)
+            metrics->Increment(IMetricsSink::Counter::AdmissionAbandoned);
         // Freed room may admit whoever waits behind it.
         PumpAndDeliver();
     }
@@ -221,20 +241,27 @@ namespace
     {
       public:
         /// @param core The shared state.
+        /// @param scope The connection this is held on; it owns this, so it outlives it.
         /// @param ticket The granted ticket.
         /// @param charge The machine own record of a loopback local lease; empty for any other.
-        AdmissionHold(std::shared_ptr<AdmissionCore> core, Distributed::Ticket ticket, HeldChargeRegistry::Handle charge):
+        AdmissionHold(std::shared_ptr<AdmissionCore> core,
+                      ConnectionScope const& scope,
+                      Distributed::Ticket ticket,
+                      HeldChargeRegistry::Handle charge):
             _core { std::move(core) },
+            _scope { &scope },
             _ticket { ticket },
             _charge { std::move(charge) }
         {
         }
 
         /// Abandons the ticket unless a settle took it: the connection ended, or another frame came.
+        /// A departure the endpoint already counted -- the grant was ready and nobody took it -- is
+        /// given back without being counted again.
         ~AdmissionHold() override
         {
             if (!_settled)
-                _core->Abandon(_ticket);
+                _core->Abandon(_ticket, _scope->DepartureCounted());
         }
 
         AdmissionHold(AdmissionHold const&) = delete;
@@ -246,6 +273,13 @@ namespace
         [[nodiscard]] bool SurvivesFrame(std::uint8_t opRaw) const noexcept override
         {
             return opRaw == static_cast<std::uint8_t>(Wire::Op::Settle);
+        }
+
+        /// @copydoc IConnectionHold::IdleWindow
+        /// As long as a granted compile may run: the settle comes when the compiler is done.
+        [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
+        {
+            return Wire::MaxCompileLeaseLifetime;
         }
 
         /// @return The ticket this holds.
@@ -262,9 +296,78 @@ namespace
 
       private:
         std::shared_ptr<AdmissionCore> _core;
+        ConnectionScope const* _scope;
         Distributed::Ticket _ticket;
         HeldChargeRegistry::Handle _charge;
         bool _settled { false };
+    };
+
+    /// A ticket a worker refused, back at the front of the queue (R7, Ruling 9), held on its connection
+    /// until that connection's next `ADMIT` waits on it again.
+    ///
+    /// The waiter is registered from the moment the settle put the ticket back, so a pump that decides
+    /// it before the client asks again has somewhere to leave the decision. Only an `ADMIT` survives;
+    /// any other frame, or the close, abandons the ticket -- exactly as for a grant nobody settles.
+    class RequeuedHold final: public IConnectionHold
+    {
+      public:
+        /// @param core The shared state.
+        /// @param ticket The ticket the settle put back.
+        /// @param waiter Its waiter, already registered in the core.
+        RequeuedHold(std::shared_ptr<AdmissionCore> core,
+                     Distributed::Ticket ticket,
+                     std::shared_ptr<AdmissionWaiter> waiter) noexcept:
+            _core { std::move(core) },
+            _ticket { ticket },
+            _waiter { std::move(waiter) }
+        {
+        }
+
+        /// Forgets the waiter and abandons the ticket, unless an `ADMIT` took both over.
+        ~RequeuedHold() override
+        {
+            if (_waiter == nullptr)
+                return;
+            _core->Forget(_ticket);
+            _core->Abandon(_ticket);
+        }
+
+        RequeuedHold(RequeuedHold const&) = delete;
+        RequeuedHold& operator=(RequeuedHold const&) = delete;
+        RequeuedHold(RequeuedHold&&) = delete;
+        RequeuedHold& operator=(RequeuedHold&&) = delete;
+
+        /// @copydoc IConnectionHold::SurvivesFrame
+        [[nodiscard]] bool SurvivesFrame(std::uint8_t opRaw) const noexcept override
+        {
+            return opRaw == static_cast<std::uint8_t>(Wire::Op::Admit);
+        }
+
+        /// @copydoc IConnectionHold::IdleWindow
+        /// A header's: the client asks again the moment its settle is answered, and a ticket at the
+        /// head of the queue must not wait an hour for a client that went quiet.
+        [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
+        {
+            return FrameServer::HeaderTimeout;
+        }
+
+        /// @return The ticket this holds.
+        [[nodiscard]] Distributed::Ticket Ticket() const noexcept
+        {
+            return _ticket;
+        }
+
+        /// The `ADMIT` that came takes the waiter over, and with it the duty to abandon the ticket.
+        /// @return The waiter.
+        [[nodiscard]] std::shared_ptr<AdmissionWaiter> TakeWaiter() noexcept
+        {
+            return std::exchange(_waiter, nullptr);
+        }
+
+      private:
+        std::shared_ptr<AdmissionCore> _core;
+        Distributed::Ticket _ticket;
+        std::shared_ptr<AdmissionWaiter> _waiter; ///< Null once an `ADMIT` took it.
     };
 
     /// The counters one grant moves, by what it granted.
@@ -301,26 +404,32 @@ namespace
         Verdict,  ///< The queue decided.
         Demoted,  ///< This node stopped leading.
         PeerGone, ///< The peer left while it waited.
-        TimedOut, ///< The admission window ran out.
     };
 
-    /// Park until something is decided for @p waiter, the peer leaves, or the window ends.
+    /// Park until something is decided for @p waiter or the peer leaves.
     ///
-    /// Suspends in the reactor own park (`interruptibleSleepUntil`); a frame the reactor frees at
-    /// teardown is freed with it, and the guards in the caller run.
+    /// **No total ceiling**, which is the spec's and not an omission: a twenty-minute wait in the queue
+    /// is the system working, and a ceiling that fails open brings back the OOM kills the queue exists
+    /// to end. Liveness is the pulse's -- the endpoint renews the request's answer window with every
+    /// pulse that reaches the peer (`ConnectionScope::JudgeByPulse`), and sweeps a peer that stops
+    /// taking them -- and a departure wakes this through the peer-gone token.
+    ///
+    /// Suspends in the reactor own park (`interruptibleSleepUntil`), in STEPS of @p step rather than
+    /// to one far deadline: the reactor's timer cannot be cancelled, so a step is all a woken park
+    /// leaves behind on the wheel. A frame the reactor frees at teardown is freed with it, and the
+    /// guards in the caller run.
     /// @param core The shared state.
     /// @param waiter What to wait on.
     /// @param scope The connection scope, whose peer-gone token also wakes this.
-    /// @param window How long to wait at most.
-    /// @return Which of the four ended the wait.
+    /// @param step How long one park lasts before it re-reads.
+    /// @return Which of the three ended the wait.
     core::async::Task<Woke> Park(std::shared_ptr<AdmissionCore> core,
                                  std::shared_ptr<AdmissionWaiter> waiter,
                                  std::shared_ptr<ConnectionScope> scope,
-                                 std::chrono::milliseconds window)
+                                 std::chrono::milliseconds step)
     {
         // The peer leaving is a second reason to wake: it requests the very stop a decision does.
         core::async::StopCallback const onGone { scope->PeerGone(), [raw = waiter.get()] { raw->wake.request_stop(); } };
-        auto const deadline = core->loop->clock().now() + window;
         for (;;)
         {
             {
@@ -332,10 +441,55 @@ namespace
             }
             if (scope->PeerGone().stop_requested())
                 co_return Woke::PeerGone;
-            if (co_await core::net::interruptibleSleepUntil(core->loop, waiter->wake.get_token(), deadline)
-                == core::net::WakeReason::Deadline)
-                co_return Woke::TimedOut;
+            // A step that ran out is not an answer: the loop re-reads and parks again.
+            (void) co_await core::net::interruptibleSleepUntil(
+                core->loop, waiter->wake.get_token(), core->loop->clock().now() + step);
         }
+    }
+    /// Take a put-back ticket off the connection, when that is what it holds.
+    /// @param scope The connection's scope.
+    /// @return The hold, or null when the connection holds none -- which is every `ADMIT` but the one
+    ///         that follows a worker's refusal, since `BeforeFrame` released anything else.
+    [[nodiscard]] std::unique_ptr<RequeuedHold> TakeRequeued(ConnectionScope& scope)
+    {
+        auto taken = scope.TakeHold();
+        if (dynamic_cast<RequeuedHold*>(taken.get()) == nullptr)
+            return nullptr; // Nothing else survives an `ADMIT`, so nothing else is here to put back.
+        return std::unique_ptr<RequeuedHold> { static_cast<RequeuedHold*>(taken.release()) };
+    }
+
+    /// Give a granted ticket back by its settle.
+    ///
+    /// `WorkerRefused` does not end the ticket (R7, Ruling 9): the service puts the SAME ticket back at
+    /// the front with the refusal counted, and the connection keeps it as a `RequeuedHold` until its
+    /// next `ADMIT` waits on it again. Its waiter is registered BEFORE the settle puts it back, because
+    /// a pump on any thread may decide it at once and must find somebody to leave the decision with.
+    /// @param core The shared state.
+    /// @param service The scheduler.
+    /// @param scope The connection's scope.
+    /// @param hold The grant being settled, already taken off the connection.
+    /// @param request The settle.
+    void SettleHeld(std::shared_ptr<AdmissionCore> const& core,
+                    Distributed::SchedulerService& service,
+                    ConnectionScope& scope,
+                    AdmissionHold& hold,
+                    Wire::SettleRequest const& request)
+    {
+        auto const ticket = hold.Ticket();
+        if (request.outcome == Wire::SettleOutcome::WorkerRefused)
+        {
+            auto waiter = std::make_shared<AdmissionWaiter>();
+            {
+                auto const guard = std::scoped_lock { core->mutex };
+                core->waiters.insert_or_assign(ticket, waiter);
+            }
+            scope.Hold(std::make_unique<RequeuedHold>(core, ticket, std::move(waiter)));
+            core->metrics->Increment(IMetricsSink::Counter::AdmissionWorkerRefused);
+        }
+        service.SettleAdmission(ticket,
+                                Distributed::Settlement { .outcome = request.outcome, .peakBytes = request.peakBytes });
+        hold.Settled();
+        core->PumpAndDeliver();
     }
 } // namespace
 
@@ -394,9 +548,10 @@ std::optional<IMetricsSink::Counter> AdmissionResponder::PeerWatchCounter(std::u
 
 std::chrono::milliseconds AdmissionResponder::RequestTimeout(std::uint8_t opRaw) const noexcept
 {
-    // A queue wait is as long as the compiles ahead of it: the ceiling a lease may live is the longest
-    // honest one, and the endpoint sweeps a connection past it.
-    return opRaw == static_cast<std::uint8_t>(Wire::Op::Admit) ? Wire::MaxCompileLeaseLifetime : FrameServer::HeaderTimeout;
+    // A queue wait is as long as the compiles ahead of it, so it has no total ceiling: this window bounds
+    // the SILENCE, and every pulse that reaches the peer renews it (`ConnectionScope::JudgeByPulse`).
+    return opRaw == static_cast<std::uint8_t>(Wire::Op::Admit) ? AdmissionIdleBound(_core->progressInterval)
+                                                               : FrameServer::HeaderTimeout;
 }
 
 core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte const> frame, PeerIdentity peer)
@@ -451,12 +606,7 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
             if (hold == nullptr)
                 co_return FrameReply { RefuseHere(Wire::ErrorCode::UnknownLease,
                                                   "no admitted compile is held on this connection") };
-            service->SettleAdmission(
-                hold->Ticket(), Distributed::Settlement { .outcome = request->outcome, .peakBytes = request->peakBytes });
-            hold->Settled();
-            if (request->outcome == Wire::SettleOutcome::WorkerRefused)
-                core->metrics->Increment(IMetricsSink::Counter::AdmissionWorkerRefused);
-            core->PumpAndDeliver();
+            SettleHeld(core, *service, *scope, *hold, *request);
             co_return FrameReply { Wire::EncodeReply(Wire::Status::Ok, {}) };
         }
         case Wire::Op::Admit:
@@ -471,6 +621,8 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     if (scope == nullptr)
         co_return FrameReply { RefuseHere(Wire::ErrorCode::DispatchNotPermitted,
                                           "an admission waits on its connection, and this caller has none") };
+    // Taken FIRST, so every refusal below gives a put-back ticket up as any other frame would.
+    auto requeued = TakeRequeued(*scope);
     if (!machine.has_value())
         co_return FrameReply { RefuseHere(Wire::ErrorCode::DispatchNotPermitted,
                                           "an admission charges a machine, and this connection identified none") };
@@ -478,8 +630,12 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     if (!request.has_value())
         co_return FrameReply { RefuseHere(Wire::ErrorCode::MalformedFrame, {}) };
 
-    // A second admission on a connection that holds one ends the first, and the next frame's own
-    // `BeforeFrame` has already done it: only a settle survives, so there is nothing held here.
+    // The liveness of this wait is its pulse, never its length (`Park`).
+    scope->JudgeByPulse();
+
+    // A second admission on a connection that holds a grant ends the first, and the next frame's own
+    // `BeforeFrame` has already done it: only a settle survives that, so the only thing an `ADMIT` can
+    // find held here is a put-back ticket, taken above.
     // The connection as it is when the grant comes, not as it is now: the facts are copied WITHOUT the
     // scope, which would keep the connection's hold reachable from the queue for as long as it waits.
     auto regateFacts = facts;
@@ -487,22 +643,35 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     auto const regate = [membership = core->membership, regateFacts = std::move(regateFacts)] {
         return Distributed::CallerContextOf(*membership, regateFacts);
     };
-    auto const ticket = service->Admit(caller, regate, *machine, *request);
-    if (!ticket.has_value())
-        co_return FrameReply { EncodeServiceReply(ticket.error()) };
-
-    auto waiter = std::make_shared<AdmissionWaiter>();
+    // A connection whose ticket a worker refused asks again on the SAME ticket (Ruling 9): it is already
+    // back at the front, its refusals counted, and its waiter registered since the settle -- so it is
+    // neither enqueued nor counted queued a second time.
+    auto ticket = Distributed::Ticket {};
+    auto waiter = std::shared_ptr<AdmissionWaiter> {};
+    if (requeued != nullptr)
     {
-        auto const guard = std::scoped_lock { core->mutex };
-        core->waiters.emplace(*ticket, waiter);
+        ticket = requeued->Ticket();
+        waiter = requeued->TakeWaiter();
     }
-    Registration registration { core, *ticket };
-    core->metrics->Increment(IMetricsSink::Counter::AdmissionQueued);
+    else
+    {
+        auto const admitted = service->Admit(caller, regate, *machine, *request);
+        if (!admitted.has_value())
+            co_return FrameReply { EncodeServiceReply(admitted.error()) };
+        ticket = *admitted;
+        waiter = std::make_shared<AdmissionWaiter>();
+        {
+            auto const guard = std::scoped_lock { core->mutex };
+            core->waiters.emplace(ticket, waiter);
+        }
+        core->metrics->Increment(IMetricsSink::Counter::AdmissionQueued);
+    }
+    Registration registration { core, ticket };
 
     // Registered BEFORE the first pump, so a decision made for this very request has somewhere to land.
     core->PumpAndDeliver();
 
-    auto const woke = co_await Park(core, waiter, scope, Wire::MaxCompileLeaseLifetime);
+    auto const woke = co_await Park(core, waiter, scope, core->progressInterval);
 
     switch (woke)
     {
@@ -515,15 +684,10 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
             // The queue forgot the ticket at demotion: nothing to abandon, and the client is told
             // where to go. The same refusal `Gate` gives a request that arrives after it.
             registration.Done();
-            co_return FrameReply { EncodeServiceReply(
-                Distributed::SchedulerReply { .status = Wire::Status::Error,
-                                              .error = Wire::ErrorCode::NotLeader,
-                                              .message = waiter->demotedTo.value_or(std::string {}),
-                                              .payload = {} }) };
+            co_return FrameReply { RefuseDemoted(waiter->demotedTo.value_or(std::string {})) };
         case Woke::PeerGone:
-        case Woke::TimedOut:
             // `Registration` gives the ticket back. An empty reply closes without writing: a peer that
-            // left is not owed an answer, and one that waited past the window is closed by the sweep.
+            // left is not owed an answer.
             co_return FrameReply {};
     }
 
@@ -551,7 +715,7 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     auto charge = HeldChargeRegistry::Handle {};
     if (verdict->kind == Wire::GrantKind::Local && loopback && core->held != nullptr)
         charge = core->held->Hold(verdict->chargedBytes);
-    scope->Hold(std::make_unique<AdmissionHold>(core, *ticket, std::move(charge)));
+    scope->Hold(std::make_unique<AdmissionHold>(core, *scope, ticket, std::move(charge)));
     registration.Done();
     co_return FrameReply { Wire::EncodeReply(Wire::Status::Ok, verdict->grant) };
 }

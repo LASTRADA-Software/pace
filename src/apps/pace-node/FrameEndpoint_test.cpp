@@ -5836,3 +5836,74 @@ TEST_CASE("The cluster-status verb reads a live node's cluster over its node por
     CHECK(Unwrap(rendered).contains("n1"));
     CHECK(Unwrap(rendered).contains("10.0.0.1:6675"));
 }
+
+namespace
+{
+/// A hold that asks for a window of its own, for `IdleWindowFor`.
+class WindowedHold final: public IConnectionHold
+{
+  public:
+    explicit WindowedHold(std::chrono::milliseconds window) noexcept:
+        _window { window }
+    {
+    }
+
+    [[nodiscard]] bool SurvivesFrame(std::uint8_t /*opRaw*/) const noexcept override
+    {
+        return true;
+    }
+
+    [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
+    {
+        return _window;
+    }
+
+  private:
+    std::chrono::milliseconds _window;
+};
+} // namespace
+
+TEST_CASE("The idle window before the next request is the header's, or the hold's", "[frame][admission]")
+{
+    // Both arms, because a constant answers either one alone: a connection holding nothing keeps the
+    // slow-loris property, and one holding a granted compile is not swept at the header's five seconds
+    // while the compiler runs (#1728).
+    ConnectionScope scope;
+    CHECK(FrameServer::IdleWindowFor(scope) == FrameServer::HeaderTimeout);
+
+    scope.Hold(std::make_unique<WindowedHold>(Wire::MaxCompileLeaseLifetime));
+    CHECK(FrameServer::IdleWindowFor(scope) == Wire::MaxCompileLeaseLifetime);
+
+    // The HOLD decides, not the fact of holding: a ticket put back in the queue asks for a short one.
+    scope.Hold(std::make_unique<WindowedHold>(123ms));
+    CHECK(FrameServer::IdleWindowFor(scope) == 123ms);
+
+    scope.End();
+    CHECK(FrameServer::IdleWindowFor(scope) == FrameServer::HeaderTimeout);
+}
+
+TEST_CASE("A retired watch is silent only for the cancellation its retirement produced", "[frame][admission]")
+{
+    using Outcome = FrameServer::WatchOutcome;
+    auto const failed = [](core::net::NetErrorCode code) {
+        return core::net::IoResult { std::unexpected { core::net::NetError { .code = code } } };
+    };
+
+    // The retirement's own `Cancelled` is nobody leaving.
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::Cancelled), true) == Outcome::Retired);
+
+    // A reset that resolved the read before the retirement found it is the departure it always was --
+    // the case a retirement-only test read as silence, and the scope was never told.
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::ConnReset), true) == Outcome::Abortive);
+
+    // Not retired, ANY error is abortive -- a `Cancelled` too, which is a close under the watch.
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::Cancelled), false) == Outcome::Abortive);
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::ConnReset), false) == Outcome::Abortive);
+
+    // A value is never the retirement's, retired or not.
+    for (auto const retired: { false, true })
+    {
+        CHECK(FrameServer::ClassifyWatch(core::net::IoResult { 0U }, retired) == Outcome::Graceful);
+        CHECK(FrameServer::ClassifyWatch(core::net::IoResult { 7U }, retired) == Outcome::Pipelined);
+    }
+}

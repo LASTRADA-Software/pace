@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <core/async/StopToken.hpp>
@@ -32,6 +34,14 @@ class IConnectionHold
     /// @param opRaw The verb of the next frame on the connection, as received.
     /// @return True when the hold goes on across a frame with that verb; false when that frame ends it.
     [[nodiscard]] virtual bool SurvivesFrame(std::uint8_t opRaw) const noexcept = 0;
+
+    /// How long the connection may sit idle before its next frame while this is held.
+    ///
+    /// A property of what is held, never of the endpoint: a granted compile waits for its settle for
+    /// as long as a compiler runs, while a request put back in the queue is owed its re-`ADMIT` at
+    /// once and must not keep its place at the head for an hour behind a client that went quiet.
+    /// @return The sweeper's window for the gap before the next request.
+    [[nodiscard]] virtual std::chrono::milliseconds IdleWindow() const noexcept = 0;
 };
 
 /// What one connection owns beyond its bytes: whether its peer has gone, and a hold a reply left on it.
@@ -70,6 +80,38 @@ class ConnectionScope
         _peerGone.request_stop();
     }
 
+    /// Record that the endpoint has already filed this peer's departure under the answered verb's
+    /// own counter (`IFrameResponder::PeerWatchCounter`): a reply was ready and nobody was left to
+    /// take it. A hold released by that same departure reads this and does not count it a second time.
+    void NoteDepartureCounted() noexcept
+    {
+        _departureCounted = true;
+    }
+
+    /// @return True once the endpoint has counted this connection's departure itself.
+    [[nodiscard]] bool DepartureCounted() const noexcept
+    {
+        return _departureCounted;
+    }
+
+    /// Ask the endpoint to judge the request being answered by its progress pulse rather than by a
+    /// total ceiling: every pulse that reaches the peer moves the request's sweep deadline on by its
+    /// whole answer window. Reset at every frame (`BeforeFrame`), so it covers one request only.
+    ///
+    /// The fleet compile queue's wait (#1728): a queue wait has no total ceiling, and a peer whose
+    /// pulses stop reaching it -- its receive window full, its host gone -- is still swept one answer
+    /// window after the last pulse that did.
+    void JudgeByPulse() noexcept
+    {
+        _judgedByPulse = true;
+    }
+
+    /// @return True while the request being answered is judged by its pulse (`JudgeByPulse`).
+    [[nodiscard]] bool JudgedByPulse() const noexcept
+    {
+        return _judgedByPulse;
+    }
+
     /// Keep @p hold until the connection ends or a frame it does not survive arrives, releasing any
     /// earlier one first.
     /// @param hold What to hold; null is the same as `Release`.
@@ -84,6 +126,14 @@ class ConnectionScope
         return _hold != nullptr;
     }
 
+    /// @return The idle window the kept hold asks for, or nothing when nothing is held.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> HeldIdleWindow() const noexcept
+    {
+        if (_hold == nullptr)
+            return std::nullopt;
+        return _hold->IdleWindow();
+    }
+
     /// Hand the hold back to the caller, who owns releasing it.
     /// @return The hold, or null when there is none.
     [[nodiscard]] std::unique_ptr<IConnectionHold> TakeHold() noexcept
@@ -96,6 +146,7 @@ class ConnectionScope
     /// @param opRaw The frame's verb, as received.
     void BeforeFrame(std::uint8_t opRaw) noexcept
     {
+        _judgedByPulse = false;
         if (_hold != nullptr && !_hold->SurvivesFrame(opRaw))
             _hold.reset();
     }
@@ -109,6 +160,8 @@ class ConnectionScope
   private:
     core::async::StopSource _peerGone;
     std::unique_ptr<IConnectionHold> _hold;
+    bool _departureCounted { false }; ///< Reactor thread only, like the hold.
+    bool _judgedByPulse { false };    ///< Reactor thread only: set by the responder, read by the pulse.
 };
 
 } // namespace Pace

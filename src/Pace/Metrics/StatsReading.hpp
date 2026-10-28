@@ -280,7 +280,8 @@ struct MetricsSnapshot
     std::optional<ConsensusStatus> consensus {};
 
     /// The admission queue's depth and charges, when this process is the leader's scheduler surface;
-    /// absent otherwise. Rendered by `/metrics` only: a live-stats frame does not carry it.
+    /// absent otherwise. Rendered by `/metrics`, and carried by a live-stats frame since grammar 7
+    /// (`StatsReadingCodec`), absent there exactly as it is here.
     std::optional<AdmissionGauges> admission {};
 
     Uptime uptime {};

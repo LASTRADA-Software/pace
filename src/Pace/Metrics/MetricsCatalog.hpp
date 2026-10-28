@@ -1513,7 +1513,8 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::AdmissionWorkerRefused,
       .prometheusName = "pace_admission_worker_refused_total",
-      .help = "Granted compiles a worker refused, which went back to the head of the queue.",
+      .help = "Granted compiles a worker refused. The same request goes back to the head of the queue with the refusal "
+              "counted, and runs on its own machine once a worker has refused it three times.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::AdmissionWaitMillisTotal,
       .prometheusName = "pace_admission_wait_milliseconds_total",

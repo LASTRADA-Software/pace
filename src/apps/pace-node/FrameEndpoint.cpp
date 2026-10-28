@@ -1208,9 +1208,11 @@ namespace
         /// True once the connection has retired this watch with `cancelRead()` because a reply left a
         /// hold on it and the peer is not expected to speak until the hold is given back.
         ///
-        /// **What silences the cancellation's error, never the error code** -- the rule `CancelRead`
-        /// states: a retired watch resolves as `Cancelled`, which would otherwise read as a departure,
-        /// and silencing by code would stop a genuine abortive close being noticed.
+        /// **What silences the cancellation's error, never the error code alone** -- the rule
+        /// `CancelRead` states: a retired watch resolves as `Cancelled`, which would otherwise read as a
+        /// departure, and silencing by code would stop a genuine abortive close being noticed. The code
+        /// still says whether the retirement is what resolved it: a reset that resolved the read before
+        /// the retirement found it is a departure (`FrameServer::ClassifyWatch`).
         bool retired { false };
     };
 
@@ -1393,13 +1395,14 @@ namespace
         // therefore a CONSEQUENCE of #1090 rather than a property of this function,
         // which is the opposite of what #1092 warned about and the same fact.
         auto const readable = co_await socket->waitReadable();
-        if (!readable.has_value() && watch->retired)
+        auto const outcome = FrameServer::ClassifyWatch(readable, watch->retired);
+        if (outcome == FrameServer::WatchOutcome::Retired)
         {
             // Retired by the connection (`SettleWatchHolding`): the read slot is free, nobody left.
             watch->finished = true;
             co_return;
         }
-        if (!readable.has_value())
+        if (outcome == FrameServer::WatchOutcome::Abortive)
         {
             // An ERROR is an abortive close -- the peer reset, or the socket was closed
             // under us, including by the `Close()` the connection issues to retrieve
@@ -1409,7 +1412,7 @@ namespace
             // suppressions decide whether it is anybody's business.
             RecordDeparture(*state, socket.get(), *watch, PeerDeparture::Abortive);
         }
-        else if (*readable == 0)
+        else if (outcome == FrameServer::WatchOutcome::Graceful)
         {
             // Zero is EOF: the peer finished sending and said goodbye. Ordinary, and
             // counted apart from the arm above for exactly that reason.
@@ -1655,7 +1658,13 @@ namespace
         // the watcher looking exactly like a peer that hung up. Filing either would put
         // this node's own teardowns in a row documented as a client-side story.
         if (hadReply && !state->ClosedLocally(socket))
+        {
             state->metrics.Increment(watch->counter);
+            // Filed HERE, so whatever the reply left held on the connection -- an admission's grant,
+            // released by the close this departure causes -- does not file the same departure again.
+            if (watch->scope != nullptr)
+                watch->scope->NoteDepartureCounted();
+        }
         co_return true;
     }
 
@@ -1705,7 +1714,9 @@ namespace
     ///
     /// **The retirement is the only retrieval of a parked read that is not `Close()`**, and ending the
     /// connection here would end every admitted compile at the settle bound. The flag is set BEFORE the
-    /// cancel, so `WatchPeer` reads the resulting `Cancelled` as a retirement and never as a departure.
+    /// cancel, so `WatchPeer` reads the resulting `Cancelled` as a retirement and never as a departure --
+    /// and only that: a read that had already resolved with a reset, its resumption still queued, is
+    /// filed as the departure it is and tells the scope (`FrameServer::ClassifyWatch`).
     /// A connection holding nothing, or one whose watch is already finished, takes `SettleWatch`'s road.
     /// @param reactor The loop this connection runs on; never null.
     /// @param socket The connection, whose parked read is retrieved.
@@ -1752,6 +1763,32 @@ namespace
         bool finished { false };
     };
 
+    /// What a pulse that reached its peer may renew: the request's sweep deadline, when the responder
+    /// asked for its request to be judged by the pulse (`ConnectionScope::JudgeByPulse`).
+    struct PulseRenewal
+    {
+        std::shared_ptr<FrameServer::State> state; ///< Where the deadline is kept.
+        std::shared_ptr<ConnectionScope> scope;    ///< Whether the request asked; null never renews.
+        std::chrono::milliseconds window {};       ///< The request's answer window, renewed whole.
+    };
+
+    /// Move the request's sweep deadline on by its whole answer window, when its responder asked.
+    ///
+    /// **This is what lets a queue wait have no total ceiling and still not wait silently** (#1728):
+    /// a compile queued behind twenty minutes of other compiles is the system working, so its answer
+    /// window bounds the SILENCE since the last pulse that reached the peer, never the wait. A peer
+    /// that stops taking pulses -- its receive window full, its host gone -- stops renewing it, and
+    /// the sweep reaches it one window later, exactly as before.
+    /// @param renewal What to renew.
+    /// @param socket The connection, as the sweeper tracks it.
+    void RenewAfterPulse(PulseRenewal const& renewal, core::net::ISocket* socket)
+    {
+        if (renewal.state == nullptr || renewal.scope == nullptr || !renewal.scope->JudgedByPulse())
+            return;
+        auto& state = *renewal.state;
+        state.Rearm(socket, state.io.Reactor().clock().now() + renewal.window, SweepPhase::AwaitingAnswer, renewal.window);
+    }
+
     /// Write `Status::Progress` to the peer every `interval` until told to stop.
     ///
     /// **The liveness signal a dispatched compile owes its client**
@@ -1783,10 +1820,12 @@ namespace
     ///        resume onto a destroyed socket -- the same lifetime rule `WatchPeer` has.
     /// @param pulse Where its state is left; shared with the connection.
     /// @param interval How long between frames.
+    /// @param renewal What a pulse that reached the peer renews (`RenewAfterPulse`).
     core::async::DetachedTask PulseProgress(core::net::EventLoop* reactor,
                                             std::shared_ptr<core::net::ISocket> socket,
                                             std::shared_ptr<ProgressPulse> pulse,
-                                            std::chrono::milliseconds interval)
+                                            std::chrono::milliseconds interval,
+                                            PulseRenewal renewal)
     {
         while (!pulse->stopped)
         {
@@ -1811,6 +1850,7 @@ namespace
             // mechanism that already knows.
             if (!co_await WriteAll(EndpointWriter::Pulse, socket.get(), Wire::EncodeProgressReply()))
                 break;
+            RenewAfterPulse(renewal, socket.get());
         }
         pulse->finished = true;
         co_return;
@@ -1830,18 +1870,20 @@ namespace
     /// @param opRaw The verb, as received.
     /// @param reactor The loop this connection runs on; never null.
     /// @param socket The connection, shared with the pulse for its lifetime.
+    /// @param renewal What each pulse that reaches the peer renews.
     /// @return The pulse, or null when this request is not pulsed.
     [[nodiscard]] std::shared_ptr<ProgressPulse> ArmProgressPulse(IFrameResponder const& responder,
                                                                   std::uint8_t opRaw,
                                                                   core::net::EventLoop* reactor,
-                                                                  std::shared_ptr<core::net::ISocket> socket)
+                                                                  std::shared_ptr<core::net::ISocket> socket,
+                                                                  PulseRenewal renewal)
     {
         auto const interval = responder.ProgressInterval(opRaw);
         if (!interval.has_value() || *interval <= std::chrono::milliseconds::zero())
             return nullptr;
 
         auto pulse = std::make_shared<ProgressPulse>();
-        PulseProgress(reactor, std::move(socket), pulse, *interval);
+        PulseProgress(reactor, std::move(socket), pulse, *interval, std::move(renewal));
         return pulse;
     }
 
@@ -2276,8 +2318,8 @@ namespace
                 reader.ReleaseSpareCapacity();
 
                 // A connection holding a granted admission waits for its settle for as long as the
-                // compile runs, so the sweeper's idle window is the compile's, never the header's.
-                auto const idleWindow = scope->Holds() ? Wire::MaxCompileLeaseLifetime : FrameServer::HeaderTimeout;
+                // compile runs, so the sweeper's idle window is the hold's, never the header's.
+                auto const idleWindow = FrameServer::IdleWindowFor(*scope);
                 state->Rearm(socket.get(), deadlineFor(idleWindow), SweepPhase::AwaitingRequest, idleWindow);
 
                 auto const header = co_await reader.ReadExactly(Wire::RequestHeaderSize);
@@ -2453,7 +2495,11 @@ namespace
                 // `ReclaimFromPulse` below is what hands the socket back before the reply.
                 // Null when this surface does not pulse this verb -- see
                 // `ArmProgressPulse` and `IFrameResponder::ProgressInterval` (#245).
-                auto pulse = ArmProgressPulse(state->responder, decoded->opRaw, &state->io.Reactor(), socket);
+                auto pulse = ArmProgressPulse(state->responder,
+                                              decoded->opRaw,
+                                              &state->io.Reactor(),
+                                              socket,
+                                              PulseRenewal { .state = shared, .scope = scope, .window = answerWindow });
 
                 // Awaited: answering may reach the network -- the cache surface
                 // consults an upstream -- and that suspends rather than blocking

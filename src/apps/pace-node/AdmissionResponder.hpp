@@ -22,6 +22,21 @@
 namespace Pace::Node
 {
 
+/// How long a parked `ADMIT` may go without a pulse reaching its peer before the endpoint sweeps it.
+///
+/// The compile surface's own pair, kept in proportion: `DefaultCompileIdleTimeout` is that many
+/// `DefaultProgressInterval`s, so a cadence a test shortens shortens the bound with it, and the bound
+/// always tolerates the same number of missed pulses the client does.
+/// @param progressInterval The pulse cadence.
+/// @return The window, renewed by every pulse.
+[[nodiscard]] constexpr std::chrono::milliseconds AdmissionIdleBound(std::chrono::milliseconds progressInterval) noexcept
+{
+    return progressInterval * (CompileCacheWire::DefaultCompileIdleTimeout / CompileCacheWire::DefaultProgressInterval);
+}
+
+static_assert(AdmissionIdleBound(CompileCacheWire::DefaultProgressInterval) == CompileCacheWire::DefaultCompileIdleTimeout,
+              "at the default cadence a parked admission is bounded exactly as a dispatched compile's silence is");
+
 /// The state an `AdmissionResponder` shares with the frames it parks and the holds it leaves on
 /// connections (defined in the implementation file).
 struct AdmissionCore;
@@ -35,6 +50,12 @@ struct AdmissionCore;
 /// `SETTLE` that gives it back; a close, or any other frame, abandons it. The hold rides on the
 /// connection's `ConnectionScope` and releases in a destructor, so every way out of a connection --
 /// including a reactor stopped with the connection's frame still parked -- gives the charge back.
+///
+/// **A worker's refusal keeps the ticket** (R7, Ruling 9). `SETTLE{WorkerRefused}` puts the SAME ticket
+/// back at the front of the queue with the refusal counted, is answered `Ok`, and leaves the connection
+/// holding it; the client's next `ADMIT` on that connection waits on it again -- no new ticket, no new
+/// place at the back -- and after `AdmissionQueue::MaxWorkerRefusals` it is granted on its caller. Any
+/// other frame, or the close, abandons it.
 ///
 /// **How a request parks.** `Answer` suspends in `core::net::interruptibleSleepUntil` on the node's
 /// reactor: the park is the reactor's own, so a reactor that stops frees the frame, and the wake is a
@@ -90,7 +111,9 @@ class AdmissionResponder final
     [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t opRaw) const noexcept;
 
     /// @param opRaw A verb served here.
-    /// @return How long its answer may take: a queue wait for `ADMIT`, a round trip for the rest.
+    /// @return How long its answer may take: for `ADMIT` the silence a parked wait may keep between two
+    ///         pulses that reach the peer (`AdmissionIdleBound`), since every such pulse renews it and the
+    ///         wait itself has no ceiling; a round trip for the rest.
     [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t opRaw) const noexcept;
 
   private:

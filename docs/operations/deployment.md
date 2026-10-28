@@ -654,7 +654,7 @@ is where they are explained one by one.
 | `pace_admission_deduplicated_total` | Requests answered *stored*: another compile of the same key stored its object while they waited. |
 | `pace_admission_ran_alone_total` | Admissions whose estimate exceeded a whole machine's budget, so the compile ran alone. |
 | `pace_admission_abandoned_total` | Queued or granted requests whose connection closed, or whose next frame was not a settle. |
-| `pace_admission_worker_refused_total` | Admitted compiles a worker declined; the request is asked again. |
+| `pace_admission_worker_refused_total` | Admitted compiles a worker declined; the same request goes back to the head of the queue, and runs locally after three refusals. |
 | `pace_admission_wait_milliseconds_total` | Milliseconds admitted requests spent queued: a `_sum`, whose count is granted_worker + granted_local + deduplicated. |
 | `pace_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
 | `pace_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. |

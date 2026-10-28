@@ -41,6 +41,7 @@
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/LeaseRosterFakes.hpp>
+#include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
@@ -259,11 +260,40 @@ struct Queue
         REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
     }
 
+    /// Register one worker on another machine, which proved its key, for the `gcc-14` toolchain.
+    void RegisterWorker(std::uint32_t slots)
+    {
+        auto const reply =
+            service.Register(Distributed::CallerContext { .membership = Distributed::Membership::Member,
+                                                          .peerId = "10.0.0.2",
+                                                          .provenNodeId = "worker-node",
+                                                          .provenKey = workerKey.PublicKey(),
+                                                          .identified = true },
+                             Distributed::WorkerRegistration {
+                                 .fingerprint = "gcc-14", .endpoint = WorkerEndpoint, .slots = slots, .codecs = {} });
+        REQUIRE(reply.status == Wire::Status::Ok);
+    }
+
+    /// The worker's machine states its budget over the wire, as the proven peer it is. Pumps.
+    void ReportWorker(std::uint64_t budgetBytes = 1024 * MiB, std::uint32_t slots = 4)
+    {
+        auto const frame = Wire::EncodeMachineBudget(Wire::MachineBudgetReport {
+            .memoryBudgetBytes = budgetBytes, .slots = slots, .heldSlots = 0, .heldBytes = 0, .peaks = {} });
+        auto reply = core::async::syncRun(admission->Answer(
+            frame,
+            PeerIdentity { .host = "10.0.0.2",
+                           .proven = ProvenIdentity { .id = "worker-node", .key = workerKey.PublicKey() } }));
+        REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
+    }
+
+    static constexpr std::string_view WorkerEndpoint = "10.0.0.2:7100";
+
     core::platform::ManualClock clock;
     core::platform::ManualWallClock wallClock;
     AtomicMetricsSink metrics;
     NullLogger logger;
     Distributed::KeyPairLeaseSigner const signer = Testing::TestLeaseSigner();
+    Ed25519KeyPair const workerKey = Testing::TestKeyPair("admission-worker");
     Distributed::SchedulerService service { clock, wallClock, metrics, logger, signer, {}, 64 * MiB };
     Distributed::SchedulerProtocol protocol { service, metrics };
     FlippableMembership membership;
@@ -544,4 +574,217 @@ TEST_CASE("AdmissionResponder.parked-frame-freed-on-teardown", "[node][admission
     queue->io.reset();
     CHECK(queue->service.AdmissionSnapshotNow().depth == 0);
     CHECK(queue->service.AdmissionSnapshotNow().chargedBytes.empty());
+}
+
+TEST_CASE("AdmissionResponder.dispatchable-grant-names-the-worker-and-its-lease", "[node][admission]")
+{
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.RegisterWorker(2);
+    queue.ReportWorker();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+    auto const grant = GrantOf(Unwrap(client.ReadAnswer()));
+    CHECK(grant.kind == Wire::GrantKind::Worker);
+    CHECK(grant.endpoint == Queue::WorkerEndpoint);
+    CHECK_FALSE(grant.leaseToken.empty());
+    CHECK(queue.service.OutstandingLeases(4).total == 1);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedWorker) == 1);
+    // A worker grant is no charge on this machine's own report: only a loopback LOCAL lease is.
+    CHECK(queue.held.Held() == HeldCharges {});
+
+    client.Send(SettleFrame(Wire::SettleOutcome::Stored, 10 * MiB));
+    CHECK(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+    CHECK(WaitFor([&] { return queue.service.OutstandingLeases(4).total == 0; }));
+    CHECK(queue.service.AdmissionSnapshotNow().chargedBytes.empty());
+}
+
+TEST_CASE("AdmissionResponder.worker-refused-readmits-on-the-same-ticket", "[node][admission]")
+{
+    // Ruling 9: a worker's refusal puts the SAME ticket back at the FRONT, and the connection's next
+    // ADMIT waits on it -- no second ticket, no place at the back behind a request that came later.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.RegisterWorker(1);
+    queue.ReportWorker(1024 * MiB, 1);
+
+    Client first { port };
+    first.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "ka"));
+    REQUIRE(GrantOf(Unwrap(first.ReadAnswer())).kind == Wire::GrantKind::Worker);
+
+    // A later request waits behind the one slot the machine offers.
+    Client later { port };
+    later.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "kb"));
+    REQUIRE(Unwrap(later.Read()).status == Wire::Status::Progress);
+    REQUIRE(Count(queue, IMetricsSink::Counter::AdmissionQueued) == 2);
+
+    first.Send(SettleFrame(Wire::SettleOutcome::WorkerRefused));
+    CHECK(Unwrap(first.ReadAnswer()).status == Wire::Status::Ok);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionWorkerRefused) == 1);
+    // Both wait now: the refused one went back, it did not leave.
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 2);
+
+    first.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "ka"));
+    REQUIRE(Unwrap(first.Read()).status == Wire::Status::Progress);
+    // Bound to the ticket it had: nothing new was queued.
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionQueued) == 2);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 2);
+
+    // The machine reports again, and the refused request -- at the front -- takes the slot.
+    queue.ReportWorker(1024 * MiB, 1);
+    CHECK(GrantOf(Unwrap(first.ReadAnswer())).kind == Wire::GrantKind::Worker);
+    CHECK(Unwrap(later.Read()).status == Wire::Status::Progress);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 1);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 0);
+}
+
+TEST_CASE("AdmissionResponder.refusal-bound-reached-over-the-wire-grants-local", "[node][admission]")
+{
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.RegisterWorker(1);
+    queue.ReportWorker();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+
+    for (auto const round: std::views::iota(1U, Distributed::AdmissionQueue::MaxWorkerRefusals + 1))
+    {
+        client.Send(SettleFrame(Wire::SettleOutcome::WorkerRefused));
+        REQUIRE(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+        client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+        REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
+        queue.ReportWorker();
+        if (round < Distributed::AdmissionQueue::MaxWorkerRefusals)
+            REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+    }
+
+    // The bound is reached: the worker that reported is not tried again, and the request waits for its
+    // own machine, which has not reported yet -- a pulse, not a grant.
+    CHECK(Unwrap(client.Read()).status == Wire::Status::Progress);
+    queue.Report(1024 * MiB, 2);
+    CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionQueued) == 1);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionWorkerRefused) == Distributed::AdmissionQueue::MaxWorkerRefusals);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedWorker) == Distributed::AdmissionQueue::MaxWorkerRefusals);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedLocal) == 1);
+}
+
+TEST_CASE("AdmissionResponder.requeued-ticket-abandoned-by-close-or-another-frame", "[node][admission]")
+{
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.RegisterWorker(1);
+    queue.ReportWorker();
+
+    SECTION("a close")
+    {
+        {
+            Client client { port };
+            client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+            REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+            client.Send(SettleFrame(Wire::SettleOutcome::WorkerRefused));
+            REQUIRE(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+            REQUIRE(queue.service.AdmissionSnapshotNow().depth == 1);
+            client.Close();
+        }
+        CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().depth == 0; }));
+        CHECK(WaitFor([&] { return Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1; }));
+    }
+    SECTION("a frame that is not an admission")
+    {
+        Client client { port };
+        client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+        REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+        client.Send(SettleFrame(Wire::SettleOutcome::WorkerRefused));
+        REQUIRE(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+        REQUIRE(queue.service.AdmissionSnapshotNow().depth == 1);
+
+        // A second settle: there is nothing granted to settle, and the put-back ticket went first.
+        client.Send(SettleFrame(Wire::SettleOutcome::Stored));
+        auto const reply = Unwrap(client.ReadAnswer());
+        CHECK(Pace::Testing::ErrorOf(reply.bytes) == Wire::ErrorCode::UnknownLease);
+        CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+        CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
+    }
+}
+
+TEST_CASE("AdmissionResponder.a-departure-the-endpoint-counted-is-not-counted-again", "[node][admission]")
+{
+    // A grant ready for a peer that had already gone: the endpoint files it under `AdmissionAbandoned`
+    // (the verb's watch counter), and the hold that departure releases must not file it a second time.
+    Queue queue;
+    queue.Report(1024 * MiB, 2);
+    auto const scope = std::make_shared<ConnectionScope>();
+    auto const reply = core::async::syncRun(queue.admission->Answer(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"),
+                                                                    PeerIdentity { .host = "127.0.0.1", .scope = scope }));
+    REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
+    REQUIRE(scope->Holds());
+
+    SECTION("filed by the endpoint")
+    {
+        scope->NoteDepartureCounted();
+        scope->End();
+        CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 0);
+    }
+    SECTION("filed by nobody else")
+    {
+        scope->End();
+        CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
+    }
+    // Given back either way.
+    CHECK(queue.service.AdmissionSnapshotNow().chargedBytes.empty());
+    CHECK(queue.held.Held() == HeldCharges {});
+}
+
+TEST_CASE("AdmissionResponder.peer-gone-before-the-grant-is-written-counts-once", "[node][admission]")
+{
+    // Over the wire: the request is granted at once, and the client has already hung up. Whether the
+    // endpoint sees the departure before its write or only after, it is one abandoned admission.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.Report(1024 * MiB, 2);
+    {
+        Client client { port };
+        client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+        client.Close();
+    }
+    REQUIRE(WaitFor([&] {
+        return Count(queue, IMetricsSink::Counter::AdmissionAbandoned) >= 1
+               && queue.service.AdmissionSnapshotNow().chargedBytes.empty() && queue.held.Held() == HeldCharges {};
+    }));
+    // Past where a second count would have landed: it lands in the same call that frees the charge, and
+    // the endpoint's own count comes before that call.
+    std::this_thread::sleep_for(200ms);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
+}
+
+TEST_CASE("AdmissionResponder.a-parked-wait-has-no-ceiling-while-pulses-flow", "[node][admission]")
+{
+    // The answer window of a parked ADMIT is the SILENCE it may keep -- six pulses at this cadence --
+    // and every pulse that reaches the client renews it. Parked far past several windows and several
+    // sweeps, it is still there to be granted; a window that bounded the WAIT would have closed it.
+    Queue queue;
+    auto const port = queue.Serve();
+    REQUIRE(queue.admission->RequestTimeout(static_cast<std::uint8_t>(Wire::Op::Admit)) == 120ms);
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    auto const until = std::chrono::steady_clock::now() + 4 * FrameServer::SweepInterval;
+    std::size_t pulses = 0;
+    while (std::chrono::steady_clock::now() < until)
+    {
+        auto const frame = client.Read();
+        REQUIRE(frame.has_value());
+        REQUIRE(frame->status == Wire::Status::Progress);
+        ++pulses;
+    }
+    CHECK(pulses > 10);
+    CHECK(Count(queue, IMetricsSink::Counter::FrameAnswerDeadlineSweeps) == 0);
+
+    queue.Report(1024 * MiB, 2);
+    CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
 }

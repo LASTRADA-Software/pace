@@ -13,6 +13,7 @@
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheAuth.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/ConnectionScope.hpp>
 #include <Pace/Protocol/LiveStream.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
 
@@ -31,6 +32,7 @@
 
 #include <core/async/Task.hpp>
 #include <core/net/IListener.hpp>
+#include <core/net/IoResult.hpp>
 
 namespace Pace::Node
 {
@@ -1174,6 +1176,50 @@ class FrameServer
         // that reads like a guarantee and is not one. The same argument
         // `RefusalTimeout` above makes for the same reason.
         return std::max(window, SweepInterval);
+    }
+
+    /// The sweeper's window for the gap before a connection's NEXT request.
+    ///
+    /// `HeaderTimeout` for a connection holding nothing -- the slow-loris property -- and whatever the
+    /// hold a reply left asks for otherwise (`IConnectionHold::IdleWindow`): a granted admission waits
+    /// for its settle for as long as a compiler runs, so sweeping it at the header's five seconds would
+    /// end every admitted compile, and the client would be told nothing (#1728). A pure function so
+    /// both arms are pinned without a case that waits out either window.
+    /// @param scope The connection's scope.
+    /// @return How long the connection may stay silent before it is swept.
+    [[nodiscard]] static std::chrono::milliseconds IdleWindowFor(ConnectionScope const& scope) noexcept
+    {
+        return scope.HeldIdleWindow().value_or(HeaderTimeout);
+    }
+
+    /// What one peer watch's single `WaitReadable` answered, read against whether the connection
+    /// retired it.
+    enum class WatchOutcome : std::uint8_t
+    {
+        Retired,   ///< The connection's own `cancelRead()` resolved it: nobody left.
+        Abortive,  ///< An error that is not that retirement: the peer reset, or the socket was closed.
+        Graceful,  ///< EOF: the peer finished sending.
+        Pipelined, ///< Bytes are pending: the peer is still there.
+    };
+
+    /// Classify a watch's resolution.
+    ///
+    /// **What silences the cancellation is the RETIREMENT, and the code only says whether the
+    /// retirement is what resolved it.** A watch is retired (`cancelRead()`) while it is not yet
+    /// FINISHED -- and a watch whose read already resolved with a reset, its resumption merely queued
+    /// for the loop's next drain, is not finished either. The cancel then finds the slot empty, and
+    /// that reset is a departure the retirement did not cause: read as a retirement, the scope was never
+    /// told the peer had gone. So a retired watch is silent only for the `Cancelled` its own retirement
+    /// produces; any other error is the departure it always was.
+    /// @param readable What `WaitReadable` answered.
+    /// @param retired Whether the connection retired the watch before it resumed.
+    /// @return The outcome.
+    [[nodiscard]] static WatchOutcome ClassifyWatch(core::net::IoResult const& readable, bool retired) noexcept
+    {
+        if (!readable.has_value())
+            return retired && readable.error().code == core::net::NetErrorCode::Cancelled ? WatchOutcome::Retired
+                                                                                          : WatchOutcome::Abortive;
+        return *readable == 0 ? WatchOutcome::Graceful : WatchOutcome::Pipelined;
     }
 
     /// @param io The loop this server accepts and answers on.
