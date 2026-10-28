@@ -950,7 +950,7 @@ TEST_CASE("AdmitForwarder.the-leaders-own-budget-round-charges-its-own-machine",
     auto const insider = Distributed::CallerContext { .membership = Distributed::Membership::Member, .peerId = "127.0.0.1" };
     auto const ticket = leader.queue.service.Admit(
         insider,
-        [insider] { return insider; },
+        [insider] { return Distributed::CallerContext { insider }; },
         leader.queue.service.OwnMachineId(),
         Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
                                    .fingerprint = {},

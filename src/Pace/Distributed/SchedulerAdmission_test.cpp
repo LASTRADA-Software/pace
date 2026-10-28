@@ -100,7 +100,7 @@ struct Fleet
                  bool storable = false,
                  std::function<CallerContext()> regate = {},
                  std::vector<std::string> excluded = {},
-                 std::optional<MachineId> machine = std::nullopt)
+                 std::optional<MachineId> const& machine = std::nullopt)
     {
         if (!regate)
             regate = [] {

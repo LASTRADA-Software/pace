@@ -209,6 +209,32 @@ namespace
         return std::nullopt;
     }
 
+    /// Read an admission block: the queue depth, the charged list, then the budget list (grammar 8).
+    /// @param in The bytes, positioned at the block.
+    /// @param gauges Where the fields go.
+    /// @return Nothing when the block read whole; otherwise why it did not.
+    [[nodiscard]] std::optional<StatsReadingFault> ReadAdmission(ByteCursor& in, AdmissionGauges& gauges)
+    {
+        std::uint32_t count = 0;
+        if (!in.ReadU64(gauges.queueDepth) || !in.ReadCount(count, MinMemberBytes + sizeof(std::uint64_t)))
+            return StatsReadingFault::Truncated;
+        for ([[maybe_unused]] auto const machine: std::views::iota(std::uint32_t { 0 }, count))
+        {
+            auto& [name, charged] = gauges.chargedBytes.emplace_back();
+            if (!in.ReadField(name) || !in.ReadU64(charged))
+                return StatsReadingFault::Truncated;
+        }
+        if (!in.ReadCount(count, MinMemberBytes + (2 * sizeof(std::uint64_t))))
+            return StatsReadingFault::Truncated;
+        for ([[maybe_unused]] auto const machine: std::views::iota(std::uint32_t { 0 }, count))
+        {
+            auto& [name, budget, inUse] = gauges.budgets.emplace_back();
+            if (!in.ReadField(name) || !in.ReadU64(budget) || !in.ReadU64(inUse))
+                return StatsReadingFault::Truncated;
+        }
+        return std::nullopt;
+    }
+
     /// Read a bitmap over @p count items.
     [[nodiscard]] std::optional<std::vector<bool>> ReadBitmap(ByteCursor& in, std::size_t count)
     {
@@ -442,24 +468,8 @@ std::expected<StatsReading, StatsReadingFault> DecodeStatsReading(std::span<std:
 
     if ((presence & AdmissionPresent) != 0)
     {
-        auto& gauges = admission.emplace();
-        std::uint32_t count = 0;
-        if (!in.ReadU64(gauges.queueDepth) || !in.ReadCount(count, MinMemberBytes + sizeof(std::uint64_t)))
-            return truncated;
-        for ([[maybe_unused]] auto const machine: std::views::iota(std::uint32_t { 0 }, count))
-        {
-            auto& [name, charged] = gauges.chargedBytes.emplace_back();
-            if (!in.ReadField(name) || !in.ReadU64(charged))
-                return truncated;
-        }
-        if (!in.ReadCount(count, MinMemberBytes + (2 * sizeof(std::uint64_t))))
-            return truncated;
-        for ([[maybe_unused]] auto const machine: std::views::iota(std::uint32_t { 0 }, count))
-        {
-            auto& [name, budget, inUse] = gauges.budgets.emplace_back();
-            if (!in.ReadField(name) || !in.ReadU64(budget) || !in.ReadU64(inUse))
-                return truncated;
-        }
+        if (auto const fault = ReadAdmission(in, admission.emplace()); fault.has_value())
+            return std::unexpected { *fault };
     }
 
     std::uint64_t seconds = 0;
