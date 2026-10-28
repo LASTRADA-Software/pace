@@ -343,6 +343,15 @@ class NodeProofClient
     /// @return What was learned.
     [[nodiscard]] NodeProofAttempt Prove(SealedFrameSocket& peer) const;
 
+    /// Whom this client proves itself to by default: the trust the presence round's `Prove` judges a
+    /// scheduler by. Exposed so a caller on a reactor, which awaits `ProveAsync`, asks the SAME question
+    /// of the scheduler it dials as the presence round does, and never a second answer of its own.
+    /// @return The default trust; outlives this client's caller, as the constructor's reference does.
+    [[nodiscard]] IServerTrust const& DefaultTrust() const noexcept
+    {
+        return _trust;
+    }
+
     /// @return The id this machine proves.
     [[nodiscard]] std::string_view NodeId() const noexcept
     {

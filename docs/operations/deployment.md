@@ -656,6 +656,9 @@ is where they are explained one by one.
 | `pace_admission_abandoned_total` | Queued or granted requests whose connection closed, or whose next frame was not a settle. |
 | `pace_admission_worker_refused_total` | Admitted compiles a worker declined; the same request goes back to the head of the queue, and runs locally after three refusals. |
 | `pace_admission_wait_milliseconds_total` | Milliseconds admitted requests spent queued: a `_sum`, whose count is granted_worker + granted_local + deduplicated. |
+| `pace_admission_forwarded_total` | Queue requests this node, which does not lead, relayed to the leader for a launcher on this machine. |
+| `pace_admission_forward_failed_total` | Queue requests this node could not relay to the leader; the launcher compiled without the queue. |
+| `pace_admission_forward_abandoned_total` | Relayed queue requests whose launcher left before the leader answered. |
 | `pace_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
 | `pace_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. |
 | `pace_dispatch_worker_registrations_field_too_long_total` | A peer registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused. |

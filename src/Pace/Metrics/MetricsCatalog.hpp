@@ -1521,6 +1521,22 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .help = "Milliseconds admitted requests spent queued. The sum of a pair: divide by granted_worker + granted_local + "
               "deduplicated, which is its count.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionForwarded,
+      .prometheusName = "pace_admission_forwarded_total",
+      .help = "Queue requests (admit and settle) this node relayed to the leader on behalf of a launcher on this "
+              "machine, and got the leader's answer to.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionForwardFailed,
+      .prometheusName = "pace_admission_forward_failed_total",
+      .help = "Queue requests this node could not relay: the leader could not be reached or proved no identity, "
+              "stopped answering, or moved more often than a request follows it. The launcher was refused and "
+              "compiles without the queue.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionForwardAbandoned,
+      .prometheusName = "pace_admission_forward_abandoned_total",
+      .help = "Relayed queue requests whose launcher left before the leader's answer reached it. The relay's "
+              "connection to the leader is closed with it, which releases the request there.",
+      .type = MetricType::Counter },
 } };
 
 // Checked at compile time rather than by a test, because the failure this prevents

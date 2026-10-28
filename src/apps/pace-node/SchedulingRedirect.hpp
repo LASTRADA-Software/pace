@@ -23,6 +23,8 @@
 namespace Pace::Node
 {
 
+class AdmitForwarder;
+
 /// @file SchedulingRedirect.hpp
 /// What a node that runs consensus but no scheduler -- a Raft learner -- answers the fleet's
 /// scheduling verbs with: `NotLeader`, naming the leader's `0xFC` endpoint (#1639).
@@ -110,6 +112,24 @@ class KnownSchedulingLeader final: public ISchedulingLeaderSource
     std::optional<core::platform::SteadyTimePoint::duration> silentFor,
     core::platform::SteadyTimePoint::duration bound) noexcept;
 
+/// What a scheduler-surface responder answers a frame refused before its payload is read: the size and
+/// opcode decisions, uncounted -- a peer confused about the framing says nothing about the fleet.
+///
+/// One answer for the redirect and the forwarder, so the two surfaces a learner serves scheduling
+/// verbs on refuse a malformed frame in the same bytes.
+/// @param decision Why the frame was refused.
+/// @param detail Words for a person.
+/// @return The encoded refusal.
+[[nodiscard]] std::vector<std::byte> SchedulerSurfaceRefusalReply(CompileCacheWire::PrePayloadDecision decision,
+                                                                  std::string_view detail);
+
+/// What a scheduler-surface responder answers a refusal the ENDPOINT decided -- memory, capacity,
+/// identity -- uncounted, by the scheduler surface's rows (`Detail::SchedulerEndpointRefusals`).
+/// @param refusal What the endpoint decided.
+/// @param detail Words for a person.
+/// @return The encoded refusal.
+[[nodiscard]] std::vector<std::byte> SchedulerSurfaceEndpointRefusalReply(EndpointRefusal refusal, std::string_view detail);
+
 /// The writer side of `KnownSchedulingLeader`: what the consensus tier tells this node, folded into
 /// the one endpoint the redirect names.
 ///
@@ -148,6 +168,11 @@ class SchedulingLeaderPublisher
 
 /// Answers every scheduling verb on a node that runs no scheduler: a member is sent to the leader.
 ///
+/// **Except the queue's, from a launcher on this machine** (#1728): with a forwarder wired
+/// (`ForwardAdmissionWith`), `ADMIT` and `SETTLE` from a caller on this machine are relayed to the
+/// leader instead (`AdmitForwarder`). Everything else -- those verbs from another machine included --
+/// is still answered `NotLeader`.
+///
 /// **Admission first, and through the fold the scheduler uses** (`Distributed::CallerContextOf`): a
 /// caller the node's oracle does not admit is answered `NotAMember` exactly as a scheduler answers
 /// it, and is never told where the leader is. Every admitted caller is then told `NotLeader` with
@@ -182,9 +207,14 @@ class SchedulingRedirectResponder final: public IFrameResponder
     SchedulingRedirectResponder(Distributed::IMembershipOracle const& membership,
                                 ISchedulingLeaderSource const& leader) noexcept;
 
+    /// Relay the queue's verbs from this machine to the leader through @p forwarder, from now on.
+    /// @param forwarder Where `ADMIT` and `SETTLE` go; must outlive this. Wired once, before serving.
+    void ForwardAdmissionWith(AdmitForwarder& forwarder) noexcept;
+
     /// @copydoc IFrameResponder::Answer
     ///
-    /// Never suspends: the answer is a membership fold and one string.
+    /// Never suspends for a redirect: the answer is a membership fold and one string. A forwarded verb
+    /// suspends for as long as the forwarder does.
     [[nodiscard]] core::async::Task<FrameReply> Answer(std::span<std::byte const> frame, PeerIdentity peer) override;
 
     /// @copydoc IFrameResponder::RefusePeer
@@ -218,11 +248,8 @@ class SchedulingRedirectResponder final: public IFrameResponder
 
     /// @copydoc IFrameResponder::RequestTimeout
     ///
-    /// The header window: nothing here waits on anything.
-    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t /*opRaw*/) const noexcept override
-    {
-        return FrameServer::HeaderTimeout;
-    }
+    /// The header window, except for a verb the forwarder relays: that waits as the forwarder says.
+    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t opRaw) const noexcept override;
 
     /// `RequestBytes`.
     [[nodiscard]] std::size_t MaxRequestBytes() const noexcept override
@@ -253,19 +280,14 @@ class SchedulingRedirectResponder final: public IFrameResponder
 
     /// @copydoc IFrameResponder::PeerWatchCounter
     ///
-    /// None: nothing here waits, so a peer has no window to vanish in.
-    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t /*opRaw*/) const noexcept override
-    {
-        return std::nullopt;
-    }
+    /// None for a redirect: nothing there waits, so a peer has no window to vanish in. A verb the
+    /// forwarder relays is the forwarder's.
+    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t opRaw) const noexcept override;
 
     /// @copydoc IFrameResponder::ProgressInterval
     ///
-    /// None: there is no silence to interpret.
-    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t /*opRaw*/) const noexcept override
-    {
-        return std::nullopt;
-    }
+    /// None for a redirect: there is no silence to interpret. A verb the forwarder relays is its.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t opRaw) const noexcept override;
 
     /// @copydoc IFrameResponder::StreamFor
     ///
@@ -288,11 +310,13 @@ class SchedulingRedirectResponder final: public IFrameResponder
     /// @param peer Who is asking.
     /// @param opRaw The verb, as received.
     /// @return The encoded refusal, or nullopt for a verb outside the scheduler family -- which a
-    ///         member is then refused by whoever asked: the endpoint's opcode check, or `Answer`.
+    ///         member is then refused by whoever asked: the endpoint's opcode check, or `Answer` -- and
+    ///         for one the forwarder relays (`ForwardAdmissionWith`), which nothing here refuses.
     [[nodiscard]] std::optional<std::vector<std::byte>> Decide(PeerIdentity const& peer, std::uint8_t opRaw) const;
 
     Distributed::IMembershipOracle const& _membership; ///< Who is told where the leader is.
     ISchedulingLeaderSource const& _leader;            ///< Where the leader answers, read per answer.
+    AdmitForwarder* _forwarder { nullptr };            ///< Where the queue's verbs go, once wired; else null.
 };
 
 } // namespace Pace::Node

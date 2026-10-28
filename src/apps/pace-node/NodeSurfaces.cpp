@@ -726,6 +726,9 @@ ServedSurfaces NodeServedSurfacesFor(NodeConfig const& cfg)
         Row { .surface = MetricsSurface::ConsensusPeerWire, .served = RunsConsensus(cfg) },
         Row { .surface = MetricsSurface::CompileScheduler, .served = servesScheduler },
         Row { .surface = MetricsSurface::SchedulerAdmission, .served = servesScheduler },
+        // The node that redirects scheduling verbs relays a launcher's queue exchanges to the leader instead
+        // (`AdmitForwarder`), asked of the predicate `main` builds that responder under.
+        Row { .surface = MetricsSurface::AdmissionForwarding, .served = RedirectsScheduling(cfg) },
         Row { .surface = MetricsSurface::CompileWorker, .served = RunsWorker(cfg) },
         Row { .surface = MetricsSurface::NodeCacheTier, .served = ConfiguresCacheTier(cfg) },
         Row { .surface = MetricsSurface::NodeEnrollment, .served = ServesEnrollment(cfg, servesScheduler) },

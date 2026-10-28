@@ -628,7 +628,9 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // Moved when the admission queue (#1728) added eight counters at the end of the catalogue and the
     // snapshot gained its admission block (grammar 7). Clients and nodes upgrade together. Read off
     // the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x2abe7f912ab63775ULL);
+    //
+    // Moved again when admission forwarding (#1728) added three counters beside them.
+    CHECK(StatsReadingLayout == 0xcf1ddc4c1e927261ULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

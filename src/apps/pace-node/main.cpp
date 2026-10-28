@@ -11,6 +11,7 @@
 ///
 #include "AdminEndpoint.hpp"
 #include "AdmissionResponder.hpp"
+#include "AdmitForwarder.hpp"
 #include "CacheTier.hpp"
 #include "ClusterAdminCli.hpp"
 #include "CompileCapacity.hpp"
@@ -1374,6 +1375,20 @@ struct RouteParts
     std::optional<Node::SchedulingRedirectResponder> schedulingRedirect;
     if (Node::RedirectsScheduling(cfg))
         schedulingRedirect.emplace(membership.Oracle(), knownSchedulingLeader);
+    // And the door a launcher on this machine uses to reach the fleet's compile queue (#1728): the queue
+    // lives on the leader alone, so this node relays `ADMIT` and `SETTLE` to it over a connection that
+    // proves THIS node's identity key, instead of sending the launcher away with `NotLeader`. Built only
+    // where the redirect is, and where an identity key exists to prove -- without one the redirect
+    // stands, and the launcher fails open. Declared after the redirect and before the surface that
+    // routes to it, so it is destroyed after that surface closes its connections.
+    std::optional<Node::ProvenSchedulerDialer> forwardDialer;
+    std::optional<Node::AdmitForwarder> admitForwarder;
+    if (schedulingRedirect.has_value() && prover.has_value())
+    {
+        forwardDialer.emplace(*prover, nodeIo.Connector(), nodeIo.Reactor());
+        admitForwarder.emplace(knownSchedulingLeader, *forwardDialer, nodeIo.Reactor(), metrics, &leaseCharges);
+        schedulingRedirect->ForwardAdmissionWith(*admitForwarder);
+    }
 
     auto nodeSurfaceOrRefusal = Node::StartNodeSurfaceOrExplain(
         nodeIo,
