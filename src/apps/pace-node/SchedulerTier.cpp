@@ -198,9 +198,10 @@ SchedulerTier::SchedulerTier(Distributed::IMembershipOracle const& membership,
                              Ed25519KeyPair identityKey,
                              std::string_view clusterId,
                              NodeConditions& conditions,
-                             std::string ownEndpoint):
+                             std::string ownEndpoint,
+                             std::uint64_t admissionEstimateBytes):
     _signer { std::move(signerId), std::move(identityKey) },
-    _service { clock, wallClock, metrics, logger, _signer, clusterId },
+    _service { clock, wallClock, metrics, logger, _signer, clusterId, admissionEstimateBytes },
     _protocol { _service, metrics },
     // The oracle is the NODE's, not this tier's: the cache surface consults the same
     // object, and a node that answered "is this peer one of ours" differently at its
@@ -246,7 +247,8 @@ std::expected<std::unique_ptr<SchedulerTier>, NodeRefusal> SchedulerTier::Start(
                                                                      *identityKey,
                                                                      cfg.clusterId,
                                                                      conditions,
-                                                                     AdvertisedEndpoint(cfg) } };
+                                                                     AdvertisedEndpoint(cfg),
+                                                                     CompileEstimateDefaultOf(cfg) } };
 
     // Answered BEFORE `main` settles the table, so no reader ever sees these rows `undecided`: a
     // scheduler no consensus has told a role says so -- `not-evaluated` -- rather than nothing.

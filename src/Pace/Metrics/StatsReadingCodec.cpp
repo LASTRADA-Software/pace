@@ -26,12 +26,13 @@ namespace
     constexpr std::uint8_t UpstreamPresent = 1U << 2U;  ///< `MetricsSnapshot::upstreamConfigured`.
     constexpr std::uint8_t ConsensusPresent = 1U << 3U; ///< `MetricsSnapshot::consensus`.
     constexpr std::uint8_t HostLoadPresent = 1U << 4U;  ///< `MetricsSnapshot::hostLoad`.
+    constexpr std::uint8_t AdmissionPresent = 1U << 6U; ///< `MetricsSnapshot::admission`.
     // Bit 5 is RETIRED and never reused: it carried a certified roster's lapse, and no roster has
     // one any more. A reading that sets it is `Malformed`, as any unknown bit is.
 
     /// Every bit a presence byte may carry; anything else is `Malformed`.
     constexpr std::uint8_t KnownPresenceBits =
-        StoragePresent | HostPresent | UpstreamPresent | ConsensusPresent | HostLoadPresent;
+        StoragePresent | HostPresent | UpstreamPresent | ConsensusPresent | HostLoadPresent | AdmissionPresent;
 
     // Presence bits inside a host-load block, in the order its figures travel.
     constexpr std::uint8_t CpuPresent = 1U << 0U;             ///< `HostLoadReading::cpu`.
@@ -255,12 +256,12 @@ std::vector<std::byte> EncodeStatsReading(StatsReading const& reading)
 
     // Structured bindings, so a field added to either struct stops this compiling until it is
     // given a place in the grammar and a name in `SnapshotFieldNames` / `ConsensusFieldNames`.
-    auto const& [storage, storageTiers, host, hostLoad, upstreamConfigured, consensus, uptime] = snapshot;
+    auto const& [storage, storageTiers, host, hostLoad, upstreamConfigured, consensus, admission, uptime] = snapshot;
 
-    out.U8(static_cast<std::uint8_t>((storage.has_value() ? StoragePresent : 0U) | (host.has_value() ? HostPresent : 0U)
-                                     | (upstreamConfigured.has_value() ? UpstreamPresent : 0U)
-                                     | (consensus.has_value() ? ConsensusPresent : 0U)
-                                     | (hostLoad.has_value() ? HostLoadPresent : 0U)));
+    out.U8(static_cast<std::uint8_t>(
+        (storage.has_value() ? StoragePresent : 0U) | (host.has_value() ? HostPresent : 0U)
+        | (upstreamConfigured.has_value() ? UpstreamPresent : 0U) | (consensus.has_value() ? ConsensusPresent : 0U)
+        | (hostLoad.has_value() ? HostLoadPresent : 0U) | (admission.has_value() ? AdmissionPresent : 0U)));
 
     if (storage.has_value())
         WriteStorage(out, *storage);
@@ -311,6 +312,18 @@ std::vector<std::byte> EncodeStatsReading(StatsReading const& reading)
         out.U64(term.value);
         out.U64(commitIndex.value);
         out.U8(static_cast<std::uint8_t>(role));
+    }
+
+    if (admission.has_value())
+    {
+        auto const& [queueDepth, chargedBytes] = *admission;
+        out.U64(queueDepth);
+        out.U32(static_cast<std::uint32_t>(chargedBytes.size()));
+        for (auto const& [machine, bytes]: chargedBytes)
+        {
+            out.Text(machine);
+            out.U64(bytes);
+        }
     }
 
     out.U64(static_cast<std::uint64_t>(uptime.value.count()));
@@ -373,7 +386,7 @@ std::expected<StatsReading, StatsReadingFault> DecodeStatsReading(std::span<std:
                                                           : CounterAbsence::NoSlotInThisBuild);
     }
 
-    auto& [storage, storageTiers, host, hostLoad, upstreamConfigured, consensus, uptime] = reading.snapshot;
+    auto& [storage, storageTiers, host, hostLoad, upstreamConfigured, consensus, admission, uptime] = reading.snapshot;
 
     auto presence = std::uint8_t { 0 };
     if (!in.ReadU8(presence))
@@ -418,6 +431,20 @@ std::expected<StatsReading, StatsReadingFault> DecodeStatsReading(std::span<std:
     {
         if (auto const fault = ReadConsensus(in, consensus.emplace()); fault.has_value())
             return std::unexpected { *fault };
+    }
+
+    if ((presence & AdmissionPresent) != 0)
+    {
+        auto& gauges = admission.emplace();
+        std::uint32_t count = 0;
+        if (!in.ReadU64(gauges.queueDepth) || !in.ReadCount(count, MinMemberBytes + sizeof(std::uint64_t)))
+            return truncated;
+        for ([[maybe_unused]] auto const machine: std::views::iota(std::uint32_t { 0 }, count))
+        {
+            auto& [name, charged] = gauges.chargedBytes.emplace_back();
+            if (!in.ReadField(name) || !in.ReadU64(charged))
+                return truncated;
+        }
     }
 
     std::uint64_t seconds = 0;

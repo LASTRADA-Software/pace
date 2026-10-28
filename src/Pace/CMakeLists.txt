@@ -78,6 +78,7 @@ target_sources(Pace
         Distributed/NodeProof.cpp
         Distributed/StateLeaseRoster.cpp
         Distributed/TicketVerifier.cpp
+        Distributed/SchedulerAdmission.cpp
         Distributed/SchedulerService.cpp
         Distributed/SchedulerProtocol.cpp
         Distributed/FleetHistory.cpp

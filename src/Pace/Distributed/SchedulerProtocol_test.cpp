@@ -1273,14 +1273,15 @@ TEST_CASE("A LEASE's toolchain label reaches the scheduler's unserved list",
     CHECK(unserved.front().label == "cl 19.44.35207");
 }
 
-TEST_CASE("The admission verbs are refused by name until the leader serves them",
+TEST_CASE("The synchronous protocol refuses the admission verbs by name; the leader queue serves them",
           "[distributed][scheduler][protocol][admission]")
 {
-    // #1728. The wire carries ADMIT, SETTLE and MACHINE-BUDGET before the leader answers them, and a
-    // scheduler that meets one in that window must REPLY: `DispatchNotPermitted`, never
-    // `UnknownOpcode` (which tells a client this build is too old) and never a dropped frame (which
-    // reads as a dead host). These verbs are not yet routed by the scheduler (Task 8 replaces this
-    // case with the real behaviour).
+    // #1728. ADMIT parks until the queue decides, which a protocol that answers from its own tables and
+    // never suspends cannot do, so `AdmissionResponder` answers these three in front of it
+    // (`AdmissionResponder_test.cpp` is the real behaviour). What THIS object owes is the reply it
+    // gives when it is asked directly -- a node whose reactor never wired a queue, a test over the bare
+    // protocol: `DispatchNotPermitted`, never `UnknownOpcode` (which tells a client this build is too
+    // old) and never a dropped frame (which reads as a dead host).
     Fixture fixture;
     auto const excluded = std::array<std::string_view, 0> {};
     std::vector<std::vector<std::byte>> const frames {

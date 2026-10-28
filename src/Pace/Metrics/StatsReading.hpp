@@ -181,6 +181,23 @@ struct ConsensusStatus
 /// snapshot plus the process uptime. Produced by the admin server's snapshot
 /// provider so the renderer takes a single bundle and the server itself needs
 /// no clock.
+/// The leader's admission queue as a scrape reads it (#1728): gauges, sampled per scrape.
+///
+/// Absent on a process that is not the leader's scheduler surface (`MetricsSnapshot::admission`), for
+/// the reason every optional here is: a node that queues nothing has no depth, and `0` would say it
+/// queues and has an empty queue.
+struct AdmissionGauges
+{
+    std::uint64_t queueDepth {}; ///< Requests waiting for admission.
+    /// Bytes the ledger has charged each machine, keyed by the machine's identity key in hex, machines
+    /// with nothing charged omitted. A machine is a key rather than a worker id: the ledger is per
+    /// machine and a machine serving two toolchains is one row.
+    std::vector<std::pair<std::string, std::uint64_t>> chargedBytes {};
+
+    /// @return True when every field is equal.
+    [[nodiscard]] bool operator==(AdmissionGauges const&) const = default;
+};
+
 struct MetricsSnapshot
 {
     /// The cache's own statistics, absent in a process that has no cache.
@@ -261,6 +278,10 @@ struct MetricsSnapshot
     /// consensus and has not yet been admitted to anything, because that is a
     /// *reading* and the one #435 exists to make observable. See `ConsensusStatus`.
     std::optional<ConsensusStatus> consensus {};
+
+    /// The admission queue's depth and charges, when this process is the leader's scheduler surface;
+    /// absent otherwise. Rendered by `/metrics` only: a live-stats frame does not carry it.
+    std::optional<AdmissionGauges> admission {};
 
     Uptime uptime {};
 
@@ -454,6 +475,11 @@ enum class MetricsSurface : std::uint8_t
     /// dormant or serving.
     NodeSharedCache,
 
+    /// The leader's admission queue (#1728): `apps/pace-node/AdmissionResponder.cpp`, which parks the
+    /// admit requests and writes the admission counters, over `Distributed/SchedulerAdmission.cpp`.
+    /// Served only where the node schedules, as `CompileScheduler` is.
+    SchedulerAdmission,
+
     /// Enumerator count. Not a surface.
     Last
 };
@@ -466,11 +492,11 @@ enum class MetricsSurface : std::uint8_t
 /// does not do that* and nobody re-checks. So an unrevisited call site keeps today's behaviour,
 /// and narrowing is always a positive act.
 inline constexpr std::array EverySurface {
-    MetricsSurface::CacheAcceptPath,   MetricsSurface::CacheStorage,      MetricsSurface::CacheCompileSurface,
-    MetricsSurface::LiveStats,         MetricsSurface::ConsensusPeerWire, MetricsSurface::CompileScheduler,
-    MetricsSurface::CompileWorker,     MetricsSurface::NodeEnrollment,    MetricsSurface::NodeCacheTier,
-    MetricsSurface::NodeFrameEndpoint, MetricsSurface::NodeDiscovery,     MetricsSurface::NodeFormation,
-    MetricsSurface::NodeSharedCache,
+    MetricsSurface::CacheAcceptPath,   MetricsSurface::CacheStorage,       MetricsSurface::CacheCompileSurface,
+    MetricsSurface::LiveStats,         MetricsSurface::ConsensusPeerWire,  MetricsSurface::CompileScheduler,
+    MetricsSurface::CompileWorker,     MetricsSurface::NodeEnrollment,     MetricsSurface::NodeCacheTier,
+    MetricsSurface::NodeFrameEndpoint, MetricsSurface::NodeDiscovery,      MetricsSurface::NodeFormation,
+    MetricsSurface::NodeSharedCache,   MetricsSurface::SchedulerAdmission,
 };
 
 static_assert(EverySurface.size() == static_cast<std::size_t>(MetricsSurface::Last),
@@ -511,7 +537,7 @@ struct CounterSoleWriter
 /// a row silently absent from the attribution and indistinguishable from one nobody had
 /// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
-/// **How the 232 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 58
+/// **How the 240 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 66
 /// of them and would have rendered the other 174 absent -- the same defect as the bug, three
 /// times larger. The rows are written by five mechanisms, and reading only `SurfaceRefusal`
 /// tables (the obvious reading of *written through `Refuse(row)`*) reaches 147 of the 174 and
@@ -521,11 +547,11 @@ struct CounterSoleWriter
 /// |---|---|
 /// | a `.counter` table row, spent by `Refuse(row)`, `RefuseAs` or an outcome table's reader | 148 |
 /// | a `LeaseToken.hpp` outcome row's `workerCounter` | 10 |
-/// | returned by a classifier for its caller to spend | 4 |
+/// | returned by a classifier for its caller to spend | 5 |
 /// | a `CacheTierProfile` member, spent by the tier built with it | 16 |
-/// | `Increment(Counter::X)` directly | 58 |
+/// | `Increment(Counter::X)` directly | 66 |
 ///
-/// The column sums past 232 because four rows are written two ways -- and the 147 above is not
+/// The column sums past 240 because five rows are written two ways -- and the 147 above is not
 /// the 148 here: 148 rows HAVE a refusal row, and 147 of those have no increment site, which is
 /// what a `SurfaceRefusal`-only reading would reach. Two figures one apart, measuring different
 /// things, is exactly how a census comes to be quoted wrong, so both are asserted.
@@ -983,6 +1009,20 @@ inline constexpr std::array CounterSoleWriterTable {
                         .surface = MetricsSurface::NodeFrameEndpoint },
     CounterSoleWriter { .counter = IMetricsSink::Counter::NodeRaftEndpointChanges,
                         .surface = MetricsSurface::NodeFrameEndpoint },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionQueued, .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionGrantedWorker,
+                        .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionGrantedLocal,
+                        .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionDeduplicated,
+                        .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionRanAlone, .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionAbandoned,
+                        .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionWorkerRefused,
+                        .surface = MetricsSurface::SchedulerAdmission },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionWaitMillisTotal,
+                        .surface = MetricsSurface::SchedulerAdmission },
 };
 
 /// Whether every catalogue row has at least one surface attributed to it.
@@ -1010,7 +1050,7 @@ inline constexpr std::array CounterSoleWriterTable {
 }
 
 /// A `consteval` fold rather than a size comparison, because `CounterSoleWriterTable.size()`
-/// counts (counter, surface) PAIRS: it is 233 for 232 counters today, and a row duplicated
+/// counts (counter, surface) PAIRS: it is 241 for 240 counters today, and a row duplicated
 /// while another went missing would leave any arithmetic on the size perfectly consistent.
 ///
 /// @return True when no enumerator is missing from the table.

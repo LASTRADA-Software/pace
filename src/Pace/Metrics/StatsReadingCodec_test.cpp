@@ -81,6 +81,8 @@ void GiveEveryCounterItsOwnValue(IMetricsSink& sink)
                                                             .term = Consensus::Term { .value = 41 },
                                                             .commitIndex = Consensus::LogIndex { .value = 918'273 },
                                                             .role = Consensus::Role::PreCandidate },
+                             .admission =
+                                 AdmissionGauges { .queueDepth = 7, .chargedBytes = { { "0a1b", 4'096 }, { "", 0 } } },
                              .uptime = Uptime { 864'017s } };
 }
 
@@ -622,7 +624,11 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     //
     // Moved when the rename to Pace renamed every series into `pace_` (both old prefixes),
     // which the layout folds in by name. Clients and nodes upgrade together. Read off the built test.
-    CHECK(StatsReadingLayout == 0x603edf728d83daf4ULL);
+    //
+    // Moved when the admission queue (#1728) added eight counters at the end of the catalogue and the
+    // snapshot gained its admission block (grammar 7). Clients and nodes upgrade together. Read off
+    // the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x2abe7f912ab63775ULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "AdmissionResponder.hpp"
 #include "CacheProxy.hpp"
 #include "EnrollmentAbsence.hpp"
 #include "FrameEndpoint.hpp"
@@ -316,14 +317,29 @@ class SchedulerResponder final: public IFrameResponder
     {
     }
 
+    /// Route the admission verbs (`ADMIT`, `SETTLE`, `MACHINE-BUDGET`, #1728) to the leader's queue.
+    ///
+    /// A setter rather than a constructor argument, for `SchedulerService::SetRole`'s reason: the
+    /// queue parks on the node's reactor, which is built after the tier this responder belongs to.
+    /// Without one the admission verbs are answered as before, `DispatchNotPermitted`.
+    /// @param admission The queue's responder; must outlive this.
+    void ServeAdmissionWith(AdmissionResponder& admission) noexcept
+    {
+        _admission = &admission;
+    }
+
     /// @copydoc IFrameResponder::Answer
     ///
-    /// Never suspends. The scheduler answers from its own tables -- a decision
+    /// Never suspends for every verb but `ADMIT`. The scheduler answers from its own tables -- a decision
     /// layer kept pure so every capacity and expiry rule is a `core::platform::ManualClock` unit
     /// test -- so this is a one-line adapter, and a responder that costs a frame
-    /// allocation and no round trip is a legitimate thing to be.
+    /// allocation and no round trip is a legitimate thing to be. `ADMIT` parks, in the admission
+    /// responder, until the queue decides.
     [[nodiscard]] core::async::Task<FrameReply> Answer(std::span<std::byte const> frame, PeerIdentity peer) override
     {
+        if (ServesAdmission(frame.size() >= CompileCacheWire::RequestHeaderSize ? std::to_integer<std::uint8_t>(frame[2])
+                                                                                : 0))
+            co_return co_await _admission->Answer(frame, std::move(peer));
         co_return _protocol.Answer(frame, Context(std::move(peer)));
     }
 
@@ -394,9 +410,10 @@ class SchedulerResponder final: public IFrameResponder
     /// A round trip. `SchedulerProtocol::Answer` never suspends -- it answers from its
     /// own tables -- so what this covers is a peer sending a payload it already has in
     /// hand, and the endpoint's own header window is the right size for that.
-    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t /*opRaw*/) const noexcept override
+    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t opRaw) const noexcept override
     {
-        return FrameServer::HeaderTimeout;
+        // A queued admission waits as long as the compiles ahead of it.
+        return ServesAdmission(opRaw) ? _admission->RequestTimeout(opRaw) : FrameServer::HeaderTimeout;
     }
 
     /// Kilobytes, not megabytes.
@@ -445,9 +462,12 @@ class SchedulerResponder final: public IFrameResponder
     /// cannot realistically vanish inside one -- and the write that would discover it
     /// is the very next statement anyway. Watching would buy a park and a wake per
     /// request to learn something the write already reports.
-    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t /*opRaw*/) const noexcept override
+    ///
+    /// **`ADMIT` is the exception**, and the reason is the same one turned over: it parks for as long as
+    /// the compiles ahead of it run, so a client can vanish inside it and the answer is what wakes.
+    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t opRaw) const noexcept override
     {
-        return std::nullopt;
+        return ServesAdmission(opRaw) ? _admission->PeerWatchCounter(opRaw) : std::nullopt;
     }
 
     /// @copydoc IFrameResponder::ProgressInterval
@@ -456,9 +476,10 @@ class SchedulerResponder final: public IFrameResponder
     /// memory in microseconds, so there is no interval in which a client could wonder
     /// whether this node is still there. A pulse would be a frame that cannot arrive
     /// before the reply it precedes, on a verb whose client is not looping for one.
-    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t /*opRaw*/) const noexcept override
+    /// **`ADMIT` again excepted**: it is the one scheduler verb a client waits minutes for.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t opRaw) const noexcept override
     {
-        return std::nullopt;
+        return ServesAdmission(opRaw) ? _admission->ProgressInterval(opRaw) : std::nullopt;
     }
 
     /// @copydoc IFrameResponder::StreamFor
@@ -511,9 +532,17 @@ class SchedulerResponder final: public IFrameResponder
         return Distributed::CallerContextOf(_membership, std::move(peer));
     }
 
+    /// @param opRaw A verb, as received.
+    /// @return True when an admission responder is attached and answers @p opRaw.
+    [[nodiscard]] bool ServesAdmission(std::uint8_t opRaw) const noexcept
+    {
+        return _admission != nullptr && AdmissionResponder::Serves(opRaw);
+    }
+
     Distributed::SchedulerProtocol& _protocol;
     Distributed::IMembershipOracle const& _membership;
     IMetricsSink& _metrics;
+    AdmissionResponder* _admission { nullptr }; ///< The leader's queue, once the node wires one.
 };
 
 /// Serves this node's own cache tier to clients on this machine, and to nobody else.

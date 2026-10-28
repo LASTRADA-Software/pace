@@ -355,6 +355,31 @@ static void AppendTierMetrics(std::string& out, TieredStorageStats const& tiers)
     }
 }
 
+/// Render the admission queue (#1728): its depth, and what each machine has been charged.
+///
+/// The charged series is one sample per machine that has something charged, under one `# HELP`: a
+/// machine with nothing charged renders no line rather than a zero, which a dashboard would read as
+/// a machine that reported a budget and is idle.
+/// @param out Destination.
+/// @param admission The queue as sampled.
+static void AppendAdmissionMetrics(std::string& out, AdmissionGauges const& admission)
+{
+    Append(out,
+           Metric { .name = "pace_admission_queue_depth",
+                    .help = "Compile requests waiting for the leader to admit them.",
+                    .type = MetricType::Gauge,
+                    .value = admission.queueDepth });
+    if (admission.chargedBytes.empty())
+        return;
+    constexpr std::string_view Name = "pace_admission_charged_bytes";
+    out += std::format("# HELP {0} Memory the leader has charged to compiles it admitted, per machine.\n# TYPE {0} {1}\n",
+                       Name,
+                       TypeName(MetricType::Gauge));
+    // The machine is rendered in hex by the sampler, so no character here needs escaping.
+    for (auto const& [machine, bytes]: admission.chargedBytes)
+        out += std::format("{}{{machine=\"{}\"}} {}\n", Name, machine, bytes);
+}
+
 /// Render what a node believes about its own Raft cluster.
 ///
 /// Gauges, every one: they describe a state rather than count events, which is why
@@ -547,6 +572,10 @@ std::string RenderPrometheus(StatsReading const& reading)
     // member set INSIDE it is a reading and renders, which is the whole of #435.
     if (snapshot.consensus.has_value())
         AppendConsensusMetrics(out, *snapshot.consensus);
+
+    // And the leader's queue, from a process that serves the admission surface.
+    if (snapshot.admission.has_value())
+        AppendAdmissionMetrics(out, *snapshot.admission);
 
     // Every counter the sink knows, without exception. Exporting the *table*
     // rather than a hand-picked subset is the whole point: seven of the nine

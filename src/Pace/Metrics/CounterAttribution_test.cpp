@@ -95,6 +95,7 @@ constexpr std::array WriterFiles {
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/FleetView.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/SchedulerProtocol.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/SchedulerService.cpp" },
+    SurfaceWriterFile { .surface = MetricsSurface::SchedulerAdmission, .path = "src/apps/pace-node/AdmissionResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/Pace/Distributed/LeaseToken.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-cc/CodecEnvelope.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-cc/WorkerProtocol.cpp" },
@@ -712,10 +713,10 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // was never taken under. Drift is a red build, which is what the previous "106 of 144" --
     // a sentence with nothing watching it -- did not get. Unaffected by the exemption above: none
     // of these five sets can contain a counter with no writer, exempt or not.
-    CHECK(incremented.size() == 58);
+    CHECK(incremented.size() == 66);
     CHECK(refusalRow.size() == 148);
     CHECK(outcomeRow.size() == 10);
-    CHECK(returned.size() == 4);
+    CHECK(returned.size() == 5);
     // Ten members of the private tier's profile and six of the shared tier's, which leaves its
     // upstream members absent.
     CHECK(profileRow.size() == 16);
@@ -742,7 +743,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // Said in words rather than as two totals: the totals were a second claim nothing checked, and
     // they had drifted one off the sets above them.
     CHECK(incremented.size() + refusalRow.size() + outcomeRow.size() + returned.size() + profileRow.size()
-          == nonExempt.size() + 4);
+          == nonExempt.size() + 5);
 }
 
 TEST_CASE("counter-attribution: a counter declared ahead of its writer is exempt, but not forever",

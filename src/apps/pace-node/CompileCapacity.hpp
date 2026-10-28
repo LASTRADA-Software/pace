@@ -134,7 +134,7 @@ class CompileCapacity final: public IHeldCharges
     CompileCapacity& operator=(CompileCapacity const&) = delete;
     CompileCapacity(CompileCapacity&&) = delete;
     CompileCapacity& operator=(CompileCapacity&&) = delete;
-    ~CompileCapacity() = default;
+    ~CompileCapacity() override = default;
 
     /// A held byte reservation, released when it goes out of scope.
     ///

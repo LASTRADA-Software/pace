@@ -76,6 +76,7 @@ add_executable(pace-node
     NodeActivation.cpp
     NodeAnnounce.cpp
     NodePresenceTier.cpp
+    AdmissionResponder.cpp
     MachineBudget.cpp
     NodeRoster.cpp
     NodeConditions.cpp
@@ -209,6 +210,8 @@ if(PACE_BUILD_TESTS)
         NodeActivation_test.cpp
         NodeAnnounce.cpp
         NodePresenceTier.cpp
+        AdmissionResponder.cpp
+        AdmissionResponder_test.cpp
         MachineBudget.cpp
         MachineBudget_test.cpp
         NodeRoster.cpp

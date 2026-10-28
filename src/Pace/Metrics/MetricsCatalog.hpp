@@ -1226,7 +1226,8 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::SchedulerRequestsRefusedNodeIdentityRequired,
       .prometheusName = "pace_scheduler_requests_refused_node_identity_required_total",
-      .help = "register, node-announce, heartbeat, withdraw and machine-budget requests refused because their connection proved no "
+      .help = "register, node-announce, heartbeat, withdraw and machine-budget requests refused because their connection "
+              "proved no "
               "identity the cluster holds live. An address admits a client, never a machine joining the fleet. A "
               "rise from one host is a node not yet admitted, or one whose proof is being refused.",
       .type = MetricType::Counter },
@@ -1485,6 +1486,39 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .prometheusName = "pace_node_raft_endpoint_changes_total",
       .help = "Times this node's advertised Raft endpoint moved because the address it routes from changed or a "
               "reload re-pinned it.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionQueued,
+      .prometheusName = "pace_admission_queued_total",
+      .help = "Compile requests the leader queued for admission.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionGrantedWorker,
+      .prometheusName = "pace_admission_granted_worker_total",
+      .help = "Admissions granted on a worker.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionGrantedLocal,
+      .prometheusName = "pace_admission_granted_local_total",
+      .help = "Admissions granted to run on the machine that asked.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionDeduplicated,
+      .prometheusName = "pace_admission_deduplicated_total",
+      .help = "Requests answered 'stored' because another compile of the same key stored the object while they waited.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionRanAlone,
+      .prometheusName = "pace_admission_ran_alone_total",
+      .help = "Admissions whose estimate exceeded a whole machine's budget, so the compile ran alone.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionAbandoned,
+      .prometheusName = "pace_admission_abandoned_total",
+      .help = "Queued or granted requests whose connection closed, or whose next frame was not a settle.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionWorkerRefused,
+      .prometheusName = "pace_admission_worker_refused_total",
+      .help = "Granted compiles a worker refused, which went back to the head of the queue.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionWaitMillisTotal,
+      .prometheusName = "pace_admission_wait_milliseconds_total",
+      .help = "Milliseconds admitted requests spent queued. The sum of a pair: divide by granted_worker + granted_local + "
+              "deduplicated, which is its count.",
       .type = MetricType::Counter },
 } };
 

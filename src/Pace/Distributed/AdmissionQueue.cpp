@@ -51,6 +51,15 @@ std::size_t AdmissionQueue::Depth() const noexcept
     return _queue.size();
 }
 
+std::vector<std::pair<MachineId, std::uint64_t>> AdmissionQueue::ChargedByMachine() const
+{
+    std::vector<std::pair<MachineId, std::uint64_t>> out;
+    for (auto const& [machine, ledger]: _ledgers)
+        if (ledger.chargedBytes != 0)
+            out.emplace_back(machine, ledger.chargedBytes);
+    return out;
+}
+
 std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
 {
     auto const found = _charges.find(ticket);
@@ -108,7 +117,11 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
 
     if (settlement.outcome == SettleOutcome::Stored)
         for (auto& waiter: waiters)
-            _stored.push_back(Decision { .ticket = waiter.ticket, .kind = GrantKind::Stored });
+            _stored.push_back(Decision { .ticket = waiter.ticket,
+                                         .kind = GrantKind::Stored,
+                                         .placement = std::nullopt,
+                                         .chargedBytes = 0,
+                                         .ranAlone = false });
     else
         Requeue(std::move(waiters));
 }

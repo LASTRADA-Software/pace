@@ -13,6 +13,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace Pace::Distributed
@@ -154,6 +155,10 @@ class AdmissionQueue
 
     /// @return How many requests are waiting.
     [[nodiscard]] std::size_t Depth() const noexcept;
+
+    /// @return What this ledger has charged each machine, in bytes, machines in no particular order.
+    ///         A machine with nothing charged is omitted.
+    [[nodiscard]] std::vector<std::pair<MachineId, std::uint64_t>> ChargedByMachine() const;
 
   private:
     struct Entry

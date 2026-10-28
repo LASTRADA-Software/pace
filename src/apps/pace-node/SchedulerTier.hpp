@@ -184,6 +184,14 @@ class SchedulerTier
         return _responder;
     }
 
+    /// Route the admission verbs to the leader's queue (#1728). Wired by `main` once the node's reactor
+    /// exists, because the queue parks on it.
+    /// @param admission The queue's responder; must outlive this tier's use.
+    void ServeAdmissionWith(AdmissionResponder& admission) noexcept
+    {
+        _responder.ServeAdmissionWith(admission);
+    }
+
     /// The scheduler a SECOND surface answers verbs against.
     ///
     /// **Non-const, and that is not a relaxation of `Service()` above -- it is a
@@ -218,7 +226,8 @@ class SchedulerTier
                   Ed25519KeyPair identityKey,
                   std::string_view clusterId,
                   NodeConditions& conditions,
-                  std::string ownEndpoint);
+                  std::string ownEndpoint,
+                  std::uint64_t admissionEstimateBytes);
 
     /// Start the thread that re-asks the fleet-wide rows every @p interval. Called by `Start` once the
     /// tier is fully built, never from the constructor.

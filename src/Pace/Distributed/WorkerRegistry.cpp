@@ -317,6 +317,39 @@ std::expected<WorkerInfo, PickError> WorkerRegistry::Pick(std::string_view finge
     return std::unexpected(sawWithdrawn ? PickError::Withdrawn : PickError::NoCapacity);
 }
 
+std::vector<WorkerInfo> WorkerRegistry::Candidates(std::string_view fingerprint, std::span<std::string const> excluded) const
+{
+    std::scoped_lock const guard { _mutex };
+    auto const now = _clock.now();
+    std::vector<WorkerInfo> out;
+    for (auto const& [id, entry]: _workers)
+    {
+        if (entry.info.fingerprint != fingerprint || !IsLive(entry, now) || FreeSlots(entry.info) == 0
+            || std::ranges::contains(excluded, entry.info.endpoint))
+            continue;
+        out.push_back(entry.info);
+    }
+    // The same order `Pick` chooses by, with the id as the last key so the answer does not depend on
+    // the map's iteration order.
+    std::ranges::sort(out, [](WorkerInfo const& left, WorkerInfo const& right) {
+        if (PrefersFirst(left, right))
+            return true;
+        if (PrefersFirst(right, left))
+            return false;
+        return left.id < right.id;
+    });
+    return out;
+}
+
+std::optional<WorkerInfo> WorkerRegistry::Find(std::string_view workerId) const
+{
+    std::scoped_lock const guard { _mutex };
+    auto const found = _workers.find(std::string { workerId });
+    if (found == _workers.end() || !IsLive(found->second, _clock.now()))
+        return std::nullopt;
+    return found->second.info;
+}
+
 void WorkerRegistry::AdjustMachineInFlight(std::string_view workerId, JobTransition transition)
 {
     auto const it = _workers.find(std::string { workerId });

@@ -1568,6 +1568,16 @@ class IMetricsSink
         /// in the cluster's record.
         NodeRaftEndpointChanges,
 
+        /// Admission queue (#1728): what the leader's scheduler surface did with queued compile requests.
+        AdmissionQueued,
+        AdmissionGrantedWorker,
+        AdmissionGrantedLocal,
+        AdmissionDeduplicated,
+        AdmissionRanAlone,
+        AdmissionAbandoned,
+        AdmissionWorkerRefused,
+        AdmissionWaitMillisTotal,
+
         Last,
     };
 

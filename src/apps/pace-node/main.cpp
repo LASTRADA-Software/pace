@@ -10,6 +10,7 @@
 /// rather than an accident of layering.
 ///
 #include "AdminEndpoint.hpp"
+#include "AdmissionResponder.hpp"
 #include "CacheTier.hpp"
 #include "ClusterAdminCli.hpp"
 #include "CompileCapacity.hpp"
@@ -1050,6 +1051,16 @@ struct RouteParts
     // compiles no `CompileCapacity` counts (the leases this node grants). Reported every presence round.
     Node::MeasuredPeaks measuredPeaks;
     Node::HeldChargeRegistry leaseCharges;
+    // The leader's admission queue (#1728): parks `ADMIT` on the node's reactor and holds each grant on
+    // its connection. Declared after the scheduler tier it serves and the ledger it records local leases
+    // in, so it is destroyed before both.
+    std::optional<Node::AdmissionResponder> admissionResponder;
+    if (schedulerTier != nullptr)
+    {
+        admissionResponder.emplace(
+            schedulerTier->ServiceForSurfaces(), membership.Oracle(), nodeIo.Reactor(), metrics, &leaseCharges);
+        schedulerTier->ServeAdmissionWith(*admissionResponder);
+    }
     auto workerOrRefusal = Node::WorkerTier::Start(Node::WorkerTierParts { .cfg = cfg,
                                                                            .reloader = reloader,
                                                                            .capacity = capacity,
@@ -1557,7 +1568,24 @@ struct RouteParts
             // scrape say NO cluster rather than a cluster of nobody. The tier is
             // declared above, so it outlives the provider: locals are destroyed in
             // reverse.
-            .consensus = Node::ConsensusScrapeSource(consensusTier.get()) },
+            .consensus = Node::ConsensusScrapeSource(consensusTier.get()),
+            // The leader's queue, sampled per scrape; empty on a node that schedules nothing. The
+            // machine is rendered as its key in hex, which is what the roster and `pacectl` name it by.
+            .admission = schedulerTier == nullptr
+                             ? std::function<AdmissionGauges()> {}
+                             : std::function<AdmissionGauges()> { [service = &schedulerTier->Service()] {
+                                   auto const snapshot = service->AdmissionSnapshotNow();
+                                   auto gauges = AdmissionGauges { .queueDepth = snapshot.depth, .chargedBytes = {} };
+                                   for (auto const& [machine, bytes]: snapshot.chargedBytes)
+                                   {
+                                       std::string hex;
+                                       for (auto const byte: machine)
+                                           hex += std::format("{:02x}",
+                                                              static_cast<unsigned>(static_cast<unsigned char>(byte)));
+                                       gauges.chargedBytes.emplace_back(std::move(hex), bytes);
+                                   }
+                                   return gauges;
+                               } } },
         startedAt);
 
     // Absent when this node runs no scheduler: there is then no registry to report,

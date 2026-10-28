@@ -171,11 +171,14 @@ namespace StatsReadingWire
                                                       std::string_view { "role" } };
 
     /// See `ConsensusFieldNames`.
-    inline constexpr std::array SnapshotFieldNames {
-        std::string_view { "storage" },  std::string_view { "storageTiers" },       std::string_view { "host" },
-        std::string_view { "hostLoad" }, std::string_view { "upstreamConfigured" }, std::string_view { "consensus" },
-        std::string_view { "uptime" }
-    };
+    inline constexpr std::array SnapshotFieldNames { std::string_view { "storage" },
+                                                     std::string_view { "storageTiers" },
+                                                     std::string_view { "host" },
+                                                     std::string_view { "hostLoad" },
+                                                     std::string_view { "upstreamConfigured" },
+                                                     std::string_view { "consensus" },
+                                                     std::string_view { "admission" },
+                                                     std::string_view { "uptime" } };
 
     /// The fields of `StatsReading` itself, by name, in the order they travel. Held to the struct by the
     /// encoder's structured binding, as `SnapshotFieldNames` is.
@@ -189,7 +192,9 @@ namespace StatsReadingWire
     ///
     /// 5: the consensus block's one member list became two, voters then learners (#1449).
     /// 6: a presence bit and a `u64` after the consensus block, for the roster's lapse (#178).
-    inline constexpr std::string_view Grammar = "stats-reading-grammar-6";
+    /// 7: the admission block -- a presence bit, the queue depth and a counted list of (machine,
+    ///    charged bytes) -- after the consensus block (#1728); bit 5, the lapse's, stays retired.
+    inline constexpr std::string_view Grammar = "stats-reading-grammar-7";
 
     /// 64-bit FNV-1a over @p text, continuing from @p hash.
     /// @param hash The running digest.
