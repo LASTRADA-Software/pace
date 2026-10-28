@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <string_view>
 
@@ -24,7 +25,7 @@ int main(int argc, char** argv)
     constexpr std::size_t PageBytes = 4096;
     auto const total = mebibytes << 20;
     auto const block = std::make_unique_for_overwrite<unsigned char[]>(total);
-    for (std::size_t offset = 0; offset < total; offset += PageBytes)
+    for (auto const offset: std::views::iota(std::size_t { 0 }, total) | std::views::stride(PageBytes))
         block[offset] = static_cast<unsigned char>(offset / PageBytes);
 
     // Read it back through a volatile so the stores cannot be elided.
