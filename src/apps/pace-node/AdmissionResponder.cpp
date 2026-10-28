@@ -361,7 +361,8 @@ namespace
         }
 
         /// @copydoc IConnectionHold::KeepAlive
-        /// The one probe every held admission connection carries, at either end of it.
+        /// Never observable: a requeue follows a grant, which already armed this connection, and arming is
+        /// once per connection. Answered like its sibling so the two holds cannot disagree.
         [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
         {
             return AdmitKeepAliveProbe;

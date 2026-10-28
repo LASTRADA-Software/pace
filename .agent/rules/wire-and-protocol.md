@@ -856,7 +856,9 @@ Every rule below has already been a bug.
   link is torn down, fleet-wide, for a change nobody asked for. Same rule as SIGPIPE
   above, reached from the option side rather than the signal side: per socket, never
   process-wide. `DialOptions::keepAlive` says so at the call, `Detail::ArmKeepAlive`
-  applies it, and `SocketAddress_test` asserts the socket is **still not probing**
+  applies it, and an ACCEPTED socket has the second door: `ISocket::armKeepAlive`, per socket,
+  called on the loop thread by the server once it decides the connection is long-lived (#1736);
+  `SocketAddress_test` asserts the socket is **still not probing**
   after `ApplyHotSocketOptions` — the negative half, which is the assertion that
   fails when somebody later folds the two together for tidiness
   ([#247](https://github.com/LASTRADA-Software/pace/issues/247)). Four things

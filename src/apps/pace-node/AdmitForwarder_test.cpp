@@ -23,6 +23,7 @@
 #include <Pace/Distributed/MembershipOracle.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Protocol/AdmitKeepAlive.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/LeaderRedirect.hpp>
 #include <Pace/Transport/NativeListen.hpp>
@@ -129,8 +130,11 @@ struct ProvenLeader
         auto listened = core::net::listen(queue.io->Reactor(), core::net::ListenOptions { .host = "127.0.0.1", .port = 0 });
         REQUIRE(listened.has_value());
         auto const port = (*listened)->boundPort();
-        auto listener = std::make_unique<Testing::RelabelledPeerListener>(
-            std::unique_ptr<core::net::IListener> { std::move(*listened) }, std::string { RelabelledHost });
+        // The noting layer sits UNDER the relabelling, so a request is in the ledger only if the relabelled
+        // socket forwarded it -- which is what makes the test fake's own forward a thing a case can fail.
+        auto noting = std::make_unique<KeepAliveNotingListener>(
+            std::unique_ptr<core::net::IListener> { std::move(*listened) }, queue.keepAlives);
+        auto listener = std::make_unique<Testing::RelabelledPeerListener>(std::move(noting), std::string { RelabelledHost });
         queue.endpoint = FrameEndpoint::StartWithListener(*queue.io,
                                                           NodeSurface::Node,
                                                           std::move(listener),
@@ -797,6 +801,10 @@ TEST_CASE("AdmitForwarder.a-proven-relay-charges-the-forwarding-machine", "[node
         CHECK(charged.front().second == grant.chargedBytes);
         CHECK(node.held.Held() == HeldCharges { .slots = 1, .bytes = grant.chargedBytes });
 
+        // The leader armed the connection it holds, and the request got through every layer the real
+        // one has here: the sealing layer, then the relabelling fake, then the socket (#1736).
+        CHECK(WaitFor([&] { return leader.queue.keepAlives.Requests().size() == 1; }));
+
         // And the settle, sealed like everything after the proof, gives it back.
         client.Send(SettleFrame(Wire::SettleOutcome::Stored, 8 * MiB));
         CHECK(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
@@ -968,4 +976,24 @@ TEST_CASE("AdmitForwarder.the-leaders-own-budget-round-charges-its-own-machine",
     CHECK_FALSE(verdicts.front().refusal.has_value());
     CHECK(verdicts.front().kind == Wire::GrantKind::Local);
     leader.queue.service.AbandonAdmission(*ticket);
+}
+
+TEST_CASE("AdmitForwarder.a-forwarded-grant-arms-keepalive-at-both-held-ends", "[node][admission][forwarder][keepalive]")
+{
+    // #1736. The launcher's connection to the follower and the relay's to the leader are each a held
+    // connection once the grant is out, so each END that accepted one arms it: the follower's accepted
+    // socket here, the leader's there.
+    Queue leader;
+    auto const leaderPort = leader.Serve();
+    Follower node { EndpointOf(leaderPort) };
+    auto const port = node.Serve();
+    leader.Report(1024 * MiB, 2);
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+
+    REQUIRE(WaitFor([&] { return node.keepAlives.Requests().size() == 1; }));
+    CHECK(node.keepAlives.Requests().front().idle == AdmitKeepAliveProbe.idle);
+    CHECK(WaitFor([&] { return leader.keepAlives.Requests().size() == 1; }));
 }

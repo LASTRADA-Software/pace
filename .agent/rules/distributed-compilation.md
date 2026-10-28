@@ -4129,8 +4129,9 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
     refusal: the sweep is still there.
   - **Every pace socket that wraps an `ISocket` forwards `armKeepAlive`** (`SealedFrameSocket`,
     `TotalDeadlineSocket`, and the test fake `RelabelledPeerSocket`), or the call lands on the
-    interface default, `Unsupported` -- `SetReceiveDeadline`'s defect class, one rule higher. Each
-    has a case asserting the request reaches the socket under it.
+    interface default, `Unsupported` -- `SetReceiveDeadline`'s defect class, one rule higher. The two
+    production wrappers each have a case asserting the request reaches the socket under them; the fake's
+    is the proven-leader forwarding case, whose ledger sits UNDER it.
 
 ## Open work
 

@@ -100,5 +100,6 @@ TEST_CASE("The total-deadline layer forwards the keepalive request to the socket
     REQUIRE(socket.armKeepAlive(settings).has_value());
     REQUIRE(raw->keepAliveRequests().size() == 1);
     CHECK(raw->keepAliveRequests().front().idle == settings.idle);
+    CHECK(raw->keepAliveRequests().front().interval == settings.interval);
     CHECK(raw->keepAliveRequests().front().count == settings.count);
 }

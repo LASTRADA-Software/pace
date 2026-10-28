@@ -304,6 +304,39 @@ class KeepAliveNotingListener final: public core::net::IListener
     KeepAliveLedger& _ledger;
 };
 
+/// Serve @p responder on a fresh loopback port through a listener whose accepted sockets note their
+/// keepalive requests.
+///
+/// **It binds with bare `ListenOptions`, as `AdmitForwarder_test`'s proven leader does, and not with
+/// production's `LoopListenOptions`** (the deep accept queue, #1679): these cases are about what a
+/// held connection is asked to do, none of them opens enough connections to meet the queue's depth,
+/// and the helper needs the listener itself to put the noting layer under the endpoint.
+/// @param io The reactor to listen on.
+/// @param ledger Where the sockets note their requests; must outlive the endpoint.
+/// @param responder What answers the frames.
+/// @param metrics Where the endpoint counts.
+/// @param logger Where it logs.
+/// @param endpoint Receives the running endpoint.
+/// @return The port.
+[[nodiscard]] inline std::uint16_t ServeNoting(NodeIoLoop& io,
+                                               KeepAliveLedger& ledger,
+                                               IFrameResponder& responder,
+                                               IMetricsSink& metrics,
+                                               ILogger& logger,
+                                               std::unique_ptr<FrameEndpoint>& endpoint)
+{
+    auto listened = core::net::listen(io.Reactor(), core::net::ListenOptions { .host = "127.0.0.1", .port = 0 });
+    REQUIRE(listened.has_value());
+    auto const port = (*listened)->boundPort();
+    auto listener =
+        std::make_unique<KeepAliveNotingListener>(std::unique_ptr<core::net::IListener> { std::move(*listened) }, ledger);
+    endpoint = FrameEndpoint::StartWithListener(
+        io, NodeSurface::Node, std::move(listener), std::format("127.0.0.1:{}", port), responder, metrics, logger);
+    REQUIRE(endpoint != nullptr);
+    io.Start();
+    return port;
+}
+
 /// The leader, its queue, a loopback listener serving it, and the machine budget the cases report.
 struct Queue
 {
@@ -318,16 +351,7 @@ struct Queue
     /// Start serving on a fresh port.
     [[nodiscard]] std::uint16_t Serve()
     {
-        auto listened = core::net::listen(io->Reactor(), core::net::ListenOptions { .host = "127.0.0.1", .port = 0 });
-        REQUIRE(listened.has_value());
-        auto const port = (*listened)->boundPort();
-        auto listener = std::make_unique<KeepAliveNotingListener>(
-            std::unique_ptr<core::net::IListener> { std::move(*listened) }, keepAlives);
-        endpoint = FrameEndpoint::StartWithListener(
-            *io, NodeSurface::Node, std::move(listener), std::format("127.0.0.1:{}", port), responder, metrics, logger);
-        REQUIRE(endpoint != nullptr);
-        io->Start();
-        return port;
+        return ServeNoting(*io, keepAlives, responder, metrics, logger, endpoint);
     }
 
     /// This machine states its budget, as a proven peer would send it. Pumps, so whatever waited is decided.
@@ -535,14 +559,7 @@ struct Follower
     /// @return The port.
     [[nodiscard]] std::uint16_t Serve()
     {
-        auto const port = FreePort();
-        NodeConfig cfg;
-        cfg.*RowFor(NodeSurface::Node).spec = std::format("127.0.0.1:{}", port);
-        auto started = FrameEndpoint::Start(*io, NodeSurface::Node, cfg, redirect, metrics, logger);
-        REQUIRE(started.has_value());
-        endpoint = std::move(*started);
-        io->Start();
-        return port;
+        return ServeNoting(*io, keepAlives, redirect, metrics, logger, endpoint);
     }
 
     AtomicMetricsSink metrics;
@@ -550,6 +567,8 @@ struct Follower
     Distributed::LoopbackMembership membership;
     KnownSchedulingLeader knownLeader;
     HeldChargeRegistry held;
+    /// What the launchers' connections to THIS node asked of their sockets (#1736).
+    KeepAliveLedger keepAlives;
     StatedEndpoint self;
     RecordingDialer dialer;
     /// Whom the proving dialer proves to: exactly the leader, under its key -- production's own trust type.
