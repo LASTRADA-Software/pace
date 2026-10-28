@@ -287,6 +287,14 @@ struct Record
     /// failed were one line in this log: a night of `cl.exe` killed from outside read, record by
     /// record, exactly like a cache that broke the build.
     std::optional<std::int32_t> exitCode;
+
+    /// How long this compile waited for a compile slot on the fleet queue, in milliseconds.
+    /// Disengaged when nothing queued it -- no reading, which is not a wait of zero.
+    std::optional<std::uint64_t> queuedMs;
+
+    /// The peak memory the compile used, children included, in bytes. Disengaged when it was
+    /// not measured, which is not a compile that used none.
+    std::optional<std::uint64_t> peakMemoryBytes;
 };
 
 /// What reading the invocation log found.
