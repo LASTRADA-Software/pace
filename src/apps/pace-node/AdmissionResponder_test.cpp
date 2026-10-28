@@ -41,6 +41,7 @@
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/LeaseRosterFakes.hpp>
+#include <tests/MembershipFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
@@ -54,39 +55,6 @@ namespace Wire = Pace::CompileCacheWire;
 namespace
 {
 using Pace::Testing::Unwrap;
-
-/// Membership this machine answers for, which a case can take away: what a `--cluster-forget` landing
-/// while a request is parked looks like to the gate. A proven key is always live, so a machine can report.
-class FlippableMembership final: public Distributed::IMembershipOracle
-{
-  public:
-    [[nodiscard]] Distributed::MembershipDecision Explain(std::string_view peerAddress) const override
-    {
-        if (_revoked.load() || !IsLoopbackHost(peerAddress))
-            return {};
-        return Distributed::DecidedBy(Distributed::Membership::Member, Distributed::MembershipParticipant::Loopback);
-    }
-
-    [[nodiscard]] Distributed::MembershipDecision ExplainKey(ProvenIdentity const& /*identity*/,
-                                                             Distributed::KeyEvidence /*evidence*/) const override
-    {
-        return Distributed::DecidedBy(Distributed::Membership::Member, Distributed::MembershipParticipant::ProvenIdentity);
-    }
-
-    [[nodiscard]] std::optional<Ed25519PublicKey> LiveKeyOf(std::string_view /*id*/) const override
-    {
-        return std::nullopt;
-    }
-
-    /// Take this machine's membership away.
-    void Revoke() noexcept
-    {
-        _revoked.store(true);
-    }
-
-  private:
-    std::atomic<bool> _revoked { false };
-};
 
 /// A port nothing is listening on right now.
 [[nodiscard]] std::uint16_t FreePort()
@@ -236,7 +204,7 @@ struct Queue
     explicit Queue(std::chrono::milliseconds pulse = 20ms, std::uint64_t defaultEstimate = 64 * MiB)
     {
         service.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
-        admission.emplace(service, membership, io->Reactor(), metrics, &held, pulse);
+        admission.emplace(service, fold.admitted, io->Reactor(), metrics, &held, pulse);
         responder.ServeAdmissionWith(*admission);
         (void) defaultEstimate;
     }
@@ -261,7 +229,7 @@ struct Queue
             .memoryBudgetBytes = budgetBytes, .slots = slots, .heldSlots = 0, .heldBytes = 0, .peaks = {} });
         auto reply = core::async::syncRun(admission->Answer(
             frame,
-            PeerIdentity { .host = "10.0.0.2", .proven = ProvenIdentity { .id = "self", .key = signer.PublicKey() } }));
+            PeerIdentity { .host = "10.0.0.2", .proven = ProvenIdentity { .id = "scheduler", .key = signer.PublicKey() } }));
         REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
     }
 
@@ -287,11 +255,14 @@ struct Queue
         auto reply = core::async::syncRun(admission->Answer(
             frame,
             PeerIdentity { .host = "10.0.0.2",
-                           .proven = ProvenIdentity { .id = "worker-node", .key = workerKey.PublicKey() } }));
+                           .proven = ProvenIdentity { .id = "admission-worker", .key = workerKey.PublicKey() } }));
         REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
     }
 
     static constexpr std::string_view WorkerEndpoint = "10.0.0.2:7100";
+
+    /// A machine elsewhere that proves its key on its connection.
+    static constexpr std::string_view RemoteClient = "remote-client";
 
     core::platform::ManualClock clock;
     core::platform::ManualWallClock wallClock;
@@ -301,8 +272,10 @@ struct Queue
     Ed25519KeyPair const workerKey = Testing::TestKeyPair("admission-worker");
     Distributed::SchedulerService service { clock, wallClock, metrics, logger, signer, {}, 64 * MiB };
     Distributed::SchedulerProtocol protocol { service, metrics };
-    FlippableMembership membership;
-    SchedulerResponder responder { protocol, membership, metrics };
+    /// The production fold -- loopback, then the cluster's key roster -- over the machines these cases
+    /// name: this node (`scheduler`), the worker's machine, and a remote client that proves its key.
+    Testing::RosterFold fold { { "scheduler", "admission-worker", std::string { RemoteClient } } };
+    SchedulerResponder responder { protocol, fold.admitted, metrics };
     HeldChargeRegistry held;
     std::optional<AdmissionResponder> admission;
 
@@ -463,28 +436,6 @@ TEST_CASE("AdmissionResponder.settle-stored-wakes-waiter", "[node][admission]")
     CHECK(woken.kind == Wire::GrantKind::Stored);
     CHECK(woken.chargedBytes == 0);
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionDeduplicated) == 1);
-}
-
-TEST_CASE("AdmissionResponder.regate-at-grant", "[node][admission]")
-{
-    Queue queue;
-    auto const port = queue.Serve();
-
-    Client client { port };
-    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
-    REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
-
-    // A `--cluster-forget` lands during the wait; then the room appears. The grant is a refusal, and
-    // it holds nothing.
-    queue.membership.Revoke();
-    queue.Report(1024 * MiB, 2);
-
-    auto const reply = Unwrap(client.ReadAnswer());
-    CHECK(reply.status == Wire::Status::Error);
-    CHECK(Pace::Testing::ErrorOf(reply.bytes) == Wire::ErrorCode::NotAMember);
-    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
-    CHECK(queue.service.AdmissionSnapshotNow().chargedBytes.empty());
-    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedLocal) == 0);
 }
 
 TEST_CASE("AdmissionResponder.demotion-answers-not-leader", "[node][admission]")
@@ -770,4 +721,64 @@ TEST_CASE("AdmissionResponder.a-parked-wait-has-no-ceiling-while-pulses-flow", "
 
     queue.Report(1024 * MiB, 2);
     CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+}
+
+namespace
+{
+/// What one `ADMIT` driven straight at the responder answered, read on the case's thread.
+struct DrivenReply
+{
+    std::atomic<bool> done { false };
+    std::vector<std::byte> bytes; ///< Written before `done` is set.
+};
+
+/// Drive one `ADMIT` straight at the responder and leave its answer in @p out.
+core::async::DetachedTask DriveAdmitInto(AdmissionResponder* responder,
+                                         std::vector<std::byte> frame,
+                                         PeerIdentity peer,
+                                         std::shared_ptr<DrivenReply> out)
+{
+    auto reply = co_await responder->Answer(frame, std::move(peer));
+    out->bytes = std::move(reply.bytes);
+    out->done.store(true, std::memory_order_release);
+}
+} // namespace
+
+TEST_CASE("AdmissionResponder.regate-at-grant", "[node][admission]")
+{
+    // R9: a request that waited is gated again when it is granted. The caller is a machine elsewhere
+    // that PROVED its key on its connection, and the forget lands through the production fold -- its
+    // key revoked in the roster -- while the request is parked. The grant is a refusal, and holds nothing.
+    Queue queue;
+    queue.RegisterWorker(2);
+    auto const scope = std::make_shared<ConnectionScope>();
+    auto const reply = std::make_shared<DrivenReply>();
+
+    // Parked before the reactor turns, so it waits on a loop that is then started under it.
+    DriveAdmitInto(&*queue.admission,
+                   AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"),
+                   PeerIdentity { .host = "10.0.0.7",
+                                  .proven = Testing::IdentityOf(std::string { Queue::RemoteClient }),
+                                  .scope = scope },
+                   reply);
+    REQUIRE(queue.service.AdmissionSnapshotNow().depth == 1);
+    // Serving is what keeps the reactor turning: a loop with nothing adopted returns at once.
+    (void) queue.Serve();
+
+    // `--cluster-forget` of the client: its key is revoked, the others stay live.
+    queue.fold.keys.Publish({ { "scheduler", Testing::TestKeyPair("scheduler").PublicKey() },
+                              { "admission-worker", Testing::TestKeyPair("admission-worker").PublicKey() } },
+                            { Testing::TestKeyPair(std::string { Queue::RemoteClient }).PublicKey() });
+
+    // Then the room appears.
+    queue.ReportWorker();
+
+    REQUIRE(WaitFor([&] { return reply->done.load(std::memory_order_acquire); }));
+    CHECK(Pace::Testing::StatusOf(reply->bytes) == Wire::Status::Error);
+    CHECK(Pace::Testing::ErrorOf(reply->bytes) == Wire::ErrorCode::NotAMember);
+    CHECK_FALSE(scope->Holds());
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+    CHECK(queue.service.AdmissionSnapshotNow().chargedBytes.empty());
+    CHECK(queue.service.OutstandingLeases(4).total == 0);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedWorker) == 0);
 }
