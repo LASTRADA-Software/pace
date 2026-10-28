@@ -1267,6 +1267,7 @@ TEST_CASE("Candidates lists the live, matching, unexcluded workers with a free s
     auto const skip = std::array { std::string { "10.0.0.3:6676" } };
     auto const candidates = fix.registry.Candidates(Gcc13, skip);
     std::vector<std::string> ids;
+    ids.reserve(candidates.size());
     for (auto const& worker: candidates)
         ids.push_back(worker.id);
     CHECK(ids == std::vector { roomy, small });
@@ -1287,7 +1288,7 @@ TEST_CASE("Find answers a live worker by id and nothing for an unknown one", "[d
     auto const id = fix.registry.Register(Announce(Gcc13, "10.0.0.1:6676", 4));
     auto const found = fix.registry.Find(id);
     REQUIRE(found.has_value());
-    CHECK(found->endpoint == "10.0.0.1:6676");
-    CHECK(found->fingerprint == Gcc13);
+    CHECK(Unwrap(found).endpoint == "10.0.0.1:6676");
+    CHECK(Unwrap(found).fingerprint == Gcc13);
     CHECK_FALSE(fix.registry.Find("no-such-worker").has_value());
 }

@@ -13,6 +13,10 @@
 #include <string_view>
 #include <vector>
 
+#include <tests/Unwrap.hpp>
+
+using Pace::Testing::Unwrap;
+
 using namespace Pace::Cc;
 
 namespace
@@ -273,7 +277,7 @@ TEST_CASE("ProcessRunner.peak-memory-is-measured", "[pace-cc][process]")
 
     REQUIRE(run.exitCode == 0);
     REQUIRE(run.peakMemoryBytes.has_value());
-    CHECK(*run.peakMemoryBytes > 0);
+    CHECK(Unwrap(run.peakMemoryBytes) > 0);
 }
 
 TEST_CASE("ProcessRunner.peak-covers-child-process", "[pace-cc][process]")
@@ -293,7 +297,7 @@ TEST_CASE("ProcessRunner.peak-covers-child-process", "[pace-cc][process]")
 
     REQUIRE(run.exitCode == 0);
     REQUIRE(run.peakMemoryBytes.has_value());
-    CHECK(*run.peakMemoryBytes >= (200ULL << 20));
+    CHECK(Unwrap(run.peakMemoryBytes) >= (200ULL << 20));
 }
 
 TEST_CASE("ProcessRunner.unspawnable-has-no-peak", "[pace-cc][process]")

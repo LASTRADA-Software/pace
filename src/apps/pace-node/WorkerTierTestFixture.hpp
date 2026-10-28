@@ -250,9 +250,14 @@ struct WorkerTierFixture
             if (machineThrows)
                 throw std::filesystem::filesystem_error("temp_directory_path",
                                                         std::make_error_code(std::errc::no_such_file_or_directory));
-            return WorkerMachine { .runner = makeRunner           ? makeRunner()
-                                             : compilersCannotRun ? std::make_unique<NeverSpawnsRunner>()
-                                                                  : Cc::MakeProcessRunner(),
+            auto runner = [this]() -> decltype(WorkerMachine::runner) {
+                if (makeRunner)
+                    return makeRunner();
+                if (compilersCannotRun)
+                    return std::make_unique<NeverSpawnsRunner>();
+                return Cc::MakeProcessRunner();
+            }();
+            return WorkerMachine { .runner = std::move(runner),
                                    .host = Cc::MakeToolchainHost(),
                                    .discovery = std::make_unique<CountingDiscovery>(discoveryCalls),
                                    .claimant = MakeLockFileScratchClaimant(),

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <format>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <CacheProtocol.hpp>
@@ -194,9 +195,11 @@ namespace
     [[nodiscard]] std::unique_ptr<ForwardHold> TakeLink(ConnectionScope& scope)
     {
         auto taken = scope.TakeHold();
-        if (dynamic_cast<ForwardHold*>(taken.get()) == nullptr)
+        auto* const link = dynamic_cast<ForwardHold*>(taken.get());
+        if (link == nullptr)
             return nullptr;
-        return std::unique_ptr<ForwardHold> { static_cast<ForwardHold*>(taken.release()) };
+        std::ignore = taken.release();
+        return std::unique_ptr<ForwardHold> { link };
     }
 
     /// The leader's refusal, handed on.

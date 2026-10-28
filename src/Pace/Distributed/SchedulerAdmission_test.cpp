@@ -247,7 +247,7 @@ TEST_CASE("SchedulerAdmission.second-grant-of-a-leased-key-is-refused-already-in
     CHECK(GrantOf(verdicts[0]).kind == Wire::GrantKind::Worker);
     CHECK(verdicts[1].ticket == second);
     REQUIRE(verdicts[1].refusal.has_value());
-    CHECK(verdicts[1].refusal->error == Wire::ErrorCode::AlreadyInFlight);
+    CHECK(Unwrap(verdicts[1].refusal).error == Wire::ErrorCode::AlreadyInFlight);
     // The refused one holds nothing: one lease, one charge.
     CHECK(fleet.Leases() == 1);
     CHECK(fleet.service.AdmissionSnapshotNow().depth == 0);
@@ -434,18 +434,18 @@ TEST_CASE("SchedulerAdmission.fleet-collects-the-queue-with-machines-named",
 
     auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
     REQUIRE(snapshot.admission.has_value());
-    CHECK(snapshot.admission->depth == 1);
+    CHECK(Unwrap(snapshot.admission).depth == 1);
     // The queued request's caller is this node's own machine, which no worker named: its row carries
     // the short form of its key, never an empty cell.
-    REQUIRE(snapshot.admission->clients.size() == 1);
-    auto const& client = snapshot.admission->clients.front();
+    REQUIRE(Unwrap(snapshot.admission).clients.size() == 1);
+    auto const& client = Unwrap(snapshot.admission).clients.front();
     CHECK_FALSE(client.machine.empty());
     CHECK(client.tree == "tree");
     CHECK(client.running + client.queued == 2);
     CHECK(client.queued == 1);
     // The worker's machine is named as it registered.
-    auto const named = std::ranges::find(snapshot.admission->machines, "build-7", &AdmissionMachineRow::machine);
-    REQUIRE(named != snapshot.admission->machines.end());
+    auto const named = std::ranges::find(Unwrap(snapshot.admission).machines, "build-7", &AdmissionMachineRow::machine);
+    REQUIRE(named != Unwrap(snapshot.admission).machines.end());
     CHECK(named->budgetBytes == std::optional<std::uint64_t> { 1024 * MiB });
     CHECK(named->chargedBytes == 64 * MiB);
 

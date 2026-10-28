@@ -72,8 +72,44 @@ struct World
 {
     /// @param machineBudgetBytes What the fleet's one machine states as its budget.
     explicit World(std::uint64_t machineBudgetBytes):
-        budget { machineBudgetBytes }
+        _budget { machineBudgetBytes }
     {
+    }
+
+    /// What the grants of one case added up to, read after every launcher has been joined.
+    struct Tally
+    {
+        std::uint64_t peakShared {}; ///< The most the compiles sharing the machine held at once.
+        std::size_t maxDepth {};     ///< The deepest the leader's queue was seen.
+        std::size_t leaderViolations {};
+        std::size_t grants {};
+        std::size_t violations {};
+        std::size_t ranAlone {};
+    };
+
+    /// @return The totals so far; read them only once every launcher has been joined.
+    [[nodiscard]] Tally Totals() const
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        return _totals;
+    }
+
+    /// @param view The leader's own view of its queue, so a grant is judged against what admission decided.
+    void SetLeaderView(std::function<Distributed::AdmissionSnapshot()> view)
+    {
+        _leaderView = std::move(view);
+    }
+
+    /// Count one compiler spawned.
+    void NoteSpawn() noexcept
+    {
+        ++_spawns;
+    }
+
+    /// @return How many compilers were spawned.
+    [[nodiscard]] int Spawns() const noexcept
+    {
+        return _spawns.load();
     }
 
     /// @param key An object key.
@@ -103,38 +139,38 @@ struct World
         // The leader is read before this side's lock is taken: it has a lock of its own.
         std::uint64_t leaderCharged = 0;
         std::size_t depth = 0;
-        auto const read = static_cast<bool>(leaderView);
+        auto const read = static_cast<bool>(_leaderView);
         if (read)
         {
-            auto const view = leaderView();
+            auto const view = _leaderView();
             depth = view.depth;
             for (auto const& [machine, bytes]: view.chargedBytes)
                 leaderCharged += bytes;
         }
         auto const guard = std::scoped_lock { _mutex };
-        ++grants;
-        auto const alone = charged > budget;
-        // A request estimated above the whole budget runs ALONE: the one grant allowed to overshoot, and
+        ++_totals.grants;
+        auto const alone = charged > _budget;
+        // A request estimated above the whole _budget runs ALONE: the one grant allowed to overshoot, and
         // only when nothing else is running beside it.
-        if (alone ? _inUse != 0 : _inUse + charged > budget)
-            ++violations;
+        if (alone ? _inUse != 0 : _inUse + charged > _budget)
+            ++_totals.violations;
         if (read)
         {
-            maxDepth = std::max(maxDepth, depth);
-            // Alone means the leader charges exactly this; anything else is over budget with more than one grant held.
-            if (alone ? leaderCharged != charged : (leaderCharged > budget && !_aloneHeld))
-                ++leaderViolations;
+            _totals.maxDepth = std::max(_totals.maxDepth, depth);
+            // Alone means the leader charges exactly this; anything else is over _budget with more than one grant held.
+            if (alone ? leaderCharged != charged : (leaderCharged > _budget && !_aloneHeld))
+                ++_totals.leaderViolations;
         }
         _inUse += charged;
         if (alone)
         {
-            ++ranAlone;
+            ++_totals.ranAlone;
             _aloneHeld = true;
         }
         else if (!_aloneHeld)
             // What the compiles that share the machine held at once. The run-alone grant is left out: it is
             // bigger than any figure this is asked to exceed, and would satisfy it by itself.
-            peakShared = std::max(peakShared, _inUse);
+            _totals.peakShared = std::max(_totals.peakShared, _inUse);
     }
 
     /// A compile and its STORE are done; the charge goes back at the next SETTLE.
@@ -143,23 +179,16 @@ struct World
     {
         auto const guard = std::scoped_lock { _mutex };
         _inUse -= charged;
-        if (charged > budget)
+        if (charged > _budget)
             _aloneHeld = false;
     }
 
-    std::uint64_t const budget;
-    /// The leader's own view of its queue; unset when a case has no leader to ask.
-    std::function<Distributed::AdmissionSnapshot()> leaderView;
-    std::atomic<int> spawns { 0 };
-    // Written under the lock, read after every launcher has been joined.
-    std::uint64_t peakShared {};
-    std::size_t maxDepth {};
-    std::size_t leaderViolations {};
-    std::size_t grants {};
-    std::size_t violations {};
-    std::size_t ranAlone {};
-
   private:
+    std::uint64_t const _budget;
+    /// The leader's own view of its queue; unset when a case has no leader to ask.
+    std::function<Distributed::AdmissionSnapshot()> _leaderView;
+    std::atomic<int> _spawns { 0 };
+    Tally _totals {}; ///< Written under the lock, read after every launcher has been joined.
     mutable std::mutex _mutex;
     std::set<std::string> _objects;
     std::uint64_t _inUse {};
@@ -179,7 +208,7 @@ struct Launch
 struct Plan
 {
     std::chrono::milliseconds duration { 0 }; ///< How long the "compiler" runs.
-    std::optional<std::uint64_t> peak;        ///< The peak it measures, which teaches the queue.
+    std::optional<std::uint64_t> peak {};     ///< The peak it measures, which teaches the queue.
 };
 
 /// One launcher's cache miss: the FETCH it makes first, then the miss flow as `main.cpp` runs it.
@@ -230,7 +259,7 @@ struct Plan
         .dispatchUnadmitted = []() -> std::optional<Cc::CompileRun> { return std::nullopt; },
         .compileLocal =
             [&] {
-                ++world.spawns;
+                world.NoteSpawn();
                 std::this_thread::sleep_for(plan.duration);
                 Cc::CompileRun run { .exitCode = 0, .out = {}, .err = {} };
                 run.peakMemoryBytes = plan.peak;
@@ -310,7 +339,7 @@ TEST_CASE("FleetAdmission.six-identical-requests-compile-once", "[node][admissio
         RunTogether(6, [&](std::size_t) { return Invoke(world, endpoint, "same-object", Plan { .duration = 400ms }); });
 
     // One compiler ran; the other five were told it would be stored, or found it stored, and fetched it.
-    CHECK(world.spawns.load() == 1);
+    CHECK(world.Spawns() == 1);
     CHECK(std::ranges::count_if(results, [](Launch const& one) { return one.servedFromCache; }) == 5);
     CHECK(std::ranges::all_of(results, [](Launch const& one) { return one.code == 0; }));
     // Nothing failed open: every one of them was answered by the queue.
@@ -337,7 +366,7 @@ TEST_CASE("FleetAdmission.learner-is-queued-through-its-own-node", "[node][admis
     CHECK(result.code == 0);
     CHECK(result.failedOpen.empty());
     CHECK(result.queuedMs.has_value());
-    CHECK(world.spawns.load() == 1);
+    CHECK(world.Spawns() == 1);
     // The LEADER queued and granted it; the learner decided nothing, and dialled exactly the leader.
     CHECK(Count(leader, IMetricsSink::Counter::AdmissionQueued) == 1);
     CHECK(Count(leader, IMetricsSink::Counter::AdmissionGrantedLocal) == 1);
@@ -441,7 +470,7 @@ TEST_CASE("FleetAdmission.node-stopped-behaves-as-today", "[node][admission][fle
 
     // The compile ran here, was stored, and the exit code is the compiler's; nothing was ever queued.
     CHECK(result.code == 0);
-    CHECK(world.spawns.load() == 1);
+    CHECK(world.Spawns() == 1);
     CHECK(world.Has("no-node-object"));
     CHECK_FALSE(result.queuedMs.has_value());
     // And the launcher said why: the one reason a node that is down is remembered by.
@@ -456,9 +485,7 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
     auto const port = queue.Serve();
     queue.Report(Budget, 64);
     World world { Budget };
-    world.leaderView = [&] {
-        return queue.service.AdmissionSnapshotNow();
-    };
+    world.SetLeaderView([&] { return queue.service.AdmissionSnapshotNow(); });
     auto const endpoint = EndpointOf(port);
 
     // Forty keys whose measured peaks are 1..5 GiB, and one more that is larger than the machine.
@@ -468,7 +495,7 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
     for (auto const index: std::views::iota(std::size_t { 0 }, Compiles))
         keys.push_back(std::format("object-{}", index));
     auto const peakOf = [](std::size_t index) -> std::uint64_t {
-        return index == 17 ? 11 * GiB : (1 + (index * 7) % 5) * GiB;
+        return index == 17 ? 11 * GiB : (1 + ((index * 7) % 5)) * GiB;
     };
     for (auto const index: std::views::iota(std::size_t { 0 }, Compiles))
         Teach(port, keys[index], peakOf(index));
@@ -477,20 +504,20 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
         return Invoke(world, endpoint, keys[index], Plan { .duration = 20ms, .peak = peakOf(index) });
     });
 
-    CHECK(world.grants == Compiles);
-    CHECK(world.spawns.load() == static_cast<int>(Compiles));
+    CHECK(world.Totals().grants == Compiles);
+    CHECK(world.Spawns() == static_cast<int>(Compiles));
     CHECK(std::ranges::all_of(results, [](Launch const& one) { return one.code == 0 && one.failedOpen.empty(); }));
     // The invariant, read two ways at every grant: what the launchers hold adds up to no more than the budget,
     // and so does what the LEADER has charged -- bar the one grant estimated above the whole budget, which
     // runs alone and which the leader must be charging by itself.
-    CHECK(world.violations == 0);
-    CHECK(world.leaderViolations == 0);
-    CHECK(world.ranAlone == 1);
+    CHECK(world.Totals().violations == 0);
+    CHECK(world.Totals().leaderViolations == 0);
+    CHECK(world.Totals().ranAlone == 1);
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionRanAlone) == 1);
     // Not vacuous. No single compile is above 5 GiB, so sharing the machine up to 6 GiB or more means at
     // least two ran at once -- and the run-alone grant is not counted towards it. And the leader had
     // requests waiting behind the ones it granted.
-    CHECK(world.peakShared >= 6 * GiB);
-    CHECK(world.maxDepth > 0);
+    CHECK(world.Totals().peakShared >= 6 * GiB);
+    CHECK(world.Totals().maxDepth > 0);
     CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
 }

@@ -49,6 +49,8 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
+using Pace::Testing::UnwrapMutable;
+
 using namespace Pace;
 using namespace Pace::Node;
 using namespace Pace::Node::AdmissionFixture;
@@ -121,7 +123,7 @@ struct ProvenLeader
                                                           NodeSurface::Node,
                                                           std::move(listener),
                                                           std::format("127.0.0.1:{}", port),
-                                                          *merged,
+                                                          UnwrapMutable(merged),
                                                           queue.metrics,
                                                           queue.logger);
         REQUIRE(queue.endpoint != nullptr);
@@ -500,13 +502,13 @@ TEST_CASE("AdmitForwarder.other-verbs-still-redirect", "[node][admission][forwar
         // local lease, which is not where its compile runs.
         Testing::RosterFold fold { { "remote" } };
         SchedulingRedirectResponder remoteFacing { fold.admitted, node.knownLeader };
-        remoteFacing.ForwardAdmissionWith(*node.forwarder);
+        remoteFacing.ForwardAdmissionWith(UnwrapMutable(node.forwarder));
         auto const remote =
             PeerIdentity { .host = "10.0.0.7",
                            .proven = ProvenIdentity { .id = "remote", .key = Testing::TestKeyPair("remote").PublicKey() } };
         auto const refused = remoteFacing.RefusePeer(remote, static_cast<std::uint8_t>(Wire::Op::Admit));
         REQUIRE(refused.has_value());
-        CHECK(ErrorOf(*refused) == Wire::ErrorCode::NotLeader);
+        CHECK(ErrorOf(Unwrap(refused)) == Wire::ErrorCode::NotLeader);
         CHECK_FALSE(AdmitForwarder::ForwardsFor(remote, static_cast<std::uint8_t>(Wire::Op::Admit)));
         CHECK(AdmitForwarder::ForwardsFor(PeerIdentity { .host = "127.0.0.1" }, static_cast<std::uint8_t>(Wire::Op::Admit)));
         CHECK(
@@ -575,7 +577,7 @@ TEST_CASE("AdmitForwarder.a-leader-pulsing-slower-than-this-node-is-not-dropped"
     {
         auto const reply = client.Read();
         REQUIRE(reply.has_value());
-        REQUIRE(reply->status == Wire::Status::Progress);
+        REQUIRE(Unwrap(reply).status == Wire::Status::Progress);
         ++pulses;
     }
     CHECK(pulses > 3);
@@ -742,8 +744,8 @@ TEST_CASE("AdmitForwarder.a-node-never-relays-to-itself", "[node][admission][for
                                                                     .key = voter.node.signer.PublicKey() },
                                          .scope = std::make_shared<ConnectionScope>() };
         auto const launcher = PeerIdentity { .host = "127.0.0.1", .scope = std::make_shared<ConnectionScope>() };
-        CHECK(voter.node.admission->DecidesHere(self));
-        CHECK_FALSE(voter.node.admission->DecidesHere(launcher));
+        CHECK(UnwrapMutable(voter.node.admission).DecidesHere(self));
+        CHECK_FALSE(UnwrapMutable(voter.node.admission).DecidesHere(launcher));
 
         auto const reply =
             core::async::syncRun(voter.node.responder.Answer(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"), self));

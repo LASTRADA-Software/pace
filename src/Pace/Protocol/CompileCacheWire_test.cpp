@@ -6236,7 +6236,8 @@ TEST_CASE("A MACHINE-BUDGET report round-trips with no peaks and with three", "[
 TEST_CASE("A MACHINE-BUDGET report over the peak cap is refused rather than truncated", "[wire][admission]")
 {
     auto big = MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} };
-    big.peaks.assign(MaxMachineBudgetPeaks + 1, { EstimateKeyFields { "k", "p", "f" }, 1 });
+    big.peaks.assign(MaxMachineBudgetPeaks + 1,
+                     { EstimateKeyFields { .cacheKey = "k", .sourcePath = "p", .compilerIdentity = "f" }, 1 });
     CHECK_FALSE(DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(big))).has_value());
     big.peaks.pop_back();
     CHECK(DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(big))).has_value());
@@ -6265,7 +6266,8 @@ TEST_CASE("The largest admission requests fit the control payload ceiling", "[wi
     CHECK(DecodeAdmitPayload(PayloadOfFrame(frame)).has_value());
 
     auto full = MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} };
-    full.peaks.assign(MaxMachineBudgetPeaks, { EstimateKeyFields { longKey, longPath, longFp }, 1 });
+    full.peaks.assign(MaxMachineBudgetPeaks,
+                      { EstimateKeyFields { .cacheKey = longKey, .sourcePath = longPath, .compilerIdentity = longFp }, 1 });
     auto const budgetFrame = EncodeMachineBudget(full);
     CHECK(PayloadOfFrame(budgetFrame).size() <= MaxControlPayload);
     CHECK(DecodeMachineBudgetPayload(PayloadOfFrame(budgetFrame)).has_value());
@@ -6310,7 +6312,9 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
                                                                .reason = LocalGrantReason::Asked }));
         auto report =
             MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} };
-        report.peaks.emplace_back(EstimateKeyFields { std::string { LongKey }, path, "a-toolchain-fingerprint-over-sso" },
+        report.peaks.emplace_back(EstimateKeyFields { .cacheKey = std::string { LongKey },
+                                                      .sourcePath = path,
+                                                      .compilerIdentity = "a-toolchain-fingerprint-over-sso" },
                                   9);
         budget = DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(report)));
     }

@@ -3151,18 +3151,18 @@ struct CachedCompile
     Cc::WitnessedManifestContent const& keyedContent; ///< The manifest's content, as the key was taken from it.
     bool dispatchConfigured;                          ///< A queue is named, so the compile is planned for placement.
 
-    std::string key; ///< The cache key, once `ComputeKey` has run.
+    std::string key {}; ///< The cache key, once `ComputeKey` has run.
     // Kept alive past `ComputeKey` ONLY when a queue is configured, and it is the dependency PATHS rather
     // than the preprocessed text. A worker gets its own preprocess, with `#line` markers the key's copy
     // deliberately suppresses, so the text has no reader after the key -- the launcher once held several
     // megabytes of it alive across the whole compile for a consumer that no longer existed. The paths it
     // cannot re-derive: a worker sees no `#include` at all, so the client writes the dependency record.
-    std::vector<std::string> dispatchDependencies;
+    std::vector<std::string> dispatchDependencies {};
     // What the probe learned about this compile's dependencies, carried past the block the probe itself
     // dies in. Both readers of it come later: the manifest recorded on a MISS after the compile, and the
     // one backfilled on a HIT. Both used to parse the compiler's captured console text instead, and both
     // readings had a locale in them -- see `RecordManifest` (issue #692).
-    ProbedDependencies probed;
+    ProbedDependencies probed {};
     /// When the cache phase began.
     std::chrono::steady_clock::time_point cacheStarted {};
     // How the fetch ended, for the two questions after it: whether a MISS may be traced, and whether the
@@ -3173,12 +3173,12 @@ struct CachedCompile
     // The parts of the root-bound marker the fetch met when this compile's own copy was absent; disengaged
     // otherwise. Still a MISS; carried only so the MISS it records says why, in the one text its trace and
     // its reason share (`BoundMissReason`).
-    std::optional<Cc::CheckoutParts> boundMiss;
+    std::optional<Cc::CheckoutParts> boundMiss {};
     // The parts the met marker named, for the STORE: an object stored behind a marker it met stays bound
     // to them whatever its own scan finds (`PlanStore`). Taken from EVERY followed marker, not only an
     // absent bound copy: one whose bound value is damaged, of another generation or stale reaches the
     // STORE too, and a portable store there would overwrite the marker for every checkout.
-    std::optional<Cc::CheckoutParts> metMarker;
+    std::optional<Cc::CheckoutParts> metMarker {};
 
     /// @param result What `RunCached` returns.
     /// @return A step that settled the invocation with @p result.

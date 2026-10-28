@@ -47,6 +47,8 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
+using Pace::Testing::UnwrapMutable;
+
 using namespace Pace;
 using namespace Pace::Node;
 using namespace std::chrono_literals;
@@ -267,7 +269,7 @@ TEST_CASE("AdmissionResponder.parked-frame-freed-on-teardown", "[node][admission
     auto const scope = std::make_shared<ConnectionScope>();
 
     // Before the reactor thread exists, so the park lands on a loop nobody else is turning.
-    DriveAdmit(&*queue->admission,
+    DriveAdmit(&UnwrapMutable(queue->admission),
                AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"),
                PeerIdentity { .host = "127.0.0.1", .scope = scope });
     REQUIRE(queue->service.AdmissionSnapshotNow().depth == 1);
@@ -421,8 +423,9 @@ TEST_CASE("AdmissionResponder.a-departure-the-endpoint-counted-is-not-counted-ag
     Queue queue;
     queue.Report(1024 * MiB, 2);
     auto const scope = std::make_shared<ConnectionScope>();
-    auto const reply = core::async::syncRun(queue.admission->Answer(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"),
-                                                                    PeerIdentity { .host = "127.0.0.1", .scope = scope }));
+    auto const reply = core::async::syncRun(
+        UnwrapMutable(queue.admission)
+            .Answer(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"), PeerIdentity { .host = "127.0.0.1", .scope = scope }));
     REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
     REQUIRE(scope->Holds());
 
@@ -449,7 +452,7 @@ TEST_CASE("AdmissionResponder.a-parked-wait-has-no-ceiling-while-pulses-flow", "
     // sweeps, it is still there to be granted; a window that bounded the WAIT would have closed it.
     Queue queue;
     auto const port = queue.Serve();
-    REQUIRE(queue.admission->RequestTimeout(static_cast<std::uint8_t>(Wire::Op::Admit)) == 120ms);
+    REQUIRE(UnwrapMutable(queue.admission).RequestTimeout(static_cast<std::uint8_t>(Wire::Op::Admit)) == 120ms);
 
     Client client { port };
     client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
@@ -459,7 +462,7 @@ TEST_CASE("AdmissionResponder.a-parked-wait-has-no-ceiling-while-pulses-flow", "
     {
         auto const frame = client.Read();
         REQUIRE(frame.has_value());
-        REQUIRE(frame->status == Wire::Status::Progress);
+        REQUIRE(Unwrap(frame).status == Wire::Status::Progress);
         ++pulses;
     }
     CHECK(pulses > 10);
@@ -501,7 +504,7 @@ TEST_CASE("AdmissionResponder.regate-at-grant", "[node][admission]")
     auto const reply = std::make_shared<DrivenReply>();
 
     // Parked before the reactor turns, so it waits on a loop that is then started under it.
-    DriveAdmitInto(&*queue.admission,
+    DriveAdmitInto(&UnwrapMutable(queue.admission),
                    AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"),
                    PeerIdentity { .host = "10.0.0.7",
                                   .proven = Testing::IdentityOf(std::string { Queue::RemoteClient }),

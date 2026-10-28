@@ -52,6 +52,8 @@
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
+using Pace::Testing::UnwrapMutable;
+
 /// @file AdmissionTestUtils.hpp
 /// The leader's side of the fleet compile queue as a test stands it up -- a scheduler, its queue, a real
 /// loopback listener serving it, and a blocking client -- shared by the cases of the leader's responder
@@ -143,7 +145,8 @@ class Client
     /// Send a frame without waiting for its reply.
     void Send(std::vector<std::byte> frame)
     {
-        REQUIRE(core::async::syncRun(SendAll(_socket.get(), std::move(frame))));
+        auto const sent = core::async::syncRun(SendAll(_socket.get(), std::move(frame)));
+        REQUIRE(sent);
     }
 
     /// @return The next frame, or nothing when the peer closed or stayed silent past the deadline.
@@ -236,7 +239,7 @@ struct Queue
     {
         auto const frame = Wire::EncodeMachineBudget(Wire::MachineBudgetReport {
             .memoryBudgetBytes = budgetBytes, .slots = slots, .heldSlots = 0, .heldBytes = 0, .peaks = {} });
-        auto reply = core::async::syncRun(admission->Answer(
+        auto reply = core::async::syncRun(UnwrapMutable(admission).Answer(
             frame,
             PeerIdentity { .host = "10.0.0.2", .proven = ProvenIdentity { .id = "scheduler", .key = signer.PublicKey() } }));
         REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
@@ -270,7 +273,7 @@ struct Queue
     {
         auto const frame = Wire::EncodeMachineBudget(Wire::MachineBudgetReport {
             .memoryBudgetBytes = budgetBytes, .slots = slots, .heldSlots = 0, .heldBytes = 0, .peaks = {} });
-        auto reply = core::async::syncRun(admission->Answer(
+        auto reply = core::async::syncRun(UnwrapMutable(admission).Answer(
             frame,
             PeerIdentity { .host = "10.0.0.9",
                            .proven = ProvenIdentity { .id = std::string { machine },

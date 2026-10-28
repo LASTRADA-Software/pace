@@ -127,6 +127,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -631,6 +632,24 @@ struct RouteParts
     IRouteProbe const& probe;  ///< The kernel's answer.
     Node::RouteHostCell& cell; ///< The last usable route host.
 };
+
+/// The leader's admission queue as the scrape reads it: its depth, and the bytes charged per machine,
+/// each machine rendered as its key in hex (what the roster and `pacectl` name it by).
+/// @param service The scheduler service whose queue is sampled.
+/// @return The gauges at this instant.
+[[nodiscard]] AdmissionGauges SampleAdmission(Distributed::SchedulerService const& service)
+{
+    auto const snapshot = service.AdmissionSnapshotNow();
+    auto gauges = AdmissionGauges { .queueDepth = snapshot.depth, .chargedBytes = {} };
+    for (auto const& [machine, bytes]: snapshot.chargedBytes)
+    {
+        std::string hex;
+        for (auto const byte: machine)
+            hex += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(byte)));
+        gauges.chargedBytes.emplace_back(std::move(hex), bytes);
+    }
+    return gauges;
+}
 
 /// Everything the node runs, under whichever host runs it.
 /// @param cfg The configuration the node started with.
@@ -1392,7 +1411,9 @@ struct RouteParts
         // an invariant, not a configuration this body could meet. `value()` states it -- a change that
         // broke it ends the start on a named exception rather than serving a surface with nothing to relay
         // through, and it adds no exit of its own beside the refusal that already owns the case.
-        forwardDialer.emplace(prover.value(), nodeIo.Connector(), nodeIo.Reactor());
+        if (!prover.has_value())
+            throw std::logic_error { "forwarding admission needs the identity prover, which every start builds" };
+        forwardDialer.emplace(*prover, nodeIo.Connector(), nodeIo.Reactor());
         admitForwarder.emplace(knownSchedulingLeader, *forwardDialer, nodeIo.Reactor(), metrics, &leaseCharges, &announced);
         if (schedulingRedirect.has_value())
             schedulingRedirect->ForwardAdmissionWith(*admitForwarder);
@@ -1599,17 +1620,7 @@ struct RouteParts
             .admission = schedulerTier == nullptr
                              ? std::function<AdmissionGauges()> {}
                              : std::function<AdmissionGauges()> { [service = &schedulerTier->Service()] {
-                                   auto const snapshot = service->AdmissionSnapshotNow();
-                                   auto gauges = AdmissionGauges { .queueDepth = snapshot.depth, .chargedBytes = {} };
-                                   for (auto const& [machine, bytes]: snapshot.chargedBytes)
-                                   {
-                                       std::string hex;
-                                       for (auto const byte: machine)
-                                           hex += std::format("{:02x}",
-                                                              static_cast<unsigned>(static_cast<unsigned char>(byte)));
-                                       gauges.chargedBytes.emplace_back(std::move(hex), bytes);
-                                   }
-                                   return gauges;
+                                   return SampleAdmission(*service);
                                } } },
         startedAt);
 

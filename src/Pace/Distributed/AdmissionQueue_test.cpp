@@ -7,6 +7,10 @@
 #include <map>
 #include <ranges>
 
+#include <tests/Unwrap.hpp>
+
+using Pace::Testing::Unwrap;
+
 using namespace Pace::Distributed;
 
 namespace
@@ -36,7 +40,9 @@ struct Fixture
     /// Enqueues a request of `bytes`, the figure being taught to the estimator under its own key.
     Ticket Add(AdmitKind kind, std::string caller, std::uint64_t bytes, std::string fingerprint = {})
     {
-        auto key = EstimateKey { "key-" + std::to_string(++_serial), "a.cpp", fingerprint };
+        auto key = EstimateKey { .cacheKey = "key-" + std::to_string(++serial),
+                                 .sourcePath = "a.cpp",
+                                 .compilerIdentity = fingerprint };
         estimates.Record(key, bytes);
         QueueRequest request;
         request.kind = kind;
@@ -52,9 +58,10 @@ struct Fixture
     }
 
     /// Enqueues `count` local-only requests of `bytes` each.
-    std::vector<Ticket> LocalMany(int count, std::uint64_t bytes, std::string caller = "m")
+    std::vector<Ticket> LocalMany(int count, std::uint64_t bytes, std::string const& caller = "m")
     {
         std::vector<Ticket> tickets;
+        tickets.reserve(static_cast<std::size_t>(count));
         for ([[maybe_unused]] auto const _: std::views::iota(0, count))
             tickets.push_back(Local(bytes, caller));
         return tickets;
@@ -63,7 +70,7 @@ struct Fixture
     /// Enqueues a request whose estimate key is `cacheKey`, so two of them collide in the dedup set.
     Ticket Keyed(AdmitKind kind, std::string caller, std::string cacheKey, bool storable, std::uint64_t bytes)
     {
-        auto key = EstimateKey { std::move(cacheKey), "a.cpp", {} };
+        auto key = EstimateKey { .cacheKey = std::move(cacheKey), .sourcePath = "a.cpp", .compilerIdentity = {} };
         estimates.Record(key, bytes);
         QueueRequest request;
         request.kind = kind;
@@ -73,20 +80,20 @@ struct Fixture
         return queue.Enqueue(std::move(request));
     }
 
-  private:
-    int _serial {};
+    int serial {}; ///< Numbers the keys `Add` mints.
 };
 
-constexpr Settlement Done { SettleOutcome::NotStored, std::nullopt };
+constexpr Settlement Done { .outcome = SettleOutcome::NotStored, .peakBytes = std::nullopt };
 
 MachineReport Report(std::uint64_t budget, std::uint32_t slots, std::uint32_t heldSlots = 0, std::uint64_t heldBytes = 0)
 {
-    return MachineReport { budget, slots, heldSlots, heldBytes };
+    return MachineReport { .memoryBudgetBytes = budget, .slots = slots, .heldSlots = heldSlots, .heldBytes = heldBytes };
 }
 
 std::vector<Ticket> Tickets(std::vector<Decision> const& decisions)
 {
     std::vector<Ticket> result;
+    result.reserve(decisions.size());
     for (auto const& decision: decisions)
         result.push_back(decision.ticket);
     return result;
@@ -245,7 +252,7 @@ TEST_CASE("AdmissionQueue.fifo-among-equals", "[distributed][admission]")
 TEST_CASE("AdmissionQueue.dispatchable-uses-placement", "[distributed][admission]")
 {
     Fixture f;
-    Placement const worker { "worker-1", "w", "10.0.0.2:6680" };
+    Placement const worker { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" };
     f.placement.byFingerprint["fp"] = { worker };
     f.queue.ReportMachine("w", Report(8 * GiB, 4));
     f.queue.ReportMachine("c", Report(8 * GiB, 4));
@@ -255,9 +262,9 @@ TEST_CASE("AdmissionQueue.dispatchable-uses-placement", "[distributed][admission
     REQUIRE(granted.size() == 1);
     CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Worker);
     REQUIRE(granted[0].placement.has_value());
-    CHECK(granted[0].placement->workerId == worker.workerId);
-    CHECK(granted[0].placement->machine == "w");
-    CHECK(granted[0].placement->endpoint == worker.endpoint);
+    CHECK(Unwrap(granted[0].placement).workerId == worker.workerId);
+    CHECK(Unwrap(granted[0].placement).machine == "w");
+    CHECK(Unwrap(granted[0].placement).endpoint == worker.endpoint);
 
     // Machine w is charged: a second 5 GiB request does not fit there, and runs on the caller
     // (which has room) rather than waiting; a third fits nowhere.
@@ -273,7 +280,7 @@ TEST_CASE("AdmissionQueue.dispatchable-uses-placement", "[distributed][admission
 TEST_CASE("AdmissionQueue.dispatchable-with-full-candidates-runs-on-caller-with-room", "[distributed][admission]")
 {
     Fixture f;
-    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
     f.queue.ReportMachine("w", Report(8 * GiB, 4, 4, 8 * GiB));
     f.queue.ReportMachine("c", Report(8 * GiB, 4));
     f.Add(AdmitKind::Dispatchable, "c", 5 * GiB, "fp");
@@ -285,8 +292,8 @@ TEST_CASE("AdmissionQueue.dispatchable-with-full-candidates-runs-on-caller-with-
 TEST_CASE("AdmissionQueue.dispatchable-head-reserves-across-changing-candidate-order", "[distributed][admission]")
 {
     Fixture f;
-    Placement const w1 { "worker-1", "w1", "10.0.0.2:6680" };
-    Placement const w2 { "worker-2", "w2", "10.0.0.3:6680" };
+    Placement const w1 { .workerId = "worker-1", .machine = "w1", .endpoint = "10.0.0.2:6680" };
+    Placement const w2 { .workerId = "worker-2", .machine = "w2", .endpoint = "10.0.0.3:6680" };
     f.placement.byFingerprint["fp"] = { w1, w2 };
     f.queue.ReportMachine("w1", Report(8 * GiB, 32));
     f.queue.ReportMachine("w2", Report(8 * GiB, 32));
@@ -343,7 +350,7 @@ TEST_CASE("AdmissionQueue.dedup-waiter-woken-by-store", "[distributed][admission
     auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { first });
 
-    f.queue.Settle(first, Settlement { SettleOutcome::Stored, std::nullopt });
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::Stored, .peakBytes = std::nullopt });
     auto const woken = f.queue.Pump();
     REQUIRE(woken.size() == 1);
     CHECK(woken[0].ticket == second);
@@ -371,7 +378,7 @@ TEST_CASE("AdmissionQueue.dedup-not-woken-by-not-stored", "[distributed][admissi
     auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     REQUIRE(f.queue.Pump().size() == 1);
 
-    f.queue.Settle(first, Settlement { SettleOutcome::NotStored, std::nullopt });
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::NotStored, .peakBytes = std::nullopt });
     auto const granted = f.queue.Pump();
     REQUIRE(granted.size() == 1);
     CHECK(granted[0].ticket == second);
@@ -386,7 +393,7 @@ TEST_CASE("AdmissionQueue.dedup-failed-owner-requeues-waiters", "[distributed][a
     auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     REQUIRE(f.queue.Pump().size() == 1);
 
-    f.queue.Settle(first, Settlement { SettleOutcome::Failed, std::nullopt });
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::Failed, .peakBytes = std::nullopt });
     auto const granted = f.queue.Pump();
     REQUIRE(granted.size() == 1);
     CHECK(granted[0].ticket == second);
@@ -417,7 +424,7 @@ TEST_CASE("AdmissionQueue.requeued-waiter-keeps-fifo-position", "[distributed][a
     auto const later = f.Local(4 * GiB);
     REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { first });
 
-    f.queue.Settle(first, Settlement { SettleOutcome::NotStored, std::nullopt });
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::NotStored, .peakBytes = std::nullopt });
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { waiter }); // not `later`, which is younger
     f.queue.Settle(waiter, Done);
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { later });
@@ -432,7 +439,7 @@ TEST_CASE("AdmissionQueue.abandoned-dedup-waiter-is-not-woken", "[distributed][a
     REQUIRE(f.queue.Pump().size() == 1);
 
     f.queue.Abandon(second);
-    f.queue.Settle(first, Settlement { SettleOutcome::Stored, std::nullopt });
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::Stored, .peakBytes = std::nullopt });
     CHECK(f.queue.Pump().empty());
 }
 
@@ -466,7 +473,7 @@ TEST_CASE("AdmissionQueue.dedup-only-same-cache", "[distributed][admission]")
         QueueRequest request;
         request.kind = AdmitKind::LocalOnly;
         request.caller = machine;
-        request.estimate = EstimateKey { "k", "a.cpp", {} };
+        request.estimate = EstimateKey { .cacheKey = "k", .sourcePath = "a.cpp", .compilerIdentity = {} };
         static_cast<void>(queue.Enqueue(std::move(request)));
     }
     CHECK(queue.Pump().size() == 1);
@@ -493,7 +500,7 @@ TEST_CASE("AdmissionQueue.abandon-granted-releases-charge", "[distributed][admis
 {
     Fixture f;
     f.queue.ReportMachine("m", Report(4 * GiB, 4));
-    auto key = EstimateKey { "key-x", "a.cpp", {} };
+    auto key = EstimateKey { .cacheKey = "key-x", .sourcePath = "a.cpp", .compilerIdentity = {} };
     f.estimates.Record(key, 1 * GiB);
     QueueRequest request;
     request.kind = AdmitKind::LocalOnly;
@@ -513,7 +520,7 @@ TEST_CASE("AdmissionQueue.abandon-granted-releases-charge", "[distributed][admis
 TEST_CASE("AdmissionQueue.abandon-queued-records-nothing", "[distributed][admission]")
 {
     Fixture f;
-    auto key = EstimateKey { "key-y", "a.cpp", {} };
+    auto key = EstimateKey { .cacheKey = "key-y", .sourcePath = "a.cpp", .compilerIdentity = {} };
     f.estimates.Record(key, 1 * GiB);
     QueueRequest request;
     request.kind = AdmitKind::LocalOnly;
@@ -528,7 +535,7 @@ TEST_CASE("AdmissionQueue.settle-records-peak", "[distributed][admission]")
 {
     Fixture f;
     f.queue.ReportMachine("m", Report(8 * GiB, 4));
-    auto key = EstimateKey { "key-z", "a.cpp", {} };
+    auto key = EstimateKey { .cacheKey = "key-z", .sourcePath = "a.cpp", .compilerIdentity = {} };
     f.estimates.Record(key, 1 * GiB);
     QueueRequest request;
     request.kind = AdmitKind::LocalOnly;
@@ -537,14 +544,14 @@ TEST_CASE("AdmissionQueue.settle-records-peak", "[distributed][admission]")
     auto const ticket = f.queue.Enqueue(request);
     REQUIRE(f.queue.Pump().size() == 1);
 
-    f.queue.Settle(ticket, Settlement { SettleOutcome::Stored, 3 * GiB });
+    f.queue.Settle(ticket, Settlement { .outcome = SettleOutcome::Stored, .peakBytes = 3 * GiB });
     CHECK(f.estimates.Estimate(key) == 3 * GiB);
 }
 
 TEST_CASE("AdmissionQueue.worker-refusal-reparks-at-head", "[distributed][admission]")
 {
     Fixture f;
-    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
     f.queue.ReportMachine("w", Report(8 * GiB, 4));
     f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller is full
     auto const ticket = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
@@ -553,7 +560,7 @@ TEST_CASE("AdmissionQueue.worker-refusal-reparks-at-head", "[distributed][admiss
     REQUIRE(granted[0].kind == GrantKind::Worker);
     auto const younger = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
 
-    f.queue.Settle(ticket, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+    f.queue.Settle(ticket, Settlement { .outcome = SettleOutcome::WorkerRefused, .peakBytes = std::nullopt });
     CHECK(f.queue.Depth() == 2);
     CHECK(f.queue.Pump().empty()); // `w` admits nothing until it reports again
 
@@ -567,7 +574,7 @@ TEST_CASE("AdmissionQueue.worker-refusal-reparks-at-head", "[distributed][admiss
 TEST_CASE("AdmissionQueue.worker-refusals-bounded", "[distributed][admission]")
 {
     Fixture f;
-    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
     f.queue.ReportMachine("c", Report(8 * GiB, 4));
     auto const ticket = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
     for ([[maybe_unused]] auto const round: std::views::iota(0U, AdmissionQueue::MaxWorkerRefusals))
@@ -576,7 +583,7 @@ TEST_CASE("AdmissionQueue.worker-refusals-bounded", "[distributed][admission]")
         auto const granted = f.queue.Pump();
         REQUIRE(granted.size() == 1);
         REQUIRE(granted[0].kind == GrantKind::Worker);
-        f.queue.Settle(ticket, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+        f.queue.Settle(ticket, Settlement { .outcome = SettleOutcome::WorkerRefused, .peakBytes = std::nullopt });
     }
     f.queue.ReportMachine("w", Report(8 * GiB, 4));
     auto const last = f.queue.Pump();
@@ -590,7 +597,7 @@ TEST_CASE("AdmissionQueue.returned-grant-goes-to-the-front-uncounted", "[distrib
     // A grant whose worker left before it could be handed over: back at the front, its charge freed,
     // and NOT a refusal -- the machine is not marked refused and the request keeps its whole bound.
     Fixture f;
-    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
     f.queue.ReportMachine("w", Report(8 * GiB, 1));
     f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller is full
     auto const ticket = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
@@ -611,7 +618,7 @@ TEST_CASE("AdmissionQueue.returned-grant-goes-to-the-front-uncounted", "[distrib
     // The bound is whole: two refusals later it still goes to a worker, which a counted return would not.
     for ([[maybe_unused]] auto const round: std::views::iota(1U, AdmissionQueue::MaxWorkerRefusals))
     {
-        f.queue.Settle(ticket, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+        f.queue.Settle(ticket, Settlement { .outcome = SettleOutcome::WorkerRefused, .peakBytes = std::nullopt });
         f.queue.ReportMachine("w", Report(8 * GiB, 1));
         auto const granted = f.queue.Pump();
         REQUIRE(granted.size() == 1);
@@ -652,7 +659,7 @@ TEST_CASE("AdmissionQueue.leadership-loss", "[distributed][admission]")
 TEST_CASE("AdmissionQueue.requeued-waiter-stays-behind-refused-front", "[distributed][admission]")
 {
     Fixture f;
-    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
     f.queue.ReportMachine("m", Report(4 * GiB, 4));
     f.queue.ReportMachine("w", Report(4 * GiB, 4));
     f.queue.ReportMachine("c", Report(4 * GiB, 4, 4, 4 * GiB)); // the caller is full
@@ -664,8 +671,11 @@ TEST_CASE("AdmissionQueue.requeued-waiter-stays-behind-refused-front", "[distrib
     auto const refused = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp"); // a higher ticket than all of them
     REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { refused });
 
-    f.queue.Settle(refused, Settlement { SettleOutcome::WorkerRefused, std::nullopt }); // queue: refused, older, younger
-    f.queue.Settle(owner, Settlement { SettleOutcome::NotStored, std::nullopt });       // the waiter rejoins
+    f.queue.Settle(
+        refused,
+        Settlement { .outcome = SettleOutcome::WorkerRefused, .peakBytes = std::nullopt }); // queue: refused, older, younger
+    f.queue.Settle(owner,
+                   Settlement { .outcome = SettleOutcome::NotStored, .peakBytes = std::nullopt }); // the waiter rejoins
     f.queue.ReportMachine("w", Report(4 * GiB, 4));
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { refused, older }); // the refused ticket is still first
 
@@ -678,14 +688,14 @@ TEST_CASE("AdmissionQueue.requeued-waiter-stays-behind-refused-front", "[distrib
 TEST_CASE("AdmissionQueue.refused-machine-admits-no-local-request-until-reported", "[distributed][admission]")
 {
     Fixture f;
-    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
     f.queue.ReportMachine("w", Report(8 * GiB, 4));
     f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB));
     auto const job = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
     REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { job });
     auto const local = f.Local(1 * GiB, "w"); // its caller is the machine about to refuse
 
-    f.queue.Settle(job, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+    f.queue.Settle(job, Settlement { .outcome = SettleOutcome::WorkerRefused, .peakBytes = std::nullopt });
     CHECK(f.queue.Pump().empty());
 
     f.queue.ReportMachine("w", Report(8 * GiB, 4));
@@ -700,7 +710,7 @@ TEST_CASE("AdmissionQueue.woken-waiter-is-parked-by-leadership-loss", "[distribu
     auto const owner = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { owner });
-    f.queue.Settle(owner, Settlement { SettleOutcome::Stored, std::nullopt });
+    f.queue.Settle(owner, Settlement { .outcome = SettleOutcome::Stored, .peakBytes = std::nullopt });
 
     CHECK(f.queue.LoseLeadership() == std::vector<Ticket> { waiter });
     f.queue.ReportMachine("m", Report(8 * GiB, 4));
@@ -715,7 +725,7 @@ TEST_CASE("AdmissionQueue.woken-waiter-abandoned-before-pump-is-not-delivered", 
     auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     auto const other = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
     REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { owner });
-    f.queue.Settle(owner, Settlement { SettleOutcome::Stored, std::nullopt });
+    f.queue.Settle(owner, Settlement { .outcome = SettleOutcome::Stored, .peakBytes = std::nullopt });
 
     f.queue.Abandon(waiter);
     auto const delivered = f.queue.Pump();
@@ -731,8 +741,8 @@ TEST_CASE("AdmissionQueue.not-stored-without-a-peak-teaches-the-estimator-nothin
     // reads as a KILLED compile and raises both to the default.
     Fixture f;
     f.queue.ReportMachine("m", Report(8 * GiB, 4));
-    auto const key = EstimateKey { "key-w", "w.cpp", "gcc-14" };
-    auto const sameShape = EstimateKey { "key-never-seen", "w.cpp", "gcc-14" };
+    auto const key = EstimateKey { .cacheKey = "key-w", .sourcePath = "w.cpp", .compilerIdentity = "gcc-14" };
+    auto const sameShape = EstimateKey { .cacheKey = "key-never-seen", .sourcePath = "w.cpp", .compilerIdentity = "gcc-14" };
     f.estimates.Record(key, 1 * GiB);
     QueueRequest request;
     request.kind = AdmitKind::LocalOnly;
@@ -745,7 +755,7 @@ TEST_CASE("AdmissionQueue.not-stored-without-a-peak-teaches-the-estimator-nothin
 
     SECTION("settled NotStored with no peak")
     {
-        f.queue.Settle(ticket, Settlement { SettleOutcome::NotStored, std::nullopt });
+        f.queue.Settle(ticket, Settlement { .outcome = SettleOutcome::NotStored, .peakBytes = std::nullopt });
         expected = 1 * GiB;
     }
     SECTION("control: abandoned")
@@ -766,7 +776,9 @@ TEST_CASE("AdmissionQueue.snapshot-names-who-runs-and-who-waits", "[distributed]
     Fixture f;
     f.queue.ReportMachine("m", Report(8 * GiB, 32));
     auto const enqueue = [&f](std::string caller, std::string tree, std::uint64_t bytes) {
-        auto key = EstimateKey { "key-" + caller + tree + std::to_string(bytes), "a.cpp", {} };
+        auto key = EstimateKey { .cacheKey = "key-" + caller + tree + std::to_string(bytes),
+                                 .sourcePath = "a.cpp",
+                                 .compilerIdentity = {} };
         f.estimates.Record(key, bytes);
         QueueRequest request;
         request.kind = AdmitKind::LocalOnly;

@@ -13,7 +13,9 @@ constexpr std::uint64_t Default = 2 * GiB;
 
 EstimateKey Key(std::string cacheKey, std::string path = "a.cpp", std::string identity = "fp")
 {
-    return EstimateKey { std::move(cacheKey), std::move(path), std::move(identity) };
+    return EstimateKey { .cacheKey = std::move(cacheKey),
+                         .sourcePath = std::move(path),
+                         .compilerIdentity = std::move(identity) };
 }
 } // namespace
 

@@ -30,6 +30,8 @@
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/Unwrap.hpp>
 
+using Pace::Testing::UnwrapMutable;
+
 using namespace Pace;
 using namespace Pace::Distributed;
 using namespace Pace::Distributed::Testing;
@@ -2518,7 +2520,7 @@ TEST_CASE("FleetView.admission-section-renders", "[distributed][fleetview][admis
 TEST_CASE("FleetView.admission-tree-label-is-escaped-on-the-page", "[distributed][fleetview][admission][security]")
 {
     auto snapshot = QueueingSnapshot();
-    snapshot.admission->clients.front().tree = "<script>x</script>";
+    UnwrapMutable(snapshot.admission).clients.front().tree = "<script>x</script>";
     auto const html = RenderFleetHtml(snapshot, NoHistory(), 0);
     CHECK_FALSE(html.contains("<script>x"));
     CHECK(html.contains("&lt;script&gt;x"));
@@ -2527,7 +2529,7 @@ TEST_CASE("FleetView.admission-tree-label-is-escaped-on-the-page", "[distributed
 TEST_CASE("FleetView.admission-tree-label-cannot-shift-a-text-row", "[distributed][fleetview][admission][security]")
 {
     auto snapshot = QueueingSnapshot();
-    snapshot.admission->clients.front().tree = "a\tb\nc";
+    UnwrapMutable(snapshot.admission).clients.front().tree = "a\tb\nc";
     auto const text = RenderFleetText(snapshot, NoHistory(), FleetSection::Clients);
     // Header plus the three rows, and every row still four fields: no tab or newline survived.
     CHECK(std::ranges::count(text, '\n') == 4);
@@ -2538,8 +2540,8 @@ TEST_CASE("FleetView.admission-tree-label-cannot-shift-a-text-row", "[distribute
 TEST_CASE("FleetView.admission-ledger-reads-in-use-beside-charged", "[distributed][fleetview][admission]")
 {
     auto snapshot = QueueingSnapshot();
-    snapshot.admission->machines.front().chargedBytes = 0;
-    snapshot.admission->machines.front().inUseBytes = 7ULL << 30;
+    UnwrapMutable(snapshot.admission).machines.front().chargedBytes = 0;
+    UnwrapMutable(snapshot.admission).machines.front().inUseBytes = 7ULL << 30;
     auto const json = RenderFleetJson(snapshot, NoHistory());
     CHECK(json.contains(R"({"machine":"ws-92","charged":0,"in-use":7516192768,"budget":17179869184})"));
 }

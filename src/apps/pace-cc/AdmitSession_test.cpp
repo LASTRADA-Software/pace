@@ -36,6 +36,9 @@
 #include <core/net/Sockets.hpp>
 #include <core/net/TcpClient.hpp>
 #include <tests/BoundedWait.hpp>
+#include <tests/Unwrap.hpp>
+
+using Pace::Testing::Unwrap;
 
 using namespace Pace;
 using namespace std::chrono_literals;
@@ -51,7 +54,7 @@ class Seen
     /// Record a request's verb.
     void Request(std::uint8_t op, std::vector<std::byte> payload)
     {
-        std::lock_guard lock { _mutex };
+        std::scoped_lock lock { _mutex };
         _ops.push_back(op);
         _payloads.push_back(std::move(payload));
     }
@@ -59,7 +62,7 @@ class Seen
     /// @return Every verb seen, in arrival order, across all connections.
     [[nodiscard]] std::vector<std::uint8_t> Ops() const
     {
-        std::lock_guard lock { _mutex };
+        std::scoped_lock lock { _mutex };
         return _ops;
     }
 
@@ -67,14 +70,38 @@ class Seen
     /// @return Its payload.
     [[nodiscard]] std::vector<std::byte> Payload(std::size_t index) const
     {
-        std::lock_guard lock { _mutex };
+        std::scoped_lock lock { _mutex };
         return index < _payloads.size() ? _payloads[index] : std::vector<std::byte> {};
     }
 
-    std::atomic<int> accepted { 0 };    ///< Connections accepted.
-    std::atomic<bool> sawEof { false }; ///< A script's read ended in EOF.
+    /// Count one accepted connection.
+    /// @return The zero-based index of that connection.
+    int NoteAccepted()
+    {
+        return _accepted.fetch_add(1);
+    }
+
+    /// @return Connections accepted.
+    [[nodiscard]] int Accepted() const
+    {
+        return _accepted.load();
+    }
+
+    /// Record that a script's read ended in EOF.
+    void NoteEof()
+    {
+        _sawEof = true;
+    }
+
+    /// @return Whether a script's read ended in EOF.
+    [[nodiscard]] bool SawEof() const
+    {
+        return _sawEof.load();
+    }
 
   private:
+    std::atomic<int> _accepted { 0 };
+    std::atomic<bool> _sawEof { false };
     mutable std::mutex _mutex;
     std::vector<std::uint8_t> _ops;
     std::vector<std::vector<std::byte>> _payloads;
@@ -97,7 +124,7 @@ core::async::Task<std::optional<std::uint8_t>> ReadRequest(Peer peer)
     auto const header = co_await core::net::receiveExactly(peer.socket, Wire::RequestHeaderSize);
     if (!header.has_value())
     {
-        peer.seen->sawEof = true;
+        peer.seen->NoteEof();
         co_return std::nullopt;
     }
     auto const decoded = Wire::DecodeRequestHeader(*header);
@@ -262,7 +289,7 @@ core::async::Task<void> PulseOnly(Peer peer)
 
 core::async::DetachedTask Serve(Script script, std::unique_ptr<core::net::ISocket> socket, Seen* seen, int index)
 {
-    co_await script(Peer { socket.get(), seen, index });
+    co_await script(Peer { .socket = socket.get(), .seen = seen, .index = index });
     socket->close();
 }
 
@@ -273,7 +300,7 @@ core::async::DetachedTask AcceptLoop(core::net::IListener* listener, Script scri
         auto accepted = co_await listener->accept();
         if (!accepted.has_value())
             co_return;
-        auto const index = seen->accepted.fetch_add(1);
+        auto const index = seen->NoteAccepted();
         Serve(script, std::move(*accepted), seen, index);
     }
 }
@@ -293,7 +320,7 @@ class FakeNode
     ~FakeNode()
     {
         {
-            std::lock_guard lock { _mutex };
+            std::scoped_lock lock { _mutex };
             if (_loop != nullptr)
                 _loop->post([this] {
                     _listener->close();
@@ -314,9 +341,14 @@ class FakeNode
         return "127.0.0.1:" + std::to_string(_port);
     }
 
-    Seen seen; ///< What it observed.
+    /// @return What it observed.
+    [[nodiscard]] Seen& Observed() noexcept
+    {
+        return seen;
+    }
 
   private:
+    Seen seen; ///< What it observed.
     void Body()
     {
         core::platform::SteadyClock clock;
@@ -324,7 +356,7 @@ class FakeNode
         auto listened = core::net::listen(loop, core::net::ListenOptions { .host = "127.0.0.1", .port = 0 });
         std::unique_ptr<core::net::IListener> listener = listened.has_value() ? std::move(*listened) : nullptr;
         {
-            std::lock_guard lock { _mutex };
+            std::scoped_lock lock { _mutex };
             // Published only with a listener: a node that could not listen has no loop to post to.
             _loop = listener != nullptr ? &loop : nullptr;
             _listener = listener.get();
@@ -335,7 +367,7 @@ class FakeNode
             return;
         AcceptLoop(listener.get(), _script, &seen);
         loop.run();
-        std::lock_guard lock { _mutex };
+        std::scoped_lock lock { _mutex };
         _loop = nullptr;
     }
 
@@ -379,7 +411,9 @@ constexpr auto Op = [](Wire::Op op) {
 [[nodiscard]] bool SeenOps(FakeNode& node, std::size_t count)
 {
     return Testing::WaitUntil(
-        "the fake node to see the requests", [&] { return node.seen.Ops().size() >= count; }, [] { return std::string {}; });
+        "the fake node to see the requests",
+        [&] { return node.Observed().Ops().size() >= count; },
+        [] { return std::string {}; });
 }
 } // namespace
 
@@ -405,7 +439,7 @@ TEST_CASE("AdmitSession.granted-after-progress")
     // R2: the grant's age starts at its receipt on this side, between the two readings.
     CHECK(ticket->receivedAt >= before);
     CHECK(ticket->receivedAt <= after);
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
 }
 
 TEST_CASE("AdmitSession.unreachable-fails-open")
@@ -424,7 +458,7 @@ TEST_CASE("AdmitSession.older-node-fails-open")
     auto session = OpenAt(node.HostPort());
     auto const ticket = session->Await();
     REQUIRE_FALSE(ticket.has_value());
-    CHECK(node.seen.accepted == 1); // Not a NotLeader: never retried.
+    CHECK(node.Observed().Accepted() == 1); // Not a NotLeader: never retried.
 }
 
 TEST_CASE("AdmitSession.other-refusals-fail-open-without-retry")
@@ -432,7 +466,7 @@ TEST_CASE("AdmitSession.other-refusals-fail-open-without-retry")
     FakeNode node { &Busy };
     auto session = OpenAt(node.HostPort());
     REQUIRE_FALSE(session->Await().has_value());
-    CHECK(node.seen.accepted == 1);
+    CHECK(node.Observed().Accepted() == 1);
 }
 
 TEST_CASE("AdmitSession.silence-fails-open")
@@ -468,7 +502,7 @@ TEST_CASE("AdmitSession.held-connection-has-no-idle-bound")
     std::this_thread::sleep_for(400ms);
     session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Stored, .peakBytes = std::nullopt });
     REQUIRE(SeenOps(node, 2));
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
 }
 
 TEST_CASE("AdmitSession.destroy-without-settle-closes")
@@ -477,11 +511,11 @@ TEST_CASE("AdmitSession.destroy-without-settle-closes")
     {
         auto session = OpenAt(node.HostPort());
         REQUIRE(session->Await().has_value());
-        CHECK_FALSE(node.seen.sawEof);
+        CHECK_FALSE(node.Observed().SawEof());
     }
     // The leader reads the end of the connection as an abandonment, so the node must see EOF.
     CHECK(Testing::WaitUntil(
-        "the node to see the connection end", [&] { return node.seen.sawEof.load(); }, [] { return std::string {}; }));
+        "the node to see the connection end", [&] { return node.Observed().SawEof(); }, [] { return std::string {}; }));
 }
 
 TEST_CASE("AdmitSession.settle-is-sent-on-same-connection")
@@ -492,12 +526,12 @@ TEST_CASE("AdmitSession.settle-is-sent-on-same-connection")
     session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Stored, .peakBytes = 123 });
 
     REQUIRE(SeenOps(node, 2));
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
-    CHECK(node.seen.accepted == 1);
-    auto const settle = Wire::DecodeSettlePayload(node.seen.Payload(1));
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
+    CHECK(node.Observed().Accepted() == 1);
+    auto const settle = Wire::DecodeSettlePayload(node.Observed().Payload(1));
     REQUIRE(settle.has_value());
-    CHECK(settle->outcome == Wire::SettleOutcome::Stored);
-    CHECK(settle->peakBytes == std::optional<std::uint64_t> { 123 });
+    CHECK(Unwrap(settle).outcome == Wire::SettleOutcome::Stored);
+    CHECK(Unwrap(settle).peakBytes == std::optional<std::uint64_t> { 123 });
 }
 
 TEST_CASE("AdmitSession.settle-without-a-grant-sends-nothing")
@@ -506,7 +540,7 @@ TEST_CASE("AdmitSession.settle-without-a-grant-sends-nothing")
     auto session = OpenAt(node.HostPort());
     REQUIRE_FALSE(session->Await().has_value());
     session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Failed, .peakBytes = std::nullopt });
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
 }
 
 TEST_CASE("AdmitSession.not-leader-retried-once")
@@ -515,8 +549,8 @@ TEST_CASE("AdmitSession.not-leader-retried-once")
     auto session = OpenAt(node.HostPort());
     auto const ticket = session->Await();
     REQUIRE(ticket.has_value());
-    CHECK(node.seen.accepted == 2);
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Admit) });
+    CHECK(node.Observed().Accepted() == 2);
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Admit) });
 }
 
 TEST_CASE("AdmitSession.not-leader-twice-fails-open")
@@ -524,7 +558,7 @@ TEST_CASE("AdmitSession.not-leader-twice-fails-open")
     FakeNode node { &NotLeaderAlways };
     auto session = OpenAt(node.HostPort());
     REQUIRE_FALSE(session->Await().has_value());
-    CHECK(node.seen.accepted == 2); // Once, never a third.
+    CHECK(node.Observed().Accepted() == 2); // Once, never a third.
 }
 
 TEST_CASE("AdmitSession.requeue-asks-again-on-the-same-connection")
@@ -541,12 +575,13 @@ TEST_CASE("AdmitSession.requeue-asks-again-on-the-same-connection")
     CHECK(second->queuedMs == 99);
     CHECK(second->receivedAt >= first->receivedAt);
 
-    CHECK(node.seen.accepted == 1);
+    CHECK(node.Observed().Accepted() == 1);
     REQUIRE(SeenOps(node, 3));
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle), Op(Wire::Op::Admit) });
-    auto const refused = Wire::DecodeSettlePayload(node.seen.Payload(1));
+    CHECK(node.Observed().Ops()
+          == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle), Op(Wire::Op::Admit) });
+    auto const refused = Wire::DecodeSettlePayload(node.Observed().Payload(1));
     REQUIRE(refused.has_value());
-    CHECK(refused->outcome == Wire::SettleOutcome::WorkerRefused);
+    CHECK(Unwrap(refused).outcome == Wire::SettleOutcome::WorkerRefused);
 }
 
 TEST_CASE("AdmitSession.requeue-without-a-grant-fails-open")
@@ -555,7 +590,7 @@ TEST_CASE("AdmitSession.requeue-without-a-grant-fails-open")
     auto session = OpenAt(node.HostPort());
     REQUIRE_FALSE(session->Await().has_value());
     CHECK_FALSE(session->Requeue().has_value());
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
 }
 
 TEST_CASE("AdmitSession.settle-has-its-own-short-bound")
@@ -572,7 +607,7 @@ TEST_CASE("AdmitSession.settle-has-its-own-short-bound")
 
     CHECK(waited < Cc::SettleBound + 1s);
     CHECK(waited >= Cc::SettleBound - 500ms); // It waited the bound out rather than failing at once.
-    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
+    CHECK(node.Observed().Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
 }
 
 TEST_CASE("AdmitSession.destroy-while-queued-is-prompt")
@@ -588,5 +623,5 @@ TEST_CASE("AdmitSession.destroy-while-queued-is-prompt")
     }
     CHECK(took < 2s); // Far under the 5 s idle bound.
     CHECK(Testing::WaitUntil(
-        "the node to see the connection end", [&] { return node.seen.sawEof.load(); }, [] { return std::string {}; }));
+        "the node to see the connection end", [&] { return node.Observed().SawEof(); }, [] { return std::string {}; }));
 }

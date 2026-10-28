@@ -2847,7 +2847,7 @@ TEST_CASE("WorkerProtocol.reports-the-measured-peak-under-the-admission-key", "[
 
     auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
     REQUIRE(answer.has_value());
-    REQUIRE(Decode(*answer).status == Wire::Status::Ok);
+    REQUIRE(Decode(Unwrap(answer)).status == Wire::Status::Ok);
     REQUIRE(measurements.peaks.size() == 1);
     CHECK(measurements.peaks.front().first
           == Wire::EstimateKeyFields {
@@ -2877,7 +2877,7 @@ TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[w
                                 DefaultMaxDecompressedBytes };
         auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
         REQUIRE(answer.has_value());
-        CHECK(Decode(*answer).status == Wire::Status::Ok);
+        CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
         CHECK(measurements.peaks.empty());
     }
 
@@ -2896,7 +2896,7 @@ TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[w
                                 DefaultMaxDecompressedBytes };
         auto const answer = worker.Answer(AdmittedFrame(std::nullopt, "", ""));
         REQUIRE(answer.has_value());
-        CHECK(Decode(*answer).status == Wire::Status::Ok);
+        CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
         CHECK(measurements.peaks.empty());
     }
 }

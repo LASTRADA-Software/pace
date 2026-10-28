@@ -25,6 +25,8 @@
 
 #include <tests/Unwrap.hpp>
 
+using Pace::Testing::Unwrap;
+
 using namespace Pace;
 using namespace Pace::Cc;
 namespace Wire = Pace::CompileCacheWire;
@@ -69,6 +71,10 @@ class FakeSession final: public IAdmitSession
     {
         _events->log.push_back(_name + ":closed");
     }
+    FakeSession(FakeSession const&) = delete;
+    FakeSession(FakeSession&&) = delete;
+    FakeSession& operator=(FakeSession const&) = delete;
+    FakeSession& operator=(FakeSession&&) = delete;
 
     [[nodiscard]] std::expected<AdmitTicket, std::string> Await() override
     {
@@ -141,7 +147,7 @@ struct Harness
     {
         return MissSeams {
             .open = [this](std::optional<std::string_view> failedWorker) -> std::unique_ptr<IAdmitSession> {
-                events.log.push_back("open");
+                events.log.emplace_back("open");
                 asked.push_back(failedWorker.has_value() ? std::optional<std::string> { *failedWorker } : std::nullopt);
                 if (openings.empty())
                     return nullptr;
@@ -154,17 +160,17 @@ struct Harness
             },
             .serveStored =
                 [this]() {
-                    events.log.push_back("fetch");
+                    events.log.emplace_back("fetch");
                     return storedFetch;
                 },
             .granted =
                 [this](AdmitTicket const& ticket) {
-                    events.log.push_back("granted");
+                    events.log.emplace_back("granted");
                     granted.push_back(ticket);
                 },
             .dispatchAdmitted =
                 [this](AdmitTicket const&) {
-                    events.log.push_back("dispatch-admitted");
+                    events.log.emplace_back("dispatch-admitted");
                     AdmittedDispatch out;
                     if (!workerRefuses.empty())
                     {
@@ -176,14 +182,14 @@ struct Harness
                     return out;
                 },
             .dispatchUnadmitted = [this]() -> std::optional<CompileRun> {
-                events.log.push_back("dispatch-unadmitted");
+                events.log.emplace_back("dispatch-unadmitted");
                 if (!legacyDispatches)
                     return std::nullopt;
                 return CompileRun { .exitCode = compileExit, .out = {}, .err = {} };
             },
             .compileLocal =
                 [this]() {
-                    events.log.push_back("compile");
+                    events.log.emplace_back("compile");
                     CompileRun run { .exitCode = compileExit, .out = {}, .err = {} };
                     run.peakMemoryBytes = peak;
                     return run;
@@ -194,7 +200,7 @@ struct Harness
                     // landed relative to it.
                     if (stores && compileExit == 0)
                     {
-                        events.log.push_back("store");
+                        events.log.emplace_back("store");
                         stored = true;
                     }
                     return compileExit;
@@ -572,22 +578,23 @@ TEST_CASE("Launcher.a-local-grant-reads-as-the-refusal-the-lease-path-records", 
     // The wording `dist-compile-e2e` asserts, and the tally the lease path moves for the same fleet.
     auto const noWorker = ExplainLocalGrant(Wire::LocalGrantReason::NoWorker, "gcc 14.2.0");
     REQUIRE(noWorker.has_value());
-    CHECK(noWorker->line.starts_with("not dispatched (rejected (no-worker): no worker serves this toolchain (gcc 14.2.0)"));
-    CHECK(noWorker->line.ends_with("; compiling locally"));
-    CHECK(noWorker->recording.outcome == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).outcome);
-    CHECK(noWorker->recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).reason);
+    CHECK(Unwrap(noWorker).line.starts_with(
+        "not dispatched (rejected (no-worker): no worker serves this toolchain (gcc 14.2.0)"));
+    CHECK(Unwrap(noWorker).line.ends_with("; compiling locally"));
+    CHECK(Unwrap(noWorker).recording.outcome == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).outcome);
+    CHECK(Unwrap(noWorker).recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).reason);
 
     auto const excluded = ExplainLocalGrant(Wire::LocalGrantReason::AllExcluded, {});
     REQUIRE(excluded.has_value());
-    CHECK(excluded->line.starts_with("not dispatched (rejected (no-worker): every worker serving this toolchain is"));
-    CHECK(excluded->recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).reason);
+    CHECK(Unwrap(excluded).line.starts_with("not dispatched (rejected (no-worker): every worker serving this toolchain is"));
+    CHECK(Unwrap(excluded).recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoToolchain).reason);
 
     auto const busy = ExplainLocalGrant(Wire::LocalGrantReason::NoRoom, "clang 19");
     REQUIRE(busy.has_value());
-    CHECK(busy->line.starts_with("not dispatched (rejected (no-capacity):"));
-    CHECK(busy->recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoCapacity).reason);
+    CHECK(Unwrap(busy).line.starts_with("not dispatched (rejected (no-capacity):"));
+    CHECK(Unwrap(busy).recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoCapacity).reason);
     // Two different tallies: a fleet that is too small is not a fleet with nobody on the toolchain.
-    CHECK(busy->recording.reason != noWorker->recording.reason);
+    CHECK(Unwrap(busy).recording.reason != Unwrap(noWorker).recording.reason);
 
     // A request that asked to run here was refused nothing.
     CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::Asked, "gcc").has_value());
@@ -619,7 +626,7 @@ TEST_CASE("Launcher.a-queue-that-never-converges-fails-open-after-a-bound", "[la
     std::deque<std::expected<AdmitTicket, std::string>> grants;
     for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, MaxWorkerRefusals + 2))
     {
-        grants.push_back(Grant(Wire::GrantKind::Worker));
+        grants.emplace_back(Grant(Wire::GrantKind::Worker));
         harness.workerRefuses.push_back(true);
     }
     harness.Open(std::move(grants));

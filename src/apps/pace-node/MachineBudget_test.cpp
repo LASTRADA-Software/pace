@@ -211,11 +211,11 @@ TEST_CASE("MachineBudget.explicit-percent", "[node][machinebudget]")
     auto const quarter = Parsed({ "--machine-memory-budget=25%" });
     REQUIRE(half.machineMemoryBudgetBytes.has_value());
     REQUIRE(quarter.machineMemoryBudgetBytes.has_value());
-    CHECK(*half.machineMemoryBudgetBytes > *quarter.machineMemoryBudgetBytes);
-    CHECK(*half.machineMemoryBudgetBytes <= QueryHostTotalMemoryBytes());
+    CHECK(Unwrap(half.machineMemoryBudgetBytes) > Unwrap(quarter.machineMemoryBudgetBytes));
+    CHECK(Unwrap(half.machineMemoryBudgetBytes) <= QueryHostTotalMemoryBytes());
 
     auto const report = MachineBudgetOf(half, MachineOf(4, 1 * GiB), HeldCharges {});
-    CHECK(report.memoryBudgetBytes == *half.machineMemoryBudgetBytes);
+    CHECK(report.memoryBudgetBytes == Unwrap(half.machineMemoryBudgetBytes));
 }
 
 TEST_CASE("MachineBudget.explicit-size", "[node][machinebudget]")
@@ -246,9 +246,9 @@ TEST_CASE("MachineBudget.slots-explicit", "[node][machinebudget]")
 TEST_CASE("MachineBudget.held-passes-through", "[node][machinebudget]")
 {
     auto const report =
-        MachineBudgetOf(NodeConfig {}, MachineOf(8, 32 * GiB), HeldCharges { .slots = 5, .bytes = 9 * GiB + 7 });
+        MachineBudgetOf(NodeConfig {}, MachineOf(8, 32 * GiB), HeldCharges { .slots = 5, .bytes = (9 * GiB) + 7 });
     CHECK(report.heldSlots == 5);
-    CHECK(report.heldBytes == 9 * GiB + 7);
+    CHECK(report.heldBytes == (9 * GiB) + 7);
 }
 
 TEST_CASE("MachineBudget.reported-with-no-worker", "[node][machinebudget]")

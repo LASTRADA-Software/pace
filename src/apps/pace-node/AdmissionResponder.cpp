@@ -9,6 +9,7 @@
 #include <array>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -453,9 +454,11 @@ namespace
     [[nodiscard]] std::unique_ptr<RequeuedHold> TakeRequeued(ConnectionScope& scope)
     {
         auto taken = scope.TakeHold();
-        if (dynamic_cast<RequeuedHold*>(taken.get()) == nullptr)
+        auto* const requeued = dynamic_cast<RequeuedHold*>(taken.get());
+        if (requeued == nullptr)
             return nullptr; // Nothing else survives an `ADMIT`, so nothing else is here to put back.
-        return std::unique_ptr<RequeuedHold> { static_cast<RequeuedHold*>(taken.release()) };
+        std::ignore = taken.release();
+        return std::unique_ptr<RequeuedHold> { requeued };
     }
 
     /// Give a granted ticket back by its settle.
@@ -614,7 +617,7 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
             auto const report = Wire::DecodeMachineBudgetPayload(payload);
             if (!report.has_value())
                 co_return FrameReply { RefuseHere(Wire::ErrorCode::MalformedFrame, {}) };
-            if (!caller.provenKey.has_value())
+            if (!caller.provenKey.has_value() || !machine.has_value())
                 co_return FrameReply { RefuseHere(Wire::ErrorCode::DispatchNotPermitted,
                                                   "a machine budget names the machine that proved it") };
             auto const reply = service->ReportMachineBudget(caller, *machine, *report);
@@ -730,6 +733,8 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
         auto const guard = std::scoped_lock { core->mutex };
         verdict = std::move(waiter->verdict);
     }
+    if (!verdict.has_value())
+        co_return FrameReply {}; // Woken with no verdict: nothing was granted, so nothing is owed an answer.
     if (verdict->refusal.has_value())
     {
         // Re-gated and refused (R9): the service already gave the charge back.
