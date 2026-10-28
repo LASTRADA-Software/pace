@@ -8,6 +8,7 @@
 #include <format>
 #include <mutex>
 #include <optional>
+#include <print>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -150,16 +151,14 @@ namespace
             if (_phase != Phase::Asking && !_reply.has_value())
                 return std::unexpected { std::string { "no admission is outstanding" } };
             _cv.wait(lock, [this] { return _reply.has_value(); });
-            auto reply = std::move(*_reply);
-            _reply.reset();
-            return reply;
+            return std::exchange(_reply, std::nullopt).value_or(Reply { std::unexpected { std::string { "no reply" } } });
         }
 
         /// Hand @p work to the loop thread; nothing happens when the loop has already ended.
         template <typename Work>
         void Post(Work work)
         {
-            std::lock_guard lock { _mutex };
+            std::scoped_lock lock { _mutex };
             if (_loop != nullptr)
                 _loop->post(std::move(work));
         }
@@ -168,7 +167,7 @@ namespace
         void Deliver(Reply reply)
         {
             {
-                std::lock_guard lock { _mutex };
+                std::scoped_lock lock { _mutex };
                 _phase = reply.has_value() ? Phase::Held : Phase::Closed;
                 _reply = std::move(reply);
             }
@@ -201,7 +200,7 @@ namespace
         void End(std::string reason)
         {
             {
-                std::lock_guard lock { _mutex };
+                std::scoped_lock lock { _mutex };
                 _loop = nullptr;
                 _ended = true;
                 // A waiter must never outlive the thread that would have answered it.
@@ -218,7 +217,7 @@ namespace
         /// Stop handing out the loop: it is about to be destroyed.
         void Detach() noexcept
         {
-            std::lock_guard lock { _mutex };
+            std::scoped_lock lock { _mutex };
             _loop = nullptr;
         }
 
@@ -254,11 +253,13 @@ namespace
                 }
 
                 Retire(Retire const&) = delete;
+                Retire(Retire&&) = delete;
                 Retire& operator=(Retire const&) = delete;
+                Retire& operator=(Retire&&) = delete;
             } const retire { this, &resolver };
 
             {
-                std::lock_guard lock { _mutex };
+                std::scoped_lock lock { _mutex };
                 _loop = &loop;
             }
             _cv.notify_all();
@@ -367,7 +368,7 @@ namespace
         {
             auto const outcome = co_await RoundTrip(self, Wire::EncodeSettle(settle), Credential {}, SettleBound);
             if (!outcome.IsHit())
-                std::fprintf(stderr, "pace-cc: settling the admission failed: %s\n", ReasonOf(outcome).c_str());
+                std::println(stderr, "pace-cc: settling the admission failed: {}", ReasonOf(outcome));
             self->DropSocket();
             self->_finished = true;
             self->EndOfTask();

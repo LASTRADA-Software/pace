@@ -1393,11 +1393,11 @@ namespace
                 if (record.queuedMs.has_value())
                 {
                     ++tally->queuedCount;
-                    tally->queuedMsTotal += *record.queuedMs;
+                    tally->queuedMsTotal += record.queuedMs.value_or(0);
                 }
                 if (record.peakMemoryBytes.has_value())
                 {
-                    tally->peakMemoryMax = std::max(tally->peakMemoryMax.value_or(0), *record.peakMemoryBytes);
+                    tally->peakMemoryMax = std::max(tally->peakMemoryMax.value_or(0), record.peakMemoryBytes.value_or(0));
                 }
                 if (record.exitCode.has_value())
                 {

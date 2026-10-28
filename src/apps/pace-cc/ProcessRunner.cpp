@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -543,6 +544,20 @@ namespace
         1024;
     #endif
 
+    /// The largest resident set a reaped child tree reached, in `rusage`'s own unit.
+    ///
+    /// glibc declares `ru_maxrss` inside an anonymous union, which a member access cannot name without
+    /// tripping `cppcoreguidelines-pro-type-union-access`; the bytes are read at the member's offset instead.
+    /// @param usage What `wait4` filled in.
+    /// @return `ru_maxrss`.
+    [[nodiscard]] long MaxRssOf(::rusage const& usage) noexcept
+    {
+        long value = 0;
+        auto const bytes = std::as_bytes(std::span { &usage, 1 });
+        std::memcpy(&value, bytes.subspan(offsetof(::rusage, ru_maxrss), sizeof(value)).data(), sizeof(value));
+        return value;
+    }
+
     /// POSIX process runner: posix_spawnp with two pipes, drained with poll().
     class PosixProcessRunner final: public IProcessRunner
     {
@@ -811,8 +826,8 @@ namespace
             ::rusage usage {};
             while (::wait4(pid, &status, 0, &usage) < 0 && errno == EINTR)
                 continue;
-            if (usage.ru_maxrss > 0)
-                result.peakMemoryBytes = static_cast<std::uint64_t>(usage.ru_maxrss) * MaxRssUnitBytes;
+            if (auto const maxRss = MaxRssOf(usage); maxRss > 0)
+                result.peakMemoryBytes = static_cast<std::uint64_t>(maxRss) * MaxRssUnitBytes;
             if (WIFEXITED(status))
                 result.exitCode = WEXITSTATUS(status);
             else if (WIFSIGNALED(status))
