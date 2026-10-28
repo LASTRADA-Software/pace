@@ -227,33 +227,37 @@ void NodePresence::Loop(std::stop_token const& stop)
         // that for a worker; for a node running none it is legal and simply means there is no
         // address to file a row under, so the round is skipped rather than sent. Silent,
         // because it is a configuration this node started with rather than an event.
+        auto announced = false;
         if (auto const endpoint = _announced.Current(); !endpoint.empty())
-            (void) AnnounceMachineOnce(PresenceRound { .loadSampler = *_loadSampler,
-                                                       .cacheTier = _cacheTier,
-                                                       .metrics = _metrics,
-                                                       .sampler = _sampler,
-                                                       .capacity = _capacityWire,
-                                                       .endpoint = endpoint,
-                                                       .logger = _logger,
-                                                       .conditions = _conditions,
-                                                       .prover = _prover,
-                                                       .reachability = _reachability,
-                                                       .askedJoins = _askedJoins },
-                                       _link,
-                                       _dialer);
+            announced = AnnounceMachineOnce(PresenceRound { .loadSampler = *_loadSampler,
+                                                            .cacheTier = _cacheTier,
+                                                            .metrics = _metrics,
+                                                            .sampler = _sampler,
+                                                            .capacity = _capacityWire,
+                                                            .endpoint = endpoint,
+                                                            .logger = _logger,
+                                                            .conditions = _conditions,
+                                                            .prover = _prover,
+                                                            .reachability = _reachability,
+                                                            .askedJoins = _askedJoins },
+                                            _link,
+                                            _dialer);
 
         // The machine's compile budget, whether or not this node runs a worker (R6): this loop is the
-        // one that runs everywhere. After the presence announcement, which is what makes the machine
-        // known at all, and dialled on its own so a refusal of one never costs the other.
-        (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
-                                                          .capacity = _capacity,
-                                                          .held = _held,
-                                                          .peaks = _peaks,
-                                                          .logger = _logger,
-                                                          .prover = _prover,
-                                                          .reachability = _reachability },
-                                     _link,
-                                     _dialer);
+        // one that runs everywhere. Only in a round whose presence announcement reached a scheduler: a
+        // second dial at a scheduler that did not answer the first would only fail the same way, and the
+        // machine is not known to the leader until that announcement lands. Dialled on its own, so a
+        // refusal of one never costs the other.
+        if (announced)
+            (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
+                                                              .capacity = _capacity,
+                                                              .held = _held,
+                                                              .peaks = _peaks,
+                                                              .logger = _logger,
+                                                              .prover = _prover,
+                                                              .reachability = _reachability },
+                                         _link,
+                                         _dialer);
 
         if (WaitOutInterval(stop))
             break;

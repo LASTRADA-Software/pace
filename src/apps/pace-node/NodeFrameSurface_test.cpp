@@ -390,8 +390,10 @@ TEST_CASE("(#290) one peer on one listener has a FETCH refused and a COMPILE adm
     NeverSpawns runner;
     Pace::Testing::ScratchDirectory const scratch { "pace-290-acceptance" };
     Cc::CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() };
-    Cc::WorkerProtocol protocol { jobs,    Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-                                  metrics, Cc::IgnoreJobRefusals() };
+    Cc::WorkerProtocol protocol {
+        jobs,    Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec },    &Testing::TestWorkerKey(),
+        metrics, Cc::IgnoreJobRefusals(),       Cc::IgnoreJobMeasurements()
+    };
     core::async::ThreadPoolExecutor pool { 1 };
     CompileCapacity capacity { 1, WorkerMaxRequestBytes, std::chrono::seconds { 5 }, logger };
 

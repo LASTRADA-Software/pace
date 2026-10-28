@@ -45,6 +45,7 @@
 
 #include <Dispatch.hpp>
 #include <IProcessRunner.hpp>
+#include <StubObjectTestSupport.hpp>
 #include <ToolchainDiscovery.hpp>
 #include <ToolchainHost.hpp>
 #include <core/async/Task.hpp>
@@ -250,6 +251,108 @@ TEST_CASE("A worker tier reports a refused argument through its OWN protocol", "
     CHECK(row->detail.contains("-fanalyzer"));
 
     // As `main` does before anything is destroyed: every compile drained while the reactor turns.
+    tier->StopAndDrain();
+}
+
+namespace
+{
+
+/// A runner whose compiles "succeed" -- the object is written where the command line names it -- and
+/// report @p peak as their measured peak, as the process runner does.
+class PeakingRunner final: public Cc::IProcessRunner
+{
+  public:
+    /// @param peak What every run reports as its peak memory.
+    explicit PeakingRunner(std::uint64_t peak) noexcept:
+        _peak { peak }
+    {
+    }
+
+    [[nodiscard]] Cc::CompileRun RunCaptureCombined(std::span<std::string const> argv) override
+    {
+        return RunCaptureSplit(argv);
+    }
+
+    [[nodiscard]] Cc::CompileRun RunCaptureSplit(std::span<std::string const> argv) override
+    {
+        Cc::Test::WriteStubObject(argv);
+        return Cc::CompileRun { .exitCode = 0, .out = {}, .err = {}, .peakMemoryBytes = _peak };
+    }
+
+  private:
+    std::uint64_t _peak;
+};
+
+/// A COMPILE for @p fingerprint stating the admission fields.
+/// @param fingerprint The toolchain to claim.
+/// @return The request frame.
+[[nodiscard]] std::vector<std::byte> AdmittedCompileFrame(std::string_view fingerprint)
+{
+    namespace Wire = CompileCacheWire;
+    constexpr std::string_view Source = "int main(){return 0;}";
+    auto const enveloped =
+        Wire::EncodeCodecEnvelope(Wire::IdentityCodec, static_cast<std::uint32_t>(Source.size()), Wire::AsBytes(Source));
+    return Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                      .fingerprint = fingerprint,
+                                                      .args = {},
+                                                      .source = enveloped,
+                                                      .acceptedCodecs = { Wire::IdentityCodec },
+                                                      .sourceName = "a.cpp",
+                                                      .compileDir = {},
+                                                      .compileDirReplacement = {},
+                                                      .sourceRoot = {},
+                                                      .sourceRootReplacement = {},
+                                                      .chargedBytes = 3ULL << 30,
+                                                      .admissionCacheKey = "objkey-1",
+                                                      .admissionSourcePath = "<SRCROOT>/src/a.cpp" });
+}
+
+} // namespace
+
+TEST_CASE("WorkerTier.hands-the-measured-peak-to-the-machine-report", "[node][worker-tier][machinebudget]")
+{
+    // #1728. The wiring, through the tier's own responder and protocol: an admitted compile's measured
+    // peak must land in the ledger the presence loop drains. A tier handed no sink -- or the ignoring
+    // one -- serves every compile and reports no peak, and no case that builds a protocol by hand sees it.
+    namespace Wire = CompileCacheWire;
+    WorkerTierFixture fixture;
+    fixture.cfg.toolchains = { "deadbeef=/opt/none/g++" };
+    constexpr auto Peak = std::uint64_t { 2'500'000'000ULL };
+    fixture.makeRunner = [Peak] {
+        return std::make_unique<PeakingRunner>(Peak);
+    };
+    auto const ok = Wire::EncodeReply(Wire::Status::Ok, std::vector<std::byte> {});
+    fixture.heartbeatReplies = { ok, ok, ok, ok, ok, ok };
+
+    auto const started = fixture.Start();
+    REQUIRE(started.has_value());
+    auto const& tier = started.value();
+    REQUIRE(tier != nullptr);
+    core::platform::ManualClock statusClock;
+    SchedulerReachability reachability { statusClock, nullptr };
+    auto heartbeat = tier->Launch(statusClock, reachability);
+    REQUIRE(Testing::WaitUntil(
+        "the heartbeat's survey to serve the pinned toolchain",
+        [&tier] { return !tier->CompilerFor("deadbeef").empty(); },
+        [&tier] { return std::format("compiler for deadbeef: '{}'", tier->CompilerFor("deadbeef")); }));
+
+    auto const bytes = fixture.io.Reactor().blockOn(
+        [](CompileResponder* responder, std::vector<std::byte> request) -> core::async::Task<std::vector<std::byte>> {
+            auto answer = co_await responder->Answer(request, PeerIdentity { .host = "127.0.0.1" });
+            answer.hold.reset();
+            co_return std::move(answer.bytes);
+        }(&tier->Responder(), AdmittedCompileFrame("deadbeef")));
+    auto const header = Wire::DecodeReplyHeader(bytes);
+    REQUIRE(header.has_value());
+    REQUIRE(Testing::Unwrap(header).status == Wire::Status::Ok);
+
+    auto const peaks = fixture.measuredPeaks.Take();
+    REQUIRE(peaks.size() == 1);
+    CHECK(peaks.front().first
+          == Wire::EstimateKeyFields {
+              .cacheKey = "objkey-1", .sourcePath = "<SRCROOT>/src/a.cpp", .compilerIdentity = "deadbeef" });
+    CHECK(peaks.front().second == Peak);
+
     tier->StopAndDrain();
 }
 

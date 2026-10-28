@@ -338,7 +338,8 @@ TEST_CASE("A worker refusing an argument on the wire raises the row that names i
     };
     RefusedArgumentsReport report { conditions, logger, {} };
     Cc::WorkerProtocol protocol {
-        jobs, Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(), metrics, report
+        jobs,   Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(), metrics,
+        report, Cc::IgnoreJobMeasurements()
     };
 
     std::string const source = "int main(){return 0;}";

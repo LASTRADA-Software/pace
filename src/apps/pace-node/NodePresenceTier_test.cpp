@@ -656,10 +656,10 @@ TEST_CASE("A host event's presence round runs on the loop's thread and never on 
     auto const dials = [&dialer] {
         return dialer.Threads().size();
     };
-    // A round is TWO dials since #1728: the presence announcement, then the machine's compile budget,
-    // each dialled on its own so a refusal of one never costs the other. Counted in rounds, so the case
-    // still tells the first round from the one a network change asks for.
-    constexpr auto DialsPerRound = std::size_t { 2 };
+    // A round whose announcement reaches nobody is ONE dial: the machine's compile budget is not sent to a
+    // scheduler that did not answer the presence announcement (#1728). Counted in rounds all the same, so
+    // the case still tells the first round from the one a network change asks for.
+    constexpr auto DialsPerRound = std::size_t { 1 };
     {
         auto const presence = NodePresence::Start(PartsOver(fix, capacity, announced, dialer, events));
         REQUIRE(presence != nullptr);
@@ -680,6 +680,8 @@ TEST_CASE("A host event's presence round runs on the loop's thread and never on 
     }
     auto const threads = dialer.Threads();
     REQUIRE(threads.size() >= 2 * DialsPerRound);
+    // Exactly the announcements: a budget dial after a failed one would make this four.
+    CHECK(threads.size() == 2 * DialsPerRound);
     CHECK(std::ranges::count(threads, std::this_thread::get_id()) == 0);
     CHECK(std::ranges::count(threads, threads.front()) == static_cast<std::ptrdiff_t>(threads.size()));
 }

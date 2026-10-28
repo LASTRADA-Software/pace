@@ -553,6 +553,11 @@ class IAnnouncement
 struct AnnounceProof
 {
     NodeProofClient const* prover; ///< Who this machine is; null where nothing proves.
+    /// The subject the round's dial and proof setbacks are filed under in `SchedulerReachability`;
+    /// empty for the presence and worker rounds, which own the unnamed place. A second announcement
+    /// to the same scheduler names its own, so one that fails while the other succeeds is two places
+    /// and not one that alternates loss and recovery every round.
+    std::string_view subject {};
 };
 
 /// Dial a scheduler, prove this machine to it, and make @p announcement, following a redirect

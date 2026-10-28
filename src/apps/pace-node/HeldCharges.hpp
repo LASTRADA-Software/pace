@@ -79,14 +79,20 @@ class HeldChargeRegistry final: public IHeldCharges
     class Handle
     {
       public:
+        /// An empty handle: holds nothing and releases nothing.
         Handle() = default;
         Handle(Handle const&) = delete;
         Handle& operator=(Handle const&) = delete;
+        /// Take over @p other's charge, leaving it empty.
+        /// @param other The handle to take from.
         Handle(Handle&& other) noexcept:
             _owner { std::exchange(other._owner, nullptr) },
             _bytes { other._bytes }
         {
         }
+        /// Release this handle's own charge, then take over @p other's, leaving it empty.
+        /// @param other The handle to take from.
+        /// @return This handle.
         Handle& operator=(Handle&& other) noexcept
         {
             if (this != &other)
@@ -97,6 +103,7 @@ class HeldChargeRegistry final: public IHeldCharges
             }
             return *this;
         }
+        /// Release the charge, if one is held.
         ~Handle()
         {
             Release();

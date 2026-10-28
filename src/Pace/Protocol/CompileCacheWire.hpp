@@ -227,7 +227,9 @@ using WireVersion = std::uint8_t;
 /// admit one compile and is answered `Ok` with a grant -- or `Error` -- after any number of
 /// `Status::Progress` pulses, which makes it the SECOND verb a reply stream may follow; SETTLE
 /// (0x23) tells the leader how that compile ended; MACHINE-BUDGET (0x24) is a node's report of its
-/// own memory ledger. An older client cannot step over a pulse on a verb it does not know, which is
+/// own memory ledger; and COMPILE grew from 10 to 13 fields, the trailing admission fields (the
+/// charge, the object key and the source path), where an empty charge means none was stated. An
+/// older client cannot step over a pulse on a verb it does not know, which is
 /// the argument that moved the floor at version 3.
 inline constexpr WireVersion CurrentVersion = 16;
 

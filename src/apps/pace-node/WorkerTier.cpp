@@ -348,14 +348,10 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     // records at registration and names in each grant -- so a launcher can tell this worker from
     // whatever else answers at its address (W-4). None where nothing proves: such a worker
     // registers nowhere, so no grant names it.
-    _protocol { _jobs,
-                std::move(validator),
-                Cc::AvailableCodecs(),
-                parts.prover != nullptr ? &parts.prover->Key() : nullptr,
-                parts.metrics,
-                _refusedArguments,
-                CompileRequestMaxOf(parts.cfg),
-                parts.measurements },
+    _protocol {
+        _jobs,         std::move(validator), Cc::AvailableCodecs(), parts.prover != nullptr ? &parts.prover->Key() : nullptr,
+        parts.metrics, _refusedArguments,    parts.measurements,    CompileRequestMaxOf(parts.cfg)
+    },
     _slots { slots },
     // Sized to the slot cap, which is what makes an admitted job always find a thread,
     // and declared before the capacity and the responder, so neither outlives it.

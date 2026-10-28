@@ -377,24 +377,24 @@ class WorkerProtocol
     /// linking `Pace` — nothing at link time.
     /// @param refusals Told of every job the runner refused, beside the counter; must outlive
     ///        this. Required: see `IJobRefusalObserver`.
+    /// @param measurements Told each measured peak that carried admission data; must outlive this.
+    ///        **Required and undefaulted**, as `refusals` is: a defaulted sink is how the node's own
+    ///        site came to drop its ledger with every test still green. A caller that keeps none passes
+    ///        `IgnoreJobMeasurements()` and says so.
     /// @param maxDecompressedBytes Ceiling on what a request's codec envelope may
     ///        declare it expands to. **The surface's own request cap**, passed in
     ///        rather than assumed: this class never sees the listener that enforced
     ///        the frame length, so a listener with a smaller cap has to say so or the
     ///        two disagree about how much memory one request may cost. The default is
     ///        the figure every framed surface here uses.
-    /// @param measurements Told each measured peak that carried admission data; must outlive this.
-    ///        **Defaulted**, unlike `refusals`, because dropping a peak loses an estimate's input and
-    ///        no operator-visible fact: a caller that keeps none (every test, the launcher's own
-    ///        worker) says nothing, and a node that does passes its ledger at its one construction site.
     WorkerProtocol(ICompileJobRunner& jobs,
                    LeaseValidator validator,
                    CompileCacheWire::CodecList acceptedCodecs,
                    Ed25519KeyPair const* replyKey,
                    IMetricsSink& metrics,
                    IJobRefusalObserver& refusals,
-                   std::size_t maxDecompressedBytes = DefaultMaxDecompressedBytes,
-                   IJobMeasurementSink& measurements = IgnoreJobMeasurements());
+                   IJobMeasurementSink& measurements,
+                   std::size_t maxDecompressedBytes = DefaultMaxDecompressedBytes);
 
     /// Answer one complete request frame.
     /// @param frame A whole request, header included.

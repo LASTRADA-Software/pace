@@ -446,3 +446,28 @@ TEST_CASE("MachineBudget.held-sources-are-summed", "[node][machinebudget]")
     CombinedHeldCharges const combined { { &worker, &leases } };
     CHECK(combined.Held() == HeldCharges { .slots = 3, .bytes = 5 * GiB });
 }
+
+TEST_CASE("MachineBudget.dial-setbacks-are-filed-under-the-budget-subject", "[node][machinebudget]")
+{
+    // The presence announcement owns the unnamed place at a scheduler. A budget dial that succeeds must
+    // not end THAT place's setback -- or a link where one fails and the other lands would alternate a
+    // loss and a recovery line every round -- and its own failures must be its own place.
+    BudgetFixture fixture;
+    (void) fixture.reachability.Failed(SchedulerOutcome::Unreachable, SchedulerFailure { .endpoint = Scheduler });
+
+    Testing::ScriptedDialer ok { { Accepted() } };
+    CHECK(fixture.SendThrough(ok));
+    auto const recoveries = [&fixture] {
+        auto const records = fixture.logger.Snapshot();
+        return std::ranges::count_if(
+            records, [](CapturingLogger::Record const& record) { return record.message.contains("reachable again"); });
+    };
+    CHECK(recoveries() == 0);
+
+    // And the budget's own dial failure is a setback of its own, recovered by its own success.
+    Testing::ScriptedDialer down { { std::vector<std::byte> {} } };
+    CHECK_FALSE(fixture.SendThrough(down));
+    Testing::ScriptedDialer up { { Accepted() } };
+    CHECK(fixture.SendThrough(up));
+    CHECK(recoveries() == 1);
+}

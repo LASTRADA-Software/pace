@@ -360,8 +360,8 @@ WorkerProtocol::WorkerProtocol(ICompileJobRunner& jobs,
                                Ed25519KeyPair const* replyKey,
                                IMetricsSink& metrics,
                                IJobRefusalObserver& refusals,
-                               std::size_t maxDecompressedBytes,
-                               IJobMeasurementSink& measurements):
+                               IJobMeasurementSink& measurements,
+                               std::size_t maxDecompressedBytes):
     _jobs { jobs },
     _validator { std::move(validator) },
     _acceptedCodecs { std::move(acceptedCodecs) },

@@ -340,7 +340,8 @@ struct Fixture
                  std::move(codecs),
                  &Testing::TestWorkerKey(),
                  metrics,
-                 refusals }
+                 refusals,
+                 IgnoreJobMeasurements() }
     {
     }
     Fixture(Fixture const&) = delete;
@@ -735,10 +736,8 @@ TEST_CASE("The envelope ceiling is the surface's own, not a figure this class as
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     constexpr std::size_t TinyCap = 8;
-    WorkerProtocol worker {
-        jobs,   UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(), metrics, IgnoreJobRefusals(),
-        TinyCap
-    };
+    WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
+                            metrics, IgnoreJobRefusals(),       IgnoreJobMeasurements(), TinyCap };
 
     // Well under the default ceiling, and over this worker's.
     auto const answer = worker.Answer(CompileFrame("gcc-13", "int main(){return 0;}"));
@@ -2094,7 +2093,7 @@ TEST_CASE("A reply carries the runner's own correlation, not one recomputed here
     LyingRunner runner { std::string { Sentinel } };
     AtomicMetricsSink metrics;
     WorkerProtocol worker { runner,  UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-                            metrics, IgnoreJobRefusals() };
+                            metrics, IgnoreJobRefusals(),       IgnoreJobMeasurements() };
 
     auto const answer = worker.Answer(CompileFrame());
     REQUIRE(answer.has_value());
@@ -2122,7 +2121,7 @@ TEST_CASE("The real runner is what a correlation comes from", "[worker-protocol]
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-                            metrics, IgnoreJobRefusals() };
+                            metrics, IgnoreJobRefusals(),       IgnoreJobMeasurements() };
 
     constexpr std::string_view Source = "int main(){return 0;}";
     auto const answer = worker.Answer(CompileFrame("gcc-13", Source));
@@ -2543,7 +2542,8 @@ struct RosterWorker
                             AvailableCodecs(),
                             &Testing::TestWorkerKey(),
                             metrics,
-                            IgnoreJobRefusals() };
+                            IgnoreJobRefusals(),
+                            IgnoreJobMeasurements() };
 };
 } // namespace
 
@@ -2836,8 +2836,14 @@ TEST_CASE("WorkerProtocol.reports-the-measured-peak-under-the-admission-key", "[
     CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
     AtomicMetricsSink metrics;
     RecordingMeasurements measurements;
-    WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec },     &Testing::TestWorkerKey(),
-                            metrics, IgnoreJobRefusals(),       DefaultMaxDecompressedBytes, measurements };
+    WorkerProtocol worker { jobs,
+                            UncheckedLeaseValidator(),
+                            { Wire::IdentityCodec },
+                            &Testing::TestWorkerKey(),
+                            metrics,
+                            IgnoreJobRefusals(),
+                            measurements,
+                            DefaultMaxDecompressedBytes };
 
     auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
     REQUIRE(answer.has_value());
@@ -2861,8 +2867,14 @@ TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[w
     {
         PeakRunner runner; // peak stays disengaged
         CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
-        WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec },     &Testing::TestWorkerKey(),
-                                metrics, IgnoreJobRefusals(),       DefaultMaxDecompressedBytes, measurements };
+        WorkerProtocol worker { jobs,
+                                UncheckedLeaseValidator(),
+                                { Wire::IdentityCodec },
+                                &Testing::TestWorkerKey(),
+                                metrics,
+                                IgnoreJobRefusals(),
+                                measurements,
+                                DefaultMaxDecompressedBytes };
         auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
         REQUIRE(answer.has_value());
         CHECK(Decode(*answer).status == Wire::Status::Ok);
@@ -2874,8 +2886,14 @@ TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[w
         PeakRunner runner;
         runner.peak = 1;
         CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
-        WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec },     &Testing::TestWorkerKey(),
-                                metrics, IgnoreJobRefusals(),       DefaultMaxDecompressedBytes, measurements };
+        WorkerProtocol worker { jobs,
+                                UncheckedLeaseValidator(),
+                                { Wire::IdentityCodec },
+                                &Testing::TestWorkerKey(),
+                                metrics,
+                                IgnoreJobRefusals(),
+                                measurements,
+                                DefaultMaxDecompressedBytes };
         auto const answer = worker.Answer(AdmittedFrame(std::nullopt, "", ""));
         REQUIRE(answer.has_value());
         CHECK(Decode(*answer).status == Wire::Status::Ok);

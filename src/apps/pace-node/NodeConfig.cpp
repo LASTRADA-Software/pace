@@ -145,17 +145,14 @@ namespace
     /// @return The count, or why it is not one.
     [[nodiscard]] std::expected<std::uint32_t, ConfigError> ParseMachineSlots(std::string_view sv)
     {
-        auto value = 0U;
-        auto const* const begin = sv.data();
-        auto const* const end = std::next(begin, static_cast<std::ptrdiff_t>(sv.size()));
-        auto const [ptr, ec] = std::from_chars(begin, end, value);
-        if (ec != std::errc {} || ptr != end)
-            return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange, std::format("not a slot count: {}", sv)));
-        if (value == 0)
-            return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
-                                             "must be more than zero: a machine with no compile slots would queue "
-                                             "every compile on it for ever"));
-        return value;
+        // `ParseSlots` and a refusal, so the two grammars cannot drift apart.
+        return ParseSlots(sv).and_then([](std::optional<std::uint32_t> count) -> std::expected<std::uint32_t, ConfigError> {
+            if (count.value_or(0) == 0)
+                return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
+                                                 "must be more than zero: a machine with no compile slots would "
+                                                 "queue every compile on it for ever"));
+            return *count;
+        });
     }
 
     /// A node class, by the name `NodeClassTable` spells it.

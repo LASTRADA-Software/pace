@@ -73,9 +73,9 @@ namespace
                 auto const outcome = sent.error().kind == Cc::AnnounceRefusalKind::Transport
                                          ? SchedulerOutcome::Unreachable
                                          : SchedulerOutcome::BudgetRefused;
-                auto const subject = outcome == SchedulerOutcome::BudgetRefused ? BudgetSubject : std::string_view {};
                 auto const said = _reachability.Failed(
-                    outcome, SchedulerFailure { .endpoint = endpoint, .subject = subject, .reason = sent.error().reason });
+                    outcome,
+                    SchedulerFailure { .endpoint = endpoint, .subject = BudgetSubject, .reason = sent.error().reason });
                 _logger.Log(said.level, said.message);
             }
             return AnnounceOutcome { .accepted = 0, .leader = sent.error().leader };
@@ -162,8 +162,12 @@ bool SendMachineBudgetOnce(MachineBudgetRound const& round, SchedulerLink& link,
     auto const report = MachineBudgetToWire(MachineBudgetOf(round.cfg, round.capacity, round.held.Held()), taken);
 
     BudgetAnnouncement announcement { report, round.logger, round.reachability };
-    (void) DialAndAnnounce(
-        link, round.reachability, dialer, round.logger, announcement, AnnounceProof { .prover = round.prover });
+    (void) DialAndAnnounce(link,
+                           round.reachability,
+                           dialer,
+                           round.logger,
+                           announcement,
+                           AnnounceProof { .prover = round.prover, .subject = BudgetSubject });
     if (!announcement.Accepted())
         // Nobody recorded them: offered again next round rather than lost with the failure.
         round.peaks.Restore(std::move(taken));
