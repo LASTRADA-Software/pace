@@ -93,6 +93,13 @@ inline constexpr auto FoldLeft = std::ranges::fold_left;
 #else
 inline constexpr auto FoldLeft = Detail::FoldLeftFallback;
 #endif
+
+// A views:: row, as core-cpp's Stride block is.
+#if defined(__cpp_lib_ranges_stride) && !defined(PACE_RANGES_FORCE_FALLBACK)
+inline constexpr auto Stride = std::views::stride;
+#else
+inline constexpr auto Stride = Detail::StrideFallback;
+#endif
 } // namespace Pace::Ranges
 ")
 
@@ -285,7 +292,7 @@ endfunction()
 # case expects the check to PASS. The field count is asserted per row below.
 set(PaceRangesSeamCases
     # The baselines, in both enumeration modes. The vendored direct call is DECLINED here.
-    "baseline via walk|none|-|-|none called directly && directory walk && 1 declined under third-party roots && std::ranges::iota -> Ranges::Iota && std::ranges::fold_left -> Ranges::FoldLeft|CMake Error"
+    "baseline via walk|none|-|-|none called directly && directory walk && 1 declined under third-party roots && std::ranges::iota -> Ranges::Iota && std::ranges::fold_left -> Ranges::FoldLeft && std::views::stride -> Ranges::Stride|CMake Error"
     "baseline via git|none-git|-|-|none called directly && git ls-files && 1 declined under third-party roots|CMake Error"
 
     # --- THE RED ARM ---
@@ -297,10 +304,17 @@ set(PaceRangesSeamCases
     "two calls on two lines are both named|newfile|src/Pace/Core/Two.cpp|void Two(std::vector<int>& v)~n~{~n~    std::ranges::iota(v, 0)~sc~~n~    (void) std::ranges::fold_left(v, 0, std::plus {})~sc~~n~}~n~|Two.cpp:3: calls `std::ranges::iota` && Two.cpp:4: calls `std::ranges::fold_left` && 2 site(s)|-"
     "line number survives brackets semicolons and a trailing backslash|newfile|src/Pace/Core/Drift.cpp|int a~lb~4~rb~ = {1, 2, 3, 4}~sc~~n~auto b = a~lb~0~rb~~sc~ auto c = a~lb~1~rb~~sc~~n~// a trailing backslash \\~n~void Drift(std::vector<int>& v) { std::ranges::iota(v, 0)~sc~ }~n~|src/Pace/Core/Drift.cpp:4: calls|-"
 
+    # A `views::` row: `std::views::stride` is no libc++'s, so it is refused by every spelling.
+    "planted views stride|newfile|src/apps/pace-cc/Walk.cpp|void Walk(std::vector<int>& v)~n~{~n~    for (int x : std::views::stride(v, 4)) ~lb~~rb~~n~}~n~|src/apps/pace-cc/Walk.cpp:3: calls `std::views::stride` directly -- write `Ranges::Stride` (gated by __cpp_lib_ranges_stride) && 1 site(s) call a wrapped range algorithm directly|-"
+    "planted ranges views stride|newfile|src/apps/pace-cc/Walk.cpp|void Walk(std::vector<int>& v)~n~{~n~    auto s = std::ranges::views::stride(v, 4)~sc~~n~}~n~|src/apps/pace-cc/Walk.cpp:3: calls `std::views::stride` directly|-"
+    "bare views stride under using namespace std|newfile|src/apps/pace-cc/Walk.cpp|using namespace std~sc~~n~auto Walk(vector<int>& v) { return views::stride(v, 4)~sc~ }~n~|src/apps/pace-cc/Walk.cpp:2: calls `std::views::stride` directly|-"
+
     # --- THE QUIET ARM ---
     "C++20 names sharing the prefix are not wrapped facilities|newfile|src/Pace/Core/Views.cpp|auto Indices(int n) { return std::views::iota(0, n)~sc~ }~n~using Span = std::ranges::iota_view<int, int>~sc~~n~auto Tail = std::ranges::fold_left_first~sc~~n~|none called directly|CMake Error"
     "the seam spelling and the macro are not direct calls|newfile|src/Pace/Core/Seam.cpp|#if defined(__cpp_lib_ranges_iota)~n~#endif~n~void Seam(std::vector<int>& v) { Pace::Ranges::Iota(v, 0)~sc~ (void) Ranges::FoldLeft(v, 0, std::plus {})~sc~ }~n~|none called directly|CMake Error"
     "comments are not calls|newfile|src/Pace/Core/Note.cpp|// Never std::ranges::iota(v, 0) here.~n~/// Nor `std::ranges::fold_left(v, 0, op)`.~n~/*~n~ std::ranges::iota(v, 0) is missing from Apple's libc++.~n~*/~n~int Note() { return 0~sc~ }~n~|none called directly|CMake Error"
+
+    "the seam stride, stride_view and a views iota are not direct calls|newfile|src/apps/pace-cc/Step.cpp|auto Step(std::vector<int>& v) { return core::ranges::Stride(v, 4)~sc~ }~n~using V = std::ranges::stride_view<std::vector<int>>~sc~~n~auto I = std::views::iota(0, 3)~sc~~n~// std::views::stride is not shipped by libc++.~n~|none called directly|CMake Error"
 
     # --- DERIVATION: a block added to the header is enforced with no edit to the check ---
     "a selection block added to the header is enforced|seamrow:src/Pace/Core/Right.cpp|#if defined(__cpp_lib_ranges_fold) && !defined(PACE_RANGES_FORCE_FALLBACK)~n~inline constexpr auto FoldRight = std::ranges::fold_right~sc~~n~#else~n~inline constexpr auto FoldRight = Detail::FoldRightFallback~sc~~n~#endif|int Right(std::vector<int> const& v) { return std::ranges::fold_right(v, 0, std::minus {})~sc~ }~n~|Right.cpp:1: calls `std::ranges::fold_right` directly -- write `Ranges::FoldRight` && std::ranges::fold_right -> Ranges::FoldRight|-"

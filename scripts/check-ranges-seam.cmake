@@ -38,17 +38,20 @@
 # block of the shape
 #
 #     #if defined(__cpp_lib_<feature>) ...
-#     inline constexpr auto <Name> = std::ranges::<name>;
+#     inline constexpr auto <Name> = std::ranges::<name>;      (or std::views::<name>)
 #
 # contributes one row -- the standard name refused, the seam name offered, the macro that gates
-# it. A restated list would catch a facility going away and be blind to one ARRIVING, which is
+# it. The scope is part of the row: `std::views::stride` (core::ranges::Stride, which no libc++
+# ships) is refused as `views::stride`, and a row for `std::ranges::iota` does not make
+# `std::views::iota` -- C++20, shipped everywhere -- a violation. A restated list would catch a facility going away and be blind to one ARRIVING, which is
 # the direction that matters: a row added to the header is enforced here with no edit. A header
 # this check derives no row from is REFUSED, never read as "nothing to enforce".
 #
-# A USE is `ranges::<name>` followed by something that cannot continue an identifier, in code
+# A USE is `<scope>::<name>` (`ranges::` or `views::`) followed by something that cannot continue an identifier, in code
 # with comments stripped (`pace_scan_code_lines`, `scripts/lib/CheckCommon.cmake`). So
 # `std::ranges::iota` and a bare `ranges::iota` under a `using namespace std;` are refused, and
 # `std::views::iota` and `std::ranges::iota_view` -- C++20, shipped everywhere -- are not.
+# `std::views::stride`, `std::ranges::views::stride` and a bare `views::stride` are refused.
 # The seam spelling differs by CASE (`Ranges::Iota`), which is what lets one case-sensitive
 # pattern tell the two apart.
 #
@@ -142,7 +145,7 @@ endforeach()
 # the `;` that ends the declaration, so no element of the result list is split by one.
 file(READ "${seamHeaderPath}" seamContent)
 string(REPLACE "\r\n" "\n" seamContent "${seamContent}")
-set(selectionShape "#if defined\\((__cpp_lib_[a-z0-9_]+)\\)[^\n]*\ninline constexpr auto ([A-Z][A-Za-z0-9]*) = std::ranges::([a-z_][a-z0-9_]*)")
+set(selectionShape "#if defined\\((__cpp_lib_[a-z0-9_]+)\\)[^\n]*\ninline constexpr auto ([A-Z][A-Za-z0-9]*) = std::(ranges::views|ranges|views)::([a-z_][a-z0-9_]*)")
 string(REGEX MATCHALL "${selectionShape}" selections "${seamContent}")
 
 set(rowNames "")
@@ -153,11 +156,17 @@ foreach(selection IN LISTS selections)
     endif()
     set(macro "${CMAKE_MATCH_1}")
     set(seamName "${CMAKE_MATCH_2}")
-    set(standardName "${CMAKE_MATCH_3}")
+    set(scope "${CMAKE_MATCH_3}")
+    # `std::ranges::views::x` is `std::views::x`: one row, scanned as `views::x`.
+    if(scope STREQUAL "ranges::views")
+        set(scope "views")
+    endif()
+    # The row's key is the token a use contains, so the scope separates `ranges::x` from `views::x`.
+    set(standardName "${scope}::${CMAKE_MATCH_4}")
     list(APPEND rowNames "${standardName}")
     set("seamNameOf_${standardName}" "${seamName}")
     set("macroOf_${standardName}" "${macro}")
-    list(APPEND rowSummaries "std::ranges::${standardName} -> Ranges::${seamName}")
+    list(APPEND rowSummaries "std::${standardName} -> Ranges::${seamName}")
 endforeach()
 
 if(NOT rowNames)
@@ -167,7 +176,7 @@ if(NOT rowNames)
     message("Each wrapped facility is expected as two consecutive lines:")
     message("")
     message("  #if defined(__cpp_lib_<feature>) && !defined(PACE_RANGES_FORCE_FALLBACK)")
-    message("  inline constexpr auto <Name> = std::ranges::<name>;")
+    message("  inline constexpr auto <Name> = std::ranges::<name>;   (or std::views::<name>)")
     message("")
     message("Reading none is not \"nothing to enforce\": it is a header whose shape changed")
     message("under this check, and every direct call would pass unseen. Restore the shape, or")
@@ -224,11 +233,11 @@ foreach(relative IN LISTS sourceFiles)
     file(READ "${PACE_SOURCE_DIR}/${relative}" wholeFile)
     foreach(standardName IN LISTS rowNames)
         # A whole-file test first; the line walk is quadratic and almost no file needs it.
-        string(FIND "${wholeFile}" "ranges::${standardName}" tokenPosition)
+        string(FIND "${wholeFile}" "${standardName}" tokenPosition)
         if(tokenPosition EQUAL -1)
             continue()
         endif()
-        pace_scan_code_lines("${wholeFile}" "ranges::${standardName}([^A-Za-z0-9_]|$)" hits)
+        pace_scan_code_lines("${wholeFile}" "${standardName}([^A-Za-z0-9_]|$)" hits)
         foreach(hit IN LISTS hits)
             if(hit MATCHES "^use:([0-9]+)$")
                 list(APPEND violations "${relative}:${CMAKE_MATCH_1}|${standardName}")
@@ -257,7 +266,7 @@ if(violations)
         string(REPLACE "|" ";" fields "${violation}")
         list(GET fields 0 where)
         list(GET fields 1 standardName)
-        message("  ${where}: calls `std::ranges::${standardName}` directly -- "
+        message("  ${where}: calls `std::${standardName}` directly -- "
                 "write `Ranges::${seamNameOf_${standardName}}` (gated by ${macroOf_${standardName}})")
     endforeach()
     message("")
