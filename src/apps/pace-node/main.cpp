@@ -651,6 +651,59 @@ struct RouteParts
     return gauges;
 }
 
+/// The relay a launcher's `ADMIT` reaches on a node that does not lead (#1728): the connection it dials
+/// to the leader and the forwarder that speaks over it. Two members of one object so that the pair is
+/// declared where the surface that routes to it can be destroyed first, and the forwarder -- which
+/// borrows the dialer -- is destroyed before it.
+struct AdmissionRelay
+{
+    std::optional<Node::ProvenSchedulerDialer> dialer;
+    std::optional<Node::AdmitForwarder> forwarder;
+};
+
+/// What `StartAdmissionRelay` reads, none of it owned.
+struct AdmissionRelayParts
+{
+    NodeConfig const& cfg;                                      ///< The configuration the node runs under.
+    std::optional<Node::NodeProofClient> const& prover;         ///< The identity prover; engaged on every start.
+    Node::NodeIoLoop& nodeIo;                                   ///< The loop the relay dials and waits on.
+    Node::KnownSchedulingLeader const& leader;                  ///< Where the leader is, as last learned.
+    IMetricsSink& metrics;                                      ///< Where the relay counts.
+    Node::HeldChargeRegistry& held;                             ///< The machine's ledger of held charges.
+    Cc::IAdvertisedEndpointSource const* announced;             ///< This node's own `0xFC` endpoint, never dialled.
+    std::optional<Node::SchedulingRedirectResponder>& redirect; ///< The redirect surface, when this node has one.
+    Node::SchedulerTier* tier;                                  ///< The scheduler tier, when this node runs one.
+};
+
+/// Build the admission relay and hand it to every surface that routes to it.
+///
+/// The queue lives on the leader alone, so whenever this node does not lead -- a learner always, a voter
+/// while another leads (Ruling 10) -- the relay carries `ADMIT` and `SETTLE` there over a connection that
+/// proves THIS node's identity key, instead of sending the launcher away with `NotLeader`. Built under
+/// `ForwardsAdmission`, the predicate the `AdmissionForwarding` surface is served under, so the counters a
+/// scrape reads present are the ones a relay can move.
+/// @param relay Receives the dialer and the forwarder.
+/// @param parts What the relay reads.
+void StartAdmissionRelay(AdmissionRelay& relay, AdmissionRelayParts const& parts)
+{
+    if (!Node::ForwardsAdmission(parts.cfg))
+        return;
+    // Every node adopts or mints its identity key before any body starts, and the start is REFUSED
+    // without one (`AdoptNodeKey`, the identity-key step), so `prover` is always engaged here:
+    // an invariant, not a configuration this body could meet. A change that broke it ends the start on a
+    // named exception rather than serving a surface with nothing to relay through, and it adds no exit of
+    // its own beside the refusal that already owns the case.
+    if (!parts.prover.has_value())
+        throw std::logic_error { "forwarding admission needs the identity prover, which every start builds" };
+    relay.dialer.emplace(*parts.prover, parts.nodeIo.Connector(), parts.nodeIo.Reactor());
+    relay.forwarder.emplace(
+        parts.leader, *relay.dialer, parts.nodeIo.Reactor(), parts.metrics, &parts.held, parts.announced);
+    if (parts.redirect.has_value())
+        parts.redirect->ForwardAdmissionWith(*relay.forwarder);
+    if (parts.tier != nullptr)
+        parts.tier->ForwardAdmissionWith(*relay.forwarder);
+}
+
 /// Everything the node runs, under whichever host runs it.
 /// @param cfg The configuration the node started with.
 /// @param identityKey The machine's identity key, or nothing.
@@ -1402,24 +1455,20 @@ struct RouteParts
     // counters a scrape reads present are the ones a relay can move. Its own `0xFC` endpoint is never
     // dialled (`announced`). Declared after the redirect and the queue and before the surface that routes
     // to it, so it is destroyed after that surface closes its connections.
-    std::optional<Node::ProvenSchedulerDialer> forwardDialer;
-    std::optional<Node::AdmitForwarder> admitForwarder;
-    if (Node::ForwardsAdmission(cfg))
-    {
-        // Every node adopts or mints its identity key before any body starts, and the start is REFUSED
-        // without one (`AdoptNodeKey`, the identity-key step), so `prover` is always engaged here:
-        // an invariant, not a configuration this body could meet. `value()` states it -- a change that
-        // broke it ends the start on a named exception rather than serving a surface with nothing to relay
-        // through, and it adds no exit of its own beside the refusal that already owns the case.
-        if (!prover.has_value())
-            throw std::logic_error { "forwarding admission needs the identity prover, which every start builds" };
-        forwardDialer.emplace(*prover, nodeIo.Connector(), nodeIo.Reactor());
-        admitForwarder.emplace(knownSchedulingLeader, *forwardDialer, nodeIo.Reactor(), metrics, &leaseCharges, &announced);
-        if (schedulingRedirect.has_value())
-            schedulingRedirect->ForwardAdmissionWith(*admitForwarder);
-        if (schedulerTier != nullptr)
-            schedulerTier->ForwardAdmissionWith(*admitForwarder);
-    }
+    // The door a launcher on this machine uses to reach the fleet's compile queue (#1728). Its own `0xFC`
+    // endpoint is never dialled (`announced`). Declared after the redirect and the queue and before the
+    // surface that routes to it, so it is destroyed after that surface closes its connections.
+    AdmissionRelay admissionRelay;
+    StartAdmissionRelay(admissionRelay,
+                        AdmissionRelayParts { .cfg = cfg,
+                                              .prover = prover,
+                                              .nodeIo = nodeIo,
+                                              .leader = knownSchedulingLeader,
+                                              .metrics = metrics,
+                                              .held = leaseCharges,
+                                              .announced = &announced,
+                                              .redirect = schedulingRedirect,
+                                              .tier = schedulerTier.get() });
 
     auto nodeSurfaceOrRefusal = Node::StartNodeSurfaceOrExplain(
         nodeIo,
