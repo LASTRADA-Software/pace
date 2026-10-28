@@ -565,6 +565,22 @@ std::chrono::milliseconds AdmissionResponder::RequestTimeout(std::uint8_t opRaw)
                                                                : FrameServer::HeaderTimeout;
 }
 
+bool AdmissionResponder::Leads() const noexcept
+{
+    auto const* const service = _core->Service();
+    return service != nullptr && service->Role() == Distributed::SchedulerRole::Leader;
+}
+
+bool AdmissionResponder::DecidesHere(PeerIdentity const& peer) const
+{
+    auto const* const service = _core->Service();
+    // Detached: nothing to relay for either, and `Answer` closes on it.
+    if (service == nullptr || service->Role() == Distributed::SchedulerRole::Leader)
+        return true;
+    auto const caller = Distributed::CallerContextOf(*_core->membership, peer);
+    return caller.provenKey.has_value() && MachineIdOf(*caller.provenKey) == service->OwnMachineId();
+}
+
 core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte const> frame, PeerIdentity peer)
 {
     auto const core = _core;

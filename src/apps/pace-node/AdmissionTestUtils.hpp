@@ -251,12 +251,22 @@ struct Queue
     /// The worker's machine states its budget over the wire, as the proven peer it is. Pumps.
     void ReportWorker(std::uint64_t budgetBytes = 1024 * MiB, std::uint32_t slots = 4)
     {
+        ReportFor("admission-worker", budgetBytes, slots);
+    }
+
+    /// The machine named @p machine states its budget over the wire, as the proven peer it is. Pumps.
+    /// @param machine The id whose test key the report is proven under; live in `fold`.
+    /// @param budgetBytes Its memory budget.
+    /// @param slots Its compile slots.
+    void ReportFor(std::string_view machine, std::uint64_t budgetBytes = 1024 * MiB, std::uint32_t slots = 4)
+    {
         auto const frame = Wire::EncodeMachineBudget(Wire::MachineBudgetReport {
             .memoryBudgetBytes = budgetBytes, .slots = slots, .heldSlots = 0, .heldBytes = 0, .peaks = {} });
         auto reply = core::async::syncRun(admission->Answer(
             frame,
-            PeerIdentity { .host = "10.0.0.2",
-                           .proven = ProvenIdentity { .id = "admission-worker", .key = workerKey.PublicKey() } }));
+            PeerIdentity { .host = "10.0.0.9",
+                           .proven = ProvenIdentity { .id = std::string { machine },
+                                                      .key = Testing::TestKeyPair(std::string { machine }).PublicKey() } }));
         REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
     }
 
@@ -264,6 +274,9 @@ struct Queue
 
     /// A machine elsewhere that proves its key on its connection.
     static constexpr std::string_view RemoteClient = "remote-client";
+
+    /// A machine elsewhere whose node relays its launchers' admissions here, proving ITS key.
+    static constexpr std::string_view ForwardingMachine = "admission-follower";
 
     core::platform::ManualClock clock;
     core::platform::ManualWallClock wallClock;
@@ -274,8 +287,11 @@ struct Queue
     Distributed::SchedulerService service { clock, wallClock, metrics, logger, signer, {}, 64 * MiB };
     Distributed::SchedulerProtocol protocol { service, metrics };
     /// The production fold -- loopback, then the cluster's key roster -- over the machines these cases
-    /// name: this node (`scheduler`), the worker's machine, and a remote client that proves its key.
-    Testing::RosterFold fold { { "scheduler", "admission-worker", std::string { RemoteClient } } };
+    /// name: this node (`scheduler`), the worker's machine, a remote client that proves its key, and a
+    /// node that relays its launchers' admissions.
+    Testing::RosterFold fold {
+        { "scheduler", "admission-worker", std::string { RemoteClient }, std::string { ForwardingMachine } }
+    };
     SchedulerResponder responder { protocol, fold.admitted, metrics };
     HeldChargeRegistry held;
     std::optional<AdmissionResponder> admission;

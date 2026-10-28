@@ -127,6 +127,13 @@ class ConnectionScope
         return _hold != nullptr;
     }
 
+    /// @return The kept hold, still owned here, or null when nothing is held: for a router that must
+    ///         send the next frame to whichever responder left it, without taking it.
+    [[nodiscard]] IConnectionHold const* Held() const noexcept
+    {
+        return _hold.get();
+    }
+
     /// @return The idle window the kept hold asks for, or nothing when nothing is held.
     [[nodiscard]] std::optional<std::chrono::milliseconds> HeldIdleWindow() const noexcept
     {

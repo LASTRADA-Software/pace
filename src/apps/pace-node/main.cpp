@@ -1376,18 +1376,28 @@ struct RouteParts
     if (Node::RedirectsScheduling(cfg))
         schedulingRedirect.emplace(membership.Oracle(), knownSchedulingLeader);
     // And the door a launcher on this machine uses to reach the fleet's compile queue (#1728): the queue
-    // lives on the leader alone, so this node relays `ADMIT` and `SETTLE` to it over a connection that
-    // proves THIS node's identity key, instead of sending the launcher away with `NotLeader`. Built only
-    // where the redirect is, and where an identity key exists to prove -- without one the redirect
-    // stands, and the launcher fails open. Declared after the redirect and before the surface that
-    // routes to it, so it is destroyed after that surface closes its connections.
+    // lives on the leader alone, so whenever this node does not lead -- a learner always, a voter while
+    // another leads (Ruling 10) -- it relays `ADMIT` and `SETTLE` there over a connection that proves
+    // THIS node's identity key, instead of sending the launcher away with `NotLeader`. Built under
+    // `ForwardsAdmission`, the predicate the `AdmissionForwarding` surface is served under, so the
+    // counters a scrape reads present are the ones a relay can move. Its own `0xFC` endpoint is never
+    // dialled (`announced`). Declared after the redirect and the queue and before the surface that routes
+    // to it, so it is destroyed after that surface closes its connections.
     std::optional<Node::ProvenSchedulerDialer> forwardDialer;
     std::optional<Node::AdmitForwarder> admitForwarder;
-    if (schedulingRedirect.has_value() && prover.has_value())
+    if (Node::ForwardsAdmission(cfg))
     {
-        forwardDialer.emplace(*prover, nodeIo.Connector(), nodeIo.Reactor());
-        admitForwarder.emplace(knownSchedulingLeader, *forwardDialer, nodeIo.Reactor(), metrics, &leaseCharges);
-        schedulingRedirect->ForwardAdmissionWith(*admitForwarder);
+        // Every node adopts or mints its identity key before any body starts, and the start is REFUSED
+        // without one (`AdoptNodeKey`, the identity-key step), so `prover` is always engaged here:
+        // an invariant, not a configuration this body could meet. `value()` states it -- a change that
+        // broke it ends the start on a named exception rather than serving a surface with nothing to relay
+        // through, and it adds no exit of its own beside the refusal that already owns the case.
+        forwardDialer.emplace(prover.value(), nodeIo.Connector(), nodeIo.Reactor());
+        admitForwarder.emplace(knownSchedulingLeader, *forwardDialer, nodeIo.Reactor(), metrics, &leaseCharges, &announced);
+        if (schedulingRedirect.has_value())
+            schedulingRedirect->ForwardAdmissionWith(*admitForwarder);
+        if (schedulerTier != nullptr)
+            schedulerTier->ForwardAdmissionWith(*admitForwarder);
     }
 
     auto nodeSurfaceOrRefusal = Node::StartNodeSurfaceOrExplain(

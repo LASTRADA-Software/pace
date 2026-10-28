@@ -192,6 +192,15 @@ class SchedulerTier
         _responder.ServeAdmissionWith(admission);
     }
 
+    /// Relay a launcher's queue verbs to the leader while this node follows (Ruling 10), rather than
+    /// answering them `NotLeader` (`SchedulerResponder::ForwardAdmissionWith`). Wired by `main` with the
+    /// queue, before serving.
+    /// @param forwarder The relay; must outlive this tier's use.
+    void ForwardAdmissionWith(AdmitForwarder& forwarder) noexcept
+    {
+        _responder.ForwardAdmissionWith(forwarder);
+    }
+
     /// The scheduler a SECOND surface answers verbs against.
     ///
     /// **Non-const, and that is not a relaxation of `Service()` above -- it is a

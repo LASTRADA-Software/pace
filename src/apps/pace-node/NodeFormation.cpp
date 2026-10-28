@@ -244,6 +244,11 @@ bool RedirectsScheduling(NodeConfig const& cfg) noexcept
     return RunsConsensus(cfg) && !ServesScheduler(cfg);
 }
 
+bool ForwardsAdmission(NodeConfig const& cfg) noexcept
+{
+    return ServesScheduler(cfg) || RedirectsScheduling(cfg);
+}
+
 std::vector<std::string> SchedulersOf(NodeConfig const& cfg, ActivatedNodeEndpoint const& activated)
 {
     if (!cfg.formation.has_value())

@@ -24,15 +24,26 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
 
+namespace Pace::Cc
+{
+class IAdvertisedEndpointSource;
+} // namespace Pace::Cc
+
+namespace Pace
+{
+class ConnectionScope;
+} // namespace Pace
+
 namespace Pace::Node
 {
 
 /// @file AdmitForwarder.hpp
-/// The follower's half of the fleet compile queue (#1728): a node that does not lead relays the
-/// admission exchange a launcher on ITS machine opens to the leader, instead of answering `NotLeader`.
+/// The follower's half of the fleet compile queue (#1728): a node that does not lead -- a learner, or a
+/// voter following another (Ruling 10) -- relays the admission exchange a launcher on ITS machine opens
+/// to the leader, instead of answering `NotLeader`.
 ///
 /// Every `pace-cc` talks only to its own machine's node, and the queue lives on the leader alone, so on
-/// a learner the launcher would otherwise be sent away from the one door it is configured to use. The
+/// any other node the launcher would otherwise be sent away from the one door it is configured to use. The
 /// forwarder is that door: one upstream connection per client connection, for the client connection's
 /// whole life, over which it relays every request frame in order and every final reply.
 
@@ -41,8 +52,15 @@ namespace Pace::Node
 inline constexpr std::size_t MaxForwardHops = 2;
 
 /// How long a relayed reply may be, in payload bytes: the scheduler surface's own request ceiling.
-/// A grant carries one signed token and an endpoint, a few hundred bytes.
+///
+/// A grant carries one signed token, an endpoint and a codec list -- a few hundred bytes, every field
+/// but the leader's own ids held to a wire ceiling (`MaxEndpointBytes`, `MaxLeaseKeyBytes`,
+/// `MaxToolchainFingerprintBytes`, `MaxCodecListIds`). A larger one would be read as a lost leader and
+/// fail open. `AdmitForwarder.the-largest-grant-fits-the-relay-ceiling` pins the margin; a refusal is
+/// held to `MaxRefusalReply`, which this holds.
 inline constexpr std::size_t MaxForwardReplyBytes = SchedulingRedirectResponder::RequestBytes;
+static_assert(MaxForwardReplyBytes >= CompileCacheWire::MaxRefusalReply,
+              "a relayed refusal must fit the relay's ceiling, or the leader's explanation reads as a lost leader");
 
 /// What opening the connection to the leader came to.
 struct UpstreamOpening
@@ -121,9 +139,16 @@ class ProvenSchedulerDialer final: public IUpstreamDialer
 /// What a forwarder is built with beyond its collaborators.
 struct ForwardPolicy
 {
-    /// How often a parked request is told this node is still there, and the unit of the silence
-    /// bound on the upstream connection (`AdmissionIdleBound`).
+    /// How often a parked request is told THIS node is still there.
     std::chrono::milliseconds progressInterval { CompileCacheWire::DefaultProgressInterval };
+
+    /// How long the LEADER may say nothing on the upstream connection before this node gives up on it.
+    ///
+    /// The wire's own bound on a pulsing peer, `DefaultCompileIdleTimeout`, and deliberately NOT derived
+    /// from `progressInterval`: the leader pulses at ITS cadence -- the wire default this bound is paired
+    /// with -- and a node whose own cadence is shorter must not read the leader's ordinary gap between
+    /// two pulses as silence. A test shortens it to place a silent leader inside a case.
+    std::chrono::milliseconds upstreamIdle { CompileCacheWire::DefaultCompileIdleTimeout };
 };
 
 /// Relays `ADMIT` and `SETTLE` from a launcher on this machine to the leader (#1728).
@@ -142,7 +167,7 @@ struct ForwardPolicy
 /// endpoint already writes this node's own pulse to the client at the same cadence while `Answer` is
 /// parked (`ProgressInterval`), a second writer there would interleave, and the pulse is empty, so the
 /// client sees the same bytes. What the leader's pulses ARE used for is this node's own liveness
-/// judgement: an upstream silent for `AdmissionIdleBound` is dropped and the client refused, so a dead
+/// judgement: an upstream silent for `ForwardPolicy::upstreamIdle` is dropped and the client refused, so a dead
 /// leader behind this node's healthy pulse is noticed rather than masked.
 ///
 /// **Failure fails open, promptly.** A leader that cannot be dialled or proven, a connection lost or
@@ -150,7 +175,14 @@ struct ForwardPolicy
 /// answered `EndpointBusy` -- one counted row, `AdmissionForwardFailed` -- so `pace-cc` compiles without
 /// the queue instead of waiting. A `NotLeader` that names a new leader is followed transparently, at
 /// most `MaxForwardHops` times, before any grant; the request loses its place in the queue, as the spec
-/// accepts for a failover. After a grant an upstream loss ends the client connection.
+/// accepts for a failover. After a grant an upstream loss ends the client connection. A grant that does
+/// not decode is the same failure, never relayed: this node cannot tell what it would be holding.
+///
+/// **Never to itself.** A leader endpoint, or a redirect, naming the endpoint THIS node announces is
+/// answered `NotLeader` naming nobody rather than dialled: a node that has just stopped leading may
+/// still be named for a moment, and a relay to itself would come straight back. The router that sends
+/// a request here asks the mirror question (`SchedulerResponder`): a request on a connection that
+/// proved this machine's own key is never forwarded again, whatever its spelling of the address.
 ///
 /// **Only a caller on this machine is forwarded** (`ForwardsFor`): the leader charges a local lease to
 /// the machine whose key the upstream connection proved, which is this node's, so a launcher elsewhere
@@ -173,12 +205,15 @@ class AdmitForwarder final: public IFrameResponder
     /// @param metrics Where the forwarding counters are written; must outlive this.
     /// @param held Where a forwarded local lease is recorded for the machine's own report
     ///        (`HeldChargeRegistry`); null for a node that reports none. Must outlive every connection.
-    /// @param policy The cadence.
+    /// @param self The `0xFC` endpoint this node announces, read per dial, so a leader or a redirect
+    ///        naming it is refused rather than dialled; null where nothing is announced. Must outlive this.
+    /// @param policy The cadence and the bound on the leader's silence.
     AdmitForwarder(ISchedulingLeaderSource const& leader,
                    IUpstreamDialer& dialer,
                    core::net::EventLoop& loop,
                    IMetricsSink& metrics,
                    HeldChargeRegistry* held,
+                   Cc::IAdvertisedEndpointSource const* self,
                    ForwardPolicy policy = {}) noexcept;
 
     /// @param opRaw A verb, as received.
@@ -189,6 +224,13 @@ class AdmitForwarder final: public IFrameResponder
     /// @param opRaw The verb, as received.
     /// @return True when this relays @p opRaw from @p peer: a served verb, from this machine.
     [[nodiscard]] static bool ForwardsFor(PeerIdentity const& peer, std::uint8_t opRaw) noexcept;
+
+    /// Whether @p scope holds a connection to the leader this forwarder left there -- a grant awaiting
+    /// its `SETTLE`, or a ticket a worker refused awaiting its `ADMIT` -- so its next frame is this
+    /// forwarder's to relay, whoever leads by then.
+    /// @param scope A client connection's scope.
+    /// @return True while the connection holds such a link.
+    [[nodiscard]] static bool Relays(ConnectionScope const& scope) noexcept;
 
     /// Relay one `ADMIT` or `SETTLE`.
     /// @param frame The whole request, header included; must outlive the task.
@@ -300,12 +342,13 @@ class AdmitForwarder final: public IFrameResponder
     [[nodiscard]] core::async::Task<FrameReply> RelaySettle(std::span<std::byte const> frame,
                                                             std::shared_ptr<ConnectionScope> scope);
 
-    ISchedulingLeaderSource const& _leader; ///< Where the leader answers, read per request.
-    IUpstreamDialer& _dialer;               ///< How the leader is reached.
-    core::net::EventLoop& _loop;            ///< Where the silence bound is armed.
-    IMetricsSink& _metrics;                 ///< Where the counters go.
-    HeldChargeRegistry* _held;              ///< Where a forwarded local lease is recorded; may be null.
-    ForwardPolicy _policy;                  ///< The cadence.
+    ISchedulingLeaderSource const& _leader;     ///< Where the leader answers, read per request.
+    IUpstreamDialer& _dialer;                   ///< How the leader is reached.
+    core::net::EventLoop& _loop;                ///< Where the silence bound is armed.
+    IMetricsSink& _metrics;                     ///< Where the counters go.
+    HeldChargeRegistry* _held;                  ///< Where a forwarded local lease is recorded; may be null.
+    Cc::IAdvertisedEndpointSource const* _self; ///< This node's own endpoint, never dialled; may be null.
+    ForwardPolicy _policy;                      ///< The cadence and the bound on the leader's silence.
 };
 
 } // namespace Pace::Node

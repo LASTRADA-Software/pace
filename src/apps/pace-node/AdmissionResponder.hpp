@@ -116,6 +116,24 @@ class AdmissionResponder final
     ///         wait itself has no ceiling; a round trip for the rest.
     [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t opRaw) const noexcept;
 
+    /// Whether an `ADMIT` from @p peer is decided by THIS node's queue rather than relayed to the leader
+    /// (`AdmitForwarder`, Ruling 10).
+    ///
+    /// Yes while this node leads. And yes, whoever leads, for a connection that proved THIS machine's own
+    /// identity key: that is this node's own forwarder dialled back to itself -- a leader endpoint or a
+    /// redirect that named it under a spelling the forwarder's own check did not recognise -- and relaying
+    /// it again would chase itself. It is answered here instead, `NotLeader` naming the leader this node
+    /// knows, which the forwarder at the other end follows or fails open on.
+    ///
+    /// Read per request: a role that moves between the routing and the answer is the gate's to settle,
+    /// which refuses `NotLeader` on a node that no longer leads.
+    /// @param peer Who asks.
+    /// @return True when `Answer` should decide it.
+    [[nodiscard]] bool DecidesHere(PeerIdentity const& peer) const;
+
+    /// @return True while the scheduler this queue belongs to leads, and is still attached.
+    [[nodiscard]] bool Leads() const noexcept;
+
   private:
     std::shared_ptr<AdmissionCore> _core;
 };

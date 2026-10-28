@@ -17,6 +17,7 @@
 #include <CacheProtocol.hpp>
 #include <EndpointDial.hpp>
 #include <ExchangeIdleWindow.hpp>
+#include <WorkerProtocol.hpp>
 #include <core/async/StopToken.hpp>
 #include <core/net/SocketDeadline.hpp>
 
@@ -44,6 +45,14 @@ namespace
         .code = Wire::ErrorCode::NotLeader,
         .rationale = "nothing was attempted, so there is no failure to count: this is the redirect's own answer "
                      "during an election, which every client reads as no leader and compiles locally",
+    };
+
+    /// The leader named is THIS node, which does not lead: it has just stopped, and nobody else is known yet.
+    constexpr Cc::UncountedRefusal NamedItself {
+        .code = Wire::ErrorCode::NotLeader,
+        .rationale = "nothing was attempted, so there is no failure to count: a node that stopped leading a moment "
+                     "ago is in the election the redirect answers NotLeader naming nobody, and relaying to itself "
+                     "would only come back",
     };
 
     /// A frame this connection cannot be served: no connection to park on, nothing held to settle.
@@ -233,6 +242,15 @@ namespace
         co_return co_await Cc::ExchangeFramed(upstream, &notice, std::move(frame), NoCredential(), &window);
     }
 
+    /// Words for the client when the leader's grant did not decode.
+    /// @param endpoint The leader's endpoint.
+    /// @return The detail of the refusal.
+    [[nodiscard]] std::string UndecodableGrant(std::string_view endpoint)
+    {
+        return std::format("the scheduling leader at {} answered this node's relay with a grant it could not read",
+                           endpoint);
+    }
+
     /// Words for the client when a dial failed.
     /// @param endpoint Where it dialled.
     /// @param reason The dialer's.
@@ -284,12 +302,14 @@ AdmitForwarder::AdmitForwarder(ISchedulingLeaderSource const& leader,
                                core::net::EventLoop& loop,
                                IMetricsSink& metrics,
                                HeldChargeRegistry* held,
+                               Cc::IAdvertisedEndpointSource const* self,
                                ForwardPolicy policy) noexcept:
     _leader { leader },
     _dialer { dialer },
     _loop { loop },
     _metrics { metrics },
     _held { held },
+    _self { self },
     _policy { policy }
 {
 }
@@ -302,6 +322,11 @@ bool AdmitForwarder::Serves(std::uint8_t opRaw) noexcept
 bool AdmitForwarder::ForwardsFor(PeerIdentity const& peer, std::uint8_t opRaw) noexcept
 {
     return Serves(opRaw) && Pace::IsLoopbackHost(peer.host);
+}
+
+bool AdmitForwarder::Relays(ConnectionScope const& scope) noexcept
+{
+    return dynamic_cast<ForwardHold const*>(scope.Held()) != nullptr;
 }
 
 std::optional<IMetricsSink::Counter> AdmitForwarder::PeerWatchCounter(std::uint8_t opRaw) const noexcept
@@ -373,6 +398,14 @@ core::async::Task<FrameReply> AdmitForwarder::RelayAdmit(std::span<std::byte con
     {
         if (link == nullptr)
         {
+            // Never to itself (see the class comment): read per dial, since a redirect can name it too.
+            if (_self != nullptr && endpoint == _self->Current())
+                co_return FrameReply { Cc::RefuseWithoutCounter(
+                    NamedItself,
+                    std::format("the scheduling leader named is this node, at {}, which does not lead", endpoint)) };
+            // **Not cancelled when the client leaves**: the dial and the proof run to their own bounds
+            // (`ForwardDialBudget`), and the departure is read once they end, below. A launcher that leaves
+            // mid-dial costs one connection to the leader that is closed unused, never a held charge.
             auto opened = co_await _dialer.Open(endpoint);
             if (opened.socket == nullptr)
             {
@@ -385,11 +418,8 @@ core::async::Task<FrameReply> AdmitForwarder::RelayAdmit(std::span<std::byte con
         if (scope->PeerGone().stop_requested())
             co_return FrameReply {};
 
-        outcome = co_await ExchangeUpstream(&_loop,
-                                            link->Socket(),
-                                            std::vector<std::byte> { frame.begin(), frame.end() },
-                                            scope,
-                                            AdmissionIdleBound(_policy.progressInterval));
+        outcome = co_await ExchangeUpstream(
+            &_loop, link->Socket(), std::vector<std::byte> { frame.begin(), frame.end() }, scope, _policy.upstreamIdle);
         // Read AFTER the exchange, whichever way it ended: a client that left closed the connection it
         // was parked on, and that reads as a lost leader to anybody who does not ask this first.
         if (scope->PeerGone().stop_requested())
@@ -418,11 +448,16 @@ core::async::Task<FrameReply> AdmitForwarder::RelayAdmit(std::span<std::byte con
     switch (outcome.kind)
     {
         case Cc::CacheOutcomeKind::Hit: {
-            _metrics.Increment(IMetricsSink::Counter::AdmissionForwarded);
             auto const grant = Wire::DecodeAdmitGrant(outcome.value);
+            // A grant this node cannot read is not relayed: whether the leader now holds a charge for it,
+            // and of which kind, is unknowable here, so the connection that would hold it closes (`link`
+            // goes out of scope) -- which releases whatever the leader charged -- and the client fails open.
+            if (!grant.has_value())
+                co_return FrameReply { Cc::Refuse(_metrics, ForwardFailed, UndecodableGrant(endpoint)) };
+            _metrics.Increment(IMetricsSink::Counter::AdmissionForwarded);
             // A `Stored` answer holds nothing on the leader, so nothing is kept: the connection to it ends
             // with this frame, and the client fetches what the other compile stored.
-            if (grant.has_value() && grant->kind != Wire::GrantKind::Stored)
+            if (grant->kind != Wire::GrantKind::Stored)
             {
                 // A local lease occupies THIS machine's budget, as the leader charged it (Ruling 4).
                 if (grant->kind == Wire::GrantKind::Local && _held != nullptr)
