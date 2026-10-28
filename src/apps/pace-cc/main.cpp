@@ -96,6 +96,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -740,18 +741,12 @@ void ApplyDispatchRecording(InvocationRecord& record, Cc::DispatchRecording cons
 
 /// What a refusal to dispatch answers, whatever the caller was asked for.
 ///
-/// "Compile it where you are" is the same answer to every caller of `DeclineDispatch` -- no plan, no
-/// compile from a worker, no refusal to hand back to a queue -- so the one value converts to each of
-/// them rather than each caller spelling its own empty.
+/// "Compile it where you are" is the same answer to every caller of `DeclineDispatch` -- no compile
+/// from a worker, no refusal to hand back to a queue -- so the one value converts to what they return
+/// rather than each caller spelling its own empty. `PlanDispatch` is not one: its refusal is a value
+/// the caller records when it is true to (`PlanRefusal`).
 struct Declined
 {
-    /// @return The empty optional of any type: nothing to continue with.
-    template <typename T>
-    [[nodiscard]] constexpr operator std::optional<T>() const noexcept
-    {
-        return std::nullopt;
-    }
-
     /// @return An admitted dispatch that produced no compile and no refusal for the queue.
     [[nodiscard]] constexpr operator Cc::AdmittedDispatch() const noexcept
     {
@@ -2531,23 +2526,47 @@ struct DispatchPlan
     std::string toolchainLabel;    ///< What a person calls the compiler; display only.
 };
 
+/// A refusal to dispatch this launcher made before asking anybody, as a value: what to record, what to
+/// say, and what to act on.
+///
+/// A value rather than a recording made on the spot, because whether it is TRUE to record depends on
+/// who is asked next (Ruling 12): with a scheduler named there is a fleet to refuse on behalf of, and
+/// it is recorded at once; with none named the launcher does not know whether there is a fleet at all
+/// until the queue grants something, and a refusal recorded for a fleet that does not exist reads as
+/// a fleet that refuses -- on every host that merely runs a cache.
+struct PlanRefusal
+{
+    Cc::DispatchRecording recording; ///< The dispatch axis's state and fixed tally reason.
+    std::string note;                ///< The verbose line.
+    std::string specifics;           ///< What to act on (`dispatchSpecifics`); empty when nothing is.
+};
+
+/// Record a refusal `PlanDispatch` made, now that it is true.
+/// @param record The invocation record this updates.
+/// @param refusal What `PlanDispatch` returned.
+void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
+{
+    if (!refusal.specifics.empty())
+        record.dispatchSpecifics = refusal.specifics;
+    (void) DeclineDispatch(record, refusal.recording, refusal.note);
+}
+
 /// Decide whether this compile may be dispatched at all, and with what.
 ///
-/// Refuses, and records the refusal, for every reason that needs no worker: a command line a worker
-/// would not take, a scheduler nothing reached a moment ago, a toolchain with no usable fingerprint.
-/// @param record The invocation record this updates.
+/// Refuses for every reason that needs no worker: a command line a worker would not take, a queue
+/// nothing reached a moment ago, a toolchain with no usable fingerprint. Records NOTHING: the caller
+/// decides when the refusal is true to record (`PlanRefusal`).
 /// @param cfg Launcher config.
 /// @param cmd The parsed compile command.
 /// @param argv The original full invocation.
 /// @param compilerBanner The compiler's version line ALONE.
 /// @param targetTriple The target this client generates for, stated on the wire.
-/// @return The plan, or nullopt when this compile runs where it was asked and the reason is recorded.
-[[nodiscard]] std::optional<DispatchPlan> PlanDispatch(InvocationRecord& record,
-                                                       Config const& cfg,
-                                                       Cc::ParsedCommand const& cmd,
-                                                       std::span<std::string const> argv,
-                                                       std::string_view compilerBanner,
-                                                       std::string_view targetTriple)
+/// @return The plan, or why this compile runs where it was asked.
+[[nodiscard]] std::expected<DispatchPlan, PlanRefusal> PlanDispatch(Config const& cfg,
+                                                                    Cc::ParsedCommand const& cmd,
+                                                                    std::span<std::string const> argv,
+                                                                    std::string_view compilerBanner,
+                                                                    std::string_view targetTriple)
 {
     // Refused before anything is sent when the command line carries something this
     // launcher cannot account for. See RemoteCompileArgs: refusing costs one local
@@ -2565,10 +2584,9 @@ struct DispatchPlan
         // The offending flag varies per compile, so it rides the verbose line and the
         // log's specifics column, and never the tally -- otherwise one row per command
         // line instead of per cause.
-        record.dispatchSpecifics = args.error();
-        return DeclineDispatch(record,
-                               RefusedHere("the command line is not dispatchable"),
-                               std::format("not dispatchable ({}); compiling locally", args.error()));
+        return std::unexpected { PlanRefusal { .recording = RefusedHere("the command line is not dispatchable"),
+                                               .note = std::format("not dispatchable ({}); compiling locally", args.error()),
+                                               .specifics = args.error() } };
     }
 
     // Asked BEFORE the second preprocess and the fingerprint, because saving those is
@@ -2584,10 +2602,11 @@ struct DispatchPlan
     // else the cache's own node (Ruling 12).
     auto const queueEndpoint = AdmissionEndpoint(cfg);
     if (memo.Remembers(Cc::MemoKind::SchedulerUnreached, queueEndpoint, wallClock.now()))
-        return DeclineDispatch(
-            record,
-            Cc::RememberedUnreachableRecording(),
-            std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, queueEndpoint));
+        return std::unexpected { PlanRefusal {
+            .recording = Cc::RememberedUnreachableRecording(),
+            .note =
+                std::format("not dispatched ({} at {}); compiling locally", Cc::RememberedUnreachableReason, queueEndpoint),
+            .specifics = {} } };
 
     // The DISPATCH identity, which is not the cache key's -- and it is built on the
     // BANNER ALONE, deliberately, where the key also folds the target.
@@ -2607,10 +2626,13 @@ struct DispatchPlan
     // the VC toolset or the SDK a `cl` or an MSVC-targeting clang borrows, which a
     // worker does not open for a preprocessed compile (#1656, `FingerprintTree`).
     //
-    // Computed HERE rather than beside the stamp, so it stays on the miss-and-
-    // dispatch-configured path only: it is a cache read in the steady state, but
-    // several seconds the first time a machine sees a toolchain, and a build that
-    // never dispatches must not pay that at all.
+    // Computed HERE rather than beside the stamp, so a HIT never pays it: it is a cache
+    // read in the steady state, but several seconds the first time a machine sees a
+    // toolchain. A MISS does pay it whenever there is a queue to ask -- the cache's own
+    // node is one, so that is every miss with `PACE_ADDR` set, fleet or not. That is the
+    // cost Ruling 12 accepted for letting the queue at the local node place compiles on
+    // workers with no `PACE_SCHEDULER` named: a host that runs only a cache pays one
+    // fingerprint per toolchain per machine, then a file read per miss.
     Cc::ThreadedParallelFor parallel;
     auto const identity = Cc::CachedToolchainFingerprint(
         ProcessRunner(), ToolchainHost(), cmd.compiler, compilerBanner, Cc::DriverOf(cmd.flavor), parallel);
@@ -2628,10 +2650,10 @@ struct DispatchPlan
         // `Refused` for the reason the comment above gives: sending it would report
         // as `NoWorker`, which reads as "the fleet has nobody on your toolchain".
         // The tally must not repeat that misdirection.
-        return DeclineDispatch(
-            record,
-            RefusedHere("this toolchain has no usable fingerprint"),
-            std::format("not dispatched ({}); compiling locally", Cc::ExplainDefect(identity.defect).reason));
+        return std::unexpected { PlanRefusal {
+            .recording = RefusedHere("this toolchain has no usable fingerprint"),
+            .note = std::format("not dispatched ({}); compiling locally", Cc::ExplainDefect(identity.defect).reason),
+            .specifics = {} } };
 
     return DispatchPlan { .args = *args, .fingerprint = identity.fingerprint, .toolchainLabel = toolchainLabel };
 }
@@ -3079,8 +3101,8 @@ void NoteAdmissionFailedOpen(InvocationRecord const& record,
         .open = [&](std::optional<std::string_view>) { return OpenAdmission(record, cfg, record.fetched, admit, memo); },
         // Nothing is stored, so nothing is ever answered `Stored`; a miss is what one would read as.
         .serveStored = []() { return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 }; },
-        // Local-only: nothing a fleet refused.
-        .grantedLocal = [](Cc::AdmitTicket const&) {},
+        // Local-only, and no plan was made: nothing a fleet refused.
+        .granted = [](Cc::AdmitTicket const&) {},
         .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
         .dispatchUnadmitted = []() -> std::optional<Cc::CompileRun> { return std::nullopt; },
         .compileLocal = [&]() { return RunCaptureSplit(args); },
@@ -3859,8 +3881,23 @@ struct FetchStep
     // A plan, when there is one, is made BEFORE the queue is asked: a dispatchable request names its
     // toolchain, and the leader places it by that. A command line a worker would not take, or a
     // toolchain with no usable fingerprint, is `LocalOnly` -- it still takes a slot and its memory.
-    std::optional<DispatchPlan> const plan =
-        dispatchConfigured ? PlanDispatch(record, cfg, cmd, argv, compilerBanner, targetTriple) : std::nullopt;
+    //
+    // A refusal the plan makes is recorded at once only when a scheduler is NAMED. With none named the
+    // queue asked is the cache's own node, which may front no fleet at all; the refusal is then held,
+    // and recorded only once that queue GRANTS something -- an admission that fails open leaves the
+    // record `NotConfigured`, the truth about a host whose queue never answered.
+    std::optional<DispatchPlan> plan;
+    std::optional<PlanRefusal> pendingRefusal;
+    if (dispatchConfigured)
+    {
+        auto planned = PlanDispatch(cfg, cmd, argv, compilerBanner, targetTriple);
+        if (planned.has_value())
+            plan = std::move(*planned);
+        else if (DispatchConfigured(cfg))
+            RecordPlanRefusal(record, planned.error());
+        else
+            pendingRefusal = std::move(planned.error());
+    }
 
     // The `<SRCROOT>`-relative source, which keys the leader's shape estimate. Absent is not an error: the
     // estimate then rests on the key alone.
@@ -3912,11 +3949,14 @@ struct FetchStep
                            ? Cc::StoredFetch { .kind = Cc::StoredFetchKind::Served, .code = *step.result }
                            : Cc::StoredFetch { .kind = Cc::StoredFetchKind::Declined, .code = 0 };
             },
-        // A dispatchable request the fleet placed nowhere is recorded as the refusal the LEASE path
-        // records for the same fleet, in its words (Ruling 11).
-        .grantedLocal =
+        .granted =
             [&](Cc::AdmitTicket const& ticket) {
-                if (!plan.has_value())
+                // A queue answered: a refusal the plan held is now about a fleet that exists.
+                if (pendingRefusal.has_value())
+                    RecordPlanRefusal(record, *std::exchange(pendingRefusal, std::nullopt));
+                // A dispatchable request the fleet placed nowhere is recorded as the refusal the LEASE
+                // path records for the same fleet, in its words (Ruling 11).
+                if (!plan.has_value() || ticket.kind != Wire::GrantKind::Local)
                     return;
                 if (auto const note = Cc::ExplainLocalGrant(ticket.localReason, plan->toolchainLabel); note.has_value())
                     (void) DeclineDispatch(record, note->recording, note->line);

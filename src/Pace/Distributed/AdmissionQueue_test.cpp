@@ -722,3 +722,40 @@ TEST_CASE("AdmissionQueue.woken-waiter-abandoned-before-pump-is-not-delivered", 
     CHECK(delivered[0].ticket == other);
     CHECK(delivered[0].kind == GrantKind::Stored);
 }
+
+TEST_CASE("AdmissionQueue.not-stored-without-a-peak-teaches-the-estimator-nothing", "[distributed][admission]")
+{
+    // What a launcher settles when the worker its grant named failed the compile: the charge is freed,
+    // and neither the key's estimate nor its shape's moves -- unlike the abandonment it replaces, which
+    // reads as a KILLED compile and raises both to the default.
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const key = EstimateKey { "key-w", "w.cpp", "gcc-14" };
+    auto const sameShape = EstimateKey { "key-never-seen", "w.cpp", "gcc-14" };
+    f.estimates.Record(key, 1 * GiB);
+    QueueRequest request;
+    request.kind = AdmitKind::LocalOnly;
+    request.caller = "m";
+    request.fingerprint = "gcc-14";
+    request.estimate = key;
+    auto const ticket = f.queue.Enqueue(request);
+    REQUIRE(f.queue.Pump().size() == 1);
+    auto expected = std::uint64_t { 0 };
+
+    SECTION("settled NotStored with no peak")
+    {
+        f.queue.Settle(ticket, Settlement { SettleOutcome::NotStored, std::nullopt });
+        expected = 1 * GiB;
+    }
+    SECTION("control: abandoned")
+    {
+        f.queue.Abandon(ticket);
+        expected = 3 * GiB;
+    }
+
+    CHECK(f.estimates.Estimate(key) == expected);
+    CHECK(f.estimates.Estimate(sameShape) == expected);
+    // Either way the charge went back.
+    f.Local(8 * GiB);
+    CHECK(f.queue.Pump().size() == 1);
+}

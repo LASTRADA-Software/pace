@@ -79,7 +79,10 @@ namespace
                                                                std::expected<AdmitTicket, std::string> answer)
     {
         if (answer.has_value())
+        {
             waits.Granted(answer->queuedMs);
+            seams.granted(*answer);
+        }
         else if (seams.failedOpen)
             seams.failedOpen(answer.error());
         return answer;
@@ -143,7 +146,6 @@ namespace
                     // connection ends with the session.
                     return AfterStored(seams.serveStored());
                 case Wire::GrantKind::Local: {
-                    seams.grantedLocal(*ticket);
                     auto run = seams.compileLocal();
                     return FinishHeld(seams, *session, run);
                 }
@@ -162,7 +164,13 @@ namespace
                     if (attempt.run.has_value())
                         return FinishHeld(seams, *session, *attempt.run);
                     // The grant charged THAT worker, which is not running the compile: this session
-                    // ends here -- the leader abandons it and frees the charge -- before anything runs.
+                    // ends here, before anything runs, and frees the charge. SETTLED rather than merely
+                    // closed: a close reads as an abandonment, which teaches the leader's estimator this
+                    // compile was KILLED -- a fact about the worker's failure, not about the compile.
+                    // `NotStored` with no peak frees the charge and teaches nothing. Should the settle
+                    // fail, the session's end still abandons, which frees the charge all the same.
+                    session->Settle(
+                        Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = std::nullopt });
                     return WorkerFailed { .endpoint = ticket->endpoint };
                 }
                 case Wire::GrantKind::Last:

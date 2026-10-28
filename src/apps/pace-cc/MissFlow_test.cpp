@@ -128,8 +128,8 @@ struct Harness
     std::vector<std::optional<std::string>> asked;
     /// What `serveStored` answers.
     StoredFetch storedFetch { .kind = StoredFetchKind::Missed, .code = 0 };
-    /// The reason of every `Local` grant the launcher was told of, in order.
-    std::vector<Wire::LocalGrantReason> grantedLocal;
+    /// Every grant the launcher was told of, in order.
+    std::vector<AdmitTicket> granted;
     std::deque<bool> workerRefuses; ///< Per admitted dispatch: whether the worker refuses.
     std::optional<std::uint64_t> peak { 4'096 };
     bool stores { true };             ///< Whether the object reaches the cache.
@@ -157,10 +157,10 @@ struct Harness
                     events.log.push_back("fetch");
                     return storedFetch;
                 },
-            .grantedLocal =
+            .granted =
                 [this](AdmitTicket const& ticket) {
-                    events.log.push_back("granted-local");
-                    grantedLocal.push_back(ticket.localReason);
+                    events.log.push_back("granted");
+                    granted.push_back(ticket);
                 },
             .dispatchAdmitted =
                 [this](AdmitTicket const&) {
@@ -263,7 +263,7 @@ TEST_CASE("Launcher.local-grant-compiles-then-stores-then-settles", "[launcher][
     // The order is the assertion: the STORE is visible before the queue wakes the compiles waiting on
     // this key (R1), and the connection is held across the whole compile (the connection is the lease).
     CHECK(harness.events.log
-          == std::vector<std::string> { "open", "s0:await", "granted-local", "compile", "store", "s0:settle", "s0:closed" });
+          == std::vector<std::string> { "open", "s0:await", "granted", "compile", "store", "s0:settle", "s0:closed" });
 }
 
 TEST_CASE("Launcher.settle-carries-how-the-compile-ended-and-its-peak", "[launcher][admission]")
@@ -424,7 +424,8 @@ TEST_CASE("Launcher.worker-grant-dispatches-then-stores-then-settles", "[launche
 
     CHECK(report.code == 0);
     CHECK(harness.events.log
-          == std::vector<std::string> { "open", "s0:await", "dispatch-admitted", "store", "s0:settle", "s0:closed" });
+          == std::vector<std::string> {
+              "open", "s0:await", "granted", "dispatch-admitted", "store", "s0:settle", "s0:closed" });
     // No local compile, so no peak: the worker's own measurement is its to report.
     CHECK_FALSE(report.peakMemoryBytes.has_value());
 }
@@ -432,8 +433,9 @@ TEST_CASE("Launcher.worker-grant-dispatches-then-stores-then-settles", "[launche
 TEST_CASE("Launcher.a-worker-that-failed-the-compile-gives-its-grant-back-and-asks-local-only", "[launcher][admission]")
 {
     // An unreachable worker, a failed dispatch preprocess, a discarded result: nothing a queue answers.
-    // The worker grant charged THAT machine, which is not running the compile, so the session closes --
-    // the leader abandons it -- and a local-only admission excluding that worker holds the compile here.
+    // The worker grant charged THAT machine, which is not running the compile, so the session is settled
+    // NotStored and closed -- freeing the charge without teaching the estimator a kill -- and a
+    // local-only admission excluding that worker holds the compile here.
     Harness harness;
     harness.Open({ Grant(Wire::GrantKind::Worker) });
     harness.Open({ Grant(Wire::GrantKind::Local) });
@@ -445,21 +447,28 @@ TEST_CASE("Launcher.a-worker-that-failed-the-compile-gives-its-grant-back-and-as
     CHECK(harness.events.log
           == std::vector<std::string> { "open",
                                         "s0:await",
+                                        "granted",
                                         "dispatch-admitted",
+                                        "s0:settle",
                                         "s0:closed",
                                         "open",
                                         "s1:await",
+                                        "granted",
                                         "compile",
                                         "store",
                                         "s1:settle",
                                         "s1:closed" });
-    // The worker's grant is never settled: its end is the abandonment.
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    // The worker's grant is settled NotStored with no peak: freed, and no measurement claimed.
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::NotStored);
+    CHECK_FALSE(harness.events.settles[0].peakBytes.has_value());
     REQUIRE(harness.asked.size() == 2);
     CHECK_FALSE(harness.asked[0].has_value());
     CHECK(harness.asked[1] == std::optional<std::string> { "worker:1" });
-    // The second grant asked to run here, so it has no refusal to record.
-    CHECK(harness.grantedLocal.empty());
+    // Both grants were told; the second asked to run here, so it carries no refusal to record.
+    REQUIRE(harness.granted.size() == 2);
+    CHECK(harness.granted[1].kind == Wire::GrantKind::Local);
+    CHECK(harness.granted[1].localReason == Wire::LocalGrantReason::Asked);
 }
 
 TEST_CASE("Launcher.a-worker-failure-with-no-local-grant-to-be-had-compiles-here-unadmitted", "[launcher][admission]")
@@ -489,7 +498,10 @@ TEST_CASE("Launcher.a-worker-failure-with-no-local-grant-to-be-had-compiles-here
     CHECK(harness.events.Count("compile") == 1);
     // Never the fleet a second way: the worker's failure was this compile's dispatch.
     CHECK(harness.events.Count("dispatch-unadmitted") == 0);
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    // The failed worker's grant is settled before its session closes; nothing else is.
+    REQUIRE(harness.events.Saw("s0:settle"));
+    CHECK(harness.events.At("s0:settle") < harness.events.At("s0:closed"));
+    CHECK(harness.events.settles.front().outcome == Wire::SettleOutcome::NotStored);
     CHECK_FALSE(harness.events.Saw("s1:settle"));
     // Every session ended before the compile ran outside it.
     CHECK(harness.events.At("s0:closed") < harness.events.At("compile"));
@@ -505,8 +517,54 @@ TEST_CASE("Launcher.a-local-grant-is-told-to-the-launcher-before-the-compile", "
 
     (void) RunMiss(harness.Seams());
 
-    CHECK(harness.grantedLocal == std::vector<Wire::LocalGrantReason> { Wire::LocalGrantReason::NoWorker });
-    CHECK(harness.events.At("granted-local") < harness.events.At("compile"));
+    REQUIRE(harness.granted.size() == 1);
+    CHECK(harness.granted[0].localReason == Wire::LocalGrantReason::NoWorker);
+    CHECK(harness.events.At("granted") < harness.events.At("compile"));
+}
+
+TEST_CASE("Launcher.a-queue-that-never-answered-is-told-no-grant", "[launcher][admission]")
+{
+    // Ruling 12's cost, held to its truth: with no scheduler named, a refusal this launcher made before
+    // asking is recorded only once a queue GRANTS something. A node that refuses the verb -- one too old
+    // to know it (`unimplemented-verb`), or a cache daemon -- grants nothing, so nothing is recorded and
+    // the dispatch axis stays `NotConfigured`.
+    Harness harness;
+    harness.Open({ std::unexpected { std::string { "rejected (unimplemented-verb): this build serves no admission" } } });
+    std::vector<std::string> recorded;
+    auto seams = harness.Seams();
+    std::optional<std::string> pending { "not dispatchable (an argument no worker passes); compiling locally" };
+    seams.granted = [&](AdmitTicket const&) {
+        if (pending.has_value())
+            recorded.push_back(*std::exchange(pending, std::nullopt));
+    };
+
+    auto const report = RunMiss(seams);
+
+    CHECK(report.code == 0);
+    CHECK(harness.events.Count("compile") == 1);
+    CHECK(recorded.empty());
+    CHECK(pending.has_value());
+
+    SECTION("control: a queue that grants is told, once, before the compile")
+    {
+        Harness granting;
+        granting.Open({ Grant(Wire::GrantKind::Stored), Grant(Wire::GrantKind::Local) });
+        granting.Open({ Grant(Wire::GrantKind::Local) });
+        auto grantingSeams = granting.Seams();
+        auto const told = grantingSeams.granted;
+        grantingSeams.granted = [&](AdmitTicket const& ticket) {
+            told(ticket);
+            if (pending.has_value())
+                recorded.push_back(*std::exchange(pending, std::nullopt));
+        };
+
+        (void) RunMiss(grantingSeams);
+
+        CHECK(recorded.size() == 1);
+        // Every grant is told, the `Stored` one included -- a queue that answered at all.
+        CHECK(granting.granted.size() == 2);
+        CHECK(granting.events.At("granted") < granting.events.At("compile"));
+    }
 }
 
 TEST_CASE("Launcher.a-local-grant-reads-as-the-refusal-the-lease-path-records", "[launcher][admission]")

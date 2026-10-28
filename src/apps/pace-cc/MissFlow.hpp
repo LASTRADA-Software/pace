@@ -66,9 +66,11 @@ struct MissSeams
     /// FETCH the key again after a `Stored` grant, and serve the hit if there is one.
     /// @return How the FETCH ended.
     std::function<StoredFetch()> serveStored;
-    /// Told of a `Local` grant before the compile runs under it, so a dispatchable request the fleet
-    /// placed nowhere is recorded as the fleet's refusal (`AdmitTicket::localReason`, Ruling 11).
-    std::function<void(AdmitTicket const& ticket)> grantedLocal;
+    /// Told of EVERY grant, as it arrives and before anything runs under it. The moment a queue has
+    /// answered at all, which is when a refusal this launcher made before asking becomes true to record
+    /// (Ruling 12); and for a `Local` grant of a dispatchable request, the fleet's reason for placing
+    /// it nowhere (`AdmitTicket::localReason`, Ruling 11). Never called for an admission that failed open.
+    std::function<void(AdmitTicket const& ticket)> granted;
     /// Dispatch to the worker an admission granted.
     std::function<AdmittedDispatch(AdmitTicket const&)> dispatchAdmitted;
     /// Today's dispatch with no admission: a `LEASE` at the scheduler, when one is configured.
