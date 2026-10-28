@@ -7,8 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace Pace::Cc;
@@ -253,4 +255,52 @@ TEST_CASE("A spawn with no additions inherits what it would have inherited anywa
     // `CHECK_FALSE` for the overriding value would be worse than weak -- nothing in
     // this spawn ever sets it, so it is vacuous.
     CHECK(run.out.contains(InheritedPathMarker));
+}
+
+namespace
+{
+/// The `cmake` this build was configured with, as a program every host can run.
+constexpr std::string_view CmakeCommand = PACE_TEST_CMAKE_COMMAND;
+
+/// The helper that allocates and touches `argv[1]` MiB, built beside the tests.
+constexpr std::string_view PeakMemoryChild = PACE_TEST_PEAK_MEMORY_CHILD;
+} // namespace
+
+TEST_CASE("ProcessRunner.peak-memory-is-measured", "[pace-cc][process]")
+{
+    auto const runner = MakeProcessRunner();
+    auto const run = runner->RunCaptureSplit({ { std::string { CmakeCommand }, "-E", "echo", "x" } });
+
+    REQUIRE(run.exitCode == 0);
+    REQUIRE(run.peakMemoryBytes.has_value());
+    CHECK(*run.peakMemoryBytes > 0);
+}
+
+TEST_CASE("ProcessRunner.peak-covers-child-process", "[pace-cc][process]")
+{
+    // The parent is a shell and stays small; the 256 MiB lives in its CHILD, so only a
+    // measurement that covers descendants can see it.
+    auto const runner = MakeProcessRunner();
+    auto child = std::string { PeakMemoryChild };
+#if defined(_WIN32)
+    // cmd.exe does not take a forward-slashed program path.
+    std::ranges::replace(child, '/', '\\');
+    auto const argv = std::vector<std::string> { "cmd.exe", "/c", child + " 256" };
+#else
+    auto const argv = std::vector<std::string> { "/bin/sh", "-c", child + " 256" };
+#endif
+    auto const run = runner->RunCaptureSplit(argv);
+
+    REQUIRE(run.exitCode == 0);
+    REQUIRE(run.peakMemoryBytes.has_value());
+    CHECK(*run.peakMemoryBytes >= (200ULL << 20));
+}
+
+TEST_CASE("ProcessRunner.unspawnable-has-no-peak", "[pace-cc][process]")
+{
+    auto const runner = MakeProcessRunner();
+    auto const run = runner->RunCaptureSplit({ { "definitely-not-a-real-program-xyzzy" } });
+
+    CHECK(run.exitCode == NotSpawned);
+    CHECK_FALSE(run.peakMemoryBytes.has_value());
 }

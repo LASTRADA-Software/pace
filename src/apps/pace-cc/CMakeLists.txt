@@ -343,6 +343,16 @@ if(PACE_BUILD_TESTS)
         target_compile_definitions(pace-cc-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     endif()
     target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads pace-monocypher core::async core::net)
+
+    # The peak-memory tests (ProcessRunner_test.cpp) run a helper that allocates and touches a
+    # known amount in a CHILD of the process they spawn, and a real `cmake` as the trivial
+    # process. Both arrive as compile definitions rather than being looked up at run time.
+    add_executable(peak-memory-child PeakMemoryChild.cpp)
+    if(TARGET peak-memory-child)
+        add_dependencies(pace-cc-tests peak-memory-child)
+        set_source_files_properties(ProcessRunner_test.cpp PROPERTIES COMPILE_DEFINITIONS
+            "PACE_TEST_CMAKE_COMMAND=\"${CMAKE_COMMAND}\";PACE_TEST_PEAK_MEMORY_CHILD=\"$<TARGET_FILE:peak-memory-child>\"")
+    endif()
     if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
         target_link_libraries(pace-cc-tests PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})
         target_compile_definitions(pace-cc-tests PRIVATE PACE_COMPRESSION_ENABLED=1)
