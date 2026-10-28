@@ -469,11 +469,13 @@ namespace
     /// @param scope The connection's scope.
     /// @param hold The grant being settled, already taken off the connection.
     /// @param request The settle.
-    void SettleHeld(std::shared_ptr<AdmissionCore> const& core,
-                    Distributed::SchedulerService& service,
-                    ConnectionScope& scope,
-                    AdmissionHold& hold,
-                    Wire::SettleRequest const& request)
+    /// @return The reply: `Ok`, or `NotLeader` naming the leader when a refusal reached a node that no
+    ///         longer leads -- the ticket is abandoned then, since a follower's queue is pumped by nobody.
+    [[nodiscard]] std::vector<std::byte> SettleHeld(std::shared_ptr<AdmissionCore> const& core,
+                                                    Distributed::SchedulerService& service,
+                                                    ConnectionScope& scope,
+                                                    AdmissionHold& hold,
+                                                    Wire::SettleRequest const& request)
     {
         auto const ticket = hold.Ticket();
         if (request.outcome == Wire::SettleOutcome::WorkerRefused)
@@ -486,10 +488,19 @@ namespace
             scope.Hold(std::make_unique<RequeuedHold>(core, ticket, std::move(waiter)));
             core->metrics->Increment(IMetricsSink::Counter::AdmissionWorkerRefused);
         }
-        service.SettleAdmission(ticket,
-                                Distributed::Settlement { .outcome = request.outcome, .peakBytes = request.peakBytes });
+        auto const settled = service.SettleAdmission(
+            ticket, Distributed::Settlement { .outcome = request.outcome, .peakBytes = request.peakBytes });
         hold.Settled();
+        if (settled == Distributed::SettleResult::NotLeading)
+        {
+            // Demoted between the grant and this settle: the service abandoned the ticket, so the
+            // put-back hold goes too -- it forgets the waiter and files the abandonment -- and the
+            // client is sent to the leader, where it asks again from the back of a queue that is pumped.
+            (void) scope.TakeHold();
+            return RefuseDemoted(service.LeaderEndpoint());
+        }
         core->PumpAndDeliver();
+        return Wire::EncodeReply(Wire::Status::Ok, {});
     }
 } // namespace
 
@@ -606,8 +617,7 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
             if (hold == nullptr)
                 co_return FrameReply { RefuseHere(Wire::ErrorCode::UnknownLease,
                                                   "no admitted compile is held on this connection") };
-            SettleHeld(core, *service, *scope, *hold, *request);
-            co_return FrameReply { Wire::EncodeReply(Wire::Status::Ok, {}) };
+            co_return FrameReply { SettleHeld(core, *service, *scope, *hold, *request) };
         }
         case Wire::Op::Admit:
             break;
@@ -650,6 +660,14 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     auto waiter = std::shared_ptr<AdmissionWaiter> {};
     if (requeued != nullptr)
     {
+        // Its payload is deliberately NOT read: the ticket is bound to the connection (Ruling 9), so
+        // what this ADMIT says it is for changes nothing -- it decoded, which is all it owes.
+        //
+        // And a node that stopped leading since the settle queues nothing: a follower is pumped by
+        // nobody, so parking here would never end. `requeued` gives the ticket back on the way out.
+        // Defence in depth -- `SettleHeld` refuses the settle itself on a demoted node.
+        if (service->Role() != Distributed::SchedulerRole::Leader)
+            co_return FrameReply { RefuseDemoted(service->LeaderEndpoint()) };
         ticket = requeued->Ticket();
         waiter = requeued->TakeWaiter();
     }

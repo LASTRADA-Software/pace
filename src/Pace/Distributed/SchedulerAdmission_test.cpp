@@ -173,7 +173,8 @@ TEST_CASE("SchedulerAdmission.worker-grant-takes-a-signed-lease-and-a-job", "[di
     CHECK(fleet.Leases() == 1);
     CHECK(fleet.Jobs(worker) == 1);
 
-    fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = 10 * MiB });
+    CHECK(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = 10 * MiB })
+          == SettleResult::Settled);
     CHECK(fleet.Leases() == 0);
     CHECK(fleet.Jobs(worker) == 0);
     CHECK(fleet.service.AdmissionSnapshotNow().chargedBytes.empty());
@@ -203,7 +204,9 @@ TEST_CASE("SchedulerAdmission.worker-refusal-keeps-the-ticket-and-frees-the-leas
     auto const ticket = fleet.Admit("k1");
     REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
 
-    fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} });
+    CHECK(
+        fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+        == SettleResult::Requeued);
     CHECK(fleet.Leases() == 0);
     CHECK(fleet.Jobs(worker) == 0);
     // The SAME ticket waits again, at the front: nothing new was queued.
@@ -285,4 +288,24 @@ TEST_CASE("SchedulerAdmission.a-worker-gone-before-its-grant-sends-the-ticket-to
     REQUIRE(again.size() == 1);
     CHECK(again[0].ticket == ticket);
     CHECK(GrantOf(again[0]).kind == Wire::GrantKind::Worker);
+}
+
+TEST_CASE("SchedulerAdmission.worker-refusal-after-demotion-abandons-the-ticket", "[distributed][admission][scheduler]")
+{
+    // A grant outlives a demotion; a refusal settled after it must not re-park the ticket in a
+    // follower's queue, which nothing pumps.
+    Fleet fleet;
+    auto const worker = fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ticket = fleet.Admit("k1");
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+
+    fleet.service.SetRole(SchedulerRole::Follower, "10.0.0.9:7000", 7);
+    CHECK(
+        fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+        == SettleResult::NotLeading);
+    CHECK(fleet.service.AdmissionSnapshotNow().depth == 0);
+    CHECK(fleet.service.AdmissionSnapshotNow().chargedBytes.empty());
+    CHECK(fleet.Leases() == 0);
+    CHECK(fleet.Jobs(worker) == 0);
 }

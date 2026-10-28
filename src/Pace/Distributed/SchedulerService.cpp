@@ -800,12 +800,15 @@ void SchedulerService::SetRole(SchedulerRole role, std::string_view leaderEndpoi
     // overwritten, and only a transition out of `Leader` counts -- a node that was never leading has
     // nothing queued, and `Undecided` -> `Follower` must not look like a demotion.
     auto lost = std::vector<Ticket> {};
-    if (role != SchedulerRole::Leader && _role.load(std::memory_order_acquire) == SchedulerRole::Leader)
     {
         std::scoped_lock const guard { _admissionMutex };
-        lost = _queue.LoseLeadership();
-        for (auto const ticket: lost)
-            _admissionTickets.erase(ticket);
+        if (role != SchedulerRole::Leader && _role.load(std::memory_order_acquire) == SchedulerRole::Leader)
+        {
+            lost = _queue.LoseLeadership();
+            for (auto const ticket: lost)
+                _admissionTickets.erase(ticket);
+        }
+        _admissionLeading = role == SchedulerRole::Leader;
     }
     // Before the role, for the reason the endpoint is: a thread that has seen
     // `Leader` must already be able to see the term it leads under, or the first

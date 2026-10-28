@@ -1662,6 +1662,12 @@ namespace
             state->metrics.Increment(watch->counter);
             // Filed HERE, so whatever the reply left held on the connection -- an admission's grant,
             // released by the close this departure causes -- does not file the same departure again.
+            //
+            // **Test gap, stated:** no case drives this line. The one over the wire never reached it
+            // (40 of 40 runs wrote the grant before the departure was seen), so it was dropped;
+            // `AdmissionResponder.a-departure-the-endpoint-counted-is-not-counted-again` pins the HOLD's
+            // half by calling `NoteDepartureCounted` itself. Deleting this call would double-count and
+            // nothing would go red.
             if (watch->scope != nullptr)
                 watch->scope->NoteDepartureCounted();
         }
@@ -1776,9 +1782,13 @@ namespace
     ///
     /// **This is what lets a queue wait have no total ceiling and still not wait silently** (#1728):
     /// a compile queued behind twenty minutes of other compiles is the system working, so its answer
-    /// window bounds the SILENCE since the last pulse that reached the peer, never the wait. A peer
-    /// that stops taking pulses -- its receive window full, its host gone -- stops renewing it, and
-    /// the sweep reaches it one window later, exactly as before.
+    /// window bounds the silence since the last pulse the KERNEL ACCEPTED, never the wait.
+    ///
+    /// **Accepted is not delivered, and the difference is the bound's weak side.** A peer whose
+    /// receive window fills stops the writes completing, so it stops renewing and is swept one window
+    /// later. A host that VANISHED does not: its pulses keep landing in this side's send buffer until
+    /// TCP's retransmission gives up and fails the socket -- minutes, set by the kernel, not by this
+    /// window. Keepalive and the retransmission timeout bound that case; this one does not.
     /// @param renewal What to renew.
     /// @param socket The connection, as the sweeper tracks it.
     void RenewAfterPulse(PulseRenewal const& renewal, core::net::ISocket* socket)

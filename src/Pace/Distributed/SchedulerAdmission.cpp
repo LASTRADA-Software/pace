@@ -205,9 +205,21 @@ std::vector<AdmissionVerdict> SchedulerService::PumpAdmission()
     return verdicts;
 }
 
-void SchedulerService::SettleAdmission(Ticket ticket, Settlement const& settlement)
+SettleResult SchedulerService::SettleAdmission(Ticket ticket, Settlement const& settlement)
 {
     auto const guard = std::scoped_lock { _admissionMutex };
+    auto const refused = settlement.outcome == Wire::SettleOutcome::WorkerRefused;
+    if (refused && !_admissionLeading)
+    {
+        // A follower's queue is pumped by nobody: abandoned, never re-parked there.
+        _queue.Abandon(ticket);
+        if (auto const held = _admissionTickets.find(ticket); held != _admissionTickets.end())
+        {
+            ReleaseAdmissionLease(held->second);
+            _admissionTickets.erase(held);
+        }
+        return SettleResult::NotLeading;
+    }
     // A worker that refused the job puts the SAME ticket back at the front of the queue, its refusal
     // counted against the request's bound and its machine's ledger marked refused until it reports
     // (R7) -- the queue does both. The record stays, so the connection's next `ADMIT` waits on this
@@ -217,9 +229,10 @@ void SchedulerService::SettleAdmission(Ticket ticket, Settlement const& settleme
     {
         // The worker the grant named is not running it, whatever the outcome: its lease goes back.
         ReleaseAdmissionLease(held->second);
-        if (settlement.outcome != Wire::SettleOutcome::WorkerRefused)
+        if (!refused)
             _admissionTickets.erase(held);
     }
+    return refused ? SettleResult::Requeued : SettleResult::Settled;
 }
 
 void SchedulerService::AbandonAdmission(Ticket ticket)

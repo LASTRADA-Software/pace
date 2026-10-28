@@ -782,3 +782,38 @@ TEST_CASE("AdmissionResponder.regate-at-grant", "[node][admission]")
     CHECK(queue.service.OutstandingLeases(4).total == 0);
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedWorker) == 0);
 }
+
+TEST_CASE("AdmissionResponder.worker-refused-after-demotion-answers-not-leader", "[node][admission]")
+{
+    // The grant was made while leading; the node is demoted while the compile runs; the worker then
+    // refuses it. Re-parking it here would queue it on a follower nobody pumps, behind pulses that keep
+    // the connection alive for ever. The client is sent to the leader instead, and nothing stays.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.RegisterWorker(1);
+    queue.ReportWorker();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+    REQUIRE(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Worker);
+
+    queue.service.SetRole(Distributed::SchedulerRole::Follower, "10.0.0.9:7000", 7);
+
+    client.Send(SettleFrame(Wire::SettleOutcome::WorkerRefused));
+    auto const reply = Unwrap(client.ReadAnswer());
+    CHECK(reply.status == Wire::Status::Error);
+    CHECK(Pace::Testing::ErrorOf(reply.bytes) == Wire::ErrorCode::NotLeader);
+    auto const text = std::string { reinterpret_cast<char const*>(reply.payload.data()), reply.payload.size() };
+    CHECK(text.find("10.0.0.9:7000") != std::string::npos);
+
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+    CHECK(queue.service.AdmissionSnapshotNow().chargedBytes.empty());
+    CHECK(queue.service.OutstandingLeases(4).total == 0);
+    CHECK(queue.held.Held() == HeldCharges {});
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
+
+    // Nothing is held on the connection either: a further ADMIT is a new request, refused by the gate.
+    client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1"));
+    CHECK(Pace::Testing::ErrorOf(Unwrap(client.ReadAnswer()).bytes) == Wire::ErrorCode::NotLeader);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+}

@@ -668,6 +668,14 @@ struct AdmissionVerdict
     std::chrono::milliseconds queued {};   ///< Enqueue to decision, on the service clock.
 };
 
+/// What a settle did with its ticket.
+enum class SettleResult : std::uint8_t
+{
+    Settled,    ///< The ticket ended.
+    Requeued,   ///< A worker refused it: back at the front of the queue, still this connection's.
+    NotLeading, ///< A worker refused it on a node that no longer leads: abandoned, nobody queues it.
+};
+
 /// The queue as a scrape reads it.
 struct AdmissionSnapshot
 {
@@ -834,9 +842,17 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// back, and the SAME ticket goes back to the front of the queue with the refusal counted (R7), to
     /// be decided by a later pump for the connection that is still waiting on it. After
     /// `AdmissionQueue::MaxWorkerRefusals` it is placed on its caller.
+    ///
+    /// **Except on a node that no longer leads.** A grant outlives a demotion (`LoseLeadership` keeps
+    /// granted tickets so their settle still releases), and a refusal settled after it would put the
+    /// ticket back in a FOLLOWER's queue, which nothing pumps -- a compile parked forever behind pulses
+    /// that keep its connection alive. So there the ticket is abandoned instead, decided under the
+    /// same lock the demotion forgets the queue under, and the answer says so.
     /// @param ticket The ticket a verdict granted.
     /// @param settlement How it ended.
-    void SettleAdmission(Ticket ticket, Settlement const& settlement);
+    /// @return `Requeued` when a refusal put the ticket back, `NotLeading` when it was abandoned
+    ///         because this node no longer leads, `Settled` otherwise.
+    [[nodiscard]] SettleResult SettleAdmission(Ticket ticket, Settlement const& settlement);
 
     /// The ticket connection ended at any stage: free whatever it holds. Unknown tickets are ignored.
     /// @param ticket Any ticket.
@@ -1425,6 +1441,10 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     AdmissionQueue _queue;                                         ///< Guarded by `_admissionMutex`.
     std::unordered_map<Ticket, AdmissionTicket> _admissionTickets; ///< Guarded by `_admissionMutex`.
     AdmissionObserver _admissionObserver;                          ///< Guarded by `_leaderMutex`.
+    /// Whether the queue belongs to a leader, written in the same locked step a demotion forgets the
+    /// queue in -- so a settle reading it under `_admissionMutex` can never re-park a ticket into a
+    /// queue that demotion has already forgotten. `_role` is published later and outside the lock.
+    bool _admissionLeading { false }; ///< Guarded by `_admissionMutex`.
 
     /// This node's standing, and where the leader is.
     ///

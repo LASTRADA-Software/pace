@@ -95,12 +95,13 @@ class ConnectionScope
     }
 
     /// Ask the endpoint to judge the request being answered by its progress pulse rather than by a
-    /// total ceiling: every pulse that reaches the peer moves the request's sweep deadline on by its
+    /// total ceiling: every pulse the kernel ACCEPTS moves the request's sweep deadline on by its
     /// whole answer window. Reset at every frame (`BeforeFrame`), so it covers one request only.
     ///
-    /// The fleet compile queue's wait (#1728): a queue wait has no total ceiling, and a peer whose
-    /// pulses stop reaching it -- its receive window full, its host gone -- is still swept one answer
-    /// window after the last pulse that did.
+    /// The fleet compile queue's wait (#1728): a queue wait has no total ceiling. A peer whose receive
+    /// window fills stops the pulse writes completing and is swept one window after the last; a host
+    /// that vanished keeps them completing into the send buffer until TCP retransmission fails the
+    /// socket, so that case is bounded by the kernel, not by this window (`RenewAfterPulse`).
     void JudgeByPulse() noexcept
     {
         _judgedByPulse = true;
