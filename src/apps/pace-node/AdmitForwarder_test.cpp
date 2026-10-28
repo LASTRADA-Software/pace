@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdmissionTestUtils.hpp"
 #include "AdmitForwarder.hpp"
+#include "EndpointDialer.hpp"
 #include "FrameEndpoint.hpp"
 #include "HeldCharges.hpp"
+#include "MachineBudget.hpp"
+#include "NodeAnnounce.hpp"
+#include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
 #include "NodeIoLoop.hpp"
 #include "NodeProofClient.hpp"
 #include "NodeProofResponder.hpp"
 #include "NodeSurfaces.hpp"
 #include "Responders.hpp"
+#include "SchedulerLink.hpp"
+#include "SchedulerReachability.hpp"
 #include "SchedulingRedirect.hpp"
 
 #include <Pace/Core/ISecureRandom.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/LeaderRedirect.hpp>
@@ -895,4 +902,70 @@ TEST_CASE("AdmitForwarder.the-relay-to-the-leader-is-dialled-with-keepalive", "[
     REQUIRE(connector.asked.size() == 1);
     CHECK(connector.asked[0].keepAlive == core::net::KeepAlive::Yes);
     CHECK(connector.asked[0].connectTimeout == ForwardDialBudget {}.connectTimeout);
+}
+
+TEST_CASE("AdmitForwarder.the-leaders-own-budget-round-charges-its-own-machine",
+          "[node][admission][forwarder][machinebudget]")
+{
+    // The leader's launchers reach its queue over loopback and are charged to THIS machine
+    // (`SchedulerService::OwnMachineId`). The queue admits nothing on a machine that has not reported a
+    // budget, so the leader's own presence round must reach ITSELF -- dialled, proven under its own
+    // identity key, sealed -- and file that budget under the same machine its loopback launchers are
+    // charged to. The production round, the production dialer and the production proof, end to end.
+    ProvenLeader leader;
+    auto const port = leader.Serve();
+
+    NodeConfig cfg;
+    cfg.machineMemoryBudgetBytes = 8 * 1024 * MiB;
+    cfg.machineSlots = 8;
+    Distributed::NodeCapacity const capacity {};
+    HeldChargeRegistry held;
+    MeasuredPeaks peaks;
+    NullLogger logger;
+    NodeConditions conditions;
+    core::platform::ManualClock clock;
+    SchedulerReachability reachability { clock, &conditions };
+    NamedMachineTrust trust { std::string { LeaderMachine }, leader.identity.PublicKey() };
+    SystemSecureRandom random;
+    NodeProofClient proof { std::string { LeaderMachine }, leader.identity, trust, nullptr, nullptr, random };
+    BlockingEndpointDialer dialer { HeartbeatIoTimeout };
+    auto link = Unwrap(SchedulerLink::For(std::vector<std::string> { EndpointOf(port) }));
+
+    REQUIRE(SendMachineBudgetOnce(MachineBudgetRound { .cfg = cfg,
+                                                       .capacity = capacity,
+                                                       .held = held,
+                                                       .peaks = peaks,
+                                                       .logger = logger,
+                                                       .prover = &proof,
+                                                       .reachability = reachability },
+                                  link,
+                                  dialer));
+
+    auto const budgets = leader.queue.service.AdmissionSnapshotNow().budgets;
+    REQUIRE(budgets.size() == 1);
+    CHECK(budgets.front().machine == leader.queue.service.OwnMachineId());
+    CHECK(budgets.front().budgetBytes == std::optional<std::uint64_t> { 8 * 1024 * MiB });
+
+    // And so a launcher on the leader's own machine -- loopback, charged to `OwnMachineId` -- is granted.
+    auto const insider = Distributed::CallerContext { .membership = Distributed::Membership::Member, .peerId = "127.0.0.1" };
+    auto const ticket = leader.queue.service.Admit(
+        insider,
+        [insider] { return insider; },
+        leader.queue.service.OwnMachineId(),
+        Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                   .fingerprint = {},
+                                   .cacheKey = "k1",
+                                   .sourcePath = {},
+                                   .treeLabel = "tree",
+                                   .storable = false,
+                                   .acceptedCodecs = {},
+                                   .excluded = {},
+                                   .toolchainLabel = {} });
+    REQUIRE(ticket.has_value());
+    auto const verdicts = leader.queue.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    CHECK(verdicts.front().ticket == *ticket);
+    CHECK_FALSE(verdicts.front().refusal.has_value());
+    CHECK(verdicts.front().kind == Wire::GrantKind::Local);
+    leader.queue.service.AbandonAdmission(*ticket);
 }
