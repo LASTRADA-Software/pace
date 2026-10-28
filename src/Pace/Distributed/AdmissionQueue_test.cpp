@@ -59,9 +59,24 @@ struct Fixture
         return tickets;
     }
 
+    /// Enqueues a request whose estimate key is `cacheKey`, so two of them collide in the dedup set.
+    Ticket Keyed(AdmitKind kind, std::string caller, std::string cacheKey, bool storable, std::uint64_t bytes)
+    {
+        auto key = EstimateKey { std::move(cacheKey), "a.cpp", {} };
+        estimates.Record(key, bytes);
+        QueueRequest request;
+        request.kind = kind;
+        request.caller = std::move(caller);
+        request.estimate = std::move(key);
+        request.storable = storable;
+        return queue.Enqueue(std::move(request));
+    }
+
   private:
     int _serial {};
 };
+
+constexpr Settlement Done { SettleOutcome::NotStored, std::nullopt };
 
 MachineReport Report(std::uint64_t budget, std::uint32_t slots, std::uint32_t heldSlots = 0, std::uint64_t heldBytes = 0)
 {
@@ -164,12 +179,12 @@ TEST_CASE("AdmissionQueue.head-reservation-prevents-starvation", "[distributed][
     auto const smalls = f.LocalMany(3, 1 * GiB);
     REQUIRE(f.queue.Pump().size() == 3);
 
-    REQUIRE(f.queue.Release(holder)); // 3 GiB in use, 5 free, head needs 6
+    f.queue.Settle(holder, Done); // 3 GiB in use, 5 free, head needs 6
     auto const late = f.Local(1 * GiB);
     CHECK(f.queue.Pump().empty()); // the free 5 GiB is the head's, not the latecomer's
 
     for (auto const small: smalls)
-        REQUIRE(f.queue.Release(small));
+        f.queue.Settle(small, Done);
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { head, late }); // head first, then the 1 GiB fits too
 }
 
@@ -220,9 +235,9 @@ TEST_CASE("AdmissionQueue.fifo-among-equals", "[distributed][admission]")
     auto const third = f.Local(3 * GiB);
 
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { first });
-    REQUIRE(f.queue.Release(first));
+    f.queue.Settle(first, Done);
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { second });
-    REQUIRE(f.queue.Release(second));
+    f.queue.Settle(second, Done);
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { third });
 }
 
@@ -288,14 +303,14 @@ TEST_CASE("AdmissionQueue.dispatchable-head-reserves-across-changing-candidate-o
     // The candidate order flips and the 2 GiB holders finish: 4 GiB is free on both machines, and
     // the head (needing 6) must keep it from the latecomers on BOTH, not only the first candidate.
     f.placement.byFingerprint["fp"] = { w2, w1 };
-    REQUIRE(f.queue.Release(small1));
-    REQUIRE(f.queue.Release(small2));
+    f.queue.Settle(small1, Done);
+    f.queue.Settle(small2, Done);
     f.Local(1 * GiB, "w1");
     f.Local(1 * GiB, "w2");
     CHECK(f.queue.Pump().empty());
 
-    REQUIRE(f.queue.Release(big1));
-    REQUIRE(f.queue.Release(big2));
+    f.queue.Settle(big1, Done);
+    f.queue.Settle(big2, Done);
     auto const granted = f.queue.Pump();
     REQUIRE_FALSE(granted.empty());
     CHECK(granted.front().ticket == head);
@@ -315,4 +330,282 @@ TEST_CASE("AdmissionQueue.dispatchable-without-candidate-runs-local", "[distribu
     // Charged to the caller: another 5 GiB does not fit there.
     f.Add(AdmitKind::Dispatchable, "c", 5 * GiB, "unknown");
     CHECK(f.queue.Pump().empty());
+}
+
+using Pace::CompileCacheWire::GrantKind;
+
+TEST_CASE("AdmissionQueue.dedup-waiter-woken-by-store", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const first = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { first });
+
+    f.queue.Settle(first, Settlement { SettleOutcome::Stored, std::nullopt });
+    auto const woken = f.queue.Pump();
+    REQUIRE(woken.size() == 1);
+    CHECK(woken[0].ticket == second);
+    CHECK(woken[0].kind == GrantKind::Stored);
+    CHECK(f.queue.Depth() == 0);
+    CHECK(f.queue.Pump().empty());
+}
+
+TEST_CASE("AdmissionQueue.dedup-waiter-holds-no-charge", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 3 * GiB);
+    f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 3 * GiB);
+    f.Local(1 * GiB);
+    CHECK(f.queue.Pump().size() == 2); // the owner and the 1 GiB one; the waiter took nothing
+    CHECK(f.queue.Depth() == 0);
+}
+
+TEST_CASE("AdmissionQueue.dedup-not-woken-by-not-stored", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const first = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.queue.Settle(first, Settlement { SettleOutcome::NotStored, std::nullopt });
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == second);
+    CHECK(granted[0].kind == GrantKind::Local);
+}
+
+TEST_CASE("AdmissionQueue.dedup-failed-owner-requeues-waiters", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const first = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.queue.Settle(first, Settlement { SettleOutcome::Failed, std::nullopt });
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == second);
+    CHECK(granted[0].kind == GrantKind::Local);
+}
+
+TEST_CASE("AdmissionQueue.dedup-owner-abandon-requeues-waiters", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const first = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.queue.Abandon(first);
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == second);
+    CHECK(granted[0].kind == GrantKind::Local);
+}
+
+TEST_CASE("AdmissionQueue.requeued-waiter-keeps-fifo-position", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    auto const first = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 4 * GiB);
+    auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 4 * GiB);
+    auto const later = f.Local(4 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { first });
+
+    f.queue.Settle(first, Settlement { SettleOutcome::NotStored, std::nullopt });
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { waiter }); // not `later`, which is younger
+    f.queue.Settle(waiter, Done);
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { later });
+}
+
+TEST_CASE("AdmissionQueue.abandoned-dedup-waiter-is-not-woken", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const first = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const second = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.queue.Abandon(second);
+    f.queue.Settle(first, Settlement { SettleOutcome::Stored, std::nullopt });
+    CHECK(f.queue.Pump().empty());
+}
+
+TEST_CASE("AdmissionQueue.non-storable-not-deduplicated", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    f.Keyed(AdmitKind::LocalOnly, "m", "k", false, 1 * GiB);
+    f.Keyed(AdmitKind::LocalOnly, "m", "k", false, 1 * GiB);
+    CHECK(f.queue.Pump().size() == 2);
+}
+
+TEST_CASE("AdmissionQueue.dedup-only-same-cache", "[distributed][admission]")
+{
+    {
+        Fixture f;
+        f.queue.ReportMachine("a", Report(8 * GiB, 4));
+        f.queue.ReportMachine("b", Report(8 * GiB, 4));
+        f.Keyed(AdmitKind::LocalOnly, "a", "k", true, 1 * GiB);
+        f.Keyed(AdmitKind::LocalOnly, "b", "k", true, 1 * GiB);
+        CHECK(f.queue.Pump().size() == 2); // default: only the same machine shares a cache
+    }
+
+    PeakEstimates estimates { 3 * GiB, 64 };
+    FakePlacement placement;
+    AdmissionQueue queue { estimates, placement, [](MachineId const&, MachineId const&) { return true; } };
+    queue.ReportMachine("a", Report(8 * GiB, 4));
+    queue.ReportMachine("b", Report(8 * GiB, 4));
+    for (auto const* machine: { "a", "b" })
+    {
+        QueueRequest request;
+        request.kind = AdmitKind::LocalOnly;
+        request.caller = machine;
+        request.estimate = EstimateKey { "k", "a.cpp", {} };
+        static_cast<void>(queue.Enqueue(std::move(request)));
+    }
+    CHECK(queue.Pump().size() == 1);
+}
+
+TEST_CASE("AdmissionQueue.abandon-while-queued", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    auto const holder = f.Local(4 * GiB);
+    REQUIRE(f.queue.Pump().size() == 1);
+    auto const head = f.Local(4 * GiB);
+    REQUIRE(f.queue.Pump().empty()); // becomes head
+    REQUIRE(f.queue.Pump().empty()); // reserving
+    f.queue.Abandon(head);
+    CHECK(f.queue.Depth() == 0);
+
+    f.queue.Settle(holder, Done);
+    auto const next = f.Local(4 * GiB); // the whole budget, no reservation left behind
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { next });
+}
+
+TEST_CASE("AdmissionQueue.abandon-granted-releases-charge", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    auto key = EstimateKey { "key-x", "a.cpp", {} };
+    f.estimates.Record(key, 1 * GiB);
+    QueueRequest request;
+    request.kind = AdmitKind::LocalOnly;
+    request.caller = "m";
+    request.estimate = key;
+    auto const ticket = f.queue.Enqueue(request);
+    REQUIRE(f.queue.Pump().size() == 1);
+    REQUIRE(f.estimates.Estimate(key) == 1 * GiB);
+
+    f.queue.Abandon(ticket);
+    CHECK(f.estimates.Estimate(key) == 3 * GiB); // RecordKilled raised it to the default
+
+    f.Local(4 * GiB);
+    CHECK(f.queue.Pump().size() == 1); // the charge went back
+}
+
+TEST_CASE("AdmissionQueue.abandon-queued-records-nothing", "[distributed][admission]")
+{
+    Fixture f;
+    auto key = EstimateKey { "key-y", "a.cpp", {} };
+    f.estimates.Record(key, 1 * GiB);
+    QueueRequest request;
+    request.kind = AdmitKind::LocalOnly;
+    request.caller = "m";
+    request.estimate = key;
+    auto const ticket = f.queue.Enqueue(request);
+    f.queue.Abandon(ticket);
+    CHECK(f.estimates.Estimate(key) == 1 * GiB);
+}
+
+TEST_CASE("AdmissionQueue.settle-records-peak", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto key = EstimateKey { "key-z", "a.cpp", {} };
+    f.estimates.Record(key, 1 * GiB);
+    QueueRequest request;
+    request.kind = AdmitKind::LocalOnly;
+    request.caller = "m";
+    request.estimate = key;
+    auto const ticket = f.queue.Enqueue(request);
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.queue.Settle(ticket, Settlement { SettleOutcome::Stored, 3 * GiB });
+    CHECK(f.estimates.Estimate(key) == 3 * GiB);
+}
+
+TEST_CASE("AdmissionQueue.worker-refusal-reparks-at-head", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.queue.ReportMachine("w", Report(8 * GiB, 4));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller is full
+    auto const ticket = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    REQUIRE(granted[0].kind == GrantKind::Worker);
+    auto const younger = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+
+    f.queue.Settle(ticket, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+    CHECK(f.queue.Depth() == 2);
+    CHECK(f.queue.Pump().empty()); // `w` admits nothing until it reports again
+
+    f.queue.ReportMachine("w", Report(8 * GiB, 4));
+    auto const again = f.queue.Pump();
+    REQUIRE(again.size() == 2);
+    CHECK(again[0].ticket == ticket); // first in the queue
+    CHECK(again[1].ticket == younger);
+}
+
+TEST_CASE("AdmissionQueue.worker-refusals-bounded", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { "worker-1", "w", "10.0.0.2:6680" } };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4));
+    auto const ticket = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    for ([[maybe_unused]] auto const round: std::views::iota(0U, AdmissionQueue::MaxWorkerRefusals))
+    {
+        f.queue.ReportMachine("w", Report(8 * GiB, 4));
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        REQUIRE(granted[0].kind == GrantKind::Worker);
+        f.queue.Settle(ticket, Settlement { SettleOutcome::WorkerRefused, std::nullopt });
+    }
+    f.queue.ReportMachine("w", Report(8 * GiB, 4));
+    auto const last = f.queue.Pump();
+    REQUIRE(last.size() == 1);
+    CHECK(last[0].kind == GrantKind::Local);
+    CHECK_FALSE(last[0].placement.has_value());
+}
+
+TEST_CASE("AdmissionQueue.leadership-loss", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    auto const owner = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const waiter = f.Keyed(AdmitKind::LocalOnly, "m", "k", true, 1 * GiB);
+    auto const queued = f.Local(4 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { owner });
+    REQUIRE(f.queue.Depth() == 1);
+
+    auto const parked = f.queue.LoseLeadership();
+    CHECK(parked == std::vector<Ticket> { waiter, queued });
+    CHECK(f.queue.Depth() == 0);
+
+    f.Local(1 * GiB);
+    CHECK(f.queue.Pump().empty()); // 3 GiB would be free, but the machine is unreported
+
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    CHECK(f.queue.Pump().size() == 1);
+
+    // The granted ticket is still tracked, so its settle releases cleanly: 1 + 1 GiB charged, one given back.
+    f.queue.Settle(owner, Done);
+    f.Local(3 * GiB);
+    CHECK(f.queue.Pump().size() == 1);
 }

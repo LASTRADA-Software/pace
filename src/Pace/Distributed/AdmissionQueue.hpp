@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -24,6 +25,7 @@ using Ticket = std::uint64_t;
 
 using CompileCacheWire::AdmitKind;
 using CompileCacheWire::GrantKind;
+using CompileCacheWire::SettleOutcome;
 
 /// One compile asking to be admitted.
 struct QueueRequest
@@ -77,6 +79,13 @@ struct Decision
     bool ranAlone {}; ///< Its estimate exceeded the whole budget.
 };
 
+/// How a granted compile ended.
+struct Settlement
+{
+    SettleOutcome outcome {};
+    std::optional<std::uint64_t> peakBytes; ///< The compile's measured peak, when known.
+};
+
 /// The leader's FIFO of compiles waiting for memory and slots, with a per-machine ledger.
 ///
 /// A request is admitted only onto a machine that has reported its budget. In-use memory and
@@ -93,13 +102,26 @@ struct Decision
 /// the candidate order changes. A request estimated above the whole budget runs alone: it
 /// waits for an idle machine and reserves all free memory and slots meanwhile.
 ///
+/// A storable request whose `estimate.cacheKey` is already in flight from a machine that
+/// shares its cache waits on that compile instead of running: it is never charged and holds no
+/// reservation. When the owner stores, the waiter is answered `GrantKind::Stored` on the next
+/// `Pump()`; when it does not, the waiter rejoins the queue at its original FIFO position.
+///
 /// Not thread-safe: the owner locks.
 class AdmissionQueue
 {
   public:
+    /// A worker refusing the same request this many times sends it to its caller.
+    static constexpr std::uint32_t MaxWorkerRefusals = 3;
+
+    /// Whether two machines read and write one compile cache.
+    using SharesCache = std::function<bool(MachineId const&, MachineId const&)>;
+
     /// @param estimates Read at enqueue time; the figure is stored on the entry.
     /// @param placement Who can run a toolchain.
-    AdmissionQueue(PeakEstimates& estimates, IPlacementSource const& placement) noexcept;
+    /// @param sharesCache Whether a compile on one machine stores what the other would look up;
+    ///                    empty means only the same machine does.
+    AdmissionQueue(PeakEstimates& estimates, IPlacementSource const& placement, SharesCache sharesCache = {});
 
     /// @param request The compile to queue.
     /// @return Its ticket.
@@ -114,10 +136,21 @@ class AdmissionQueue
     /// @param report Its budget and what it holds.
     void ReportMachine(MachineId const& machine, MachineReport const& report);
 
-    /// Frees a granted ticket's charge.
+    /// A granted ticket finished: frees its charge, records its peak, and answers or releases
+    /// whatever waited on it. An unknown ticket is ignored.
     /// @param ticket A ticket `Pump()` granted.
-    /// @return False when the ticket holds no charge.
-    [[nodiscard]] bool Release(Ticket ticket);
+    /// @param settlement How it ended.
+    void Settle(Ticket ticket, Settlement const& settlement);
+
+    /// The ticket's connection closed, at any stage. A granted ticket frees its charge and teaches
+    /// the estimator it was killed; a queued or waiting one simply leaves. An unknown ticket is ignored.
+    /// @param ticket Any ticket.
+    void Abandon(Ticket ticket);
+
+    /// This node is no longer the leader.
+    /// @return Every queued and dedup-waiting ticket, now forgotten. Granted tickets stay tracked
+    ///         so their `Settle`/`Abandon` still releases; every machine becomes unreported.
+    [[nodiscard]] std::vector<Ticket> LoseLeadership();
 
     /// @return How many requests are waiting.
     [[nodiscard]] std::size_t Depth() const noexcept;
@@ -128,6 +161,7 @@ class AdmissionQueue
         Ticket ticket {};
         QueueRequest request;
         std::uint64_t chargedBytes {}; ///< The estimate taken at enqueue.
+        std::uint32_t refusals {};     ///< Worker refusals so far.
     };
 
     /// What this ledger has charged a machine, beside its own report.
@@ -136,13 +170,23 @@ class AdmissionQueue
         std::optional<MachineReport> report;
         std::uint64_t chargedBytes {};
         std::uint32_t chargedSlots {};
+        bool refused {}; ///< A worker here declined a job; admits nothing until the next report.
     };
 
-    /// A charge to give back on `Release`.
+    /// A granted entry and what it charged, to give back on `Settle`/`Abandon`.
     struct Charge
     {
         MachineId machine;
         std::uint64_t bytes {};
+        Entry entry;
+    };
+
+    /// A granted storable compile and the requests waiting for its store.
+    struct Inflight
+    {
+        std::string cacheKey;
+        MachineId machine; ///< The owner's caller.
+        std::vector<Entry> waiters;
     };
 
     /// Memory and slots held back from later requests on one machine during one pump.
@@ -166,13 +210,23 @@ class AdmissionQueue
     /// @return Its in-use and free figures.
     [[nodiscard]] Room RoomOn(MachineId const& machine, Reserved const& hold) const;
 
+    /// Frees a granted ticket's charge.
+    /// @return What it held, or nothing when the ticket holds no charge.
+    [[nodiscard]] std::optional<Charge> Free(Ticket ticket);
+
+    /// Puts entries back in the queue at their original FIFO place.
+    void Requeue(std::vector<Entry> entries);
+
     PeakEstimates& _estimates;
+    SharesCache _sharesCache;
     IPlacementSource const& _placement;
     Ticket _nextTicket { 1 };
     std::vector<Entry> _queue;
     std::unordered_map<MachineId, Ledger> _ledgers;
     std::unordered_map<Ticket, Charge> _charges;
-    std::unordered_set<Ticket> _headTickets; ///< Entries that were a blocked head in the last pump.
+    std::unordered_map<Ticket, Inflight> _inflight; ///< Keyed by the owner's ticket.
+    std::vector<Decision> _stored;                  ///< Waiters woken by a store, answered by the next pump.
+    std::unordered_set<Ticket> _headTickets;        ///< Entries that were a blocked head in the last pump.
 };
 
 } // namespace Pace::Distributed

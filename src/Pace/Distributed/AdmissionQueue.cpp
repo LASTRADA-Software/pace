@@ -20,8 +20,9 @@ namespace
 
 } // namespace
 
-AdmissionQueue::AdmissionQueue(PeakEstimates& estimates, IPlacementSource const& placement) noexcept:
+AdmissionQueue::AdmissionQueue(PeakEstimates& estimates, IPlacementSource const& placement, SharesCache sharesCache):
     _estimates { estimates },
+    _sharesCache { sharesCache ? std::move(sharesCache) : SharesCache { std::equal_to<> {} } },
     _placement { placement }
 {
 }
@@ -36,7 +37,9 @@ Ticket AdmissionQueue::Enqueue(QueueRequest request)
 
 void AdmissionQueue::ReportMachine(MachineId const& machine, MachineReport const& report)
 {
-    _ledgers[machine].report = report;
+    auto& ledger = _ledgers[machine];
+    ledger.report = report;
+    ledger.refused = false;
 }
 
 std::size_t AdmissionQueue::Depth() const noexcept
@@ -44,16 +47,108 @@ std::size_t AdmissionQueue::Depth() const noexcept
     return _queue.size();
 }
 
-bool AdmissionQueue::Release(Ticket ticket)
+std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
 {
     auto const found = _charges.find(ticket);
     if (found == _charges.end())
-        return false;
-    auto& ledger = _ledgers[found->second.machine];
-    ledger.chargedBytes = Saturating(ledger.chargedBytes, found->second.bytes);
-    ledger.chargedSlots = Saturating<std::uint32_t>(ledger.chargedSlots, 1);
+        return std::nullopt;
+    auto charge = std::move(found->second);
     _charges.erase(found);
-    return true;
+    auto& ledger = _ledgers[charge.machine];
+    ledger.chargedBytes = Saturating(ledger.chargedBytes, charge.bytes);
+    ledger.chargedSlots = Saturating<std::uint32_t>(ledger.chargedSlots, 1);
+    return charge;
+}
+
+void AdmissionQueue::Requeue(std::vector<Entry> entries)
+{
+    for (auto& entry: entries)
+    {
+        auto const place = std::ranges::find_if(_queue, [&](Entry const& queued) { return queued.ticket > entry.ticket; });
+        _queue.insert(place, std::move(entry));
+    }
+}
+
+void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
+{
+    auto charge = Free(ticket);
+    if (!charge)
+        return;
+    auto waiters = std::vector<Entry> {};
+    if (auto const owned = _inflight.find(ticket); owned != _inflight.end())
+    {
+        waiters = std::move(owned->second.waiters);
+        _inflight.erase(owned);
+    }
+
+    if (settlement.outcome == SettleOutcome::WorkerRefused)
+    {
+        auto& entry = charge->entry;
+        ++entry.refusals;
+        _ledgers[charge->machine].refused = true;
+        _queue.insert(_queue.begin(), std::move(entry));
+        Requeue(std::move(waiters));
+        return;
+    }
+
+    if (settlement.peakBytes)
+        _estimates.Record(charge->entry.request.estimate, *settlement.peakBytes);
+
+    if (settlement.outcome == SettleOutcome::Stored)
+        for (auto& waiter: waiters)
+            _stored.push_back(Decision { .ticket = waiter.ticket, .kind = GrantKind::Stored });
+    else
+        Requeue(std::move(waiters));
+}
+
+void AdmissionQueue::Abandon(Ticket ticket)
+{
+    if (auto const queued = std::ranges::find(_queue, ticket, &Entry::ticket); queued != _queue.end())
+    {
+        _queue.erase(queued);
+        _headTickets.erase(ticket);
+        return;
+    }
+    if (auto const woken = std::ranges::find(_stored, ticket, &Decision::ticket); woken != _stored.end())
+    {
+        _stored.erase(woken);
+        return;
+    }
+    for (auto& [owner, inflight]: _inflight)
+        if (std::erase_if(inflight.waiters, [&](Entry const& waiter) { return waiter.ticket == ticket; }) > 0)
+            return;
+
+    auto charge = Free(ticket);
+    if (!charge)
+        return;
+    _estimates.RecordKilled(charge->entry.request.estimate);
+    if (auto const owned = _inflight.find(ticket); owned != _inflight.end())
+    {
+        auto waiters = std::move(owned->second.waiters);
+        _inflight.erase(owned);
+        Requeue(std::move(waiters));
+    }
+}
+
+std::vector<Ticket> AdmissionQueue::LoseLeadership()
+{
+    std::vector<Ticket> parked;
+    for (auto const& entry: _queue)
+        parked.push_back(entry.ticket);
+    for (auto const& decision: _stored)
+        parked.push_back(decision.ticket);
+    for (auto const& [owner, inflight]: _inflight)
+        for (auto const& waiter: inflight.waiters)
+            parked.push_back(waiter.ticket);
+    std::ranges::sort(parked);
+
+    _queue.clear();
+    _stored.clear();
+    _inflight.clear();
+    _headTickets.clear();
+    for (auto& [machine, ledger]: _ledgers)
+        ledger.report.reset();
+    return parked;
 }
 
 AdmissionQueue::Room AdmissionQueue::RoomOn(MachineId const& machine, Reserved const& hold) const
@@ -79,7 +174,7 @@ std::vector<Decision> AdmissionQueue::Pump()
         std::optional<Placement> placement;
     };
 
-    std::vector<Decision> decisions;
+    std::vector<Decision> decisions = std::exchange(_stored, {});
     std::vector<Entry> remaining;
     std::unordered_map<MachineId, Reserved> reserved;
     std::unordered_set<MachineId> claimed; // machines whose head was already found this pump
@@ -87,17 +182,31 @@ std::vector<Decision> AdmissionQueue::Pump()
 
     auto const reported = [this](MachineId const& machine) {
         auto const found = _ledgers.find(machine);
-        return found != _ledgers.end() && found->second.report.has_value();
+        return found != _ledgers.end() && found->second.report.has_value() && !found->second.refused;
     };
 
     for (auto& entry: _queue)
     {
         auto const& request = entry.request;
 
+        // Another compile of this key is running where this one's cache is: wait for its store.
+        if (request.storable && !request.estimate.cacheKey.empty())
+        {
+            auto const owner = std::ranges::find_if(_inflight, [&](auto const& item) {
+                return item.second.cacheKey == request.estimate.cacheKey
+                       && _sharesCache(item.second.machine, request.caller);
+            });
+            if (owner != _inflight.end())
+            {
+                owner->second.waiters.push_back(std::move(entry));
+                continue;
+            }
+        }
+
         // Reported candidates in placement order, then the caller: the CPU never idles while the
         // caller has room.
         std::vector<Target> targets;
-        if (request.kind == AdmitKind::Dispatchable)
+        if (request.kind == AdmitKind::Dispatchable && entry.refusals < MaxWorkerRefusals)
             for (auto& placement: _placement.Candidates(request.fingerprint, request.excluded))
                 if (reported(placement.machine))
                     targets.push_back(Target { .machine = placement.machine, .placement = std::move(placement) });
@@ -118,13 +227,19 @@ std::vector<Decision> AdmissionQueue::Pump()
             auto& ledger = _ledgers.at(granted->machine);
             ledger.chargedBytes += entry.chargedBytes;
             ledger.chargedSlots += 1;
-            _charges.emplace(entry.ticket, Charge { .machine = granted->machine, .bytes = entry.chargedBytes });
+            auto const ticket = entry.ticket;
+            auto const chargedBytes = entry.chargedBytes;
+            if (request.storable && !request.estimate.cacheKey.empty())
+                _inflight.emplace(
+                    ticket, Inflight { .cacheKey = request.estimate.cacheKey, .machine = request.caller, .waiters = {} });
+            _charges.emplace(ticket,
+                             Charge { .machine = granted->machine, .bytes = chargedBytes, .entry = std::move(entry) });
             decisions.push_back(Decision {
-                .ticket = entry.ticket,
+                .ticket = ticket,
                 .kind = granted->placement.has_value() ? GrantKind::Worker : GrantKind::Local,
                 .placement = granted->placement,
-                .chargedBytes = entry.chargedBytes,
-                .ranAlone = entry.chargedBytes > ledger.report->memoryBudgetBytes,
+                .chargedBytes = chargedBytes,
+                .ranAlone = chargedBytes > ledger.report->memoryBudgetBytes,
             });
             continue;
         }

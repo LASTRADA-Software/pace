@@ -9435,6 +9435,21 @@ enum class GrantKind : std::uint8_t
     Last
 };
 
+/// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.
+/// `Last` is the count, never a value.
+enum class SettleOutcome : std::uint8_t
+{
+    /// The object was stored; compiles waiting on the same key are answered `GrantKind::Stored`.
+    Stored = 0,
+    /// The compile finished but stored nothing; its waiters compile themselves.
+    NotStored = 1,
+    /// The compile failed; its waiters compile themselves.
+    Failed = 2,
+    /// The worker declined the job: the request is parked again at the head of the queue.
+    WorkerRefused = 3,
+    Last
+};
+
 /// What a `Status::Push` frame carries. Explicit values because these bytes are transmitted.
 enum class PushKind : std::uint8_t
 {
