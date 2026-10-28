@@ -71,6 +71,7 @@ target_sources(Pace
         Core/Logger.cpp
         Distributed/LeaseTable.cpp
         Distributed/PeakEstimates.cpp
+        Distributed/AdmissionQueue.cpp
         Distributed/WorkerRegistry.cpp
         Distributed/UnservedToolchains.cpp
         Distributed/FleetVersions.cpp

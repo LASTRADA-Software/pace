@@ -9412,6 +9412,29 @@ inline constexpr std::size_t MaxLiveSubscriptions = 64;
 /// bound.
 inline constexpr std::chrono::milliseconds MinLiveStreamWriteStall { 10'000 };
 
+/// Whether an admission request may run on a worker or must run where it was asked.
+/// Explicit values: transmitted. `Last` is the count, never a value.
+enum class AdmitKind : std::uint8_t
+{
+    /// May be placed on any worker that can run the toolchain.
+    Dispatchable = 0,
+    /// Must run on the machine that asked.
+    LocalOnly = 1,
+    Last
+};
+
+/// Where an admitted compile was granted. Explicit values: transmitted. `Last` is the count.
+enum class GrantKind : std::uint8_t
+{
+    /// Run on the named worker.
+    Worker = 0,
+    /// Run on the machine that asked.
+    Local = 1,
+    /// Another compile of the same key already stored the object.
+    Stored = 2,
+    Last
+};
+
 /// What a `Status::Push` frame carries. Explicit values because these bytes are transmitted.
 enum class PushKind : std::uint8_t
 {
