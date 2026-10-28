@@ -6122,7 +6122,8 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
     }
     SECTION("a worker key of any width but a key's is refused")
     {
-        auto const fields = Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent)));
+        auto const encoded = EncodeAdmitGrant(sent);
+        auto const fields = Unwrap(WireFields::SplitAll(encoded));
         std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
         auto const shortKey = std::vector<std::byte>(IdentityPublicKeyBytes - 1, std::byte { 1 });
         parts[7] = shortKey;
@@ -6130,7 +6131,8 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
     }
     SECTION("a lifetime that is not four bytes is refused")
     {
-        auto const fields = Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent)));
+        auto const encoded = EncodeAdmitGrant(sent);
+        auto const fields = Unwrap(WireFields::SplitAll(encoded));
         std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
         auto const wide = EncodeU64Field(7);
         parts[6] = wide;
