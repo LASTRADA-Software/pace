@@ -61,6 +61,9 @@ class IAdmitSession
 
     /// The worker refused the job: send `SETTLE{WorkerRefused}` on the SAME connection, then ask
     /// again on it and wait for the next grant, exactly as `Await` does.
+    ///
+    /// Unlike the opening ADMIT, the second one is NOT retried on `NotLeader`: it rides a connection the
+    /// node already granted on, so any refusal there fails open.
     /// @return The next grant, or the reason this session fails open.
     [[nodiscard]] virtual std::expected<AdmitTicket, std::string> Requeue() = 0;
 
@@ -69,6 +72,15 @@ class IAdmitSession
     /// @param settle How the compile ended.
     virtual void Settle(CompileCacheWire::SettleRequest const& settle) = 0;
 };
+
+/// The longest a SETTLE waits for its answer.
+///
+/// **Its own bound, because a SETTLE cannot pulse**: the idle bound is sized for a queue that pulses
+/// every `DefaultProgressInterval`, and spent here it would hold the launcher up to
+/// `DefaultCompileIdleTimeout` after its compile is already done. The same order as the node's relay of
+/// SETTLE to the leader (`FrameServer::HeaderTimeout / 2`, `AdmitForwarder.cpp`), which this launcher cannot
+/// include; a leader that has not answered by then has the connection's end to read as an abandonment.
+inline constexpr std::chrono::milliseconds SettleBound { 2'500 };
 
 /// The budget an admission runs under: a one second connect, NO total bound, and the compile
 /// idle bound -- the queue may take as long as it takes while the node says it is alive.

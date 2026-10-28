@@ -226,6 +226,31 @@ core::async::Task<void> NotLeaderAlways(Peer peer)
     co_await Send(peer, Wire::EncodeErrorReply(Wire::ErrorCode::NotLeader));
 }
 
+/// Grants, reads the SETTLE and then keeps the connection open without answering it.
+core::async::Task<void> GrantThenIgnoreSettle(Peer peer)
+{
+    if (!(co_await ReadRequest(peer)))
+        co_return;
+    co_await Send(peer, GrantFrame("worker-a:1"));
+    if (co_await ReadRequest(peer))
+        co_await ReadRequest(peer); // Parked until the client gives up.
+}
+
+/// Pulses until the client goes away; never answers.
+core::async::Task<void> PulseOnly(Peer peer)
+{
+    if (!(co_await ReadRequest(peer)))
+        co_return;
+    for (int pulse = 0; pulse < 200; ++pulse)
+    {
+        std::this_thread::sleep_for(50ms);
+        auto const sent = co_await core::net::sendAll(peer.socket, Wire::EncodeProgressReply());
+        if (!sent)
+            break;
+    }
+    co_await ReadRequest(peer); // EOF once the client is gone.
+}
+
 // --- the fake node ----------------------------------------------------------------------------
 
 core::async::DetachedTask Serve(Script script, std::unique_ptr<core::net::ISocket> socket, Seen* seen, int index)
@@ -293,7 +318,8 @@ class FakeNode
         std::unique_ptr<core::net::IListener> listener = listened.has_value() ? std::move(*listened) : nullptr;
         {
             std::lock_guard lock { _mutex };
-            _loop = &loop;
+            // Published only with a listener: a node that could not listen has no loop to post to.
+            _loop = listener != nullptr ? &loop : nullptr;
             _listener = listener.get();
             _port = listener != nullptr ? listener->boundPort() : 1;
         }
@@ -372,12 +398,9 @@ TEST_CASE("AdmitSession.granted-after-progress")
 
 TEST_CASE("AdmitSession.unreachable-fails-open")
 {
-    std::string hostPort;
-    {
-        FakeNode node { &Busy };
-        hostPort = node.HostPort(); // Nothing listens here once the node is gone.
-    }
-    auto session = OpenAt(hostPort);
+    // Port 1 (tcpmux): below any ephemeral range, so no outbound connection of this host can hold it, and
+    // nothing here serves it. A port released a moment ago would be free for another process to take.
+    auto session = OpenAt("127.0.0.1:1");
     auto const ticket = session->Await();
     REQUIRE_FALSE(ticket.has_value());
     CHECK_FALSE(ticket.error().empty());
@@ -521,4 +544,37 @@ TEST_CASE("AdmitSession.requeue-without-a-grant-fails-open")
     REQUIRE_FALSE(session->Await().has_value());
     CHECK_FALSE(session->Requeue().has_value());
     CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit) });
+}
+
+TEST_CASE("AdmitSession.settle-has-its-own-short-bound")
+{
+    // The node reads the SETTLE and never answers. The idle bound here is 5 s, which is what a SETTLE used to
+    // wait under; it must now give up at `SettleBound`.
+    FakeNode node { &GrantThenIgnoreSettle };
+    auto session = OpenAt(node.HostPort(), 5s);
+    REQUIRE(session->Await().has_value());
+
+    auto const started = std::chrono::steady_clock::now();
+    session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Stored, .peakBytes = std::nullopt });
+    auto const waited = std::chrono::steady_clock::now() - started;
+
+    CHECK(waited < Cc::SettleBound + 1s);
+    CHECK(waited >= Cc::SettleBound - 500ms); // It waited the bound out rather than failing at once.
+    CHECK(node.seen.Ops() == std::vector<std::uint8_t> { Op(Wire::Op::Admit), Op(Wire::Op::Settle) });
+}
+
+TEST_CASE("AdmitSession.destroy-while-queued-is-prompt")
+{
+    FakeNode node { &PulseOnly };
+    std::chrono::steady_clock::duration took {};
+    {
+        auto session = OpenAt(node.HostPort(), 5s);
+        REQUIRE(SeenOps(node, 1)); // The ADMIT is in flight, and the node only pulses.
+        auto const started = std::chrono::steady_clock::now();
+        session.reset();
+        took = std::chrono::steady_clock::now() - started;
+    }
+    CHECK(took < 2s); // Far under the 5 s idle bound.
+    CHECK(Testing::WaitUntil(
+        "the node to see the connection end", [&] { return node.seen.sawEof.load(); }, [] { return std::string {}; }));
 }

@@ -83,7 +83,7 @@ namespace
             _thread = std::thread { [this] { Body(); } };
             // The loop exists on the thread that runs it, so nothing is posted before it does.
             std::unique_lock lock { _mutex };
-            _cv.wait(lock, [this] { return _loop != nullptr; });
+            _cv.wait(lock, [this] { return _loop != nullptr || _ended; });
         }
 
         ~Session() override
@@ -173,7 +173,54 @@ namespace
         }
 
         /// The thread: build the loop, run the opening ADMIT, serve until told to stop.
-        void Body()
+        void Body() noexcept
+        {
+            std::string failure;
+            try
+            {
+                Run();
+            }
+            catch (std::exception const& error)
+            {
+                failure = error.what();
+            }
+            catch (...)
+            {
+                failure = "unknown error";
+            }
+            // Whatever ended the thread, a waiter is answered and the constructor's wait released: an
+            // exception here must cost one compile its queue place, never the process.
+            End(failure.empty() ? "admission session ended" : std::format("admission session failed: {}", failure));
+        }
+
+        /// Mark the thread over and answer anyone still waiting with a fail-open.
+        /// @param reason Why, for the waiter.
+        void End(std::string reason)
+        {
+            {
+                std::lock_guard lock { _mutex };
+                _loop = nullptr;
+                _ended = true;
+                // A waiter must never outlive the thread that would have answered it.
+                if (_phase == Phase::Asking && !_reply.has_value())
+                {
+                    _phase = Phase::Closed;
+                    _reply = std::unexpected { std::move(reason) };
+                }
+                _settling = false;
+            }
+            _cv.notify_all();
+        }
+
+        /// Stop handing out the loop: it is about to be destroyed.
+        void Detach() noexcept
+        {
+            std::lock_guard lock { _mutex };
+            _loop = nullptr;
+        }
+
+        /// The loop thread's work, up to the moment the loop ends.
+        void Run()
         {
             core::platform::SteadyClock clock;
             core::net::PlatformLoop loop { clock };
@@ -187,30 +234,34 @@ namespace
             _cv.notify_all();
             _busy = true;
             std::ignore = RunOpening(this);
-            loop.run();
+            try
+            {
+                loop.run();
+            }
+            catch (...)
+            {
+                Detach();
+                DropSocket();
+                resolver.stop();
+                throw;
+            }
+            Detach();
             // The socket belongs to this loop: it goes before the loop does, not with the session.
             DropSocket();
-            {
-                std::lock_guard lock { _mutex };
-                _loop = nullptr;
-                // A waiter must never outlive the thread that would have answered it.
-                if (_phase == Phase::Asking && !_reply.has_value())
-                {
-                    _phase = Phase::Closed;
-                    _reply = std::unexpected { std::string { "admission session ended" } };
-                }
-                _settling = false;
-            }
-            _cv.notify_all();
             // Stopped before the loop goes out of scope, for the reason `RunOneExchange` gives.
             resolver.stop();
         }
 
         /// One request and its reply on the held socket, the idle bound armed for just that long.
-        static core::async::Task<CacheOutcome> RoundTrip(Session* self, std::vector<std::byte> frame, Credential credential)
+        static core::async::Task<CacheOutcome> RoundTrip(Session* self,
+                                                         std::vector<std::byte> frame,
+                                                         Credential credential,
+                                                         std::chrono::milliseconds idleBound)
         {
             core::net::SocketDeadlineTarget silence { .socket = self->_socket.get() };
-            ExchangeIdleWindow idle { *self->_loop, self->_budget, &silence };
+            auto bounded = self->_budget;
+            bounded.idle = idleBound;
+            ExchangeIdleWindow idle { *self->_loop, bounded, &silence };
             idle.MovedForward();
             auto outcome =
                 co_await ExchangeFramed(self->_socket.get(), &self->_notice, std::move(frame), std::move(credential), &idle);
@@ -232,7 +283,7 @@ namespace
                 unreached.transportFailure = TransportFailure::Unreached;
                 co_return unreached;
             }
-            co_return co_await RoundTrip(self, self->_admitFrame, self->_credential);
+            co_return co_await RoundTrip(self, self->_admitFrame, self->_credential, self->_budget.idle);
         }
 
         /// What the answer to an ADMIT does to the session, on the loop thread.
@@ -282,9 +333,10 @@ namespace
                 co_await RoundTrip(self,
                                    Wire::EncodeSettle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::WorkerRefused,
                                                                             .peakBytes = std::nullopt }),
-                                   Credential {});
+                                   Credential {},
+                                   SettleBound);
             if (refused.IsHit())
-                self->Conclude(co_await RoundTrip(self, self->_admitFrame, Credential {}));
+                self->Conclude(co_await RoundTrip(self, self->_admitFrame, Credential {}, self->_budget.idle));
             else
             {
                 self->Deliver(std::unexpected { ReasonOf(refused) });
@@ -296,7 +348,7 @@ namespace
         /// The final SETTLE.
         static core::async::DetachedTask RunSettle(Session* self, Wire::SettleRequest settle)
         {
-            auto const outcome = co_await RoundTrip(self, Wire::EncodeSettle(settle), Credential {});
+            auto const outcome = co_await RoundTrip(self, Wire::EncodeSettle(settle), Credential {}, SettleBound);
             if (!outcome.IsHit())
                 std::fprintf(stderr, "pace-cc: settling the admission failed: %s\n", ReasonOf(outcome).c_str());
             self->DropSocket();
@@ -317,6 +369,7 @@ namespace
         std::optional<Reply> _reply;             ///< Guarded by `_mutex`.
         Phase _phase { Phase::Asking };          ///< Guarded by `_mutex`.
         bool _settling { false };                ///< Guarded by `_mutex`.
+        bool _ended { false };                   ///< Guarded by `_mutex`; the thread is over.
 
         // Loop thread only.
         core::net::IConnector* _connector { nullptr };
