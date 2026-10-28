@@ -2178,7 +2178,7 @@ symptom was that they were slow.
     and a learner granted none, so only a broken client sends one there.
   - **A node running NO consensus follows no leader**, and answers as the `pace-kv` daemon
     does: the capacity verbs (`Register`, `Heartbeat`, `Withdraw`, `Lease`, `Release`,
-    `NodeAnnounce`) `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
+    `NodeAnnounce`, and the admission verbs `Admit`, `Settle`, `MachineBudget`) `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
     `NodeAnnounce`'s code through `RefusalFor`'s fallback. The codes agree on every scheduling
     verb, and `NodeFrameSurface_test` pins that agreement on the wire; the words are each
     binary's own.
@@ -3775,7 +3775,8 @@ its own identity key, and sealed every frame after the proof. Each rule below is
 plausible simpler design gets wrong.
 
 **No address admits another machine, and the verbs a machine JOINS with need a proof.** They -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` -- decide where the fleet's work
-is sent, and they are `IdentityRequirement::ProvenNodeOnly`, a COLUMN of `OpTable` pinned by
+is sent, and `MachineBudget` decides how much work a machine is ADMITTED (the memory budget the leader
+charges it against, #1728); all five are `IdentityRequirement::ProvenNodeOnly`, a COLUMN of `OpTable` pinned by
 `JoiningVerbsNeedAnIdentity`, refused `NodeIdentityRequired` and counted
 (`SchedulerRequestsRefusedNodeIdentityRequired`). Loopback is NOT exempt: a process on the
 scheduler's own host could otherwise register an endpoint of its choosing and be leased the

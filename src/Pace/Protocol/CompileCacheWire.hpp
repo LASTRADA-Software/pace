@@ -204,7 +204,8 @@ using WireVersion = std::uint8_t;
 /// version-13 proof would be asked to verify a MAC under a key it no longer has. The four verbs
 /// a joining machine sends -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` -- also now
 /// require that identity (`OpDescriptor::identity`), and a worker-admission verb (0x1D, since
-/// retired with principal mode) and three error codes are new.
+/// retired with principal mode) and three error codes are new. (Historical: version 16 adds
+/// `MachineBudget` to that set, so "four" is the version-14 count, not the current one.)
 ///
 /// **15 is the office-fleet flag day: zero-config formation, machine tickets and signed compile
 /// replies** (#178 and the formation lanes). Request arities moved -- AUTH carries its credential
