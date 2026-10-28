@@ -2762,3 +2762,123 @@ TEST_CASE("An exchange with a scheduler sends the command alone, awaited or run 
     CHECK(core::async::syncRun(Cc::ExchangeWithSchedulerAsync(&awaited, frame)).IsHit());
     CHECK(awaited.Sent() == frame);
 }
+
+namespace
+{
+
+/// A runner that reports a measured peak, as the process runner does (Task 1), and can report none.
+class PeakRunner final: public IProcessRunner
+{
+  public:
+    std::optional<std::uint64_t> peak; ///< What `CompileRun::peakMemoryBytes` reports.
+
+    CompileRun RunCaptureCombined(std::span<std::string const> argv) override
+    {
+        return RunCaptureSplit(argv);
+    }
+    CompileRun RunCaptureSplit(std::span<std::string const> argv) override
+    {
+        Test::WriteStubObject(argv, "OBJECT");
+        return CompileRun { .exitCode = 0, .out = {}, .err = {}, .peakMemoryBytes = peak };
+    }
+};
+
+/// Remembers every peak it is told.
+class RecordingMeasurements final: public IJobMeasurementSink
+{
+  public:
+    void OnPeak(Wire::EstimateKeyFields const& key, std::uint64_t peakBytes) override
+    {
+        std::scoped_lock const lock { _mutex };
+        peaks.emplace_back(key, peakBytes);
+    }
+
+    std::mutex _mutex;
+    std::vector<std::pair<Wire::EstimateKeyFields, std::uint64_t>> peaks;
+};
+
+/// A COMPILE frame stating the admission fields.
+/// @param charged What the queue charged, or nullopt for none.
+/// @param cacheKey The object key; empty for none.
+/// @param sourcePath The root-relative source path.
+/// @return The framed request.
+[[nodiscard]] std::vector<std::byte> AdmittedFrame(std::optional<std::uint64_t> charged,
+                                                   std::string_view cacheKey,
+                                                   std::string_view sourcePath)
+{
+    auto const source = std::string_view { "int main(){return 0;}" };
+    auto const enveloped =
+        Wire::EncodeCodecEnvelope(Wire::IdentityCodec, static_cast<std::uint32_t>(source.size()), Wire::AsBytes(source));
+    return Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                      .fingerprint = "gcc-13",
+                                                      .args = {},
+                                                      .source = enveloped,
+                                                      .acceptedCodecs = { Wire::IdentityCodec },
+                                                      .sourceName = "a.cpp",
+                                                      .compileDir = {},
+                                                      .compileDirReplacement = {},
+                                                      .sourceRoot = {},
+                                                      .sourceRootReplacement = {},
+                                                      .chargedBytes = charged,
+                                                      .admissionCacheKey = cacheKey,
+                                                      .admissionSourcePath = sourcePath });
+}
+
+} // namespace
+
+TEST_CASE("WorkerProtocol.reports-the-measured-peak-under-the-admission-key", "[worker-protocol][machinebudget]")
+{
+    // #1728. The worker is the only place a dispatched compile's peak exists. It is filed under the key
+    // the launcher stated -- object key and source path -- and the job's own toolchain fingerprint.
+    PeakRunner runner;
+    runner.peak = 3'000'000'000ULL;
+    Pace::Testing::ScratchDirectory const scratch { "pace-wp" };
+    CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+    AtomicMetricsSink metrics;
+    RecordingMeasurements measurements;
+    WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec },     &Testing::TestWorkerKey(),
+                            metrics, IgnoreJobRefusals(),       DefaultMaxDecompressedBytes, measurements };
+
+    auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
+    REQUIRE(answer.has_value());
+    REQUIRE(Decode(*answer).status == Wire::Status::Ok);
+    REQUIRE(measurements.peaks.size() == 1);
+    CHECK(measurements.peaks.front().first
+          == Wire::EstimateKeyFields {
+              .cacheKey = "objkey-abc", .sourcePath = "<SRCROOT>/src/a.cpp", .compilerIdentity = "gcc-13" });
+    CHECK(measurements.peaks.front().second == 3'000'000'000ULL);
+}
+
+TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[worker-protocol][machinebudget]")
+{
+    // A peak nobody measured is not a small one, and a measured peak with no key estimates nothing:
+    // either way nothing is reported, and the compile is served as ever.
+    Pace::Testing::ScratchDirectory const scratch { "pace-wp" };
+    AtomicMetricsSink metrics;
+    RecordingMeasurements measurements;
+
+    SECTION("not measured")
+    {
+        PeakRunner runner; // peak stays disengaged
+        CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+        WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec },     &Testing::TestWorkerKey(),
+                                metrics, IgnoreJobRefusals(),       DefaultMaxDecompressedBytes, measurements };
+        auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
+        REQUIRE(answer.has_value());
+        CHECK(Decode(*answer).status == Wire::Status::Ok);
+        CHECK(measurements.peaks.empty());
+    }
+
+    SECTION("no admission key (an older launcher)")
+    {
+        PeakRunner runner;
+        runner.peak = 1;
+        CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+        WorkerProtocol worker { jobs,    UncheckedLeaseValidator(), { Wire::IdentityCodec },     &Testing::TestWorkerKey(),
+                                metrics, IgnoreJobRefusals(),       DefaultMaxDecompressedBytes, measurements };
+        auto const answer = worker.Answer(AdmittedFrame(std::nullopt, "", ""));
+        REQUIRE(answer.has_value());
+        CHECK(Decode(*answer).status == Wire::Status::Ok);
+        CHECK(measurements.peaks.empty());
+    }
+}

@@ -2531,8 +2531,9 @@ inline constexpr std::array OpTable {
     OpDescriptor { .code = Op::Compile,
                    .name = "compile",
                    // leaseToken, fingerprint, args, preprocessed, accepted codecs, sourceName,
-                   // compileDir, compileDirReplacement, sourceRoot, sourceRootReplacement
-                   .fieldCount = 10,
+                   // compileDir, compileDirReplacement, sourceRoot, sourceRootReplacement,
+                   // chargedBytes (empty = none), admissionCacheKey, admissionSourcePath
+                   .fieldCount = 13,
                    // `Progress` is legal HERE and on no other verb, which is the whole
                    // scope of the version-3 change: every other verb on this wire is
                    // answered from a table in microseconds, so a liveness pulse on one
@@ -4810,6 +4811,12 @@ inline constexpr std::size_t MaxToolchainFingerprintBytes = 64;
 /// so it is sized as the fingerprint is and held there by the same `static_assert`.
 inline constexpr std::size_t MaxLeaseKeyBytes = 64;
 
+/// The longest source path an admission request or a reported peak carries, in bytes.
+///
+/// Root-relative (`<SRCROOT>/...`) by construction, so well under a filesystem's own limit; a path
+/// longer than this is one no honest launcher produced, and the estimate it keys is not worth it.
+inline constexpr std::size_t MaxAdmitPathBytes = 512;
+
 /// The longest endpoint a REGISTER or a NODE-ANNOUNCE names that a scheduler records, in bytes.
 ///
 /// KEPT: it is what a worker entry and a machine's row are filed under, where a granted lease
@@ -5006,6 +5013,19 @@ struct CompileRequest
     /// `sourceName` and the reason this can carry a directory at all.
     std::string_view sourceRoot {};
     std::string_view sourceRootReplacement {};
+
+    /// What the leader's queue charged this compile (`AdmitGrant::chargedBytes`), when the client was
+    /// admitted by one; disengaged when it was not (an older launcher, or one that fails open).
+    ///
+    /// **Disengaged is not zero**, and is what travels as an EMPTY field: a worker holding a compile
+    /// that states no charge reports the slot held and no bytes, rather than a claim that it costs
+    /// nothing. Read by the worker to report what it holds (`MachineBudget`), never to admit or refuse.
+    std::optional<std::uint64_t> chargedBytes {};
+    /// The object key the estimate this compile was admitted under is keyed by; empty when absent.
+    /// With `admissionSourcePath` and the job's own fingerprint it names the peak the worker measures.
+    std::string_view admissionCacheKey {};
+    /// The root-relative source path that keys the shape estimate; empty when absent or unknown.
+    std::string_view admissionSourcePath {};
 };
 
 /// The same, as views into a received payload.
@@ -5031,6 +5051,11 @@ struct CompileView
     /// which is one value where a rule needs two (#883).
     std::span<std::byte const> sourceRoot {};
     std::span<std::byte const> sourceRootReplacement {};
+
+    /// `CompileRequest::chargedBytes`; disengaged when the field arrived empty.
+    std::optional<std::uint64_t> chargedBytes {};
+    std::span<std::byte const> admissionCacheKey {};   ///< Empty when the client sent none.
+    std::span<std::byte const> admissionSourcePath {}; ///< Empty when the client sent none.
 };
 
 /// Frame a REGISTER request.
@@ -6193,27 +6218,45 @@ struct ClusterAdmitReceipt
                                                           WireVersion version = CurrentVersion)
 {
     auto const codecs = EncodeCodecList(request.acceptedCodecs);
-    return Detail::EncodeRequest(version,
-                                 Op::Compile,
-                                 { AsBytes(request.leaseToken),
-                                   AsBytes(request.fingerprint),
-                                   request.args,
-                                   request.source,
-                                   std::span<std::byte const> { codecs },
-                                   AsBytes(request.sourceName),
-                                   AsBytes(request.compileDir),
-                                   AsBytes(request.compileDirReplacement),
-                                   AsBytes(request.sourceRoot),
-                                   AsBytes(request.sourceRootReplacement) });
+    // Empty, never zero, for "no charge stated": the decoder reads an empty field as disengaged.
+    auto const charged =
+        request.chargedBytes.has_value() ? std::optional { EncodeU64Field(*request.chargedBytes) } : std::nullopt;
+    return Detail::EncodeRequest(
+        version,
+        Op::Compile,
+        { AsBytes(request.leaseToken),
+          AsBytes(request.fingerprint),
+          request.args,
+          request.source,
+          std::span<std::byte const> { codecs },
+          AsBytes(request.sourceName),
+          AsBytes(request.compileDir),
+          AsBytes(request.compileDirReplacement),
+          AsBytes(request.sourceRoot),
+          AsBytes(request.sourceRootReplacement),
+          charged.has_value() ? std::span<std::byte const> { *charged } : std::span<std::byte const> {},
+          AsBytes(request.admissionCacheKey),
+          AsBytes(request.admissionSourcePath) });
 }
 
 /// Split a COMPILE payload.
 /// @param payload The bytes following the request header.
-/// @return The fields, or nullopt when malformed.
+/// @return The fields, or nullopt when malformed -- including a charge that is neither empty nor a
+///         u64, and an admission key or path over its cap (`MaxLeaseKeyBytes`, `MaxAdmitPathBytes`),
+///         which is refused rather than truncated: a peak keyed by half a key is a peak for nothing.
 [[nodiscard]] inline std::optional<CompileView> DecodeCompilePayload(std::span<std::byte const> payload)
 {
     auto const fields = SplitFields(payload, OpFieldCount(Op::Compile));
     if (!fields.has_value())
+        return std::nullopt;
+    std::optional<std::uint64_t> charged;
+    if (!(*fields)[10].empty())
+    {
+        charged = DecodeU64Field((*fields)[10]);
+        if (!charged.has_value())
+            return std::nullopt;
+    }
+    if ((*fields)[11].size() > MaxLeaseKeyBytes || (*fields)[12].size() > MaxAdmitPathBytes)
         return std::nullopt;
     return CompileView { .leaseToken = (*fields)[0],
                          .fingerprint = (*fields)[1],
@@ -6224,7 +6267,10 @@ struct ClusterAdmitReceipt
                          .compileDir = (*fields)[6],
                          .compileDirReplacement = (*fields)[7],
                          .sourceRoot = (*fields)[8],
-                         .sourceRootReplacement = (*fields)[9] };
+                         .sourceRootReplacement = (*fields)[9],
+                         .chargedBytes = charged,
+                         .admissionCacheKey = (*fields)[11],
+                         .admissionSourcePath = (*fields)[12] };
 }
 
 /// What a scheduler answers a LEASE with, on success.
@@ -9540,12 +9586,6 @@ enum class SettleOutcome : std::uint8_t
 // returns by value OWNS its bytes, because `Decode(Encode(x))` is a use-after-free the moment a
 // member is a view. A decoder refuses what it cannot read -- an enumerator past `Last`, a number
 // of another width, a string over its cap -- and never clamps.
-
-/// The longest source path an admission request or a reported peak carries, in bytes.
-///
-/// Root-relative (`<SRCROOT>/...`) by construction, so well under a filesystem's own limit; a path
-/// longer than this is one no honest launcher produced, and the estimate it keys is not worth it.
-inline constexpr std::size_t MaxAdmitPathBytes = 512;
 
 /// The longest tree label an admission request carries, in bytes. Display only (R14), but still
 /// text a peer chose: one that is not UTF-8 is REFUSED where it enters, never truncated or repaired.

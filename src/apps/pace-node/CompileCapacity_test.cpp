@@ -484,3 +484,40 @@ TEST_CASE("The default in-flight compile budget follows the slots, above a floor
     CHECK(DefaultCompileByteBudget(1, 1024 * MiB) == 1024 * MiB);
     CHECK(DefaultCompileByteBudget(30, 1024 * MiB) == 1920 * MiB);
 }
+
+TEST_CASE("CompileCapacity.held-bytes-follow-their-slot", "[node][compile-capacity][machinebudget]")
+{
+    // #1728. What the worker reports it holds: a slot and the bytes the leader charged it, taken together
+    // under one lock and given back together, so the report never shows one without the other.
+    CapturingLogger logger;
+    auto capacity = WorkerWith(4, logger);
+    CHECK(capacity.Held() == HeldCharges {});
+
+    REQUIRE(capacity.TryTakeSlot(100) == SlotAdmission::Taken);
+    REQUIRE(capacity.TryTakeSlot(250) == SlotAdmission::Taken);
+    // A compile that stated no charge holds a slot and nothing else.
+    REQUIRE(capacity.TryTakeSlot() == SlotAdmission::Taken);
+    CHECK(capacity.Held() == HeldCharges { .slots = 3, .bytes = 350 });
+
+    capacity.ReleaseSlot(250);
+    CHECK(capacity.Held() == HeldCharges { .slots = 2, .bytes = 100 });
+    capacity.ReleaseSlot();
+    capacity.ReleaseSlot(100);
+    CHECK(capacity.Held() == HeldCharges {});
+}
+
+TEST_CASE("CompileCapacity.a-refused-take-holds-nothing", "[node][compile-capacity][machinebudget]")
+{
+    // The bytes ride the TAKE, so a refusal must leave them out: a cordoned or full worker that kept a
+    // refused compile's charge would report memory nothing is using.
+    CapturingLogger logger;
+    auto capacity = WorkerWith(1, logger);
+    REQUIRE(capacity.TryTakeSlot(100) == SlotAdmission::Taken);
+    CHECK(capacity.TryTakeSlot(999) == SlotAdmission::Full);
+    CHECK(capacity.Held() == HeldCharges { .slots = 1, .bytes = 100 });
+
+    (void) capacity.Cordon(true);
+    capacity.ReleaseSlot(100);
+    CHECK(capacity.TryTakeSlot(999) == SlotAdmission::Cordoned);
+    CHECK(capacity.Held() == HeldCharges {});
+}

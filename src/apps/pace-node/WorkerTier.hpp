@@ -179,6 +179,9 @@ struct WorkerTierParts
     /// How the heartbeat reaches a scheduler -- its rounds and a suspend's one withdrawal. Only
     /// the heartbeat thread dials through it, never the thread a host event arrives on.
     IEndpointDialer& schedulerDialer;
+    /// Told each measured peak a compile reports, for the machine-budget report the presence loop
+    /// sends (#1728). Required, and a node with no worker never builds a tier to be handed it.
+    Cc::IJobMeasurementSink& measurements;
 };
 
 class WorkerTier;

@@ -62,6 +62,7 @@ enum class SchedulerOutcome : std::uint8_t
     IdentityDeferred,    ///< It could not judge this machine's identity yet.
     RegistrationRefused, ///< It did not register one of this worker's toolchains.
     PresenceRefused,     ///< It did not record this machine.
+    BudgetRefused,       ///< It did not record this machine's compile budget.
     Last                 ///< Not an outcome.
 };
 
@@ -120,6 +121,11 @@ inline constexpr auto SchedulerOutcomeTable = EnumTable<SchedulerOutcome, Schedu
                           .proof = std::nullopt,
                           .failure = "scheduler {0} did not record this machine {2}",
                           .recovery = "scheduler {0} recorded this machine again after {3}s" },
+    SchedulerOutcomeRow { .outcome = SchedulerOutcome::BudgetRefused,
+                          .stage = AnnounceStage::Announcement,
+                          .proof = std::nullopt,
+                          .failure = "scheduler {0} did not record this machine's compile budget: {2}",
+                          .recovery = "scheduler {0} recorded this machine's compile budget again after {3}s" },
 };
 static_assert(RowsInEnumeratorOrder(SchedulerOutcomeTable, &SchedulerOutcomeRow::outcome));
 

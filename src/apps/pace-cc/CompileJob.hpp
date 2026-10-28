@@ -201,6 +201,10 @@ struct CompileOutcome
     /// against and catches nothing. See `CompileCorrelation`, which also records the
     /// half of the problem this cannot see.
     std::string correlation;
+    /// The peak memory the compiler and its descendants used (`CompileRun::peakMemoryBytes`), carried
+    /// through so the worker can report a measured figure for the estimates the leader's queue keeps.
+    /// Disengaged when nothing was measured -- never zero for "unknown".
+    std::optional<std::uint64_t> peakMemoryBytes {};
 };
 
 /// Runs one compile job, and the seam `WorkerProtocol` reaches a compiler through.

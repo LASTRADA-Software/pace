@@ -29,6 +29,7 @@
 #include "LiveNodeConfig.hpp"
 #include "LiveStatsResponder.hpp"
 #include "LiveStatsSources.hpp"
+#include "MachineBudget.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeAudience.hpp"
@@ -1044,6 +1045,11 @@ struct RouteParts
     //
     // Its heartbeat dials through `workerDialer`, declared above it so it outlives the tier.
     Node::BlockingEndpointDialer workerDialer { Node::HeartbeatIoTimeout };
+    // The machine's compile ledger (#1728), declared above the worker tier and the presence loop that
+    // both reach it, so it outlives them: the peaks this worker measures, and the charges held for
+    // compiles no `CompileCapacity` counts (the leases this node grants). Reported every presence round.
+    Node::MeasuredPeaks measuredPeaks;
+    Node::HeldChargeRegistry leaseCharges;
     auto workerOrRefusal = Node::WorkerTier::Start(Node::WorkerTierParts { .cfg = cfg,
                                                                            .reloader = reloader,
                                                                            .capacity = capacity,
@@ -1064,7 +1070,8 @@ struct RouteParts
                                                                            .conditions = conditions,
                                                                            .hostEvents = hostEvents,
                                                                            .suspendWait = DefaultDrainWait(),
-                                                                           .schedulerDialer = workerDialer },
+                                                                           .schedulerDialer = workerDialer,
+                                                                           .measurements = measuredPeaks },
                                                    &Node::MakeSystemWorkerMachine);
     if (!workerOrRefusal.has_value())
     {
@@ -1688,6 +1695,12 @@ struct RouteParts
     //
     // Its rounds dial through `presenceDialer`, declared just above it so it outlives the loop.
     Node::BlockingEndpointDialer presenceDialer { Node::PresenceIoTimeout };
+    // What compiles on this machine hold: the worker's running ones, when it runs a worker, and the
+    // leases this node grants. One sum for the report, whichever of them exist.
+    Node::CombinedHeldCharges const machineHeld {
+        workerTier != nullptr ? std::vector<Node::IHeldCharges const*> { &workerTier->Capacity(), &leaseCharges }
+                              : std::vector<Node::IHeldCharges const*> { &leaseCharges }
+    };
     auto const presence =
         Node::NodePresence::Start(Node::NodePresenceParts { .cfg = cfg,
                                                             .schedulers = appliedSchedulers,
@@ -1703,7 +1716,9 @@ struct RouteParts
                                                             .dialer = presenceDialer,
                                                             .hostEvents = hostEvents,
                                                             .askedJoins = Node::AskedJoinsOf(formationRuntime.get()),
-                                                            .endpoints = &endpointResolver });
+                                                            .endpoints = &endpointResolver,
+                                                            .held = machineHeld,
+                                                            .peaks = measuredPeaks });
 
     // Installed only once the listener is up and the heartbeat is running, so a
     // stop arriving during startup cannot close a listener that does not exist yet.

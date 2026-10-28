@@ -136,6 +136,28 @@ namespace
         return std::optional<std::uint32_t> { value };
     }
 
+    /// `--machine-slots`: how many compiles this machine runs at once, counting every one on it.
+    ///
+    /// Zero is refused, unlike `--slots`: that one means "no worker", while a machine that holds no
+    /// compile at all would queue every launcher on it for ever. Say what it IS: the leader treats an
+    /// absent count as the machine's cores, so there is no "none" to type.
+    /// @param sv Text to parse.
+    /// @return The count, or why it is not one.
+    [[nodiscard]] std::expected<std::uint32_t, ConfigError> ParseMachineSlots(std::string_view sv)
+    {
+        auto value = 0U;
+        auto const* const begin = sv.data();
+        auto const* const end = std::next(begin, static_cast<std::ptrdiff_t>(sv.size()));
+        auto const [ptr, ec] = std::from_chars(begin, end, value);
+        if (ec != std::errc {} || ptr != end)
+            return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange, std::format("not a slot count: {}", sv)));
+        if (value == 0)
+            return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
+                                             "must be more than zero: a machine with no compile slots would queue "
+                                             "every compile on it for ever"));
+        return value;
+    }
+
     /// A node class, by the name `NodeClassTable` spells it.
     ///
     /// Off the shared table rather than a two-arm `if`, so a class added there is
@@ -628,6 +650,26 @@ namespace
         if (!parsed.has_value())
             return std::unexpected(parsed.error());
         return static_cast<std::uint64_t>(*parsed);
+    }
+
+    /// A compile-memory figure that must be more than zero: `--machine-memory-budget` and
+    /// `--compile-estimate-default`.
+    ///
+    /// `ParseCacheBytes` grammar, `N%` of host RAM included, because the machine budget's own default
+    /// is stated in that vocabulary. Zero is refused in the grammar rather than meaning "unbounded" as
+    /// it does for a cache: a zero budget admits no compile and a zero estimate charges none, which
+    /// is the queue switched off by a typo.
+    /// @param sv Text to parse.
+    /// @return The size in bytes, or why it is not one.
+    [[nodiscard]] std::expected<std::uint64_t, ConfigError> ParseCompileMemoryBytes(std::string_view sv)
+    {
+        return ParseCacheBytes(sv).and_then([](std::uint64_t bytes) -> std::expected<std::uint64_t, ConfigError> {
+            if (bytes == 0)
+                return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
+                                                 "must be more than zero: a zero figure would admit no compile at "
+                                                 "all, or charge none"));
+            return bytes;
+        });
     }
 
     /// The on-disk tier's byte budget.
@@ -1293,6 +1335,55 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .same = FieldEq<&NodeConfig::compileInflightMaxBytes>(),
             .component = &WorkerComponent,
             .present = PresentIn<&NodeConfig::compileInflightMaxBytes>(),
+        },
+        // The machine's compile budget (#1728), named `machine-` for the thing it counts: every compile on
+        // this MACHINE, local leases included. Deliberately NOT worker rows -- no `component` -- because a
+        // node with `--slots=0` runs no worker and still reports one (R6), and a worker-only row would be
+        // refused on exactly that node. Restart-only: the report is read from the configuration the body
+        // started with, and a budget that shrinks under charges already granted is a larger change than
+        // a reload row (`--slots` reason).
+        {
+            .primary = "--machine-slots",
+            .arity = Arity::Value,
+            .operand = "=<n>",
+            .apply = AssignFrom<&NodeConfig::machineSlots, ParseMachineSlots>(),
+            .description = "compile slots this MACHINE shares between every compile\n"
+                           "on it, local ones included, as the fleet's queue\n"
+                           "counts them. Default: its logical cores. Not --slots,\n"
+                           "which sizes the worker and is 0 on a node with none:\n"
+                           "this is reported whether or not a worker runs.",
+            .yamlKey = "machine_slots",
+            .same = FieldEq<&NodeConfig::machineSlots>(),
+            .present = PresentIn<&NodeConfig::machineSlots>(),
+        },
+        {
+            .primary = "--machine-memory-budget",
+            .arity = Arity::Value,
+            .operand = "=<size|N%>",
+            .apply = AssignFrom<&NodeConfig::machineMemoryBudgetBytes, ParseCompileMemoryBytes>(),
+            .description = "the memory the fleet's queue may have this machine's\n"
+                           "compiles hold at once, local ones included; k/m/g =\n"
+                           "KiB/MiB/GiB or N% of host RAM. Default: 75% of RAM\n"
+                           "less this node's cache tier, never below\n"
+                           "--compile-estimate-default. A compile larger than\n"
+                           "the whole budget runs alone rather than never.",
+            .yamlKey = "machine_memory_budget",
+            .same = FieldEq<&NodeConfig::machineMemoryBudgetBytes>(),
+            .present = PresentIn<&NodeConfig::machineMemoryBudgetBytes>(),
+        },
+        {
+            .primary = "--compile-estimate-default",
+            .arity = Arity::Value,
+            .operand = "=<size>",
+            .apply = AssignFrom<&NodeConfig::compileEstimateDefaultBytes, ParseCompileMemoryBytes>(),
+            .description = "what a translation unit nobody has measured is\n"
+                           "assumed to need (default 2g; k/m/g = KiB/MiB/GiB).\n"
+                           "Too low is the out-of-memory kill the queue exists\n"
+                           "to prevent; too high is a compile waiting longer\n"
+                           "than it must until its first measurement.",
+            .yamlKey = "compile_estimate_default",
+            .same = FieldEq<&NodeConfig::compileEstimateDefaultBytes>(),
+            .present = PresentIn<&NodeConfig::compileEstimateDefaultBytes>(),
         },
         {
             .primary = "--reserve-cores",
@@ -2594,6 +2685,10 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     // every start, and a registration that baked today's figure in would stop following it.
     emitIfPresent("compile-request-max", cfg.compileRequestMaxBytes);
     emitIfPresent("compile-inflight-max", cfg.compileInflightMaxBytes);
+    // On presence, for `--slots` reason: absent DERIVES each from the machine at every start.
+    emitIfPresent("machine-slots", cfg.machineSlots);
+    emitIfPresent("machine-memory-budget", cfg.machineMemoryBudgetBytes);
+    emitIfPresent("compile-estimate-default", cfg.compileEstimateDefaultBytes);
     emitIfExplicit("admin-listen", cfg.adminListen, cfg.adminListenExplicit);
     if (cfg.dashboard)
         argv.emplace_back("--dashboard");
@@ -2913,6 +3008,11 @@ std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept
 {
     return cfg.compileRequestMaxBytes.has_value() ? static_cast<std::size_t>(*cfg.compileRequestMaxBytes)
                                                   : WorkerMaxRequestBytes;
+}
+
+std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept
+{
+    return cfg.compileEstimateDefaultBytes.value_or(DefaultCompileEstimateBytes);
 }
 
 std::size_t CompileByteBudgetOf(NodeConfig const& cfg, std::uint32_t slots) noexcept

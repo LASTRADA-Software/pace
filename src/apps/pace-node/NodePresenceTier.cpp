@@ -191,6 +191,10 @@ NodePresence::NodePresence(NodePresenceParts const& parts, SchedulerLink link):
     _reachability { parts.reachability },
     _askedJoins { parts.askedJoins },
     _endpoints { parts.endpoints },
+    _cfg { parts.cfg },
+    _capacity { parts.capacity },
+    _held { parts.held },
+    _peaks { parts.peaks },
     // `AnnouncedCapacity` rather than `Distributed::CapacityToWire` alone: the latter knows
     // nothing of the version, so a node with no worker sent NODE-ANNOUNCE with none, and the
     // leader recorded it exactly as absent as a build too old to know the field.
@@ -237,6 +241,19 @@ void NodePresence::Loop(std::stop_token const& stop)
                                                        .askedJoins = _askedJoins },
                                        _link,
                                        _dialer);
+
+        // The machine's compile budget, whether or not this node runs a worker (R6): this loop is the
+        // one that runs everywhere. After the presence announcement, which is what makes the machine
+        // known at all, and dialled on its own so a refusal of one never costs the other.
+        (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
+                                                          .capacity = _capacity,
+                                                          .held = _held,
+                                                          .peaks = _peaks,
+                                                          .logger = _logger,
+                                                          .prover = _prover,
+                                                          .reachability = _reachability },
+                                     _link,
+                                     _dialer);
 
         if (WaitOutInterval(stop))
             break;

@@ -3339,6 +3339,26 @@ tally that also covers a full connection cap, so read the node's own counter: a 
 `pace_worker_jobs_refused_endpoint_busy_total` is the signal to raise
 `--compile-inflight-max`.
 
+#### The machine's compile budget
+
+Separate from the worker's in-flight bytes above, every node also states what its
+**machine** may be charged for compiles, to the fleet's queue. It is sent every
+presence round (`MACHINE-BUDGET`), **whether or not the node runs a worker**: a node
+started with `--slots=0` runs no worker and still has a machine.
+
+| Option | Default | What it states |
+| --- | --- | --- |
+| `--machine-slots` (`machine_slots`) | the machine's logical cores | Compiles the machine runs at once, every one on it counted, local ones included. Not `--slots`, which sizes the worker and is `0` on a node with none. `0` is refused. |
+| `--machine-memory-budget` (`machine_memory_budget`) | 75% of RAM, less this node's cache tier, never below `--compile-estimate-default` | The memory those compiles may hold at once. `k`/`m`/`g` or `N%` of host RAM. A typed figure is used as given. `0` is refused. |
+| `--compile-estimate-default` (`compile_estimate_default`) | `2g` | What a translation unit nobody has measured is assumed to need. Too low is the out-of-memory kill the queue exists to prevent. `0` is refused. |
+
+All three are **restart-only**, and a service registration replays only the ones typed.
+Beside the figures, the report carries what the machine's compiles hold now and a
+bounded sample of the peaks its compiler processes measured, so the leader's estimates
+learn from the machines that ran the compiles. A leader that cannot take the report
+refuses it like any other verb; the node logs that once, when it starts, and again when
+it clears.
+
 The node's one `0xFC` listener holds its own pool of bytes for frames still being
 read, sized to the largest budget any of its components declares — so it follows the
 compile budget and never undercuts it. It is ONE pool: the cache and shared-cache

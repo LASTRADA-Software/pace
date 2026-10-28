@@ -7,6 +7,7 @@
 
 #include "EndpointDialerTestUtils.hpp"
 #include "EndpointResolver.hpp"
+#include "MachineBudget.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
 #include "NodeFormation.hpp"
@@ -182,6 +183,8 @@ struct WorkerTierFixture
     NodeConfig cfg = Worker();
     /// Where the tier answers its conditions; a case reads it after `Start`.
     NodeConditions conditions;
+    /// Where the worker reports the peaks it measures (#1728); nothing here reads them.
+    MeasuredPeaks measuredPeaks;
     int discoveryCalls = 0;
     /// How often the machine was asked for; a no-worker start must never ask.
     int machineBuilds = 0;
@@ -276,7 +279,8 @@ struct WorkerTierFixture
                                                    .conditions = conditions,
                                                    .hostEvents = hostEvents,
                                                    .suspendWait = suspendWait,
-                                                   .schedulerDialer = Dialer() },
+                                                   .schedulerDialer = Dialer(),
+                                                   .measurements = measuredPeaks },
                                  makeMachine);
     }
 };

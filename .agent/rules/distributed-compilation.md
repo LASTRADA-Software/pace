@@ -2373,6 +2373,13 @@ Six more about what the tier IS and who gets to see it:
   and that is correct rather than the same defect: a node offering no slots has a
   capacity of zero, which is a reading rather than an unmade measurement. The two
   fields answer different questions and the same word would be wrong in one of them.
+  **"No worker" is not "no machine" for the fleet's compile queue (#1728, R6)**: every
+  node, a `--slots=0` one included, states its machine's compile budget
+  (`MachineBudgetOf`: `--machine-slots`, `--machine-memory-budget`) on the presence loop's
+  round, which runs everywhere. It is a budget record and not a worker registration -- such
+  a node still registers nothing and is never sent a dispatched compile -- and its flags are
+  deliberately NOT worker-column rows, or the generated rule above would refuse them on
+  exactly the node that needs them.
   **The worker is `WorkerTier`, null on such a node** (#1387): no idle pool thread, no
   capacity sized to zero, no validator. It owns the `SchedulerLink`, so a worker cannot
   exist without one and a start that reaches it with no `--scheduler` is refused by

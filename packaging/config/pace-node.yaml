@@ -182,6 +182,25 @@
 # Read at startup only.
 #compile_inflight_max:
 
+# compile slots this MACHINE shares between every compile on it, local ones
+# included, as the fleet's queue counts them. Default: its logical cores. Not
+# slots, which sizes the worker and is 0 on a node with none: this is reported
+# whether or not a worker runs. Read at startup only.
+#machine_slots:
+
+# the memory the fleet's queue may have this machine's compiles hold at once,
+# local ones included; k/m/g = KiB/MiB/GiB or N% of host RAM. Default: 75% of
+# RAM less this node's cache tier, never below compile_estimate_default. A
+# compile larger than the whole budget runs alone rather than never. Read at
+# startup only.
+#machine_memory_budget:
+
+# what a translation unit nobody has measured is assumed to need (default 2g;
+# k/m/g = KiB/MiB/GiB). Too low is the out-of-memory kill the queue exists to
+# prevent; too high is a compile waiting longer than it must until its first
+# measurement. Read at startup only.
+#compile_estimate_default:
+
 # cores never offered to the fleet, overriding what the node class reserves.
 # 0 is a real answer and is not the same as omitting the flag. Ignored when
 # --slots names a number, which is the operator's answer already.

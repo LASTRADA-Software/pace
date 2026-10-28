@@ -843,6 +843,92 @@ TEST_CASE("Every dispatch verb round-trips its fields", "[wire]")
         CHECK(AsStringView(Unwrap(decoded).sourceName) == "Widget.cpp");
     }
 
+    SECTION("COMPILE carries the admission fields, and absent ones decode as no admission data")
+    {
+        // #1728. What the leader's queue charged, and the key the worker files its measured peak under.
+        auto const admitted = EncodeCompile(CompileRequest { .leaseToken = "l1",
+                                                             .fingerprint = "gcc-13-abc",
+                                                             .args = {},
+                                                             .source = {},
+                                                             .acceptedCodecs = { 1 },
+                                                             .sourceName = "Widget.cpp",
+                                                             .compileDir = {},
+                                                             .compileDirReplacement = {},
+                                                             .sourceRoot = {},
+                                                             .sourceRootReplacement = {},
+                                                             .chargedBytes = 2ULL << 30,
+                                                             .admissionCacheKey = "objkey-1",
+                                                             .admissionSourcePath = "<SRCROOT>/src/Widget.cpp" });
+        auto const with = DecodeCompilePayload(std::span { admitted }.subspan(RequestHeaderSize));
+        REQUIRE(with.has_value());
+        CHECK(Unwrap(with).chargedBytes == std::optional<std::uint64_t> { 2ULL << 30 });
+        CHECK(AsStringView(Unwrap(with).admissionCacheKey) == "objkey-1");
+        CHECK(AsStringView(Unwrap(with).admissionSourcePath) == "<SRCROOT>/src/Widget.cpp");
+
+        // None stated: DISENGAGED, which is not a charge of zero -- the two travel differently.
+        auto const bare = EncodeCompile(CompileRequest { .leaseToken = "l1",
+                                                         .fingerprint = "gcc-13-abc",
+                                                         .args = {},
+                                                         .source = {},
+                                                         .acceptedCodecs = { 1 },
+                                                         .sourceName = "Widget.cpp",
+                                                         .compileDir = {},
+                                                         .compileDirReplacement = {},
+                                                         .sourceRoot = {},
+                                                         .sourceRootReplacement = {} });
+        auto const without = DecodeCompilePayload(std::span { bare }.subspan(RequestHeaderSize));
+        REQUIRE(without.has_value());
+        CHECK_FALSE(Unwrap(without).chargedBytes.has_value());
+        CHECK(Unwrap(without).admissionCacheKey.empty());
+        CHECK(Unwrap(without).admissionSourcePath.empty());
+
+        auto const zero = EncodeCompile(CompileRequest { .leaseToken = "l1",
+                                                         .fingerprint = "gcc-13-abc",
+                                                         .args = {},
+                                                         .source = {},
+                                                         .acceptedCodecs = { 1 },
+                                                         .sourceName = "Widget.cpp",
+                                                         .compileDir = {},
+                                                         .compileDirReplacement = {},
+                                                         .sourceRoot = {},
+                                                         .sourceRootReplacement = {},
+                                                         .chargedBytes = 0 });
+        auto const zeroDecoded = DecodeCompilePayload(std::span { zero }.subspan(RequestHeaderSize));
+        REQUIRE(zeroDecoded.has_value());
+        CHECK(Unwrap(zeroDecoded).chargedBytes == std::optional<std::uint64_t> { 0 });
+
+        // Over a cap is REFUSED, never truncated: a peak keyed by half a key is a peak for nothing.
+        auto const longKey = std::string(MaxLeaseKeyBytes + 1, 'k');
+        auto const tooLongKey = EncodeCompile(CompileRequest { .leaseToken = "l1",
+                                                               .fingerprint = "gcc-13-abc",
+                                                               .args = {},
+                                                               .source = {},
+                                                               .acceptedCodecs = { 1 },
+                                                               .sourceName = "Widget.cpp",
+                                                               .compileDir = {},
+                                                               .compileDirReplacement = {},
+                                                               .sourceRoot = {},
+                                                               .sourceRootReplacement = {},
+                                                               .chargedBytes = std::nullopt,
+                                                               .admissionCacheKey = longKey });
+        CHECK_FALSE(DecodeCompilePayload(std::span { tooLongKey }.subspan(RequestHeaderSize)).has_value());
+        auto const longPath = std::string(MaxAdmitPathBytes + 1, 'p');
+        auto const tooLongPath = EncodeCompile(CompileRequest { .leaseToken = "l1",
+                                                                .fingerprint = "gcc-13-abc",
+                                                                .args = {},
+                                                                .source = {},
+                                                                .acceptedCodecs = { 1 },
+                                                                .sourceName = "Widget.cpp",
+                                                                .compileDir = {},
+                                                                .compileDirReplacement = {},
+                                                                .sourceRoot = {},
+                                                                .sourceRootReplacement = {},
+                                                                .chargedBytes = std::nullopt,
+                                                                .admissionCacheKey = "k",
+                                                                .admissionSourcePath = longPath });
+        CHECK_FALSE(DecodeCompilePayload(std::span { tooLongPath }.subspan(RequestHeaderSize)).has_value());
+    }
+
     SECTION("COMPILE carries a PATH in sourceName, not a base name")
     {
         // Every other case here sends `Widget.cpp`, which is what this field used to
