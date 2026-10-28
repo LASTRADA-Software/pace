@@ -3125,6 +3125,773 @@ struct FetchStep
     std::optional<int> result; ///< The exit code, or nullopt to compile with no STORE (`Warn`'s answer).
 };
 
+/// Everything the phases of one cache-consulting compile share, and the state they hand each other.
+///
+/// `RunCached` builds the toolchain's answers, the roots and the witness once; the phases then run in the
+/// order the key needs them -- `ComputeKey`, `Fetch`, `TraceMiss`, `AdmitAndCompile` -- each a member so
+/// that the many values every one of them reads are named once instead of captured by a lambda apiece.
+/// A reference member borrows from `RunCached`'s frame, which outlives this object.
+struct CachedCompile
+{
+    InvocationRecord& record;                         ///< The invocation record every phase writes its finding to.
+    Config const& cfg;                                ///< The launcher's configuration.
+    Cc::ParsedCommand const& cmd;                     ///< The command, its driver flavour already corrected.
+    std::span<std::string const> argv;                ///< The full command line.
+    Cc::RootReconciler& reconciler;                   ///< The one object every compiler-emitted path passes through.
+    PathCanon::Layout const& layout;                  ///< The reconciler's layout.
+    std::vector<std::string> const& relativizedArgs;  ///< The arguments as the key hashes them.
+    std::string const& compilerBanner;                ///< The driver's identity line.
+    std::string const& targetTriple;                  ///< What the driver generates for; empty when it did not say.
+    std::string const& toolchainStamp;                ///< Banner and target, joined once (`CacheCompilerId`).
+    std::filesystem::path const& workingDirectory;    ///< The working directory in the layout's vocabulary.
+    std::string const& workingDirectoryText;          ///< `workingDirectory` as text.
+    Cc::CheckoutRoots const& checkout;                ///< This checkout's roots, for the root binding.
+    Cc::IInputFiles const* inputFiles;                ///< The input files; never null.
+    Cc::InputWitness& witness;                        ///< T0 .. T2 for this invocation (#1650).
+    Cc::WitnessedManifestContent const& keyedContent; ///< The manifest's content, as the key was taken from it.
+    bool dispatchConfigured;                          ///< A queue is named, so the compile is planned for placement.
+
+    std::string key; ///< The cache key, once `ComputeKey` has run.
+    // Kept alive past `ComputeKey` ONLY when a queue is configured, and it is the dependency PATHS rather
+    // than the preprocessed text. A worker gets its own preprocess, with `#line` markers the key's copy
+    // deliberately suppresses, so the text has no reader after the key -- the launcher once held several
+    // megabytes of it alive across the whole compile for a consumer that no longer existed. The paths it
+    // cannot re-derive: a worker sees no `#include` at all, so the client writes the dependency record.
+    std::vector<std::string> dispatchDependencies;
+    // What the probe learned about this compile's dependencies, carried past the block the probe itself
+    // dies in. Both readers of it come later: the manifest recorded on a MISS after the compile, and the
+    // one backfilled on a HIT. Both used to parse the compiler's captured console text instead, and both
+    // readings had a locale in them -- see `RecordManifest` (issue #692).
+    ProbedDependencies probed;
+    /// When the cache phase began.
+    std::chrono::steady_clock::time_point cacheStarted {};
+    // How the fetch ended, for the two questions after it: whether a MISS may be traced, and whether the
+    // STORE is worth the transfer. Carried as the kind rather than a `bool` derived from it, so both put
+    // the same question to `Cc::CacheIsServing`. `Transport` is what `CacheOutcome` itself starts on and
+    // means "we never got an answer", so it is the safe value to hold before the exchange overwrites it.
+    Cc::CacheOutcomeKind fetchKind { Cc::CacheOutcomeKind::Transport };
+    // The parts of the root-bound marker the fetch met when this compile's own copy was absent; disengaged
+    // otherwise. Still a MISS; carried only so the MISS it records says why, in the one text its trace and
+    // its reason share (`BoundMissReason`).
+    std::optional<Cc::CheckoutParts> boundMiss;
+    // The parts the met marker named, for the STORE: an object stored behind a marker it met stays bound
+    // to them whatever its own scan finds (`PlanStore`). Taken from EVERY followed marker, not only an
+    // absent bound copy: one whose bound value is damaged, of another generation or stale reaches the
+    // STORE too, and a portable store there would overwrite the marker for every checkout.
+    std::optional<Cc::CheckoutParts> metMarker;
+
+    /// @param result What `RunCached` returns.
+    /// @return A step that settled the invocation with @p result.
+    [[nodiscard]] static FetchStep Settled(std::optional<int> result) noexcept
+    {
+        return FetchStep { .decided = true, .result = result };
+    }
+
+    /// Preprocess, reduce the dependency set and take the key (T0 .. T1').
+    /// @return Decided when the invocation is settled here -- a decline or a failed preprocess -- else
+    ///         undecided, with `key`, `probed` and `dispatchDependencies` filled.
+    [[nodiscard]] FetchStep ComputeKey();
+
+    /// Record the manifest from the content the key was taken from.
+    /// @return Whether one was recorded.
+    ManifestRecorded RecordManifestNow();
+
+    /// FETCH, as a step that can be taken AGAIN: a compile the queue answers `Stored` fetches once more for
+    /// the object another launcher has just stored, and that is this same step, not a copy of it.
+    /// @return Decided when the cache settled the invocation -- a hit served, or a decline that compiles
+    ///         with no STORE; undecided is a MISS.
+    [[nodiscard]] FetchStep Fetch();
+
+    /// Tell the launchers after this one that a node nothing reached is unreachable.
+    /// @param outcome The FETCH's outcome.
+    void RememberUnreachedFetch(Cc::CacheOutcome const& outcome) const;
+
+    /// Record why the FETCH did not serve, and announce a refusal that will be true of every unit.
+    /// @param outcome The FETCH's outcome.
+    /// @param presented What the exchange presented, for a refusal its missing ticket explains.
+    void NoteFetchFailure(Cc::CacheOutcome const& outcome, Cc::PresentedCredential const& presented) const;
+
+    /// Act on a FETCH that returned a value: follow a marker, then serve, refuse or carry on to a MISS.
+    /// @param outcome The FETCH's hit.
+    /// @return Decided when the hit settled the invocation; undecided to compile for real.
+    [[nodiscard]] FetchStep ServeHit(Cc::CacheOutcome const& outcome);
+
+    /// Stamp the cache phase's time and, for a daemon that answered, trace the MISS and say why.
+    void TraceMiss();
+
+    /// Ask the fleet queue where the MISS runs, then run it there (#1728).
+    /// @return What `RunCached` returns.
+    [[nodiscard]] std::optional<int> AdmitAndCompile();
+
+    /// What happens to a finished compile: replay its streams, and store the object when allowed.
+    /// @param run The compile, local or dispatched.
+    /// @param stored Set when the daemon accepted the object.
+    /// @return The compile's exit code.
+    [[nodiscard]] int FinishMiss(Cc::CompileRun& run, bool& stored);
+
+    /// Reconcile the captured streams and the depfile into the value's text regions.
+    /// @param run The finished compile.
+    /// @param value The value whose `textRegions` are filled.
+    /// @return False when a region names a path this host cannot read, so the value must not be stored.
+    [[nodiscard]] bool FillTextRegions(Cc::CompileRun const& run, CompileValue& value);
+};
+
+FetchStep CachedCompile::ComputeKey()
+{
+    auto const preprocessStarted = std::chrono::steady_clock::now();
+    // Scoped, and the text MOVED through it rather than copied: the preprocessed
+    // form of a real translation unit runs to several megabytes, and everything
+    // below — two round trips and, on a miss, the real compiler as a child
+    // process — has no use for it once the key exists. Leaving it live held that
+    // much dead memory resident for exactly as long as the machine is busiest.
+    {
+        auto probe = Preprocess(record, cmd, argv, reconciler);
+        if (!probe.has_value())
+            return Settled(Warn(record, "preprocess failed"));
+
+        // Skip translation units that reference a time/date macro. `__TIME__` /
+        // `__DATE__` / `__TIMESTAMP__` expand to a run-varying (second-granular)
+        // string, so such a TU re-keys on every compile and can never hit —
+        // caching it only churns the store. Preprocessing has already *expanded*
+        // the macro (its name is gone from the output), so we scan the source file
+        // text itself, matching sccache's refusal to cache these. Direct use in the
+        // TU is the overwhelmingly common case; header-introduced use is rare and
+        // its only cost is a permanent miss, never incorrectness.
+        if (SourceReferencesVolatileMacro(cmd.source))
+            return Settled(Decline(record, "uses __TIME__/__DATE__/__TIMESTAMP__; not caching (non-deterministic)"));
+
+        // The dependency set is reduced to its portable form before it reaches the
+        // key: canonical tokens only, sorted and deduplicated, with toolchain paths
+        // dropped because the compiler identity above already covers them and
+        // hashing them would end cross-machine sharing outright. A relative path is
+        // resolved against the compile's working directory first, so it is
+        // classified by the file it names rather than by how the driver spelled it.
+        // See DependencyProbe.hpp, where each half of that filter is justified.
+        auto dependencies = Cc::KeyDependencySet(probe->dependencyPaths, layout, workingDirectory.string());
+
+        // Both counts, because they answer different questions and only the pair
+        // is diagnostic. An empty set means a moved header cannot re-key — the
+        // property this whole input exists for, failing silently — and "the probe
+        // reported nothing" (a driver that does not report on the preprocess line)
+        // is a different defect from "every reported path was filtered out" (paths
+        // the layout does not recognise as its own). Named for the same reason the
+        // STALE HIT note names its path: otherwise this is a whole investigation.
+        //
+        // And the pair alone stopped being enough. `0 of M` was the fingerprint of
+        // one fault (issue #66's short-name root, where nothing prefix-matches what
+        // the driver echoes back) until issue #65 gave it a second (a drive-relative
+        // path, which is anchored to nothing this machine can place). The reasons
+        // are what tell those apart now; the counts alone told neither (issue #105).
+        // Rendered by DescribeDropped rather than here, because main.cpp is in no
+        // test target. Semicolon-separated from the filesystem-call count, which is
+        // not a path count and must not read as another entry in the list.
+        auto const dropped = Cc::DescribeDropped(dependencies);
+        Note(record.verbose,
+             std::format("dependency set: {} of {} reported path(s) keyed ({}{}{} filesystem call(s))",
+                         dependencies.keyed.size(),
+                         dependencies.Reported(),
+                         dropped,
+                         dropped.empty() ? "" : "; ",
+                         PathResolver().FilesystemCalls()));
+        NoteIfRootsDoNotDescribeCompile(record, cfg, cmd.source, dependencies, reconciler);
+
+        // The one disposition that is not merely a drop. A drive-relative path under
+        // no root is keyed by nothing here and stat'ed by nothing in ReplayGuard, so
+        // a header moved inside it replays a depfile naming a file that is gone
+        // (issue #104). The note above has already said how many there were; this
+        // says what the launcher does about them.
+        //
+        // This is the AUTHORITATIVE ask: it reads what the compiler actually opened,
+        // where the command-line ask near the top of this function depends on
+        // `PathValueFlags()` recognising the flag that carried the path. Read off the
+        // tally rather than re-derived from the paths — `PortableForm` already
+        // classified every one of them, and a second walk asking the same question
+        // is a second place for the answer to drift.
+        if (dependencies.Count(Cc::PathDisposition::DriveRelative) != 0)
+        {
+            return Settled(Decline(record,
+                                   "a reported dependency path is drive-relative under no root; not caching "
+                                   "(neither keyed nor guarded)"));
+        }
+
+        // The same hazard reached by a different road, and it has to be its own ask
+        // because `PortableForm` cannot see it: whether bytes are text is a property
+        // of the HOST, and that function is pure. A path the reconciler could not
+        // read went through untranslated, so it prefix-matches no root, keys as
+        // toolchain and is stat'ed by nothing -- a moved header inside it would
+        // replay a stored object under a zero exit code.
+        //
+        // Reachable only on Windows, and there only when a tool wrote a path in
+        // neither UTF-8 nor the console output code page. The recovery is the
+        // console: `chcp 65001` makes `cl` emit UTF-8 and this stops firing.
+        if (reconciler.UnreadablePaths() != 0)
+        {
+            return Settled(Decline(record,
+                                   "a reported dependency path is not text this host can read; not caching "
+                                   "(neither keyed nor guarded) -- try a UTF-8 console code page"));
+        }
+
+        // The preprocessed text is MOVED in, not copied: it runs to several
+        // megabytes on a real translation unit, on the hot path of a parallel
+        // build. Nothing moves back out again -- a worker preprocesses a second
+        // time, with the `#line` markers this copy deliberately suppresses -- so
+        // `inputs` dies with the block and the text with it, which is the whole
+        // point of the block.
+        Cc::KeyInputs const inputs {
+            .compilerId = toolchainStamp,
+            .preprocessed = std::move(probe->preprocessed),
+            .relativizedArgs = relativizedArgs,
+            .dependencyPaths = std::move(dependencies.keyed),
+        };
+        key = Cc::ComputeKey(inputs);
+
+        // Moved out AFTER the key is computed, so the key path pays nothing: the
+        // KEYED subset went into `inputs` above as its own copy, and what is left on
+        // the probe is the full list, which only a dispatch reads and which would
+        // otherwise be dropped with the block.
+        if (dispatchConfigured)
+            dispatchDependencies = probe->dependencyPaths;
+
+        // Copied just above rather than moved when a scheduler is configured, and
+        // moved here in every case: two consumers want the same full list, and the
+        // manifest's is the one that runs on every build rather than only on a
+        // distributed one.
+        probed = { .paths = std::move(probe->dependencyPaths), .unreadable = probe->dependenciesUnreadable };
+
+        // The key is taken: the preprocess timer ends HERE, before the T1' snapshot below, so
+        // `--show-stats`' preprocess latency measures what it always measured and the witness's
+        // hashing does not move it for an unnamed reason.
+        record.preprocessMs = MsSince(preprocessStarted);
+
+        // T1': what the key was just taken from. These hashes are what a manifest records.
+        witness.Snapshot(Cc::ProjectDependencyPaths(probed.paths, workingDirectoryText, layout), *inputFiles);
+    }
+
+    return FetchStep {};
+}
+
+ManifestRecorded CachedCompile::RecordManifestNow()
+{
+    // Every manifest this invocation records -- the backfill on a HIT, the one kept when the
+    // object is not stored, and the one after the STORE -- is built from the content the key was
+    // taken from, never from the disk as it stands after the compile (#1650).
+    return RecordManifest(
+        record, cfg, cmd, layout, workingDirectory, relativizedArgs, toolchainStamp, probed, key, reconciler, keyedContent);
+}
+
+void CachedCompile::RememberUnreachedFetch(Cc::CacheOutcome const& outcome) const
+{
+    if (outcome.kind == Cc::CacheOutcomeKind::Transport && Cc::MarksUnreachable(outcome.transportFailure))
+    {
+        auto const memoFiles = Cc::MakeDiskFiles();
+        Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *memoFiles };
+        core::platform::SystemWallClock const wallClock;
+        auto memo = Cc::ReachabilityMemo::Load(memoStore);
+        if (Cc::RememberUnreachedFetch(
+                memo, AdmissionEndpoint(cfg), cfg.addr, outcome.kind, outcome.transportFailure, wallClock.now()))
+            memo.SaveIfChanged(memoStore);
+    }
+}
+
+void CachedCompile::NoteFetchFailure(Cc::CacheOutcome const& outcome, Cc::PresentedCredential const& presented) const
+{
+    // Told apart, because an operator fixes them in different places. A
+    // refusal is the daemon answering, so its own code and words become the
+    // reason -- `--show-stats` then names a version mismatch instead of
+    // lumping it in with an unreachable daemon. A transport failure has no
+    // answer to quote: an endpoint that refused the connection, a peer that
+    // broke mid-reply, or the budget running out, all under one FIXED
+    // string so the tally gets a row per cause rather than one per compile.
+    if (fetchKind == Cc::CacheOutcomeKind::Rejected)
+    {
+        // A refusal THIS exchange's missing ticket explains is recorded under WHY no
+        // ticket was presented -- the thing to fix -- rather than the refusal it caused.
+        WarnAndCarryOn(record, Cc::RecordedReason(outcome, presented.missing));
+
+        // A refusal that will be true of every unit of this build is said out
+        // loud, once per interval, whatever the verbosity (#181). The tally
+        // above is correct and nobody reads it: #815 is a whole team building
+        // through a cache answering "no" to every request for weeks, with a
+        // `--show-stats` reason as the only trace.
+        //
+        // Throttled through the state directory rather than printed per unit,
+        // because a line per translation unit is thousands of lines and gets
+        // filtered -- which is worse than silence, since it buries everything
+        // else with it.
+        if (auto const* const row = Cc::PersistentRefusalFor(outcome.code);
+            row != nullptr
+            && Cc::ShouldAnnounceRefusal(
+                Cc::StateDirectory(), cfg.addr, outcome.code, std::chrono::system_clock::now(), *Cc::MakeDiskFiles()))
+            std::cerr << Cc::RefusalNoticeLine(cfg.addr, *row, outcome.message) << '\n';
+    }
+    else
+        WarnAndCarryOn(record, "fetch exchange failed");
+}
+
+FetchStep CachedCompile::ServeHit(Cc::CacheOutcome const& outcome)
+{
+    // A marker is followed to THIS checkout's bound key here, and only here --
+    // `ResolveFetchedObject` is the one place a fetched object value is
+    // classified, so no path can write a marker to disk as an object file.
+    auto const fetched = Cc::ResolveFetchedObject(outcome.value, key, checkout, BoundFetch(record, cfg));
+    metMarker = fetched.markerParts;
+    if (auto const* error = std::get_if<ProtocolError>(&fetched.answer))
+    {
+        NoteUndecodableValue(record, "the fetched object", *error);
+        // CARRY ON rather than return, and that is what makes a generation
+        // bump cost one cold cache instead of a permanent outage.
+        //
+        // `Warn` returns `nullopt`, and a `nullopt` out of `RunCached` reaches
+        // `RunPassthrough` -- a plain compile with NO STORE. The key is
+        // unchanged by a generation bump (only `objkey-v*` moves a key, and a
+        // generation is deliberately not that), so the refused value stays
+        // under the very key this build just computed, is fetched and refused
+        // again on every later build, and is never overwritten. After an
+        // upgrade that is EVERY key in the cache: a fleet that never caches
+        // anything again, presenting as a slow build with a `--show-stats`
+        // reason nobody reads.
+        //
+        // Falling through reaches the MISS path, whose STORE overwrites this
+        // key with a value of this generation -- which is exactly what the
+        // STALE-hit branch below already does, and for the same reason stated
+        // there. `WarnAndCarryOn` is the spelling the fetch-failure arms above
+        // use; the bucket an operator sees is unchanged.
+        WarnAndCarryOn(record, DecodeFailureReason(*error));
+    }
+    else if (std::holds_alternative<Cc::BoundAbsence>(fetched.answer))
+    {
+        // The object under this key names paths this compile does not share. A MISS, and
+        // the STORE after the compile writes this checkout's own copy under its
+        // own bound key -- which is what makes the next compile here a hit.
+        boundMiss = fetched.markerParts;
+    }
+    else if (auto const* decoded = std::get_if<CompileValue>(&fetched.answer))
+    {
+
+        // HIT: check what the value asserts, then write the object, reproduce
+        // the depfile, and replay the streams (all with paths localized).
+        //
+        // Reproducing the depfile is not optional: skipping it silently breaks
+        // incremental builds, because Ninja/Make would see no header
+        // dependencies for this TU and stop rebuilding it when they change.
+        auto const materialized = MaterializeHit(record, cmd, *decoded, layout, workingDirectory, cfg.showIncludesMarker);
+
+        // What happens next is read from `CacheDecisionTable` rather than
+        // spelled here, and that is the whole of #909: this file is in no test
+        // target, so a three-way branch written out here is one no case can
+        // reach. The table is exercised at every state by
+        // `CacheDecision_test.cpp`; what is left in this file is the call.
+        //
+        // Not a `switch` with a `default` either -- on this decision the
+        // default that reads as safest is `CompileWithoutStoring`, which is the
+        // permanently-dead-cache behaviour a generation bump would hit.
+        auto const action =
+            Cc::DecideCacheAction(Cc::ObserveFetch(fetchKind, /*isHit=*/true, /*decoded=*/true, materialized.disposition));
+
+        if (!Cc::CompilesForReal(action))
+        {
+            record.valueBytes = decoded->objectBlob.size();
+            record.cacheMs = MsSince(cacheStarted);
+
+            // Backfill the direct-mode manifest from the hit we just served.
+            //
+            // Without this, direct mode could never populate on a cache that already
+            // holds preprocessed-key entries: manifests would only ever be written by
+            // the miss path, so a warm cache would preprocess forever.
+            //
+            // From THIS machine's probe rather than from the value's replayed
+            // /showIncludes text, which is what it used to read. Both name the same
+            // headers, but the replayed text was written by the producer's compiler
+            // in the producer's language, so parsing it made the backfill work only
+            // between machines that happened to share a locale (issue #692). The
+            // probe already ran, so this still costs no compiler invocation.
+            //
+            // The hit is served whatever moved: its object was compiled from exactly the
+            // text this key hashes. Only a manifest built from hashes that may not
+            // describe that text is refused (#1650).
+            if (BackfillsManifest(cfg, witness, record.verbose))
+                RecordManifestNow();
+
+            // The preprocessed-key hit, verified exactly as the direct-mode one
+            // is. Both paths, because a wrong object served through either is the
+            // same defect and a feature that covered one would be a feature an
+            // operator could not rely on (#423).
+            return FetchStep { .decided = true, .result = FinishServedHit(record, cfg, cmd, argv, key, fetched) };
+        }
+        if (!Cc::StoresResult(action))
+        {
+            // The object could not be written, so the cache is not usable on this
+            // machine and a STORE would fail the same way -- the one observation that
+            // skips the store (an unwritable DEPFILE compiles as a miss would). Named
+            // at the site, because `check-cache-flow-continuations.sh` classifies
+            // this call by the observation it spells. `Warn` returns nullopt, which
+            // reaches `RunPassthrough` -- a plain compile with no store, which is
+            // correct HERE and catastrophic one branch up, where the value is merely
+            // of a generation this build cannot read.
+            return FetchStep { .decided = true,
+                               .result = Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable)) };
+        }
+        // Stale: the object is fine but the dependency record it carries is not
+        // true here -- or the depfile this build names could not be written, which
+        // says nothing against the entry -- so fall through and compile for real. The STORE that follows
+        // overwrites this very key with a correct one, which is what repairs the
+        // entry rather than leaving it to poison every later build.
+        //
+        // And if that STORE is refused for any reason, the build still converges:
+        // the real compiler ran, so a correct depfile is on disk regardless, and
+        // the cost degrades to a permanent miss for this key.
+    }
+
+    // MISS -- fall through to compile. A refused generation arrives here too,
+    // which is what turns a bump into one cold cache rather than a dead one.
+    return FetchStep {};
+}
+
+FetchStep CachedCompile::Fetch()
+{
+    auto const presented = Tickets(cfg, record.verbose).Present(cfg.addr);
+    auto const outcome =
+        CacheExchange(record, "fetch", cfg.addr, Wire::EncodeFetch(key), presented.credential, BudgetOf(cfg));
+    fetchKind = outcome.kind;
+    record.fetched = fetchKind;
+    RememberUnreachedFetch(outcome);
+    if (!Cc::CacheIsServing(fetchKind))
+        NoteFetchFailure(outcome, presented);
+    else if (outcome.IsHit())
+        return ServeHit(outcome);
+    // MISS -- fall through to compile. A refused generation arrives here too,
+    // which is what turns a bump into one cold cache rather than a dead one.
+    return FetchStep {};
+}
+
+void CachedCompile::TraceMiss()
+{
+    record.cacheMs = MsSince(cacheStarted);
+    // Only a daemon that answered produces a MISS. A refusal and a transport
+    // failure have already recorded themselves as fall-backs, and tracing a MISS
+    // over the top would clear the reason `--show-stats` ranks and report a broken
+    // cache as a cold one -- the exact conflation `CacheOutcomeKind` was split to
+    // end, arriving by a different road.
+    if (Cc::CacheIsServing(fetchKind))
+    {
+        // Which parts, from the marker -- and no claim about WHICH of them differs, which
+        // this end cannot know: the trace and the tallied reason say the same thing.
+        TraceOutcome(
+            record, Cc::Outcome::Miss, key, boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
+        // A miss carrying a reason, as a crossed reply is: the cache answered honestly, and
+        // what it holds under this key names paths this compile does not share -- or this
+        // compile's own copy was evicted. Worth ranking, because a translation unit that is a
+        // root-bound miss everywhere is one whose `__FILE__` or `source_location` keeps it
+        // from ever being shared, and that is fixed in the source rather than in the cache.
+        if (boundMiss.has_value())
+            record.outcomeDetail = Cc::BoundMissReason(*boundMiss);
+    }
+}
+
+bool CachedCompile::FillTextRegions(Cc::CompileRun const& run, CompileValue& value)
+{
+    auto const textGrammar = Cc::StreamGrammar(cmd.flavor);
+    // Two regions, one per stream, in a fixed order (0=stdout, 1=stderr) so the
+    // hit path replays each on its correct channel. Measured (#825): BOTH `cl` and
+    // `clang-cl` emit /showIncludes on stdout under `/c` and on stderr under
+    // `/EP` -- the channel follows the FLAG, not the driver.
+    // `.agent/rules/compile-cache.md` holds the table and is where it stays; this
+    // comment must not become a second home for it.
+    //
+    // Which is why nothing here depends on the answer, and the measurement says
+    // that was the right call rather than a lucky one: a stored value's notes are
+    // on stdout when a compile produced it and on stderr when a `/EP` run did, so
+    // there is no single stream to prefer. We tag BOTH regions with the
+    // ShowIncludes grammar, and a non-matching line in either is preserved
+    // verbatim.
+    //
+    // Both are reconciled first, and only the STORED copy is: ReplayStreams above
+    // has already passed the compiler's own bytes through untouched. The daemon
+    // canonicalizes a STORE against the roots this launcher sends, which are the
+    // AS-GIVEN ones — so a region still carrying a spelling the driver resolved
+    // some other way would match neither root and be stored with this machine's
+    // absolute paths in it. Reconciling here is what puts the two in one spelling;
+    // sending the resolved roots instead would be the other way to do it, and it
+    // is the way that breaks the replayed depfile (see RootReconciler).
+    //
+    // The MARKER is normalized before either of those, and it has to be first: the
+    // grammar finds a note by its prefix, so a region still carrying a localized one
+    // has no path spans as far as the reconciler or the daemon is concerned, and the
+    // value is stored with this machine's absolute paths in it -- #229 reached
+    // through a language pack rather than through a missing canonicalizer (#879).
+    // Normalizing here rather than on a server is forced: only this machine knows
+    // what language its own notes are in.
+    //
+    // `cfg.showIncludesMarker` is what this build believes its notes carry. On a
+    // dispatched compile that is a FACT -- the notes were synthesised with it a few
+    // hundred lines up -- and on a local one it is the operator's answer, or the
+    // English default when nobody said otherwise. The unset localized case is
+    // therefore still not canonicalized, and cannot be until the prefix is
+    // discovered from the compiler (#878); it is unchanged rather than worsened,
+    // because an unmatched marker rewrites nothing.
+    auto const storedOut = PathCanon::NormalizeIncludeNoteMarker(run.out, cfg.showIncludesMarker);
+    auto const storedErr = PathCanon::NormalizeIncludeNoteMarker(run.err, cfg.showIncludesMarker);
+    auto const includeTextOut = reconciler.Region(storedOut, textGrammar);
+    auto const includeTextErr = reconciler.Region(storedErr, textGrammar);
+    value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextOut });
+    value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextErr });
+
+    // Region 2, when present, is the GNU depfile the compile just wrote. It is
+    // tagged with the depfile grammar so the daemon canonicalizes the header
+    // paths inside it — a depfile full of this machine's absolute paths would be
+    // useless (and wrong) when replayed on another checkout.
+    if (auto const depText = ReadDepFile(cmd))
+        value.textRegions.push_back(
+            { .grammar = PathCanon::Grammar::GccDepfile,
+              .bytes = reconciler.Region(*depText, PathCanon::Grammar::GccDepfile, Cc::ParseDepFileTargets(*depText)) });
+
+    // Asked AGAIN, after the regions above, and not only on the key path. Those
+    // calls run the reconciler over every path span the grammars find in the
+    // captured streams -- a wider set than the dependency list, and one the earlier
+    // ask therefore cannot have covered. A span this host could not read went into
+    // these regions untranslated, so the value would carry a spelling no consumer
+    // can canonicalize, localize or check.
+    if (reconciler.UnreadablePaths() != 0)
+    {
+        Note(record.verbose,
+             "a captured region names a path that is not text this host can read; not caching "
+             "-- try a UTF-8 console code page");
+        return false;
+    }
+
+    // The dependency root is tokenized HERE, and every other root by the server. A server
+    // canonicalizes with the two roots the STORE frame carries and knows no third; this
+    // machine's dependency cache would otherwise reach the value as an absolute path, and a
+    // hit on a machine whose cache sits in another home would replay a depfile naming headers
+    // that are not there -- refused as stale, so the shared key would buy nothing. The
+    // server leaves a `<DEPROOT>` span alone, and the hit localizes it against its own root.
+    if (!layout.dependencyRoot.empty())
+    {
+        PathCanon::Layout const dependencyOnly { .sourceRoot = {},
+                                                 .buildTree = {},
+                                                 .dependencyRoot = layout.dependencyRoot };
+        for (auto& region: value.textRegions)
+            region.bytes = PathCanon::CanonicalizeRegion(region.bytes, region.grammar, dependencyOnly);
+    }
+    return true;
+}
+
+// MISS: ask the fleet queue where this compile runs, then run it there (#1728).
+//
+// A dispatched compile is shaped to look exactly like a local one -- object on
+// disk at cmd.objPath, dependency record written, streams in hand -- so
+// everything in `finishMiss` is unchanged and cannot tell the difference. That
+// is deliberate: the STORE, the manifest and the statistics all have one path,
+// and a second one would be a second place for them to diverge.
+//
+// Whatever the queue answers -- or does not -- ends in the same `finishMiss`, and the queue is
+// told AFTER it: the STORE must be visible before the compiles waiting on this key are woken.
+int CachedCompile::FinishMiss(Cc::CompileRun& run, bool& stored)
+{
+    //
+    // These are COPIES, and deliberately so: the store below re-reads `run.out` and `run.err`
+    // untouched. What a build system reads has its note paths collapsed here; what the cache
+    // stores is collapsed by the SERVER, span by span, as it canonicalizes (generations 6 and 7,
+    // `CanonicalizeRegion`) -- one collapse, `PathCanon::CollapseRelativeSegments`, on both sides.
+    auto const textGrammar = Cc::StreamGrammar(cmd.flavor);
+    auto const replayOut = Cc::CollapseNotePaths(run.out, textGrammar, cfg.showIncludesMarker);
+    auto const replayErr = Cc::CollapseNotePaths(run.err, textGrammar, cfg.showIncludesMarker);
+    ReplayStreams(replayOut, replayErr);
+    // A spawn failure reports `NotSpawned`, which a POSIX exit status truncates to 255 —
+    // an arbitrary code no build system can interpret. Normalize it the same way
+    // the fall-back path does.
+    int const code = run.exitCode == Cc::NotSpawned ? 1 : run.exitCode;
+    if (code != 0)
+        return code; // do not cache a failed compile
+
+    // Nothing more is offered to a daemon that refused this launcher, or that was
+    // never reached: the fetch above established it, and everything below exists
+    // only to store -- reading the object back, reconciling the captured regions,
+    // encoding the value and pushing it, megabytes per translation unit, spent to
+    // be told the same thing again.
+    //
+    // It is also what keeps the fall-through above from costing an extra connect
+    // per translation unit against a wrong address. The connect BUDGET, and why
+    // this is not a claim that one connect is all a dead cache costs, are in
+    // .agent/rules/distributed-compilation.md.
+    if (!Cc::CacheIsServing(fetchKind))
+    {
+        // Worded so it is true of BOTH kinds. A refusal *is* an answer -- the daemon
+        // spoke and declined -- and saying it "did not answer" would send an
+        // operator to look for an unreachable daemon that is in fact running and
+        // rejecting, which is the rule this tree records about reporting a refusal
+        // under the wrong reason. The fall-back reason above already names which.
+        Note(record.verbose, "the cache did not serve the fetch; not offering this object to it");
+        return code;
+    }
+
+    // T2 (#1650). The object belongs to the key only if nothing the key was taken from moved
+    // while the compile -- local or dispatched, whose second preprocess is inside this window --
+    // was reading it.
+    auto const moved = witness.AfterCompile(
+        Cc::ProjectDependencyPaths(ManifestDependencies(probed, cmd, reconciler), workingDirectoryText, layout),
+        *inputFiles);
+    auto permit = GuardStore(record, cfg, moved, [this] { return RecordManifestNow(); });
+    if (!permit)
+        return code;
+
+    auto const objectBytes = Cc::ReadFileBytes(cmd.objPath);
+    if (!objectBytes.has_value())
+    {
+        // The compile itself succeeded, so this stays a MISS: only the caching
+        // of it failed. Note() rather than Warn() keeps the recorded outcome.
+        Note(record.verbose, "object missing after compile; not caching");
+        return code;
+    }
+
+    CompileValue value;
+    value.objectBlob = *objectBytes;
+    if (!FillTextRegions(run, value))
+        return code;
+
+    auto const encoded = EncodeCompileValue(value);
+    if (!Cc::IsStorableSize(encoded.size(), cfg.maxStoreBytes))
+    {
+        // Still a MISS, and still a successful compile: the object on disk is
+        // the real one. Only the caching of it is declined, and declined here
+        // rather than by the daemon so the build does not spend the transfer to
+        // be refused on every rebuild of this translation unit.
+        Note(
+            record.verbose,
+            std::format(
+                "value {} bytes exceeds {}={}; not caching", encoded.size(), Cc::EnvName::MaxStoreBytes, cfg.maxStoreBytes));
+        return code;
+    }
+
+    stored = StoreCompiledObject(std::move(*permit), record, cfg, key, value.objectBlob, encoded, checkout, metMarker);
+
+    // Record the direct-mode manifest so the NEXT compile of this TU can reach the
+    // object without preprocessing. The include set comes from the /showIncludes
+    // output the compile just produced, so this costs no extra compiler run.
+    //
+    // The manifest holds a POINTER to the object's ordinary key, not a second copy
+    // of the object: the two keys answer different questions (one from preprocessed
+    // text, one from header hashes), but storing the bytes under both would double
+    // the cached volume, and because L1 keeps values uncompressed that doubling
+    // lands on RAM where compression cannot help. A direct hit therefore costs one
+    // extra fetch to follow the pointer — see DirectManifest::objectKey.
+    if (cfg.direct)
+        RecordManifestNow();
+    return code;
+}
+
+std::optional<int> CachedCompile::AdmitAndCompile()
+{
+    // The queue is asked where this compile runs. WHAT it answers is `Cc::RunMiss`'s to act on, in a
+    // file a test reaches; this is HOW each step is performed.
+    //
+    // A plan, when there is one, is made BEFORE the queue is asked: a dispatchable request names its
+    // toolchain, and the leader places it by that. A command line a worker would not take, or a
+    // toolchain with no usable fingerprint, is `LocalOnly` -- it still takes a slot and its memory.
+    //
+    // A refusal the plan makes is recorded at once only when a scheduler is NAMED. With none named the
+    // queue asked is the cache's own node, which may front no fleet at all; the refusal is then held,
+    // and recorded only once that queue GRANTS something -- an admission that fails open leaves the
+    // record `NotConfigured`, the truth about a host whose queue never answered.
+    std::optional<DispatchPlan> plan;
+    std::optional<PlanRefusal> pendingRefusal;
+    if (dispatchConfigured)
+    {
+        auto planned = PlanDispatch(cfg, cmd, argv, compilerBanner, targetTriple);
+        if (planned.has_value())
+            plan = std::move(*planned);
+        else if (DispatchConfigured(cfg))
+            RecordPlanRefusal(record, planned.error());
+        else
+            pendingRefusal = std::move(planned.error());
+    }
+
+    // The `<SRCROOT>`-relative source, which keys the leader's shape estimate. Absent is not an error: the
+    // estimate then rests on the key alone.
+    auto const sourceToken = Cc::CanonicalSourceToken(cmd.source, layout, workingDirectoryText);
+    std::string const admissionSource = sourceToken.has_value() ? *sourceToken : std::string {};
+
+    auto const admitFiles = Cc::MakeDiskFiles();
+    Cc::FileMemoStore admitMemoStore { Cc::ReachabilityMemoPath(), *admitFiles };
+    core::platform::SystemWallClock const admitClock;
+    auto admitMemo = Cc::ReachabilityMemo::Load(admitMemoStore);
+    auto const unreachedWorkers = admitMemo.Fresh(Cc::MemoKind::WorkerUnreached, admitClock.now());
+    std::vector<std::string_view> const excludedWorkers { unreachedWorkers.begin(), unreachedWorkers.end() };
+    auto const treeLabel = Cc::TreeLabelOf(workingDirectoryText, cfg.srcRoot);
+    auto const acceptedCodecs = Cc::AvailableCodecs();
+    Wire::AdmitRequest const admit { .kind = plan.has_value() ? Wire::AdmitKind::Dispatchable : Wire::AdmitKind::LocalOnly,
+                                     .fingerprint =
+                                         plan.has_value() ? std::string_view { plan->fingerprint } : std::string_view {},
+                                     .cacheKey = key,
+                                     .sourcePath = admissionSource,
+                                     .treeLabel = treeLabel,
+                                     .storable = true,
+                                     .acceptedCodecs = acceptedCodecs,
+                                     .excluded = excludedWorkers,
+                                     // What a leader with no worker for the fingerprint names it by; withheld when it
+                                     // is not text the leader would keep.
+                                     .toolchainLabel = plan.has_value() ? Cc::SendableToolchainLabel(plan->toolchainLabel)
+                                                                        : std::string_view {} };
+
+    Cc::MissSeams const seams {
+        .open =
+            [&](std::optional<std::string_view> failedWorker) {
+                if (!failedWorker.has_value())
+                    return OpenAdmission(record, cfg, fetchKind, admit, admitMemo);
+                // A worker failed this compile: it runs HERE now, so it is asked for as a local compile, and
+                // the worker that failed it is excluded along with the ones the memo already names.
+                auto excludedAgain = excludedWorkers;
+                excludedAgain.push_back(*failedWorker);
+                auto here = admit;
+                here.kind = Wire::AdmitKind::LocalOnly;
+                here.excluded = excludedAgain;
+                return OpenAdmission(record, cfg, fetchKind, here, admitMemo);
+            },
+        .serveStored =
+            [&]() {
+                auto const step = Fetch();
+                if (!step.decided)
+                    return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 };
+                return step.result.has_value()
+                           ? Cc::StoredFetch { .kind = Cc::StoredFetchKind::Served, .code = *step.result }
+                           : Cc::StoredFetch { .kind = Cc::StoredFetchKind::Declined, .code = 0 };
+            },
+        .granted =
+            [&](Cc::AdmitTicket const& ticket) {
+                // A queue answered: a refusal the plan held is now about a fleet that exists.
+                if (pendingRefusal.has_value())
+                    RecordPlanRefusal(record, *std::exchange(pendingRefusal, std::nullopt));
+                // A dispatchable request the fleet placed nowhere is recorded as the refusal the LEASE
+                // path records for the same fleet, in its words (Ruling 11).
+                if (!plan.has_value() || ticket.kind != Wire::GrantKind::Local)
+                    return;
+                if (auto const note = Cc::ExplainLocalGrant(ticket.localReason, plan->toolchainLabel); note.has_value())
+                    (void) DeclineDispatch(record, note->recording, note->line);
+            },
+        .dispatchAdmitted = [&](Cc::AdmitTicket const& ticket) -> Cc::AdmittedDispatch {
+            if (!plan.has_value())
+                return {};
+            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
+        },
+        // Today's path when no queue answers: a LEASE, which needs a scheduler named.
+        .dispatchUnadmitted = [&]() -> std::optional<Cc::CompileRun> {
+            if (!plan.has_value() || !DispatchConfigured(cfg))
+                return std::nullopt;
+            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}).run;
+        },
+        .compileLocal = [&]() { return RunCaptureSplit(argv); },
+        .finish = [this](Cc::CompileRun& run, bool& stored) { return FinishMiss(run, stored); },
+        .failedOpen =
+            [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, admitMemo, admitMemoStore, reason); },
+    };
+    auto const report = Cc::RunMiss(seams);
+    record.queuedMs = report.queuedMs;
+    record.peakMemoryBytes = report.peakMemoryBytes;
+    // Disengaged: the cache, asked again after a `Stored` grant, settled this as a plain compile with no
+    // STORE -- the same answer the first FETCH gives as `Warn`'s `nullopt`.
+    return report.code;
+}
+
 /// Try to serve `cmd` from the cache; returns the process exit code if handled
 /// (hit, or miss-then-compiled — locally or on a worker), or std::nullopt to
 /// signal "fall back to a plain real compile".
@@ -3297,692 +4064,36 @@ struct FetchStep
                                 WitnessHashing(cfg));
     Cc::WitnessedManifestContent const keyedContent { witness, *inputFiles };
 
-    auto const preprocessStarted = std::chrono::steady_clock::now();
-    // Scoped, and the text MOVED through it rather than copied: the preprocessed
-    // form of a real translation unit runs to several megabytes, and everything
-    // below — two round trips and, on a miss, the real compiler as a child
-    // process — has no use for it once the key exists. Leaving it live held that
-    // much dead memory resident for exactly as long as the machine is busiest.
-    std::string key;
-    // Kept alive past the block below ONLY when a scheduler is configured, and it
-    // is the dependency PATHS rather than the preprocessed text. A worker gets its
-    // own preprocess, with `#line` markers the key's copy deliberately suppresses,
-    // so the text this block produced has no reader after the key -- the launcher
-    // once held several megabytes of it alive across the whole compile for a
-    // consumer that no longer existed. The paths it cannot re-derive: a worker sees
-    // no `#include` at all, so the client writes the dependency record.
-    std::vector<std::string> dispatchDependencies;
     // Planned whenever there is a queue to ask, not only when a scheduler is named: the queue at the
     // cache's own node places compiles on workers too (Ruling 12). Only today's LEASE path, which a
     // launcher falls back to when no queue answers, still needs `PACE_SCHEDULER`.
     bool const dispatchConfigured = !AdmissionEndpoint(cfg).empty();
 
-    // What the probe learned about this compile's dependencies, carried past the
-    // block the probe itself dies in.
-    //
-    // Both readers of it are outside that block: the manifest recorded on a MISS
-    // after the compile, and the one backfilled on a HIT. Both used to parse the
-    // compiler's captured console text instead, and both readings had a locale in
-    // them -- see `RecordManifest` (issue #692).
-    ProbedDependencies probed;
-    {
-        auto probe = Preprocess(record, cmd, argv, reconciler);
-        if (!probe.has_value())
-            return Warn(record, "preprocess failed");
+    CachedCompile run { .record = record,
+                        .cfg = cfg,
+                        .cmd = cmd,
+                        .argv = argv,
+                        .reconciler = reconciler,
+                        .layout = layout,
+                        .relativizedArgs = relativizedArgs,
+                        .compilerBanner = compilerBanner,
+                        .targetTriple = targetTriple,
+                        .toolchainStamp = toolchainStamp,
+                        .workingDirectory = workingDirectory,
+                        .workingDirectoryText = workingDirectoryText,
+                        .checkout = checkout,
+                        .inputFiles = inputFiles.get(),
+                        .witness = witness,
+                        .keyedContent = keyedContent,
+                        .dispatchConfigured = dispatchConfigured };
+    if (auto const keyed = run.ComputeKey(); keyed.decided)
+        return keyed.result;
 
-        // Skip translation units that reference a time/date macro. `__TIME__` /
-        // `__DATE__` / `__TIMESTAMP__` expand to a run-varying (second-granular)
-        // string, so such a TU re-keys on every compile and can never hit —
-        // caching it only churns the store. Preprocessing has already *expanded*
-        // the macro (its name is gone from the output), so we scan the source file
-        // text itself, matching sccache's refusal to cache these. Direct use in the
-        // TU is the overwhelmingly common case; header-introduced use is rare and
-        // its only cost is a permanent miss, never incorrectness.
-        if (SourceReferencesVolatileMacro(cmd.source))
-            return Decline(record, "uses __TIME__/__DATE__/__TIMESTAMP__; not caching (non-deterministic)");
-
-        // The dependency set is reduced to its portable form before it reaches the
-        // key: canonical tokens only, sorted and deduplicated, with toolchain paths
-        // dropped because the compiler identity above already covers them and
-        // hashing them would end cross-machine sharing outright. A relative path is
-        // resolved against the compile's working directory first, so it is
-        // classified by the file it names rather than by how the driver spelled it.
-        // See DependencyProbe.hpp, where each half of that filter is justified.
-        auto dependencies = Cc::KeyDependencySet(probe->dependencyPaths, layout, workingDirectory.string());
-
-        // Both counts, because they answer different questions and only the pair
-        // is diagnostic. An empty set means a moved header cannot re-key — the
-        // property this whole input exists for, failing silently — and "the probe
-        // reported nothing" (a driver that does not report on the preprocess line)
-        // is a different defect from "every reported path was filtered out" (paths
-        // the layout does not recognise as its own). Named for the same reason the
-        // STALE HIT note names its path: otherwise this is a whole investigation.
-        //
-        // And the pair alone stopped being enough. `0 of M` was the fingerprint of
-        // one fault (issue #66's short-name root, where nothing prefix-matches what
-        // the driver echoes back) until issue #65 gave it a second (a drive-relative
-        // path, which is anchored to nothing this machine can place). The reasons
-        // are what tell those apart now; the counts alone told neither (issue #105).
-        // Rendered by DescribeDropped rather than here, because main.cpp is in no
-        // test target. Semicolon-separated from the filesystem-call count, which is
-        // not a path count and must not read as another entry in the list.
-        auto const dropped = Cc::DescribeDropped(dependencies);
-        Note(record.verbose,
-             std::format("dependency set: {} of {} reported path(s) keyed ({}{}{} filesystem call(s))",
-                         dependencies.keyed.size(),
-                         dependencies.Reported(),
-                         dropped,
-                         dropped.empty() ? "" : "; ",
-                         PathResolver().FilesystemCalls()));
-        NoteIfRootsDoNotDescribeCompile(record, cfg, cmd.source, dependencies, reconciler);
-
-        // The one disposition that is not merely a drop. A drive-relative path under
-        // no root is keyed by nothing here and stat'ed by nothing in ReplayGuard, so
-        // a header moved inside it replays a depfile naming a file that is gone
-        // (issue #104). The note above has already said how many there were; this
-        // says what the launcher does about them.
-        //
-        // This is the AUTHORITATIVE ask: it reads what the compiler actually opened,
-        // where the command-line ask near the top of this function depends on
-        // `PathValueFlags()` recognising the flag that carried the path. Read off the
-        // tally rather than re-derived from the paths — `PortableForm` already
-        // classified every one of them, and a second walk asking the same question
-        // is a second place for the answer to drift.
-        if (dependencies.Count(Cc::PathDisposition::DriveRelative) != 0)
-        {
-            return Decline(record,
-                           "a reported dependency path is drive-relative under no root; not caching "
-                           "(neither keyed nor guarded)");
-        }
-
-        // The same hazard reached by a different road, and it has to be its own ask
-        // because `PortableForm` cannot see it: whether bytes are text is a property
-        // of the HOST, and that function is pure. A path the reconciler could not
-        // read went through untranslated, so it prefix-matches no root, keys as
-        // toolchain and is stat'ed by nothing -- a moved header inside it would
-        // replay a stored object under a zero exit code.
-        //
-        // Reachable only on Windows, and there only when a tool wrote a path in
-        // neither UTF-8 nor the console output code page. The recovery is the
-        // console: `chcp 65001` makes `cl` emit UTF-8 and this stops firing.
-        if (reconciler.UnreadablePaths() != 0)
-        {
-            return Decline(record,
-                           "a reported dependency path is not text this host can read; not caching "
-                           "(neither keyed nor guarded) -- try a UTF-8 console code page");
-        }
-
-        // The preprocessed text is MOVED in, not copied: it runs to several
-        // megabytes on a real translation unit, on the hot path of a parallel
-        // build. Nothing moves back out again -- a worker preprocesses a second
-        // time, with the `#line` markers this copy deliberately suppresses -- so
-        // `inputs` dies with the block and the text with it, which is the whole
-        // point of the block.
-        Cc::KeyInputs const inputs {
-            .compilerId = toolchainStamp,
-            .preprocessed = std::move(probe->preprocessed),
-            .relativizedArgs = relativizedArgs,
-            .dependencyPaths = std::move(dependencies.keyed),
-        };
-        key = Cc::ComputeKey(inputs);
-
-        // Moved out AFTER the key is computed, so the key path pays nothing: the
-        // KEYED subset went into `inputs` above as its own copy, and what is left on
-        // the probe is the full list, which only a dispatch reads and which would
-        // otherwise be dropped with the block.
-        if (dispatchConfigured)
-            dispatchDependencies = probe->dependencyPaths;
-
-        // Copied just above rather than moved when a scheduler is configured, and
-        // moved here in every case: two consumers want the same full list, and the
-        // manifest's is the one that runs on every build rather than only on a
-        // distributed one.
-        probed = { .paths = std::move(probe->dependencyPaths), .unreadable = probe->dependenciesUnreadable };
-
-        // The key is taken: the preprocess timer ends HERE, before the T1' snapshot below, so
-        // `--show-stats`' preprocess latency measures what it always measured and the witness's
-        // hashing does not move it for an unnamed reason.
-        record.preprocessMs = MsSince(preprocessStarted);
-
-        // T1': what the key was just taken from. These hashes are what a manifest records.
-        witness.Snapshot(Cc::ProjectDependencyPaths(probed.paths, workingDirectoryText, layout), *inputFiles);
-    }
-
-    // Every manifest this invocation records -- the backfill on a HIT, the one kept when the
-    // object is not stored, and the one after the STORE -- is built from the content the key was
-    // taken from, never from the disk as it stands after the compile (#1650).
-    auto const recordManifest = [&] {
-        return RecordManifest(record,
-                              cfg,
-                              cmd,
-                              layout,
-                              workingDirectory,
-                              relativizedArgs,
-                              toolchainStamp,
-                              probed,
-                              key,
-                              reconciler,
-                              keyedContent);
-    };
-
-    auto const cacheStarted = std::chrono::steady_clock::now();
-
-    // How the fetch ended, for the two questions below: whether a MISS may be
-    // traced, and whether the STORE is worth the transfer. Carried out of the block
-    // rather than a `bool` derived from it, so both put the same question to
-    // `Cc::CacheIsServing` instead of reading a summary somebody has to keep in
-    // step with it. `Transport` is what `CacheOutcome` itself starts on and means
-    // "we never got an answer", so it is the safe thing to hold for the two
-    // statements before the exchange overwrites it -- not a guard for a path that
-    // skips the assignment, because there is none.
-    auto fetchKind = Cc::CacheOutcomeKind::Transport;
-
-    // The parts of the root-bound marker the fetch met when this compile's own copy was
-    // absent; disengaged otherwise. Still a MISS; carried out of the block only so the MISS
-    // it records says why, in the one text its trace and its reason share (`BoundMissReason`).
-    std::optional<Cc::CheckoutParts> boundMiss;
-    // The parts the met marker named, for the STORE: an object stored behind a marker it
-    // met stays bound to them whatever its own scan finds (`PlanStore`). Taken from EVERY
-    // followed marker, not only an absent bound copy: one whose bound value is damaged,
-    // of another generation or stale reaches the STORE too, and a portable store there
-    // would overwrite the marker for every checkout.
-    std::optional<Cc::CheckoutParts> metMarker;
-
-    // FETCH, as a step that can be taken AGAIN: a compile the queue answers `Stored` fetches once more
-    // for the object another launcher has just stored, and that is this same block, not a copy of it.
-    // Decided means the cache settled the invocation -- a hit served, or a decline that compiles with no
-    // STORE -- and `result` is what `RunCached` returns; undecided is a MISS.
-    auto const fetchStep = [&]() -> FetchStep {
-        auto const presented = Tickets(cfg, record.verbose).Present(cfg.addr);
-        auto const outcome =
-            CacheExchange(record, "fetch", cfg.addr, Wire::EncodeFetch(key), presented.credential, BudgetOf(cfg));
-        fetchKind = outcome.kind;
-        record.fetched = fetchKind;
-        // A node nothing reached is told to the launchers after this one, whose compiles may make no
-        // FETCH to learn it from and would otherwise each dial the queue to be told the same thing.
-        if (outcome.kind == Cc::CacheOutcomeKind::Transport && Cc::MarksUnreachable(outcome.transportFailure))
-        {
-            auto const memoFiles = Cc::MakeDiskFiles();
-            Cc::FileMemoStore memoStore { Cc::ReachabilityMemoPath(), *memoFiles };
-            core::platform::SystemWallClock const wallClock;
-            auto memo = Cc::ReachabilityMemo::Load(memoStore);
-            if (Cc::RememberUnreachedFetch(
-                    memo, AdmissionEndpoint(cfg), cfg.addr, outcome.kind, outcome.transportFailure, wallClock.now()))
-                memo.SaveIfChanged(memoStore);
-        }
-        if (!Cc::CacheIsServing(fetchKind))
-        {
-            // Told apart, because an operator fixes them in different places. A
-            // refusal is the daemon answering, so its own code and words become the
-            // reason -- `--show-stats` then names a version mismatch instead of
-            // lumping it in with an unreachable daemon. A transport failure has no
-            // answer to quote: an endpoint that refused the connection, a peer that
-            // broke mid-reply, or the budget running out, all under one FIXED
-            // string so the tally gets a row per cause rather than one per compile.
-            if (fetchKind == Cc::CacheOutcomeKind::Rejected)
-            {
-                // A refusal THIS exchange's missing ticket explains is recorded under WHY no
-                // ticket was presented -- the thing to fix -- rather than the refusal it caused.
-                WarnAndCarryOn(record, Cc::RecordedReason(outcome, presented.missing));
-
-                // A refusal that will be true of every unit of this build is said out
-                // loud, once per interval, whatever the verbosity (#181). The tally
-                // above is correct and nobody reads it: #815 is a whole team building
-                // through a cache answering "no" to every request for weeks, with a
-                // `--show-stats` reason as the only trace.
-                //
-                // Throttled through the state directory rather than printed per unit,
-                // because a line per translation unit is thousands of lines and gets
-                // filtered -- which is worse than silence, since it buries everything
-                // else with it.
-                if (auto const* const row = Cc::PersistentRefusalFor(outcome.code);
-                    row != nullptr
-                    && Cc::ShouldAnnounceRefusal(Cc::StateDirectory(),
-                                                 cfg.addr,
-                                                 outcome.code,
-                                                 std::chrono::system_clock::now(),
-                                                 *Cc::MakeDiskFiles()))
-                    std::cerr << Cc::RefusalNoticeLine(cfg.addr, *row, outcome.message) << '\n';
-            }
-            else
-                WarnAndCarryOn(record, "fetch exchange failed");
-        }
-        else if (outcome.IsHit())
-        {
-            // A marker is followed to THIS checkout's bound key here, and only here --
-            // `ResolveFetchedObject` is the one place a fetched object value is
-            // classified, so no path can write a marker to disk as an object file.
-            auto const fetched = Cc::ResolveFetchedObject(outcome.value, key, checkout, BoundFetch(record, cfg));
-            metMarker = fetched.markerParts;
-            if (auto const* error = std::get_if<ProtocolError>(&fetched.answer))
-            {
-                NoteUndecodableValue(record, "the fetched object", *error);
-                // CARRY ON rather than return, and that is what makes a generation
-                // bump cost one cold cache instead of a permanent outage.
-                //
-                // `Warn` returns `nullopt`, and a `nullopt` out of `RunCached` reaches
-                // `RunPassthrough` -- a plain compile with NO STORE. The key is
-                // unchanged by a generation bump (only `objkey-v*` moves a key, and a
-                // generation is deliberately not that), so the refused value stays
-                // under the very key this build just computed, is fetched and refused
-                // again on every later build, and is never overwritten. After an
-                // upgrade that is EVERY key in the cache: a fleet that never caches
-                // anything again, presenting as a slow build with a `--show-stats`
-                // reason nobody reads.
-                //
-                // Falling through reaches the MISS path, whose STORE overwrites this
-                // key with a value of this generation -- which is exactly what the
-                // STALE-hit branch below already does, and for the same reason stated
-                // there. `WarnAndCarryOn` is the spelling the fetch-failure arms above
-                // use; the bucket an operator sees is unchanged.
-                WarnAndCarryOn(record, DecodeFailureReason(*error));
-            }
-            else if (std::holds_alternative<Cc::BoundAbsence>(fetched.answer))
-            {
-                // The object under this key names paths this compile does not share. A MISS, and
-                // the STORE after the compile writes this checkout's own copy under its
-                // own bound key -- which is what makes the next compile here a hit.
-                boundMiss = fetched.markerParts;
-            }
-            else if (auto const* decoded = std::get_if<CompileValue>(&fetched.answer))
-            {
-
-                // HIT: check what the value asserts, then write the object, reproduce
-                // the depfile, and replay the streams (all with paths localized).
-                //
-                // Reproducing the depfile is not optional: skipping it silently breaks
-                // incremental builds, because Ninja/Make would see no header
-                // dependencies for this TU and stop rebuilding it when they change.
-                auto const materialized =
-                    MaterializeHit(record, cmd, *decoded, layout, workingDirectory, cfg.showIncludesMarker);
-
-                // What happens next is read from `CacheDecisionTable` rather than
-                // spelled here, and that is the whole of #909: this file is in no test
-                // target, so a three-way branch written out here is one no case can
-                // reach. The table is exercised at every state by
-                // `CacheDecision_test.cpp`; what is left in this file is the call.
-                //
-                // Not a `switch` with a `default` either -- on this decision the
-                // default that reads as safest is `CompileWithoutStoring`, which is the
-                // permanently-dead-cache behaviour a generation bump would hit.
-                auto const action = Cc::DecideCacheAction(
-                    Cc::ObserveFetch(fetchKind, /*isHit=*/true, /*decoded=*/true, materialized.disposition));
-
-                if (!Cc::CompilesForReal(action))
-                {
-                    record.valueBytes = decoded->objectBlob.size();
-                    record.cacheMs = MsSince(cacheStarted);
-
-                    // Backfill the direct-mode manifest from the hit we just served.
-                    //
-                    // Without this, direct mode could never populate on a cache that already
-                    // holds preprocessed-key entries: manifests would only ever be written by
-                    // the miss path, so a warm cache would preprocess forever.
-                    //
-                    // From THIS machine's probe rather than from the value's replayed
-                    // /showIncludes text, which is what it used to read. Both name the same
-                    // headers, but the replayed text was written by the producer's compiler
-                    // in the producer's language, so parsing it made the backfill work only
-                    // between machines that happened to share a locale (issue #692). The
-                    // probe already ran, so this still costs no compiler invocation.
-                    //
-                    // The hit is served whatever moved: its object was compiled from exactly the
-                    // text this key hashes. Only a manifest built from hashes that may not
-                    // describe that text is refused (#1650).
-                    if (BackfillsManifest(cfg, witness, record.verbose))
-                        recordManifest();
-
-                    // The preprocessed-key hit, verified exactly as the direct-mode one
-                    // is. Both paths, because a wrong object served through either is the
-                    // same defect and a feature that covered one would be a feature an
-                    // operator could not rely on (#423).
-                    return FetchStep { .decided = true, .result = FinishServedHit(record, cfg, cmd, argv, key, fetched) };
-                }
-                if (!Cc::StoresResult(action))
-                {
-                    // The object could not be written, so the cache is not usable on this
-                    // machine and a STORE would fail the same way -- the one observation that
-                    // skips the store (an unwritable DEPFILE compiles as a miss would). Named
-                    // at the site, because `check-cache-flow-continuations.sh` classifies
-                    // this call by the observation it spells. `Warn` returns nullopt, which
-                    // reaches `RunPassthrough` -- a plain compile with no store, which is
-                    // correct HERE and catastrophic one branch up, where the value is merely
-                    // of a generation this build cannot read.
-                    return FetchStep { .decided = true,
-                                       .result =
-                                           Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable)) };
-                }
-                // Stale: the object is fine but the dependency record it carries is not
-                // true here -- or the depfile this build names could not be written, which
-                // says nothing against the entry -- so fall through and compile for real. The STORE that follows
-                // overwrites this very key with a correct one, which is what repairs the
-                // entry rather than leaving it to poison every later build.
-                //
-                // And if that STORE is refused for any reason, the build still converges:
-                // the real compiler ran, so a correct depfile is on disk regardless, and
-                // the cost degrades to a permanent miss for this key.
-            }
-        }
-        // MISS — fall through to compile. A refused generation arrives here too,
-        // which is what turns a bump into one cold cache rather than a dead one.
-        return FetchStep {};
-    };
-    if (auto const first = fetchStep(); first.decided)
+    run.cacheStarted = std::chrono::steady_clock::now();
+    if (auto const first = run.Fetch(); first.decided)
         return first.result;
-    record.cacheMs = MsSince(cacheStarted);
-    // Only a daemon that answered produces a MISS. A refusal and a transport
-    // failure have already recorded themselves as fall-backs, and tracing a MISS
-    // over the top would clear the reason `--show-stats` ranks and report a broken
-    // cache as a cold one -- the exact conflation `CacheOutcomeKind` was split to
-    // end, arriving by a different road.
-    if (Cc::CacheIsServing(fetchKind))
-    {
-        // Which parts, from the marker -- and no claim about WHICH of them differs, which
-        // this end cannot know: the trace and the tallied reason say the same thing.
-        TraceOutcome(
-            record, Cc::Outcome::Miss, key, boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
-        // A miss carrying a reason, as a crossed reply is: the cache answered honestly, and
-        // what it holds under this key names paths this compile does not share -- or this
-        // compile's own copy was evicted. Worth ranking, because a translation unit that is a
-        // root-bound miss everywhere is one whose `__FILE__` or `source_location` keeps it
-        // from ever being shared, and that is fixed in the source rather than in the cache.
-        if (boundMiss.has_value())
-            record.outcomeDetail = Cc::BoundMissReason(*boundMiss);
-    }
-
-    // MISS: ask the fleet queue where this compile runs, then run it there (#1728).
-    //
-    // A dispatched compile is shaped to look exactly like a local one -- object on
-    // disk at cmd.objPath, dependency record written, streams in hand -- so
-    // everything in `finishMiss` is unchanged and cannot tell the difference. That
-    // is deliberate: the STORE, the manifest and the statistics all have one path,
-    // and a second one would be a second place for them to diverge.
-    //
-    // Whatever the queue answers -- or does not -- ends in the same `finishMiss`, and the queue is
-    // told AFTER it: the STORE must be visible before the compiles waiting on this key are woken.
-    auto const finishMiss = [&](Cc::CompileRun& run, bool& stored) -> int {
-        // Always surface the compiler's output on its true streams and its exit code.
-        //
-        // These are COPIES, and deliberately so: the store below re-reads `run.out` and `run.err`
-        // untouched. What a build system reads has its note paths collapsed here; what the cache
-        // stores is collapsed by the SERVER, span by span, as it canonicalizes (generations 6 and 7,
-        // `CanonicalizeRegion`) -- one collapse, `PathCanon::CollapseRelativeSegments`, on both sides.
-        auto const textGrammar = Cc::StreamGrammar(cmd.flavor);
-        auto const replayOut = Cc::CollapseNotePaths(run.out, textGrammar, cfg.showIncludesMarker);
-        auto const replayErr = Cc::CollapseNotePaths(run.err, textGrammar, cfg.showIncludesMarker);
-        ReplayStreams(replayOut, replayErr);
-        // A spawn failure reports `NotSpawned`, which a POSIX exit status truncates to 255 —
-        // an arbitrary code no build system can interpret. Normalize it the same way
-        // the fall-back path does.
-        int const code = run.exitCode == Cc::NotSpawned ? 1 : run.exitCode;
-        if (code != 0)
-            return code; // do not cache a failed compile
-
-        // Nothing more is offered to a daemon that refused this launcher, or that was
-        // never reached: the fetch above established it, and everything below exists
-        // only to store -- reading the object back, reconciling the captured regions,
-        // encoding the value and pushing it, megabytes per translation unit, spent to
-        // be told the same thing again.
-        //
-        // It is also what keeps the fall-through above from costing an extra connect
-        // per translation unit against a wrong address. The connect BUDGET, and why
-        // this is not a claim that one connect is all a dead cache costs, are in
-        // .agent/rules/distributed-compilation.md.
-        if (!Cc::CacheIsServing(fetchKind))
-        {
-            // Worded so it is true of BOTH kinds. A refusal *is* an answer -- the daemon
-            // spoke and declined -- and saying it "did not answer" would send an
-            // operator to look for an unreachable daemon that is in fact running and
-            // rejecting, which is the rule this tree records about reporting a refusal
-            // under the wrong reason. The fall-back reason above already names which.
-            Note(record.verbose, "the cache did not serve the fetch; not offering this object to it");
-            return code;
-        }
-
-        // T2 (#1650). The object belongs to the key only if nothing the key was taken from moved
-        // while the compile -- local or dispatched, whose second preprocess is inside this window --
-        // was reading it.
-        auto const moved = witness.AfterCompile(
-            Cc::ProjectDependencyPaths(ManifestDependencies(probed, cmd, reconciler), workingDirectoryText, layout),
-            *inputFiles);
-        auto permit = GuardStore(record, cfg, moved, recordManifest);
-        if (!permit)
-            return code;
-
-        auto const objectBytes = Cc::ReadFileBytes(cmd.objPath);
-        if (!objectBytes.has_value())
-        {
-            // The compile itself succeeded, so this stays a MISS: only the caching
-            // of it failed. Note() rather than Warn() keeps the recorded outcome.
-            Note(record.verbose, "object missing after compile; not caching");
-            return code;
-        }
-
-        CompileValue value;
-        value.objectBlob = *objectBytes;
-        // Two regions, one per stream, in a fixed order (0=stdout, 1=stderr) so the
-        // hit path replays each on its correct channel. Measured (#825): BOTH `cl` and
-        // `clang-cl` emit /showIncludes on stdout under `/c` and on stderr under
-        // `/EP` -- the channel follows the FLAG, not the driver.
-        // `.agent/rules/compile-cache.md` holds the table and is where it stays; this
-        // comment must not become a second home for it.
-        //
-        // Which is why nothing here depends on the answer, and the measurement says
-        // that was the right call rather than a lucky one: a stored value's notes are
-        // on stdout when a compile produced it and on stderr when a `/EP` run did, so
-        // there is no single stream to prefer. We tag BOTH regions with the
-        // ShowIncludes grammar, and a non-matching line in either is preserved
-        // verbatim.
-        //
-        // Both are reconciled first, and only the STORED copy is: ReplayStreams above
-        // has already passed the compiler's own bytes through untouched. The daemon
-        // canonicalizes a STORE against the roots this launcher sends, which are the
-        // AS-GIVEN ones — so a region still carrying a spelling the driver resolved
-        // some other way would match neither root and be stored with this machine's
-        // absolute paths in it. Reconciling here is what puts the two in one spelling;
-        // sending the resolved roots instead would be the other way to do it, and it
-        // is the way that breaks the replayed depfile (see RootReconciler).
-        //
-        // The MARKER is normalized before either of those, and it has to be first: the
-        // grammar finds a note by its prefix, so a region still carrying a localized one
-        // has no path spans as far as the reconciler or the daemon is concerned, and the
-        // value is stored with this machine's absolute paths in it -- #229 reached
-        // through a language pack rather than through a missing canonicalizer (#879).
-        // Normalizing here rather than on a server is forced: only this machine knows
-        // what language its own notes are in.
-        //
-        // `cfg.showIncludesMarker` is what this build believes its notes carry. On a
-        // dispatched compile that is a FACT -- the notes were synthesised with it a few
-        // hundred lines up -- and on a local one it is the operator's answer, or the
-        // English default when nobody said otherwise. The unset localized case is
-        // therefore still not canonicalized, and cannot be until the prefix is
-        // discovered from the compiler (#878); it is unchanged rather than worsened,
-        // because an unmatched marker rewrites nothing.
-        auto const storedOut = PathCanon::NormalizeIncludeNoteMarker(run.out, cfg.showIncludesMarker);
-        auto const storedErr = PathCanon::NormalizeIncludeNoteMarker(run.err, cfg.showIncludesMarker);
-        auto const includeTextOut = reconciler.Region(storedOut, textGrammar);
-        auto const includeTextErr = reconciler.Region(storedErr, textGrammar);
-        value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextOut });
-        value.textRegions.push_back({ .grammar = textGrammar, .bytes = includeTextErr });
-
-        // Region 2, when present, is the GNU depfile the compile just wrote. It is
-        // tagged with the depfile grammar so the daemon canonicalizes the header
-        // paths inside it — a depfile full of this machine's absolute paths would be
-        // useless (and wrong) when replayed on another checkout.
-        if (auto const depText = ReadDepFile(cmd))
-            value.textRegions.push_back(
-                { .grammar = PathCanon::Grammar::GccDepfile,
-                  .bytes = reconciler.Region(*depText, PathCanon::Grammar::GccDepfile, Cc::ParseDepFileTargets(*depText)) });
-
-        // Asked AGAIN, after the regions above, and not only on the key path. Those
-        // calls run the reconciler over every path span the grammars find in the
-        // captured streams -- a wider set than the dependency list, and one the earlier
-        // ask therefore cannot have covered. A span this host could not read went into
-        // these regions untranslated, so the value would carry a spelling no consumer
-        // can canonicalize, localize or check.
-        if (reconciler.UnreadablePaths() != 0)
-        {
-            Note(record.verbose,
-                 "a captured region names a path that is not text this host can read; not caching "
-                 "-- try a UTF-8 console code page");
-            return code;
-        }
-
-        // The dependency root is tokenized HERE, and every other root by the server. A server
-        // canonicalizes with the two roots the STORE frame carries and knows no third; this
-        // machine's dependency cache would otherwise reach the value as an absolute path, and a
-        // hit on a machine whose cache sits in another home would replay a depfile naming headers
-        // that are not there -- refused as stale, so the shared key would buy nothing. The
-        // server leaves a `<DEPROOT>` span alone, and the hit localizes it against its own root.
-        if (!layout.dependencyRoot.empty())
-        {
-            PathCanon::Layout const dependencyOnly { .sourceRoot = {},
-                                                     .buildTree = {},
-                                                     .dependencyRoot = layout.dependencyRoot };
-            for (auto& region: value.textRegions)
-                region.bytes = PathCanon::CanonicalizeRegion(region.bytes, region.grammar, dependencyOnly);
-        }
-
-        auto const encoded = EncodeCompileValue(value);
-        if (!Cc::IsStorableSize(encoded.size(), cfg.maxStoreBytes))
-        {
-            // Still a MISS, and still a successful compile: the object on disk is
-            // the real one. Only the caching of it is declined, and declined here
-            // rather than by the daemon so the build does not spend the transfer to
-            // be refused on every rebuild of this translation unit.
-            Note(record.verbose,
-                 std::format("value {} bytes exceeds {}={}; not caching",
-                             encoded.size(),
-                             Cc::EnvName::MaxStoreBytes,
-                             cfg.maxStoreBytes));
-            return code;
-        }
-
-        stored = StoreCompiledObject(std::move(*permit), record, cfg, key, value.objectBlob, encoded, checkout, metMarker);
-
-        // Record the direct-mode manifest so the NEXT compile of this TU can reach the
-        // object without preprocessing. The include set comes from the /showIncludes
-        // output the compile just produced, so this costs no extra compiler run.
-        //
-        // The manifest holds a POINTER to the object's ordinary key, not a second copy
-        // of the object: the two keys answer different questions (one from preprocessed
-        // text, one from header hashes), but storing the bytes under both would double
-        // the cached volume, and because L1 keeps values uncompressed that doubling
-        // lands on RAM where compression cannot help. A direct hit therefore costs one
-        // extra fetch to follow the pointer — see DirectManifest::objectKey.
-        if (cfg.direct)
-            recordManifest();
-        return code;
-    };
-
-    // The queue is asked where this compile runs. WHAT it answers is `Cc::RunMiss`'s to act on, in a
-    // file a test reaches; this is HOW each step is performed.
-    //
-    // A plan, when there is one, is made BEFORE the queue is asked: a dispatchable request names its
-    // toolchain, and the leader places it by that. A command line a worker would not take, or a
-    // toolchain with no usable fingerprint, is `LocalOnly` -- it still takes a slot and its memory.
-    //
-    // A refusal the plan makes is recorded at once only when a scheduler is NAMED. With none named the
-    // queue asked is the cache's own node, which may front no fleet at all; the refusal is then held,
-    // and recorded only once that queue GRANTS something -- an admission that fails open leaves the
-    // record `NotConfigured`, the truth about a host whose queue never answered.
-    std::optional<DispatchPlan> plan;
-    std::optional<PlanRefusal> pendingRefusal;
-    if (dispatchConfigured)
-    {
-        auto planned = PlanDispatch(cfg, cmd, argv, compilerBanner, targetTriple);
-        if (planned.has_value())
-            plan = std::move(*planned);
-        else if (DispatchConfigured(cfg))
-            RecordPlanRefusal(record, planned.error());
-        else
-            pendingRefusal = std::move(planned.error());
-    }
-
-    // The `<SRCROOT>`-relative source, which keys the leader's shape estimate. Absent is not an error: the
-    // estimate then rests on the key alone.
-    auto const sourceToken = Cc::CanonicalSourceToken(cmd.source, layout, workingDirectoryText);
-    std::string const admissionSource = sourceToken.has_value() ? *sourceToken : std::string {};
-
-    auto const admitFiles = Cc::MakeDiskFiles();
-    Cc::FileMemoStore admitMemoStore { Cc::ReachabilityMemoPath(), *admitFiles };
-    core::platform::SystemWallClock const admitClock;
-    auto admitMemo = Cc::ReachabilityMemo::Load(admitMemoStore);
-    auto const unreachedWorkers = admitMemo.Fresh(Cc::MemoKind::WorkerUnreached, admitClock.now());
-    std::vector<std::string_view> const excludedWorkers { unreachedWorkers.begin(), unreachedWorkers.end() };
-    auto const treeLabel = Cc::TreeLabelOf(workingDirectoryText, cfg.srcRoot);
-    auto const acceptedCodecs = Cc::AvailableCodecs();
-    Wire::AdmitRequest const admit { .kind = plan.has_value() ? Wire::AdmitKind::Dispatchable : Wire::AdmitKind::LocalOnly,
-                                     .fingerprint =
-                                         plan.has_value() ? std::string_view { plan->fingerprint } : std::string_view {},
-                                     .cacheKey = key,
-                                     .sourcePath = admissionSource,
-                                     .treeLabel = treeLabel,
-                                     .storable = true,
-                                     .acceptedCodecs = acceptedCodecs,
-                                     .excluded = excludedWorkers,
-                                     // What a leader with no worker for the fingerprint names it by; withheld when it
-                                     // is not text the leader would keep.
-                                     .toolchainLabel = plan.has_value() ? Cc::SendableToolchainLabel(plan->toolchainLabel)
-                                                                        : std::string_view {} };
-
-    Cc::MissSeams const seams {
-        .open =
-            [&](std::optional<std::string_view> failedWorker) {
-                if (!failedWorker.has_value())
-                    return OpenAdmission(record, cfg, fetchKind, admit, admitMemo);
-                // A worker failed this compile: it runs HERE now, so it is asked for as a local compile, and
-                // the worker that failed it is excluded along with the ones the memo already names.
-                auto excludedAgain = excludedWorkers;
-                excludedAgain.push_back(*failedWorker);
-                auto here = admit;
-                here.kind = Wire::AdmitKind::LocalOnly;
-                here.excluded = excludedAgain;
-                return OpenAdmission(record, cfg, fetchKind, here, admitMemo);
-            },
-        .serveStored =
-            [&]() {
-                auto const step = fetchStep();
-                if (!step.decided)
-                    return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 };
-                return step.result.has_value()
-                           ? Cc::StoredFetch { .kind = Cc::StoredFetchKind::Served, .code = *step.result }
-                           : Cc::StoredFetch { .kind = Cc::StoredFetchKind::Declined, .code = 0 };
-            },
-        .granted =
-            [&](Cc::AdmitTicket const& ticket) {
-                // A queue answered: a refusal the plan held is now about a fleet that exists.
-                if (pendingRefusal.has_value())
-                    RecordPlanRefusal(record, *std::exchange(pendingRefusal, std::nullopt));
-                // A dispatchable request the fleet placed nowhere is recorded as the refusal the LEASE
-                // path records for the same fleet, in its words (Ruling 11).
-                if (!plan.has_value() || ticket.kind != Wire::GrantKind::Local)
-                    return;
-                if (auto const note = Cc::ExplainLocalGrant(ticket.localReason, plan->toolchainLabel); note.has_value())
-                    (void) DeclineDispatch(record, note->recording, note->line);
-            },
-        .dispatchAdmitted = [&](Cc::AdmitTicket const& ticket) -> Cc::AdmittedDispatch {
-            if (!plan.has_value())
-                return {};
-            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
-        },
-        // Today's path when no queue answers: a LEASE, which needs a scheduler named.
-        .dispatchUnadmitted = [&]() -> std::optional<Cc::CompileRun> {
-            if (!plan.has_value() || !DispatchConfigured(cfg))
-                return std::nullopt;
-            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}).run;
-        },
-        .compileLocal = [&]() { return RunCaptureSplit(argv); },
-        .finish = finishMiss,
-        .failedOpen =
-            [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, admitMemo, admitMemoStore, reason); },
-    };
-    auto const report = Cc::RunMiss(seams);
-    record.queuedMs = report.queuedMs;
-    record.peakMemoryBytes = report.peakMemoryBytes;
-    // Disengaged: the cache, asked again after a `Stored` grant, settled this as a plain compile with no
-    // STORE -- the same answer the first FETCH gives as `Warn`'s `nullopt`.
-    return report.code;
+    run.TraceMiss();
+    return run.AdmitAndCompile();
 }
 
 } // namespace
