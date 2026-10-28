@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -95,7 +96,8 @@ struct Fleet
     Ticket Admit(std::string key,
                  Wire::AdmitKind kind = Wire::AdmitKind::Dispatchable,
                  bool storable = false,
-                 std::function<CallerContext()> regate = {})
+                 std::function<CallerContext()> regate = {},
+                 std::vector<std::string> excluded = {})
     {
         if (!regate)
             regate = [] {
@@ -111,7 +113,7 @@ struct Fleet
                                                                      .treeLabel = "tree",
                                                                      .storable = storable,
                                                                      .acceptedCodecs = {},
-                                                                     .excluded = {} });
+                                                                     .excluded = std::move(excluded) });
         REQUIRE(ticket.has_value());
         return *ticket;
     }
@@ -169,6 +171,12 @@ TEST_CASE("SchedulerAdmission.worker-grant-takes-a-signed-lease-and-a-job", "[di
     CHECK(claims->endpoint == WorkerEndpoint);
     CHECK(claims->fingerprint == Toolchain);
     CHECK(claims->workerKey == MachineOf(fleet.workerKey.PublicKey()));
+    // Beside the token, from the same lease and worker: the key the reply is sealed under and how long
+    // the lease lives, so the client reads neither out of claims it cannot verify (Ruling 13).
+    CHECK(std::ranges::equal(grant.workerKey, fleet.workerKey.PublicKey()));
+    CHECK(grant.lifetime > 0ms);
+    CHECK(claims->expiresAt == fleet.wallClock.now() + grant.lifetime);
+    CHECK(grant.reason == Wire::LocalGrantReason::Asked);
 
     CHECK(fleet.Leases() == 1);
     CHECK(fleet.Jobs(worker) == 1);
@@ -255,7 +263,78 @@ TEST_CASE("SchedulerAdmission.a-worker-that-proved-no-key-is-not-placed-on", "[d
     auto const verdicts = fleet.service.PumpAdmission();
     REQUIRE(verdicts.size() == 1);
     CHECK(GrantOf(verdicts[0]).kind == Wire::GrantKind::Local);
+    // Nothing the queue could place on serves the toolchain, which is what the launcher is told.
+    CHECK(GrantOf(verdicts[0]).reason == Wire::LocalGrantReason::NoWorker);
     CHECK(fleet.Leases() == 0);
+}
+
+TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why", "[distributed][admission][scheduler]")
+{
+    // Ruling 11: "no worker serves this" and "every worker was busy" are opposite fixes, and the
+    // launcher records them as the LEASE path's `NoWorker` and `NoCapacity` rows -- so the grant says which.
+    Fleet fleet;
+    fleet.Report(fleet.service.OwnMachineId());
+    auto expected = Wire::LocalGrantReason::Asked;
+    auto kind = Wire::AdmitKind::Dispatchable;
+    std::vector<std::string> excluded;
+
+    SECTION("no worker serves the toolchain")
+    {
+        expected = Wire::LocalGrantReason::NoWorker;
+    }
+    SECTION("the only worker serving it is excluded")
+    {
+        (void) fleet.RegisterWorker();
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+        excluded.emplace_back(WorkerEndpoint);
+        expected = Wire::LocalGrantReason::AllExcluded;
+    }
+    SECTION("a worker serves it and had no room")
+    {
+        // Its machine reported nothing, so the queue may not charge it.
+        (void) fleet.RegisterWorker();
+        expected = Wire::LocalGrantReason::NoRoom;
+    }
+    SECTION("a request that asked to run here has nothing to explain")
+    {
+        kind = Wire::AdmitKind::LocalOnly;
+        expected = Wire::LocalGrantReason::Asked;
+    }
+
+    (void) fleet.Admit("k1", kind, false, {}, excluded);
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    auto const grant = GrantOf(verdicts[0]);
+    CHECK(grant.kind == Wire::GrantKind::Local);
+    CHECK(grant.reason == expected);
+    CHECK(grant.workerKey.empty());
+    CHECK(grant.lifetime == 0ms);
+}
+
+TEST_CASE("SchedulerAdmission.local-grant-reason-reads-the-registry", "[distributed][admission][scheduler]")
+{
+    auto const worker = [](std::string fingerprint, std::string endpoint, std::string key) {
+        WorkerInfo info;
+        info.fingerprint = std::move(fingerprint);
+        info.endpoint = std::move(endpoint);
+        info.identityKey = std::move(key);
+        return info;
+    };
+    std::vector<WorkerInfo> const live { worker("gcc-14", "a:1", "ka"),
+                                         worker("gcc-14", "b:1", "kb"),
+                                         worker("clang-19", "c:1", "kc"),
+                                         worker("msvc", "d:1", "") };
+    std::vector<std::string> const none;
+    std::vector<std::string> const oneOfTwo { "a:1" };
+    std::vector<std::string> const both { "a:1", "b:1" };
+
+    CHECK(LocalGrantReasonOf(live, "gcc-14", none) == Wire::LocalGrantReason::NoRoom);
+    CHECK(LocalGrantReasonOf(live, "gcc-14", oneOfTwo) == Wire::LocalGrantReason::NoRoom);
+    CHECK(LocalGrantReasonOf(live, "gcc-14", both) == Wire::LocalGrantReason::AllExcluded);
+    CHECK(LocalGrantReasonOf(live, "icc", none) == Wire::LocalGrantReason::NoWorker);
+    // A worker that proved no identity is one the queue never places on, so it serves nobody.
+    CHECK(LocalGrantReasonOf(live, "msvc", none) == Wire::LocalGrantReason::NoWorker);
+    CHECK(LocalGrantReasonOf({}, "gcc-14", none) == Wire::LocalGrantReason::NoWorker);
 }
 
 TEST_CASE("SchedulerAdmission.a-worker-gone-before-its-grant-sends-the-ticket-to-the-front",

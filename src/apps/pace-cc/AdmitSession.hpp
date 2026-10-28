@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <core/platform/Clock.hpp>
 
@@ -26,6 +27,14 @@ struct AdmitTicket
     CompileCacheWire::CodecList workerCodecs; ///< What that worker can decode.
     std::uint64_t chargedBytes {};            ///< The memory estimate the leader charged for this admission.
     std::uint64_t queuedMs {};                ///< How long the request waited in the queue.
+    /// How long a `Worker` grant lives from `receivedAt`, as the leader minted its token; zero when the
+    /// grant named none. What bounds the admitted compile on this side (R2).
+    std::chrono::milliseconds lifetime {};
+    /// The identity key of the worker a `Worker` grant names, as the leader relayed it beside the token:
+    /// what the compile reply must be sealed under (W-4). Empty otherwise.
+    std::vector<std::byte> workerKey;
+    /// Why a dispatchable request was granted `Local`; `Asked` for every other grant.
+    CompileCacheWire::LocalGrantReason localReason {};
     /// When THIS side received the grant, on a monotonic clock (R2).
     ///
     /// A grant's age is measured from here and never from when the launcher asked: a request that

@@ -6052,12 +6052,16 @@ TEST_CASE("An ADMIT payload this build cannot read is refused, never clamped", "
 
 TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admission]")
 {
+    auto const workerKey = std::vector<std::byte>(IdentityPublicKeyBytes, std::byte { 0x5A });
     auto const sent = AdmitGrant { .kind = GrantKind::Worker,
                                    .endpoint = "10.0.0.7:6676",
                                    .leaseToken = "a-lease-token-of-a-realistic-length",
                                    .workerCodecs = { 2, 1 },
                                    .chargedBytes = 0x0000'0001'2345'6789ULL,
-                                   .queuedMs = 0x0000'0000'0000'1F40ULL };
+                                   .queuedMs = 0x0000'0000'0000'1F40ULL,
+                                   .lifetime = std::chrono::milliseconds { 0x0001'D4C0 },
+                                   .workerKey = workerKey,
+                                   .reason = LocalGrantReason::Asked };
     // The encoder and the decoder share one arity.
     CHECK(Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent))).size() == AdmitGrantFieldCount);
     auto const back = DecodeAdmitGrant(EncodeAdmitGrant(sent));
@@ -6068,18 +6072,69 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
                                 .leaseToken = "a-lease-token-of-a-realistic-length",
                                 .workerCodecs = { 2, 1 },
                                 .chargedBytes = 0x0000'0001'2345'6789ULL,
-                                .queuedMs = 0x0000'0000'0000'1F40ULL });
+                                .queuedMs = 0x0000'0000'0000'1F40ULL,
+                                .lifetime = std::chrono::milliseconds { 0x0001'D4C0 },
+                                .workerKey = workerKey,
+                                .reason = LocalGrantReason::Asked });
 
     SECTION("a local and a stored grant carry no endpoint")
     {
         for (auto const kind: { GrantKind::Local, GrantKind::Stored })
         {
-            auto const bare = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant {
-                .kind = kind, .endpoint = {}, .leaseToken = {}, .workerCodecs = {}, .chargedBytes = 5, .queuedMs = 6 }));
+            auto const bare = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant { .kind = kind,
+                                                                             .endpoint = {},
+                                                                             .leaseToken = {},
+                                                                             .workerCodecs = {},
+                                                                             .chargedBytes = 5,
+                                                                             .queuedMs = 6,
+                                                                             .lifetime = {},
+                                                                             .workerKey = {},
+                                                                             .reason = LocalGrantReason::Asked }));
             REQUIRE(bare.has_value());
             CHECK(Unwrap(bare).kind == kind);
             CHECK(Unwrap(bare).endpoint.empty());
+            CHECK(Unwrap(bare).workerKey.empty());
         }
+    }
+    SECTION("a local grant says why a dispatchable request did not go to a worker")
+    {
+        for (auto const reason: { LocalGrantReason::NoWorker, LocalGrantReason::AllExcluded, LocalGrantReason::NoRoom })
+        {
+            auto const local = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant { .kind = GrantKind::Local,
+                                                                              .endpoint = {},
+                                                                              .leaseToken = {},
+                                                                              .workerCodecs = {},
+                                                                              .chargedBytes = 5,
+                                                                              .queuedMs = 6,
+                                                                              .lifetime = {},
+                                                                              .workerKey = {},
+                                                                              .reason = reason }));
+            REQUIRE(local.has_value());
+            CHECK(Unwrap(local).reason == reason);
+        }
+    }
+    SECTION("a reason past the last enumerator is refused")
+    {
+        auto payload = EncodeAdmitGrant(sent);
+        // The reason is the last field, `[u32 length=1][reason]`, so it is the final byte.
+        payload.back() = static_cast<std::byte>(LocalGrantReason::Last);
+        CHECK_FALSE(DecodeAdmitGrant(payload).has_value());
+    }
+    SECTION("a worker key of any width but a key's is refused")
+    {
+        auto const fields = Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent)));
+        std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
+        auto const shortKey = std::vector<std::byte>(IdentityPublicKeyBytes - 1, std::byte { 1 });
+        parts[7] = shortKey;
+        CHECK_FALSE(DecodeAdmitGrant(WireFields::Encode(WireFields::FieldList { parts })).has_value());
+    }
+    SECTION("a lifetime that is not four bytes is refused")
+    {
+        auto const fields = Unwrap(WireFields::SplitAll(EncodeAdmitGrant(sent)));
+        std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
+        auto const wide = EncodeU64Field(7);
+        parts[6] = wide;
+        CHECK_FALSE(DecodeAdmitGrant(WireFields::Encode(WireFields::FieldList { parts })).has_value());
     }
     SECTION("a kind past the last enumerator is refused")
     {
@@ -6223,7 +6278,10 @@ TEST_CASE("Decoded admission records own their bytes", "[wire][admission]")
                                                                .leaseToken = "a-lease-token-over-the-sso-buffer",
                                                                .workerCodecs = { 1 },
                                                                .chargedBytes = 1,
-                                                               .queuedMs = 2 }));
+                                                               .queuedMs = 2,
+                                                               .lifetime = std::chrono::milliseconds { 3 },
+                                                               .workerKey = {},
+                                                               .reason = LocalGrantReason::Asked }));
         auto report =
             MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} };
         report.peaks.emplace_back(EstimateKeyFields { std::string { LongKey }, path, "a-toolchain-fingerprint-over-sso" },
@@ -6271,6 +6329,12 @@ TEST_CASE("The admission enums have their specified bytes", "[wire][admission]")
     CHECK(static_cast<std::uint8_t>(SettleOutcome::Failed) == 2);
     CHECK(static_cast<std::uint8_t>(SettleOutcome::WorkerRefused) == 3);
     CHECK(static_cast<std::uint8_t>(SettleOutcome::Last) == 4);
+
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Asked) == 0);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoWorker) == 1);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::AllExcluded) == 2);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoRoom) == 3);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 4);
 }
 
 TEST_CASE("The wire is at version 16 at both ends of its range", "[wire][admission]")

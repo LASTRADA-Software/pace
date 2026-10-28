@@ -115,6 +115,9 @@ core::async::Task<std::optional<std::uint8_t>> ReadRequest(Peer peer)
     co_return decoded->opRaw;
 }
 
+/// The identity key every scripted grant names: a key's width, so the client reads it as one.
+inline std::vector<std::byte> const GrantWorkerKey(Wire::IdentityPublicKeyBytes, std::byte { 0x4B });
+
 /// @return A grant frame for a worker named @p endpoint.
 [[nodiscard]] std::vector<std::byte> GrantFrame(std::string_view endpoint, std::uint64_t queuedMs = 7)
 {
@@ -124,7 +127,10 @@ core::async::Task<std::optional<std::uint8_t>> ReadRequest(Peer peer)
                                                                        .leaseToken = "token",
                                                                        .workerCodecs = { 1, 2 },
                                                                        .chargedBytes = 4096,
-                                                                       .queuedMs = queuedMs }));
+                                                                       .queuedMs = queuedMs,
+                                                                       .lifetime = std::chrono::milliseconds { 90'000 },
+                                                                       .workerKey = GrantWorkerKey,
+                                                                       .reason = Wire::LocalGrantReason::Asked }));
 }
 
 core::async::Task<void> Send(Peer peer, std::vector<std::byte> frame)
@@ -391,6 +397,10 @@ TEST_CASE("AdmitSession.granted-after-progress")
     CHECK(ticket->workerCodecs == Wire::CodecList { 1, 2 });
     CHECK(ticket->chargedBytes == 4096);
     CHECK(ticket->queuedMs == 7);
+    // What the dispatch bounds the compile by and authenticates its reply against, carried beside the
+    // token rather than read out of it.
+    CHECK(ticket->lifetime == std::chrono::milliseconds { 90'000 });
+    CHECK(ticket->workerKey == GrantWorkerKey);
     // R2: the grant's age starts at its receipt on this side, between the two readings.
     CHECK(ticket->receivedAt >= before);
     CHECK(ticket->receivedAt <= after);

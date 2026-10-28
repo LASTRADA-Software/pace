@@ -700,6 +700,21 @@ inline constexpr std::uint64_t DefaultAdmissionEstimateBytes = 2ULL << 30;
 /// How many figures each of the two estimate maps remembers.
 inline constexpr std::size_t AdmissionEstimateCapacity = 65'536;
 
+/// Why a DISPATCHABLE request the queue granted `Local` was not placed on a worker.
+///
+/// Read from the registry as it stands when the grant is minted, because the queue's own candidates are
+/// only the workers with a free slot -- "none was free" and "none exists" are opposite fixes, and the
+/// launcher records them apart exactly as the LEASE path's `NoWorker`, `Excluded` and `NoCapacity` rows
+/// are. Only a worker that proved its identity serves: the queue places on no other.
+/// @param live The registry's live workers (`WorkerRegistry::LiveWorkers`).
+/// @param fingerprint The toolchain the request named.
+/// @param excluded The workers the client could not reach, by advertised endpoint.
+/// @return `NoWorker` when nothing serves the toolchain, `AllExcluded` when everything that does is
+///         excluded, otherwise `NoRoom`.
+[[nodiscard]] CompileCacheWire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
+                                                                    std::string_view fingerprint,
+                                                                    std::span<std::string const> excluded);
+
 /// The fleet scheduler: who may compile where, and on whose behalf.
 ///
 /// ## Why this is not in the cache daemon any more
@@ -1342,6 +1357,8 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
         std::function<CallerContext()> regate;      ///< The connection's context as it is NOW, for the grant's gate (R9).
         std::string fingerprint;                    ///< Toolchain the request named.
         std::string cacheKey;                       ///< The lease key.
+        CompileCacheWire::AdmitKind kind {};        ///< Whether a worker could have run it, for a local grant's reason.
+        std::vector<std::string> excluded;          ///< Workers the client could not reach, for the same.
         core::platform::SteadyTimePoint enqueuedAt; ///< For `queued`.
         std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
     };

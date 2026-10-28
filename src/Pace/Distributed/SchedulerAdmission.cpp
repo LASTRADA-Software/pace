@@ -45,6 +45,25 @@ std::vector<Placement> SchedulerService::RegistryPlacement::Candidates(std::stri
     return out;
 }
 
+Wire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
+                                          std::string_view fingerprint,
+                                          std::span<std::string const> excluded)
+{
+    // Only a worker the queue could place on counts as serving: one that proved no identity has no
+    // machine to charge (`RegistryPlacement::Candidates`).
+    auto const serves = [&](WorkerInfo const& worker) {
+        return worker.fingerprint == fingerprint && !worker.identityKey.empty();
+    };
+    auto const reachable = [&](WorkerInfo const& worker) {
+        return serves(worker) && !std::ranges::contains(excluded, worker.endpoint);
+    };
+    if (std::ranges::none_of(live, serves))
+        return Wire::LocalGrantReason::NoWorker;
+    if (std::ranges::none_of(live, reachable))
+        return Wire::LocalGrantReason::AllExcluded;
+    return Wire::LocalGrantReason::NoRoom;
+}
+
 MachineId SchedulerService::OwnMachineId() const
 {
     return KeyAsMachineId(_signer.PublicKey());
@@ -77,6 +96,8 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                               AdmissionTicket { .regate = std::move(regate),
                                                 .fingerprint = request.fingerprint,
                                                 .cacheKey = request.cacheKey,
+                                                .kind = request.kind,
+                                                .excluded = request.excluded,
                                                 .enqueuedAt = _clock.now(),
                                                 .lease = std::nullopt });
     return ticket;
@@ -131,23 +152,39 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
             _workers.JobStarted(worker->id);
             held.lease = *lease;
             auto const token = MintGrantToken(*lease, worker->endpoint, worker->fingerprint, worker->identityKey);
+            // The lifetime and the key beside the token exactly as `Lease` relays them, from the lease and
+            // the worker the token was just minted from: the client bounds its compile by the one and
+            // authenticates the reply against the other, and verifies no claims to learn either.
             verdict.grant = Wire::EncodeAdmitGrant(Wire::AdmitGrant { .kind = Wire::GrantKind::Worker,
                                                                       .endpoint = worker->endpoint,
                                                                       .leaseToken = token,
                                                                       .workerCodecs = worker->codecs,
                                                                       .chargedBytes = decision.chargedBytes,
-                                                                      .queuedMs = queuedMs });
+                                                                      .queuedMs = queuedMs,
+                                                                      .lifetime = lease->lifetime,
+                                                                      .workerKey = Wire::AsBytes(worker->identityKey),
+                                                                      .reason = Wire::LocalGrantReason::Asked });
             return verdict;
         }
         case Wire::GrantKind::Local:
-        case Wire::GrantKind::Stored:
+        case Wire::GrantKind::Stored: {
+            // A dispatchable request kept here says why, so the launcher records a fleet that placed it
+            // nowhere as it records a lease the scheduler refused -- a fleet that distributes nothing must
+            // not go green in silence.
+            auto const reason = decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable
+                                    ? LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded)
+                                    : Wire::LocalGrantReason::Asked;
             verdict.grant = Wire::EncodeAdmitGrant(Wire::AdmitGrant { .kind = decision.kind,
                                                                       .endpoint = {},
                                                                       .leaseToken = {},
                                                                       .workerCodecs = {},
                                                                       .chargedBytes = decision.chargedBytes,
-                                                                      .queuedMs = queuedMs });
+                                                                      .queuedMs = queuedMs,
+                                                                      .lifetime = {},
+                                                                      .workerKey = {},
+                                                                      .reason = reason });
             return verdict;
+        }
         case Wire::GrantKind::Last:
             break;
     }

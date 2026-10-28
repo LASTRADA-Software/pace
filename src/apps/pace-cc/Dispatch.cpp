@@ -4,7 +4,6 @@
 
 #include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/Utf8.hpp>
-#include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Protocol/CompileReplySeal.hpp>
 
 #include <algorithm>
@@ -752,11 +751,10 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
     if (auto denied = DeniedHere(request); denied.has_value())
         return std::move(*denied);
 
-    // The key the reply must be sealed under is the one the token names, and the grant carries no
-    // other: see `UnverifiedWorkerKey`. A token naming none, or not a token, names nobody this client
-    // could authenticate a reply from, so nothing is sent -- the same refusal a lease grant meets (W-4).
-    auto const workerKeyText = Distributed::UnverifiedWorkerKey(ticket.leaseToken);
-    if (!workerKeyText.has_value() || workerKeyText->size() != Wire::IdentityPublicKeyBytes)
+    // The key the reply must be sealed under is the one the leader relayed beside the token, as a lease
+    // grant relays it. A grant naming none names nobody this client could authenticate a reply from, so
+    // nothing is sent -- the same refusal a lease grant meets (W-4).
+    if (ticket.workerKey.size() != Wire::IdentityPublicKeyBytes)
         return Refused(DispatchStatus::Unauthenticated,
                        std::format("the grant for {} names no worker key, so no reply from it could be "
                                    "authenticated; not dispatched",
@@ -771,8 +769,8 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
                                           .token = ticket.leaseToken,
                                           .hint = {},
                                           .workerCodecs = ticket.workerCodecs,
-                                          .workerKey = Wire::AsBytes(*workerKeyText),
-                                          .lifetime = Wire::DefaultCompileLeaseTimeout,
+                                          .workerKey = ticket.workerKey,
+                                          .lifetime = ticket.lifetime,
                                           .start = ticket.receivedAt,
                                           .chargedBytes = ticket.chargedBytes,
                                           .admissionCacheKey = request.objectKey,

@@ -9565,6 +9565,25 @@ enum class GrantKind : std::uint8_t
     Last
 };
 
+/// Why a DISPATCHABLE request was granted `Local`: the fleet's answer to "why did this not go to a
+/// worker", which the launcher records exactly as it records a lease the scheduler refused, so a fleet
+/// that never distributes anything does not go green in silence. Explicit values: transmitted. `Last`
+/// is the count, never a value.
+enum class LocalGrantReason : std::uint8_t
+{
+    /// Not a local grant of a dispatchable request: the request asked to run here, or it went to a
+    /// worker, or it was answered `Stored`. Nothing to record.
+    Asked = 0,
+    /// No live worker that proved its key serves the request's toolchain.
+    NoWorker = 1,
+    /// Workers serve it, and every one of them is on the request's exclusion list.
+    AllExcluded = 2,
+    /// Workers serve it and none had room for it when the queue reached it -- full, unreported, or
+    /// refused it as often as the queue allows.
+    NoRoom = 3,
+    Last
+};
+
 /// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.
 /// `Last` is the count, never a value.
 enum class SettleOutcome : std::uint8_t
@@ -9645,6 +9664,14 @@ struct AdmitGrant
     CodecList workerCodecs;      ///< What that worker can decode.
     std::uint64_t chargedBytes;  ///< The memory estimate charged for this admission.
     std::uint64_t queuedMs;      ///< How long the request waited in the queue.
+    /// How long a `Worker` grant's lease lives, from when the client RECEIVES it; zero otherwise.
+    /// In the clear beside the token for `LeaseGrant::lifetime`'s reason: the client verifies no claims.
+    std::chrono::milliseconds lifetime;
+    /// The identity key of the worker a `Worker` grant names, `IdentityPublicKeyBytes` of it; empty
+    /// otherwise. What the client authenticates the COMPILE reply against, as `LeaseGrant::workerKey`.
+    std::span<std::byte const> workerKey;
+    /// Why a dispatchable request was granted `Local`; `Asked` for every other grant.
+    LocalGrantReason reason;
 };
 
 /// The same, as the client decodes it. OWNS its bytes.
@@ -9656,6 +9683,9 @@ struct AdmitGrantFields
     CodecList workerCodecs;
     std::uint64_t chargedBytes {};
     std::uint64_t queuedMs {};
+    std::chrono::milliseconds lifetime {};
+    std::vector<std::byte> workerKey;
+    LocalGrantReason reason {};
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(AdmitGrantFields const&) const = default;
@@ -9784,9 +9814,10 @@ namespace Detail
     return out;
 }
 
-/// How many fields an ADMIT reply holds: kind, endpoint, lease token, codecs, charged, queued.
-/// One number for `EncodeAdmitGrant` and `DecodeAdmitGrant`, so the two cannot drift.
-inline constexpr std::size_t AdmitGrantFieldCount = 6;
+/// How many fields an ADMIT reply holds: kind, endpoint, lease token, codecs, charged, queued,
+/// lifetime, worker key, local reason. One number for `EncodeAdmitGrant` and `DecodeAdmitGrant`, so
+/// the two cannot drift.
+inline constexpr std::size_t AdmitGrantFieldCount = 9;
 
 /// Frame the payload of a successful ADMIT reply.
 /// @param grant What the leader decided.
@@ -9797,18 +9828,24 @@ inline constexpr std::size_t AdmitGrantFieldCount = 6;
     auto const codecs = EncodeCodecList(grant.workerCodecs);
     auto const charged = EncodeU64Field(grant.chargedBytes);
     auto const queued = EncodeU64Field(grant.queuedMs);
+    auto const lifetime = EncodeU32Field(static_cast<std::uint32_t>(grant.lifetime.count()));
+    auto const reason = Detail::EncodeEnumByte(grant.reason);
     return WireFields::Encode({ std::span<std::byte const> { kind },
                                 AsBytes(grant.endpoint),
                                 AsBytes(grant.leaseToken),
                                 std::span<std::byte const> { codecs },
                                 std::span<std::byte const> { charged },
-                                std::span<std::byte const> { queued } });
+                                std::span<std::byte const> { queued },
+                                std::span<std::byte const> { lifetime },
+                                grant.workerKey,
+                                std::span<std::byte const> { reason } });
 }
 
 /// Split an ADMIT reply payload.
 ///
-/// Exactly six fields: a reply is not stepped over the way a request is. The endpoint is held to
-/// `MaxEndpointBytes` because the client dials it.
+/// Exactly `AdmitGrantFieldCount` fields: a reply is not stepped over the way a request is. The
+/// endpoint is held to `MaxEndpointBytes` because the client dials it; the worker key is empty or
+/// exactly a key's width, and the lifetime exactly four bytes, as a LEASE grant's are.
 /// @param payload The reply body.
 /// @return The owned fields, or nullopt when malformed.
 [[nodiscard]] inline std::optional<AdmitGrantFields> DecodeAdmitGrant(std::span<std::byte const> payload)
@@ -9819,14 +9856,22 @@ inline constexpr std::size_t AdmitGrantFieldCount = 6;
     auto const kind = Detail::DecodeEnumByte<GrantKind>((*fields)[0]);
     auto const charged = DecodeU64Field((*fields)[4]);
     auto const queued = DecodeU64Field((*fields)[5]);
-    if (!kind.has_value() || !charged.has_value() || !queued.has_value() || !Detail::FitsCap((*fields)[1], MaxEndpointBytes))
+    auto const lifetime = DecodeU32Field((*fields)[6]);
+    auto const& workerKey = (*fields)[7];
+    auto const reason = Detail::DecodeEnumByte<LocalGrantReason>((*fields)[8]);
+    if (!kind.has_value() || !charged.has_value() || !queued.has_value() || !lifetime.has_value() || !reason.has_value()
+        || !Detail::FitsCap((*fields)[1], MaxEndpointBytes)
+        || (!workerKey.empty() && workerKey.size() != IdentityPublicKeyBytes))
         return std::nullopt;
     return AdmitGrantFields { .kind = *kind,
                               .endpoint = std::string { AsStringView((*fields)[1]) },
                               .leaseToken = std::string { AsStringView((*fields)[2]) },
                               .workerCodecs = DecodeCodecList((*fields)[3]),
                               .chargedBytes = *charged,
-                              .queuedMs = *queued };
+                              .queuedMs = *queued,
+                              .lifetime = std::chrono::milliseconds { *lifetime },
+                              .workerKey = { workerKey.begin(), workerKey.end() },
+                              .reason = *reason };
 }
 
 /// Frame a SETTLE request.

@@ -723,30 +723,6 @@ namespace Detail
                          .workerKey = std::string { WireFields::AsStringView((*fields)[9]) } };
 }
 
-/// The identity key of the worker a grant token names, read WITHOUT verifying the token.
-///
-/// For the CLIENT, which holds a token it was handed by the node it asked and cannot verify one
-/// (it holds no roster): an admission grant (`AdmitGrant`) carries no key field beside the token as a
-/// lease grant does, and the key the token names is what the worker's reply must be sealed under (W-4).
-/// Unverified is sound for that use and no other: the bytes came over the connection the admission
-/// itself rode, exactly as `LeaseGrant::workerKey` does, and the worker still verifies the signature
-/// before it spawns anything. Never a way to learn who may do what.
-/// @param token The token as granted.
-/// @return The raw key bytes, empty when the token names none; disengaged when it is not a token.
-[[nodiscard]] inline std::optional<std::string> UnverifiedWorkerKey(std::string_view token)
-{
-    auto const decoded = Base64Decode(token);
-    if (!decoded.has_value())
-        return std::nullopt;
-    auto const outer = WireFields::SplitExactly(WireFields::AsBytes(*decoded), Detail::EnvelopeFieldCount);
-    if (!outer.has_value())
-        return std::nullopt;
-    auto const fields = WireFields::SplitExactly((*outer)[0], Detail::ClaimFieldCount);
-    if (!fields.has_value())
-        return std::nullopt;
-    return std::string { WireFields::AsStringView((*fields)[9]) };
-}
-
 /// What learning a scheduler term did to a worker's picture of the fleet.
 ///
 /// Three outcomes and not a `bool`, because the one that matters is the one a boolean

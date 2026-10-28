@@ -968,12 +968,17 @@ TEST_CASE("AdmitForwarder.the-largest-grant-fits-the-relay-ceiling", "[node][adm
                                    .epoch = ~std::uint64_t { 0 },
                                    .signer = {},
                                    .workerKey = std::string(Ed25519PublicKeyBytes, 'w') });
-    auto const grant = Wire::EncodeAdmitGrant(Wire::AdmitGrant { .kind = Wire::GrantKind::Worker,
-                                                                 .endpoint = endpoint,
-                                                                 .leaseToken = token,
-                                                                 .workerCodecs = Wire::CodecList(Wire::MaxCodecListIds, 1),
-                                                                 .chargedBytes = ~std::uint64_t { 0 },
-                                                                 .queuedMs = ~std::uint64_t { 0 } });
+    auto const workerKeyBytes = std::string(Wire::IdentityPublicKeyBytes, 'w');
+    auto const grant =
+        Wire::EncodeAdmitGrant(Wire::AdmitGrant { .kind = Wire::GrantKind::Worker,
+                                                  .endpoint = endpoint,
+                                                  .leaseToken = token,
+                                                  .workerCodecs = Wire::CodecList(Wire::MaxCodecListIds, 1),
+                                                  .chargedBytes = ~std::uint64_t { 0 },
+                                                  .queuedMs = ~std::uint64_t { 0 },
+                                                  .lifetime = std::chrono::milliseconds { ~std::uint32_t { 0 } },
+                                                  .workerKey = Wire::AsBytes(std::string_view { workerKeyBytes }),
+                                                  .reason = Wire::LocalGrantReason::Asked });
     CAPTURE(grant.size());
     // An eighth of the ceiling: room for every id to grow eightfold before the relay could refuse one.
     CHECK(grant.size() < MaxForwardReplyBytes / 8);

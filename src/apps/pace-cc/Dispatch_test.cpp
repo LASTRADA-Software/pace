@@ -2578,13 +2578,15 @@ TEST_CASE("The launcher refuses a pass-through exactly where the worker refuses 
 
 namespace
 {
-/// A worker grant as the queue hands it to the launcher: a token minted for `Worker` that names the
-/// test worker's identity key, received at @p receivedAt.
+/// A worker grant as the queue hands it to the launcher: a token minted for `Worker`, and beside it the
+/// test worker's identity key and the lease's lifetime, received at @p receivedAt.
 /// @param receivedAt When this side received it.
-/// @param workerKey What the token names as its worker's key; the test worker's by default.
+/// @param workerKey What the grant relays as its worker's key; the test worker's by default.
+/// @param lifetime What the grant relays as the lease's lifetime.
 /// @return The ticket.
 [[nodiscard]] AdmitTicket AdmittedTo(core::platform::SteadyTimePoint receivedAt,
-                                     std::span<std::byte const> workerKey = Testing::TestWorkerPublicKey())
+                                     std::span<std::byte const> workerKey = Testing::TestWorkerPublicKey(),
+                                     std::chrono::milliseconds lifetime = Wire::DefaultCompileLeaseTimeout)
 {
     static auto const signer = Testing::TestLeaseSigner("scheduler");
     auto const token = Distributed::MintLeaseToken(
@@ -2604,6 +2606,9 @@ namespace
                          .workerCodecs = {},
                          .chargedBytes = 123'456'789,
                          .queuedMs = 0,
+                         .lifetime = lifetime,
+                         .workerKey = { workerKey.begin(), workerKey.end() },
+                         .localReason = Wire::LocalGrantReason::Asked,
                          .receivedAt = receivedAt };
 }
 
@@ -2690,6 +2695,29 @@ TEST_CASE("Dispatch.admitted-grant-age-starts-at-grant", "[dispatch][admission]"
     CHECK(compileBudgetFor(askedAt) == std::chrono::milliseconds { 1 });
 }
 
+TEST_CASE("Dispatch.admitted-compile-is-bounded-by-the-lifetime-the-grant-carries", "[dispatch][admission]")
+{
+    // Ruling 13: the lifetime the leader minted the token with, relayed beside it -- never a compile-time
+    // constant a fleet that agreed another figure would contradict (#522).
+    std::vector<std::string> const args { "-O2" };
+    auto const request = Request(args);
+    core::platform::ManualClock clock;
+
+    auto const compileBudgetUnder = [&](std::chrono::milliseconds lifetime) {
+        ScriptedFleet fleet;
+        fleet.UseClock(clock);
+        fleet.Serve(std::string { Worker }, CompileReply(request, "OBJECTBYTES"));
+        auto const result =
+            Dispatch(fleet, request, AdmittedTo(clock.now(), Testing::TestWorkerPublicKey(), lifetime), {}, {}, {}, &clock);
+        REQUIRE(result.Ran());
+        REQUIRE(fleet.Budgets().size() == 1);
+        return fleet.Budgets().front().total;
+    };
+
+    CHECK(compileBudgetUnder(std::chrono::minutes { 2 }) == std::chrono::minutes { 2 });
+    CHECK(compileBudgetUnder(std::chrono::minutes { 45 }) == std::chrono::minutes { 45 });
+}
+
 TEST_CASE("Dispatch.worker-grant-naming-no-key-sends-nothing", "[dispatch][admission]")
 {
     // W-4 on the admission path: a reply could not be authenticated, so no translation unit is sent.
@@ -2699,13 +2727,18 @@ TEST_CASE("Dispatch.worker-grant-naming-no-key-sends-nothing", "[dispatch][admis
     fleet.Serve(std::string { Worker }, CompileReply(Request(args), "OBJECTBYTES"));
 
     auto ticket = AdmittedTo(clock.now(), {});
-    SECTION("a token naming no key")
+    SECTION("a grant naming no key")
     {
-        // As minted.
+        // As relayed.
     }
-    SECTION("a token that is not a token")
+    SECTION("a grant naming a key of another width")
     {
-        ticket.leaseToken = "not-a-token";
+        ticket.workerKey.assign(Wire::IdentityPublicKeyBytes - 1, std::byte { 7 });
+    }
+    SECTION("a token naming the key is not read for one")
+    {
+        // The token names the worker's key in its claims; the client reads only what was relayed beside it.
+        ticket.leaseToken = AdmittedTo(clock.now()).leaseToken;
     }
 
     auto const result = Dispatch(fleet, Request(args), ticket, {}, {}, {}, &clock);

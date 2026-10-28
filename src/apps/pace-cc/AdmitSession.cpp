@@ -58,6 +58,9 @@ namespace
                              .workerCodecs = grant->workerCodecs,
                              .chargedBytes = grant->chargedBytes,
                              .queuedMs = grant->queuedMs,
+                             .lifetime = grant->lifetime,
+                             .workerKey = grant->workerKey,
+                             .localReason = grant->reason,
                              .receivedAt = received };
     }
 

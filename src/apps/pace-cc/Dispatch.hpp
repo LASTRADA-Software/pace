@@ -953,13 +953,14 @@ struct DispatchRequest
 ///
 /// **The grant's age starts at `ticket.receivedAt`** (R2), never at when the launcher asked: a
 /// request that queued for twenty minutes holds a grant that is seconds old. What is left of the
-/// compile budget is measured from there, against `DefaultCompileLeaseTimeout`, which is the figure
-/// the token's own expiry is minted from unless a cluster agreed another -- and the worker enforces
-/// the token's real expiry whatever this side believes.
+/// compile budget is measured from there, against the lifetime the leader minted the token with and
+/// relayed beside it (`AdmitTicket::lifetime`) -- and the worker enforces the token's real expiry
+/// whatever this side believes. A grant naming no lifetime leaves the compile budget as it is.
 ///
-/// The worker's key, which the reply must be sealed under (W-4), is read from the token itself
-/// (`UnverifiedWorkerKey`), because the admission grant carries none beside it. An admission names
-/// no dial hint, so the advertised name is dialled.
+/// The worker's key, which the reply must be sealed under (W-4), is the one the leader relayed beside
+/// the token (`AdmitTicket::workerKey`), never read out of it: this client verifies no claims. A
+/// grant naming none sends nothing. An admission names no dial hint, so the advertised name is
+/// dialled.
 /// @param exchange How to reach the worker.
 /// @param request The job. `schedulerEndpoint` and `fingerprint` are unused here beyond what the
 ///        compile request states.
