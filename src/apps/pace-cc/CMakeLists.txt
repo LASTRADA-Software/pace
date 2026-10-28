@@ -348,6 +348,8 @@ if(PACE_BUILD_TESTS)
     # known amount in a CHILD of the process they spawn, and a real `cmake` as the trivial
     # process. Both arrive as compile definitions rather than being looked up at run time.
     add_executable(peak-memory-child PeakMemoryChild.cpp)
+    # `core::async` is header-only and carries core-cpp's include path for `<core/Ranges.hpp>`.
+    target_link_libraries(peak-memory-child PRIVATE core::async)
     if(TARGET peak-memory-child)
         add_dependencies(pace-cc-tests peak-memory-child)
         set_source_files_properties(ProcessRunner_test.cpp PROPERTIES COMPILE_DEFINITIONS
