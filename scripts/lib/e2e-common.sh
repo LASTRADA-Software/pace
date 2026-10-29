@@ -3142,6 +3142,130 @@ e2e_bounded_perl() {
     exec perl -e "alarm ${seconds};" -e "$program" -- "$@" # perl-lifetime: this line IS the injector
 }
 
+# The STARVATION WITNESS's tick and its STALL threshold, in ms (#1739). The witness asks for an
+# `e2e_witness_tick_ms` sleep over and over, and a wake-up later than that by more than
+# `e2e_witness_stall_ms` counts its EXCESS over the threshold as stalled time; lateness under it
+# counts nothing. The threshold exists because summing every tick's lateness measures the TIMER,
+# not the host: Cygwin's perl wakes 10-15 ms late on EVERY 20 ms sleep on an idle host, so the raw
+# sum over a leg was larger than the 1000 ms a doubled deadline overruns its ceiling by, and
+# excused exactly the regression the ceiling is there to catch (review of #1739, C1).
+#
+# MEASURED, 8 s a run, five runs each (three of the program alone, two through this function), on
+# an idle 32-thread Windows 11 host (about 5% CPU busy, WSL load average 0.1-0.9), 2026-10-29:
+#
+#   perl                                   ticks     raw lateness   worst tick   stalled (> 50)
+#   Git Bash 5.42.2, x86_64-cygwin         255-256   2546-2598 ms   11-15 ms     0 ms
+#   WSL2 5.38.2, Linux 6.6.87.2            388-394   33-40 ms       0-3 ms       0 ms
+#
+# So 50 ms is more than three times the worst quiet tick -- Windows' default timer period is
+# 15.6 ms -- and a quiet host's stalled figure over a whole leg is 0, far below the TOTAL / 2 =
+# 1000 ms by which a doubled deadline overruns the ceiling: a doubled deadline on a quiet host is a
+# `fail`. The cost, failing CLOSED: a host that starves in slices under 50 ms counts nothing, and
+# every counted stall loses its first 50 ms, so a starved host can still read as a `fail`.
+e2e_witness_tick_ms=20
+e2e_witness_stall_ms=50
+
+# Run the STARVATION WITNESS (#1739) in THIS process, which it replaces: a ticker that writes
+# `<ticks> <late_ms> <stalled_ms> <closed> <worst_ms>` to @1 atomically (tmp + rename) after every
+# tick, so a KILL leaves the last complete reading. `late_ms` sums every tick's lateness and is
+# printed only; `stalled_ms` sums the excess over `e2e_witness_stall_ms` and is what a verdict
+# reads; `worst_ms` is the latest single tick. Once @2 contains @3 -- the line the launcher prints
+# when its last cache exchange has failed -- the witness writes `closed` 1 and EXITS, so its window
+# ends with the cache phase rather than with the compile after it (review of #1739, M1). Whoever
+# starts it in the background owns its lifecycle: clear the fixture's traps first, KILL it after,
+# and remove a stale @2 before it starts, or it closes on the previous run's line at once.
+#
+# Its window still FAILS OPEN at both ends, and is wider than the `direct-ms + cache-ms` a verdict
+# judges: it opens before the launcher's process does, so a stall during perl's or the launcher's
+# start counts; it spans the launcher's own work between its exchanges, which neither figure times;
+# and it closes up to one tick plus however long it took to notice @3 after the exchange ended. A
+# reading with `closed` 0 never saw @3, so its window ran to the kill and may include the compile.
+#
+# @param 1 the reading's file
+# @param 2 the launcher's stderr, polled once a tick
+# @param 3 the line in it that ends the cache phase
+# @param 4 the witness's lifetime bound in whole seconds
+e2e_starvation_witness() {
+    local program='
+        use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
+        my ($file, $log, $marker, $tick, $stall) = @ARGV;
+        my ($ticks, $late, $stalled, $closed, $worst) = (0, 0, 0, 0, 0);
+        my $want = $tick / 1000;
+        while (1) {
+            my $t0 = clock_gettime(CLOCK_MONOTONIC);
+            select(undef, undef, undef, $want);
+            my $over = (clock_gettime(CLOCK_MONOTONIC) - $t0 - $want) * 1000;
+            $ticks++;
+            if ($over > 0) {
+                $late += $over;
+                $stalled += $over - $stall if $over > $stall;
+                $worst = $over if $over > $worst;
+            }
+            if (open(my $in, "<", $log)) {
+                local $/;
+                my $text = <$in>;
+                close $in;
+                $closed = 1 if defined $text && index($text, $marker) >= 0;
+            }
+            open(my $out, ">", "$file.tmp") or die "$file: $!";
+            printf $out "%d %d %d %d %d\n", $ticks, $late, $stalled, $closed, $worst;
+            close $out;
+            rename("$file.tmp", $file) or die "$file: $!";
+            last if $closed;
+        }'
+    e2e_bounded_perl "$4" "$program" "$1" "$2" "$3" "$e2e_witness_tick_ms" "$e2e_witness_stall_ms"
+}
+
+# Judge a measured time against its ceiling, given the STARVATION WITNESS's stalled figure (#1739):
+# print exactly one of `pass`, `fail`, `inconclusive`, and return 0. Pure -- it reads no clock and
+# starts nothing.
+#
+# A time over its ceiling says the HOST was slow or the code was, and it cannot say which: a
+# launcher that DOUBLED its deadline and a host that stalled it can report the same figure (8132 ms
+# on a loaded Windows runner, past the 8000 a doubled deadline reports). The witness is a sibling
+# ticker; a host that stalled the launcher by at least the overrun stalled the sibling as well.
+#
+#   spent <= ceiling                       pass
+#   over, witness unusable (ticks 0)       fail -- no evidence of starvation, so CLOSED
+#   over, stalled >= spent - ceiling       inconclusive -- the overrun is not attributable
+#   otherwise                              fail
+#
+# The figure is the STALLED one, never the raw lateness: the raw sum is timer granularity, which
+# on Cygwin alone exceeds the overrun of a doubled deadline (`e2e_witness_stall_ms` has the
+# measurement). Blind spots: a host that starves the ticker and not the launcher reads as
+# `inconclusive` (OPEN), and so does a stall the witness's wider window saw outside the judged time
+# (`e2e_starvation_witness`); starvation in slices under the threshold reads as `fail` (CLOSED).
+# Integers only; a malformed spent or ceiling is the caller's bug and `fail`s the run, and so is one
+# with a LEADING ZERO, refused by name: `$(( 08132 - 7000 ))` is an octal error rather than an
+# answer, and the PowerShell twin (`Get-E2EDeadCeilingVerdict`) refuses the same readings.
+#
+# @param 1 spent, ms
+# @param 2 ceiling, ms
+# @param 3 witness tick count
+# @param 4 witness stalled time, ms -- the excess over `e2e_witness_stall_ms`, never raw lateness
+e2e_dead_ceiling_verdict() {
+    local spent="${1:-}" ceiling="${2:-}" ticks="${3:-}" stalled="${4:-}"
+    case "$spent" in ''|*[!0-9]*) fail "e2e_dead_ceiling_verdict: spent '${spent}' is not a whole number" ;; esac
+    case "$ceiling" in ''|*[!0-9]*) fail "e2e_dead_ceiling_verdict: ceiling '${ceiling}' is not a whole number" ;; esac
+    case "$spent" in 0?*) fail "e2e_dead_ceiling_verdict: spent '${spent}' has a leading zero" ;; esac
+    case "$ceiling" in 0?*) fail "e2e_dead_ceiling_verdict: ceiling '${ceiling}' has a leading zero" ;; esac
+    if [ "$spent" -le "$ceiling" ]; then
+        echo pass
+        return 0
+    fi
+    # An unreadable witness is the absence of evidence, never evidence of a quiet host.
+    case "$ticks" in ''|*[!0-9]*) echo fail; return 0 ;; esac
+    case "$stalled" in ''|*[!0-9]*) echo fail; return 0 ;; esac
+    if [ "$ticks" -eq 0 ]; then
+        echo fail
+    elif [ "$stalled" -ge $(( spent - ceiling )) ]; then
+        echo inconclusive
+    else
+        echo fail
+    fi
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 
 # Reap every still-running background job of the CALLING shell: TERM, one shared

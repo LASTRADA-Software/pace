@@ -918,11 +918,32 @@ cat "${workdir}/fallback.log"
 # 7000 ms at N = 2 and TOTAL = 2000. An exchange that DOUBLED its deadline reports 2N x TOTAL =
 # 8000 (measured 8006-8017 by run-launcher-e2e.ps1) and fails it by TOTAL / 2 = 1000 ms; one that
 # IGNORED PACE_TIMEOUT falls back to the default total of 10000 ms per exchange and reports
-# about 20000. A stall of up to (N - 1/2) x TOTAL = 3000 ms past the floor still passes: a stall
-# belongs to the HOST, and the host's worst measured overrun is +1616 ms (round 9, on the refused
-# leg). The former (N + 1) x TOTAL, 6000 ms, tolerated a stall of 2000, only 384 above that
-# overrun, and at N = 1 it would equal a doubled TOTAL and catch nothing. The `dead_shapes`
-# table's third column names the deadline a shape is held to that way, or `-`.
+# about 20000. The `dead_shapes` table's third column names the deadline a shape is held to that
+# way, or `-`.
+#
+# The ceiling is NOT raised to forgive a stalled host: a loaded Windows runner reported 7602 and
+# then 8132 ms, and 8132 is past the 8000 a doubled deadline reports, so time alone cannot tell a
+# starved host from a doubled TOTAL (#1739). A STARVATION WITNESS decides instead
+# (`e2e_starvation_witness`): a perl ticker runs beside the launcher, asks for a 20 ms sleep over
+# and over, and sums how far each wake-up was late by more than a STALL threshold of 50 ms. Never
+# the raw lateness: that is the TIMER's granularity, 2546-2598 ms over 8 s of an idle host under
+# Git Bash's perl, which would excuse a doubled deadline outright; the stalled figure is 0 there
+# and under WSL (`e2e_witness_stall_ms` holds the measurement and its conditions). The witness
+# stops once the launcher says its last exchange failed, so its window is the CACHE phase and not
+# the compile after it. A reading over the ceiling is then one of three outcomes, decided by the
+# pure `e2e_dead_ceiling_verdict`: PASS (within it), INCONCLUSIVE (the host stalled at least as long
+# as the overrun, so the overrun is not the launcher's to answer for -- printed, annotated on CI,
+# repeated on the run's last line, never failed) or FAIL (the host did not stall that long, or the
+# witness did not run: no evidence of starvation fails CLOSED). Under `ctest` a PASSING test's
+# output is not shown -- every preset sets only `outputOnFailure` -- so the annotation reaches
+# GitHub only from the jobs that run this script directly. `run-launcher-e2e.ps1` holds the same
+# ceiling and the same witness (`scripts/lib/E2EStarvationWitness.psm1`).
+#
+# The witness fails OPEN where a host starves the ticker and not the launcher, and where its window
+# is wider than the time judged -- it opens before the launcher's process does and spans the
+# launcher's own work between its two exchanges, so a stall there excuses an overrun it did not
+# cause. It fails CLOSED where a host starves in slices under the threshold, which count nothing,
+# and where a host starves only the launcher, the right way round.
 #
 # BLIND SPOTS, failing OPEN. A retry INSIDE one exchange -- in the dial, below the door -- is one
 # trace line, seen only as an extra accept on the reset leg. A WAIT anywhere is judged only by the
@@ -948,7 +969,13 @@ dead_timer_tolerance_ms=50
 dead_shapes="refused dead_connect_ms -
 accept-then-reset dead_connect_ms -
 never-accepting dead_total_ms dead_total_ms"
+# The launcher's line once its last cache exchange has failed: what tells a leg that reached the
+# peer from one that never did, and the end of the starvation witness's window.
+dead_fell_back='(fetch exchange failed)'
+# Every INCONCLUSIVE ceiling of this run, repeated on its last line so a pass cannot hide one.
+dead_inconclusive=""
 dead_peer_pid=""
+dead_witness_pid=""
 dead_launch_pid=""
 dead_ended_ms=0
 dead_accepts=""
@@ -988,6 +1015,16 @@ dead_peer() {
             close $client;
         }'
     e2e_bounded_perl "$3" "$program" "$1" "$2"
+}
+
+# The starvation witness (#1739), `e2e_starvation_witness`: its reading goes to @1, and it stops once
+# the launcher's stderr @2 says the cache phase is over (`dead_fell_back`). It lives at most @3
+# seconds.
+dead_witness() {
+    # A SUBSHELL, as `dead_peer` is: the fixture's EXIT trap is cleared first, closing the window
+    # until the `exec` into perl; the `kill -KILL` that ends it covers the window before this line.
+    trap - EXIT TERM INT HUP
+    e2e_starvation_witness "$1" "$2" "$dead_fell_back" "$3"
 }
 
 dead_peer_ready() { [[ -s "${workdir}/dead-peer.port" ]]; }
@@ -1063,7 +1100,28 @@ while read -r shape dead_cost_name dead_held_name <&3; do
     dead_log="$(e2e_launcher_state_log)"
     dead_records_before=0
     [[ -f "$dead_log" ]] && dead_records_before="$(count_lines "$dead_log")"
+    # The starvation witness runs beside the leg whose time is held to a ceiling, and nowhere else.
+    # The previous leg's stderr carries the line that ends the witness's window, so it goes first:
+    # left in place, the witness would close on it at its first tick and judge nothing.
+    rm -f "${workdir}/dead-witness" "${workdir}/dead-witness.tmp" "${workdir}/dead.log"
+    if [[ "$dead_held_name" != - ]]; then
+        dead_witness "${workdir}/dead-witness" "${workdir}/dead.log" $(( 2 * ((dead_bound_ms + 999) / 1000) )) &
+        dead_witness_pid=$!
+    fi
     dead_compile "$addr" "$dead_bound_ms" "the launcher against the ${shape} peer to finish"
+    if [[ -n "$dead_witness_pid" ]]; then
+        # KILL, never TERM, for the reason the peer's is: no trap runs on either side of the
+        # `trap -` inside `dead_witness`. And only while it is still a RUNNING job of this shell:
+        # the witness EXITS by itself once it sees the fall-back line, bash reaps it then, and its
+        # pid is free to have been recycled by the time this line runs -- signalling it would hit
+        # a process belonging to somebody else. `jobs -pr`, as `reap_background_jobs` asks, read
+        # through a herestring, since `jobs -pr | grep -q` is a false negative under pipefail.
+        if grep -qx -- "$dead_witness_pid" <<< "$(jobs -pr)"; then
+            kill -KILL "$dead_witness_pid" 2>/dev/null || true
+        fi
+        wait "$dead_witness_pid" 2>/dev/null || true
+        dead_witness_pid=""
+    fi
     if [[ -n "$dead_peer_pid" ]]; then
         # KILL, never TERM: it covers the window the `trap -` inside `dead_peer` cannot -- a
         # subshell signalled between its fork and its first command still holds the fixture's
@@ -1083,7 +1141,7 @@ while read -r shape dead_cost_name dead_held_name <&3; do
     [[ "$dead_traced" == "$dead_exchanges" ]] \
         || { cat "${workdir}/dead.log" >&2; fail "dead peers: ${shape}: the launcher traced '${dead_traced}' cache exchange(s), want exactly ${dead_exchanges}"; }
     # What tells this leg from one that never reached the peer: the launcher says it fell back.
-    grep -qF "(fetch exchange failed)" "${workdir}/dead.log" \
+    grep -qF -- "$dead_fell_back" "${workdir}/dead.log" \
         || { cat "${workdir}/dead.log" >&2; fail "dead peers: ${shape}: no 'fetch exchange failed' fall-back, so the peer was never asked"; }
     # The launcher's OWN time, between a floor and a ceiling, on the shape whose exchanges cannot
     # end before their deadline. Read from the record this compile appended to the run's log.
@@ -1106,9 +1164,35 @@ while read -r shape dead_cost_name dead_held_name <&3; do
         dead_ceiling_ms=$(( (4 * dead_exchanges - 1) * dead_held_ms / 2 ))
         [[ "$dead_spent_ms" -ge "$dead_floor_ms" ]] \
             || { cat "${workdir}/dead.log" >&2; fail "dead peers: ${shape}: the launcher reported ${dead_spent_ms} ms on the cache, under the ${dead_floor_ms} ms that ${dead_exchanges} exchange(s) with a silent peer cannot end before -- its own timer is not measuring the exchanges"; }
-        [[ "$dead_spent_ms" -le "$dead_ceiling_ms" ]] \
-            || { cat "${workdir}/dead.log" >&2; fail "dead peers: ${shape}: the launcher reported ${dead_spent_ms} ms on the cache, past the ${dead_ceiling_ms} ms ceiling, (2N - 1/2) x its deadline for ${dead_exchanges} exchange(s) -- an exchange overran its configured deadline by as much as a doubled one does"; }
-        echo "   ${shape}: ${dead_spent_ms} ms reported on the cache (floor ${dead_floor_ms}, ceiling ${dead_ceiling_ms})"
+        # The witness's last complete reading; absent or unreadable is ticks 0, which fails closed.
+        dead_ticks=0; dead_late_ms=0; dead_stalled_ms=0; dead_closed=0; dead_worst_ms=0
+        [[ ! -s "${workdir}/dead-witness" ]] \
+            || read -r dead_ticks dead_late_ms dead_stalled_ms dead_closed dead_worst_ms < "${workdir}/dead-witness" || true
+        dead_overrun_ms=$(( dead_spent_ms - dead_ceiling_ms ))
+        if [[ "$dead_ticks" =~ ^[0-9]+$ && "$dead_ticks" -gt 0 ]]; then
+            dead_window="the cache phase"
+            [[ "$dead_closed" == 1 ]] || dead_window="until the kill, never having seen '${dead_fell_back}', so the compile too"
+            dead_reading="starvation witness: ${dead_stalled_ms} ms stalled past ${e2e_witness_stall_ms} ms a tick (${dead_late_ms} ms late in all, worst tick ${dead_worst_ms} ms) over ${dead_ticks} tick(s) of ${e2e_witness_tick_ms} ms, through ${dead_window}"
+        else
+            # Not a quiet host: a witness that left no reading did not run, and says nothing either way.
+            dead_reading="the starvation witness left no reading, so it did not run and nothing can excuse the overrun -- that fails CLOSED"
+        fi
+        dead_verdict="$(e2e_dead_ceiling_verdict "$dead_spent_ms" "$dead_ceiling_ms" "$dead_ticks" "$dead_stalled_ms")"
+        case "$dead_verdict" in
+            pass) ;;
+            inconclusive)
+                dead_note="dead peers: ${shape}: INCONCLUSIVE: the launcher reported ${dead_spent_ms} ms on the cache, ${dead_overrun_ms} ms past the ${dead_ceiling_ms} ms ceiling, but the host stalled at least that long (${dead_reading}) -- the overrun is not attributable to the launcher, and NOT judged (#1739)"
+                echo "   ${dead_note}"
+                # A run that ends in OK must not bury this: annotated on CI, and repeated on the last line.
+                [[ "${GITHUB_ACTIONS:-}" != true ]] || echo "::warning::${dead_note}"
+                dead_inconclusive="${dead_inconclusive}${dead_inconclusive:+; }${dead_note}" ;;
+            fail)
+                cat "${workdir}/dead.log" >&2
+                fail "dead peers: ${shape}: the launcher reported ${dead_spent_ms} ms on the cache, ${dead_overrun_ms} ms past the ${dead_ceiling_ms} ms ceiling, (2N - 1/2) x its deadline for ${dead_exchanges} exchange(s) -- an exchange overran its configured deadline by as much as a doubled one does, and nothing shows the host stalled that long (${dead_reading})" ;;
+            *)
+                fail "dead peers: ${shape}: e2e_dead_ceiling_verdict answered '${dead_verdict}'" ;;
+        esac
+        echo "   ${shape}: ${dead_spent_ms} ms reported on the cache (floor ${dead_floor_ms}, ceiling ${dead_ceiling_ms}; ${dead_reading}; ${dead_verdict})"
     fi
     # And on the reset leg, where every exchange is a connection the peer accepts, the PEER's
     # count, which must agree with the trace: what makes the launcher's own count trustworthy on
@@ -1866,6 +1950,9 @@ e2e_launcher_state_assert_used
 [ ! -f "$(e2e_launcher_state_log)" ] || fail "-z left this run's state log in place ($(e2e_launcher_state_log)), so it cleared some other one"
 e2e_launcher_state_assert_caller_untouched
 
+# An INCONCLUSIVE ceiling is not a failure, and not a pass either: said again where a reader looks.
+[[ -z "$dead_inconclusive" ]] \
+    || echo "compile-cache E2E: one judgement was NOT made, and this run does not vouch for it -- ${dead_inconclusive}"
 echo "compile-cache E2E OK: miss/hit, byte-identical, >1 MiB values, store ceiling, cross-depth, nested roots," \
      "moved-header convergence (both layouts keyed apart), an edit re-keying, root-bound objects keyed apart," \
      "a save during a compile storing nothing unsound," \
