@@ -250,6 +250,9 @@ Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EPorts.psm1") -Fo
 # And imported by name as well, for the launcher-state seam: E2EPorts' own import of it
 # is nested, so its functions stop at E2EPorts and never reach this script.
 Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EEnvironment.psm1") -Force
+# The dead-peer ceiling's starvation witness and its three-outcome verdict (#1739); its own cases
+# run as `launcher-e2e-starvation-witness-selftest`.
+Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/E2EStarvationWitness.psm1") -Force
 
 if ($SelfTestPorts) { exit (Invoke-E2EPortSelfTest) }
 
@@ -656,12 +659,33 @@ $DeadPeerExchanges = 2
 # launcher's. The reset's exchanges end at once. That shape has a CEILING too, (2N - 1/2) x TOTAL,
 # 7000 ms at N = 2 and TOTAL = 2000. An exchange that DOUBLED its deadline reports 2N x TOTAL =
 # 8000 (measured 8006-8017) and fails it by TOTAL / 2 = 1000 ms; one that IGNORED PACE_TIMEOUT
-# falls back to the default total of 10000 ms per exchange and reports about 20000. A stall of up
-# to (N - 1/2) x TOTAL = 3000 ms past the floor still passes: a stall belongs to the HOST, not to a
-# leg, and the host's worst measured overrun is +1616 ms (round 9, on the refused leg; this leg's
-# own +435 is the wrong quantity to size it by, round 10 review, I5). Neither a counted retry nor a
-# default substitution has the 1.5x shape this lets through. And the wall clock bounds the whole
-# leg as the HANG detector: N x cost + cost / 2, plus the baseline, plus $DeadPeerWallSlackMs.
+# falls back to the default total of 10000 ms per exchange and reports about 20000. Neither a
+# counted retry nor a default substitution has the 1.5x shape this lets through. And the wall
+# clock bounds the whole leg as the HANG detector: N x cost + cost / 2, plus the baseline, plus
+# $DeadPeerWallSlackMs.
+#
+# The ceiling is NOT raised to forgive a stalled host: a loaded Windows runner reported 7602 and
+# then 8132 ms, and 8132 is past the 8000 a doubled deadline reports, so time alone cannot tell a
+# starved host from a doubled TOTAL (#1739). A STARVATION WITNESS decides instead
+# (`scripts/lib/E2EStarvationWitness.psm1`, the twin of `compile-cache-e2e.sh`'s): a thread of
+# this process asks for a 20 ms sleep over and over on a Stopwatch, and sums how far each wake-up
+# was late by more than a STALL threshold of 50 ms. Never the raw lateness: that is the TIMER's
+# granularity, 2924-3221 ms over 8 s of an idle host under pwsh, which would excuse a doubled
+# deadline outright; the stalled figure there is 0 (the module holds the measurement). The witness
+# stops once the launcher says its last exchange failed, so its window is the CACHE phase and not
+# the compile after it. A reading over the ceiling is then one of three outcomes, decided by the
+# pure `Get-E2EDeadCeilingVerdict`: PASS (within it), INCONCLUSIVE (the host stalled at least as
+# long as the overrun, so the overrun is not the launcher's to answer for -- printed, annotated
+# on CI, repeated before the run's last line, never failed) or FAIL (the host did not stall that
+# long, or the witness left no reading: no evidence of starvation fails CLOSED). Under `ctest` a
+# PASSING test's output is not shown -- every preset sets only `outputOnFailure` -- so the
+# annotation reaches GitHub only from the job that runs this script directly.
+#
+# The witness fails OPEN where a host starves the ticker and not the launcher, and where its window
+# is wider than the time judged -- it opens before the launcher's process does and spans the
+# launcher's own work between its two exchanges, so a stall there excuses an overrun it did not
+# cause. It fails CLOSED where a host starves in slices under the threshold, which count nothing,
+# and where a host starves only the launcher, the right way round.
 #
 # BLIND SPOTS, failing OPEN. A retry INSIDE one exchange -- below the door, in the dial -- is one
 # trace line: the counted shapes see it as an extra connection, refused does not see it at all.
@@ -691,6 +715,13 @@ $DeadPeerShapeFloorMs = [ordered]@{
 }
 # The floor's allowance for a timer firing early by its resolution: Windows' default tick is 15.6 ms.
 $DeadPeerTimerToleranceMs = 50
+
+# The launcher's line once its last cache exchange has failed: what tells a leg that reached the
+# peer from one that never did, and the end of the starvation witness's window.
+$DeadPeerFellBack = '(fetch exchange failed)'
+
+# Every INCONCLUSIVE ceiling of this run, repeated before its last line so a pass cannot hide one.
+$DeadPeerInconclusive = [System.Collections.Generic.List[string]]::new()
 
 # The object's SHA-256 with the COFF header's TimeDateStamp (bytes 4-7) zeroed: every MSVC
 # driver stamps the clock there, so two compiles of one source differ there and nowhere else.
@@ -725,11 +756,14 @@ function New-SilentListener {
 # MONOTONIC clock has passed. With $resetOn, every connection that listener takes while the
 # launcher runs is accepted and then reset (a zero linger turns the close into an RST). The
 # launcher records into $state, a directory of this leg's own, so its one record is read back.
-# Returns @{ code; stderr; elapsedMs; timedOut; resets; spentMs; exchanges }, `spentMs` being the
-# launcher's own `direct-ms` + `cache-ms`, or $null when it left not exactly one record, and
-# `exchanges` the `cache exchange (...)` lines on its verbose trace.
+# With $witnessed, the starvation witness (`scripts/lib/E2EStarvationWitness.psm1`) ticks beside the
+# launcher, from before it starts until its stderr says the cache phase is over.
+# Returns @{ code; stderr; elapsedMs; timedOut; resets; spentMs; exchanges; witness }, `spentMs`
+# being the launcher's own `direct-ms` + `cache-ms`, or $null when it left not exactly one record,
+# `exchanges` the `cache exchange (...)` lines on its verbose trace, and `witness` the witness's
+# reading, or $null when none was asked for.
 function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$buildTree, [string]$obj,
-                                 [string]$addr, [long]$boundMs, $resetOn, [string]$state) {
+                                 [string]$addr, [long]$boundMs, $resetOn, [string]$state, [bool]$witnessed = $false) {
     $env:PACE_ADDR            = $addr
     $env:PACE_SOURCE_DIR      = $srcRoot
     $env:PACE_BINARY_DIR      = $buildTree
@@ -737,10 +771,14 @@ function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$b
     $env:PACE_CONNECT_TIMEOUT = "${DeadPeerConnectMs}ms"
     $env:PACE_TIMEOUT         = "${DeadPeerTotalMs}ms"
     $errFile = New-TemporaryFile
+    $witness = $null
+    $reading = $null
     try {
         $source = Join-Path $srcRoot "u.cpp"
         Remove-Item -Recurse -Force $state -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force $state | Out-Null
+        # A fresh temporary file, so no earlier leg's fall-back line can close the witness at once.
+        if ($witnessed) { $witness = Start-E2EStarvationWitness $errFile.FullName $DeadPeerFellBack ($boundMs + $DeadPeerWallSlackMs) }
         $clock = [System.Diagnostics.Stopwatch]::StartNew()
         # Unwaited, as in Invoke-LauncherBounded: the child took its environment when it
         # started, and the wait below is the caller's. Under a state root of the leg's own,
@@ -769,6 +807,8 @@ function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$b
             }
         }
         $elapsed = $clock.ElapsedMilliseconds
+        $reading = Stop-E2EStarvationWitness $witness
+        $witness = $null
         $timedOut = -not $p.HasExited
         if ($timedOut) {
             try { $p.Kill($true) } catch { }
@@ -781,8 +821,10 @@ function Invoke-LauncherDeadPeer([string]$compiler, [string]$srcRoot, [string]$b
             [long](Get-E2ELauncherLogField $records[0] 'direct-ms') + [long](Get-E2ELauncherLogField $records[0] 'cache-ms')
         } else { $null }
         $exchanges = @($err -split "`r?`n" | Where-Object { $_ -match '^pace-cc: cache exchange \(' }).Count
-        return @{ code = $code; stderr = $err; elapsedMs = $elapsed; timedOut = $timedOut; resets = $resets; spentMs = $spent; exchanges = $exchanges }
+        return @{ code = $code; stderr = $err; elapsedMs = $elapsed; timedOut = $timedOut; resets = $resets; spentMs = $spent; exchanges = $exchanges; witness = $reading }
     } finally {
+        # Stopped on every way out, an early throw included; a no-op once stopped above.
+        $null = Stop-E2EStarvationWitness $witness
         Remove-Item $errFile -ErrorAction SilentlyContinue
         Remove-Item Env:\PACE_CONNECT_TIMEOUT, Env:\PACE_TIMEOUT -ErrorAction SilentlyContinue
     }
@@ -833,7 +875,8 @@ function Test-DeadPeers([string]$compiler) {
                     default   { $listener = New-SilentListener; "127.0.0.1:$($listener.LocalEndpoint.Port)" }
                 }
                 $resetOn = if ($shape -eq 'accept-then-reset') { $listener } else { $null }
-                $r = Invoke-LauncherDeadPeer $compiler $src $build $obj $addr $boundMs $resetOn $state
+                # The witness ticks beside the leg whose time is held to a ceiling, and nowhere else.
+                $r = Invoke-LauncherDeadPeer $compiler $src $build $obj $addr $boundMs $resetOn $state ($exchangeCeilingMs -gt 0)
                 # A listener nothing accepted from still holds every connection the launcher
                 # made: drained, each one is an exchange, counted as the reset leg counts its own.
                 if ($shape -eq 'never-accepting') {
@@ -847,15 +890,33 @@ function Test-DeadPeers([string]$compiler) {
             # it COUNTS them: exactly $DeadPeerExchanges, since a time bound cannot see one exchange
             # too many on a shape whose exchanges cost nothing -- a launcher that retried a failed
             # fetch once would pass every bound here and still fail this.
-            $fellBack = $r.stderr -match '\(fetch exchange failed\)'
+            $fellBack = $r.stderr.Contains($DeadPeerFellBack)
             $counted = $shape -in @('accept-then-reset', 'never-accepting')
             $traced = $r.exchanges -eq $DeadPeerExchanges
             $reached = (-not $counted) -or $r.resets -eq $r.exchanges
             $aboveFloor = ($null -ne $r.spentMs) -and $r.spentMs -ge $exchangeFloorMs
-            $belowCeiling = ($exchangeCeilingMs -eq 0) -or (($null -ne $r.spentMs) -and $r.spentMs -le $exchangeCeilingMs)
+            # Over the ceiling is a FAIL only when the witness does not show the host stalled at least as
+            # long as the overrun; when it does, the overrun is INCONCLUSIVE -- reported, not failed.
+            $witnessText = Format-E2EStarvationWitness $r.witness
+            $ceilingVerdict = if ($exchangeCeilingMs -eq 0 -or $null -eq $r.spentMs) { 'pass' }
+                              elseif ($null -eq $r.witness) { Get-E2EDeadCeilingVerdict $r.spentMs $exchangeCeilingMs 0 0 }
+                              else { Get-E2EDeadCeilingVerdict $r.spentMs $exchangeCeilingMs $r.witness.Ticks $r.witness.StalledMs }
+            $belowCeiling = $ceilingVerdict -ne 'fail'
+            $overrunMs = if ($null -ne $r.spentMs) { $r.spentMs - $exchangeCeilingMs } else { 0 }
             $built = (Test-Path $obj) -and ((Get-ObjectDigest $obj) -eq $expected)
             if (-not $r.timedOut -and $r.code -eq 0 -and $built -and $fellBack -and $traced -and $reached -and $aboveFloor -and $belowCeiling) {
-                Write-Host "  $shape : compiled locally in $($r.elapsedMs) ms after $($r.exchanges) exchange(s), $($r.spentMs) ms of it on the cache (floor $exchangeFloorMs, ceiling $exchangeCeilingMs), object matches the baseline: OK ($compiler)" -ForegroundColor Green
+                if ($ceilingVerdict -eq 'inconclusive') {
+                    $note = "dead peers ($compiler, $shape): INCONCLUSIVE: the launcher reported $($r.spentMs) ms on the cache, $overrunMs ms past the $exchangeCeilingMs ms ceiling, but the host stalled at least that long ($witnessText) -- the overrun is not attributable to the launcher, and NOT judged (#1739)"
+                    Write-Host "  $note" -ForegroundColor Yellow
+                    # A run that ends in PASSED must not bury this: annotated on CI, and repeated at the end.
+                    # Under `ctest` neither shows on a PASSING test: every preset here sets only
+                    # `outputOnFailure`, so the annotation reaches GitHub from the compile-cache-e2e-windows
+                    # job, which runs this script directly, and from no `ctest` leg.
+                    if ($env:GITHUB_ACTIONS -eq 'true') { Write-Host "::warning::$note" }
+                    $DeadPeerInconclusive.Add($note)
+                }
+                $witnessSuffix = if ($null -ne $r.witness) { "; $witnessText" } else { "" }
+                Write-Host "  $shape : compiled locally in $($r.elapsedMs) ms after $($r.exchanges) exchange(s), $($r.spentMs) ms of it on the cache (floor $exchangeFloorMs, ceiling $exchangeCeilingMs$witnessSuffix; $ceilingVerdict), object matches the baseline: OK ($compiler)" -ForegroundColor Green
                 continue
             }
             $why = if ($r.timedOut) { "still running at the $boundMs ms hang bound, stopped" }
@@ -866,7 +927,7 @@ function Test-DeadPeers([string]$compiler) {
                    elseif (-not $reached) { "the peer took $($r.resets) connection(s) while the launcher traced $($r.exchanges) exchange(s) -- its own count is not to be trusted" }
                    elseif ($null -eq $r.spentMs) { "the launcher left no single invocation record, so the time it spent on the cache is unknown" }
                    elseif (-not $aboveFloor) { "the launcher reported $($r.spentMs) ms on the cache, under the $exchangeFloorMs ms that $DeadPeerExchanges exchange(s) with a silent peer cannot end before -- its own timer is not measuring the exchanges" }
-                   else { "the launcher reported $($r.spentMs) ms on the cache, past the $exchangeCeilingMs ms ceiling, (2N - 1/2) x its deadline for $DeadPeerExchanges exchange(s) -- an exchange overran its configured deadline by as much as a doubled one does" }
+                   else { "the launcher reported $($r.spentMs) ms on the cache, $overrunMs ms past the $exchangeCeilingMs ms ceiling, (2N - 1/2) x its deadline for $DeadPeerExchanges exchange(s) -- an exchange overran its configured deadline by as much as a doubled one does, and nothing shows the host stalled that long ($witnessText)" }
             Write-Host "  DEAD-PEER FAIL ($compiler, $shape): $why; $($r.elapsedMs) ms, $($r.exchanges) traced exchange(s), $($r.resets) connection(s)" -ForegroundColor Red
             Write-Host $r.stderr
             $ok = $false
@@ -2064,6 +2125,10 @@ if (-not $ranAnyCompiler) {
     exit $SKIP
 }
 
+# An INCONCLUSIVE ceiling is not a failure, and not a pass either: said again where a reader looks.
+if ($DeadPeerInconclusive.Count -gt 0) {
+    Write-Host "launcher E2E: $($DeadPeerInconclusive.Count) judgement(s) were NOT made, and this run does not vouch for them -- $($DeadPeerInconclusive -join '; ')" -ForegroundColor Yellow
+}
 if ($exit -eq 0) { Write-Host "ALL LAUNCHER E2E CHECKS PASSED" -ForegroundColor Green }
 else { Write-Host "SOME LAUNCHER E2E CHECKS FAILED" -ForegroundColor Red }
 exit $exit

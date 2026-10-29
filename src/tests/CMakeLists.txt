@@ -5102,11 +5102,24 @@ if(PACE_PWSH)
         LABELS "hygiene"
         TIMEOUT 120
     )
+    # The same fixture's dead-peer ceiling verdict and its starvation witness (#1739), which that
+    # fixture reaches only with a built tree and an MSVC toolchain: driven here with neither.
+    add_test(
+        NAME "launcher-e2e-starvation-witness-selftest"
+        COMMAND "${PACE_PWSH}" -NoProfile -Command
+                "Import-Module '${CMAKE_SOURCE_DIR}/scripts/lib/E2EStarvationWitness.psm1'; exit (Invoke-E2EStarvationWitnessSelfTest)"
+    )
+    set_tests_properties("launcher-e2e-starvation-witness-selftest" PROPERTIES
+        LABELS "hygiene"
+        TIMEOUT 120
+    )
 else()
     # Absent is not skipped, and dropping the row is what makes a permanent gap
     # indistinguishable from a platform that was never meant to run it.
     pace_register_skipped_test("launcher-e2e-ports-selftest"
         "no pwsh on this host, so run-launcher-e2e.ps1's port decision was not exercised")
+    pace_register_skipped_test("launcher-e2e-starvation-witness-selftest"
+        "no pwsh on this host, so run-launcher-e2e.ps1's dead-peer ceiling verdict was not exercised")
 endif()
 
 # ---------------------------------------------------------------------------

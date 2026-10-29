@@ -853,6 +853,80 @@ run_case() {
         echo "an odd column name: status ${status}"
         ;;
 
+    # --- the dead-peers ceiling's verdict (#1739) --------------------------------
+    #
+    # Pure, so driven against synthesised readings: spent, ceiling, witness ticks, witness STALLED
+    # time. The boundary (stalled == overrun) is inconclusive, one under it is a fail, and a
+    # witness that never ticked or left an unreadable figure fails CLOSED. The two `as measured`
+    # rows are a doubled deadline (8006-8017 ms) beside the stalled figure an idle host produced
+    # over 8 s (`e2e_witness_stall_ms` holds the measurement): 0 under both perls, so a fail.
+    # The trailing space and the `x` are what get past a test(1) comparison when a guard is gone
+    # -- `[ "1500 " -ge 1132 ]` is true -- so they, and not an empty string, are what bite.
+    dead-ceiling-verdict)
+        echo "within: $(e2e_dead_ceiling_verdict 7000 7000 10 0)"
+        echo "within, no witness: $(e2e_dead_ceiling_verdict 6000 7000 0 0)"
+        echo "starved: $(e2e_dead_ceiling_verdict 8132 7000 50 1500)"
+        echo "boundary: $(e2e_dead_ceiling_verdict 8132 7000 50 1132)"
+        echo "one under: $(e2e_dead_ceiling_verdict 8132 7000 50 1131)"
+        echo "doubled on a quiet host: $(e2e_dead_ceiling_verdict 8010 7000 50 3)"
+        echo "doubled, as measured under Git Bash: $(e2e_dead_ceiling_verdict 8017 7000 256 0)"
+        echo "doubled, as measured under WSL: $(e2e_dead_ceiling_verdict 8006 7000 390 0)"
+        echo "witness never ticked: $(e2e_dead_ceiling_verdict 8132 7000 0 9999)"
+        echo "witness unreadable: $(e2e_dead_ceiling_verdict 8132 7000 '' '')"
+        echo "ticks not a number: $(e2e_dead_ceiling_verdict 8132 7000 x 9999)"
+        echo "stalled not a number: $(e2e_dead_ceiling_verdict 8132 7000 50 '1500x')"
+        echo "stalled with a trailing space: $(e2e_dead_ceiling_verdict 8132 7000 50 '1500 ')"
+        ;;
+
+    # A malformed spent or ceiling is the CALLER's bug: `fail`, which ends the case, never a
+    # silent `pass`. One case each, because the first `fail` ends the case.
+    dead-ceiling-verdict-malformed)
+        e2e_dead_ceiling_verdict abc 7000 1 1
+        echo "BUG: a malformed spent was answered"
+        ;;
+    dead-ceiling-verdict-malformed-ceiling)
+        e2e_dead_ceiling_verdict 8132 '7000 ' 1 1
+        echo "BUG: a malformed ceiling was answered"
+        ;;
+    # A leading zero is octal to bash arithmetic, so it is refused by name rather than met as an
+    # arithmetic error halfway through -- as the PowerShell twin refuses it.
+    dead-ceiling-verdict-leading-zero-spent)
+        e2e_dead_ceiling_verdict 08132 7000 1 1
+        echo "BUG: a leading-zero spent was answered"
+        ;;
+    dead-ceiling-verdict-leading-zero-ceiling)
+        e2e_dead_ceiling_verdict 8132 07000 1 1
+        echo "BUG: a leading-zero ceiling was answered"
+        ;;
+
+    # --- the starvation witness itself (#1739) -----------------------------------
+    #
+    # Its TIMING cannot be asserted here -- a selftest shares the host with whatever else ctest is
+    # running -- so what is asserted is the part that does not depend on the clock: the reading's
+    # five fields, that it lands by rename, and that its window ends on the launcher's fall-back
+    # line. A log that already holds the line closes it at its FIRST tick, and it exits.
+    starvation-witness-closes)
+        printf 'pace-cc: cache exchange (fetch) with x: timed out\npace-cc: warning (fetch exchange failed)\n' \
+            > "${scratch}/launcher.log"
+        ( e2e_starvation_witness "${scratch}/reading" "${scratch}/launcher.log" '(fetch exchange failed)' 5 )
+        read -r ticks late stalled closed worst < "${scratch}/reading"
+        echo "closed at its first tick: ticks ${ticks}, closed ${closed}"
+        echo "fields: $(wc -w < "${scratch}/reading" | tr -d ' ')"
+        if [ -e "${scratch}/reading.tmp" ]; then echo "BUG: the tmp file outlived the rename"; else echo "renamed into place"; fi
+        ;;
+
+    # And one that never sees the line keeps ticking until its bound ends it, saying `closed 0` --
+    # which the fixture reports as a window that ran to the kill.
+    starvation-witness-open)
+        printf 'pace-cc: cache exchange (fetch) with x: timed out\n' > "${scratch}/launcher.log"
+        status=0
+        ( e2e_starvation_witness "${scratch}/reading" "${scratch}/launcher.log" '(fetch exchange failed)' 1 ) || status=$?
+        read -r ticks late stalled closed worst < "${scratch}/reading"
+        echo "ended by its bound: status ${status}"
+        echo "never closed: closed ${closed}"
+        if [ "$ticks" -gt 1 ]; then echo "kept ticking"; else echo "BUG: ${ticks} tick(s) in a second"; fi
+        ;;
+
     # --- the caller-damage check, when its own count cannot be taken -------------
     #
     # The check counts this run's records in the caller's log with one awk. An awk that FAILS
@@ -3324,6 +3398,13 @@ cases=(
     "port-range-refused|1|E2E_PORT_RANGE='1000-2000' is not a slice of 20000-32000|!BUG:"
     "port-range-of-this-lane|0|this lane draws from slice|!BUG:"
     "launcher-log-field|0|outcomes: MISS HIT |sources: /tree/v.cpp /tree/old.cpp |a foreign version: status 3, []|an unknown column: status 2|a short line: status 4, []|an odd column name: status 2|!BUG:"
+    "dead-ceiling-verdict|0|within: pass|within, no witness: pass|starved: inconclusive|boundary: inconclusive|one under: fail|doubled on a quiet host: fail|doubled, as measured under Git Bash: fail|doubled, as measured under WSL: fail|witness never ticked: fail|witness unreadable: fail|ticks not a number: fail|stalled not a number: fail|stalled with a trailing space: fail|!BUG:"
+    "dead-ceiling-verdict-malformed|1|e2e_dead_ceiling_verdict: spent 'abc' is not a whole number|!BUG:"
+    "dead-ceiling-verdict-malformed-ceiling|1|e2e_dead_ceiling_verdict: ceiling '7000 ' is not a whole number|!BUG:"
+    "dead-ceiling-verdict-leading-zero-spent|1|e2e_dead_ceiling_verdict: spent '08132' has a leading zero|!BUG:"
+    "dead-ceiling-verdict-leading-zero-ceiling|1|e2e_dead_ceiling_verdict: ceiling '07000' has a leading zero|!BUG:"
+    "starvation-witness-closes|0|closed at its first tick: ticks 1, closed 1|fields: 5|renamed into place|!BUG:"
+    "starvation-witness-open|0|ended by its bound: status 142|never closed: closed 0|kept ticking|!BUG:"
     "launcher-damage-unread|0|the control found this run's record|a failed count is reported, not clean|!BUG:"
     "launcher-damage-unread-tail|0|the control found this run's record|a failed count is reported, not clean|!BUG:"
     # Both accepting rows first: a helper refusing everything would satisfy every
